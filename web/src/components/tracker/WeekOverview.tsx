@@ -14,10 +14,14 @@ import { questionsWithUnambiguousCourse } from "./legacyCourseQuestionScope";
 const ALLOWANCE_FIELDS: CourseActivity[] = ["lecture", "small-group", "imcq", "esoft", "lab"];
 
 function questionLine(week: WeekSummary): string | null {
-  const { total, attempted, firstTimeCorrect } = week.questions;
-  if (!total) return null;
-  if (!attempted) return `${total} question${total === 1 ? "" : "s"} filed, none answered yet`;
-  return `Questions: ${attempted} of ${total} answered, ${Math.round((firstTimeCorrect / attempted) * 100)}% right first time`;
+  const { total, attempted, firstTimeCorrect, sourceReviewHeld = 0 } = week.questions;
+  const held = sourceReviewHeld
+    ? `${sourceReviewHeld} question${sourceReviewHeld === 1 ? "" : "s"} held for source review` : "";
+  if (!total) return held || null;
+  const progress = !attempted
+    ? `${total} question${total === 1 ? "" : "s"} filed, none answered yet`
+    : `Questions: ${attempted} of ${total} answered, ${Math.round((firstTimeCorrect / attempted) * 100)}% right first time`;
+  return held ? `${progress} · ${held}` : progress;
 }
 
 export function WeekOverview() {

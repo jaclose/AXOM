@@ -143,6 +143,156 @@ describe("source-week integrity", () => {
 });
 
 
+describe("verified primary-source progress attribution", () => {
+  it("holds conflicting, missing, forged and malformed primary evidence without discarding attempts", () => {
+    const at = "2026-11-06T00:00:00Z";
+    const ownScope = { module: "NB2", week: 3, courseId: "core" };
+    const fullSets = new Map([
+      ["primary", { scope: ownScope, questionIds: ["valid", "inherited", "malformed"] }],
+      ["elsewhere", { scope: { module: "FTM 1", week: 4, courseId: "elective" },
+        questionIds: ["conflict"] }],
+      ["review", { scope: ownScope, questionIds: ["valid", "valid", "conflict"] }],
+    ]);
+    const correct = [{ at, status: "correct" as const }];
+    const questions = [
+      question("valid", { setId: "primary", ...ownScope, status: "correct", attempts: correct }),
+      question("inherited", { setId: "primary" }),
+      question("legacy", { setId: undefined, ...ownScope }),
+      question("conflict", { setId: "elsewhere", ...ownScope,
+        status: "incorrect", attempts: [{ at, status: "incorrect" }] }),
+      question("forged", { setId: "primary", ...ownScope, attempts: correct }),
+      question("missing", { setId: "missing", ...ownScope, attempts: correct }),
+      question("malformed", { setId: "primary", ...ownScope,
+        week: legacyWeek("Week 3-4"), attempts: correct }),
+      question("unbound-malformed", { setId: undefined, ...ownScope,
+        week: legacyWeek("Week 3/4"), attempts: correct }),
+    ];
+    const before = JSON.stringify(questions);
+    const result = scopeProgress(questions, ownScope, fullSets);
+    assert.deepEqual(result, {
+      total: 3, attempted: 1, firstTimeCorrect: 1, missed: 0,
+      questionIds: ["valid", "inherited", "legacy"], sourceReviewHeld: 3,
+    });
+    const wholeModule = scopeProgress(questions, { module: "NB2", courseId: "core" }, fullSets);
+    assert.equal(wholeModule.total, 3);
+    assert.equal(wholeModule.sourceReviewHeld, 5);
+    const groups = groupQuestionsByScope(questions, fullSets);
+    assert.deepEqual(groups.find(group => group.key === "nb2|w3")?.questionIds,
+      ["valid", "inherited", "legacy"]);
+    assert.deepEqual(groups.find(group => group.key === "unassigned")?.questionIds,
+      ["conflict", "forged", "missing", "malformed", "unbound-malformed"]);
+    // The old answers remain on the same original records for later review.
+    assert.equal(JSON.stringify(questions), before);
+  });
+
+  it("deduplicates the same original question rather than inflating progress", () => {
+    const attempt = { at: "2026-11-06T00:00:00Z", status: "correct" as const };
+    const questionRecord = question("original", {
+      setId: "primary", module: "NB2", week: 3, courseId: "core",
+      attempts: [attempt], status: "correct",
+    });
+    const sets = new Map([["primary", { scope: { module: "NB2", week: 3, courseId: "core" },
+      questionIds: ["original", "original"] }]]);
+    const original = JSON.stringify(questionRecord);
+    assert.deepEqual(scopeProgress([questionRecord, questionRecord],
+      { module: "NB2", week: 3, courseId: "core" }, sets), {
+      total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0, questionIds: ["original"],
+    });
+    assert.deepEqual(groupQuestionsByScope([questionRecord, questionRecord], sets)
+      .flatMap(group => group.questionIds), ["original"]);
+    assert.equal(JSON.stringify(questionRecord), original);
+  });
+
+  it("holds duplicate IDs with competing primary-source claims in either input order", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([
+      ["primary-a", { scope: filing, questionIds: ["shared"] }],
+      ["primary-b", { scope: filing, questionIds: ["shared"] }],
+    ]);
+    const correct = [{ at: "2026-11-06T00:00:00Z", status: "correct" as const }];
+    const wrong = [{ at: "2026-11-06T00:00:00Z", status: "incorrect" as const }];
+    const a = question("shared", { setId: "primary-a", ...filing, attempts: correct, status: "correct" });
+    const b = question("shared", { setId: "primary-b", ...filing, attempts: wrong, status: "incorrect" });
+    const before = JSON.stringify([a, b, [...sets]]);
+    for (const records of [[a, b], [b, a]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.attempted, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(progress.questionIds, []);
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+    assert.equal(JSON.stringify([a, b, [...sets]]), before);
+  });
+
+  it("holds duplicate practice snapshots whose first answers or latest states disagree", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const first = question("shared", { setId: "primary", ...filing, status: "correct",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct" }] });
+    const second = question("shared", { setId: "primary", ...filing, status: "incorrect",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "incorrect" }] });
+    for (const records of [[first, second], [second, first]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+  });
+
+  it("counts equivalent cloned records once without holding legitimate source evidence", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const a = question("shared", { setId: "primary", ...filing, status: "correct",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct" }] });
+    const b = question("shared", { setId: "primary", ...filing, status: "correct",
+      attempts: [{ at: "2026-11-06T01:00:00Z", status: "correct" }] });
+    assert.deepEqual(scopeProgress([a, b], filing, sets), {
+      total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0, questionIds: ["shared"],
+    });
+    assert.deepEqual(groupQuestionsByScope([b, a], sets).flatMap(group => group.questionIds),
+      ["shared"]);
+  });
+
+  it("keeps unrelated week memberships unread during a scoped progress query", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const unrelatedIds = ["other"];
+    unrelatedIds.includes = () => { throw new Error("unrelated source membership was scanned"); };
+    const sets = new Map([
+      ["primary", { scope: filing, questionIds: ["tracked"] }],
+      ["unrelated", { scope: { module: "FTM 1", week: 4, courseId: "elective" },
+        questionIds: unrelatedIds }],
+    ]);
+    const records = [
+      question("tracked", { setId: "primary", ...filing }),
+      question("other", { setId: "unrelated", module: "FTM 1", week: 4, courseId: "elective" }),
+    ];
+    const progress = scopeProgress(records, filing, sets);
+    assert.equal(progress.total, 1);
+    assert.equal(progress.sourceReviewHeld, undefined);
+  });
+
+  it("holds same-ID duplicates with different source documents or scoring keys", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const baseline = question("shared", { setId: "primary", ...filing,
+      sourceDocumentId: "source-a", correctKey: "A" });
+    for (const changes of [{ sourceDocumentId: "source-b" }, { correctKey: "B" }]) {
+      const altered = { ...baseline, ...changes };
+      for (const pair of [[baseline, altered], [altered, baseline]]) {
+        const progress = scopeProgress(pair, filing, sets);
+        assert.equal(progress.total, 0);
+        assert.equal(progress.sourceReviewHeld, 1);
+        assert.deepEqual(groupQuestionsByScope(pair, sets)
+          .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+      }
+    }
+  });
+});
+
+
 describe("source module inheritance after course refiling", () => {
   it("does not assign the old source module to a question moved to a different course", () => {
     const moved = question("moved", { courseId: "course-b" });
