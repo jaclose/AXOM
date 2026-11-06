@@ -154,6 +154,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   let unassignedQuestions = 0;
   const unassignedIds = new Set<string>();
+  const sourceHeldIds = new Set(conflictingOriginals);
   for (const question of input.questions) {
     const scope = questionScope(question, setsById);
     // Older questions sometimes have immutable set membership but no setId.
@@ -182,6 +183,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     };
     const resolved = resolve(finalScope);
     if (!resolved || ambiguousOwners.has(question.id)) {
+      sourceHeldIds.add(question.id);
       if (!unassignedIds.has(question.id)) {
         unassignedIds.add(question.id);
         unassignedQuestions += 1;
@@ -205,6 +207,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
           && primaryScope.courseId !== finalScope.courseId)
         || (primaryWeek !== undefined && finalScope.week !== undefined && primaryWeek !== finalScope.week)
       ));
+    if (sourceReviewHeld) sourceHeldIds.add(question.id);
     const draft = draftFor(resolved);
     draft.present.add(question.id);
     (!sourceReviewHeld && !mappingReviewIds.has(question.id) ? draft.ready : draft.review).add(question.id);
@@ -220,13 +223,13 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     // Conflicted original IDs stay review-held; independently filed source
     // collections can still show their own source-declared week and missing IDs.
     const presentMembers = [...new Set(set.questionIds)]
-      .filter((id) => !conflictingOriginals.has(id))
+      .filter((id) => !sourceHeldIds.has(id))
       .flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
     // A secondary review collection cannot make a conflicted original's
     // otherwise unsupported week count as fresh source evidence. A review
     // collection with another valid member still undergoes scope checks below.
     if (set.kind === "review" && presentMembers.length === 0
-      && set.questionIds.some((id) => conflictingOriginals.has(id))) {
+      && set.questionIds.some((id) => sourceHeldIds.has(id))) {
       unassignedCollections += 1;
       continue;
     }
