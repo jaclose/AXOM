@@ -141,7 +141,11 @@ async function notesInfo(client: AnkiClient, noteIds: readonly number[]): Promis
 }
 
 /** Find AXOM notes by AxomId. Returns the oldest note per id. */
-async function findByAxomId(client: AnkiClient, axomIds: readonly string[]): Promise<Map<string, AnkiNoteInfo>> {
+async function findByAxomId(
+  client: AnkiClient,
+  axomIds: readonly string[],
+  eligible?: (info: AnkiNoteInfo, axomId: string) => boolean,
+): Promise<Map<string, AnkiNoteInfo>> {
   const found = new Map<string, AnkiNoteInfo>();
   if (!axomIds.length) return found;
   const models = anyOf([noteTypeQuery(AXOM_BASIC_MODEL), noteTypeQuery(AXOM_CLOZE_MODEL)]);
@@ -161,6 +165,7 @@ async function findByAxomId(client: AnkiClient, axomIds: readonly string[]): Pro
     const axomId = info.fields[AXOM_ID_FIELD]?.value?.trim();
     if (!axomId || !wanted.has(axomId.toLowerCase())) continue;
     const key = axomIds.find((id) => id.toLowerCase() === axomId.toLowerCase())!;
+    if (eligible && !eligible(info, key)) continue;
     if (!found.has(key)) found.set(key, info);
   }
   return found;
@@ -263,6 +268,21 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
     if (toCheck.length) {
       progress("Comparing with Anki…");
       const infos = await notesInfo(client, toCheck.map((id) => state.links[id].noteId));
+      // A previous replacement may have reached Anki even if its HTTP reply
+      // vanished. Before issuing another addNotes(allowDuplicate: true), look
+      // for an already-existing note with this AxomId and desired model.
+      // Retired historical notes are intentionally excluded: Basic -> Cloze ->
+      // Basic may legitimately keep the first Basic note as suspended history.
+      const kindSwitchIds = toCheck.filter((id) => {
+        const link = state.links[id];
+        return infos.has(link.noteId) && desired.get(id)!.note.kind !== link.kind;
+      });
+      const priorReplacements = await findByAxomId(client, kindSwitchIds, (candidate, id) => {
+        const link = state.links[id];
+        return candidate.modelName === desired.get(id)!.note.modelName &&
+          candidate.noteId !== link.noteId &&
+          !(link.retiredNoteIds ?? []).includes(candidate.noteId);
+      });
       for (const id of toCheck) {
         const link = state.links[id];
         const { note, fingerprint } = desired.get(id)!;
@@ -274,6 +294,24 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
           continue;
         }
         if (note.kind !== link.kind) {
+          // Never create a second replacement while a desired-kind note may
+          // already exist. It could be an applied add whose reply was lost or
+          // a learner-authored duplicate. Hold for review rather than merging
+          // unknown fields or deleting either note.
+          const prior = priorReplacements.get(id);
+          if (prior) {
+            state.links[id] = {
+              ...link,
+              issue: {
+                kind: "conflict",
+                message: `Anki already contains note ${prior.noteId} with this AXOM ID and the requested note type. AXOM did not create another. Review both notes in Anki before retrying this conversion.`,
+                at,
+              },
+            };
+            report.conflicts += 1;
+            report.conflictIds.push(id);
+            continue;
+          }
           // Basic ↔ Cloze needs a different note type: add a new note and
           // suspend the old one (its review history stays in Anki).
           replaceAfterAdd.set(id, { ...link, cardIds: info.cards });
