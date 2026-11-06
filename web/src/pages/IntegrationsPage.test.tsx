@@ -45,6 +45,13 @@ function stubCalendarObjectUrl(createObjectURL: (blob: Blob | MediaSource) => st
   };
 }
 
+// Distinguish a broken external-store React subscription from a calendar-only
+// rendering defect without changing any production component.
+function CalendarStoreProbe() {
+  const due = useStore((state) => state.tasks[0]?.due ?? "missing");
+  return <output data-testid="calendar-store-probe">{due}</output>;
+}
+
 describe("Integrations", () => {
   it("groups integrations by readiness and states what leaves the device", () => {
     render(<IntegrationsPage />);
@@ -103,6 +110,7 @@ describe("Integrations", () => {
     const onCalendarCommit = () => { calendarCommits++; };
     const { rerender } = render(
       <Profiler id="calendar-recovery" onRender={onCalendarCommit}>
+        <CalendarStoreProbe />
         <IntegrationsPage />
       </Profiler>,
     );
@@ -110,6 +118,7 @@ describe("Integrations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
     expect(createObjectURL).not.toHaveBeenCalled();
+    expect(screen.getByTestId("calendar-store-probe").textContent).toBe("2999-02-31");
 
     // An unrelated store revision must not discard a still-applicable error.
     // Keeping the exact tasks reference simulates a non-calendar state update.
@@ -134,6 +143,7 @@ describe("Integrations", () => {
     unsubscribeTaskCheck();
     expect(taskChangeNotifications).toBe(1);
     expect(useStore.getState().tasks).not.toBe(tasksBeforeRepair);
+    expect(screen.getByTestId("calendar-store-probe").textContent).toBe("2999-03-01");
     // An external task edit must commit a mounted React update, not merely
     // notify Zustand listeners while leaving the calendar UI stale.
     expect(calendarCommits).toBeGreaterThan(commitsBeforeRepair);
@@ -141,6 +151,7 @@ describe("Integrations", () => {
     // The real-browser E2E separately proves automatic subscription refresh.
     rerender(
       <Profiler id="calendar-recovery" onRender={onCalendarCommit}>
+        <CalendarStoreProbe />
         <IntegrationsPage />
       </Profiler>,
     );
