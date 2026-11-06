@@ -170,3 +170,15 @@
   .qsl-card { transition: none; }
   .qsl-card:hover { transform: none; }
 }
+
+/* Reviewable AI proposals and future diagram requests are deliberately secondary. */
+.qsl-assist {
+  padding: 14px; border: 1px solid var(--hairline);
+  border-radius: var(--radius-md); background: var(--surface-2);
+}
+.qsl-assist p { margin: 0; font-size: var(--fs-small); line-height: 1.55; color: var(--text-70); }
+.qsl-assist details, .qsl-visual-hints { padding: 10px 0; border-top: 1px solid var(--hairline-soft); }
+.qsl-assist details summary, .qsl-visual-hints summary { cursor: pointer; color: var(--text); font-weight: var(--fw-semibold); }
+.qsl-assist details p { margin-top: 10px; }
+.qsl-assist details ul, .qsl-visual-hints ul { padding-left: 21px; overflow-wrap: anywhere; }
+.qsl-visual-hints p { color: var(--text-70); font-size: var(--fs-small); }
