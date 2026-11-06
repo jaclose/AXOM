@@ -295,6 +295,21 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
           report.missingIds.push(id);
           continue;
         }
+        // A numeric note ID can be reused in a different Anki profile.
+        // Never mutate a note unless its AXOM identity still matches.
+        if (info.fields[AXOM_ID_FIELD]?.value?.trim() !== id) {
+          state.links[id] = {
+            ...link,
+            issue: {
+              kind: "conflict",
+              message: "The linked Anki note has another AXOM ID or cannot be identified. Nothing was changed. Check the active Anki profile before retrying.",
+              at,
+            },
+          };
+          report.conflicts += 1;
+          report.conflictIds.push(id);
+          continue;
+        }
         if (note.kind !== link.kind) {
           // Never create a second replacement while a desired-kind note may
           // already exist. It could be an applied add whose reply was lost or
@@ -309,6 +324,24 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
                 kind: "conflict",
                 message: `Anki already contains note ${existingId} with this AXOM ID and the requested note type. AXOM did not create another. Review both notes in Anki before retrying this conversion.`,
                 at,
+              },
+            };
+            report.conflicts += 1;
+            report.conflictIds.push(id);
+            continue;
+          }
+          // A learner may have edited the old note directly in Anki since
+          // our last sync. Preserve that edited copy until they explicitly
+          // choose AXOM's version; do not silently retire it on conversion.
+          const ankiFields = managedFieldsOf(info, link.kind);
+          if (fieldsHash(ankiFields, link.kind) !== link.fieldsHash && !link.force) {
+            state.links[id] = {
+              ...link,
+              issue: {
+                kind: "conflict",
+                message: "The note was edited in Anki. Review its changes before converting the note type.",
+                at,
+                ankiFields,
               },
             };
             report.conflicts += 1;

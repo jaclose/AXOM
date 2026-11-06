@@ -290,6 +290,52 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("deleteNotes")).toEqual([]);
   });
 
+  it("rejects linked-note identity mismatch for both field updates and kind switches, even when forced", async () => {
+    for (const convert of [false, true]) {
+      const h = harness();
+      await h.run([card("a")]);
+      const previous = h.state.links.a;
+      h.fake.call("updateNoteFields", { note: { id: previous.noteId, fields: { AxomId: "different-card" } } });
+      const desired = convert
+        ? card("a", { type: "cloze", front: "{{c1::Different}} content", back: "" })
+        : card("a", { back: "Do not overwrite a different Anki note" });
+      const held = await h.run([desired]);
+      expect(held).toMatchObject({ updated: 0, replaced: 0, added: 0, conflicts: 1, offline: false });
+      expect(h.state.links.a).toMatchObject({ noteId: previous.noteId, kind: "basic", issue: { kind: "conflict" } });
+      expect(h.fake.call<Array<{ fields: Record<string, { value: string }> }>>("notesInfo", { notes: [previous.noteId] })[0].fields.AxomId.value)
+        .toBe("different-card");
+      expect(h.fake.actionsCalled("addNotes")).toHaveLength(1);
+      expect(h.fake.actionsCalled("updateNoteFields")).toHaveLength(1); // only simulated outside edit
+      expect(h.fake.actionsCalled("suspend")).toEqual([]);
+      h.state = keepAxomVersion(h.state, "a");
+      const forced = await h.run([desired]);
+      expect(forced).toMatchObject({ updated: 0, replaced: 0, conflicts: 1 });
+      expect(h.fake.actionsCalled("addNotes")).toHaveLength(1);
+    }
+  });
+
+  it("holds a Basic-to-Cloze conversion if the learner edited the original note in Anki", async () => {
+    const h = harness();
+    await h.run([card("a")]);
+    const previous = h.state.links.a;
+    h.fake.call("updateNoteFields", { note: { id: previous.noteId, fields: { Back: "learner-edited answer" } } });
+    const cloze = card("a", { type: "cloze", front: "{{c1::Kidney}} anatomy", back: "" });
+    const held = await h.run([cloze]);
+    expect(held).toMatchObject({ conflicts: 1, replaced: 0, added: 0, offline: false });
+    expect(h.state.links.a.issue).toMatchObject({ kind: "conflict", ankiFields: { Back: "learner-edited answer" } });
+    expect(h.fake.notes.size).toBe(1);
+    expect(h.fake.call("areSuspended", { cards: previous.cardIds })).toEqual([false]);
+    expect(h.fake.actionsCalled("addNotes")).toHaveLength(1);
+
+    h.state = keepAxomVersion(h.state, "a");
+    const approved = await h.run([cloze]);
+    expect(approved).toMatchObject({ replaced: 1, conflicts: 0, pending: 0, offline: false });
+    expect(h.fake.call("areSuspended", { cards: previous.cardIds })).toEqual([true]);
+    expect(h.fake.call<Array<{ fields: Record<string, { value: string }> }>>("notesInfo", { notes: [previous.noteId] })[0].fields.Back.value)
+      .toBe("learner-edited answer"); // historical note preserved intact
+    expect(h.fake.notes.size).toBe(2);
+  });
+
   it("replaces the note when a card switches between Basic and Cloze, keeping the old one suspended", async () => {
     const h = harness();
     await h.run([card("a")]);
