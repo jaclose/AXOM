@@ -100,3 +100,12 @@ with canonical links. Keep permanent rules here and bridges tiny. The repository
 enforces bootstrap size, not total client/global context or actual agent reading.
 Before finishing run `repo:check`, review the scoped diff and hand off honestly. Stop;
 do not start the next feature in this session.
+
+## AXOM AI worker protocol (V1)
+
+Every AXOM coding, research, design, infrastructure, QA and scheduled AI worker
+follows [the V1 SOP](docs/operations/ai-worker-sop-v1.md) for scoped ownership,
+pre-push test receipts, exact-head CI diagnosis, draft-PR handoff, Vercel
+preview budgets and unified release acceptance. Feature workers prepare;
+the owner-authorized gateway publishes only independently verified batches.
+No worker may promote pushed to tested, merged or deployed without evidence.
