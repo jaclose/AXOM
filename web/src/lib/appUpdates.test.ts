@@ -184,6 +184,74 @@ describe("explicit app update lifecycle", () => {
     expect(calls).toEqual(["checkpoint", "checkpoint", "activate", "restart"]);
   });
 
+  it("allows an explicitly confirmed web refresh only after a failed workspace checkpoint", async () => {
+    const { controller, deps, calls } = fixture(false);
+    await controller.check();
+    vi.mocked(deps.checkpoint).mockRejectedValueOnce(new Error("Could not verify the saved workspace."));
+
+    await controller.apply();
+
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: "error", canRefreshWithoutVerifiedSave: true,
+    });
+    expect(calls).toEqual([]);
+    expect(deps.activateWeb).not.toHaveBeenCalled();
+
+    await controller.apply({ skipFailedCheckpoint: true });
+    expect(deps.checkpoint).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["activate", "restart"]);
+  });
+
+  it("rejects a forced web refresh before a checkpoint has failed", async () => {
+    const { controller, deps, calls } = fixture(false);
+    await controller.check();
+    await controller.apply({ skipFailedCheckpoint: true });
+
+    expect(controller.getSnapshot().phase).toBe("error");
+    expect(deps.checkpoint).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+  });
+
+  it("never offers a checkpoint bypass on desktop", async () => {
+    const { controller, deps, calls } = fixture();
+    await controller.check();
+    await controller.download();
+    vi.mocked(deps.checkpoint).mockRejectedValueOnce(new Error("Workspace save failed"));
+
+    await controller.apply();
+    expect(controller.getSnapshot().canRefreshWithoutVerifiedSave).toBeFalsy();
+    await controller.apply({ skipFailedCheckpoint: true });
+    expect(deps.checkpoint).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["download"]);
+  });
+
+  it("does not offer a bypass for a failed web worker activation", async () => {
+    const { controller, deps } = fixture(false);
+    await controller.check();
+    vi.mocked(deps.activateWeb).mockRejectedValueOnce(new Error("Worker activation failed"));
+    await controller.apply();
+
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: "error", canRefreshWithoutVerifiedSave: false,
+    });
+    await controller.apply({ skipFailedCheckpoint: true });
+    expect(deps.checkpoint).toHaveBeenCalledTimes(1);
+    expect(deps.restart).not.toHaveBeenCalled();
+  });
+
+  it("clears the unsafe-refresh offer when a new update check begins", async () => {
+    const { controller, deps } = fixture(false);
+    await controller.check();
+    vi.mocked(deps.checkpoint).mockRejectedValueOnce(new Error("Read-back verification failed"));
+    await controller.apply();
+    expect(controller.getSnapshot().canRefreshWithoutVerifiedSave).toBe(true);
+
+    await controller.check(true);
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: "available", canRefreshWithoutVerifiedSave: false,
+    });
+  });
+
   it("retains the app if worker activation fails", async () => {
     const { controller, deps, calls } = fixture(false);
     await controller.check();
