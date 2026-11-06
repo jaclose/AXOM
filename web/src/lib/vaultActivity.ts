@@ -3,10 +3,18 @@ import { STORAGE_KEYS } from "./brand";
 /**
  * The exact time of the latest successful local workspace write, so Settings
  * can say "Saved on this device at 8:42:13 PM" instead of a vague "autosave
- * is on". Stores one timestamp and the storage tier — never content.
+ * is on". Stores only versioned workspace-write metadata, never content.
+ * Legacy unscoped markers are not evidence of a workspace save.
  */
 export type VaultWriteTarget = "indexeddb" | "local-fallback";
-export interface VaultWriteRecord { at: string; target: VaultWriteTarget }
+/** v2 prevents old auxiliary cache writes from impersonating workspace saves. */
+const WORKSPACE_WRITE_MARKER_VERSION = 2 as const;
+export interface VaultWriteRecord {
+  at: string;
+  target: VaultWriteTarget;
+  version: typeof WORKSPACE_WRITE_MARKER_VERSION;
+  scope: "workspace";
+}
 
 export const VAULT_WRITE_EVENT = "axom:vault-write";
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
@@ -32,7 +40,8 @@ export function readVaultWriteFailure(): string | null {
 }
 
 export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date()): void {
-  lastWrite = { at: now.toISOString(), target };
+  // PR #128 only calls this after the persisted workspace key actually landed.
+  lastWrite = { at: now.toISOString(), target, version: WORKSPACE_WRITE_MARKER_VERSION, scope: "workspace" };
   failingSince = null;
   // Keep the tiny localStorage marker current without hammering it on every
   // keystroke: at most once per second.
@@ -48,10 +57,25 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
 export function readLastVaultWrite(): VaultWriteRecord | null {
   if (lastWrite) return lastWrite;
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null") as VaultWriteRecord | null;
-    if (parsed && Number.isFinite(Date.parse(parsed.at)) && (parsed.target === "indexeddb" || parsed.target === "local-fallback")) {
-      lastWrite = parsed;
-      return parsed;
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const marker = parsed as Record<string, unknown>;
+    // Legacy {at,target} may represent only an auxiliary/cache save. Fail closed
+    // until the next actual workspace write, preserving all stored learner data.
+    if (
+      marker.version === WORKSPACE_WRITE_MARKER_VERSION &&
+      marker.scope === "workspace" &&
+      typeof marker.at === "string" &&
+      Number.isFinite(Date.parse(marker.at)) &&
+      (marker.target === "indexeddb" || marker.target === "local-fallback")
+    ) {
+      lastWrite = {
+        at: marker.at,
+        target: marker.target,
+        version: WORKSPACE_WRITE_MARKER_VERSION,
+        scope: "workspace",
+      };
+      return lastWrite;
     }
   } catch {
     // Fall through.
