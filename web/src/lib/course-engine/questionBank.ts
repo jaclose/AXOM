@@ -67,15 +67,18 @@ export function buildCourseQuestionBank(
   const scopesById = new Map<string, CourseScope>();
   for (const question of questions) {
     const related = memberships.get(question.id) ?? [];
-    const first = related[0]?.scope;
+    // Bind legacy inference to a source collection, never to the first review
+    // collection encountered in an arbitrary array ordering.
+    const source = related.find((set) => set.kind !== "review");
+    const first = source?.scope;
     const unanimousLegacy = !question.setId && Boolean(first?.module)
-      && related.some((set) => set.kind !== "review") && related.every((set) =>
+      && related.every((set) =>
       Boolean(set.scope?.module)
       && canonicalModuleKey(set.scope!.module!) === canonicalModuleKey(first!.module!)
       && set.scope?.courseId === first?.courseId
       && (!hasDeclaredWeek(set.scope?.week) || parseWeek(set.scope?.week) !== undefined)
       && parseWeek(set.scope?.week) === parseWeek(first?.week));
-    const bound = unanimousLegacy ? { ...question, setId: related[0].id } : question;
+    const bound = unanimousLegacy ? { ...question, setId: source!.id } : question;
     scopesById.set(question.id, questionScope(bound, setsById));
   }
 
