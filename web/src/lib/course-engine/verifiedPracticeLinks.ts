@@ -85,13 +85,28 @@ export function verifyCollectionForCourse(
       setId: question.setId ?? sourceSet?.id,
     }, setsById);
     const primary = question.setId != null ? setsById.get(question.setId) : sourceSet;
+    const primaryScope = primary?.scope;
+    const primaryWeek = parseWeek(primaryScope?.week);
+    // An explicitly declared primary association is a provenance claim, not
+    // permission to refile the question through an agreeing review collection.
+    // Until a verified refile receipt exists, contradictory or missing primary
+    // evidence must hold fresh practice even if the question's own fields agree.
+    const disagreesWithPrimary = question.setId != null && (
+      !primary || !primary.questionIds.includes(id)
+      || invalidExplicitWeek(primaryScope?.week)
+      || Boolean(primaryScope && (
+        !equivalent(own.module, primaryScope.module)
+        || (own.week !== undefined && primaryWeek !== undefined && own.week !== primaryWeek)
+        || (own.courseId && primaryScope.courseId && own.courseId !== primaryScope.courseId)
+      ))
+    );
     const disagreesWithSource = Boolean(sourceScope
       && (!equivalent(own.module, sourceScope.module)
         || (own.week !== undefined && sourceWeek !== undefined && own.week !== sourceWeek)
         || (own.courseId && sourceScope.courseId && own.courseId !== sourceScope.courseId)));
     // Parsing maps malformed numbers/ranges to undefined; without this guard,
     // module-wide requests would mistake invalid evidence for an absent week.
-    if (invalidExplicitWeek(question.week) || invalidExplicitWeek(primary?.scope?.week)
+    if (invalidExplicitWeek(question.week) || disagreesWithPrimary
       || !scopeMatches(own, requested, requireCourseProof) || disagreesWithSource) {
       conflictingQuestionCount += 1;
       continue;
