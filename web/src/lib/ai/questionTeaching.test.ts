@@ -64,6 +64,15 @@ describe("review-gated explanation drafting", () => {
     }), valid)).rejects.toThrow(/choice|rationale/i);
   });
 
+  it("does not draft over an existing author-written choice rationale", async () => {
+    const source = question({ choiceRationales: { B: "The author has already written a distractor rationale." } });
+    const model = provider({});
+    expect(eligibleForExplanationDraft(source)).toBe(false);
+    // Direct calls are still protected against overwriting authored work.
+    await expect(draftQuestionExplanation(model, source)).rejects.toThrow(/existing|rationale/i);
+    expect(model.completeJson).not.toHaveBeenCalled();
+  });
+
   it("detects changed questions before accepting AI-generated explanations", () => {
     const original = question();
     const fingerprint = questionExplanationFingerprint(original);
