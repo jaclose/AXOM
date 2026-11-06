@@ -3,7 +3,7 @@
 // personal workload: canonical SGU terms/courses, a few sample tracker rows,
 // official board resources, and empty logs/journal.
 // ===========================================================================
-import type { BoardPrepProfile, ClockPreferences, DashboardWidgetId, NoctyriumState, ProductivityTracker, TimeZonePreference, TrackerItem, TrackerKind, Yield } from "./types";
+import type { BoardPrepProfile, ClockPreferences, DashboardWidgetId, AxomState, ProductivityTracker, TimeZonePreference, TrackerItem, TrackerKind, Yield } from "./types";
 import { isoDate } from "./scoring";
 import { userIdFromName } from "./userIdentity";
 import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS, DEFAULT_FOCUS_IDS } from "./experience";
@@ -88,7 +88,7 @@ function trackerRow(
   return { id: crypto.randomUUID(), path, label, kind, passes, ankiPasses, yield: y, updated: now() };
 }
 
-export function makeSeed(): NoctyriumState {
+export function makeSeed(): AxomState {
   const seedNow = now();
   return {
     schemaVersion: SCHEMA_VERSION,

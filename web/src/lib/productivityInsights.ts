@@ -1,4 +1,4 @@
-import type { NoctyriumState } from "./types";
+import type { AxomState } from "./types";
 import { evaluateDailySuccess } from "./dailySuccess";
 import { buildTargetContributionLedger, canonicalStudyLogs } from "./targetContributions";
 import { localDateKey } from "./dailyRollover";
@@ -12,7 +12,7 @@ export interface ProductivityInsight {
 }
 
 /** Read-only recommendation based only on recorded sources and current targets. */
-export function productivityInsight(state: NoctyriumState, saveFailed: boolean, running: boolean): ProductivityInsight {
+export function productivityInsight(state: AxomState, saveFailed: boolean, running: boolean): ProductivityInsight {
   if (saveFailed) return { title: "Check your save", detail: "Your latest workspace save did not complete. Review storage before continuing.", action: "Open settings", href: "#settings" };
   const result = evaluateDailySuccess(state);
   if (result.requirements.some((item) => item.status === "unavailable")) return { title: "Review a target source", detail: "A target's linked source is unavailable. Your activity remains in history.", action: "Review targets", href: "#productivity-targets" };
@@ -35,7 +35,7 @@ export function formatStudyMinutes(minutes: number): string {
 }
 
 /** Independent evidence sources; none implies time spent or mastery. */
-export function recordedActivityEvidence(state: NoctyriumState, dayKey: string) {
+export function recordedActivityEvidence(state: AxomState, dayKey: string) {
   return {
     cardReviews: datedEventCount(state.cardReviews, dayKey),
     trackerPasses: datedEventCount(state.tracker.flatMap((item) => item.passEvents ?? []), dayKey),

@@ -11,7 +11,7 @@ import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
 import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
-  BoardBlueprintLog, BoardExamId, BoardPrepProfile, Course, CourseModule, DailyRolloverEvent, DayPlan, HubFolder, JournalEntry, NoctyriumState,
+  BoardBlueprintLog, BoardExamId, BoardPrepProfile, Course, CourseModule, DailyRolloverEvent, DayPlan, HubFolder, JournalEntry, AxomState,
   PremedExperienceEntry, ProductivityTracker, Prompt, Resource, Task, Term, TrackerItem, Profile, StudyLog, InstalledBlueprintNode, EnergyFactor,
   Habit, HabitEntry, HabitCheckStatus, DailyWordPuzzleState,
 } from "./types";
@@ -365,12 +365,12 @@ interface Actions {
   resetDailyWordPuzzles: () => void;
 
   // data management
-  replaceAll: (state: NoctyriumState) => void;
+  replaceAll: (state: AxomState) => void;
   resetToSeed: () => void;
   startFresh: () => void; // wipe sample data, keep an empty personal profile
 }
 
-export type Store = NoctyriumState & Actions;
+export type Store = AxomState & Actions;
 
 export const useStore = create<Store>()(
   persist(
@@ -2203,7 +2203,7 @@ export const useStore = create<Store>()(
           folders, logs, integrations, boardPrep, dayPlans, blueprintInstalls, activeDayKey,
           lastActiveLocalDate, lastTimezoneOffset, dailyArchives, dailyRolloverEvents, energyFactors,
           habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion, deferredContent,
-        } as NoctyriumState;
+        } as AxomState;
       },
     },
   ),
@@ -2215,7 +2215,7 @@ export const useStore = create<Store>()(
 // first. The full automatic safety copy lives in IndexedDB; this synchronous
 // marker remains small so localStorage is reserved for preferences/metadata.
 // ===========================================================================
-export function migratePersistedState(persisted: unknown, fromVersion: number): NoctyriumState {
+export function migratePersistedState(persisted: unknown, fromVersion: number): AxomState {
   const s = (persisted ?? {}) as Record<string, unknown>;
   if (fromVersion < SCHEMA_VERSION) {
     try {
@@ -2578,7 +2578,7 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
     return { ...item, path: normalizeTrackerPath(String(item.path ?? "")), difficulty, assessmentDate, explicitPriority: priority >= 1 && priority <= 5 ? Math.round(priority) : undefined, recommendationSnoozedUntil };
   });
   s.schemaVersion = SCHEMA_VERSION;
-  return s as unknown as NoctyriumState;
+  return s as unknown as AxomState;
 }
 
 
@@ -2622,11 +2622,11 @@ function buildTrackStructure(track: EducationTrack): { terms: Term[]; courses: C
 
 /** Keep a habit-tracking tracker's linked habit checked for `dayKey`. */
 function withTrackerHabitSync(
-  s: NoctyriumState,
+  s: AxomState,
   logs: StudyLog[],
   tracker: ProductivityTracker | undefined,
   dayKey: string,
-): Partial<NoctyriumState> {
+): Partial<AxomState> {
   if (!tracker?.contributesToHabitTracking || !tracker.linkedHabitId) return { logs };
   const habit = (s.habits ?? []).find((item) => item.id === tracker.linkedHabitId && !item.archived);
   if (!habit) return { logs };
@@ -2650,7 +2650,7 @@ function upsertTrackerHabitEntry(
 
 const TRACKER_HABIT_NOTE = "From your tracker";
 
-function linkTrackerHabit(s: Pick<NoctyriumState, "habits">, tracker: ProductivityTracker): { tracker: ProductivityTracker; habits: Habit[] } {
+function linkTrackerHabit(s: Pick<AxomState, "habits">, tracker: ProductivityTracker): { tracker: ProductivityTracker; habits: Habit[] } {
   const habits = s.habits ?? [];
   const existing = tracker.linkedHabitId ? habits.find((habit) => habit.id === tracker.linkedHabitId) : undefined;
   const shape = {

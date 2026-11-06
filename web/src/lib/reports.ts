@@ -1,7 +1,7 @@
 import { addLocalDays } from "./dailyRollover";
 import { evaluateDailySuccess } from "./dailySuccess";
 import { targetPassesForItem } from "./tracker";
-import type { NoctyriumState, StudyLog } from "./types";
+import type { AxomState, StudyLog } from "./types";
 
 export type ReportMetricState = "ready" | "low-data" | "neutral";
 export type ReportMetricId = "study" | "streak" | "consistency" | "daily-success" | "readiness" | "performance" | "tracker-mastery" | "tasks";
@@ -66,7 +66,7 @@ export interface ReportPeriodComparison {
 }
 
 /** Canonical schedule-aware day series shared by weekly and monthly Reports UI. */
-export function buildCanonicalReportTrends(state: NoctyriumState): CanonicalReportTrends {
+export function buildCanonicalReportTrends(state: AxomState): CanonicalReportTrends {
   const floor = reportTrackingFloor(state);
   const history = reportDateKeys(state.activeDayKey, 366)
     .filter((dayKey) => dayKey >= floor)
@@ -122,7 +122,7 @@ export function reportTrendMetricValue(day: ReportDayDatum, metric: ReportTrendM
 }
 
 /** One canonical denominator/provenance source for the primary report cards. */
-export function buildCanonicalReportSummary(state: NoctyriumState, range: number): CanonicalReportSummary {
+export function buildCanonicalReportSummary(state: AxomState, range: number): CanonicalReportSummary {
   const endKey = state.activeDayKey;
   const allDates = reportDateKeys(endKey, range);
   const trackingFloor = reportTrackingFloor(state);
@@ -287,7 +287,7 @@ export function reportDateKeys(endKey: string, range: number): string[] {
   return Array.from({ length: count }, (_, index) => addLocalDays(endKey, index - count + 1));
 }
 
-export function reportTrackingFloor(state: NoctyriumState): string {
+export function reportTrackingFloor(state: AxomState): string {
   const configuredStarts = state.profile.dailySuccess?.requirements
     .filter((requirement) => requirement.enabled)
     .map((requirement) => requirement.trackingStartsAt)
@@ -297,7 +297,7 @@ export function reportTrackingFloor(state: NoctyriumState): string {
   return firstActivity ?? state.activeDayKey;
 }
 
-function reportDayDatum(state: NoctyriumState, dayKey: string, floor: string): ReportDayDatum {
+function reportDayDatum(state: AxomState, dayKey: string, floor: string): ReportDayDatum {
   const tracked = dayKey >= floor;
   const result = evaluateDailySuccess(state, dayKey, state.activeDayKey);
   const logs = state.logs.filter((log) => log.dayKey === dayKey);
@@ -360,7 +360,7 @@ function net(logs: readonly StudyLog[], value: (log: StudyLog) => number): numbe
   return Math.max(0, logs.reduce((sum, log) => sum + finite(value(log)), 0));
 }
 
-function successStreak(state: NoctyriumState, floor: string): number {
+function successStreak(state: AxomState, floor: string): number {
   let cursor = state.activeDayKey;
   let streak = 0;
   let first = true;
@@ -430,13 +430,13 @@ export interface CalendarWeeks {
 }
 
 /** The last `count` calendar days ending today (for effort charts). */
-export function buildRecentDays(state: NoctyriumState, count: number): ReportDayDatum[] {
+export function buildRecentDays(state: AxomState, count: number): ReportDayDatum[] {
   const floor = reportTrackingFloor(state);
   return reportDateKeys(state.activeDayKey, count).map((dayKey) => reportDayDatum(state, dayKey, floor));
 }
 
 /** The last 7 calendar days ending today, and the 7 before them. */
-export function buildCalendarWeeks(state: NoctyriumState): CalendarWeeks {
+export function buildCalendarWeeks(state: AxomState): CalendarWeeks {
   const floor = reportTrackingFloor(state);
   const keys = reportDateKeys(state.activeDayKey, 14);
   const days = keys.map((dayKey) => reportDayDatum(state, dayKey, floor));
@@ -500,7 +500,7 @@ export function formatMetric(value: number, metric: ReportTrendMetric): string {
  * window and the current run of consecutive active days. Today counts once
  * it has activity; an empty today never breaks the run.
  */
-export function buildActivityRhythm(state: NoctyriumState, range: number): { consistency: ReportMetric; streak: ReportMetric } {
+export function buildActivityRhythm(state: AxomState, range: number): { consistency: ReportMetric; streak: ReportMetric } {
   const floor = reportTrackingFloor(state);
   const endKey = state.activeDayKey;
   const observed = reportDateKeys(endKey, range).filter((dayKey) => dayKey >= floor);

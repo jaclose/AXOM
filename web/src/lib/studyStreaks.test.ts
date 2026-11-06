@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NoctyriumState } from "./types";
+import type { AxomState } from "./types";
 import {
   dailyWordProtectedStreak,
   dateKeyInTimeZone,
@@ -76,7 +76,7 @@ describe("study streak rewards", () => {
     expect(ledger.productivity).toMatchObject({ freezesLeft: 2, refillProgress: 0 });
     const repeated = reconcileProductivityStreak(ledger, "2026-07-11", { eligibleCount: 1, progress: 80 }, { eligibleCount: 1, progress: 80 });
     expect(repeated.ledger).toEqual(ledger);
-    expect(studyCreditsBalance({ profile: { studyStreaks: ledger }, sessions: [] } as unknown as Pick<NoctyriumState, "profile" | "sessions">)).toBe(2);
+    expect(studyCreditsBalance({ profile: { studyStreaks: ledger }, sessions: [] } as unknown as Pick<AxomState, "profile" | "sessions">)).toBe(2);
   });
 
   it("does not count a frozen day as refill progress, but lets later earned days refill", () => {
@@ -167,12 +167,12 @@ describe("study streak rewards", () => {
     const before = {
       profile: { studyStreaks: ledger, journalNotebook: { unlockedStyles: ["copper"] } },
       sessions: [{ id: "old-session", status: "completed" }],
-    } as unknown as Pick<NoctyriumState, "profile" | "sessions">;
+    } as unknown as Pick<AxomState, "profile" | "sessions">;
     expect(studyCreditsBalance(before)).toBe(3);
     const after = {
       ...before,
       sessions: [...before.sessions, { ...before.sessions[0], id: "new-session" }, { ...before.sessions[0], id: "new-session" }],
-    } as Pick<NoctyriumState, "profile" | "sessions">;
+    } as Pick<AxomState, "profile" | "sessions">;
     expect(studyCreditsBalance(after)).toBe(4);
   });
 });

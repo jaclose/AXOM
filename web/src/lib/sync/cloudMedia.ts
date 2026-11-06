@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../compressedText";
 import { privateReviewMedia } from "../privateLibrary/media";
 import { getQuestionAttachmentBlob, MAX_QUESTION_ATTACHMENT_BYTES, QUESTION_ATTACHMENT_TYPES, type QuestionImageAttachment } from "../questionAttachments";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { SyncPushError } from "./syncFailure";
 
 export const MEDIA_BUCKET = "workspace-media";
@@ -22,7 +22,7 @@ export interface CloudMediaReference {
 }
 
 type Reference = { questionId: string; attachment: QuestionImageAttachment; checksum?: string };
-export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
+export function workspaceMedia(state: AxomState): Map<string, Reference> {
   state = contentMetadata(state);
   const refs = new Map<string, Reference>();
   for (const question of [...state.questions, ...privateReviewMedia(state.documents)]) {
@@ -51,7 +51,7 @@ export function readMediaManifest(value: unknown): CloudMediaReference[] {
 }
 
 /** A protected workspace cannot claim completeness while omitting a figure. */
-export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): CloudMediaReference[] {
+export function validateWorkspaceMedia(state: AxomState, value: unknown): CloudMediaReference[] {
   const manifest = readMediaManifest(value);
   const expected = workspaceMedia(state);
   if (manifest.length !== expected.size || manifest.some((entry) => {
@@ -63,7 +63,7 @@ export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): C
 
 /** Images remain lossless originals. Identical bytes share one immutable object
  * within an account; filenames and local paths never become public URLs. */
-export async function uploadCloudMedia(client: SupabaseClient, userId: string, state: NoctyriumState, assertCurrent: () => Promise<void>, previous: CloudMediaReference[] = []): Promise<CloudMediaReference[]> {
+export async function uploadCloudMedia(client: SupabaseClient, userId: string, state: AxomState, assertCurrent: () => Promise<void>, previous: CloudMediaReference[] = []): Promise<CloudMediaReference[]> {
   const bucket = client.storage.from(MEDIA_BUCKET);
   const shared = storedAcademicBindings(state).assets;
   const academicByHash = new Map<string, AcademicAssetReference>();
