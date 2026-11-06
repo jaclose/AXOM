@@ -23,10 +23,13 @@ Desktop must verify its local and SQLite snapshots before installing. If only
 the additional web recovery copy fails, AXOM keeps the old build open and
 offers a separately confirmed refresh using the saved workspace. It verifies
 the authoritative saved workspace and unchanged live state again immediately
-before that refresh. A failed primary save or changed workspace still blocks
-the update; no consent bypasses those checks. The downloaded update must pass
-the Tauri cryptographic signature check. Failed network checks do not disable
-the current app.
+before that refresh. A failed primary save or changed workspace blocks the
+normal update. On hosted web only, AXOM can offer a separate **Refresh anyway**
+action after a failed checkpoint, with an explicit warning and confirmation
+that recent changes may be lost. This user-authorized path skips the checkpoint,
+never happens automatically, and is unavailable for desktop updates. The
+downloaded desktop update must pass the Tauri cryptographic signature check.
+Failed network checks do not disable the current app.
 
 The service worker stages a new build without skipWaiting during installation.
 Activation occurs after the user approves refresh. Prior hashed assets are
