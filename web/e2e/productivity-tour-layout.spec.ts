@@ -123,12 +123,12 @@ test("Productivity primary panels stay usable across themes and narrow screens",
       await expect(page.getByRole("heading", { name: "Log an activity" })).toBeVisible();
       const bounds = await page.locator(".productivity-primary-grid").evaluate((grid) => {
         const [log, focus] = Array.from(grid.children).map((element) => element.getBoundingClientRect());
-        const focusCard = grid.querySelector<HTMLElement>(".pomodoro");
-        if (!focusCard) throw new Error("Focus card is missing");
-        const previousHeight = focusCard.style.height;
-        focusCard.style.height = "auto";
-        const naturalFocusHeight = focusCard.getBoundingClientRect().height;
-        focusCard.style.height = previousHeight;
+        const focusStack = grid.querySelector<HTMLElement>("#productivity-focus");
+        if (!focusStack) throw new Error("Focus stack is missing");
+        const previousHeight = focusStack.style.height;
+        focusStack.style.height = "auto";
+        const naturalFocusHeight = focusStack.getBoundingClientRect().height;
+        focusStack.style.height = previousHeight;
         return { logTop: log.top, focusTop: focus.top, focusHeight: focus.height, naturalFocusHeight, scroll: grid.scrollWidth, width: grid.clientWidth };
       });
       expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
@@ -156,6 +156,8 @@ test("Productivity primary panels stay usable across themes and narrow screens",
         expect(field.right).toBeLessThanOrEqual(1);
         expect(field.width).toBeGreaterThan(40);
       }
+      await expect(page.locator("#productivity-focus .study-streak-monitor")).toBeVisible();
+      await expect(page.locator("#productivity-log .study-streak-monitor")).toHaveCount(0);
       const focusMeter = page.getByRole("progressbar", { name: "Focus session progress" });
       await expect(focusMeter).toBeVisible();
       await expect(focusMeter).toHaveAttribute("aria-valuenow", /^(0|[1-9]\d?|100)$/);
