@@ -33,6 +33,14 @@ export function requestApplyUpdateWithVerifiedSave(): void {
   if (window.confirm(prompt)) void appUpdates.apply({ skipRecoverySnapshot: true });
 }
 
+/** User-authorized web-only escape hatch when the workspace save itself fails. */
+export function requestApplyUpdateWithoutVerifiedSave(): void {
+  const prompt = "AXOM could not verify that your latest workspace was saved. Refreshing now may lose recent changes. Export a backup first if possible. Are you sure you want to refresh anyway?";
+  if (window.confirm(prompt)) void appUpdates.apply({ skipFailedCheckpoint: true }).then(() => {
+    if (appUpdates.getSnapshot().phase === "error") window.dispatchEvent(new Event("axom:open-update-panel"));
+  });
+}
+
 function useAutoDownload(): boolean {
   const [value, setValue] = useState(() => readUpdatePreferences().autoDownload);
   useEffect(() => {
@@ -63,6 +71,7 @@ export function AppUpdatePanel() {
   };
   const apply = requestApplyUpdate;
   const canContinueWithVerifiedSave = state.canContinueWithoutRecoverySnapshot && !state.desktop;
+  const canRefreshWithoutVerifiedSave = state.canRefreshWithoutVerifiedSave && !state.desktop && state.phase === "error";
   return (
     <section className="settings-update-panel" aria-busy={busy} aria-labelledby="settings-update-title">
       <div className="settings-update-head">
@@ -75,6 +84,7 @@ export function AppUpdatePanel() {
       </div>
       {state.restartPending && state.phase === "error" && <p className="sub">The update is already prepared. Retry the restart below; it will save your current workspace again without reinstalling.</p>}
       {canContinueWithVerifiedSave && <p className="sub">Your saved workspace was verified. The browser could not make a second recovery copy because storage is full. Export a backup first, or refresh with the verified save.</p>}
+      {canRefreshWithoutVerifiedSave && <p className="sub" id="update-unverified-save-warning">AXOM could not verify that your latest workspace was saved. Refreshing now may lose recent changes. Export a backup from Settings if possible, or choose Refresh anyway and confirm.</p>}
       {state.phase === "downloading" && <div>
         <progress aria-label="Update download" value={state.totalBytes ? state.downloadedBytes : undefined} max={state.totalBytes ?? 1} style={{ width: "100%" }} />
         <p className="sub">{(state.downloadedBytes / 1_048_576).toFixed(1)} MB{state.totalBytes ? ` of ${(state.totalBytes / 1_048_576).toFixed(1)} MB` : " received"}</p>
@@ -85,6 +95,7 @@ export function AppUpdatePanel() {
         {state.desktop && state.version && !appUpdates.hasDownloaded() && <GButton size="sm" variant="primary" disabled={busy} onClick={() => { void appUpdates.download(); }}><Download size={16} /> Download update</GButton>}
         {canApply && <GButton size="sm" variant="primary" disabled={busy} onClick={apply}><ShieldCheck size={16} /> {state.desktop ? (state.restartPending ? "Save and restart" : "Install and restart") : "Save and refresh"}</GButton>}
         {canContinueWithVerifiedSave && <GButton size="sm" variant="primary" disabled={busy} onClick={requestApplyUpdateWithVerifiedSave}><ShieldCheck size={16} /> Refresh with verified save</GButton>}
+        {canRefreshWithoutVerifiedSave && <GButton size="sm" disabled={busy} aria-describedby="update-unverified-save-warning" onClick={requestApplyUpdateWithoutVerifiedSave}><RefreshCw size={16} /> Refresh anyway</GButton>}
         {state.version && !busy && <GButton size="sm" onClick={() => appUpdates.defer()}>Remind me next time</GButton>}
       </div>
       {state.deferred && <p className="sub">Reminder deferred for this app session. You can still update here.</p>}
@@ -94,7 +105,7 @@ export function AppUpdatePanel() {
           Download updates in the background (installing always waits for you)
         </label>
       )}
-      <p className="settings-update-note">AXOM saves and verifies your workspace before an update. If storage is full, you can choose whether to refresh without an extra recovery copy.</p>
+      <p className="settings-update-note">By default, AXOM saves and verifies your workspace before updating. If a web checkpoint fails, refreshing without a verified save requires separate confirmation and may lose recent changes.</p>
       <Suspense fallback={<p className="sub">Loading release notes…</p>}><ReleaseNotesHistory /></Suspense>
     </section>
   );
