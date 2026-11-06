@@ -1441,8 +1441,18 @@ function readJournalFeedbackDraft(key: string): JournalExperienceFeedbackInput {
 }
 
 function JournalFeedback({ onClose }: { onClose: () => void }) {
+  // The dialog can stay mounted across workspace or account switches. Remount
+  // its draft state for each owner so one user's text is never written under
+  // another owner's localStorage key. Do not migrate legacy authenticated
+  // drafts automatically because the old keys did not identify an account.
+  const workspaceId = useStore((state) => state.profile.userId);
+  const accountId = useAccount((state) => state.user?.id);
+  const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
+  return <JournalFeedbackForOwner key={ownerKey} draftKey={`axom-journal-feedback-draft:${ownerKey}`} onClose={onClose} />;
+}
+
+function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; draftKey: string }) {
   const user = useAccount((state) => state.user);
-  const draftKey = `axom-journal-feedback-draft:${useStore.getState().profile.userId}`;
   const [draft, setDraft] = useState(() => readJournalFeedbackDraft(draftKey));
   const [sending, setSending] = useState(false);
   const [sentId, setSentId] = useState("");

@@ -304,6 +304,76 @@ describe("Journal notebook foundation", () => {
     expect(document.activeElement).toBe(deskWriting);
   });
 
+  it("isolates an open feedback draft when the local workspace owner changes", () => {
+    const originalProfile = useStore.getState().profile;
+    const ownerA = "journal-feedback-local-a";
+    const ownerB = "journal-feedback-local-b";
+    const keyA = `axom-journal-feedback-draft:${ownerA}`;
+    const keyB = `axom-journal-feedback-draft:${ownerB}`;
+    window.localStorage.removeItem(keyA);
+    window.localStorage.removeItem(keyB);
+    useStore.setState({ profile: { ...originalProfile, userId: ownerA } });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      fireEvent.change(liked(), { target: { value: "Only A should read this private feedback." } });
+      expect(JSON.parse(window.localStorage.getItem(keyA) ?? "{}").liked).toBe("Only A should read this private feedback.");
+
+      act(() => { useStore.setState({ profile: { ...originalProfile, userId: ownerB } }); });
+      expect(liked().value).toBe("");
+      expect(window.localStorage.getItem(keyB)).not.toContain("Only A should read");
+      fireEvent.change(liked(), { target: { value: "B owns a different feedback draft." } });
+      expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B owns a different feedback draft.");
+
+      act(() => { useStore.setState({ profile: { ...originalProfile, userId: ownerA } }); });
+      expect(liked().value).toBe("Only A should read this private feedback.");
+      expect(window.localStorage.getItem(keyA)).not.toContain("B owns a different");
+    } finally {
+      cleanup();
+      useStore.setState({ profile: originalProfile });
+      window.localStorage.removeItem(keyA);
+      window.localStorage.removeItem(keyB);
+    }
+  });
+
+  it("partitions feedback drafts for two signed-in accounts on the same workspace", () => {
+    const previous = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const workspaceId = "journal-feedback-shared-workspace";
+    const previousProfile = useStore.getState().profile;
+    const accountA = { id: "feedback-account-a", email: "a@example.test", displayName: "A", emailConfirmed: true };
+    const accountB = { id: "feedback-account-b", email: "b@example.test", displayName: "B", emailConfirmed: true };
+    const keyA = `axom-journal-feedback-draft:${workspaceId}:account:${accountA.id}`;
+    const keyB = `axom-journal-feedback-draft:${workspaceId}:account:${accountB.id}`;
+    window.localStorage.removeItem(keyA);
+    window.localStorage.removeItem(keyB);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: accountA, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      fireEvent.change(liked(), { target: { value: "A's private feedback." } });
+      expect(JSON.parse(window.localStorage.getItem(keyA) ?? "{}").liked).toBe("A's private feedback.");
+
+      act(() => { useAccount.setState({ user: accountB }); });
+      expect(liked().value).toBe("");
+      expect(window.localStorage.getItem(keyB)).not.toContain("A's private feedback.");
+      fireEvent.change(liked(), { target: { value: "B's private feedback." } });
+      expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B's private feedback.");
+
+      act(() => { useAccount.setState({ user: accountA }); });
+      expect(liked().value).toBe("A's private feedback.");
+      expect(window.localStorage.getItem(keyA)).not.toContain("B's private feedback.");
+    } finally {
+      cleanup();
+      useAccount.setState(previous);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(keyA);
+      window.localStorage.removeItem(keyB);
+    }
+  });
+
   it("opens feedback from the notification route without sending private content", () => {
     window.history.replaceState(null, "", "#journal?feedback=1");
     render(<JournalPage />);
