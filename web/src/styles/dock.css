@@ -381,7 +381,10 @@
 @media (max-width: 560px) {
   .focus-dock-row { gap: 10px; }
   .dock-timer .dock-label, .dock-eq { display: none; }
-  .dock-timer { justify-content: space-between; }
+  /* Anchor the clock while the primary control stays at the right edge;
+     justify-content: space-between collides with dock-more at 441–560px. */
+  .dock-timer { justify-content: flex-start; }
+  .dock-timer > .dock-icon.primary { margin-left: auto; }
   .dock-sound-inner { gap: 2px; }
   .dock-sound-name { padding-inline: 2px; }
   .dock-sound-name b { max-width: 100%; }
