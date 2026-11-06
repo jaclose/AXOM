@@ -94,16 +94,10 @@
 }
 .dock-timer.paused .dock-clock { opacity: .58; }
 .dock-timer.paused .dock-live-dot { animation: none; opacity: .5; }
-.dock-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  max-width: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-width .34s cubic-bezier(.2, .9, .25, 1), opacity .2s ease;
-}
-.dock-timer.expanded .dock-more { max-width: 150px; opacity: 1; }
+/* Only mounted while expanded, so secondary actions belong to the pill's
+   layout instead of becoming a detached hover capsule. */
+.dock-more { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+.dock-more .dock-icon { width: 26px; height: 32px; }
 .dock-log-menu {
   position: absolute;
   right: 12px;
@@ -344,9 +338,24 @@
 .dock-sound-name { flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .dock-sound-name b, .dock-sound-name small { overflow: hidden; text-overflow: ellipsis; }
 .dock-timer .dock-label { flex: 1; min-width: 0; }
+/* Make space for inline actions by swapping the decorative ring and title
+   for controls while retaining the clock and primary pause/play button. */
+.dock-timer.expanded { gap: 4px; padding-inline: 7px; }
+.dock-timer.expanded .dock-ring,
+.dock-timer.expanded .dock-label { display: none; }
+.dock-timer.expanded .dock-clock {
+  flex: 1 1 auto;
+  min-width: 40px;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock-timer.expanded > .dock-icon.primary { width: 30px; }
 .dock-timer-trigger { padding: 0; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .dock-timer-trigger:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); border-radius: 4px; }
-.dock-more, .dock-timer.expanded .dock-more, .dock-setup {
+.dock-setup {
   position: absolute; bottom: calc(100% + 12px); left: 0; right: auto; z-index: 1;
   width: max-content; max-width: calc(100vw - 24px); max-height: none; overflow: visible;
   opacity: 1; padding: 7px; border-radius: 16px; background: rgb(var(--dock-bg));
@@ -356,7 +365,7 @@
 .dock-setup label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dock-setup select, .dock-setup button { color: inherit; background: rgb(255 255 255 / .09); border: 1px solid rgb(255 255 255 / .12); border-radius: 8px; padding: 7px; }
 .dock-setup select:disabled, .dock-setup button:disabled { opacity: .5; cursor: not-allowed; }
-.dock-log-menu { left: 0; right: auto; bottom: calc(100% + 62px); max-width: calc(100vw - 24px); }
+.dock-log-menu { left: 0; right: auto; bottom: calc(100% + 12px); max-width: calc(100vw - 24px); }
 .dock-genie { max-height: calc(100dvh - 96px - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; }
 .dock-genie.closing { pointer-events: none; }
 .surface-scroll { scroll-padding-bottom: 100px; }
@@ -371,3 +380,17 @@
 }
 /* Keep the floating controls reachable across the gap above the pill. */
 .dock-timer.expanded::before { content: ""; position: absolute; bottom: 100%; left: 0; width: 100%; height: 12px; }
+
+/* Small screens get a two-row timer on expansion. Both capsules share the
+   same height, with quick actions inside (not floating above) the timer. */
+@media (max-width: 440px) {
+  .focus-dock .dock-capsule { height: 64px; }
+  .dock-timer.expanded { padding-bottom: 32px; }
+  .dock-timer.expanded .dock-more {
+    position: absolute;
+    inset: auto 5px 0;
+    justify-content: center;
+    gap: 4px;
+  }
+  .dock-timer.expanded .dock-more .dock-icon { width: 34px; height: 32px; }
+}
