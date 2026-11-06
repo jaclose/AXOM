@@ -9,6 +9,10 @@ Optical highlights may surround it without altering the mark. Keep the ΛXOM wor
 and quiet tagline ("Private academic OS") where appropriate. Existing cinematic metal
 mark reference: `AXOM_Opening_Cinematic_v1/`. This revision does not replace shell assets.
 
+The [AXOM brand implementation guide](BRAND-GUIDE.md) covers identity-master
+application, source versus product palette, diagrams, communications and asset rights.
+This file remains authoritative for actual app tokens, UI primitives and interaction rules.
+
 ## 1. Voice
 
 - Plain language first. Anything technical (storage engines, checksums, credentials, IDs) goes behind `TechnicalDetails` (closed by default).
