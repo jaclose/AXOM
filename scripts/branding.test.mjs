@@ -23,3 +23,22 @@ test('AXOM rebrand keeps the existing native data container', async () => {
   assert.equal(config.identifier, 'com.noctyrium.alpha');
   assert.deepEqual(config.plugins.sql.preload, ['sqlite:noctyrium.db']);
 });
+
+
+test('active API copy and AI generation labels use AXOM rather than the retired product', async () => {
+  const http = await read('lib/api/http.ts');
+  const ai = await read('lib/api/aiService.ts');
+  assert.doesNotMatch(http, /Noctyrium/i);
+  assert.doesNotMatch(ai, /["']noctyrium["']/i);
+  assert.match(http, /AXOM cloud backend error/);
+  assert.match(ai, /["']axom["']/);
+});
+
+test('workspace type and native web wrapper use AXOM naming', async () => {
+  const types = await read('web/src/lib/types.ts');
+  const native = await read('web/native/AXOMWebApp.swift');
+  assert.match(types, /export interface AxomState\s*\{/);
+  assert.doesNotMatch(types, /NoctyriumState/);
+  assert.match(native, /struct AXOMWebApp: App/);
+  assert.doesNotMatch(native, /Noctyrium/);
+});
