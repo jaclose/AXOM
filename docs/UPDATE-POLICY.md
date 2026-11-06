@@ -24,9 +24,11 @@ the additional web recovery copy fails, AXOM keeps the old build open and
 offers a separately confirmed refresh using the saved workspace. It verifies
 the authoritative saved workspace and unchanged live state again immediately
 before that refresh. A failed primary save or changed workspace still blocks
-the update; no consent bypasses those checks. The downloaded update must pass
-the Tauri cryptographic signature check. Failed network checks do not disable
-the current app.
+the verified-save shortcut. The web app offers a separately confirmed **Refresh
+anyway** action after a failed primary checkpoint, warning that unverified edits
+may be lost; desktop never skips the primary save check. The downloaded update
+must pass the Tauri cryptographic signature check. Failed network checks do not
+disable the current app.
 
 The service worker stages a new build without skipWaiting during installation.
 Activation occurs after the user approves refresh. Prior hashed assets are
