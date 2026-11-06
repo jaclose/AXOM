@@ -6,6 +6,7 @@ on:
       - "web/src/lib/localVault.ts"
       - "web/src/lib/localVault.test.ts"
       - "web/src/lib/retryLocalWorkspaceSave.ts"
+      - "web/src/lib/retryLocalWorkspaceSave.test.ts"
       - "web/src/components/shell/AccountSyncPanel.tsx"
       - "web/src/components/shell/AccountSyncPanel.test.tsx"
       - "web/src/components/shell/DataHealthPanel.tsx"
