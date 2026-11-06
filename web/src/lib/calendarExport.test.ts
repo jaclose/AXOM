@@ -71,4 +71,53 @@ describe("calendar export", () => {
     expect(ics.split("\r\n").filter((row) => row === "END:VEVENT")).toHaveLength(1);
   });
 
+  it("escapes UID TEXT so untrusted record delimiters cannot create extra VEVENTs", () => {
+    const uid = "task-a\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:forged";
+    const at = new Date("2026-11-06T02:00:00.000Z");
+    const event = { uid, day: "2026-12-31", title: "Review", category: "AXOM task" };
+    const ics = buildIcs([event], at);
+    const physical = ics.split("\r\n");
+    expect(physical.filter((line) => line === "BEGIN:VEVENT")).toHaveLength(1);
+    expect(physical.filter((line) => line === "END:VEVENT")).toHaveLength(1);
+    expect(ics).toContain("UID:task-a\\nEND:VEVENT\\nBEGIN:VEVENT\\nUID:forged@axom.local");
+    expect(ics).not.toContain("\r\nUID:forged");
+    const literalBackslash = buildIcs([{ ...event, uid: "x\\ny" }], at);
+    const actualNewline = buildIcs([{ ...event, uid: "x\ny" }], at);
+    expect(literalBackslash).not.toBe(actualNewline);
+    expect(buildIcs([{ ...event, uid: "task-simple" }], at)).toContain("UID:task-simple@axom.local");
+  });
+
+  it.each([
+    "2026-02-31", "2025-02-29", "2026-13-01", "0000-01-01",
+    "9999-12-31", "2026-12-31\r\nBEGIN:VEVENT", "not-a-date",
+  ])("rejects malformed calendar date %j without returning partial content", (day) => {
+    expect(() => buildIcs([{
+      uid: "task-date", day, title: "Renal", category: "AXOM task",
+    }], new Date("2026-11-06T02:00:00.000Z"))).toThrow(RangeError);
+  });
+
+  it("uses UTC Gregorian days for leap, year-end and DST boundaries", () => {
+    const at = new Date("2026-11-06T02:00:00.000Z");
+    for (const [day, end] of [
+      ["2028-02-29", "20280301"],
+      ["2026-03-08", "20260309"],
+      ["2026-11-01", "20261102"],
+      ["2026-12-31", "20270101"],
+    ]) {
+      const ics = buildIcs([{ uid: "task-1", day, title: "Review", category: "AXOM task" }], at);
+      expect(ics).toContain("DTSTART;VALUE=DATE:" + day.replace(/-/g, ""));
+      expect(ics).toContain("DTEND;VALUE=DATE:" + end);
+    }
+  });
+
+  it("refuses missing, repeated or ambiguous UIDs without merging unrelated events", () => {
+    const event = { uid: "task-1", day: "2026-11-20", title: "Review", category: "AXOM task" };
+    const at = new Date("2026-11-06T02:00:00.000Z");
+    expect(() => buildIcs([{ ...event, uid: "" }], at)).toThrow(RangeError);
+    expect(() => buildIcs([event, { ...event }], at)).toThrow(RangeError);
+    expect(() => buildIcs([{ ...event, uid: "task-\u0000" }], at)).toThrow(RangeError);
+    expect(() => buildIcs([{ ...event, uid: "task-\uD800" }], at)).toThrow(RangeError);
+    expect(escapeIcsText("A\u0000B\u007fC")).toBe("A B C");
+  });
+
 });
