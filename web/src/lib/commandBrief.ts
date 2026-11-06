@@ -8,7 +8,7 @@
 // AI layer (lib/ai) may later PROPOSE a brief through the same schema, but a
 // proposal never mutates the plan without user review.
 // ===========================================================================
-import type { Course, DayPlan, Habit, HabitEntry, NoctyriumState, Task, TrackerItem } from "./types";
+import type { Course, DayPlan, Habit, HabitEntry, AxomState, Task, TrackerItem } from "./types";
 import { sessionElapsedMinutes, type StudySession, type SessionLink } from "./sessions";
 import type { DailyCloseout } from "./closeout";
 import { isQuestionKind } from "./tracker";
@@ -117,8 +117,8 @@ export interface BriefStateSlice {
   primaryScopes?: readonly string[];
   courses?: Course[];
   studyWorkflow?: StudyWorkflowPreferences;
-  logs: NoctyriumState["logs"];
-  boardPrep: NoctyriumState["boardPrep"];
+  logs: AxomState["logs"];
+  boardPrep: AxomState["boardPrep"];
   activeDayKey: string;
   sessions: StudySession[];
   closeouts: DailyCloseout[];
@@ -137,7 +137,7 @@ export interface BriefEvidenceState {
   courses: Course[];
   tracker: TrackerItem[];
   studyWorkflow?: StudyWorkflowPreferences;
-  logs: NoctyriumState["logs"];
+  logs: AxomState["logs"];
   tasks: Task[];
   questions: QuestionRecord[];
   documents: SourceDocument[];

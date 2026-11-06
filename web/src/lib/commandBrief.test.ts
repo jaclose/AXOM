@@ -4,7 +4,7 @@ import {
   rankCommandBriefCandidates,
   type BriefEvidenceState, type BriefStateSlice, type BriefSignals,
 } from "./commandBrief";
-import type { NoctyriumState, Task, TrackerItem } from "./types";
+import type { AxomState, Task, TrackerItem } from "./types";
 import type { Habit } from "./types";
 import { newSchedule, type AnkiCard } from "./ankiCards";
 import { makeSeed } from "./seed";
@@ -80,7 +80,7 @@ function slice(patch: Partial<BriefStateSlice> = {}): BriefStateSlice {
     tasks: [],
     tracker: [],
     logs: [],
-    boardPrep: {} as NoctyriumState["boardPrep"],
+    boardPrep: {} as AxomState["boardPrep"],
     activeDayKey: TODAY,
     sessions: [],
     closeouts: [],

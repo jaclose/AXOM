@@ -1,7 +1,7 @@
 import { assessBank } from "../question-content/assessBank";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PreparedBank } from "../privateLibrary/types";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { sha256 } from "../compressedText";
 import { readCatalog, readPreparedBank, safeLibraryPath, type LibraryInstallation } from "../privateLibrary/install";
 import { packageToReviewedImport } from "../question-content/toReviewedImport";
@@ -77,7 +77,7 @@ export function academicRecord(bank: PreparedBank, reference: AcademicRecordRefe
 
 /** Only a byte-for-byte equivalent source projection earns a shared reference.
  * Personal source edits or Decode additions keep the private recovery path. */
-export async function academicBindings(state: NoctyriumState, installation: LibraryInstallation, revisionId: string,
+export async function academicBindings(state: AxomState, installation: LibraryInstallation, revisionId: string,
   files: Array<{ path: string; sha256: string; mime_type: string }>, captured: Map<string, Uint8Array>): Promise<AcademicBindings> {
   const sources: ContentReference[] = [];
   const bound = new Set<string>();
@@ -118,7 +118,7 @@ export async function academicBindings(state: NoctyriumState, installation: Libr
   return { sources, originals, assets: files.filter(file => file.mime_type.startsWith("image/")).map(file => ({ revisionId, path: file.path, sha256: file.sha256 })) };
 }
 
-export function storedAcademicBindings(state: NoctyriumState): AcademicBindings {
+export function storedAcademicBindings(state: AxomState): AcademicBindings {
   const result: AcademicBindings = { sources: [], assets: [], originals: [] };
   for (const doc of state.documents) {
     if (doc.fileType !== "axom-academic-reference") continue;

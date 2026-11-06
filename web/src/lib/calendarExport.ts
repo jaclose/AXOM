@@ -1,4 +1,4 @@
-import type { NoctyriumState } from "./types";
+import type { AxomState } from "./types";
 
 /**
  * Calendar export (.ics, RFC 5545). Works with Google Calendar, Apple
@@ -25,7 +25,7 @@ const BOARD_LABELS: Record<string, string> = {
   step1: "USMLE Step 1", step2: "USMLE Step 2 CK", step3: "USMLE Step 3", shelf: "Shelf exam", mcat: "MCAT", premed: "Pre-med milestone",
 };
 
-export function calendarEvents(state: Pick<NoctyriumState, "tasks" | "boardPrep" | "dayPlans">, options: CalendarExportOptions): CalendarEventInput[] {
+export function calendarEvents(state: Pick<AxomState, "tasks" | "boardPrep" | "dayPlans">, options: CalendarExportOptions): CalendarEventInput[] {
   const events: CalendarEventInput[] = [];
   if (options.tasks) {
     for (const task of state.tasks) {

@@ -1,5 +1,5 @@
 import type { SourceDocument } from "../library";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import type { LibraryInstallation, LibraryInstallScope } from "../privateLibrary/install";
 import type { AcademicBindings } from "./contentReferences";
 import { downloadAcademicCourse, type AcademicCourse } from "./client";
@@ -19,7 +19,7 @@ export interface DownloadReference extends LibraryInstallation {
   pendingWeeks?: number[];
   bindings?: AcademicBindings;
 }
-export type DownloadWorkspace = Pick<NoctyriumState, "documents" | "questions" | "questionSets" | "deferredContent">;
+export type DownloadWorkspace = Pick<AxomState, "documents" | "questions" | "questionSets" | "deferredContent">;
 type CourseIdentity = Pick<AcademicCourse, "id" | "current_revision_id">;
 // A failed flush can leave an optimistic receipt in memory. It must not make
 // a retry skip the course until the reference has actually been saved.

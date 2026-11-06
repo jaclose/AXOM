@@ -3,7 +3,7 @@ import { academicAccountScope } from "./accountScope";
 import { ACADEMIC_REFERENCE_TYPE, readDownloadReference, type DownloadReference, type DownloadWorkspace } from "./downloadReference";
 import { questionMappingStatus } from "../questions";
 import type { CourseQuizLaunch } from "../course-engine/quizLaunch";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 
 const termIdentity = (value: string): string => {
   const numbered = value.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
@@ -38,7 +38,7 @@ export async function listTermCourses(term: string, accountId: string,
   } finally { scope.dispose(); }
 }
 
-type TermWorkspace = DownloadWorkspace & Pick<NoctyriumState, "terms" | "courses">;
+type TermWorkspace = DownloadWorkspace & Pick<AxomState, "terms" | "courses">;
 
 function workspaceReferences(accountId: string, workspace: TermWorkspace): DownloadReference[] {
   const references: DownloadReference[] = [];
