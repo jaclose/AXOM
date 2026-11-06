@@ -30,6 +30,16 @@ describe("DailyProgressVessel", () => {
     expect(container.querySelector(".daily-progress-fill")?.getAttribute("style")).toContain("50%");
   });
 
+  it("shows the selected-day context and the streak threshold only for scored targets", () => {
+    const { rerender, container } = render(<DailyProgressVessel result={neutral} dayLabel="Selected day" />);
+    expect(screen.getByText("Selected day")).toBeTruthy();
+    expect(container.querySelector(".daily-progress-threshold")).toBeNull();
+    rerender(<DailyProgressVessel dayLabel="Today" result={{ ...neutral, eligibleCount: 1, metCount: 0, progress: 43, status: "in-progress", statusLabel: "In progress" }} />);
+    expect(screen.getByText("Today")).toBeTruthy();
+    expect(container.querySelector(".daily-progress-threshold")).toBeTruthy();
+    expect(screen.getByText("80% streak threshold")).toBeTruthy();
+  });
+
   it("reveals native, weighted, source, and remaining progress for keyboard and touch users", () => {
     const result: DailySuccessResult = {
       ...neutral,
