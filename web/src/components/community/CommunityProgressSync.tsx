@@ -14,14 +14,17 @@ const FOCUS_RESYNC_MS = 5 * 60_000;
  * costs no request, and whether that day is actually shared (not empty or private). */
 const confirmed = new Map<string, { signature: string; shared: boolean }>();
 
-/** Reads the account's sharing choice, also used to retry after a failed check. */
-export async function refreshCommunityShareMode(accountId: string): Promise<void> {
+/** Reads the account's sharing choice: from the stored session at start, or from the
+ * server (`fresh`) when Community opens or a failed check is retried. */
+export async function refreshCommunityShareMode(accountId: string, fresh = false): Promise<void> {
   try {
     const { readShareMode } = await import("../../lib/community/community");
-    const mode = await readShareMode(accountId);
+    const mode = await readShareMode(accountId, { fresh });
     if (useAccount.getState().user?.id === accountId) setCommunityShareMode(accountId, mode);
   } catch (cause) {
     if (useAccount.getState().user?.id !== accountId) return;
+    // A failed recheck keeps the choice this device already knows.
+    if (fresh && shareModeFor(useCommunityShare.getState(), accountId) !== null) return;
     setCommunityShareMode(accountId, null);
     reportCommunityShare(accountId, "error", cause instanceof Error ? cause.message : "Your sharing choice could not be checked. Retry when connected.");
   }

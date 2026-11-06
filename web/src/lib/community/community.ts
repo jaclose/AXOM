@@ -341,10 +341,18 @@ export async function loadProgressBoard(accountId: string, fromDay: string): Pro
   });
 }
 
-/** The sharing choice lives on the account, so every signed-in device agrees. */
-export async function readShareMode(accountId: string): Promise<ShareMode> {
+/** The sharing choice lives on the account, so every signed-in device agrees. The
+ * stored session carries it and is renewed with every token, so app start costs no
+ * request; `fresh` asks the server, catching a change made on another device. */
+export async function readShareMode(accountId: string, options: { fresh?: boolean } = {}): Promise<ShareMode> {
   const shared = await loadSupabase();
   if (!shared) return "off";
+  if (!options.fresh) {
+    const { data: { session } } = await shared.auth.getSession();
+    if (!session) throw new Error("Your sharing choice could not be checked. Sign in again.");
+    if (session.user.id !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
+    return shareModeFrom(session.user.user_metadata);
+  }
   const { data, error } = await shared.auth.getUser();
   if (error || !data.user) throw new Error("Your sharing choice could not be checked. Retry when connected.");
   if (data.user.id !== accountId) throw new Error("The signed-in account changed. Reopen Community.");

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Globe, LockKeyhole, RefreshCw, Users } from "lucide-react";
 import { GButton, GlassCard, PanelHeader } from "../ui/primitives";
 import type { ShareMode } from "../../lib/community/progressBoard";
@@ -25,6 +25,8 @@ export function CommunityShareCard({ accountId, discoverable }: { accountId: str
   const lastSharedAt = useCommunityShare(state => state.accountId === accountId ? state.lastSharedAt : undefined);
   const [saving, setSaving] = useState<ShareMode | null>(null);
   const [error, setError] = useState("");
+  // Opening Community rechecks the server, so a change made on another device shows here.
+  useEffect(() => { void refreshCommunityShareMode(accountId, true); }, [accountId]);
 
   async function choose(next: ShareMode) {
     if (saving || next === mode) return;
@@ -60,7 +62,7 @@ export function CommunityShareCard({ accountId, discoverable }: { accountId: str
       {(mode === "friends" || mode === "community") && status === "idle" && <span>Your totals update a few seconds after you log study.</span>}
     </div>
     {(status === "error" || status === "needs-profile") && statusMessage && <div role="alert" className="community-error"><p>{statusMessage}</p>
-      {mode === null && <GButton size="sm" onClick={() => void refreshCommunityShareMode(accountId)}><RefreshCw size={14} aria-hidden="true" /> Retry</GButton>}</div>}
+      {mode === null && <GButton size="sm" onClick={() => void refreshCommunityShareMode(accountId, true)}><RefreshCw size={14} aria-hidden="true" /> Retry</GButton>}</div>}
     {error && <p role="alert" className="community-error">{error}</p>}
   </GlassCard>;
 }

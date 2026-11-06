@@ -117,22 +117,29 @@ describe("leaderboard data and the sharing choice", () => {
     await expect(loadProgressBoard("me", "last month")).rejects.toThrow(/period/);
   });
 
-  it("reads and saves the choice on the signed-in account only", async () => {
+  it("reads the choice from the stored session without a request, and saves it on the signed-in account only", async () => {
     let metadata: Record<string, unknown> = { display_name: "Me" };
+    let sessionMetadata: Record<string, unknown> = { display_name: "Me" };
     const auth = {
       getUser: vi.fn(async () => ({ data: { user: { id: "me", user_metadata: metadata } }, error: null })),
-      getSession: vi.fn(async () => ({ data: { session: { user: { id: "me" } } } })),
+      getSession: vi.fn(async () => ({ data: { session: { user: { id: "me", user_metadata: sessionMetadata } } } })),
       updateUser: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         metadata = { ...metadata, ...data };
+        sessionMetadata = metadata;
         return { data: { user: { id: "me", user_metadata: metadata } }, error: null };
       }),
     };
     vi.mocked(loadSupabase).mockResolvedValue({ auth } as unknown as Awaited<ReturnType<typeof loadSupabase>>);
     expect(await readShareMode("me")).toBe("off");
+    expect(auth.getUser).not.toHaveBeenCalled();
     await saveShareMode("me", "community");
     expect(auth.updateUser).toHaveBeenCalledWith({ data: { [SHARE_MODE_KEY]: "community" } });
     expect(await readShareMode("me")).toBe("community");
+    metadata = { ...metadata, [SHARE_MODE_KEY]: "friends" }; // changed on another device
+    expect(await readShareMode("me")).toBe("community");
+    expect(await readShareMode("me", { fresh: true })).toBe("friends");
     await expect(saveShareMode("someone-else", "friends")).rejects.toThrow(/account changed/);
     await expect(readShareMode("someone-else")).rejects.toThrow(/account changed/);
+    await expect(readShareMode("someone-else", { fresh: true })).rejects.toThrow(/account changed/);
   });
 });
