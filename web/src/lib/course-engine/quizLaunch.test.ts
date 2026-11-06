@@ -105,6 +105,21 @@ describe("course to canonical quiz handoff", () => {
     expect(readCourseQuizLaunch(questions)?.questionIds).toEqual(["one"]);
   });
 
+  it("does not launch when multiple on-device questions claim a requested original ID", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: ["set-one"] };
+    launchCourseQuiz(selection);
+    const pending = sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY);
+    const disputed = { ...questions[0], stem: "Conflicting original with the same saved ID" };
+    for (const local of [[questions[0], disputed], [disputed, questions[0]]]) {
+      expect(readCourseQuizLaunch(local)).toBeNull();
+      expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
+    }
+    // Duplicate unrelated records must not hold a valid fixed selection.
+    const unrelated = { ...questions[1], id: "unrelated" };
+    expect(readCourseQuizLaunch([questions[0], unrelated, { ...unrelated, stem: "Different" }])?.questionIds).toEqual(["one"]);
+    expect(readCourseQuizLaunch([questions[0]])?.questionIds).toEqual(["one"]);
+  });
+
   it("does not overwrite an unreadable saved quiz or navigate away from recovery", () => {
     const currentHash = location.hash;
     localStorage.setItem(STORAGE_KEYS.quizActiveSession, "{damaged session");

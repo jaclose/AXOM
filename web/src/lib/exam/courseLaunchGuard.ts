@@ -46,13 +46,21 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
     return invalid("The saved course selection has invalid collection identifiers.");
   }
 
-  const byId = new Map(questions.map((question) => [question.id, question]));
+  const requestedIds = new Set(ids);
+  const byId = new Map<string, QuestionRecord>();
+  const duplicateOnDevice = new Set<string>();
+  for (const question of questions) {
+    if (!requestedIds.has(question.id)) continue;
+    if (byId.has(question.id)) duplicateOnDevice.add(question.id);
+    else byId.set(question.id, question);
+  }
   let ready = 0;
   let missing = 0;
   const reviewIds: string[] = [];
   for (const id of ids) {
     const record = byId.get(id);
-    if (!record) missing += 1;
+    if (duplicateOnDevice.has(id)) reviewIds.push(id);
+    else if (!record) missing += 1;
     else if (questionPracticeReadiness(record) === "ready") ready += 1;
     else reviewIds.push(id);
   }

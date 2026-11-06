@@ -73,10 +73,19 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
         || new Set(value.setIds).size !== value.setIds.length
         || value.setIds.some(id => typeof id !== "string" || !id.trim())))) return null;
     const questionIds = value.questionIds as string[];
-    const eligible = new Set(questions.filter(question => questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id));
-    // A partial hydration MUST NOT produce a shorter practice block. Keep the
-    // original request untouched until every exact question is ready on-device.
-    if (!questionIds.every(id => eligible.has(id))) return null;
+    const requestedIds = new Set(questionIds);
+    const seenOnDevice = new Set<string>();
+    const duplicateOnDevice = new Set<string>();
+    const eligible = new Set<string>();
+    for (const question of questions) {
+      if (!requestedIds.has(question.id)) continue;
+      if (seenOnDevice.has(question.id)) duplicateOnDevice.add(question.id);
+      seenOnDevice.add(question.id);
+      if (questionMappingStatus(question) === "ready" && question.options.length >= 2) eligible.add(question.id);
+    }
+    // A partial hydration or conflicting local identity must not launch a
+    // shorter or order-dependent block. Preserve the pending request for repair.
+    if (!questionIds.every(id => eligible.has(id) && !duplicateOnDevice.has(id))) return null;
     return { module: value.module, term: value.term, questionIds,
       ...("courseId" in value && typeof value.courseId === "string" ? { courseId: value.courseId } : {}),
       ...("week" in value && typeof value.week === "number" ? { week: value.week } : {}),
