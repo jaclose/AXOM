@@ -1,53 +1,128 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { ICON_SIZE } from "../../lib/iconSize";
 
-export function LandingFilm() {
+const ROOT = "/landing/alpha-v1";
+const PORTRAIT = "(max-aspect-ratio: 1/1)";
+type Connection = { saveData?: boolean; effectiveType?: string; addEventListener?: (type: string, listener: EventListener) => void; removeEventListener?: (type: string, listener: EventListener) => void };
+
+/** Public media only. Never imports the workspace store or writes learner data. */
+export function LandingFilm({ suspended = false }: { suspended?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const scene = useRef<HTMLDivElement>(null);
+  const resumeAt = useRef(0);
+  const [variant, setVariant] = useState<"web" | "mobile">("web");
   const [allowed, setAllowed] = useState(false);
+  const [requested, setRequested] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [visible, setVisible] = useState(true);
   const [onScreen, setOnScreen] = useState(true);
+  const enabled = (allowed || requested) && !failed;
+
   useEffect(() => {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const portrait = window.matchMedia(PORTRAIT);
+    const connection = (navigator as Navigator & { connection?: Connection }).connection;
+    const syncPolicy = () => {
+      const permit = !reduced.matches && document.documentElement.dataset.motion !== "reduce"
+        && !connection?.saveData && !/^(slow-)?2g$/.test(connection?.effectiveType ?? "");
+      setAllowed(permit);
+      // A new accessibility or connection preference revokes an earlier override.
+      if (!permit) setRequested(false);
+    };
+    const syncVariant = () => {
+      if (video.current) resumeAt.current = video.current.currentTime;
+      setReady(false);
+      setFailed(false);
+      setVariant(portrait.matches ? "mobile" : "web");
+    };
+    const syncVisibility = () => setVisible(document.visibilityState === "visible");
+    const preference = new MutationObserver(syncPolicy);
+    preference.observe(document.documentElement, { attributes: true, attributeFilter: ["data-motion"] });
+    syncPolicy(); syncVariant(); syncVisibility();
+    reduced.addEventListener("change", syncPolicy);
+    portrait.addEventListener("change", syncVariant);
+    connection?.addEventListener?.("change", syncPolicy);
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => {
+      preference.disconnect();
+      reduced.removeEventListener("change", syncPolicy);
+      portrait.removeEventListener("change", syncVariant);
+      connection?.removeEventListener?.("change", syncPolicy);
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(([entry]) => setOnScreen(entry.isIntersecting));
     if (scene.current) observer.observe(scene.current);
     return () => observer.disconnect();
   }, []);
-  useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
-    const sync = () => setAllowed(!reduced.matches && document.documentElement.dataset.motion !== "reduce" && !connection?.saveData && !/^(slow-)?2g$/.test(connection?.effectiveType ?? ""));
-    sync(); reduced.addEventListener("change", sync);
-    const visibility = () => setVisible(document.visibilityState === "visible");
-    document.addEventListener("visibilitychange", visibility);
-    return () => { reduced.removeEventListener("change", sync); document.removeEventListener("visibilitychange", visibility); };
-  }, []);
+
   useEffect(() => {
     const element = video.current;
-    if (!element || !allowed || failed) return;
-    if (paused || !visible || !onScreen) { element.pause(); return; }
+    if (!element || !enabled) return;
+    if (paused || suspended || !visible || !onScreen) { element.pause(); return; }
     let active = true;
     void element.play().catch((error: unknown) => {
-      // A visibility change can abort an in-flight play request. It is not a
-      // user pause or an autoplay refusal and should resume when visible again.
       if (active && !(error instanceof DOMException && error.name === "AbortError")) setPaused(true);
     });
-    return () => { active = false; };
-  }, [allowed, paused, visible, onScreen, failed]);
+    return () => { active = false; element.pause(); };
+  }, [enabled, paused, suspended, visible, onScreen, variant]);
+
+  const togglePlayback = () => {
+    if (failed || !enabled || paused) {
+      setFailed(false);
+      setRequested(true);
+      setPaused(false);
+    } else {
+      setPaused(true);
+    }
+  };
+  const toggleSound = () => {
+    const element = video.current;
+    if (!element) return;
+    // Unmute inside the user's gesture. Sound never starts or resumes playback.
+    element.muted = !element.muted;
+    setMuted(element.muted);
+  };
+  const wantsPlay = !enabled || paused;
+  const playbackLabel = failed ? "Retry film" : wantsPlay ? "Play background film" : "Pause background film";
+
   return <>
     <div ref={scene} className="landing-film" aria-hidden="true">
-      <picture><source media="(max-width: 600px)" srcSet="/landing/orbit-mobile.webp" /><img src="/landing/orbit-poster.webp" width="1920" height="1080" alt="" loading="eager" /></picture>
-      {allowed && !failed && <video ref={video} className={ready ? "is-ready" : ""} muted loop playsInline preload="metadata" tabIndex={-1}
-        onCanPlay={() => setReady(true)} onError={(event) => { if (event.target === event.currentTarget) { setFailed(true); setReady(false); } }}>
-        <source src="/landing/orbit-720.webm" type="video/webm" media="(max-width: 800px)" />
-        <source src="/landing/orbit-1080.webm" type="video/webm" />
-        <source src="/landing/orbit-1080.mp4" type="video/mp4" onError={() => { setFailed(true); setReady(false); }} />
+      <picture>
+        <source media={PORTRAIT} srcSet={`${ROOT}/poster-mobile.jpg`} />
+        <img src={`${ROOT}/poster.jpg`} width="1920" height="1080" alt="" loading="eager" />
+      </picture>
+      {enabled && <video key={variant} ref={video} src={`${ROOT}/axom-launch-${variant}.mp4`}
+        className={ready ? "is-ready" : ""} muted={muted} loop playsInline preload="metadata" tabIndex={-1}
+        onCanPlay={() => setReady(true)}
+        onTimeUpdate={(event) => { resumeAt.current = event.currentTarget.currentTime; }}
+        onLoadedMetadata={(event) => {
+          const element = event.currentTarget;
+          if (Number.isFinite(element.duration) && resumeAt.current > 0) element.currentTime = Math.min(resumeAt.current, Math.max(0, element.duration - 0.1));
+        }}
+        onVolumeChange={(event) => setMuted(event.currentTarget.muted)}
+        onError={() => { setFailed(true); setReady(false); setPaused(true); }}>
+        <track kind="descriptions" src={`${ROOT}/film-description.vtt`} srcLang="en" label="English visual description" />
       </video>}
     </div>
-    {allowed && !failed && <button className="landing-motion" onClick={() => setPaused((value) => !value)} aria-label={paused ? "Play background film" : "Pause background film"}>
-      {paused ? <Play size={14} /> : <Pause size={14} />}<span>{paused ? "Play motion" : "Pause motion"}</span>
-    </button>}
+    {failed && <p className="landing-film-notice" role="status">The film is unavailable. You can still open AXOM.</p>}
+    <div className="landing-film-controls" role="group" aria-label="Film playback">
+      <button type="button" onClick={togglePlayback} aria-label={playbackLabel}>
+        {wantsPlay ? <Play size={ICON_SIZE.body} aria-hidden="true" /> : <Pause size={ICON_SIZE.body} aria-hidden="true" />}
+        <span>{failed ? "Retry film" : wantsPlay ? "Play film" : "Pause"}</span>
+      </button>
+      <button type="button" onClick={toggleSound} disabled={!enabled} aria-pressed={!muted}
+        aria-label={muted ? "Enable film sound" : "Mute film sound"}>
+        {muted ? <VolumeX size={ICON_SIZE.body} aria-hidden="true" /> : <Volume2 size={ICON_SIZE.body} aria-hidden="true" />}
+        <span>{muted ? "Sound off" : "Sound on"}</span>
+      </button>
+    </div>
   </>;
 }
