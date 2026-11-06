@@ -5,6 +5,7 @@ import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
 import { createQuestionSetShare, type SharedQuestionSetSnapshot } from "../../lib/sharing/questionSetShare";
+import { enrichCommunitySnapshotVisualTags } from "../../lib/sharing/communityVisualTags";
 import {
   listMyQuestionSetSubmissions, submitQuestionSetToLibrary, withdrawQuestionSetSubmission,
   type LibrarySubmission,
@@ -58,7 +59,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
       || (submission && submission.status !== "rejected")) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      snapshotRef.current ??= createQuestionSetShare(set, questions);
+      snapshotRef.current ??= enrichCommunitySnapshotVisualTags(createQuestionSetShare(set, questions));
       const id = await submitQuestionSetToLibrary(accountId, set.id, snapshotRef.current, credit);
       const result = await refresh();
       if (!result || result.id !== id) throw new Error("The submission could not be read back. Check its status before retrying.");
