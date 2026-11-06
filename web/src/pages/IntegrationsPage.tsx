@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowRight, CalendarDays, CheckCircle2, Cloud, Download, FileJson, HardDrive, Layers, Link2, Lock, NotebookPen, Plug,
   Puzzle, Smartphone, Sparkles,
@@ -152,7 +152,10 @@ function CalendarExportPanel() {
     sources: Pick<ReturnType<typeof useStore.getState>,
       "tasks" | "boardPrep" | "dayPlans" | "activeDayKey">;
   } | null>(null);
-  const currentSources = useStore.getState();
+  // Render from one consistent subscribed Zustand snapshot. An imperative
+  // getState() read here could disagree with useSyncExternalStore during a
+  // concurrent task edit and leave a previous validation warning visible.
+  const currentSources = state;
   const errorMessage = exportError
     && exportError.sources.tasks === currentSources.tasks
     && exportError.sources.boardPrep === currentSources.boardPrep
@@ -163,26 +166,9 @@ function CalendarExportPanel() {
     const { tasks, boardPrep, dayPlans, activeDayKey } = useStore.getState();
     setExportError({ message, sources: { tasks, boardPrep, dayPlans, activeDayKey } });
   };
-  // A source may change while this panel remains mounted and while React is
-  // processing a different surface. Watch the canonical store for the lifetime
-  // of the error rather than relying on a later parent render to dismiss it.
-  // Do not dismiss a real error for unrelated workspace state changes.
-  useEffect(() => {
-    if (!exportError) return;
-    const stillCurrent = (next: ReturnType<typeof useStore.getState>) =>
-      exportError.sources.tasks === next.tasks
-      && exportError.sources.boardPrep === next.boardPrep
-      && exportError.sources.dayPlans === next.dayPlans
-      && exportError.sources.activeDayKey === next.activeDayKey;
-    // The source could have changed between reporting and subscribing.
-    if (!stillCurrent(useStore.getState())) {
-      setExportError(null);
-      return;
-    }
-    return useStore.subscribe((next) => {
-      if (!stillCurrent(next)) setExportError(null);
-    });
-  }, [exportError]);
+  // The existing subscribed store snapshot drives source-validity rendering.
+  // Avoid a competing error-specific effect that updates React state while
+  // Zustand dispatches its own source notifications.
   const events = calendarEvents(state, { tasks, exams, dayPlans, fromDay: state.activeDayKey });
   const downloadSelected = () => {
     let content: string;
