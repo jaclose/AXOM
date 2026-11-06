@@ -133,6 +133,23 @@ describe("pre-update workspace checkpoint", () => {
     expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
   });
 
+  it("refuses a refresh fallback if the workspace changes while the extra recovery copy fails", async () => {
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.localBackupPrefix)) {
+        runtime.state = { ...runtime.state, tasks: [{ id: "newer-unsaved-edit" }] };
+        throw new Error("Recovery copy failed.");
+      }
+      originalSetItem(key, value);
+    });
+    vi.stubGlobal("indexedDB", undefined);
+
+    await expect(createUpdateCheckpoint(false)).rejects.toThrow("workspace changed while saving");
+    const saved = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+    expect(JSON.parse(saved!).state.tasks).toEqual([{ id: "unsaved-latest" }]);
+    expect(runtime.state.tasks).toEqual([{ id: "newer-unsaved-edit" }]);
+  });
+
   it("keeps a full verified fallback snapshot when IndexedDB is unavailable", async () => {
     vi.stubGlobal("indexedDB", undefined);
     const key = await createUpdateCheckpoint(false);
