@@ -182,3 +182,14 @@
 .qsl-assist details p { margin-top: 10px; }
 .qsl-assist details ul, .qsl-visual-hints ul { padding-left: 21px; overflow-wrap: anywhere; }
 .qsl-visual-hints p { color: var(--text-70); font-size: var(--fs-small); }
+
+.qsl-draft-stem { color: var(--text); font-weight: var(--fw-semibold); line-height: 1.5; }
+.qsl-draft-options { margin: 8px 0 14px; }
+.qsl-draft-field { display: grid; gap: 6px; margin: 12px 0; font-size: var(--fs-small); color: var(--text-80); }
+.qsl-draft-field textarea {
+  width: 100%; min-width: 0; min-height: 72px; padding: 10px 12px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+  background: var(--surface-1); color: var(--text);
+  font: inherit; line-height: 1.5; resize: vertical;
+}
+.qsl-draft-field textarea:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
