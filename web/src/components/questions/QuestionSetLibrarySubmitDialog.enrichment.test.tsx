@@ -97,10 +97,14 @@ describe("Question Set draft explanation review", () => {
     expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText(/Question 1 · Review explanation and choices/));
-    expect(screen.getByText(/Tunica media has concentric vascular smooth muscle/)).toBeTruthy();
+    const explanationInput = screen.getByRole("textbox", { name: "Question 1 explanation" }) as HTMLTextAreaElement;
+    expect(explanationInput.value).toMatch(/Tunica media has concentric vascular smooth muscle/);
+    fireEvent.change(explanationInput, { target: {
+      value: "The tunica media contains the main smooth muscle layers and adjusts vessel caliber when vascular resistance changes.",
+    } });
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
     await waitFor(() => expect(mocks.updateQuestion).toHaveBeenCalledWith("q-1", expect.objectContaining({
-      explanation: expect.stringContaining("concentric vascular smooth muscle"),
+      explanation: expect.stringContaining("AXOM AI-assisted explanation"),
       choiceRationales: expect.objectContaining({ B: expect.stringContaining("endothelial") }),
     })));
     expect(mocks.submit).not.toHaveBeenCalled();
