@@ -10,8 +10,9 @@ import {
 const QUIET_MS = 15_000;
 const FIRST_MS = 1_500;
 const FOCUS_RESYNC_MS = 5 * 60_000;
-/** Totals the server last confirmed, per account, mode and day, so an unchanged day costs no request. */
-const confirmed = new Map<string, string>();
+/** Totals the server last confirmed, per account, mode and day, so an unchanged day
+ * costs no request, and whether that day is actually shared (not empty or private). */
+const confirmed = new Map<string, { signature: string; shared: boolean }>();
 
 /** Reads the account's sharing choice, also used to retry after a failed check. */
 export async function refreshCommunityShareMode(accountId: string): Promise<void> {
@@ -50,14 +51,18 @@ export function CommunityProgressSync() {
       const today = isoDate(new Date());
       const entries = [addDays(today, -1), today].map(day => ({ day, ...dayProgress(useStore.getState().logs, day) }));
       const signature = (entry: (typeof entries)[number]) => `${entry.minutes}/${entry.cards}/${entry.questions}`;
-      const pending = entries.filter(entry => confirmed.get(`${runKey}:${entry.day}`) !== signature(entry));
+      const pending = entries.filter(entry => confirmed.get(`${runKey}:${entry.day}`)?.signature !== signature(entry));
       if (!pending.length) return;
       reportCommunityShare(accountId, "sharing");
       try {
         const { syncSharedProgress } = await import("../../lib/community/community");
-        await syncSharedProgress(accountId, mode, pending);
-        for (const entry of pending) confirmed.set(`${runKey}:${entry.day}`, signature(entry));
-        if (!cancelled) reportCommunityShare(accountId, "shared");
+        const outcomes = await syncSharedProgress(accountId, mode, pending);
+        for (const entry of pending) {
+          const action = outcomes.find(outcome => outcome.day === entry.day)?.action;
+          confirmed.set(`${runKey}:${entry.day}`, { signature: signature(entry), shared: action === "inserted" || action === "updated" || action === "unchanged" });
+        }
+        // "Shared" only when today's row is on the server; an empty or private day stays idle.
+        if (!cancelled) reportCommunityShare(accountId, confirmed.get(`${runKey}:${today}`)?.shared ? "shared" : "idle");
       } catch (cause) {
         if (cancelled) return;
         const missingProfile = cause instanceof Error && cause.name === "CommunityProfileMissingError";
