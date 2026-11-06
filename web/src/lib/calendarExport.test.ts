@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildIcs, calendarEvents, escapeIcsText, foldIcsLine } from "./calendarExport";
+import { parseIcsEvents } from "./icsCalendar";
 import { makeSeed } from "./seed";
 
 describe("calendar export", () => {
@@ -108,6 +109,24 @@ describe("calendar export", () => {
       expect(ics).toContain("DTSTART;VALUE=DATE:" + day.replace(/-/g, ""));
       expect(ics).toContain("DTEND;VALUE=DATE:" + end);
     }
+  });
+
+  it("round-trips the generated wire bytes through AXOM's independent calendar importer", () => {
+    const original = [
+      { uid: "task-unicode", day: "2026-12-31", title: "مراجعة 🧠 é; 麻酔, \\ lecture ".repeat(9), category: "AXOM task" },
+      { uid: "exam-board", day: "2028-02-29", title: "USMLE Step 1", category: "AXOM exam" },
+    ];
+    const file = buildIcs(original, new Date("2026-11-06T02:00:00.000Z"));
+    const encoded = new TextEncoder().encode(file);
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(encoded);
+    const parsed = parseIcsEvents(decoded, { timeZone: "America/Grenada" });
+    expect(parsed).toHaveLength(2);
+    expect(parsed.map((item) => item.uid)).toEqual(original.map((item) => item.uid + "@axom.local"));
+    expect(parsed.map((item) => item.start?.date)).toEqual(original.map((item) => item.day));
+    expect(parsed.map((item) => item.summary)).toEqual(original.map((item) => item.title.trim()));
+    expect(parsed[0].end?.date).toBe("2027-01-01");
+    expect(parsed[1].end?.date).toBe("2028-03-01");
+    expect(decoded.split("\r\n").filter(Boolean).every((line) => new TextEncoder().encode(line).length <= 75)).toBe(true);
   });
 
   it("refuses missing, repeated or ambiguous UIDs without merging unrelated events", () => {
