@@ -1,8 +1,16 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 
 const media = "/landing/alpha-v1/";
+
+async function seekFrame(video: Locator, seconds: number) {
+  await video.evaluate((el: HTMLVideoElement, time) => new Promise<void>((resolve) => {
+    el.addEventListener("seeked", () => resolve(), { once: true });
+    el.currentTime = time;
+  }), seconds);
+  await expect(video).toHaveCSS("opacity", "1");
+}
 
 test("approved alpha files retain the owner's exact bytes", async () => {
   const root = new URL("../public/landing/alpha-v1/", import.meta.url);
@@ -52,10 +60,12 @@ test("desktop plays the approved local film muted with working pause and sound",
   await page.getByRole("button", { name: "Mute film sound" }).click();
   await expect(video).toHaveJSProperty("muted", true);
   await expect(video).toHaveJSProperty("paused", true);
+  await seekFrame(video, 12);
+  await page.screenshot({ path: testInfo.outputPath("cinematic-alpha-playing.png") });
+  await seekFrame(video, 35.5);
   await page.getByRole("button", { name: "Play background film" }).click();
   await expect(video).toHaveJSProperty("paused", false);
-  await video.evaluate((el: HTMLVideoElement) => { el.currentTime = 12; });
-  await page.screenshot({ path: testInfo.outputPath("cinematic-alpha-playing.png") });
+  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeLessThan(3);
   expect(errors).toEqual([]);
 });
 
@@ -70,8 +80,7 @@ test("portrait uses only the mobile film and rotation retains user pause and pos
   await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThan(0.1);
   expect(requests.every(url => url.includes("axom-launch-mobile.mp4"))).toBe(true);
   await page.getByRole("button", { name: "Pause background film" }).click();
-  await video.evaluate((el: HTMLVideoElement) => { el.currentTime = 12; });
-  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThan(11.9);
+  await seekFrame(video, 12);
   await page.screenshot({ path: testInfo.outputPath("cinematic-alpha-mobile-playing.png") });
   await page.setViewportSize({ width: 844, height: 390 });
   await expect(video).toHaveAttribute("src", `${media}axom-launch-web.mp4`);
@@ -83,7 +92,7 @@ test("portrait uses only the mobile film and rotation retains user pause and pos
 for (const mode of ["reduce", "save-data", "slow-connection"] as const) {
   test(`${mode} loads a poster without downloading either film`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: mode === "reduce" ? "reduce" : "no-preference" });
-    await page.addInitScript(value => Object.defineProperty(navigator, "connection", { configurable: true, value: { saveData: value === "save-data", effectiveType: value === "slow-connection" ? "2g" : "4g" } }), mode);
+    await page.addInitScript(value => Object.defineProperty(navigator, "connection", { configurable: true, value: { saveData: value === "save-data", effectiveType: value === "slow-connection" ? "slow-2g" : "4g" } }), mode);
     const requests: string[] = [];
     page.on("request", request => { if (/\.mp4(?:\?|$)/.test(request.url())) requests.push(request.url()); });
     await page.goto("/");
