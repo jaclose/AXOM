@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "../compressedText";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
 import { makeSeed } from "../seed";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { MEDIA_BUCKET, clearCloudMediaUploadCache, uploadCloudMedia } from "./cloudMedia";
 
 const objects = new Map<string, Blob>();
@@ -22,7 +22,7 @@ const client = { storage: { from: (bucket: string) => {
 } } } as unknown as SupabaseClient;
 const guard = vi.fn(async () => undefined);
 
-async function fixture(count: number): Promise<{ state: NoctyriumState; keys: string[]; hashes: string[] }> {
+async function fixture(count: number): Promise<{ state: AxomState; keys: string[]; hashes: string[] }> {
   const state = makeSeed();
   const at = "2026-11-02T00:00:00.000Z";
   const keys: string[] = [];

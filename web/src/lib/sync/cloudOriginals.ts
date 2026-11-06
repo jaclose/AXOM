@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SourceDocument } from "../library";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { sha256Hex } from "../checksum";
 import { SyncPushError } from "./syncFailure";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
@@ -17,8 +17,8 @@ const originalIdentityKey = (identity: NonNullable<ReturnType<typeof readOrigina
 
 /** Source identity is part of the normal document metadata. Files live once per
  * account/hash, outside checkpoints, and are acknowledged before the revision. */
-export async function uploadCloudOriginals(client: SupabaseClient, userId: string, state: NoctyriumState, previous: string | undefined, assertCurrent: () => Promise<void>, resumable?: ResumableOriginalUpload, signal?: AbortSignal) {
-  const prior = previous?.startsWith("{") ? JSON.parse(previous) as Pick<NoctyriumState, "documents"> : undefined;
+export async function uploadCloudOriginals(client: SupabaseClient, userId: string, state: AxomState, previous: string | undefined, assertCurrent: () => Promise<void>, resumable?: ResumableOriginalUpload, signal?: AbortSignal) {
+  const prior = previous?.startsWith("{") ? JSON.parse(previous) as Pick<AxomState, "documents"> : undefined;
   const known = new Map((prior?.documents ?? []).flatMap(document => {
     const file = readOriginalFile(document);
     return file ? [[file.sha256, file] as const] : [];
@@ -106,7 +106,7 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
  * A size-matched object is left untouched; a wrong-size immutable object is
  * an integrity failure, not permission to overwrite it. */
 export async function repairMissingCloudOriginals(
-  client: SupabaseClient, userId: string, state: NoctyriumState,
+  client: SupabaseClient, userId: string, state: AxomState,
   assertCurrent: () => Promise<void>, resumable?: ResumableOriginalUpload,
 ): Promise<number> {
   const grouped = new Map<string, SourceDocument[]>();

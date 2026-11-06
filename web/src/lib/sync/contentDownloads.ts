@@ -3,7 +3,7 @@ import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questio
 import { accountOperationClient } from "../account/supabase";
 import { useStore } from "../store";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { hydrateCloudContent, splitCloudContent, mergeSourceFields } from "./cloudContent";
 import { readDeferredContent } from "./deferredContent";
 import { downloadAcademicAsset, storedAcademicBindings } from "../academicLibrary/contentReferences";
@@ -14,7 +14,7 @@ export interface ContentSelection { questionIds?: string[]; documentIds?: string
 
 /** Explicit downloads are additive. Account switches or edits during I/O never
  * replace the current workspace, and failure leaves every reference retryable. */
-export async function materializeState(state: NoctyriumState, selection?: ContentSelection): Promise<NoctyriumState> {
+export async function materializeState(state: AxomState, selection?: ContentSelection): Promise<AxomState> {
   const deferred = readDeferredContent(state.deferredContent);
   if (!deferred) return state;
   const { client, userId, assertCurrent } = await accountOperationClient();
@@ -24,7 +24,7 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   const qids = new Set(questions.map(record => record.id));
   const dids = new Set(documents.map(record => record.id));
   const sources = deferred.sources.filter(ref => (ref.collection === "questions" ? qids : dids).has(ref.id));
-  const partial = { ...state, questions, documents, deferredContent: undefined } as NoctyriumState;
+  const partial = { ...state, questions, documents, deferredContent: undefined } as AxomState;
   const restored = await hydrateCloudContent(client, userId, partial, sources, assertCurrent);
   // Original PDF/DOCX files belong to the same protected course revision.
   // Keep only verified copies in Decode's existing original-file cache.
@@ -84,7 +84,7 @@ export async function downloadAccountContent(selection?: ContentSelection): Prom
 
 /** Keep already downloaded bytes on this device while adopting remote learner
  * metadata. Only exact immutable digest matches can supply the source fields. */
-export async function retainDownloadedContent(remote: NoctyriumState, local: NoctyriumState): Promise<NoctyriumState> {
+export async function retainDownloadedContent(remote: AxomState, local: AxomState): Promise<AxomState> {
   if (!remote.deferredContent) return remote;
   const split = await splitCloudContent({ ...local, deferredContent: undefined });
   const known = new Map(split.objects.map(object => [`${object.reference.collection}:${object.reference.id}`, object]));

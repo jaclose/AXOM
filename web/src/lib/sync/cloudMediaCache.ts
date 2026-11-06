@@ -3,7 +3,7 @@ import { accountOperationClient } from "../account/supabase";
 import { setMissingAttachmentLoader } from "../questionAttachments";
 import { downloadCloudMediaAsset, readMediaManifest, workspaceMedia, type CloudMediaReference } from "./cloudMedia";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 
 const keyFor = (userId: string) => `axom.cloud.media.v2:${userId}`;
 async function indexStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -35,7 +35,7 @@ export async function saveCloudMediaIndex(userId: string, value: CloudMediaRefer
 /** Install only for the linked, signed-in account. Images load when a question
  * is opened, then stay in the normal offline/export vault. Sign-out removes
  * the network resolver; it never clears cached learner files. */
-export function installCloudMediaCache(userId: string, state: () => NoctyriumState): () => void {
+export function installCloudMediaCache(userId: string, state: () => AxomState): () => void {
   let disposed = false;
   const pending = new Map<string, ReturnType<Parameters<typeof setMissingAttachmentLoader>[0]>>();
   const unregister = setMissingAttachmentLoader((blobKey) => {

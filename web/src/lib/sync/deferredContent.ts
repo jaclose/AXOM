@@ -1,4 +1,4 @@
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import type { QuestionRecord } from "../questions";
 import type { SourceDocument } from "../library";
 import { readContentReferences, INLINE_CONTENT_TYPES, type ContentReference } from "./cloudContent";
@@ -30,7 +30,7 @@ export function readDeferredContent(value: unknown): DeferredContent | undefined
   return item;
 }
 
-export function deferContent(state: NoctyriumState, accountId: string, sources: ContentReference[], media: CloudMediaReference[]): NoctyriumState {
+export function deferContent(state: AxomState, accountId: string, sources: ContentReference[], media: CloudMediaReference[]): AxomState {
   const inline = state.documents.filter(doc => INLINE_CONTENT_TYPES.has(doc.fileType));
   const inlineIds = new Set(inline.map(doc => doc.id));
   const deferredContent = readDeferredContent({ accountId, questions: state.questions, documents: state.documents.filter(doc => !inlineIds.has(doc.id)),
@@ -39,7 +39,7 @@ export function deferContent(state: NoctyriumState, accountId: string, sources: 
 }
 
 /** Include deferred metadata for transfer/media checks only, never for study. */
-export function contentMetadata(state: NoctyriumState): NoctyriumState {
+export function contentMetadata(state: AxomState): AxomState {
   const deferred = readDeferredContent(state.deferredContent);
   if (!deferred) return state;
   const result = { ...state };
