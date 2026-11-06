@@ -161,6 +161,41 @@ describe("canonical source proof survives Tracker collection lookup", () => {
     });
   });
 
+  it("holds valid but contradictory primary provenance even when the question and review set agree", () => {
+    const secondary = { ...bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" }), kind: "review" as const };
+    const record = q("q", { setId: "primary", module: "NB2", week: 3, courseId: "core" });
+    for (const primaryScope of [
+      { module: "FTM 1", week: 3, courseId: "core" },
+      { module: "NB2", week: 4, courseId: "core" },
+      { module: "NB2", week: 3, courseId: "elective" },
+    ]) {
+      const sources = [bank("primary", ["q"], primaryScope), secondary];
+      for (const requested of [
+        { module: "NB2", week: 3, courseId: "core" },
+        { module: "NB2", courseId: "core" },
+      ]) {
+        expect(verify(["q"], [record], sources, requested)).toEqual({
+          readyQuestionIds: [], sourceReviewRequired: true,
+          conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+        });
+      }
+    }
+  });
+
+  it("holds absent or forged declared primary membership despite a complete question filing", () => {
+    const secondary = { ...bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" }), kind: "review" as const };
+    const record = q("q", { setId: "primary", module: "NB2", week: 3, courseId: "core" });
+    for (const sources of [
+      [secondary],
+      [bank("primary", [], { module: "NB2", week: 3, courseId: "core" }), secondary],
+    ]) {
+      expect(verify(["q"], [record], sources)).toEqual({
+        readyQuestionIds: [], sourceReviewRequired: true,
+        conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+      });
+    }
+  });
+
   it("honors the question's own explicit evidence without requiring fields on its primary set", () => {
     const sets = [bank("primary", ["q"]), bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" })];
     const questions = [q("q", { setId: "primary", module: "NB2", week: 3, courseId: "core" })];

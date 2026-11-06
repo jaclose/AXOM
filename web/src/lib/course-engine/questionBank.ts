@@ -107,9 +107,23 @@ export function buildCourseQuestionBank(
     // Missing references remain in the original set for repair, unchanged.
     const conflicting = members.some((question) => {
       const own = scopesById.get(question.id)!;
+      const primary = question.setId != null ? setsById.get(question.setId) : undefined;
+      const primaryScope = primary?.scope;
+      const primaryWeek = parseWeek(primaryScope?.week);
+      // A question's refiled fields cannot silently override contradictory
+      // primary-source proof just because a secondary review set agrees.
+      const contradictsPrimary = question.setId != null && (
+        !primary || !primary.questionIds.includes(question.id)
+        || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
+        || Boolean(primaryScope && (
+          (primaryScope.module && own.module
+            && canonicalModuleKey(primaryScope.module) !== canonicalModuleKey(own.module))
+          || (primaryWeek !== undefined && own.week !== undefined && own.week !== primaryWeek)
+          || (primaryScope.courseId && own.courseId && primaryScope.courseId !== own.courseId)
+        ))
+      );
       return (hasDeclaredWeek(question.week) && parseWeek(question.week) === undefined)
-        || Boolean(question.setId && !setsById.has(question.setId))
-        || Boolean(question.setId && !memberships.get(question.id)?.some((set) => set.id === question.setId))
+        || contradictsPrimary
         || Boolean(scope.module && (!own.module
           || canonicalModuleKey(own.module) !== canonicalModuleKey(scope.module)))
         || Boolean(scope.courseId && own.courseId !== scope.courseId)

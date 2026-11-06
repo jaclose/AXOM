@@ -58,6 +58,31 @@ describe("course bank read model", () => {
     expect(module.weeks.map((week) => week.week)).toEqual([2]);
     expect(module.weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
   });
+  it("holds a secondary review collection when its declared primary contradicts valid own filing", () => {
+    const record = { ...question, setId: "primary", module: "FTM 1", week: 2, courseId: "c1" };
+    const review = { ...set, id: "secondary", kind: "review" as const, scope: { module: "FTM 1", week: 2, courseId: "c1" } };
+    for (const primaryScope of [
+      { module: "FTM 2", week: 2, courseId: "c1" },
+      { module: "FTM 1", week: 3, courseId: "c1" },
+      { module: "FTM 1", week: 2, courseId: "c2" },
+    ]) {
+      const original = { ...set, id: "primary", scope: primaryScope };
+      for (const collections of [[original, review], [review, original]]) {
+        expect(indexed(collections, [record])
+          .flatMap((module) => module.weeks.flatMap((week) => week.questionIds))).toEqual([]);
+      }
+    }
+    const consistent = { ...set, id: "primary", scope: { module: "FTM 1", week: 2, courseId: "c1" } };
+    expect(indexed([review, consistent], [record])[0].weeks[0].questionIds).toEqual(["q1"]);
+  });
+
+  it("does not borrow a review collection when an explicit primary lacks this question", () => {
+    const record = { ...question, setId: "primary", module: "FTM 1", week: 2, courseId: "c1" };
+    const secondary = { ...set, id: "secondary", kind: "review" as const, scope: { module: "FTM 1", week: 2, courseId: "c1" } };
+    expect(indexed([{ ...set, id: "primary", questionIds: [] }, secondary], [record])
+      .flatMap((module) => module.weeks.flatMap((week) => week.questionIds))).toEqual([]);
+  });
+
   it("requires unanimous valid source membership to infer legacy questions with no primary set", () => {
     const legacy = { ...question, setId: undefined };
     const agree = { ...set, id: "agree" };
