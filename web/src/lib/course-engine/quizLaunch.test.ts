@@ -88,4 +88,31 @@ describe("course to canonical quiz handoff", () => {
     expect(readCourseQuizLaunch([])).toBeNull();
     expect(readCourseQuizLaunch(questions)?.questionIds).toEqual(["one", "two"]);
   });
+
+  it("rejects malformed or repeated set IDs before replacing the pending handoff", () => {
+    const valid = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: ["set-one"] };
+    launchCourseQuiz(valid);
+    const pending = sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY);
+    for (const ids of [["set-one", "set-one"], [" "], [null], [17]]) {
+      const malformed = { ...valid, setIds: ids as unknown as string[] };
+      expect(() => launchCourseQuiz(malformed)).toThrow(/selection is invalid/);
+      expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
+      sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(malformed));
+      expect(readCourseQuizLaunch(questions)).toBeNull();
+      // The next legitimate launch is still readable without rewriting question data.
+      sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, pending!);
+    }
+    expect(readCourseQuizLaunch(questions)?.questionIds).toEqual(["one"]);
+  });
+
+  it("does not overwrite an unreadable saved quiz or navigate away from recovery", () => {
+    const currentHash = location.hash;
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, "{damaged session");
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBe("{damaged session");
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+    expect(location.hash).toBe(currentHash);
+  });
+
 });

@@ -34,10 +34,20 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
     || !selection.module.trim() || !selection.term.trim()
     || (selection.week !== undefined && (!Number.isSafeInteger(selection.week) || selection.week < 1))
     || (selection.courseId !== undefined && !selection.courseId.trim())
-    || selection.setIds.length > MAX_COURSE_QUIZ_QUESTIONS) {
+    || selection.setIds.length > MAX_COURSE_QUIZ_QUESTIONS
+    || new Set(selection.setIds).size !== selection.setIds.length
+    || selection.setIds.some(id => typeof id !== "string" || !id.trim())) {
     throw new Error("The course practice selection is invalid or exceeds its supported question limit.");
   }
-  const active = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { poolIds?: unknown[] } | null;
+  // A damaged saved session is not permission to replace it with a new quiz.
+  // Keep the original bytes available for recovery instead of surfacing a raw
+  // JSON parser error or clearing the learner's unfinished work.
+  let active: { poolIds?: unknown[] } | null;
+  try {
+    active = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { poolIds?: unknown[] } | null;
+  } catch {
+    throw new Error("Your saved Question Bank session cannot be read. Open Question Bank to recover it before starting a new quiz.");
+  }
   if (active?.poolIds?.length) throw new Error("Resume or finish your current quiz in Question Bank before starting another.");
   sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(selection));
   const alreadyInQuestionBank = location.hash === "#questions";
@@ -60,6 +70,7 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
       || ("week" in value && value.week !== undefined && (!Number.isSafeInteger(value.week) || (value.week as number) < 1))
       || ("courseId" in value && value.courseId !== undefined && (typeof value.courseId !== "string" || !value.courseId.trim()))
       || ("setIds" in value && (!Array.isArray(value.setIds) || value.setIds.length > MAX_COURSE_QUIZ_QUESTIONS
+        || new Set(value.setIds).size !== value.setIds.length
         || value.setIds.some(id => typeof id !== "string" || !id.trim())))) return null;
     const questionIds = value.questionIds as string[];
     const eligible = new Set(questions.filter(question => questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id));
