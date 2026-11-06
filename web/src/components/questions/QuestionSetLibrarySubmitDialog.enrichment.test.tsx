@@ -15,9 +15,9 @@ const mocks = vi.hoisted(() => ({
   workspace: { questions: [] as unknown[] },
 }));
 vi.mock("../../lib/account/accountStore", () => {
-  const state = () => ({ user: mocks.accountId ? { id: mocks.accountId } : null });
-  const useAccount = (selector: (state: ReturnType<typeof state>) => unknown) => selector(state());
-  useAccount.getState = state;
+  const getAccountState = () => ({ user: mocks.accountId ? { id: mocks.accountId } : null });
+  const useAccount = (selector: (snapshot: ReturnType<typeof getAccountState>) => unknown) => selector(getAccountState());
+  useAccount.getState = getAccountState;
   return { useAccount };
 });
 vi.mock("../../lib/ai", () => ({
