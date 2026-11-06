@@ -123,7 +123,8 @@ export function addressSpaceFor(url: URL): AddressSpace | null {
     return null;
   }
 
-  if (host.endsWith(".local") || /^f[cd][0-9a-f]{2}:/.test(host) || host.startsWith("fe80:")) return "local";
+  // RFC 4291 reserves fe80::/10 for link-local, covering fe80 through febf.
+  if (host.endsWith(".local") || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) return "local";
   return null;
 }
 
