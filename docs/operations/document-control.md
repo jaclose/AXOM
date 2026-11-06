@@ -14,9 +14,9 @@ review_trigger: material-policy-or-source-change
 
 | Type | Examples | What it may govern |
 | --- | --- | --- |
-| Product/governance | \`docs/governance/AX-0002-CONSTITUTION.md\`, backlog, UX standards, Learning Intelligence doctrine | Approved goals, terminology, enduring requirements |
-| Engineering/implementation | \`AGENTS.md\`, domain data/auth contracts, \`DESIGN.md\`, testing, deployment and engineering SOP | Working rules and implementation invariants |
-| Evidence/state | exact source PR/SHA, GitHub CI, issue ledger, real browser/provider acceptance, \`docs/AI_STATE.md\` | What is presently built, verified, blocked or live |
+| Product/governance | `docs/governance/AX-0002-CONSTITUTION.md`, backlog, UX standards, Learning Intelligence doctrine | Approved goals, terminology, enduring requirements |
+| Engineering/implementation | `AGENTS.md`, domain data/auth contracts, `DESIGN.md`, testing, deployment and engineering SOP | Working rules and implementation invariants |
+| Evidence/state | exact source PR/SHA, GitHub CI, issue ledger, real browser/provider acceptance, `docs/AI_STATE.md` | What is presently built, verified, blocked or live |
 
 An original owner message or verbatim idea is a **source**, not permission to silently rewrite previously agreed governance. A beautiful PDF is a design specimen unless it has a recorded approval. A code change is not automatically a product-policy change. If two authorities conflict, record the contradiction, preserve the older source and request the narrow owner decision; do not invent a hierarchy on the fly.
 
@@ -24,18 +24,18 @@ An original owner message or verbatim idea is a **source**, not permission to si
 
 | Need | Canonical source or route | Responsible change process |
 | --- | --- | --- |
-| Agent bootstrap / safety guardrails | \`AGENTS.md\` | Small stable router; reviewed PR |
-| Engineering practice / IDE hygiene | \`docs/operations/engineering-sop.md\` | Developer evidence + risk review |
-| Release gate and deployment truth | \`docs/operations/deployment.md\` | FORGE and independent QA |
-| Release naming and edition history | \`docs/operations/release-nomenclature.md\` | FORGE + owner brand approval |
-| Brand application | \`docs/design/BRAND-GUIDE.md\` | Brand/design owner and browser proof |
-| UI tokens/components | \`docs/design/DESIGN.md\` | Source-led review and visual acceptance |
-| Product operating direction | \`docs/product/PRODUCT-GUIDE.md\` | Product owner disposition |
-| Product constitution and backlog | \`docs/governance/\` stable IDs | Formal governance process |
-| Source idea and work status | \`docs/directions/\` | Verbatim preservation, dated status evidence |
-| Change evidence, short handoff | \`docs/AI_STATE.md\`, GitHub work item | Exact SHA and owner, never unbounded transcript |
-| Cleanup protections | \`docs/operations/repository-audit.md#maintenance-registry\` | Safe-condition evidence and owner handoff |
-| Architecture/domain contract | \`docs/architecture\` and \`docs/features\` routes | Code/tests and domain-owner review |
+| Agent bootstrap / safety guardrails | `AGENTS.md` | Small stable router; reviewed PR |
+| Engineering practice / IDE hygiene | `docs/operations/engineering-sop.md` | Developer evidence + risk review |
+| Release gate and deployment truth | `docs/operations/deployment.md` | FORGE and independent QA |
+| Release naming and edition history | `docs/operations/release-nomenclature.md` | FORGE + owner brand approval |
+| Brand application | `docs/design/BRAND-GUIDE.md` | Brand/design owner and browser proof |
+| UI tokens/components | `docs/design/DESIGN.md` | Source-led review and visual acceptance |
+| Product operating direction | `docs/product/PRODUCT-GUIDE.md` | Product owner disposition |
+| Product constitution and backlog | `docs/governance/` stable IDs | Formal governance process |
+| Source idea and work status | `docs/directions/` | Verbatim preservation, dated status evidence |
+| Change evidence, short handoff | `docs/AI_STATE.md`, GitHub work item | Exact SHA and owner, never unbounded transcript |
+| Cleanup protections | `docs/operations/repository-audit.md#maintenance-registry` | Safe-condition evidence and owner handoff |
+| Architecture/domain contract | `docs/architecture` and `docs/features` routes | Code/tests and domain-owner review |
 
 **Rule: one concept, one canonical explanation.** Other files contain one-paragraph summaries and links, not parallel copies that drift. The [context router](../INDEX.md) guides retrieval, it is not a required reading assignment for every worker.
 
@@ -58,7 +58,7 @@ An original owner message or verbatim idea is a **source**, not permission to si
 3. **Check collisions:** search matching headings and related files; do not create a new manual when an owned section can be revised.
 4. **Protect history:** preserve decision IDs, original idea text, issue discussions, source references and rationale. Add a supersession link rather than erasing provenance.
 5. **Make narrow change:** one topic per edit; update inbound links, outdated examples and glossary terms consistently.
-6. **Validate:** relative links/paths, code snippets, file existence, contradictory directions, spelling, claims of actual deployment, privacy and license. Run \`npm run test:repo\` and \`npm run repo:check\` for docs changes, plus relevant content tests.
+6. **Validate:** relative links/paths, code snippets, file existence, contradictory directions, spelling, claims of actual deployment, privacy and license. Run `npm run test:repo` and `npm run repo:check` for docs changes, plus relevant content tests.
 7. **Review:** product owner for direction, security/data owner for boundary, brand owner for master assets, FORGE for release process. A contributor's self-review does not count as independent review for high-risk policy.
 8. **Submit to gateway:** commit to an owned branch, exact SHA and PR, include test status and link impact. Do not independently main-merge the doc branch.
 9. **Update reference points:** after accepted merge, refresh the router/AGENTS crosslink, note document revision and inform affected worker prompts or issue templates if their procedures changed.
