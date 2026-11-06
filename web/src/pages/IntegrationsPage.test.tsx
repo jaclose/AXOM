@@ -63,4 +63,34 @@ describe("Integrations", () => {
     expect(within(panel).getByRole("button", { name: /Download .ics/ }).hasAttribute("disabled")).toBe(true);
     expect(within(panel).getByRole("link", { name: /Add a task with a due date/ }).getAttribute("href")).toBe("#productivity");
   });
+  it("surfaces invalid dates instead of downloading a malformed calendar, then recovers", () => {
+    const createObjectURL = vi.fn(() => "blob:ics");
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    const task = useStore.getState().tasks[0];
+    useStore.setState({ tasks: [{ ...task, due: "2999-02-31" }] });
+    render(<IntegrationsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
+    expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
+    expect(createObjectURL).not.toHaveBeenCalled();
+
+    useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] });
+    fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
+  it("reports a browser download failure separately and clears the error after changing choices", () => {
+    const createObjectURL = vi.fn(() => { throw new Error("downloads blocked"); });
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    render(<IntegrationsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
+    expect(screen.getByRole("alert").textContent).toMatch(/could not be downloaded/i);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Open tasks with due dates/ }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
 });
