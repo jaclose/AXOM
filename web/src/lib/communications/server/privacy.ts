@@ -298,6 +298,59 @@ export async function journalFeedbackForExport(service: CommunicationsService, u
   return feedback;
 }
 
+/** Service-role reads must re-prove ownership before any row enters an account
+ * export. Only the requester's authored data and their own relationships are
+ * included; other authors' replies and private learner work are not traversed. */
+export async function communityForExport(service: CommunicationsService, userId: string): Promise<Record<string, unknown>> {
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(userId)) throw new Error("community-export-owner-invalid");
+  const specifications = [
+    { key: "profile", table: "social_profiles", owner: "user_id", identity: "user_id", fields: "user_id,handle,display_name,bio,discoverable,created_at,updated_at" },
+    { key: "preferences", table: "social_preferences", owner: "user_id", identity: "user_id", fields: "user_id,discoverable,share_mode,revision,updated_at" },
+    { key: "posts", table: "social_posts", owner: "user_id", identity: "id", fields: "id,user_id,kind,visibility,activity_day,minutes,cards,questions,set_title,caption,share_source,revision,created_at,updated_at" },
+    { key: "comments", table: "social_comments", owner: "user_id", identity: "id", fields: "id,post_id,user_id,body,created_at,updated_at" },
+    { key: "reactions", table: "social_reactions", owner: "user_id", identity: "post_id", fields: "post_id,user_id,created_at" },
+    { key: "connections", table: "social_connections", owner: "parties", identity: "id", fields: "id,requester_id,addressee_id,status,created_at,accepted_at" },
+    { key: "reports", table: "social_post_reports", owner: "reporter_id", identity: "post_id", fields: "post_id,reporter_id,reason,created_at" },
+    { key: "hiddenProgressDays", table: "social_progress_blocks", owner: "user_id", identity: "activity_day", fields: "user_id,activity_day,created_at" },
+  ];
+  const unavailableTables: string[] = [];
+  const result: Record<string, unknown> = { unavailableTables };
+  for (const spec of specifications) {
+    const rows: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    let expected: number | undefined;
+    for (let start = 0; ; start += 500) {
+      let query = service.db.from(spec.table).select(spec.fields, { count: "exact" });
+      query = spec.owner === "parties" ? query.or(`requester_id.eq.${userId},addressee_id.eq.${userId}`) : query.eq(spec.owner, userId);
+      const response = await query.order(spec.identity).range(start, start + 499);
+      if (start === 0 && response.error && ["42P01", "PGRST205"].includes(response.error.code ?? "") && response.error.message.includes(spec.table)) {
+        unavailableTables.push(spec.table);
+        break;
+      }
+      if (response.error || !Array.isArray(response.data) || typeof response.count !== "number") throw new Error("community-export-unavailable");
+      if (expected === undefined) expected = response.count;
+      if (response.count !== expected) throw new Error("community-export-changed");
+      for (const value of response.data as unknown[]) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("community-export-invalid");
+        const row = value as Record<string, unknown>;
+        const owned = spec.owner === "parties" ? row.requester_id === userId || row.addressee_id === userId : row[spec.owner] === userId;
+        const id = row[spec.identity];
+        if (!owned || typeof id !== "string" || !id || seen.has(id)) throw new Error("community-export-invalid");
+        seen.add(id);
+        // Project the allowlisted fields again at the service boundary. New or
+        // accidentally returned backend columns cannot leak into portable data.
+        rows.push(Object.fromEntries(spec.fields.split(",").filter(field => field !== "user_id" && field !== "reporter_id")
+          .map(field => [field, row[field]])));
+      }
+      if (rows.length > 50000) throw new Error("community-export-too-large");
+      if (response.data.length < 500) break;
+    }
+    if (expected !== undefined && rows.length !== expected) throw new Error("community-export-incomplete");
+    result[spec.key] = rows;
+  }
+  return result;
+}
+
 export async function processPrivacy(service: CommunicationsService): Promise<number> {
   const now = new Date().toISOString();
   // Any stale job may have crossed an external I/O boundary. Keep its durable
@@ -324,7 +377,8 @@ export async function processPrivacy(service: CommunicationsService): Promise<nu
         const workspace = await service.workspace(request.user_id);
         const [user, prefs, identity, pulses, history, privacy] = await Promise.all([service.user(request.user_id), service.preferenceRows(request.user_id), service.identity(request.user_id), service.db.from("pulse_snapshots").select("*").eq("user_id", request.user_id), service.db.from("email_jobs").select("id,type,status,created_at,sent_at").eq("user_id", request.user_id), service.db.from("privacy_requests").select("id,kind,status,scheduled_for,created_at").eq("user_id", request.user_id)]);
         const journalFeedback = await journalFeedbackForExport(service, request.user_id);
-        const data = { format: "axom-account-export", version: 1, generatedAt: now, profile: { id: user.id, email: user.email, displayName: user.user_metadata?.display_name }, preferences: prefs, emailPresentation: identity, workspace: workspace?.state ?? null, workspaceUpdatedAt: workspace?.at ?? null, pulse: checked(pulses), communications: checked(history), journalFeedback, privacy: checked(privacy), coverage: "Account-held data only. Device-local source files, original PDFs and attachment binaries are not included. Use the local portable backup for device-owned content." };
+        const community = await communityForExport(service, request.user_id);
+        const data = { format: "axom-account-export", version: 1, generatedAt: now, profile: { id: user.id, email: user.email, displayName: user.user_metadata?.display_name }, preferences: prefs, emailPresentation: identity, workspace: workspace?.state ?? null, workspaceUpdatedAt: workspace?.at ?? null, pulse: checked(pulses), communications: checked(history), journalFeedback, community, privacy: checked(privacy), coverage: "Account-held data only, including your Community profile, preferences, authored posts and replies, reactions, connections and reports. Community tables unavailable in this service version are named in community.unavailableTables. Device-local source files, original PDFs and attachment binaries are not included. Use the local portable backup for device-owned content." };
         const object_path = `${request.user_id}/${request.id}.json`;
         const serialized = JSON.stringify(data);
         if (new TextEncoder().encode(serialized).byteLength > 25000000) throw new Error("export-too-large");

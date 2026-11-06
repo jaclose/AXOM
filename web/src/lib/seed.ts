@@ -58,6 +58,7 @@ export const STORED_DASHBOARD_WIDGET_IDS: DashboardWidgetId[] = [
   "journal",
   "streak",
   "dailyWord",
+  "community",
   "aiActions",
 ];
 

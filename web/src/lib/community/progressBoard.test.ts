@@ -55,6 +55,14 @@ describe("progress leaderboards", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].minutes).toBe(10);
   });
+
+  it("removes zero-corrected days from active-day counts and streaks", () => {
+    const [row] = board([post("me", today, 15), post("me", addDays(today, -1), 0), post("me", addDays(today, -2), 20)]);
+    expect(row.minutes).toBe(35);
+    expect(row.days).toBe(2);
+    expect(row.streak).toBe(1);
+    expect(board([post("me", today, 0)])).toEqual([]);
+  });
 });
 
 describe("daily totals and helpers", () => {

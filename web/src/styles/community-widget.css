@@ -1,0 +1,15 @@
+.community-widget { min-width: 0; height: 100%; }
+.community-widget-body { display: grid; gap: 14px; min-width: 0; }
+.community-widget-empty { display: grid; justify-items: start; gap: 12px; color: var(--text-70); }
+.community-widget-empty p { margin: 0; line-height: 1.6; }
+.community-widget-empty > svg { color: var(--gold); }
+.community-widget-counts { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.community-widget-counts > span { color: var(--text-70); }
+.community-widget-counts b { font: var(--fw-semibold) var(--fs-title)/1.2 var(--font-display); color: var(--text); }
+.community-widget-counts a { display: inline-flex; align-items: center; gap: 6px; color: var(--gold); font-size: var(--fs-small); text-decoration: none; }
+.community-widget-posts { list-style: none; padding: 0; margin: 0; }
+.community-widget-posts li + li { border-top: 1px solid var(--hairline-soft); }
+.community-widget-posts a { display: grid; gap: 4px; padding: 10px 0; color: var(--text); text-decoration: none; min-width: 0; }
+.community-widget-posts a > span { color: var(--text-70); font-size: var(--fs-small); line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.community-widget-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.community-widget a:focus-visible, .community-widget button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }

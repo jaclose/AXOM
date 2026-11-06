@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import {
   AlertTriangle, BadgeCheck, ChevronDown, Cloud, CloudOff, Download, GitMerge, HardDrive, History,
   KeyRound, Laptop, LogOut, Mail, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Trash2, UserPlus,
@@ -12,12 +12,14 @@ import {
   protectionLabel,
   useAccount,
   type AccountUser,
+  type CommunitySignupPreferences,
 } from "../../lib/account/accountStore";
 import type { AccountDevice, ProtectionStatus, RevisionSummary } from "../../lib/sync/syncTypes";
 import { useStore } from "../../lib/store";
 import { readVaultWriteFailure } from "../../lib/vaultActivity";
 import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
 import { TechnicalDetails } from "./TechnicalDetails";
+import { CommunityPreferenceFields, CommunityPreferencesSettings } from "../community/CommunityPreferences";
 
 type AuthMode = "sign-in" | "create" | "code" | "forgot";
 
@@ -39,8 +41,9 @@ const PROTECTION_HEADING: Record<ProtectionStatus, string> = {
  * and conflict. Local work is always legitimate; nothing uploads or replaces
  * without a deliberate choice.
  */
-export function AccountSyncPanel({ onOpenBackup }: { onOpenBackup?: () => void }) {
+export function AccountSyncPanel({ onOpenBackup, onOpenCommunity }: { onOpenBackup?: () => void; onOpenCommunity?: () => void }) {
   const account = useAccount();
+  const protectionActions = useRef<HTMLDivElement>(null);
   useEffect(() => { useAccount.getState().init(); }, []);
   useEffect(() => {
     if (account.phase === "signed-in") void useAccount.getState().refresh();
@@ -50,7 +53,7 @@ export function AccountSyncPanel({ onOpenBackup }: { onOpenBackup?: () => void }
     <div className="account-center">
       <div className="account-stage">
         <AccountHero user={account.user} status={account.protection} phase={account.phase} lastProtectedAt={account.lastProtectedAt} />
-        <div className="account-stage-work">
+        <div className="account-stage-work" ref={protectionActions}>
           {account.phase === "unconfigured" && <UnconfiguredCard onOpenBackup={onOpenBackup} />}
           {account.phase === "loading" && <div className="account-loading" role="status">Checking your account…</div>}
           {account.phase === "signed-out" && <AuthCard />}
@@ -68,6 +71,9 @@ export function AccountSyncPanel({ onOpenBackup }: { onOpenBackup?: () => void }
           <IdentityCard user={account.user} />
         </div>
       )}
+
+      {account.phase === "signed-in" && account.user && <CommunityPreferencesSettings accountId={account.user.id} onOpenCommunity={onOpenCommunity}
+        onReviewWorkspace={() => protectionActions.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus()} />}
 
       {(account.message || account.error) && (
         <div className={`account-notice ${account.error ? "error" : ""}`} role={account.error ? "alert" : "status"}>
@@ -159,6 +165,7 @@ function AuthCard() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState(profileName ?? "");
   const [code, setCode] = useState("");
+  const [communityPreferences, setCommunityPreferences] = useState<CommunitySignupPreferences>({ discoverable: false, shareMode: "off" });
 
   function choose(next: AuthMode) {
     setMode(next);
@@ -171,9 +178,9 @@ function AuthCard() {
     event.preventDefault();
     if (pendingCodeEmail) await verifyCode(pendingCodeEmail, code);
     else if (mode === "sign-in") await signIn(email, password);
-    else if (mode === "create") await signUp(email, password, displayName);
+    else if (mode === "create") await signUp(email, password, displayName, communityPreferences);
     else if (mode === "forgot") await requestPasswordReset(email);
-    else await sendCode(email);
+    else await sendCode(email, communityPreferences);
   }
 
   return (
@@ -203,7 +210,7 @@ function AuthCard() {
           </div>
         )}
         <form className="account-form" onSubmit={(event) => void submit(event)}>
-        {mode === "create" && (
+        {mode === "create" && !pendingCodeEmail && (
           <label>
             <span>Name on your account</span>
             <input className="field" name="displayName" value={displayName} maxLength={80} autoComplete="name" onChange={(event) => setDisplayName(event.target.value)} />
@@ -236,6 +243,13 @@ function AuthCard() {
             <span>{pendingCodeKind === "signup" ? "Confirmation code" : pendingCodeKind === "recovery" ? "Password reset code" : "Sign-in code"} sent to {pendingCodeEmail}</span>
             <input className="field account-code" name="code" inputMode="numeric" autoComplete="one-time-code" spellCheck={false} required maxLength={10} value={code} onChange={(event) => setCode(event.target.value)} />
           </label>
+        )}
+        {!pendingCodeEmail && (mode === "create" || mode === "code") && (
+          <section className="community-preferences community-preferences-signup" aria-label="Community and leaderboards">
+            <h6>Community &amp; leaderboards</h6>
+            <p className="community-preferences-help">{mode === "code" ? "If this email creates a new account, use these choices. Existing accounts keep their saved choices." : "Optional. Choose a handle in Community before sharing starts. You can change these choices in Account Settings."}</p>
+            <CommunityPreferenceFields value={communityPreferences} onChange={setCommunityPreferences} disabled={busy} />
+          </section>
         )}
         <div className="account-form-actions">
           <GButton className="account-submit" variant="primary" type="submit" disabled={busy}>

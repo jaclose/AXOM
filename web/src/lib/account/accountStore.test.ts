@@ -106,7 +106,7 @@ beforeEach(() => {
   Object.values(auth).forEach((fn) => fn.mockClear());
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
   useStore.setState(makeSeed());
-  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined, syncFailure: undefined, nextAttemptAt: undefined, snapshotBytes: undefined });
+  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined, syncFailure: undefined, nextAttemptAt: undefined, snapshotBytes: undefined, pendingCodeEmail: undefined, pendingCodeKind: undefined });
 });
 
 describe("account validation", () => {
@@ -190,10 +190,45 @@ describe("account lifecycle", () => {
 
   it("confirms a new account with the emailed code instead of the link", async () => {
     expect(await useAccount.getState().signUp("learner@example.com", "password123", "Learner")).toBe(true);
+    expect(auth.signUp).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({
+      data: { display_name: "Learner", axom_community_preferences: { discoverable: false, shareMode: "off" } },
+    }) }));
     expect(useAccount.getState()).toMatchObject({ pendingCodeEmail: "learner@example.com", pendingCodeKind: "signup" });
     expect(await useAccount.getState().verifyCode("learner@example.com", "12345678")).toBe(true);
     expect(auth.verifyOtp).toHaveBeenCalledWith({ email: "learner@example.com", token: "12345678", type: "email" });
     expect(useAccount.getState()).toMatchObject({ phase: "signed-in", pendingCodeEmail: undefined, pendingCodeKind: undefined });
+  });
+
+  it("sends explicit signup consent before confirmation without reapplying it on verification", async () => {
+    const choices = { discoverable: true, shareMode: "friends" as const };
+    expect(await useAccount.getState().signUp("learner@example.com", "password123", "Learner", choices)).toBe(true);
+    expect(auth.signUp).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({
+      data: { display_name: "Learner", axom_community_preferences: choices },
+    }) }));
+    expect(useAccount.getState().phase).toBe("signed-out");
+    expect(await useAccount.getState().verifyCode("learner@example.com", "12345678")).toBe(true);
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("seeds choices for OTP-created accounts but never writes consent after code sign-in", async () => {
+    const choices = { discoverable: false, shareMode: "community" as const };
+    expect(await useAccount.getState().sendCode("learner@example.com", choices)).toBe(true);
+    expect(auth.signInWithOtp).toHaveBeenCalledWith({ email: "learner@example.com", options: {
+      shouldCreateUser: true, emailRedirectTo: "http://localhost/", data: { axom_community_preferences: choices },
+    } });
+    expect(await useAccount.getState().verifyCode("learner@example.com", "12345678")).toBe(true);
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not carry earlier signup choices into an existing account's password sign-in", async () => {
+    await useAccount.getState().signUp("new@example.com", "password123", "Learner", { discoverable: true, shareMode: "community" });
+    expect(await useAccount.getState().signIn("learner@example.com", "password123")).toBe(true);
+    expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: "learner@example.com", password: "password123" });
+    expect(useAccount.getState()).toMatchObject({ pendingCodeEmail: undefined, pendingCodeKind: undefined });
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("signs a new account straight in when the project does not ask for email confirmation", async () => {

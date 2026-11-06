@@ -128,3 +128,31 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo check --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+
+  community-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Community, account privacy, and dashboard browser acceptance
+        run: npm --prefix web run test:e2e -- e2e/platform.local.spec.ts e2e/community-experience.spec.ts e2e/dashboard-widget-layout.spec.ts e2e/dashboard-inboxes.spec.ts --workers=1
+      - name: Community browser evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: community-browser-${{ github.run_id }}
+          path: |
+            web/test-results/
+            /tmp/axom-community-*.png
+            /tmp/axom-pr30-*.png
+          if-no-files-found: warn
+          retention-days: 7

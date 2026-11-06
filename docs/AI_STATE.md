@@ -5,6 +5,26 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## Community release candidate · 2026-11-06
+
+`codex/community-complete-20261105` extends PR #115 with private signup/Settings
+choices, editable profiles, friendships, posts/replies, shared activity/streaks,
+Community standings and a Dashboard widget. See [Communities](features/communities.md).
+Its `20261106020000_community_experience.sql` migration makes consent server
+authoritative, withdraws automatic posts on Off, rejects stale revisions and
+preserves deleted days. Deploy it and the regenerated Communications export
+function together with this client. Custom navigation/dashboard choices survive.
+
+Release acceptance is pending. The current public production bundle points to
+Supabase `jofkmfwkidubxcutkwzf`. This session's Supabase connection exposes only
+`yfjqsshsaxiggcbvkvnj` and denies production administration. The Vercel connection
+also does not list the existing AXOM project. Do not mistake the accessible
+project for production, or release the client before its matching migration and
+Communications function. No live schema change has been made by this candidate.
+Focused tests pass; combined gates and the new `community-browser` CI job are
+being completed. Local Chromium is blocked by the runtime's socket policy;
+synthetic browser evidence must come from a supported runner.
+
 ## Host and Communities repair · 2026-11-04
 
 Branch `claude/host-communities-20261104` from `a96f1491`. Host now shows only
@@ -21,21 +41,12 @@ Reports panel for moderators and administrators (no migration).
 
 ## Checkout and release boundary · 2026-11-02 14:55 UTC
 
-Remote `main` is `b1d3bea5` after PR #91, which makes missing static assets return
-404 instead of the SPA HTML fallback and removes the blanket immutable asset
-header. Cache-busted version checks for both `axom.info` and `www.axom.info`
-return the same `b1d3bea5` production build. Apex points directly to Production
-without redirecting to `www`, preserving the browser origin that owns local
-workspace storage.
-
-The isolated hotfix checkout `codex/axom-startup-fresh-update-20261102` is
-based on that main commit. It moves web-worker registration ahead of shell
-imports, retries missing assets with a cache-busted request, and offers an
-explicit verified-save refresh if browser quota blocks only the extra recovery
-copy. The focused update, checkpoint and route-boundary tests pass 30/30;
-typecheck and lint pass. The first full web test run exposed one mock-export
-mismatch; after fixing it, focused coverage passed. Full build and hosted CI
-remain pending before merge. No user browser storage was cleared or rewritten.
+PR #91 (`b1d3bea5`) made missing static assets return 404 and removed blanket
+immutable caching. The startup repair registers the worker before shell imports,
+retries missing assets and permits a verified-save refresh when only the extra
+recovery copy exceeds quota. Its focused checks passed; dated receipts remain
+in Git history. Preserve apex and www as separate browser storage origins; do
+not redirect or clear either learner workspace to fix an update.
 
 ## What this release contains
 

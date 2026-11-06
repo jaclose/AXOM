@@ -1,9 +1,7 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, Award, CalendarDays, CloudOff, Crown, Flame, Medal, TrendingUp, Trophy, Zap } from "lucide-react";
-import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
+import { ArrowRight, Award, CalendarDays, Crown, Flame, Medal, TrendingUp, Trophy, Zap } from "lucide-react";
+import { GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { useStore } from "../lib/store";
-import { useAccount } from "../lib/account/accountStore";
-import { useUi } from "../lib/uiStore";
 import {
   bestDay,
   longestActiveStreak,
@@ -15,8 +13,6 @@ import {
 } from "../lib/leaderboards";
 import { isoDate } from "../lib/scoring";
 import { ICON_SIZE } from "../lib/iconSize";
-import { SharedDailyLeaderboard } from "../components/tracker/SharedDailyLeaderboard";
-import { CommunityLeaderboard } from "../components/community/CommunityLeaderboard";
 import "../styles/wip-experience.css";
 
 const BOARDS: Array<{ id: PersonalBoardMetric; label: string }> = [
@@ -86,8 +82,6 @@ function BeatYourBest({ pace }: { pace: WeekPace }) {
 
 export function LeaderboardsPage() {
   const logs = useStore((s) => s.logs);
-  const accountPhase = useAccount((s) => s.phase);
-  const accountId = useAccount((s) => s.user?.id);
   const [metric, setMetric] = useState<PersonalBoardMetric>("activeDays");
   const today = isoDate(new Date());
   const now = useMemo(() => new Date(`${today}T12:00:00`), [today]);
@@ -149,6 +143,7 @@ export function LeaderboardsPage() {
 
       <GlassCard pad>
         <PanelHeader
+          headingLevel={2}
           title="Your completed weeks"
           sub="Your last eight completed Monday–Sunday weeks. Equal totals share a rank; the week in progress is shown with its projection, never ranked early."
           action={pace.projectedRank && pace.status !== "no-history" ? <Tag tone={pace.projectedRank <= 3 ? "green" : "neutral"}>This week on pace for #{pace.projectedRank}</Tag> : undefined}
@@ -174,32 +169,7 @@ export function LeaderboardsPage() {
         )}
         <p className="sub">Based only on academic activity recorded in AXOM. Logged cards are not a verified connection to the Anki Leaderboard add-on.</p>
       </GlassCard>
-      <section className="lb-shared-section" aria-labelledby="lb-shared-title">
-        <div className="lb-shared-head">
-          <div>
-            <span className="lb-kicker">Optional · Shared</span>
-            <h2 id="lb-shared-title">Shared study</h2>
-            <p>Compare the study you and your friends share, and answer the Daily Challenge together. Your record above stays on this device unless you share daily totals from Community.</p>
-          </div>
-          <Tag tone="orange">Work in progress</Tag>
-        </div>
-        {accountPhase === "unconfigured" ? (
-          <GlassCard pad className="lb-shared-unavailable">
-            <CloudOff size={ICON_SIZE.emphasis} aria-hidden="true" />
-            <div>
-              <h3>Account challenges are unavailable here</h3>
-              <p>This build has no account service. Keep logging locally while shared challenges are being prepared.</p>
-              <a className="gbtn sm" href="#productivity">Keep logging locally <ArrowRight size={ICON_SIZE.body} aria-hidden="true" /></a>
-            </div>
-          </GlassCard>
-        ) : (
-          <>
-            {accountId && <CommunityLeaderboard accountId={accountId} headingLevel={3} />}
-            <SharedDailyLeaderboard />
-            {!accountId && <GButton size="sm" onClick={() => useUi.getState().requestSettings("account")}>Open account settings <ArrowRight size={ICON_SIZE.body} aria-hidden="true" /></GButton>}
-          </>
-        )}
-      </section>
+
     </div>
   );
 }

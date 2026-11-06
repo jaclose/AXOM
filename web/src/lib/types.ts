@@ -605,6 +605,7 @@ export type DashboardWidgetId =
   | "examCountdown"
   | "pomodoro"
   | "soundscapes"
+  | "community"
   | "weekly"
   | "suggested"
   /** Legacy storage-only ID; intentionally absent from current catalogs. */

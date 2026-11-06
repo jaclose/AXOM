@@ -4,17 +4,24 @@ Status (2026-11-02): The Host, Community and searchable Question Set Library UI 
 
 ## Community
 
-The #community page extends optional Supabase accounts without moving or auto-publishing any saved learner workspace data.
+The Study circle inside `#communities` extends optional Supabase accounts without
+moving private workspace data. `#community` remains a compatible direct link.
+The [Communities contract](communities.md) owns the current profile, post and
+dashboard widget experience.
 
 1. Sign into each AXOM account.
-2. Each learner independently creates a profile and chooses a handle. Discovery is unchecked by default; existing accounts are not auto-listed.
+2. At account creation, each learner can choose discovery and automatic progress sharing, both off by default. Later changes live in Account Settings. The Community tab creates and edits their handle, display name and bio; existing accounts are not auto-listed.
 3. Find the other opted-in handle, send a friend request, and accept it on the other account.
-4. Select a study day to publish an optional aggregate, or choose a local Question Set whose title only can be celebrated. Posts default to Private. Accepted friends and Community are deliberate alternatives.
-5. Both people can give Kudos to eligible posts and compare shared progress on the leaderboard: Friends (you and accepted friends) or Community (days shared with everyone by discoverable learners), ranked by study time, questions or cards over 7 or 30 days, with today's figure, a streak and days shared. The same board appears on the Leaderboards page. Private posts never enter shared standings; one row per person per day means repeated posts cannot multiply totals. Separate Daily Challenge standings remain server-verified.
-6. Optional automatic sharing ("Share my daily progress": Off, Friends or Community; Off by default) keeps today's and yesterday's daily totals (minutes, logged cards, questions) current a few seconds after the learner logs study, on any signed-in device. The choice is stored on the account as Supabase Auth user metadata `axom_community_share`, so it needs no migration. The sync never lowers a figure another device already shared, never widens a day posted as "Only me", waits on days after today's UTC date, and sends nothing but those three totals. `CommunityProgressSync` runs app-wide from `App.tsx`; leaving Community turns sharing off.
+4. Write an update or study invitation, select a study day's aggregate, or announce a Question Set title. Posts default to Only me. Friends and Community are deliberate alternatives. Replies, author edits/deletes, Kudos and reported-post moderation respect the current audience.
+5. Compare self-shared progress in Study circle: Friends (you and accepted friends) or Community (public days from discoverable learners), ranked by study time, questions or cards over 7 or 30 days, with today's figure, a shared streak and days shared. Private posts never enter standings; one row per person per day prevents duplicate totals. Daily Challenge standings remain separately server-verified. Local Personal bests also lives inside Community.
+6. Optional automatic sharing uses account-owned `social_preferences` and revision-checked RPCs, introduced by `20261106020000_community_experience.sql`. A linked workspace and current consent are required. Off withdraws old automatic rows; stale requests cannot republish them. Corrected totals can decrease or become zero; conflicting devices require explicit resolution. Deleted days stay suppressed until deliberately republished. See [data and consent](../architecture/data-model.md#community-data-and-consent).
 7. People can hide themselves from discovery, remove friends, delete individual posts or leave Community without touching local QBank materials.
 
-The social tables have restrictive RLS. Non-discoverable people are visible only to themselves and accepted friends. Friends-only posts require an accepted connection for RLS to expose them. Unfriending immediately removes that access. Reports may surface a reported post's metadata to a moderator; the unreported feed is not a host-wide surveillance view.
+The social tables have restrictive RLS. Non-discoverable profiles are visible to
+themselves, accepted friends, and the recipient of an outgoing pending request.
+Pending requests grant no friends-only activity access. Unfriending immediately
+removes that access. Reports may surface a reported post's metadata to a moderator;
+the unreported feed is not a host-wide surveillance view.
 
 **Question Set announcement is not source sharing.** No private question text, answers, share tokens, source PDFs or media are copied to social_posts. Link a set only through the existing explicit share/review mechanism and rights controls. A user may post a title from a private set, so the UI warns them before publishing.
 
@@ -76,7 +83,7 @@ Do not paste private emails, JWTs or service keys into the public repository. Ro
 8. Check build, typecheck, lint, unit tests, QBank Playwright, Vercel preview and real-account reload. GitHub CI is not a substitute for live multi-account or migration tests.
 9. Approve integration into main and only then verify the production commit and runtime schema. No auto-publication of user material.
 
-Not in this slice: account-wide suspension, persistent user blocking, configurable capability policies beyond the existing three operator roles, billing/token/latency attribution, comment threads, full Question Set content in the feed, independent source-rights verification tools, trusted general QBank/course-event ingestion, realtime push notifications or automatic Anki imports. Unfriend removes friends-only access but is not a block. Persistent blocking needs an auth-bound record that survives leaving and rejoining Community. Self-shared standings must never be described as verified study rankings.
+Not in this slice: account-wide suspension, persistent user blocking, configurable capability policies beyond the existing three operator roles, billing/token/latency attribution, full Question Set content in the feed, independent source-rights verification tools, trusted general QBank/course-event ingestion, realtime push notifications or automatic Anki imports. Unfriend removes friends-only access but is not a block. Persistent blocking needs an auth-bound record that survives leaving and rejoining Community. Self-shared standings must never be described as verified study rankings.
 
 ## Historical PR #30 integration boundary
 

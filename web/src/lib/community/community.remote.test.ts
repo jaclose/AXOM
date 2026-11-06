@@ -7,6 +7,8 @@ vi.mock("../academicLibrary/accountScope", () => ({ academicAccountScope: () => 
 
 type Query = {
   table: string;
+  rpc?: string;
+  args?: Record<string, unknown>;
   filters: Record<string, unknown>;
   limit?: number;
   range?: [number, number];
@@ -39,7 +41,11 @@ function mockBackend(answer: (query: Query) => Response) {
     return builder;
   });
   vi.mocked(accountOperationClient).mockResolvedValue({
-    userId: "me", client: { from }, assertCurrent: async () => {},
+    userId: "me", client: { from, rpc: async (rpc: string, args: Record<string, unknown>) => {
+      const query = { table: "rpc", filters: {}, rpc, args };
+      queries.push(query);
+      return answer(query);
+    } }, assertCurrent: async () => {},
   } as unknown as Awaited<ReturnType<typeof accountOperationClient>>);
   return queries;
 }
@@ -111,7 +117,7 @@ describe("Community account and directory loading", () => {
 
   it("searches both server fields, excludes hidden profiles, and never upserts an existing profile", async () => {
     const queries = mockBackend(query => {
-      if (query.insert) return { data: null, error: { code: "23505", message: "duplicate" } };
+      if (query.rpc === "axom_create_community_profile") return { data: null, error: { code: "23505", message: "duplicate" } };
       if (query.filters["ilike:handle"]) return ok([profile("older", "older_learner"), profile("hidden", "hidden", false)]);
       if (query.filters["ilike:display_name"]) return ok([profile("older", "older_learner")]);
       throw new Error(`Unexpected ${query.table}`);
@@ -120,6 +126,6 @@ describe("Community account and directory loading", () => {
     expect(queries.filter(query => query.table === "social_profiles" && !query.insert).map(query => query.filters))
       .toEqual([{ discoverable: true, "ilike:handle": "%older%" }, { discoverable: true, "ilike:display_name": "%older%" }]);
     await expect(joinCommunity("me", "existing", "Existing learner")).rejects.toThrow(/profile already exists/);
-    expect(queries.find(query => query.insert)?.insert).toMatchObject({ user_id: "me", handle: "existing" });
+    expect(queries.find(query => query.rpc)?.args).toEqual({ p_handle: "existing", p_display_name: "Existing learner", p_bio: "" });
   });
 });

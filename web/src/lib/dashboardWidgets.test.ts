@@ -189,7 +189,7 @@ describe("dashboard defaults revision 2: check-in, timer, soundscapes", () => {
     expect(gridOrder(upgraded).slice(0, 3)).toEqual(["winDay", "pomodoro", "soundscapes"]);
     expect(gridOrder(upgraded)).toContain("tasks");
     expect(upgraded.widgets.tasks.size).toBe("large");
-    expect(upgraded.defaultsRevision).toBe(2);
+    expect(upgraded.defaultsRevision).toBe(3);
     expect(upgradeDashboardLayout(upgraded)).toBe(upgraded);
   });
 
@@ -201,7 +201,7 @@ describe("dashboard defaults revision 2: check-in, timer, soundscapes", () => {
       hiddenWidgetIds: [],
       widgets: {},
     })!;
-    expect(upgradeDashboardLayout(custom).order).toEqual(["questionBank", "pomodoro", "soundscapes", "journal", "winDay"]);
+    expect(upgradeDashboardLayout(custom).order).toEqual(["questionBank", "pomodoro", "soundscapes", "journal", "winDay", "community"]);
   });
 
   it("adds soundscapes hidden when the learner hid or never had the timer", () => {
@@ -213,7 +213,7 @@ describe("dashboard defaults revision 2: check-in, timer, soundscapes", () => {
       version: 1, preset: "custom", order: ["winDay"], hiddenWidgetIds: [], widgets: {},
     })!;
     const upgraded = upgradeDashboardLayout(noTimer);
-    expect(upgraded.order).toEqual(["winDay", "soundscapes"]);
+    expect(upgraded.order).toEqual(["winDay", "soundscapes", "community"]);
     expect(upgraded.hiddenWidgetIds).toContain("soundscapes");
   });
 
@@ -231,5 +231,17 @@ describe("dashboard defaults revision 2: check-in, timer, soundscapes", () => {
     expect(dashboardWidgetOptions("winDay", { size: "large", preferences: { writing: true } })).toEqual({ writing: true });
     expect(dashboardWidgetOptions("winDay", { size: "large", preferences: { writing: "yes" } })).toEqual({ writing: false });
     expect(dashboardWidgetOptions("tasks")).toEqual({});
+  });
+});
+
+describe("community widget layout upgrade", () => {
+  it("adds the widget to the library while preserving every existing dashboard choice", () => {
+    const prior = normalizeDashboardLayoutPreferences({ version: 1, preset: "custom", defaultsRevision: 2,
+      order: ["journal", "pomodoro"], hiddenWidgetIds: ["pomodoro"], widgets: { journal: { size: "large", enabledFields: ["latest"] } } })!;
+    const next = upgradeDashboardLayout(prior);
+    expect(next.order).toEqual(["journal", "pomodoro", "community"]);
+    expect(next.hiddenWidgetIds).toEqual(["pomodoro", "community"]);
+    expect(next.widgets.journal).toEqual(prior.widgets.journal);
+    expect(upgradeDashboardLayout(next)).toBe(next);
   });
 });

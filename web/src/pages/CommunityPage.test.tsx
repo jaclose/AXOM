@@ -3,12 +3,13 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  loadCommunity, loadProgressBoard, saveShareMode, searchCommunityProfiles,
+  loadCommunity, loadCommunityComments, loadProgressBoard, saveShareMode, searchCommunityProfiles,
   type CommunityPost, type CommunityProfile, type CommunitySnapshot,
 } from "../lib/community/community";
 import { loadOperatorReports, resolveReport, useOperatorAccessStatus, type OperatorRole } from "../lib/operator/hostClient";
 import { resetCommunityShare, setCommunityShareMode } from "../lib/community/shareStore";
 import { isoDate } from "../lib/scoring";
+import { useUi } from "../lib/uiStore";
 import { CommunityPage } from "./CommunityPage";
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -29,6 +30,7 @@ vi.mock("../lib/operator/hostClient", () => ({
 vi.mock("../lib/community/community", async importOriginal => ({
   ...await importOriginal<typeof import("../lib/community/community")>(),
   loadCommunity: vi.fn(),
+  loadCommunityComments: vi.fn(),
   loadProgressBoard: vi.fn(),
   saveShareMode: vi.fn(),
   searchCommunityProfiles: vi.fn(),
@@ -57,12 +59,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetCommunityShare();
   operator(null);
+  vi.mocked(loadCommunityComments).mockResolvedValue([]);
   vi.mocked(loadProgressBoard).mockResolvedValue({ me: profile("me", "zzz_owner", false), friendIds: [], profiles: [], posts: [] });
 });
 afterEach(cleanup);
 
 describe("Community directory and owner profile", () => {
-  it("keeps privacy controls for an owner beyond the first 100 handles and a friend-list overflow", async () => {
+  it("keeps the owner profile and account settings available beyond the first 100 handles and a friend-list overflow", async () => {
     const firstHundred = Array.from({ length: 100 }, (_, index) => profile(`user-${index}`, `a${String(index).padStart(3, "0")}`));
     vi.mocked(loadCommunity).mockResolvedValue(snapshot({
       profiles: [...firstHundred, profile("me", "zzz_owner", false)],
@@ -71,10 +74,10 @@ describe("Community directory and owner profile", () => {
     vi.mocked(loadProgressBoard).mockResolvedValue({ me: profile("me", "zzz_owner", false), friendIds: [], profiles: [], posts: [],
       connectionsError: "Friend connections could not be loaded. Refresh before comparing friends." });
     render(<CommunityPage />);
-    expect(await screen.findByRole("heading", { name: "Your privacy" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Edit profile" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Join Community" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Show me" })).toBeTruthy();
-    expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes("Your profile and privacy controls remain available."))).toBe(true);
+    expect(screen.getByRole("button", { name: "Account sharing settings" })).toBeTruthy();
+    expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes("Your profile and account settings remain available."))).toBe(true);
     expect(await screen.findByText("Friend connections could not be loaded. Refresh before comparing friends.")).toBeTruthy();
   });
 
@@ -105,7 +108,8 @@ describe("Community directory and owner profile", () => {
     await user.type(input, "hidden_friend");
     await waitFor(() => expect(searchCommunityProfiles).toHaveBeenCalledWith("me", "hidden_friend"));
     expect(screen.getByText("@hidden_friend")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Friends · remove" })).toBeTruthy();
+    const people = screen.getByRole("heading", { name: "Your people" }).closest(".community-directory") as HTMLElement;
+    expect(within(people).getByRole("button", { name: "Friends" })).toBeTruthy();
   });
 
   it("ignores an old response and offers retry when the current search fails", async () => {
@@ -129,6 +133,47 @@ describe("Community directory and owner profile", () => {
 });
 
 describe("Shared progress and moderation", () => {
+  it("preserves an unsent draft across a failed feed refresh and retry", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadCommunity).mockResolvedValue(snapshot());
+    render(<CommunityPage />);
+    await user.type(await screen.findByRole("textbox", { name: "Your update" }), "Keep this unfinished thought.");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Who can see this?" }), "friends");
+    vi.mocked(loadCommunity).mockRejectedValueOnce(new Error("Connection interrupted"));
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("Your draft is kept here while you reconnect.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Activity feed" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Retry Community" }));
+    expect((await screen.findByRole("textbox", { name: "Your update" }) as HTMLTextAreaElement).value).toBe("Keep this unfinished thought.");
+    expect((screen.getByRole("combobox", { name: "Who can see this?" }) as HTMLSelectElement).value).toBe("friends");
+  });
+
+  it("lets a signed-in reader view Community standings before creating a profile", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadCommunity).mockResolvedValue(snapshot({ profiles: [] }));
+    vi.mocked(loadProgressBoard).mockResolvedValue({ me: null, friendIds: [], profiles: [profile("friend", "study_buddy")],
+      posts: [progress("public-day", "friend", "community", 40)] });
+    render(<CommunityPage />);
+    expect(await screen.findByRole("button", { name: "Create profile" })).toBeTruthy();
+    await user.click(within(screen.getByRole("group", { name: "Who to compare" })).getByRole("button", { name: "Community" }));
+    expect(await screen.findByRole("list", { name: /Community leaderboard by study time/ })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Automatic sharing" })).toBeNull();
+  });
+
+  it("restores an unfinished reply after a failed feed refresh without retaining the stale feed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadCommunity).mockResolvedValue(snapshot({ posts: [progress("post-one", "me", "friends", 30)] }));
+    render(<CommunityPage />);
+    await user.click(await screen.findByRole("button", { name: "Replies" }));
+    await user.type(await screen.findByRole("textbox", { name: "Write a reply" }), "My unfinished reply.");
+    vi.mocked(loadCommunity).mockRejectedValueOnce(new Error("Connection interrupted"));
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    const retry = await screen.findByRole("button", { name: "Retry Community" });
+    expect(screen.queryByRole("region", { name: "Activity feed" })).toBeNull();
+    await user.click(retry);
+    expect((await screen.findByRole("textbox", { name: "Write a reply" }) as HTMLTextAreaElement).value).toBe("My unfinished reply.");
+  });
+
   it("ranks shared study among friends, then across Community", async () => {
     const user = userEvent.setup();
     vi.mocked(loadCommunity).mockResolvedValue(snapshot());
@@ -150,17 +195,35 @@ describe("Shared progress and moderation", () => {
     expect(await screen.findByRole("list", { name: /Community leaderboard by questions/ })).toBeTruthy();
   });
 
-  it("saves the automatic sharing choice on the account", async () => {
+  it("keeps hidden friends and a hidden owner out of Community standings while retaining them on Friends", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadCommunity).mockResolvedValue(snapshot());
+    const me = profile("me", "hidden_owner", false), hidden = profile("hidden", "hidden_friend", false), visible = profile("visible", "visible_learner", true);
+    vi.mocked(loadProgressBoard).mockResolvedValue({ me, friendIds: ["hidden"], profiles: [me, hidden, visible],
+      posts: [progress("mine", "me", "community", 30), progress("hidden-day", "hidden", "community", 200), progress("visible-day", "visible", "community", 50)] });
+    render(<CommunityPage />);
+    const friends = await screen.findByRole("list", { name: /Friends leaderboard by study time/ });
+    expect(within(friends).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(friends).getByText("hidden_friend")).toBeTruthy();
+    await user.click(within(screen.getByRole("group", { name: "Who to compare" })).getByRole("button", { name: "Community" }));
+    const board = await screen.findByRole("list", { name: /Community leaderboard by study time/ });
+    expect(within(board).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(board).getByText("visible_learner")).toBeTruthy();
+    expect(within(board).queryByText("hidden_friend")).toBeNull();
+    expect(within(board).queryByText("You")).toBeNull();
+  });
+
+  it("opens account sharing settings without exposing privacy switches on Community", async () => {
     const user = userEvent.setup();
     vi.mocked(loadCommunity).mockResolvedValue(snapshot());
     vi.mocked(saveShareMode).mockResolvedValue();
     setCommunityShareMode("me", "off");
     render(<CommunityPage />);
-    const choices = await screen.findByRole("group", { name: "Automatic sharing" });
-    expect(within(choices).getByRole("button", { name: /^Off/ }).getAttribute("aria-pressed")).toBe("true");
-    await user.click(within(choices).getByRole("button", { name: /^Friends/ }));
-    await waitFor(() => expect(saveShareMode).toHaveBeenCalledWith("me", "friends"));
-    await waitFor(() => expect(within(choices).getByRole("button", { name: /^Friends/ }).getAttribute("aria-pressed")).toBe("true"));
+    await user.click(await screen.findByRole("button", { name: "Account sharing settings" }));
+    expect(useUi.getState().settingsRequest).toBe("account");
+    expect(screen.queryByRole("group", { name: "Automatic sharing" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show me" })).toBeNull();
+    expect(saveShareMode).not.toHaveBeenCalled();
   });
 
   it("shows reported posts to a moderator and requires a reason before deciding", async () => {
@@ -184,7 +247,7 @@ describe("Shared progress and moderation", () => {
   it("hides the reports panel from members", async () => {
     vi.mocked(loadCommunity).mockResolvedValue(snapshot());
     render(<CommunityPage />);
-    expect(await screen.findByRole("heading", { name: "Your privacy" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Edit profile" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Reported posts" })).toBeNull();
     expect(loadOperatorReports).not.toHaveBeenCalled();
   });

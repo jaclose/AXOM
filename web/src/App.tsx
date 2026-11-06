@@ -79,7 +79,6 @@ const LazyPromptLibraryPage = lazy(() => import("./pages/PromptLibraryPage").the
 const LazyHubFoldersPage = lazy(() => import("./pages/HubFoldersPage").then((module) => ({ default: module.HubFoldersPage })));
 const LazyHelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
 const LazyAboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
-const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then((module) => ({ default: module.LeaderboardsPage })));
 const LazyCommunityPage = lazy(() => import("./pages/CommunityPage").then((module) => ({ default: module.CommunityPage })));
 const LazyHostPage = lazy(() => import("./pages/HostPage").then((module) => ({ default: module.HostPage })));
 const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
@@ -135,7 +134,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   about: () => <LazyAboutPage />,
   help: () => <LazyHelpPage />,
   appchecker: () => <LazyApplicationCheckerPage />,
-  leaderboards: () => <LazyLeaderboardsPage />,
+  leaderboards: () => <LazyCommunitiesPage initialSpace="records" />,
   community: () => <LazyCommunityPage />,
   host: () => <LazyHostPage />,
   "daily-games": () => <LazyDailyGamesPage />,

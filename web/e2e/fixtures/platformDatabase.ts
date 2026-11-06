@@ -18,9 +18,10 @@ const rpcNames = new Set(["axom_operator_role", "axom_operator_overview", "axom_
   "academic_catalog",
   "academic_is_reviewer", "submit_question_set_library", "withdraw_question_set_library", "review_question_set_library",
   "my_question_set_library", "pending_question_set_library", "set_question_set_library_like",
-  "list_question_set_library", "get_question_set_library"]);
+  "list_question_set_library", "get_question_set_library", "axom_community_preferences", "axom_save_community_preferences",
+  "axom_leave_community", "axom_sync_community_day", "axom_publish_community_day", "axom_create_community_profile"]);
 const tables = new Set(["social_profiles", "social_connections", "social_posts", "social_reactions", "social_post_reports", "axom_operator_audit",
-  "journal_experience_feedback"]);
+  "journal_experience_feedback", "social_preferences", "social_comments", "social_progress_blocks"]);
 const identifier = (value: string) => {
   if (!/^[a-z_]+$/.test(value)) throw new Error("Unexpected fixture identifier");
   return `"${value}"`;

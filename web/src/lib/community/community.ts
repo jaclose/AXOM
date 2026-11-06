@@ -1,7 +1,16 @@
-import { accountOperationClient, loadSupabase } from "../account/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { academicAccountScope } from "../academicLibrary/accountScope";
-import { SHARE_MODE_KEY, shareModeFrom, type DayTotals, type ShareMode } from "./progressBoard";
+import { withCommunityClient as withClient, communityProfileFields as profileFields, communityPostFields as postFields,
+  communityErrorMessage as errorMessage, isRecord as row, isText as text, isCount as count,
+  boundedRows as bounded, validCommunityProfile as validProfile, validCommunityPost as validPost, validCommunityDay as dayKey } from "./client";
+import { readCommunityPreferences, saveCommunityPreferences } from "./preferences";
+import { readOwnProgressDay } from "./progressSync";
+export { readCommunityPreferences, saveCommunityPreferences, readShareMode, saveShareMode } from "./preferences";
+export type { CommunityPreferences } from "./preferences";
+export { syncSharedProgress, CommunityProfileMissingError, CommunityProgressConflictError } from "./progressSync";
+export type { DailyTotals, ShareSyncAction, ProgressSyncOptions } from "./progressSync";
+export { loadCommunityProfile, updateCommunityProfile, editCommunityPost, loadCommunityComments,
+  publishCommunityComment, editCommunityComment, deleteCommunityComment } from "./conversations";
+export type { CommunityComment, CommunityProfileSnapshot } from "./conversations";
 
 export interface CommunityProfile {
   user_id: string;
@@ -19,7 +28,7 @@ export interface CommunityConnection {
 export interface CommunityPost {
   id: string;
   user_id: string;
-  kind: "progress" | "question_set";
+  kind: "progress" | "question_set" | "update" | "study_invite";
   visibility: "private" | "friends" | "community";
   activity_day: string | null;
   minutes: number;
@@ -28,6 +37,8 @@ export interface CommunityPost {
   set_title: string | null;
   caption: string;
   created_at: string;
+  share_source?: "manual" | "automatic" | "withdrawn";
+  revision?: number;
 }
 export interface CommunityReaction { post_id: string; user_id: string }
 export interface CommunitySnapshot {
@@ -40,40 +51,15 @@ export interface CommunitySnapshot {
 }
 
 const HANDLE = /^[a-z0-9][a-z0-9_]{2,29}$/;
-const errorMessage = "The community could not be reached. Your local work has not changed.";
-const profileFields = "user_id,handle,display_name,bio,discoverable";
 const connectionFields = "id,requester_id,addressee_id,status";
 const connectionPageSize = 150;
 const maxConnections = 1000;
 
-async function withClient<T>(accountId: string, run: (client: SupabaseClient) => Promise<T>): Promise<T> {
-  const guard = academicAccountScope(accountId);
-  try {
-    guard.assertCurrent();
-    const scope = await accountOperationClient();
-    guard.assertCurrent();
-    if (scope.userId !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
-    await scope.assertCurrent();
-    const result = await run(scope.client);
-    guard.assertCurrent();
-    await scope.assertCurrent();
-    guard.assertCurrent();
-    return result;
-  } finally { guard.dispose(); }
-}
-
-const row = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-const text = (value: unknown) => typeof value === "string";
-const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-const bounded = (value: unknown, max: number, check: (item: unknown) => boolean) => Array.isArray(value) && value.length <= max && value.every(check);
 export function validCommunitySnapshot(value: unknown): value is CommunitySnapshot {
   return row(value)
     && bounded(value.profiles, maxConnections + 101, item => row(item) && [item.user_id, item.handle, item.display_name, item.bio].every(text) && typeof item.discoverable === "boolean")
     && bounded(value.connections, maxConnections, item => row(item) && [item.id, item.requester_id, item.addressee_id].every(text) && ["pending", "accepted"].includes(String(item.status)))
-    && bounded(value.posts, 100, item => row(item) && [item.id, item.user_id, item.caption, item.created_at].every(text)
-      && ["progress", "question_set"].includes(String(item.kind)) && ["private", "friends", "community"].includes(String(item.visibility))
-      && (item.activity_day === null || text(item.activity_day)) && (item.set_title === null || text(item.set_title))
-      && count(item.minutes) && count(item.cards) && count(item.questions))
+    && bounded(value.posts, 100, validPost)
     && bounded(value.reactions, 2000, item => row(item) && text(item.post_id) && text(item.user_id))
     && (value.directoryError === undefined || text(value.directoryError))
     && (value.connectionsError === undefined || text(value.connectionsError));
@@ -131,7 +117,7 @@ export async function loadCommunity(accountId: string): Promise<CommunitySnapsho
   const [ownProfile, directory, posts] = await Promise.all([
     client.from("social_profiles").select(profileFields).eq("user_id", accountId).limit(1),
     client.from("social_profiles").select(profileFields).order("handle").limit(100),
-    client.from("social_posts").select("id,user_id,kind,visibility,activity_day,minutes,cards,questions,set_title,caption,created_at").order("created_at", { ascending: false }).limit(100),
+    client.from("social_posts").select(postFields).order("created_at", { ascending: false }).limit(100),
   ]);
   if (ownProfile.error || !Array.isArray(ownProfile.data) || posts.error) throw new Error(errorMessage);
   let connections: CommunityConnection[] = [];
@@ -171,29 +157,32 @@ export async function loadCommunity(accountId: string): Promise<CommunitySnapsho
   });
 }
 
-export async function joinCommunity(accountId: string, handle: string, displayName: string, bio = "", discoverable = false): Promise<void> {
+export async function joinCommunity(accountId: string, handle: string, displayName: string, bio = "", discoverable?: boolean): Promise<void> {
   const normalized = handle.trim().toLowerCase();
   if (!HANDLE.test(normalized)) throw new Error("Choose a handle of 3 to 30 lowercase letters, digits or underscores.");
   if (!displayName.trim() || displayName.trim().length > 80 || bio.length > 240) throw new Error("Check your name and bio.");
+  // The legacy optional choice remains an explicit save, never a default. The
+  // atomic create operation reads the latest server preference under its lock.
+  if (discoverable !== undefined) {
+    const preferences = await readCommunityPreferences(accountId);
+    await saveCommunityPreferences(accountId, { discoverable, shareMode: preferences.shareMode });
+  }
   return withClient(accountId, async client => {
-  const { error } = await client.from("social_profiles").insert({
-    user_id: accountId, handle: normalized, display_name: displayName.trim(), bio: bio.trim(),
-    discoverable, updated_at: new Date().toISOString(),
+  const { error } = await client.rpc("axom_create_community_profile", {
+    p_handle: normalized, p_display_name: displayName.trim(), p_bio: bio.trim(),
   });
   if (error) throw new Error(error.code === "23505" ? "That handle is taken or your profile already exists. Refresh Community before trying again." : errorMessage);
   });
 }
 
 export async function setDiscoverable(accountId: string, discoverable: boolean): Promise<void> {
-  return withClient(accountId, async client => {
-    const { data, error } = await client.from("social_profiles").update({ discoverable, updated_at: new Date().toISOString() }).eq("user_id", accountId).select("user_id");
-    if (error || data?.length !== 1) throw new Error("Your privacy choice could not be confirmed. Refresh before retrying.");
-  });
+  const preferences = await readCommunityPreferences(accountId);
+  await saveCommunityPreferences(accountId, { discoverable, shareMode: preferences.shareMode });
 }
 export async function leaveCommunity(accountId: string): Promise<void> {
   return withClient(accountId, async client => {
-  const { error } = await client.from("social_profiles").delete().eq("user_id", accountId);
-  if (error) throw new Error(errorMessage);
+    const { error } = await client.rpc("axom_leave_community");
+    if (error) throw new Error("Your Community profile could not be removed. Retry before assuming sharing has stopped.");
   });
 }
 export async function requestFriend(accountId: string, otherId: string): Promise<void> {
@@ -219,26 +208,33 @@ export async function removeFriend(accountId: string, connectionId: string): Pro
 export async function publishCommunityPost(accountId: string, post: {
   kind: CommunityPost["kind"]; visibility: CommunityPost["visibility"];
   activityDay?: string; minutes?: number; cards?: number; questions?: number;
-  setTitle?: string; caption: string;
+  setTitle?: string; caption: string; expectedRevision?: number;
 }): Promise<void> {
   if (post.caption.length > 500 || (post.setTitle?.length ?? 0) > 160) throw new Error("This update is too long.");
   if (!["private", "friends", "community"].includes(post.visibility)) throw new Error("Choose who can see this update.");
-  if (post.kind === "progress" && (!post.activityDay || !/^\d{4}-\d{2}-\d{2}$/.test(post.activityDay)
-    || !Number.isFinite(Date.parse(`${post.activityDay}T12:00:00Z`)))) throw new Error("Choose a valid study day.");
+  if (!["progress", "question_set", "update", "study_invite"].includes(post.kind)) throw new Error("Choose a valid update type.");
+  if (post.kind === "progress" && !dayKey(post.activityDay)) throw new Error("Choose a valid study day.");
+  if ((post.kind === "update" || post.kind === "study_invite") && !post.caption.trim()) throw new Error("Write something before posting.");
   if (post.kind === "question_set" && !post.setTitle?.trim()) throw new Error("Choose a Question Set title.");
   if (![post.minutes ?? 0, post.cards ?? 0, post.questions ?? 0].every(count)
     || (post.minutes ?? 0) > 1440 || (post.cards ?? 0) > 20000 || (post.questions ?? 0) > 20000) throw new Error("The recorded study totals are outside the supported limits.");
   return withClient(accountId, async client => {
+  if (post.kind === "progress") {
+    const current = await readOwnProgressDay(client, accountId, post.activityDay!);
+    const { error } = await client.rpc("axom_publish_community_day", {
+      p_day: post.activityDay, p_minutes: post.minutes ?? 0, p_cards: post.cards ?? 0, p_questions: post.questions ?? 0,
+      p_caption: post.caption.trim(), p_visibility: post.visibility, p_expected_revision: post.expectedRevision ?? current?.revision ?? 0,
+    });
+    if (error) throw new Error(error.code === "PT409" ? "This day changed on another device. Refresh before posting again." : errorMessage);
+    return;
+  }
   const { error } = await client.from("social_posts").insert({
     user_id: accountId, kind: post.kind, visibility: post.visibility,
-    activity_day: post.kind === "progress" ? post.activityDay : null,
-    minutes: post.kind === "progress" ? post.minutes ?? 0 : 0,
-    cards: post.kind === "progress" ? post.cards ?? 0 : 0,
-    questions: post.kind === "progress" ? post.questions ?? 0 : 0,
+    activity_day: null, minutes: 0, cards: 0, questions: 0,
     set_title: post.kind === "question_set" ? post.setTitle?.trim() : null,
     caption: post.caption.trim(),
   });
-  if (error) throw new Error(error.code === "23505" ? "You already saved progress for this day. Remove the earlier post before publishing another." : errorMessage);
+  if (error) throw new Error(errorMessage);
   });
 }
 export async function deleteCommunityPost(accountId: string, postId: string): Promise<void> {
@@ -276,7 +272,8 @@ export function sharedWeeklyStandings(posts: readonly CommunityPost[], today: st
   const byUser = new Map<string, { userId: string; minutes: number; cards: number; questions: number; days: number }>();
   const seen = new Set<string>();
   for (const post of posts) {
-    if (post.visibility === "private" || post.kind !== "progress" || !post.activity_day || post.activity_day < after || post.activity_day > today) continue;
+    if (post.visibility === "private" || post.kind !== "progress" || !post.activity_day || post.activity_day < after || post.activity_day > today
+      || (post.minutes === 0 && post.cards === 0 && post.questions === 0)) continue;
     const dayIdentity = `${post.user_id}:${post.activity_day}`;
     if (seen.has(dayIdentity)) continue;
     seen.add(dayIdentity);
@@ -290,16 +287,9 @@ export function sharedWeeklyStandings(posts: readonly CommunityPost[], today: st
   return [...byUser.values()].sort((a,b) => b.minutes-a.minutes || b.questions-a.questions || b.cards-a.cards || a.userId.localeCompare(b.userId));
 }
 
-const postFields = "id,user_id,kind,visibility,activity_day,minutes,cards,questions,set_title,caption,created_at";
-const maxBoardPosts = 2000;
+const maxBoardPosts = 10000;
+const boardPageSize = 500;
 const boardError = "Leaderboards could not be loaded. Your study records are unchanged.";
-const syncError = "Your daily totals could not be shared right now. Your study records are unchanged.";
-const validProfile = (item: unknown) => row(item) && [item.user_id, item.handle, item.display_name, item.bio].every(text) && typeof item.discoverable === "boolean";
-const validPost = (item: unknown) => row(item) && [item.id, item.user_id, item.caption, item.created_at].every(text)
-  && ["progress", "question_set"].includes(String(item.kind)) && ["private", "friends", "community"].includes(String(item.visibility))
-  && (item.activity_day === null || text(item.activity_day)) && (item.set_title === null || text(item.set_title))
-  && count(item.minutes) && count(item.cards) && count(item.questions);
-const dayKey = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T12:00:00Z`));
 
 export interface ProgressBoardData {
   me: CommunityProfile | null;
@@ -317,10 +307,9 @@ export async function loadProgressBoard(accountId: string, fromDay: string): Pro
   return withClient(accountId, async client => {
     const [own, shared] = await Promise.all([
       client.from("social_profiles").select(profileFields).eq("user_id", accountId).limit(1),
-      client.from("social_posts").select(postFields).eq("kind", "progress").neq("visibility", "private").gte("activity_day", fromDay)
-        .order("activity_day", { ascending: false }).order("id", { ascending: true }).limit(maxBoardPosts),
+      loadAllBoardPosts(client, fromDay),
     ]);
-    if (own.error || shared.error || !bounded(own.data, 1, validProfile) || !bounded(shared.data, maxBoardPosts, validPost)) throw new Error(boardError);
+    if (own.error || !bounded(own.data, 1, validProfile)) throw new Error(boardError);
     let friendIds: string[] = [];
     let connectionsError: string | undefined;
     try {
@@ -329,7 +318,7 @@ export async function loadProgressBoard(accountId: string, fromDay: string): Pro
     } catch (cause) {
       connectionsError = cause instanceof Error ? cause.message : "Friend connections could not be loaded. Refresh before comparing friends.";
     }
-    const posts = shared.data as CommunityPost[];
+    const posts = shared;
     const profiles = [...own.data as CommunityProfile[]];
     const authors = [...new Set(posts.map(post => post.user_id))].filter(id => id !== accountId);
     for (let offset = 0; offset < authors.length; offset += 100) {
@@ -341,83 +330,23 @@ export async function loadProgressBoard(accountId: string, fromDay: string): Pro
   });
 }
 
-/** The sharing choice lives on the account, so every signed-in device agrees. */
-export async function readShareMode(accountId: string): Promise<ShareMode> {
-  const shared = await loadSupabase();
-  if (!shared) return "off";
-  const { data, error } = await shared.auth.getUser();
-  if (error || !data.user) throw new Error("Your sharing choice could not be checked. Retry when connected.");
-  if (data.user.id !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
-  return shareModeFrom(data.user.user_metadata);
-}
 
-export async function saveShareMode(accountId: string, mode: ShareMode): Promise<void> {
-  if (mode !== "off" && mode !== "friends" && mode !== "community") throw new Error("Choose who sees your daily totals.");
-  const shared = await loadSupabase();
-  if (!shared) throw new Error("Accounts aren’t configured in this build.");
-  const { data: { session } } = await shared.auth.getSession();
-  if (session?.user.id !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
-  const { data, error } = await shared.auth.updateUser({ data: { [SHARE_MODE_KEY]: mode } });
-  if (error || data.user?.id !== accountId || shareModeFrom(data.user.user_metadata) !== mode) {
-    throw new Error("Your sharing choice could not be saved. Nothing new was shared.");
-  }
-}
-
-export interface DailyTotals extends DayTotals { day: string }
-export type ShareSyncAction = "inserted" | "updated" | "unchanged" | "kept-private" | "skipped";
-/** Thrown when automatic sharing runs for an account that has no Community profile. */
-export class CommunityProfileMissingError extends Error { override name = "CommunityProfileMissingError"; }
-type OwnDay = { id: string; visibility: CommunityPost["visibility"]; minutes: number; cards: number; questions: number };
-
-async function readOwnDay(client: SupabaseClient, accountId: string, day: string): Promise<OwnDay | null> {
-  const { data, error } = await client.from("social_posts").select("id,visibility,minutes,cards,questions")
-    .eq("user_id", accountId).eq("kind", "progress").eq("activity_day", day).limit(1);
-  if (error || !Array.isArray(data) || data.length > 1) throw new Error(syncError);
-  const item: unknown = data[0];
-  if (item === undefined) return null;
-  if (!row(item) || !text(item.id) || !["private", "friends", "community"].includes(String(item.visibility))
-    || ![item.minutes, item.cards, item.questions].every(count)) throw new Error(syncError);
-  return item as OwnDay;
-}
-
-/** Keeps the learner's automatic daily posts current. A figure never drops below a
- * larger one another device already shared, and a day posted as "Only me" is never
- * widened. Days after today's UTC date wait, because the server would refuse them. */
-export async function syncSharedProgress(accountId: string, mode: Exclude<ShareMode, "off">, entries: readonly DailyTotals[]): Promise<Array<{ day: string; action: ShareSyncAction }>> {
-  if (mode !== "friends" && mode !== "community") throw new Error("Automatic sharing is off.");
-  if (entries.length > 7 || !entries.every(entry => dayKey(entry.day) && entry.day >= "2020-01-01" && [entry.minutes, entry.cards, entry.questions].every(count)
-    && entry.minutes <= 1440 && entry.cards <= 20000 && entry.questions <= 20000)) throw new Error("The recorded study totals are outside the supported limits.");
-  const utcToday = new Date().toISOString().slice(0, 10);
-  return withClient(accountId, async client => {
-    const outcomes: Array<{ day: string; action: ShareSyncAction }> = [];
-    for (const entry of entries) {
-      if (entry.day > utcToday) { outcomes.push({ day: entry.day, action: "skipped" }); continue; }
-      let current = await readOwnDay(client, accountId, entry.day);
-      if (!current) {
-        if (!entry.minutes && !entry.cards && !entry.questions) { outcomes.push({ day: entry.day, action: "skipped" }); continue; }
-        const { error } = await client.from("social_posts").insert({
-          user_id: accountId, kind: "progress", visibility: mode, activity_day: entry.day,
-          minutes: entry.minutes, cards: entry.cards, questions: entry.questions, set_title: null, caption: "",
-        });
-        if (!error) { outcomes.push({ day: entry.day, action: "inserted" }); continue; }
-        if (error.code === "23503") throw new CommunityProfileMissingError("Join Community before sharing your daily totals.");
-        if (error.code !== "23505") throw new Error(syncError);
-        current = await readOwnDay(client, accountId, entry.day);
-        if (!current) throw new Error(syncError);
-      }
-      if (current.visibility === "private") { outcomes.push({ day: entry.day, action: "kept-private" }); continue; }
-      const next = {
-        minutes: Math.max(current.minutes, entry.minutes), cards: Math.max(current.cards, entry.cards),
-        questions: Math.max(current.questions, entry.questions), visibility: mode,
-      };
-      if (next.minutes === current.minutes && next.cards === current.cards && next.questions === current.questions && current.visibility === mode) {
-        outcomes.push({ day: entry.day, action: "unchanged" });
-        continue;
-      }
-      const updated = await client.from("social_posts").update(next).eq("id", current.id).eq("user_id", accountId).select("id");
-      if (updated.error || !Array.isArray(updated.data) || updated.data.length !== 1) throw new Error(syncError);
-      outcomes.push({ day: entry.day, action: "updated" });
+/** Read every page before ranking. A service bound is explicit; a partial board
+ * must never look like a complete ranking of the community. */
+async function loadAllBoardPosts(client: SupabaseClient, fromDay: string): Promise<CommunityPost[]> {
+  const posts: CommunityPost[] = [];
+  const seen = new Set<string>();
+  for (let offset = 0; offset <= maxBoardPosts; offset += boardPageSize) {
+    const { data, error } = await client.from("social_posts").select(postFields).eq("kind", "progress").neq("visibility", "private").gte("activity_day", fromDay)
+      .order("activity_day", { ascending: false }).order("id", { ascending: true }).range(offset, offset + boardPageSize - 1);
+    if (error || !bounded(data, boardPageSize, validPost)) throw new Error(boardError);
+    for (const post of data as CommunityPost[]) {
+      if (seen.has(post.id)) throw new Error("Shared activity changed while loading. Refresh the leaderboard.");
+      seen.add(post.id);
+      posts.push(post);
     }
-    return outcomes;
-  });
+    if (posts.length > maxBoardPosts) throw new Error("There is too much shared activity to rank safely here. Try again after the community service is updated.");
+    if (data.length < boardPageSize) return posts;
+  }
+  throw new Error(boardError);
 }

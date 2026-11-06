@@ -42,7 +42,7 @@ export const NAV = [
   { id: "tracker", label: "Course Tracker", subtitle: "Lecture, DLA, and PQ completion map", icon: BadgeCheck },
   { id: "questions", label: "Question Bank", subtitle: "Import Center, source library, question sets, blocks, and results", icon: HelpCircle },
   { id: "simulations", label: "Simulations", subtitle: "Explore body mechanisms; first study: asthma and albuterol", icon: Activity },
-  { id: "communities", label: "Communities", subtitle: "Shared courses and daily challenges with review status", icon: UsersRound },
+  { id: "communities", label: "Community", subtitle: "Friends, study updates, shared leaderboards and courses", icon: UsersRound },
   { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and import an unlisted Question Set link", icon: HelpCircle },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
   { id: "soundscapes", label: "Soundscapes", subtitle: "Study sounds, your own recordings, live visuals, and a listening log", icon: AudioWaveform },
@@ -72,7 +72,7 @@ export const NAV = [
   { id: "patch-notes", label: "Patch Notes", subtitle: "A searchable record of AXOM releases", icon: BookText },
   { id: "integrations", label: "Integrations", subtitle: "Connect Anki, calendar, drives, and more", icon: Share2 },
   { id: "community", label: "Community", subtitle: "Friends, shared study updates and weekly standings", icon: Users },
-  { id: "leaderboards", label: "Leaderboards", subtitle: "Daily challenges and personal study history", icon: Trophy },
+  { id: "leaderboards", label: "Personal bests", subtitle: "Your personal study history inside Community", icon: Trophy },
   { id: "activity", label: "Activity History", subtitle: "Full local study ledger with filters and export", icon: Calendar },
   // After Tools
   { id: "about", label: "About", subtitle: "What AXOM is, where it is headed, and the live project preview", icon: Info },

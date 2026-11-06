@@ -2,7 +2,7 @@ import type { CommunityPost } from "./community";
 import type { StudyLog } from "../types";
 
 /** Whether AXOM keeps a learner's daily totals shared without a manual post.
- * Stored on the account (user metadata) so every signed-in device agrees. */
+ * Stored in account-scoped server preferences with a revocable consent revision. */
 export type ShareMode = "off" | "friends" | "community";
 export const SHARE_MODE_KEY = "axom_community_share";
 export type BoardScope = "friends" | "community";
@@ -58,6 +58,8 @@ export function progressBoard(posts: readonly CommunityPost[], options: {
   const sharedDays = new Map<string, Map<string, DayTotals>>();
   for (const post of posts) {
     if (post.kind !== "progress" || !post.activity_day || post.visibility === "private") continue;
+    // A corrected-to-zero day is not evidence of study or an earned streak.
+    if (!post.minutes && !post.cards && !post.questions) continue;
     if (post.activity_day > options.today) continue;
     if (options.scope === "community" && post.visibility !== "community") continue;
     if (options.scope === "friends" && post.user_id !== options.me && !options.friendIds.has(post.user_id)) continue;

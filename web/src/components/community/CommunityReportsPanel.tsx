@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Flag, RefreshCw } from "lucide-react";
 import { GButton, GhostButton, GlassCard, PanelHeader } from "../ui/primitives";
 import { loadOperatorReports, refreshOperatorAccess, resolveReport, useOperatorAccessStatus, type OperatorReport } from "../../lib/operator/hostClient";
+import { postKindLabel } from "./CommunityPostContent";
+import type { CommunityPost } from "../../lib/community/community";
 
 const ROLE_LABEL = { owner: "Project CEO", admin: "Administrator", moderator: "Moderator" } as const;
 const REASON_LABEL: Record<string, string> = {
@@ -69,7 +71,7 @@ export function CommunityReportsPanel({ accountId }: { accountId: string }) {
         <div className="community-report-head">
           <Flag size={15} aria-hidden="true" />
           <b>@{report.author_handle}</b>
-          <span>{report.post_kind === "question_set" ? "Question Set post" : "Daily progress post"}</span>
+          <span>{postKindLabel(report.post_kind as CommunityPost["kind"])}</span>
           <small>{report.reports} {report.reports === 1 ? "report" : "reports"} · {new Date(report.latest_at).toLocaleDateString()}</small>
         </div>
         <p><strong>{REASON_LABEL[report.reason] ?? report.reason}</strong>{report.note ? ` · ${report.note}` : ""}</p>

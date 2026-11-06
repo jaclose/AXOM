@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
-  BookText, ArrowRight,
+  BookText, ArrowRight, UsersRound,
   Database, Download, ShieldCheck, PackageCheck,
   Sunrise, Check, Circle, ArrowRightCircle, ExternalLink,
   SlidersHorizontal, GripVertical, PlusCircle, X,
@@ -32,6 +32,7 @@ import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Pomodoro } from "../components/productivity/Pomodoro";
 import { SoundscapeWidget } from "../components/dashboard/SoundscapeWidget";
+import { CommunityWidget } from "../components/dashboard/CommunityWidget";
 import { DailyCheckIn } from "../components/dashboard/DailyCheckIn";
 import { isAfterLocalTime } from "../lib/dailyCheckIn";
 import { DoctordleReminder } from "../components/games/DoctordleReminder";
@@ -514,6 +515,7 @@ const WIDGET_GLYPHS: Record<DashboardWidgetId, { icon: typeof Database; tone: st
   examCountdown: { icon: CalendarClock, tone: "rose" },
   pomodoro: { icon: Timer, tone: "orange" },
   soundscapes: { icon: AudioWaveform, tone: "violet" },
+  community: { icon: UsersRound, tone: "cool" },
   weekly: { icon: BarChart3, tone: "cool" },
   suggested: { icon: Sparkles, tone: "gold" },
   aiActions: { icon: Sparkles, tone: "violet" },
@@ -567,7 +569,7 @@ function preferencesSizeLabel(size: DashboardWidgetSize) {
 
 const WIDGET_FIELDS_IMPLEMENTED = new Set<DashboardWidgetId>([
   "questionBank", "courseTracker", "tasks", "readiness", "activity", "journal",
-  "streak", "dailyWord", "todayScore", "weekly",
+  "streak", "dailyWord", "todayScore", "weekly", "community",
 ]);
 
 function widgetConfigurableFields(widgetId: DashboardWidgetId, preferences: DashboardWidgetPreferences) {
@@ -598,6 +600,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "examCountdown") return <ExamCountdownWidget />;
   if (widgetId === "pomodoro") return <Pomodoro compact />;
   if (widgetId === "soundscapes") return <SoundscapeWidget enabledFields={enabledFields} />;
+  if (widgetId === "community") return <CommunityWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "weekly") return <WeeklyWidget week={week} enabledFields={enabledFields} />;
   if (widgetId === "questionBank") return <QuestionBankWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "courseTracker") return <CourseTrackerDashboardWidget size={size} enabledFields={enabledFields} />;
@@ -640,6 +643,7 @@ function widgetDataStatus(id: DashboardWidgetId, s: ReturnType<typeof useStore.g
   if (id === "weekly" || id === "streak") return s.logs.length ? "History available" : "Learning your rhythm";
   if (id === "pomodoro") return "Ready to focus";
   if (id === "soundscapes") return "Plays beside the timer";
+  if (id === "community") return "Friends and shared activity";
   return "Available";
 }
 
