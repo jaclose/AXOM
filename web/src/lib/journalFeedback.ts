@@ -21,7 +21,16 @@ const uuid = (value: unknown): value is string => typeof value === "string"
 export function validateJournalExperienceFeedback(input: JournalExperienceFeedbackInput): JournalExperienceFeedbackInput {
   if (!Number.isInteger(input.rating) || input.rating < 1 || input.rating > 5)
     throw new Error("Choose a rating from 1 to 5.");
-  const cleaned = { ...input };
+  // Project exactly the approved feedback fields. Spreading an otherwise valid
+  // runtime object can retain unrelated notebook text or private metadata.
+  const cleaned: JournalExperienceFeedbackInput = {
+    rating: input.rating,
+    liked: "",
+    wantMore: "",
+    missing: "",
+    painPoints: "",
+    comment: "",
+  };
   for (const key of Object.keys(limits) as (keyof typeof limits)[]) {
     if (typeof input[key] !== "string" || input[key].length > limits[key])
       throw new Error(`Keep ${key === "painPoints" ? "pain points" : key === "wantMore" ? "what you want more of" : key} under ${limits[key]} characters.`);
