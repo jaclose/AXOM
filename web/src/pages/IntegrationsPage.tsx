@@ -32,7 +32,6 @@ const READINESS: Record<Readiness, { label: string; tone: "green" | "orange" | "
 };
 
 export function IntegrationsPage() {
-  const state = useStore();
   const accountPhase = useAccount((account) => account.phase);
   const accountsAvailable = accountPhase !== "unconfigured";
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -123,7 +122,7 @@ export function IntegrationsPage() {
                       ? <a className="gbtn sm integration-action" href={card.action.href}>{card.action.label} <ArrowRight size={ICON_SIZE.body} /></a>
                       : <GButton size="sm" className="integration-action" onClick={card.action.onClick}>{card.action.label} <ArrowRight size={ICON_SIZE.body} /></GButton>
                   )}
-                  {card.id === "calendar" && calendarOpen && <CalendarExportPanel state={state} />}
+                  {card.id === "calendar" && calendarOpen && <CalendarExportPanel />}
                 </GlassCard>
               );
             })}
@@ -138,24 +137,76 @@ export function IntegrationsPage() {
   );
 }
 
-function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getState> }) {
+function CalendarExportPanel() {
+  // Subscribe where the live calendar state and error UI are actually rendered.
+  // The outer integrations catalog need not own the workspace subscription.
+  const state = useStore();
   const [tasks, setTasks] = useState(true);
   const [exams, setExams] = useState(true);
   const [dayPlans, setDayPlans] = useState(false);
+  // An error applies to the exact source revision that produced it. Derive its
+  // visibility from the canonical store on each render instead of relying on a
+  // passive effect to clear it before paint (or before an immediate retry).
+  const [exportError, setExportError] = useState<{
+    message: string;
+    sources: Pick<ReturnType<typeof useStore.getState>,
+      "tasks" | "boardPrep" | "dayPlans" | "activeDayKey">;
+  } | null>(null);
+  // Render from one consistent subscribed Zustand snapshot. An imperative
+  // getState() read here could disagree with useSyncExternalStore during a
+  // concurrent task edit and leave a previous validation warning visible.
+  const currentSources = state;
+  const errorMessage = exportError
+    && exportError.sources.tasks === currentSources.tasks
+    && exportError.sources.boardPrep === currentSources.boardPrep
+    && exportError.sources.dayPlans === currentSources.dayPlans
+    && exportError.sources.activeDayKey === currentSources.activeDayKey
+    ? exportError.message : null;
+  const reportError = (message: string) => {
+    const { tasks, boardPrep, dayPlans, activeDayKey } = useStore.getState();
+    setExportError({ message, sources: { tasks, boardPrep, dayPlans, activeDayKey } });
+  };
+  // The existing subscribed store snapshot drives source-validity rendering.
+  // Avoid a competing error-specific effect that updates React state while
+  // Zustand dispatches its own source notifications.
   const events = calendarEvents(state, { tasks, exams, dayPlans, fromDay: state.activeDayKey });
+  const downloadSelected = () => {
+    let content: string;
+    try {
+      // Use the current canonical workspace at click time. An edit to a task
+      // outside this panel must not export the stale render-time snapshot.
+      const latest = useStore.getState();
+      const selected = calendarEvents(latest, { tasks, exams, dayPlans, fromDay: latest.activeDayKey });
+      if (!selected.length) {
+        reportError("The selected calendar items changed. Review the choices above and try again.");
+        return;
+      }
+      content = buildIcs(selected);
+    } catch {
+      reportError("A calendar item has an invalid date or identifier. Correct it in AXOM and try again.");
+      return;
+    }
+    try {
+      downloadIcs(content);
+      setExportError(null);
+    } catch {
+      reportError("The calendar file could not be downloaded. Check your browser settings and retry.");
+    }
+  };
   return (
     <div className="calendar-export">
-      <label><input type="checkbox" checked={tasks} onChange={(event) => setTasks(event.target.checked)} /> Open tasks with due dates</label>
-      <label><input type="checkbox" checked={exams} onChange={(event) => setExams(event.target.checked)} /> Exam dates (Boards)</label>
-      <label><input type="checkbox" checked={dayPlans} onChange={(event) => setDayPlans(event.target.checked)} /> Upcoming daily intentions</label>
+      <label><input type="checkbox" checked={tasks} onChange={(event) => { setTasks(event.target.checked); setExportError(null); }} /> Open tasks with due dates</label>
+      <label><input type="checkbox" checked={exams} onChange={(event) => { setExams(event.target.checked); setExportError(null); }} /> Exam dates (Boards)</label>
+      <label><input type="checkbox" checked={dayPlans} onChange={(event) => { setDayPlans(event.target.checked); setExportError(null); }} /> Upcoming daily intentions</label>
       <div className="calendar-export-foot">
         <span>{events.length} event{events.length === 1 ? "" : "s"} from today onward · all-day · no notes or journal text</span>
-        <GButton size="sm" variant="primary" disabled={!events.length} onClick={() => downloadIcs(buildIcs(events))}>
+        <GButton size="sm" variant="primary" disabled={!events.length} onClick={downloadSelected}>
           <Download size={ICON_SIZE.body} /> Download .ics
         </GButton>
       </div>
+      {errorMessage && <p className="calendar-export-next" role="alert">{errorMessage}</p>}
       {!events.length && <p className="calendar-export-next">Nothing dated is ready to export. <a href="#productivity">Add a task with a due date</a> or choose another source above.</p>}
-      <p>Import it in Google Calendar (Settings → Import), Apple Calendar (File → Import), or Outlook. Re-export any time; events keep stable IDs so re-importing updates instead of duplicating in most apps.</p>
+      <p>Import it in Google Calendar (Settings → Import), Apple Calendar (File → Import), or Outlook. This is a file export, not live sync. On re-import, your calendar app may skip, update, or duplicate events; check the target calendar first.</p>
     </div>
   );
 }
