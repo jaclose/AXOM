@@ -1,12 +1,16 @@
 import { create } from "zustand";
 import { SoundscapeEngine, soundscapesSupported, type OutputMode } from "./engine";
 import { appendListeningInterval } from "./listeningLog";
-import { SOUNDSCAPES, isPlayable, isSoundscapeId, versionOf, type SoundscapeId } from "./presets";
+import { DEFAULT_SOUNDSCAPE_ID, DEFAULT_SOUNDSCAPE_VERSION, SOUNDSCAPES, isPlayable, isSoundscapeId, versionOf, type SoundscapeId } from "./presets";
 import { EMPTY_TASTE, normalizeTaste, type Taste } from "./taste";
 
 export type SoundscapeStatus = "idle" | "playing" | "paused";
 
+export interface MainSound { presetId: SoundscapeId; versionId: string }
+
 interface Prefs {
+  preferenceVersion: number;
+  mainSound: MainSound;
   volume: number;
   output: OutputMode;
   followTimer: boolean;
@@ -25,6 +29,8 @@ interface SoundscapeState extends Prefs {
   supported: boolean;
   status: SoundscapeStatus;
   presetId: SoundscapeId | null;
+  /** The version actually loaded in the engine, independent of a pending choice. */
+  loadedVersionId: string | null;
   /** Bumps whenever your own files change the catalog, so version lists re-render. */
   catalog: number;
   bumpCatalog: () => void;
@@ -50,6 +56,7 @@ interface SoundscapeState extends Prefs {
   setScene: (id: SoundscapeId, scene: string) => void;
   setTaste: (taste: Partial<Taste>) => void;
   togglePin: (id: SoundscapeId) => void;
+  setMainSound: (presetId: SoundscapeId, versionId: string) => void;
   /** Start the audio context inside a click so hover previews can play. */
   unlockAudio: () => Promise<boolean>;
   toggle: () => Promise<void>;
@@ -64,12 +71,17 @@ interface SoundscapeState extends Prefs {
 
 export const SOUNDSCAPE_PREFS_KEY = "axom.soundscapes.v1";
 export const STOP_TIMER_CHOICES = [15, 20, 30, 45, 60, 90] as const;
-const DEFAULT_PREFS: Prefs = { volume: 35, output: "headphones", followTimer: true, lastPresetId: "gamma-40", versions: {}, scenes: {}, taste: EMPTY_TASTE, pinned: [] };
+export const DEFAULT_MAIN_SOUND: MainSound = { presetId: DEFAULT_SOUNDSCAPE_ID, versionId: DEFAULT_SOUNDSCAPE_VERSION };
+const DEFAULT_PREFS: Prefs = { preferenceVersion: 2, mainSound: DEFAULT_MAIN_SOUND, volume: 35, output: "headphones", followTimer: true, lastPresetId: DEFAULT_SOUNDSCAPE_ID, versions: {}, scenes: {}, taste: EMPTY_TASTE, pinned: [DEFAULT_SOUNDSCAPE_ID] };
 
-function readPrefs(): Prefs {
+export function readPrefs(): Prefs {
   try {
     const raw = JSON.parse(window.localStorage.getItem(SOUNDSCAPE_PREFS_KEY) ?? "null") as Partial<Prefs> | null;
-    return {
+    const old = (raw?.preferenceVersion ?? 0) < 2;
+    const main = raw?.mainSound;
+    const prefs: Prefs = {
+      preferenceVersion: 2,
+      mainSound: main && isSoundscapeId(main.presetId) && typeof main.versionId === "string" ? main : DEFAULT_MAIN_SOUND,
       volume: typeof raw?.volume === "number" && raw.volume >= 0 && raw.volume <= 100 ? raw.volume : DEFAULT_PREFS.volume,
       output: raw?.output === "speakers" ? "speakers" : "headphones",
       followTimer: typeof raw?.followTimer === "boolean" ? raw.followTimer : DEFAULT_PREFS.followTimer,
@@ -81,8 +93,10 @@ function readPrefs(): Prefs {
         ? Object.fromEntries(Object.entries(raw.scenes).filter(([id, scene]) => isSoundscapeId(id) && typeof scene === "string"))
         : {},
       taste: normalizeTaste(raw?.taste),
-      pinned: Array.isArray(raw?.pinned) ? [...new Set(raw.pinned.filter(isSoundscapeId))] : [],
+      pinned: old ? [DEFAULT_SOUNDSCAPE_ID, ...(Array.isArray(raw?.pinned) ? raw.pinned.filter(isSoundscapeId).filter((id) => id !== DEFAULT_SOUNDSCAPE_ID) : [])] : Array.isArray(raw?.pinned) ? [...new Set(raw.pinned.filter(isSoundscapeId))] : [],
     };
+    if (old) { try { window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify(prefs)); } catch { /* preference storage may be unavailable */ } }
+    return prefs;
   } catch {
     return DEFAULT_PREFS;
   }
@@ -130,7 +144,7 @@ function updateMediaSession(presetId: SoundscapeId | null, status: SoundscapeSta
     }
     const preset = SOUNDSCAPES[presetId];
     const store = useSoundscape.getState();
-    const version = versionOf(preset, store.versions[presetId]);
+    const version = versionOf(preset, store.loadedVersionId ?? store.versions[presetId]);
     const base = (import.meta.env.BASE_URL ?? "/").replace(/\/?$/, "/");
     // macOS Now Playing / Control Center and the media keys read this.
     const ownFile = "src" in version && (version.userFile || preset.band === "Yours" || preset.band === "Music");
@@ -158,11 +172,12 @@ function updateMediaSession(presetId: SoundscapeId | null, status: SoundscapeSta
 }
 
 export const useSoundscape = create<SoundscapeState>((set, get) => {
+  let request = 0;
   const persist = (patch: Partial<Prefs>) => {
     set(patch);
-    const { volume, output, followTimer, lastPresetId, versions, scenes, taste, pinned } = get();
+    const { preferenceVersion, mainSound, volume, output, followTimer, lastPresetId, versions, scenes, taste, pinned } = get();
     try {
-      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ volume, output, followTimer, lastPresetId, versions, scenes, taste, pinned }));
+      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ preferenceVersion, mainSound, volume, output, followTimer, lastPresetId, versions, scenes, taste, pinned }));
     } catch { /* device preference only */ }
   };
 
@@ -178,6 +193,7 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     supported: typeof window !== "undefined" && soundscapesSupported(),
     status: "idle",
     presetId: null,
+    loadedVersionId: null,
     previewing: false,
     catalog: 0,
     bumpCatalog() {
@@ -187,29 +203,43 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     async play(id, options = {}) {
       const preset = SOUNDSCAPES[id];
       if (!isPlayable(id)) {
-        set({ error: "Add a file first — this shelf is empty." });
+        set({ error: "Add a file first. This shelf is empty." });
         return;
       }
+      const currentRequest = ++request;
       const minutes = options.stopAfterMinutes === undefined ? preset.defaultStopMinutes : options.stopAfterMinutes ?? undefined;
       const keepTimer = get().status !== "idle" && options.stopAfterMinutes === undefined && !preset.defaultStopMinutes;
       const stopAt = keepTimer ? get().stopAt : minutes ? Date.now() + minutes * 60_000 : undefined;
       const versionId = versionOf(preset, options.version ?? get().versions[id]).id;
+      const replacePaused = get().status === "paused";
       try {
-        await getEngine().play(preset, { volume: get().volume, output: get().output, versionId });
+        await getEngine().play(preset, { volume: get().volume, output: get().output, versionId, ...(replacePaused ? { replacePaused: true } : {}) });
       } catch (error) {
-        set({ error: error instanceof Error ? error.message : "Audio couldn’t start." });
+        if (currentRequest === request) set({ ...(replacePaused ? { loadedVersionId: null } : {}), error: error instanceof Error ? error.message : "Audio couldn’t start." });
         return;
+      }
+      if (currentRequest !== request) return;
+      if (versionId.startsWith("user-") && !SOUNDSCAPES[id].versions.some((version) => version.id === versionId)) {
+        // The file can be moved or removed while its media element buffers.
+        const moved = Object.values(SOUNDSCAPES).find((entry) => entry.versions.some((version) => version.id === versionId));
+        if (moved) id = moved.id;
+        else {
+          const stopping = get().stop();
+          set({ error: "That sound is no longer available on this device." });
+          await stopping;
+          return;
+        }
       }
       if (options.preview) {
         // A taste of the sound only: no preference, timer or log changes.
         closeInterval();
         clearTimeout(stopTimer);
-        set({ status: "playing", presetId: id, stopAt: undefined, error: undefined, previewing: true });
+        set({ status: "playing", presetId: id, loadedVersionId: versionId, stopAt: undefined, error: undefined, previewing: true });
         return;
       }
       openIntervalFor(id);
       persist({ lastPresetId: id, versions: { ...get().versions, [id]: versionId } });
-      set({ status: "playing", presetId: id, stopAt, error: undefined, previewing: false });
+      set({ status: "playing", presetId: id, loadedVersionId: versionId, stopAt, error: undefined, previewing: false });
       armStopTimer(stopAt);
       updateMediaSession(id, "playing");
     },
@@ -224,26 +254,43 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     },
     async pause() {
       if (get().status !== "playing") return;
+      const currentRequest = ++request;
       closeInterval();
-      await getEngine().pause();
+      try { await getEngine().pause(); } catch (error) {
+        if (currentRequest === request) set({ error: error instanceof Error ? error.message : "Audio couldn’t pause." });
+        return;
+      }
+      if (currentRequest !== request) return;
       set({ status: "paused" });
       updateMediaSession(get().presetId, "paused");
     },
     async resume() {
       const { status, presetId } = get();
       if (status !== "paused" || !presetId) return;
-      await getEngine().resume();
-      openIntervalFor(presetId);
-      set({ status: "playing" });
+      const currentRequest = ++request;
+      const chosen = versionOf(SOUNDSCAPES[presetId], get().previewing ? get().loadedVersionId ?? undefined : get().versions[presetId]).id;
+      try {
+        if (chosen !== get().loadedVersionId) {
+          await getEngine().play(SOUNDSCAPES[presetId], { volume: get().volume, output: get().output, versionId: chosen, replacePaused: true });
+        } else {
+          await getEngine().resume();
+        }
+      } catch (error) {
+        if (currentRequest === request) set({ loadedVersionId: chosen !== get().loadedVersionId ? null : get().loadedVersionId, error: error instanceof Error ? error.message : "Audio couldn’t resume." });
+        return;
+      }
+      if (currentRequest !== request) return;
+      if (!get().previewing) openIntervalFor(presetId);
+      set({ status: "playing", loadedVersionId: chosen, error: undefined });
       updateMediaSession(presetId, "playing");
     },
     async stop(fadeSeconds) {
-      if (get().status === "idle") return;
+      ++request;
       closeInterval();
       clearTimeout(stopTimer);
-      set({ status: "idle", stopAt: undefined, previewing: false });
+      set({ status: "idle", loadedVersionId: null, stopAt: undefined, previewing: false });
       updateMediaSession(null, "idle");
-      await getEngine().stop(fadeSeconds);
+      await engine?.stop(fadeSeconds);
     },
     setVolume(volume) {
       persist({ volume });
@@ -262,6 +309,10 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const pinned = get().pinned;
       persist({ pinned: pinned.includes(id) ? pinned.filter((item) => item !== id) : [id, ...pinned] });
     },
+    setMainSound(presetId, versionId) {
+      if (!SOUNDSCAPES[presetId].versions.some((version) => version.id === versionId)) return;
+      persist({ mainSound: { presetId, versionId } });
+    },
     async unlockAudio() {
       try { return await getEngine().unlock(); } catch { return false; }
     },
@@ -272,6 +323,7 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     },
     setVersion(id, version) {
       persist({ versions: { ...get().versions, [id]: version } });
+      if (get().previewing && get().presetId === id) set({ previewing: false });
       const { status, presetId, stopAt } = get();
       if (status === "playing" && presetId === id) {
         void get().play(id, { version, stopAfterMinutes: stopAt ? Math.max(1, (stopAt - Date.now()) / 60_000) : null });
@@ -280,10 +332,10 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     moveVersion(from, to, version) {
       if (from === to) return;
       const { status, presetId, versions, stopAt } = get();
-      const loaded = status !== "idle" && presetId === from && versionOf(SOUNDSCAPES[to], version).id === version && versions[from] === version;
+      const loaded = status !== "idle" && presetId === from && versionOf(SOUNDSCAPES[to], version).id === version && get().loadedVersionId === version;
       const next = { ...versions, [to]: version };
       if (next[from] === version) delete next[from];
-      persist({ versions: next, ...(loaded ? { lastPresetId: to } : {}) });
+      persist({ versions: next, ...(loaded ? { lastPresetId: to } : {}), ...(get().mainSound.presetId === from && get().mainSound.versionId === version ? { mainSound: { presetId: to, versionId: version } } : {}) });
       if (loaded) {
         // Same audio, new home: follow the file rather than restart it.
         set({ presetId: to });
@@ -298,12 +350,15 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       if (presetId && status !== "idle") updateMediaSession(presetId, status);
     },
     settleCatalog() {
-      const { presetId, lastPresetId, status } = get();
+      const { presetId, lastPresetId, status, mainSound } = get();
       if (presetId && !isPlayable(presetId)) {
         if (status !== "idle") void get().stop();
         set({ presetId: null });
       }
       if (!isPlayable(lastPresetId)) persist({ lastPresetId: DEFAULT_PREFS.lastPresetId });
+      if (!SOUNDSCAPES[mainSound.presetId].versions.some((version) => version.id === mainSound.versionId)) {
+        persist({ mainSound: DEFAULT_MAIN_SOUND });
+      }
     },
     setFollowTimer(value) {
       persist({ followTimer: value });

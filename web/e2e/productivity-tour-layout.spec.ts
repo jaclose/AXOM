@@ -110,3 +110,27 @@ async function completeOnboarding(page: Page): Promise<void> {
   const reviewLater = page.getByRole("button", { name: "Review later" });
   if (await reviewLater.count()) await reviewLater.click();
 }
+
+test("Productivity primary panels stay usable across themes and narrow screens", async ({ page }, testInfo) => {
+  await page.goto("/#productivity", { waitUntil: "networkidle" });
+  await completeOnboarding(page);
+  await page.evaluate(() => { window.location.hash = "productivity"; });
+  for (const theme of ["dark", "light"]) {
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
+      await expect(page.getByRole("heading", { name: "Log an activity" })).toBeVisible();
+      const bounds = await page.locator(".productivity-primary-grid").evaluate((grid) => {
+        const [log, focus] = Array.from(grid.children).map((element) => element.getBoundingClientRect());
+        return { logHeight: log.height, focusHeight: focus.height, logTop: log.top, focusTop: focus.top, scroll: grid.scrollWidth, width: grid.clientWidth };
+      });
+      expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
+      if (width === 1440) {
+        expect(Math.abs(bounds.logTop - bounds.focusTop)).toBeLessThan(2);
+        expect(Math.abs(bounds.logHeight - bounds.focusHeight)).toBeLessThan(2);
+      } else expect(bounds.focusTop).toBeGreaterThan(bounds.logTop);
+      await page.locator(".surface-scroll").evaluate((surface) => { surface.scrollTop = 0; });
+      await page.screenshot({ path: testInfo.outputPath(`productivity-${theme}-${width}.png`) });
+    }
+  }
+});

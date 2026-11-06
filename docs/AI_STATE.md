@@ -5,6 +5,20 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## Productivity and Soundscapes · 2026-11-05
+
+Branch `codex/productivity-soundscapes-20261105`, integrated with `dc72d41`. JD authorized
+AXOM-only audio publication plus commit, push and merge after verification.
+The 566.920-second stereo loop is the default main sound and initial pin.
+[Soundscapes](features/soundscapes.md) owns playback, the reactive Orb and persistent
+dock; [Productivity](features/productivity.md) owns source accounting. No workspace
+schema change. Node 22.23.4 / npm 10.9.9: typecheck, lint, 4,763 unit tests (35
+skipped), 89 release tests, build, update/offline checks and focused feature browser
+acceptance passed. Independent reviews also found and fixed empty-shelf playback
+request invalidation and zero-minute activity best-day selection. The complete browser
+suite now runs in three hosted CI shards. Final candidate CI and production readback
+remain pending; this describes the release candidate, not a deployed release.
+
 ## Host and Communities repair · 2026-11-04
 
 Branch `claude/host-communities-20261104` from `a96f1491`. Host now shows only

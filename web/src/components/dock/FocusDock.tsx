@@ -1,18 +1,16 @@
 // ===========================================================================
-// Focus dock — the persistent pill at the bottom of every page. It appears
-// whenever something is running: a study session, a Pomodoro phase, or a
-// soundscape. With a timer and a soundscape together, the pill splits in two
-// (a liquid "pinch" drawn by an SVG goo filter behind the content). Hovering
-// the sound half genies its live visual out of the pill.
+// Focus dock: equal timer and sound pills stay available while idle, paused,
+// or running. An SVG goo filter draws the background shapes without duplicating
+// interactive controls. Hovering or focusing the sound pill opens its visual.
 // ===========================================================================
-import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
 import { Brain, Check, Coffee, ListPlus, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, SkipForward, Sunrise, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { findLiveSession, formatElapsed, sessionElapsedMs, QUICK_LOG_LABEL, type SessionQuickLog } from "../../lib/sessions";
-import { formatClock, pomodoroPhaseSeconds, usePomodoro } from "../../lib/pomodoro";
+import { formatClock, pomodoroPhaseSeconds, POMODORO_PRESETS, usePomodoro } from "../../lib/pomodoro";
 import { useSessionUi } from "../../lib/sessionUi";
 import { useSoundscape } from "../../lib/soundscapes/store";
-import { EVIDENCE_LABEL, SOUNDSCAPES, lookFor, versionOf } from "../../lib/soundscapes/presets";
+import { DEFAULT_SOUNDSCAPE_ID, EVIDENCE_LABEL, SOUNDSCAPES, lookFor, versionOf, isPlayable } from "../../lib/soundscapes/presets";
 import { carrierPair } from "../../lib/soundscapes/engine";
 import { useReducedMotion } from "../../lib/motion";
 import { formatRestClock, useRest } from "../../lib/rest";
@@ -38,7 +36,7 @@ function useNow(active: boolean): number {
 function usePomodoroView() {
   const pomodoro = usePomodoro();
   const total = pomodoroPhaseSeconds(pomodoro);
-  // Paused mid-sprint (even at 0 s elapsed) still belongs in the dock; reset hides it.
+  // A started sprint takes priority over a standalone session, even while paused.
   const visible = pomodoro.running || pomodoro.focusRunStarted || (pomodoro.secondsLeft > 0 && pomodoro.secondsLeft < total);
   return { pomodoro, total, visible };
 }
@@ -47,35 +45,23 @@ export function FocusDock() {
   const sessions = useStore((state) => state.sessions);
   const session = findLiveSession(sessions ?? []);
   const { pomodoro, total, visible: pomodoroVisible } = usePomodoroView();
-  const soundStatus = useSoundscape((state) => state.status);
   const restStatus = useRest((state) => state.status);
   const resting = restStatus !== "idle";
   // While resting, the rest capsule stands in for the (paused) timer.
-  const timerActive = resting || Boolean(session) || pomodoroVisible;
-  const soundActive = soundStatus !== "idle";
   const [expanded, setExpanded] = useState(false);
-  if (!timerActive && !soundActive) return null;
-  const split = timerActive && soundActive;
 
-  const capsules = (ghost: boolean) => (
+  const capsules = (
     <>
-      {resting && <RestCapsule ghost={ghost} />}
-      {timerActive && !resting && (
-        <TimerCapsule
-          ghost={ghost}
-          expanded={expanded}
-          onExpand={setExpanded}
-          session={session}
-          pomodoro={pomodoroVisible ? pomodoro : null}
-          phaseTotal={total}
-        />
+      {resting ? <RestCapsule ghost={false} /> : (
+        <TimerCapsule ghost={false} expanded={expanded} onExpand={setExpanded}
+          session={session} pomodoro={session && !pomodoroVisible ? null : pomodoro} phaseTotal={total} />
       )}
-      {soundActive && <SoundCapsule ghost={ghost} entering={split} />}
+      <SoundCapsule ghost={false} entering={false} />
     </>
   );
 
   return (
-    <div className={`focus-dock ${split ? "split" : ""}`} role="region" aria-label="Focus dock">
+    <div className="focus-dock split" role="region" aria-label="Focus dock">
       <svg className="focus-dock-defs" aria-hidden="true" focusable="false">
         <filter id="axom-dock-goo" colorInterpolationFilters="sRGB">
           <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur" />
@@ -84,8 +70,8 @@ export function FocusDock() {
         </filter>
       </svg>
       {/* The goo layer holds only the capsule shapes; the crisp content sits on top. */}
-      <div className="focus-dock-row focus-dock-goo" aria-hidden="true">{capsules(true)}</div>
-      <div className="focus-dock-row focus-dock-content">{capsules(false)}</div>
+      <div className="focus-dock-row focus-dock-goo" aria-hidden="true"><div className="dock-capsule ghost" /><div className="dock-capsule ghost" /></div>
+      <div className="focus-dock-row focus-dock-content">{capsules}</div>
     </div>
   );
 }
@@ -133,6 +119,10 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
 }) {
   const now = useNow(!ghost && session?.status === "active");
   const [logsOpen, setLogsOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const closeTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+  const idle = Boolean(pomodoro && !pomodoro.running && !pomodoro.focusRunStarted && pomodoro.phase === "focus" && pomodoro.secondsLeft === phaseTotal && !session);
   const { focusMode, toggleFocusMode, openCapture } = useSessionUi();
   const store = useStore.getState();
   const elapsed = session ? sessionElapsedMs(session, new Date(now)) : 0;
@@ -148,7 +138,7 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
     else if (session?.status === "active") store.pauseSession(session.id);
     else if (session) store.resumeSession(session.id);
   };
-  const status = pomodoro
+  const status = idle ? `Timer ready, ${clock}` : pomodoro
     ? `${pomodoro.phase === "break" ? "Break" : "Focus"} ${pomodoro.running ? "running" : "paused"}, ${clock} left`
     : `Session ${session?.status === "active" ? "running" : "paused"}, ${clock} elapsed`;
 
@@ -156,19 +146,43 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
     <Capsule
       ghost={ghost}
       className={`dock-timer ${expanded ? "expanded" : ""} ${running ? "" : "paused"}`}
-      onMouseEnter={() => onExpand(true)}
-      onMouseLeave={() => { onExpand(false); setLogsOpen(false); }}
-      onFocus={() => onExpand(true)}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { onExpand(false); setLogsOpen(false); } }}
+      onMouseEnter={() => { window.clearTimeout(closeTimer.current); onExpand(true); }}
+      onMouseLeave={(event) => {
+        const capsule = event.currentTarget;
+        window.clearTimeout(closeTimer.current);
+        closeTimer.current = window.setTimeout(() => {
+          if (!capsule.contains(document.activeElement)) { onExpand(false); setLogsOpen(false); setSetupOpen(false); }
+        }, 250);
+      }}
+      onFocus={() => { window.clearTimeout(closeTimer.current); onExpand(true); }}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { onExpand(false); setLogsOpen(false); setSetupOpen(false); } }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        const trigger = event.currentTarget.querySelector<HTMLButtonElement>(".dock-timer-trigger")
+          ?? event.currentTarget.querySelector<HTMLButtonElement>(".dock-icon.primary");
+        trigger?.focus();
+        setLogsOpen(false);
+        setSetupOpen(false);
+        onExpand(false);
+      }}
     >
       <ProgressRing fraction={fraction} phase={phase} />
-      <span className="dock-clock mono" aria-hidden="true">{clock}</span>
+      {pomodoro
+        ? <button type="button" className="dock-clock dock-timer-trigger mono" aria-label="Timer options" aria-expanded={setupOpen} onClick={() => setSetupOpen((value) => !value)}>{clock}</button>
+        : <span className="dock-clock mono" aria-hidden="true">{clock}</span>}
       <span className="sr-only" role="status">{status}</span>
       <span className="dock-label">{label}</span>
-      <IconButton label={running ? (pomodoro ? "Pause timer" : "Pause session") : (pomodoro ? "Resume timer" : "Resume session")} onClick={toggle} className="primary">
+      <IconButton label={running ? (pomodoro ? "Pause timer" : "Pause session") : (idle ? "Start timer" : pomodoro ? "Resume timer" : "Resume session")} onClick={toggle} className="primary">
         {running ? <Pause size={ICON_SIZE.body} /> : <Play size={ICON_SIZE.body} />}
       </IconButton>
-      <span className="dock-more">
+      {setupOpen && pomodoro && <div className="dock-setup" role="group" aria-label="Timer options">
+        <label>Duration <select aria-label="Timer duration" disabled={pomodoro.running} value={pomodoro.presetId} onChange={(event) => pomodoro.setPreset(event.target.value)}>{POMODORO_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
+        <button type="button" disabled={pomodoro.running} onClick={() => { pomodoro.start(); setSetupOpen(false); }}>Start timer</button>
+        <button type="button" disabled={pomodoro.running} onClick={() => { if (pomodoro.phase === "focus") pomodoro.skip(); usePomodoro.getState().start(); setSetupOpen(false); }}>Start break</button>
+      </div>}
+      {expanded && !setupOpen && (pomodoro || session) && <span className="dock-more">
         {pomodoro && (
           <>
             <IconButton label="Skip to next phase" onClick={() => pomodoro.skip()}><SkipForward size={ICON_SIZE.body} /></IconButton>
@@ -184,7 +198,7 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
             <IconButton label="Finish session" onClick={openCapture} className="finish"><Check size={ICON_SIZE.body} /></IconButton>
           </>
         )}
-      </span>
+      </span>}
       {session && logsOpen && !ghost && (
         <span className="dock-log-menu" role="menu" aria-label="Quick log">
           {QUICK_LOGS.map((log) => (
@@ -209,7 +223,7 @@ function RestCapsule({ ghost }: { ghost: boolean }) {
   return (
     <Capsule ghost={ghost} className={`dock-rest ${ringing ? "ringing" : ""}`}>
       <span className="dock-ring session" aria-hidden="true">{ringing ? <Sunrise size={13} /> : <Moon size={13} />}</span>
-      <button type="button" className="dock-sound-name" onClick={open} aria-label={ringing ? "Rest is over — open" : "Resting — open"}>
+      <button type="button" className="dock-sound-name" onClick={open} aria-label={ringing ? "Rest is over, open" : "Resting, open"}>
         <b className="mono">{ringing ? "Wake up" : formatRestClock((endsAt ?? now) - now)}</b>
         <small>{ringing ? "Rest is over" : "Resting"}</small>
       </button>
@@ -229,16 +243,18 @@ function Equalizer({ playing }: { playing: boolean }) {
 type GeniePhase = "closed" | "open" | "closing";
 
 function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }) {
-  const presetId = useSoundscape((state) => state.presetId);
+  const presetId = useSoundscape((state) => state.presetId ?? (isPlayable(state.lastPresetId) ? state.lastPresetId : DEFAULT_SOUNDSCAPE_ID));
   const status = useSoundscape((state) => state.status);
   const output = useSoundscape((state) => state.output);
-  const versionChoice = useSoundscape((state) => (state.presetId ? state.versions[state.presetId] : undefined));
+  const versionChoice = useSoundscape((state) => state.status !== "idle" ? state.loadedVersionId ?? state.versions[presetId] : state.versions[presetId]);
   useSoundscape((state) => state.catalog);
   const { toggle, stop } = useSoundscape.getState();
   const stopLabel = useStopTimerLabel();
   const reduced = useReducedMotion();
   const [genie, setGenie] = useState<GeniePhase>("closed");
   const [origin, setOrigin] = useState(70);
+  const panelId = useId();
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const capsuleRef = useRef<HTMLDivElement | null>(null);
   const timers = useRef<{ open?: number; close?: number; out?: number }>({});
   // Escape closes the genie wherever focus is (a hover never moves focus).
@@ -247,6 +263,9 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && focused.closest(".dock-genie")) capsuleRef.current?.querySelector<HTMLButtonElement>(".dock-sound-name")?.focus();
+      window.clearTimeout(timers.current.open);
       setGenie("closing");
       window.clearTimeout(timers.current.out);
       timers.current.out = window.setTimeout(() => setGenie("closed"), reduced ? 0 : GENIE_OUT_MS);
@@ -259,7 +278,6 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
     window.clearTimeout(timers.current.close);
     window.clearTimeout(timers.current.out);
   }, []);
-  if (!presetId) return null;
   const preset = SOUNDSCAPES[presetId];
   const pair = carrierPair(preset, output);
   // Your own files show their own name, not the shelf's.
@@ -277,9 +295,11 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
     clear();
     timers.current.open = window.setTimeout(() => setGenie("open"), delay);
   };
-  const close = (delay = GENIE_CLOSE_DELAY) => {
+  const close = (delay = GENIE_CLOSE_DELAY, keepFocused = false) => {
     clear();
     timers.current.close = window.setTimeout(() => {
+      // Pointer movement must not remove controls that still own keyboard focus.
+      if (keepFocused && wrapperRef.current?.contains(document.activeElement)) return;
       setGenie((current) => (current === "open" ? "closing" : current));
       timers.current.out = window.setTimeout(() => setGenie("closed"), reduced ? 0 : GENIE_OUT_MS);
     }, delay);
@@ -287,15 +307,13 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
 
   return (
     <div
+      ref={wrapperRef}
       className="dock-sound-wrap"
       onMouseEnter={ghost ? undefined : () => open()}
-      onMouseLeave={ghost ? undefined : () => close()}
+      onMouseLeave={ghost ? undefined : () => close(GENIE_CLOSE_DELAY, true)}
       onFocus={ghost ? undefined : () => open(0)}
       onBlur={ghost ? undefined : (event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close(); }}
     >
-      {!ghost && genie !== "closed" && (
-        <GeniePanel phase={genie} origin={origin} presetId={presetId} pairLabel={pair ? `${pair[0]} / ${pair[1]} Hz` : undefined} />
-      )}
       <Capsule ghost={ghost} className={`dock-sound ${entering ? "entering" : ""} ${status === "paused" ? "paused" : ""}`}>
         <div
           ref={ghost ? undefined : (node) => {
@@ -312,7 +330,7 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
           className="dock-sound-inner"
         >
           <Equalizer playing={status === "playing"} />
-          <button type="button" className="dock-sound-name" onClick={() => (genie === "open" ? close(0) : open(0))} aria-expanded={genie === "open"} aria-label={`${preset.name} soundscape — show visual and controls`}>
+          <button type="button" className="dock-sound-name" onClick={() => (genie === "open" ? close(0) : open(0))} aria-expanded={genie === "open"} aria-controls={genie !== "closed" ? panelId : undefined} aria-haspopup="dialog" aria-label={`${preset.name} soundscape, show visual and controls`}>
             <b>{capsuleTitle}</b>
             <small>{stopLabel ?? capsuleSub}</small>
           </button>
@@ -322,20 +340,24 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
           <IconButton label="Stop sound" onClick={() => void stop()}><X size={ICON_SIZE.body} /></IconButton>
         </div>
       </Capsule>
+      {!ghost && genie !== "closed" && (
+        <GeniePanel id={panelId} phase={genie} origin={origin} presetId={presetId} pairLabel={pair ? `${pair[0]} / ${pair[1]} Hz` : undefined} />
+      )}
     </div>
   );
 }
 
-function GeniePanel({ phase, origin, presetId, pairLabel }: { phase: Exclude<GeniePhase, "closed">; origin: number; presetId: NonNullable<ReturnType<typeof useSoundscape.getState>["presetId"]>; pairLabel?: string }) {
+function GeniePanel({ id, phase, origin, presetId, pairLabel }: { id: string; phase: Exclude<GeniePhase, "closed">; origin: number; presetId: NonNullable<ReturnType<typeof useSoundscape.getState>["presetId"]>; pairLabel?: string }) {
   const preset = SOUNDSCAPES[presetId];
   const status = useSoundscape((state) => state.status);
-  const versionId = useSoundscape((state) => state.versions[presetId]);
+  const versionId = useSoundscape((state) => state.status !== "idle" ? state.loadedVersionId ?? state.versions[presetId] : state.versions[presetId]);
   const panelRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     panelRef.current?.style.setProperty("--genie-origin", `${origin}%`);
-  }, [origin]);
+    panelRef.current?.toggleAttribute("inert", phase === "closing");
+  }, [origin, phase]);
   return (
-    <div ref={panelRef} className={`dock-genie ${phase}`} role="dialog" aria-label={`${preset.name} soundscape`}>
+    <div id={id} ref={panelRef} className={`dock-genie ${phase}`} aria-hidden={phase === "closing" ? true : undefined} role="dialog" aria-label={`${preset.name} soundscape`}>
       <div className="dock-genie-stage">
         <SoundscapeVisual {...lookFor(preset, versionId)} animate={status === "playing"} reactive label={`${preset.name} visual`} />
         <div className="dock-genie-caption">

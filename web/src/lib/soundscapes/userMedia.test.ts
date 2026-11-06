@@ -10,7 +10,7 @@ describe("your own sounds and backgrounds", () => {
   });
 
   it("turns file names into readable labels", () => {
-    expect(labelFromFileName("Super_Focus_Flow.mp3")).toBe("Super Focus Flow");
+    expect(labelFromFileName("Study_Mix.mp3")).toBe("Study Mix");
     expect(labelFromFileName(".m4a")).toBe("Untitled");
   });
 
@@ -26,8 +26,8 @@ describe("your own sounds and backgrounds", () => {
     expect(result.kind).toBe("sound");
     expect(result.processingStatus).toBe("original");
     expect(result.sourceSize).toBe(10_000_000);
-    expect(result.optimizedSize).toBeGreaterThanOrEqual(0);
-    expect(result.percentSaved).toBeGreaterThanOrEqual(0);
+    expect(result.optimizedSize).toBe(10_000_000);
+    expect(result.percentSaved).toBe(0);
     expect(result.percentSaved).toBeLessThanOrEqual(100);
     expect(result.provenance).toMatch(/device|local/i);
   });
