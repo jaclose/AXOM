@@ -77,7 +77,7 @@ describe("Integrations", () => {
     expect(within(panel).getByRole("link", { name: /Add a task with a due date/ }).getAttribute("href")).toBe("#productivity");
   });
   it("surfaces invalid dates instead of downloading a malformed calendar, then recovers", async () => {
-    const createObjectURL = vi.fn(() => "blob:ics");
+    const createObjectURL = vi.fn((_blob: Blob | MediaSource) => "blob:ics");
     stubCalendarObjectUrl(createObjectURL);
     const task = useStore.getState().tasks[0];
     useStore.setState({ tasks: [{ ...task, due: "2999-02-31" }] });
