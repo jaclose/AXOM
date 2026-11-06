@@ -539,7 +539,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
         </aside>
       </div>
       {submittingQuestionSet && <QuestionSetLibrarySubmitDialog key={submittingQuestionSet.id}
-        set={submittingQuestionSet} questions={questions} onClose={() => setSubmittingQuestionSetId("")} />}
+        set={submittingQuestionSet} questions={questions} autoDraft onClose={() => setSubmittingQuestionSetId("")} />}
     </>}
   </section>;
 }
