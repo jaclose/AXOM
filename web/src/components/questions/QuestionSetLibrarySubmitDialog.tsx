@@ -17,6 +17,8 @@ import { Modal } from "../ui/Modal";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import "../../styles/question-set-library.css";
 
+const AI_EXPLANATION_PREFIX = "AXOM AI-assisted explanation (verify against source): ";
+
 export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDraft = false }: {
   set: QuestionSet;
   questions: readonly QuestionRecord[];
@@ -146,7 +148,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     for (const draft of drafts) {
       const question = current.get(draft.questionId);
       const keys = question?.options.map(option => option.key) ?? [];
-      if (draft.explanation.trim().length < 40 || draft.explanation.length > 30_000
+      if (draft.explanation.trim().length < 40 || draft.explanation.trim().length + AI_EXPLANATION_PREFIX.length > 30_000
         || keys.some(key => (draft.choiceRationales[key] ?? "").trim().length < 10
           || draft.choiceRationales[key].length > 10_000)) {
         setGenerationError("Finish the explanation and every choice rationale before saving.");
@@ -156,7 +158,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     for (const draft of drafts) {
       bank.updateQuestion(draft.questionId, {
         // Do not silently masquerade AI-authored teaching prose as a source rationale.
-        explanation: `AXOM AI-assisted explanation (verify against source): ${draft.explanation.trim()}`,
+        explanation: `${AI_EXPLANATION_PREFIX}${draft.explanation.trim()}`,
         choiceRationales: draft.choiceRationales,
       });
     }
