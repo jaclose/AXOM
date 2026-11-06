@@ -17,6 +17,7 @@ import { createLocalBackup } from "../localBackup";
 import { mergeStates, parseImport } from "../backup";
 import { recordRestoreEvent } from "../restoreHistory";
 import { deviceHasOwnWork } from "../saveProgress";
+import type { ShareMode } from "../community/progressBoard";
 
 /**
  * App-wide account state. The Settings panel, the sidebar status badge, and
@@ -42,6 +43,19 @@ export type LinkState = "linked" | "unlinked" | "linked-elsewhere";
 
 /** Every AXOM auth email carries a code, so desktop users never need the link. */
 export type CodeKind = "sign-in" | "signup" | "recovery";
+
+/** These choices seed a new account only. Existing accounts keep their saved consent. */
+export interface CommunitySignupPreferences {
+  discoverable: boolean;
+  shareMode: ShareMode;
+}
+
+function signupCommunityPreferences(preferences?: CommunitySignupPreferences): CommunitySignupPreferences {
+  return {
+    discoverable: preferences?.discoverable === true,
+    shareMode: preferences?.shareMode === "friends" || preferences?.shareMode === "community" ? preferences.shareMode : "off",
+  };
+}
 
 interface AccountState {
   phase: AccountPhase;
@@ -70,8 +84,8 @@ interface AccountState {
 
   init(): void;
   signIn(email: string, password: string): Promise<boolean>;
-  signUp(email: string, password: string, displayName: string): Promise<boolean>;
-  sendCode(email: string): Promise<boolean>;
+  signUp(email: string, password: string, displayName: string, communityPreferences?: CommunitySignupPreferences): Promise<boolean>;
+  sendCode(email: string, communityPreferences?: CommunitySignupPreferences): Promise<boolean>;
   verifyCode(email: string, code: string): Promise<boolean>;
   requestPasswordReset(email: string): Promise<boolean>;
   updatePassword(password: string): Promise<boolean>;
@@ -332,13 +346,13 @@ export const useAccount = create<AccountState>((set, get) => {
         return true;
       });
       if (result) {
-        set({ message: "Signed in. Nothing on this device has changed." });
+        set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, message: "Signed in. Nothing on this device has changed." });
         await welcomeBack();
       }
       return Boolean(result);
     },
 
-    async signUp(email, password, displayName) {
+    async signUp(email, password, displayName, communityPreferences) {
       const emailError = validateEmail(email) ?? validatePassword(password);
       if (emailError) { set({ error: emailError }); return false; }
       const result = await guarded("Creating your account…", async () => {
@@ -346,7 +360,12 @@ export const useAccount = create<AccountState>((set, get) => {
           email: email.trim(),
           password,
           options: {
-            data: { display_name: displayName.trim().slice(0, 80) || useStore.getState().profile.name || "Learner" },
+            data: {
+              display_name: displayName.trim().slice(0, 80) || useStore.getState().profile.name || "Learner",
+              // The auth-user insert trigger persists this even when email confirmation
+              // happens on another device. It never reapplies it to an existing account.
+              axom_community_preferences: signupCommunityPreferences(communityPreferences),
+            },
             emailRedirectTo: authRedirectUrl(),
           },
         });
@@ -355,17 +374,21 @@ export const useAccount = create<AccountState>((set, get) => {
         return data.session ? "signed-in" : "confirm";
       });
       if (result === "confirm") set({ pendingCodeEmail: email.trim(), pendingCodeKind: "signup", message: `We emailed a confirmation code to ${email.trim()}. Enter it below, or use the link in the email. Local work is unchanged.` });
-      if (result === "signed-in") set({ message: "Account created. Choose whether to protect this device’s workspace." });
+      if (result === "signed-in") set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, message: "Account created. Choose whether to protect this device’s workspace." });
       return Boolean(result);
     },
 
-    async sendCode(email) {
+    async sendCode(email, communityPreferences) {
       const emailError = validateEmail(email);
       if (emailError) { set({ error: emailError }); return false; }
       const result = await guarded("Sending a sign-in code…", async () => {
         const { error } = await (await client()).auth.signInWithOtp({
           email: email.trim(),
-          options: { shouldCreateUser: true, emailRedirectTo: authRedirectUrl() },
+          options: {
+            shouldCreateUser: true,
+            emailRedirectTo: authRedirectUrl(),
+            data: { axom_community_preferences: signupCommunityPreferences(communityPreferences) },
+          },
         });
         if (error) throw error;
         return true;

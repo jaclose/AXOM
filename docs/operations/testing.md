@@ -62,8 +62,12 @@ console, resize and reduced-motion review.
 
 `.github/workflows/quality.yml` runs web quality, release tests, update/offline checks,
 production dependency audit and native checks on PRs, main/integration pushes and merge
-groups. Both root and web dependencies are installed. It does not currently run the general
-Playwright E2E suite; do not equate CI green with the full local gate.
+groups. Both root and web dependencies are installed. Its three `browser` shards
+run the complete Playwright suite, including the SQL-backed Community/Host
+journey, Community profile/post/reply/privacy, and dashboard widget acceptance.
+They retain phone/desktop, dark/light screenshots and failure traces as artifacts.
+Those fixtures use real PostgreSQL policies with synthetic Auth/REST transport;
+they do not prove live GoTrue email confirmation or deployed PostgREST behavior.
 
 Do not retry unrelated failures blindly. Reproduce them on the base revision, capture
 an exact failing test/command, and keep scope clear. Known environment traps and

@@ -87,6 +87,8 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
     } satisfies CommunicationsSettings);
     if (path === "/auth/v1/user") return json({ id: userId, aud: "authenticated", role: "authenticated", email: "owner@example.test",
       app_metadata: {}, user_metadata: {}, created_at: "2026-10-27T00:00:00Z" });
+    // App-wide sharing checks are private by default for this synthetic account.
+    if (method === "POST" && path === "/rest/v1/rpc/axom_community_preferences") return json({ discoverable: false, shareMode: "off", revision: 1 });
     if (path.endsWith("/rpc/academic_is_reviewer")) return json(Boolean(options.reviewer));
     if (path.endsWith("/rpc/academic_review_queue")) return json([]);
     if (path.endsWith("/rpc/axom_operator_role")) return json(null);

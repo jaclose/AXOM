@@ -71,3 +71,44 @@ Focused tests: `localVault.test.ts`, `storeMigrations.test.ts`, `storageRecovery
 `web/scripts/verify-app-updates.mjs` checks checkpoint/update behavior. The 2,857-line
 baseline `store.ts` is a future incremental refactor candidate, not a reason to read
 or split it wholesale for every feature task.
+
+## Community data and consent
+
+Community is account data, separate from the portable private workspace.
+`20261106020000_community_experience.sql` adds account-owned `social_preferences`,
+parent-scoped `social_comments`, and server-managed `social_progress_blocks`, plus
+post provenance and revision fields. RLS applies to each table. Account export
+includes the new preferences, replies and deleted-day suppression records;
+account deletion cascades them. Leaving Community removes the social profile,
+posts, replies and relationships and turns sharing/discovery off while leaving
+the private workspace and Auth account intact.
+
+The migration preserves existing discovery choices and initializes automatic
+sharing to Off. Preexisting posts lack source provenance, so they are classified
+as manual and keep their audience. Off cannot retrospectively distinguish any
+automatic posts made by older preview clients; those posts can be removed
+individually or by leaving Community.
+
+`axom_save_community_preferences` serializes account consent changes with automatic
+publishing. Each change advances a consent generation. A delayed request from an
+older generation fails even if sharing has subsequently been reenabled. Off
+withdraws previously automatic progress from other readers; Community to Friends
+narrows automatic posts. Increasing consent never widens existing posts. Manual
+posts retain their explicitly chosen audience. Automatic publication requires a
+profile, current consent, and a linked device workspace.
+
+Automatic progress has one authoritative row per learner and study day. Revision
+comparison permits a confirmed device to correct totals downward or to zero;
+an unconfirmed divergent device must resolve through the explicit daily-progress
+composer. Deleting a progress day suppresses background recreation until the
+learner explicitly republishes it. Direct legacy writes cannot bypass the RPC's
+consent, revision and suppression checks. Notes, source content, private answers,
+question text and other private workspace fields never enter these aggregates.
+Study-day keys remain the author's local calendar dates; the server rejects days
+beyond the latest current civil date worldwide (UTC+14).
+
+Shared standings and profiles read only visible rows. A friend's visibility
+does not grant access to private QBank or account snapshots. Reactions and replies
+follow the parent's read permissions, and unfriend or audience withdrawal denies
+future reads. Client response guards also reject account switches, including an
+away-and-back transition while a request was outstanding.

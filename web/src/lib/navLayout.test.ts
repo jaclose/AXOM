@@ -4,13 +4,20 @@ import { applyNavOrder, moveNavItem, normalizeNavOrder, stepNavItem, upgradeNavL
 describe("sidebar layout", () => {
   it("upgrades an existing layout once: hides the Misc tools, keeps Soundscapes and Daily Games on", () => {
     const first = upgradeNavLayout(["courses", "soundscapes", "daily-word"], undefined);
-    expect(first.navLayoutVersion).toBe(2);
+    expect(first.navLayoutVersion).toBe(3);
     expect(first.hiddenNav).toEqual(expect.arrayContaining(["courses", "tasks", "methods", "prompts", "folders"]));
     expect(first.hiddenNav).not.toContain("soundscapes");
     expect(first.hiddenNav).not.toContain("daily-word");
     // Later the learner re-enables Tasks: the upgrade never runs again.
     const afterChoice = upgradeNavLayout(first.hiddenNav.filter((id) => id !== "tasks"), first.navLayoutVersion);
     expect(afterChoice.hiddenNav).not.toContain("tasks");
+  });
+
+  it("moves the legacy leaderboard shortcut into Community once without resetting prior choices", () => {
+    const upgraded = upgradeNavLayout(["soundscapes", "courses"], 2);
+    expect(upgraded.hiddenNav).toEqual(["soundscapes", "courses", "leaderboards"]);
+    const restored = upgradeNavLayout(upgraded.hiddenNav.filter(id => id !== "leaderboards"), 3);
+    expect(restored.hiddenNav).toEqual(["soundscapes", "courses"]);
   });
 
   it("orders a section by the learner's choice and leaves unmoved items in place after", () => {

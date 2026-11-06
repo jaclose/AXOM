@@ -21,6 +21,7 @@ vi.mock("../components/tracker/SharedDailyLeaderboard", () => ({
 vi.mock("./CommunityPage", () => ({
   CommunityPage: () => <div>Study circle loaded</div>,
 }));
+vi.mock("./LeaderboardsPage", () => ({ LeaderboardsPage: () => <div>Personal study record loaded</div> }));
 
 beforeEach(() => {
   account = { phase: "unconfigured", user: null };
@@ -34,8 +35,9 @@ describe("CommunitiesPage", () => {
     const user = userEvent.setup();
     render(<CommunitiesPage />);
 
-    expect(screen.getByRole("main", { name: "Shared study, with provenance." })).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1, name: "Shared study, with provenance." })).toBeTruthy();
+    expect(screen.getByRole("main", { name: "Community" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Community" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Course exchange/i }));
     await user.click(screen.getByRole("button", { name: "Open saved questions" }));
     expect(window.location.hash).toBe("#questions");
   });
@@ -64,9 +66,15 @@ describe("CommunitiesPage", () => {
   it("opens the opt-in social space from Communities", async () => {
     const user = userEvent.setup();
     render(<CommunitiesPage />);
-
-    await user.click(screen.getByRole("button", { name: /Study circle/i }));
     expect(await screen.findByText("Study circle loaded")).toBeTruthy();
     expect(screen.getByRole("region", { name: "Study circle" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Personal bests/i }));
+    expect(await screen.findByText("Personal study record loaded")).toBeTruthy();
+  });
+
+  it("preserves the legacy personal leaderboard destination within Community", async () => {
+    render(<CommunitiesPage initialSpace="records" />);
+    expect(await screen.findByText("Personal study record loaded")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Personal bests/i }).getAttribute("aria-pressed")).toBe("true");
   });
 });

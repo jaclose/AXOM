@@ -4,16 +4,24 @@ Status (2026-11-02): The Host, Community and searchable Question Set Library UI 
 
 ## Community
 
-The #community page extends optional Supabase accounts without moving or auto-publishing any saved learner workspace data.
+The Study circle inside `#communities` extends optional Supabase accounts without
+moving private workspace data. `#community` remains a compatible direct link.
+The [Communities contract](communities.md) owns the current profile, post and
+dashboard widget experience.
 
 1. Sign into each AXOM account.
-2. Each learner independently creates a profile and chooses a handle. Discovery is unchecked by default; existing accounts are not auto-listed.
+2. At account creation, each learner can choose discovery and automatic progress sharing, both off by default. Later changes live in Account Settings. The Community tab creates and edits their handle, display name and bio; existing accounts are not auto-listed.
 3. Find the other opted-in handle, send a friend request, and accept it on the other account.
-4. Select a study day to publish an optional aggregate, or choose a local Question Set whose title only can be celebrated. Posts default to Private. Accepted friends and Community are deliberate alternatives.
-5. Both people can give Kudos to eligible posts and compare the last seven days of self-shared progress. Private posts never enter shared standings; repeated posts for a day cannot multiply totals. Separate Daily Challenge standings remain server-verified.
-6. People can hide themselves from discovery, remove friends, delete individual posts or leave Community without touching local QBank materials.
+4. Write an update or study invitation, select a study day's aggregate, or announce a Question Set title. Posts default to Only me. Friends and Community are deliberate alternatives. Replies, author edits/deletes, Kudos and reported-post moderation respect the current audience.
+5. Compare self-shared progress in Study circle: Friends (you and accepted friends) or Community (public days from discoverable learners), ranked by study time, questions or cards over 7 or 30 days, with today's figure, a shared streak and days shared. Private posts never enter standings; one row per person per day prevents duplicate totals. Daily Challenge standings remain separately server-verified. Local Personal bests also lives inside Community.
+6. Optional automatic sharing uses account-owned `social_preferences` and revision-checked RPCs, introduced by `20261106020000_community_experience.sql`. A linked workspace and current consent are required. Off withdraws old automatic rows; stale requests cannot republish them. Corrected totals can decrease or become zero; conflicting devices require explicit resolution. Deleted days stay suppressed until deliberately republished. See [data and consent](../architecture/data-model.md#community-data-and-consent).
+7. People can hide themselves from discovery, remove friends, delete individual posts or leave Community without touching local QBank materials.
 
-The social tables have restrictive RLS. Non-discoverable people are visible only to themselves and accepted friends. Friends-only posts require an accepted connection for RLS to expose them. Unfriending immediately removes that access. Reports may surface a reported post's metadata to a moderator; the unreported feed is not a host-wide surveillance view.
+The social tables have restrictive RLS. Non-discoverable profiles are visible to
+themselves, accepted friends, and the recipient of an outgoing pending request.
+Pending requests grant no friends-only activity access. Unfriending immediately
+removes that access. Reports may surface a reported post's metadata to a moderator;
+the unreported feed is not a host-wide surveillance view.
 
 **Question Set announcement is not source sharing.** No private question text, answers, share tokens, source PDFs or media are copied to social_posts. Link a set only through the existing explicit share/review mechanism and rights controls. A user may post a title from a private set, so the UI warns them before publishing.
 
@@ -42,7 +50,7 @@ The #host page has server-authorized roles, never front-end-only permissions:
 | Moderator | Submitted shared QBank metadata and reported post moderation |
 | Normal learner | No operator data or permission writes |
 
-**Host is visible only to the verified Project CEO** (JD's request, 2026-11-04). The sidebar item, page title, Settings "Host access" panel and Community shortcut appear only after the shared `axom_operator_role` readback reports `owner`. Every other account, administrators and moderators included, gets the dashboard for a `#host` link, and an unknown route takes the dashboard's title. The rule lives in `web/src/lib/operator/hostAccess.ts`; one shared role check in `hostClient.ts` feeds every screen and keeps its answer through background rechecks. Administrator and moderator RPCs remain server-authorized but have no interface while this rule stands.
+**Host is visible only to the verified Project CEO** (JD's request, 2026-11-04). The sidebar item, page title, Settings "Host access" panel and Community shortcut appear only after the shared `axom_operator_role` readback reports `owner`. Every other account, administrators and moderators included, gets the dashboard for a `#host` link, and an unknown route takes the dashboard's title. The rule lives in `web/src/lib/operator/hostAccess.ts`; one shared role check in `hostClient.ts` feeds every screen and keeps its answer through background rechecks. Administrators and moderators (and the owner) review reported posts in a **Reported posts** panel inside Community instead (JD's choice, 2026-11-05); it reuses `axom_operator_reports` and `axom_operator_resolve_report`, needs the same 8–500 character reason, and re-reads the role when Community opens so a newly granted moderator sees it without reloading. Administrators have no directory or metrics screen while Host is owner-only.
 
 Project CEO/administrator access does not bypass private workspace snapshot policies. Operators cannot approve Question Banks by unchecked bulk actions. The Host queue is restricted to the current, ready revision in an explicit pending `academic_community_submissions` record; group visibility alone never puts a collection in this queue. The visible Project CEO badge appears only after the authenticated account's `axom_operator_role` readback reports `owner`. The database permits one owner row, provisioned for JD only after immutable Auth ID verification.
 
@@ -66,7 +74,7 @@ Do not paste private emails, JWTs or service keys into the public repository. Ro
 ## Deployment and verification gates
 
 1. Check the current integration/coordination state and protected local work. The remote Mac was offline during this branch's creation, so no local files or uncommitted material were read, replaced, staged or reset.
-2. `20261104120000_operator_accounts_email_text.sql` repairs the Host account directory: Supabase stores `auth.users.email` as `varchar(255)`, which PL/pgSQL `RETURN QUERY` rejects for the declared `text` column (42804), so the owner's dashboard and account search failed on every load. Local fixtures now create that column as `varchar(255)`. It is pending on production until JD approves `db push`.
+2. `20261104120000_operator_accounts_email_text.sql` repairs the Host account directory: Supabase stores `auth.users.email` as `varchar(255)`, which PL/pgSQL `RETURN QUERY` rejects for the declared `text` column (42804), so the owner's dashboard and account search failed on every load. Local fixtures now create that column as `varchar(255)`. Applied to AXOM Production on 2026-11-04 with JD's approval and verified as his owner account.
 3. The 2026-11-02 production dry run listed exactly seven pending migrations, no seeds or roles. They applied in order: `20261101190000_community_social.sql`, `20261101191000_operator_console.sql`, `20261101192000_question_set_library.sql`, `20261101193000_journal_experience_feedback.sql`, `20261102160000_operator_privacy_audit_hardening.sql`, `20261102170000_academic_review_queue.sql`, and `20261102171000_reviewer_attestation_identity.sql`. The earlier four-migration postflight was on preview only. Do not replay these versions. The older `20261101120000` and `20261101130000` versions belong to separate academic migrations.
 4. Run PGlite/Postgres RLS tests with at least three distinct JWT identities, plus anonymous access. Attempt spoofed sender IDs, reverse friend requests, self-requests, forged role assignment, social post updates to another owner, friendship reassignments, denied AI quota edits and access after unfriend.
 5. Verify privileged RPCs return 42501 for users with no role, that the unsubmitted group collection is absent from Host monitoring, and that private posts disappear from report moderation. Verify a second owner is rejected and report decisions store a reason. Inspect function privileges and run the Supabase security advisor.
@@ -75,7 +83,7 @@ Do not paste private emails, JWTs or service keys into the public repository. Ro
 8. Check build, typecheck, lint, unit tests, QBank Playwright, Vercel preview and real-account reload. GitHub CI is not a substitute for live multi-account or migration tests.
 9. Approve integration into main and only then verify the production commit and runtime schema. No auto-publication of user material.
 
-Not in this slice: account-wide suspension, persistent user blocking, configurable capability policies beyond the existing three operator roles, billing/token/latency attribution, comment threads, full Question Set content in the feed, independent source-rights verification tools, trusted general QBank/course-event ingestion, realtime push notifications or automatic Anki imports. Unfriend removes friends-only access but is not a block. Persistent blocking needs an auth-bound record that survives leaving and rejoining Community. Self-shared standings must never be described as verified study rankings.
+Not in this slice: account-wide suspension, persistent user blocking, configurable capability policies beyond the existing three operator roles, billing/token/latency attribution, full Question Set content in the feed, independent source-rights verification tools, trusted general QBank/course-event ingestion, realtime push notifications or automatic Anki imports. Unfriend removes friends-only access but is not a block. Persistent blocking needs an auth-bound record that survives leaving and rejoining Community. Self-shared standings must never be described as verified study rankings.
 
 ## Historical PR #30 integration boundary
 

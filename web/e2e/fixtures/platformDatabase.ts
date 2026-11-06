@@ -18,18 +18,22 @@ const rpcNames = new Set(["axom_operator_role", "axom_operator_overview", "axom_
   "academic_catalog",
   "academic_is_reviewer", "submit_question_set_library", "withdraw_question_set_library", "review_question_set_library",
   "my_question_set_library", "pending_question_set_library", "set_question_set_library_like",
-  "list_question_set_library", "get_question_set_library"]);
+  "list_question_set_library", "get_question_set_library", "axom_community_preferences", "axom_save_community_preferences",
+  "axom_leave_community", "axom_sync_community_day", "axom_publish_community_day", "axom_create_community_profile"]);
 const tables = new Set(["social_profiles", "social_connections", "social_posts", "social_reactions", "social_post_reports", "axom_operator_audit",
-  "journal_experience_feedback"]);
+  "journal_experience_feedback", "social_preferences", "social_comments", "social_progress_blocks"]);
 const identifier = (value: string) => {
   if (!/^[a-z_]+$/.test(value)) throw new Error("Unexpected fixture identifier");
   return `"${value}"`;
 };
 
 export async function createPlatformDatabase() {
-  // PGlite's default DATE parser creates a Date, while PostgREST sends YYYY-MM-DD.
-  // Preserve SQL date text so date-window logic sees the production wire shape.
-  const db = new PGlite({ extensions: { pgcrypto }, parsers: { 1082: value => value } });
+  // Preserve PostgREST's date strings and full timestamp precision. A JS Date
+  // truncates microseconds, which can make an unchanged reply fail its edit CAS.
+  const db = new PGlite({ extensions: { pgcrypto }, parsers: {
+    1082: value => value,
+    1184: value => value.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00"),
+  } });
   await db.exec(`
     create schema extensions;
     create extension pgcrypto with schema extensions;
@@ -98,6 +102,9 @@ export async function createPlatformDatabase() {
     for (const [column, value] of url.searchParams.entries()) {
       if (["select", "order", "limit", "offset", "on_conflict"].includes(column)) continue;
       if (value.startsWith("eq.")) predicates.push(`${identifier(column)} = ${bind(value.slice(3))}`);
+      else if (value.startsWith("neq.")) predicates.push(`${identifier(column)} <> ${bind(value.slice(4))}`);
+      else if (value.startsWith("gte.")) predicates.push(`${identifier(column)} >= ${bind(value.slice(4))}`);
+      else if (value.startsWith("gt.")) predicates.push(`${identifier(column)} > ${bind(value.slice(3))}`);
       else if (value.startsWith("ilike.")) predicates.push(`${identifier(column)} ilike ${bind(value.slice(6))}`);
       else if (value.startsWith("in.(") && value.endsWith(")")) {
         const members = value.slice(4, -1).split(",");
@@ -139,6 +146,7 @@ export async function createPlatformDatabase() {
   const attach = async (page: Page, index: 0 | 1) => {
     const person = PLATFORM_USERS[index];
     const unexpected: string[] = [];
+    const metadata: Record<string, unknown> = { display_name: person.name };
     await page.addInitScript(({ url, person, nudges }) => {
       Object.assign(window, { __AXOM_E2E_ACCOUNT__: { url, key: "synthetic-public-fixture-key" } });
       const user = { id: person.id, aud: "authenticated", role: "authenticated", email: `${person.handle}@example.test`,
@@ -172,7 +180,11 @@ export async function createPlatformDatabase() {
         return json(200, { preferences: [], identity: { accent: "gold", theme: "dark" }, history: [], privacy: [], admin: false,
           deliveryMode: "disabled", deletionEnabled: false, hasProtectedCopy: false });
       }
-      if (url.pathname === "/auth/v1/user") return json(200, { id: person.id, aud: "authenticated", role: "authenticated", email: `${person.handle}@example.test`, user_metadata: { display_name: person.name }, app_metadata: {} });
+      if (url.pathname === "/auth/v1/user") {
+        // Account metadata persists per synthetic account, like Supabase Auth's merge.
+        if (request.method() === "PUT") Object.assign(metadata, (request.postDataJSON() as { data?: Record<string, unknown> } | null)?.data ?? {});
+        return json(200, { id: person.id, aud: "authenticated", role: "authenticated", email: `${person.handle}@example.test`, user_metadata: { ...metadata }, app_metadata: {} });
+      }
       unexpected.push(`${request.method()} ${url.pathname}${url.search}`);
       return json(404, { message: "Request is outside this local fixture" });
     });

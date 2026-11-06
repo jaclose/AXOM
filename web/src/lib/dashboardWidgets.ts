@@ -74,6 +74,7 @@ export const DASHBOARD_WIDGET_CATALOG: readonly DashboardWidgetCatalogItem[] = [
   { id: "examCountdown", label: "Exam countdown", description: "Exam date, phase, and daily question target.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("days", "phase", "questionTarget") },
   { id: "pomodoro", label: "Focus timer", description: "Current focus session and timer controls.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("timer", "intention", "sessions") },
   { id: "soundscapes", label: "Soundscape", description: "Play, pause, and switch your study sound next to the timer.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields(["quickPicks", "Quick picks"], ["followTimer", "Follow my Pomodoro"]) },
+  { id: "community", label: "Community", description: "Your friends, incoming requests, and recent shared activity.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields(["friends", "Friends and requests"], ["activity", "Shared activity"]) },
   { id: "weekly", label: "Weekly overview", description: "Seven-day effort and active-day rhythm.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("minutes", "activeDays", "trend") },
   { id: "suggested", label: "Suggested moves", description: "Merged into Up next; retained for old layouts.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("actions", "reasons", "effort"), storageOnly: true },
   { id: "schedule", label: "Schedule", description: "Legacy calendar widget retained for old layouts.", defaultSize: "large", supportedSizes: ALL_SIZES, fields: fields("calendar", "tasks", "activity"), storageOnly: true },
@@ -104,11 +105,11 @@ const CATALOG_BY_ID = new Map<string, DashboardWidgetCatalogItem>(
 const FOCUSED_ORDER: DashboardWidgetId[] = [
   "welcome", "commandBrief", "winDay", "pomodoro", "soundscapes", "todayScore", "questionBank",
   "courseTracker", "weekly", "dailyWord", "tasks", "journal", "examCountdown", "readiness",
-  "activity", "streak", "localData", "premedHours",
+  "activity", "streak", "community", "localData", "premedHours",
 ];
 
 /** Bump when default orders gain widgets; upgradeDashboardLayout carries saved layouts forward. */
-export const DASHBOARD_DEFAULTS_REVISION = 2;
+export const DASHBOARD_DEFAULTS_REVISION = 3;
 
 const STUDY_HEAVY_VISIBLE = new Set<DashboardWidgetId>([
   "welcome", "commandBrief", "todayScore", "tasks", "courseTracker", "questionBank",
@@ -317,17 +318,24 @@ export function upgradeDashboardLayout(layout: DashboardLayoutPreferences): Dash
   const widgets = { ...layout.widgets };
   let order = [...layout.order];
   const preset = layout.preset === "custom" ? undefined : PRESET_BY_ID.get(layout.preset);
-  if (preset) {
+  if (preset && (layout.defaultsRevision ?? 1) < 2) {
     order = [...preset.order, ...order.filter((id) => !preset.order.includes(id as DashboardWidgetId))];
     if (preset.hiddenWidgetIds.includes("soundscapes")) hidden.add("soundscapes");
     else hidden.delete("soundscapes");
     widgets.soundscapes ??= normalizeWidgetPreferences("soundscapes", { size: preset.sizes.soundscapes });
-  } else if (!order.includes("soundscapes")) {
+  } else if ((layout.defaultsRevision ?? 1) < 2 && !order.includes("soundscapes")) {
     const timer = order.indexOf("pomodoro");
     order.splice(timer < 0 ? order.length : timer + 1, 0, "soundscapes");
     if (timer < 0 || hidden.has("pomodoro")) hidden.add("soundscapes");
     widgets.soundscapes ??= defaultDashboardWidgetPreferences("soundscapes");
   }
+  // Community is available in the widget library without changing a learner's
+  // chosen dashboard or starting account requests on a previously local view.
+  if (!order.includes("community")) {
+    order.push("community");
+    hidden.add("community");
+  }
+  widgets.community ??= defaultDashboardWidgetPreferences("community");
   return { ...layout, order, hiddenWidgetIds: [...hidden], widgets, defaultsRevision: DASHBOARD_DEFAULTS_REVISION };
 }
 

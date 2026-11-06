@@ -4,7 +4,7 @@
 // section can be reordered. Existing profiles are upgraded once, by version,
 // and whatever the learner re-enables afterwards stays enabled.
 
-export const NAV_LAYOUT_VERSION = 2;
+export const NAV_LAYOUT_VERSION = 3;
 export const NAV_V2_HIDDEN = ["tasks", "methods", "prompts", "folders"] as const;
 export const NAV_V2_SHOWN = ["soundscapes", "daily-games", "daily-word", "doctordle"] as const;
 
@@ -12,8 +12,13 @@ export function upgradeNavLayout(hiddenNav: readonly string[], version: unknown)
   const from = typeof version === "number" && Number.isFinite(version) ? version : 1;
   if (from >= NAV_LAYOUT_VERSION) return { hiddenNav: [...hiddenNav], navLayoutVersion: from };
   const next = new Set(hiddenNav);
-  NAV_V2_HIDDEN.forEach((id) => next.add(id));
-  NAV_V2_SHOWN.forEach((id) => next.delete(id));
+  if (from < 2) {
+    NAV_V2_HIDDEN.forEach((id) => next.add(id));
+    NAV_V2_SHOWN.forEach((id) => next.delete(id));
+  }
+  // Rankings now live in Community. Keep the legacy route and saved order so
+  // learners can still restore its shortcut without losing their study history.
+  if (from < 3) next.add("leaderboards");
   return { hiddenNav: [...next], navLayoutVersion: NAV_LAYOUT_VERSION };
 }
 

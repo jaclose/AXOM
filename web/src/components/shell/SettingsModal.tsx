@@ -416,7 +416,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       )}
       {tab === "account" && (
         <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`} className="settings-account-panel">
-          <AccountSyncPanel onOpenBackup={() => setTab("backup")} />
+          <AccountSyncPanel onOpenBackup={() => setTab("backup")} onOpenCommunity={onClose} />
           {otherWorkspace && <aside className="settings-other-workspace" aria-label="Other AXOM address">
             <div><b>Looking for work on the other AXOM address?</b><p>Browser work is stored separately at each address. This workspace stays here.</p></div>
             <a href={otherWorkspace} target="_blank" rel="noopener noreferrer">Open www.axom.info</a>
