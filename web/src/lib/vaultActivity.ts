@@ -20,6 +20,8 @@ export const VAULT_WRITE_EVENT = "axom:vault-write";
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
 let lastPersistedAt = 0;
+/** Preserve verified current-runtime IndexedDB writes if the optional status key is quota-blocked. */
+let memoryOnlyConfirmedWrite = false;
 let failingSince: string | null = null;
 /** A removed/missing workspace must not rehydrate stale save-success metadata. */
 let statusInvalidated = false;
@@ -50,7 +52,13 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
   // keystroke: at most once per second.
   if (now.getTime() - lastPersistedAt >= 1000) {
     lastPersistedAt = now.getTime();
-    try { window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(lastWrite)); } catch { /* optional */ }
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(lastWrite));
+      memoryOnlyConfirmedWrite = false;
+    } catch {
+      // The IndexedDB workspace save can still be verified in this tab.
+      memoryOnlyConfirmedWrite = true;
+    }
   }
   if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
@@ -70,6 +78,7 @@ export function invalidateVaultWrite(): void {
   } catch { /* Optional metadata may be unavailable. */ }
   lastWrite = null;
   lastPersistedAt = 0;
+  memoryOnlyConfirmedWrite = false;
   statusInvalidated = true;
   try {
     window.localStorage.removeItem(STORAGE_KEYS.lastVaultWriteAt);
@@ -113,6 +122,9 @@ function readStoredWorkspaceMarker(): VaultWriteRecord | null {
  */
 export function readLastVaultWrite(): VaultWriteRecord | null {
   if (statusInvalidated) return null;
+  // A confirmed in-process workspace write remains truthful when only the
+  // optional localStorage *status* marker was blocked by browser quota.
+  if (lastWrite && memoryOnlyConfirmedWrite) return lastWrite;
   const stored = readStoredWorkspaceMarker();
   if (!stored) {
     lastWrite = null;
@@ -139,6 +151,7 @@ export function subscribeVaultWriteStatus(listener: () => void): () => void {
     }
     lastWrite = null;
     lastPersistedAt = 0;
+    memoryOnlyConfirmedWrite = false;
     try {
       // Reconcile with the latest persisted value, rather than assuming
       // one queued event is newer than every write from another tab.

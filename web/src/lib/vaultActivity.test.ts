@@ -162,3 +162,24 @@ describe("cross-tab workspace marker consistency", () => {
     unsubscribe();
   });
 });
+
+describe("optional marker storage quota boundaries", () => {
+  it("retains a verified in-process workspace save when optional status metadata cannot be written", async () => {
+    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    const rejected = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("simulated metadata-only quota rejection");
+    });
+    try {
+      markVaultWrite("indexeddb", new Date(savedAt));
+      expect(readLastVaultWrite()).toEqual({
+        at: savedAt, target: "indexeddb", version: 2, scope: "workspace",
+      });
+    } finally {
+      rejected.mockRestore();
+    }
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+    // An absent marker is never promoted to persisted success on another load.
+    vi.resetModules();
+    expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
+  });
+});
