@@ -112,6 +112,7 @@ test("setup keeps its choices across refresh and they stay editable in Settings"
   await deferPromisePrompt(page);
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Open navigation menu" }).click();
+  await expect(page.getByRole("region", { name: "Focus dock" })).toHaveCount(0);
   await page.getByTitle("Settings", { exact: true }).click();
   await page.getByRole("combobox", { name: "Settings section" }).selectOption("personalization");
   await expect(page.getByRole("button", { name: "Quizlet", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -121,6 +122,8 @@ test("setup keeps its choices across refresh and they stay editable in Settings"
   await page.getByLabel("Your Noji approach (optional)").fill("My edited approach");
   await noOverflow(page);
   await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("region", { name: "Focus dock" })).toBeVisible();
   expect(errors).toEqual([]);
 });
 

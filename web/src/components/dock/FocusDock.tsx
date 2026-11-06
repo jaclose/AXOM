@@ -22,6 +22,11 @@ const QUICK_LOGS = Object.keys(QUICK_LOG_LABEL) as SessionQuickLog[];
 const GENIE_OPEN_DELAY = 140;
 const GENIE_CLOSE_DELAY = 260;
 const GENIE_OUT_MS = 260;
+const DOCK_HOVER_QUERY = "(min-width: 561px) and (hover: hover) and (pointer: fine)";
+
+function dockHoverEnabled(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia(DOCK_HOVER_QUERY).matches;
+}
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -146,7 +151,7 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
     <Capsule
       ghost={ghost}
       className={`dock-timer ${expanded ? "expanded" : ""} ${running ? "" : "paused"}`}
-      onMouseEnter={() => { window.clearTimeout(closeTimer.current); onExpand(true); }}
+      onMouseEnter={() => { if (dockHoverEnabled()) { window.clearTimeout(closeTimer.current); onExpand(true); } }}
       onMouseLeave={(event) => {
         const capsule = event.currentTarget;
         window.clearTimeout(closeTimer.current);
@@ -309,7 +314,7 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
     <div
       ref={wrapperRef}
       className="dock-sound-wrap"
-      onMouseEnter={ghost ? undefined : () => open()}
+      onMouseEnter={ghost ? undefined : () => { if (dockHoverEnabled()) open(); }}
       onMouseLeave={ghost ? undefined : () => close(GENIE_CLOSE_DELAY, true)}
       onFocus={ghost ? undefined : () => open(0)}
       onBlur={ghost ? undefined : (event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close(); }}

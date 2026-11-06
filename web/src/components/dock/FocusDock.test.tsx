@@ -29,7 +29,7 @@ beforeEach(() => {
     targetKind: "free", targetId: undefined, targetLabel: undefined, intention: "",
   });
   useSessionUi.setState({ focusMode: false, capturing: false });
-  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query.includes("(min-width: 561px)"), addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
 
 afterEach(() => {
@@ -121,6 +121,27 @@ describe("focus dock", () => {
     expect(useSoundscape.getState().status).toBe("idle");
     expect(screen.getByRole("button", { name: "Play sound" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Focus dock" }).querySelectorAll(".focus-dock-content .dock-capsule")).toHaveLength(2);
+  });
+
+  it("requires explicit activation on narrow or touch layouts while preserving keyboard access", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const { container } = render(<FocusDock />);
+    const trigger = screen.getByRole("button", { name: /soundscape.*show visual and controls/ });
+    fireEvent.mouseEnter(container.querySelector(".dock-sound-wrap")!);
+    fireEvent.mouseEnter(container.querySelector(".dock-timer")!);
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset timer" })).toBeNull();
+
+    fireEvent.click(trigger);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.focus(trigger);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
   it("labels the loaded recording until a paused replacement has actually started", async () => {

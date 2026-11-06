@@ -7,17 +7,18 @@ authority: current-state
 
 ## Productivity and Soundscapes · 2026-11-05
 
-Branch `codex/productivity-soundscapes-20261105`, integrated with `dc72d41`. JD authorized
-AXOM-only audio publication plus commit, push and merge after verification.
+PR #122, `codex/productivity-soundscapes-20261105`, includes `eb4e5d3`. JD authorized
+audio publication, push and merge after verification.
 The 566.920-second stereo loop is the default main sound and initial pin.
 [Soundscapes](features/soundscapes.md) owns playback, the reactive Orb and persistent
 dock; [Productivity](features/productivity.md) owns source accounting. No workspace
-schema change. Node 22.23.4 / npm 10.9.9: typecheck, lint, 4,763 unit tests (35
-skipped), 89 release tests, build, update/offline checks and focused feature browser
-acceptance passed. Independent reviews also found and fixed empty-shelf playback
-request invalidation and zero-minute activity best-day selection. The complete browser
-suite now runs in three hosted CI shards. Final candidate CI and production readback
-remain pending; this describes the release candidate, not a deployed release.
+schema change. Initial CI passed 4,765 unit tests (35 skips), 89 release tests and
+typecheck/lint/build. Local update/offline and feature browser checks passed.
+Review fixes cover audio races, best-day selection, responsive forms, mobile dock
+interception and readable capsule surfaces. Final CI (three browser shards) and
+live readback remain pending.
+Production Supabase denies this connection access: the regenerated Communications
+export bundle still needs deployment. The frontend does not depend on that update.
 
 ## Host and Communities repair · 2026-11-04
 

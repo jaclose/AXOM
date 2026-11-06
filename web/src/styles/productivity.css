@@ -5,11 +5,45 @@
 .productivity-next p, .productivity-save { margin: 0; color: var(--text-70); }
 .productivity-eyebrow { color: var(--gold); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .1em; }
 .productivity-save { text-align: right; font-size: var(--fs-xs); margin: 8px 0 14px; }
-.productivity-primary-grid, .surface-scroll .productivity-analytics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; gap: 16px; }
+.productivity-primary-grid, .surface-scroll .productivity-analytics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); align-items: stretch; gap: 16px; }
 .productivity-primary-grid > *, .surface-scroll .productivity-analytics > * { min-width: 0; height: 100%; }
 .productivity-primary-grid > div > .pomodoro { height: 100%; }
+.productivity-primary-grid .fast-activity-logger, .productivity-primary-grid .today-targets { grid-template-columns: minmax(0, 1fr); }
+.productivity-primary-grid .fast-activity-logger > * { min-width: 0; grid-column: auto; }
+.productivity-primary-grid .fast-activity-logger > .gbtn { grid-column: auto; justify-self: start; }
+.productivity-primary-grid .fast-activity-measures { grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+.productivity-primary-grid .fast-field.quantity input { flex: 1; width: 0; }
+.productivity-primary-grid .fast-field.quantity select { flex: 0 0 118px; }
+.productivity-primary-grid .daily-progress-vessel { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+.productivity-primary-grid .pomo-target-box { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+.productivity-primary-grid .pomo-target-box > label { min-width: 0; }
+.productivity-primary-grid .pomo-target-box .field { width: 100%; min-width: 0; }
+#productivity-log .daily-requirement-card-head { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+#productivity-log .daily-requirement-card-head > * { min-width: 0; grid-column: auto; grid-row: auto; }
+#productivity-log .daily-requirement-toggle input { flex: none; }
+#productivity-log .daily-requirement-toggle > span { min-width: 0; overflow-wrap: anywhere; }
+#productivity-log .daily-requirement-row,
+#productivity-log .daily-custom-grid,
+#productivity-log .daily-requirement-match-row,
+#productivity-log .daily-requirement-match-row.muted { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+#productivity-log .daily-requirement-row > *,
+#productivity-log .daily-custom-grid > *,
+#productivity-log .daily-requirement-match-row > * { min-width: 0; grid-column: auto; }
+#productivity-log .daily-requirement-aliases,
+#productivity-log .daily-custom-grid > .daily-custom-alias,
+#productivity-log .daily-weekdays { grid-column: 1 / -1; }
+#productivity-log .daily-weekdays { flex-wrap: wrap; min-inline-size: 0; }
+#productivity-log .daily-requirements-editor .field { width: 100%; min-width: 0; }
+#productivity-log .daily-requirement-remove { justify-self: end; }
+#productivity-log .daily-custom-grid > .gbtn { justify-self: start; }
+#productivity-log .daily-requirements-editor summary { flex-wrap: wrap; overflow-wrap: anywhere; }
+#productivity-log .daily-requirements-editor summary > svg { flex: none; }
 @media (max-width: 880px) { .productivity-primary-grid, .surface-scroll .productivity-analytics { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 560px) { .productivity-next { flex-wrap: wrap; padding: 16px; } .productivity-next img { width: 42px; height: 42px; } .productivity-next .gbtn { margin-left: 58px; } }
+@media (max-width: 560px) {
+  .productivity-next { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 12px 16px; padding: 16px; }
+  .productivity-next img { width: 42px; height: 42px; }
+  .productivity-next .gbtn { grid-column: 2; justify-self: start; }
+}
 .productivity-evidence { margin-top: 14px; color: var(--text-70); font-size: var(--fs-xs); }
 .productivity-evidence small { display: block; color: var(--text-50); }
 :root[data-theme="light"] .productivity-intel,
