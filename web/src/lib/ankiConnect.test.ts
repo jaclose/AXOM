@@ -3,6 +3,53 @@ import { AnkiError, addressSpaceFor, connectToAnki, createAnkiClient, fetchAnkiS
 import { createFakeFetch, FakeAnkiConnect } from "./anki/fake/fakeAnkiConnect";
 
 describe("AnkiConnect client", () => {
+  it("does not replay possibly applied writes or multi batches after a hinted connection failure", async () => {
+    // Simulate a browser which accepts the Chrome Local Network Access hint.
+    // The mocked Anki endpoint applies the command, then loses the response.
+    class HintRequest extends Request {
+      readonly targetAddressSpace?: string;
+      constructor(input: RequestInfo | URL, init?: RequestInit & { targetAddressSpace?: string }) {
+        super(input, init);
+        this.targetAddressSpace = init?.targetAddressSpace;
+      }
+    }
+    vi.stubGlobal("Request", HintRequest);
+    vi.stubGlobal("window", { location: { href: "https://www.axom.info/", origin: "https://www.axom.info", protocol: "https:" } });
+    try {
+      const applied: string[] = [];
+      const ambiguousFetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { action: string };
+        applied.push(body.action);
+        throw new TypeError("connection dropped after Anki applied the action");
+      });
+      const client = createAnkiClient({ endpoint: "http://127.0.0.1:8765", fetchImpl: ambiguousFetch });
+      const uncertainWrite = await client.call("addNote", { note: { deckName: "AXOM", modelName: "Basic", fields: { Front: "a", Back: "b" } } }).catch((error: unknown) => error);
+      expect(uncertainWrite).toMatchObject({ kind: "local-network-blocked", message: expect.stringContaining("may already have applied") });
+      // Keep sync.ts's offline-safe path: do not immediately retry an ambiguous add.
+      expect(isAnkiOffline(uncertainWrite)).toBe(true);
+      await expect(client.call("addNotes", { notes: [{ deckName: "AXOM", modelName: "Basic", fields: { Front: "c", Back: "d" } }] }))
+        .rejects.toMatchObject({ message: expect.stringContaining("may already have applied") });
+      await expect(client.multi([{ action: "addNote", params: { note: { deckName: "AXOM" } } }]))
+        .rejects.toMatchObject({ message: expect.stringContaining("may already have applied") });
+      expect(applied).toEqual(["addNote", "addNotes", "multi"]);
+      expect(ambiguousFetch).toHaveBeenCalledTimes(3);
+      expect((ambiguousFetch.mock.calls[0] as unknown as [string, RequestInit & { targetAddressSpace?: string }])[1].targetAddressSpace).toBe("loopback");
+
+      const readFetch = vi.fn()
+        .mockRejectedValueOnce(new TypeError("hint blocked before read"))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: 6, error: null })));
+      await expect(createAnkiClient({ endpoint: "http://127.0.0.1:8765", fetchImpl: readFetch }).call("version")).resolves.toBe(6);
+      expect(readFetch).toHaveBeenCalledTimes(2);
+      const first = (readFetch.mock.calls[0] as unknown as [string, RequestInit & { targetAddressSpace?: string }])[1];
+      const second = (readFetch.mock.calls[1] as unknown as [string, RequestInit & { targetAddressSpace?: string }])[1];
+      expect(first).toMatchObject({ targetAddressSpace: "loopback", redirect: "error" });
+      expect(second).toMatchObject({ redirect: "error" });
+      expect(second.targetAddressSpace).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("sends simple CORS requests: a JSON string body with no custom headers", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ result: 6, error: null })));
     const client = createAnkiClient({ endpoint: "http://127.0.0.1:8765", fetchImpl });

@@ -279,6 +279,16 @@ export interface AnkiClient {
   multi(actions: AnkiAction[], options?: { timeoutMs?: number }): Promise<AnkiMultiResult[]>;
 }
 
+// A hinted request may have reached Anki before its response was lost.
+// Only replay explicit, idempotent reads; unknown actions and multi batches
+// might contain mutations and must not be run twice automatically.
+const RETRYABLE_READ_ACTIONS = new Set([
+  "requestPermission", "version", "deckNames", "deckNamesAndIds",
+  "getDeckStats", "getNumCardsReviewedToday", "getNumCardsReviewedByDay",
+  "findCards", "findNotes", "cardsInfo", "notesInfo",
+  "modelNames", "modelNamesAndIds", "modelFieldNames", "modelTemplates", "getTags",
+]);
+
 export function createAnkiClient(options: AnkiClientOptions = {}): AnkiClient {
   const endpoint = (options.endpoint ?? getAnkiEndpoint()).trim() || DEFAULT_ANKI_ENDPOINT;
   const fetchImpl = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
@@ -293,9 +303,16 @@ export function createAnkiClient(options: AnkiClientOptions = {}): AnkiClient {
       return await send(url, body, timeoutMs, fetchImpl, hint, action);
     } catch (error) {
       if (error instanceof AnkiError) throw error;
-      // A browser whose Local Network Access rules reject the hint fails before
-      // any request is sent; one plain retry keeps those builds working.
+      // A TypeError cannot distinguish a preflight rejection from a lost
+      // response after Anki applied a write. Replay only idempotent reads.
       if (hint && error instanceof TypeError) {
+        if (!RETRYABLE_READ_ACTIONS.has(action)) {
+          const diagnosed = classifyFetchFailure(error, url, timeoutMs, action);
+          throw new AnkiError(
+            `${diagnosed.message} AXOM did not repeat this action because Anki may already have applied it. Check Anki before retrying.`,
+            diagnosed.kind, action,
+          );
+        }
         try {
           return await send(url, body, timeoutMs, fetchImpl, undefined, action);
         } catch (retryError) {
