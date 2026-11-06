@@ -36,7 +36,7 @@ describe("course bank read model", () => {
   });
   it("infers legacy set scope from unanimous question fields and leaves mixed sets unfiled", () => {
     const legacy = { ...set, scope: undefined };
-    const qs = [{ ...question, module: "FTM 1", week: 3 }, { ...question, id: "q2", module: "FTM 2", week: 4 }];
+    const qs = [{ ...question, module: "FTM 1", week: 3 }, { ...question, id: "q2", setId: undefined, module: "FTM 2", week: 4 }];
     const bank = indexed([legacy, { ...legacy, id: "mixed", questionIds: ["q1", "q2"] }], qs);
     expect(bank[0].weeks[0].week).toBe(3);
     expect(bank[1].module).toBe("Unfiled & mixed");
