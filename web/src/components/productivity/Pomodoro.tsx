@@ -147,7 +147,7 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
       <div className="pomo-body">
         <div className="pomo-dial" style={{ width: dim, height: dim }}>
           <svg width={dim} height={dim} viewBox={`0 0 ${dim} ${dim}`}>
-            <circle cx={dim / 2} cy={dim / 2} r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="9" />
+            <circle cx={dim / 2} cy={dim / 2} r={radius} fill="none" stroke="var(--hairline)" strokeWidth="9" />
             <circle
               cx={dim / 2} cy={dim / 2} r={radius} fill="none" stroke={accent} strokeWidth="9" strokeLinecap="round"
               strokeDasharray={circumference}
