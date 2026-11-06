@@ -32,7 +32,6 @@ const READINESS: Record<Readiness, { label: string; tone: "green" | "orange" | "
 };
 
 export function IntegrationsPage() {
-  const state = useStore();
   const accountPhase = useAccount((account) => account.phase);
   const accountsAvailable = accountPhase !== "unconfigured";
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -123,7 +122,7 @@ export function IntegrationsPage() {
                       ? <a className="gbtn sm integration-action" href={card.action.href}>{card.action.label} <ArrowRight size={ICON_SIZE.body} /></a>
                       : <GButton size="sm" className="integration-action" onClick={card.action.onClick}>{card.action.label} <ArrowRight size={ICON_SIZE.body} /></GButton>
                   )}
-                  {card.id === "calendar" && calendarOpen && <CalendarExportPanel state={state} />}
+                  {card.id === "calendar" && calendarOpen && <CalendarExportPanel />}
                 </GlassCard>
               );
             })}
@@ -138,7 +137,10 @@ export function IntegrationsPage() {
   );
 }
 
-function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getState> }) {
+function CalendarExportPanel() {
+  // Subscribe where the live calendar state and error UI are actually rendered.
+  // The outer integrations catalog need not own the workspace subscription.
+  const state = useStore();
   const [tasks, setTasks] = useState(true);
   const [exams, setExams] = useState(true);
   const [dayPlans, setDayPlans] = useState(false);
