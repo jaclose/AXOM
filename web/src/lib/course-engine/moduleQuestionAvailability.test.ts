@@ -287,3 +287,60 @@ describe("source-week availability proof", () => {
     expect(JSON.stringify([source, record])).toBe(before);
   });
 });
+
+
+describe("primary-source proof gates runnable course availability", () => {
+  it("holds a keyed question whose declared primary collection is missing", () => {
+    const orphan = question("orphan", { setId: "missing-source", ...goerScope });
+    const before = JSON.stringify(orphan);
+    const index = buildQuestionAvailabilityIndex(input([], [orphan]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+      unresolvedWeekQuestions: 1, indexedWeeks: [],
+    });
+    expect(index.unassignedQuestions).toBe(0);
+    expect(JSON.stringify(orphan)).toBe(before);
+  });
+
+  it("holds a forged primary membership even if the source collection advertises the same week", () => {
+    const source = set("primary", ["not-on-device"], { scope: goerScope });
+    const forged = question("forged", { setId: "primary", ...goerScope });
+    const index = buildQuestionAvailabilityIndex(input([source], [forged]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+      unresolvedWeekQuestions: 1,
+      // The source collection's independently documented week remains indexed.
+      indexedWeeks: [2],
+    });
+    expect(index.unassignedQuestions).toBe(0);
+  });
+
+  it("holds a question whose declared week contradicts the exact primary source", () => {
+    const primary = set("primary", ["moved"], {
+      scope: { module: "GOER", week: 3, courseId: "ppm-501" },
+    });
+    const moved = question("moved", {
+      setId: "primary", module: "GOER", week: 2, courseId: "ppm-501",
+      status: "correct", attempts: [{ at: stamp, status: "correct" }],
+    });
+    const before = JSON.stringify([primary, moved]);
+    const index = buildQuestionAvailabilityIndex(input([primary], [moved]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+      unresolvedWeekQuestions: 1, indexedWeeks: [],
+    });
+    expect(index.unassignedCollections).toBe(1);
+    expect(JSON.stringify([primary, moved])).toBe(before);
+  });
+
+  it("keeps verified primary membership and legitimate explicitly filed personal questions ready", () => {
+    const primary = set("primary", ["verified"], { scope: goerScope });
+    const verified = question("verified", { setId: "primary" });
+    const personal = question("personal", { setId: undefined, ...goerScope });
+    const index = buildQuestionAvailabilityIndex(input([primary], [verified, personal]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 2, readyQuestions: 2, reviewQuestions: 0,
+      unresolvedWeekQuestions: 0, indexedWeeks: [2],
+    });
+  });
+});
