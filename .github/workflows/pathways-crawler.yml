@@ -42,7 +42,7 @@ jobs:
           python crawler.py bootstrap ../../web/public/application-schools.json --allow-private-capture
           python crawler.py once --max-pages 8
           python crawler.py status > status.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         with:
           name: pathways-crawler-status
