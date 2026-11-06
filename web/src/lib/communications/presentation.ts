@@ -1,6 +1,6 @@
 import { paletteDefinition, readPalettePreference } from "../palette";
 import { DOCTORDLE_URL } from "../doctordle";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { examContext } from "./context";
 import { buildPulse } from "./snapshot";
 import { localClock, periodBefore, type EmailType, type Personalization } from "./model";
@@ -8,7 +8,7 @@ export function currentPresentation() {
   const palette = readPalettePreference(); const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
   return { theme, accent: paletteDefinition(palette.id, palette.customAccent)[theme].accent } as const;
 }
-export function localEmailContext(state: NoctyriumState, type: EmailType, theme: "dark" | "light" = currentPresentation().theme): Personalization {
+export function localEmailContext(state: AxomState, type: EmailType, theme: "dark" | "light" = currentPresentation().theme): Personalization {
   const timezone = state.profile.timeZonePreference?.mode === "custom" ? state.profile.timeZonePreference.customTimezone ?? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone;
   const day = localClock(new Date(), timezone).day; const scope = type === "pulse" ? "year" : type === "monthly_report" ? "month" : "week";
   const { start, end } = type === "pulse" ? { start: `${day.slice(0, 4)}-01-01`, end: day } : periodBefore(day, scope);

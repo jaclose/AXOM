@@ -1,7 +1,7 @@
 import { STORAGE_KEYS } from "./brand";
 import { isoDate } from "./scoring";
 import { entryDayKey } from "./journal";
-import type { DailyLoopReminderPreferences, NoctyriumState } from "./types";
+import type { DailyLoopReminderPreferences, AxomState } from "./types";
 
 export type DailyLoopReminderKind = "check-in" | "closeout";
 export type DailyLoopReminderDisposition = "pending" | "shown" | "skipped";
@@ -50,7 +50,7 @@ export interface DailyLoopReminderEvaluationInput {
 
 /** A finished journal page closes the writing loop even without a quick closeout. */
 export function journalPageComplete(
-  journal: Pick<NoctyriumState, "journal">["journal"],
+  journal: Pick<AxomState, "journal">["journal"],
   dayKey: string,
 ): boolean {
   return journal.some((entry) => entryDayKey(entry) === dayKey && entry.notebookStatus === "complete");
@@ -58,7 +58,7 @@ export function journalPageComplete(
 
 /** Offer only yesterday, once there is something real to return to after 08:00. */
 export function journalCatchUpDay(
-  state: Pick<NoctyriumState, "journal" | "logs" | "dayPlans" | "closeouts">,
+  state: Pick<AxomState, "journal" | "logs" | "dayPlans" | "closeouts">,
   now: Date = new Date(),
 ): string | null {
   if (!Number.isFinite(now.getTime()) || now.getHours() < 8) return null;

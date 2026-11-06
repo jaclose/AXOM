@@ -5,7 +5,7 @@ import type {
   DailySuccessSchedule,
   DailySuccessSource,
   Habit,
-  NoctyriumState,
+  AxomState,
   ProductivityTracker,
 } from "./types";
 import { addLocalDays, localDateKey } from "./dailyRollover";
@@ -48,7 +48,7 @@ export interface DailySuccessResult {
 }
 
 export type DailySuccessState = Pick<
-  NoctyriumState,
+  AxomState,
   "profile" | "logs" | "productivityTrackers" | "habits" | "habitEntries" | "closeouts" | "activeDayKey"
 >;
 

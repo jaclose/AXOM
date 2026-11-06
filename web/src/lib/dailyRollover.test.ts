@@ -8,11 +8,11 @@ import {
   mergeRolloverEvent,
   shouldRollover,
 } from "./dailyRollover";
-import type { DailyRolloverEvent, NoctyriumState } from "./types";
+import type { DailyRolloverEvent, AxomState } from "./types";
 
-function state(patch: Partial<NoctyriumState> = {}): NoctyriumState {
+function state(patch: Partial<AxomState> = {}): AxomState {
   return {
-    profile: {} as NoctyriumState["profile"],
+    profile: {} as AxomState["profile"],
     terms: [],
     courses: [],
     tracker: [],
@@ -25,7 +25,7 @@ function state(patch: Partial<NoctyriumState> = {}): NoctyriumState {
     folders: [],
     logs: [],
     integrations: [],
-    boardPrep: {} as NoctyriumState["boardPrep"],
+    boardPrep: {} as AxomState["boardPrep"],
     dayPlans: [],
     blueprintInstalls: [],
     activeDayKey: "2026-06-23",
