@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { create } from "zustand";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
 import { buildIcs, calendarEvents } from "../lib/calendarExport";
@@ -63,12 +63,27 @@ describe("Integrations", () => {
       const due = useStore((state) => state.tasks[0]?.due ?? "missing");
       return <output data-testid="task-probe">{due}</output>;
     }
-    render(<TaskProbe />);
+    function WholeStateProbe() {
+      const store = useStore();
+      return <output data-testid="whole-store-probe">{store.tasks[0]?.due ?? "missing"}</output>;
+    }
+    render(<><TaskProbe /><WholeStateProbe /></>);
     expect(screen.getByTestId("task-probe").textContent).toBe("2999-01-01");
+    expect(screen.getByTestId("whole-store-probe").textContent).toBe("2999-01-01");
     const id = useStore.getState().tasks[0].id;
     await act(async () => { useStore.getState().updateTask(id, { due: "2999-03-01" }); });
     expect(useStore.getState().tasks[0].due).toBe("2999-03-01");
     expect(screen.getByTestId("task-probe").textContent).toBe("2999-03-01");
+    expect(screen.getByTestId("whole-store-probe").textContent).toBe("2999-03-01");
+  });
+
+  it("diagnostic: an open calendar panel follows task completion without errors", async () => {
+    render(<IntegrationsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
+    expect(screen.getByText(/^1 event/)).toBeTruthy();
+    await act(async () => { useStore.getState().updateTask("t1", { done: true }); });
+    expect(useStore.getState().tasks[0].done).toBe(true);
+    await waitFor(() => expect(screen.getByText(/^0 events/)).toBeTruthy());
   });
 
   it("groups integrations by readiness and states what leaves the device", () => {
