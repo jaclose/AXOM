@@ -263,16 +263,16 @@ describe("IndexedDB-first local vault", () => {
     await localVaultStorage.setItem(key, saved);
     const record = readLastVaultWrite();
     expect(record?.scope).toBe("workspace");
-    localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+    window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
 
     await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, '{"generations":[]}');
     await localVaultStorage.removeItem(STORAGE_KEYS.aiGenerations);
     expect(readLastVaultWrite()).toEqual(record);
-    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
 
     await localVaultStorage.removeItem(key);
     expect(readLastVaultWrite()).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
     expect(await localVaultStorage.getItem(key)).toBeNull();
   });
 
@@ -282,15 +282,15 @@ describe("IndexedDB-first local vault", () => {
     await localVaultStorage.setItem(key, saved);
     const record = readLastVaultWrite();
     expect(record?.scope).toBe("workspace");
-    localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+    window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
 
     // IndexedDB may be purged independently of the tiny browser status marker.
     await deleteDatabase(STORAGE_KEYS.vaultDb);
-    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
 
     expect(await localVaultStorage.getItem(key)).toBeNull();
     expect(readLastVaultWrite()).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
   });
 
   it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
