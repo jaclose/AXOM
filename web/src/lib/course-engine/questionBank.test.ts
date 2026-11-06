@@ -67,6 +67,17 @@ describe("course bank read model", () => {
     const conflicting = { ...set, id: "elsewhere", scope: { module: "FTM 1", week: 3 } };
     expect(indexed([set, conflicting], [legacy])).toEqual([]);
   });
+  it("keeps inferred legacy week and counts stable regardless of review collection ordering", () => {
+    const legacy = { ...question, setId: undefined };
+    const review = { ...set, id: "secondary", kind: "review" as const };
+    const left = indexed([review, set], [legacy]);
+    const right = indexed([set, review], [legacy]);
+    expect(left[0].weeks[0].questionIds).toEqual(["q1"]);
+    expect(left[0].weeks[0].ready).toBe(1);
+    expect(left[0].weeks[0].attempted).toBe(1);
+    expect(right[0].weeks[0].questionIds).toEqual(["q1"]);
+    expect(right[0].weeks[0].ready).toBe(1);
+  });
   it("does not borrow a week from a review collection if the declared primary set is absent", () => {
     expect(indexed([set], [{ ...question, setId: "missing" }])).toEqual([]);
   });
