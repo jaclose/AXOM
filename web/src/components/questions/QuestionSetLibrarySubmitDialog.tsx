@@ -284,7 +284,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         <label className="qsl-check"><input type="checkbox" checked={rights} disabled={busy} onChange={event => setRights(event.target.checked)} />
           <span>I own this content or have permission to distribute every question, answer and explanation.</span></label>
         <label className="qsl-check"><input type="checkbox" checked={answers} disabled={busy} onChange={event => setAnswers(event.target.checked)} />
-          <span>I checked every answer and explanation against its source and resolved any source-key conflicts.</span></label>
+          <span>I checked every answer against its source, verified every explanation, and resolved source-key conflicts.</span></label>
         <GButton variant="primary" disabled={busy || checking || statusIdentity !== `${accountId}:${set.id}` || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
           <ShieldCheck size={16} aria-hidden="true" /> {busy ? "Submitting…" : "Send for review"}
         </GButton>
