@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Profiler } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
@@ -82,7 +83,13 @@ describe("Integrations", () => {
     stubCalendarObjectUrl(createObjectURL);
     const task = useStore.getState().tasks[0];
     useStore.setState({ tasks: [{ ...task, due: "2999-02-31" }] });
-    const { rerender } = render(<IntegrationsPage />);
+    let calendarCommits = 0;
+    const onCalendarCommit = () => { calendarCommits++; };
+    const { rerender } = render(
+      <Profiler id="calendar-recovery" onRender={onCalendarCommit}>
+        <IntegrationsPage />
+      </Profiler>,
+    );
     fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
@@ -97,6 +104,7 @@ describe("Integrations", () => {
     // Use the actual learner task-update action rather than mutating the
     // persisted Zustand store directly from the harness. Verify that it emits
     // a new tasks reference for the mounted calendar subscriber.
+    const commitsBeforeRepair = calendarCommits;
     const tasksBeforeRepair = useStore.getState().tasks;
     let taskChangeNotifications = 0;
     const unsubscribeTaskCheck = useStore.subscribe((state, previous) => {
@@ -110,9 +118,16 @@ describe("Integrations", () => {
     unsubscribeTaskCheck();
     expect(taskChangeNotifications).toBe(1);
     expect(useStore.getState().tasks).not.toBe(tasksBeforeRepair);
+    // An external task edit must commit a mounted React update, not merely
+    // notify Zustand listeners while leaving the calendar UI stale.
+    expect(calendarCommits).toBeGreaterThan(commitsBeforeRepair);
     // Exercise React's mounted update boundary after the task action.
     // The real-browser E2E separately proves automatic subscription refresh.
-    rerender(<IntegrationsPage />);
+    rerender(
+      <Profiler id="calendar-recovery" onRender={onCalendarCommit}>
+        <IntegrationsPage />
+      </Profiler>,
+    );
     // The learner repairs the task elsewhere while this panel remains open.
     // Retrying must use the updated store values, download valid bytes and
     // clear the stale validation error without reloading or remounting.
