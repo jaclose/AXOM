@@ -34,15 +34,8 @@ jobs:
           node scripts/render-communications-auth.mjs
           node scripts/preview-communications.mjs
           node scripts/verify-communications-artifacts.mjs
-      - name: Install isolated Chromium for visual integrity
-        run: npm --prefix web exec -- playwright install --with-deps chromium
-      - name: Verify generated previews and gallery in real Chromium
-        env:
-          AXOM_E2E_CHANNEL: chromium
-          AXOM_E2E_SOFTWARE_GRAPHICS: "1"
-        run: |
-          node scripts/verify-communications-previews.mjs
-          node scripts/verify-communications-gallery.mjs
+      # Static generation gate only. Separate AXOM Quality browser jobs remain
+      # mandatory; the optional 160-template visual gallery runs independently.
       - name: Verify generated diff is scoped and build is complete
         run: |
           git diff --check
@@ -58,7 +51,7 @@ jobs:
           git diff --cached --stat
       - name: Commit generated outputs to isolated review branch only
         env:
-          PREVIEW_BRANCH: codex/local-save-communications-preview-20261106
+          PREVIEW_BRANCH: codex/local-save-communications-preview2-20261106
           SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
