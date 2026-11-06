@@ -1,19 +1,29 @@
-# AXOM Correspondents: 25 personalized email identities
+# AXOM Living Atlas: 40 academic companion identities
 
 Status: **implemented candidate POC and allowlisted test-send tool; no live Resend configuration or delivery**.
 
 The implementation lives in `web/src/lib/communications/correspondents.ts`.
-The 25 names are Meridian, Vellum, Fathom, Serein, Calder, Lattice, Oriel,
-Kestrel, Morrow, Nacre, Aster, Vesper, Vela, Argent, Atlas, Ember, Arc, Cairn,
-Solstice, Mosaic, Quill, Juniper, Cipher, Harbor and Verge.
+Forty identities are grouped into eight academic orders of five:
+Architects (Meridian, Lattice, Atlas, Cipher, Orrery);
+Seekers (Fathom, Aster, Oriel, Verge, Eidolon);
+Sentinels (Argent, Kestrel, Cairn, Rook, Thren);
+Keepers (Vellum, Quill, Vesper, Nacre, Virelai);
+Alchemists (Calder, Ember, Mosaic, Arc, Tessera);
+Wayfinders (Morrow, Vela, Solstice, Zephyr, Halcyon);
+Wardens (Juniper, Harbor, Serein, Thistle, Calyx);
+Luminaries (Aureline, Helion, Caelum, Solara, Noctis).
+Each character has a distinct fictional origin and academic role, with detailed pet
+and visual-development profiles in the companion Character Bible.
 
 ## Contract
 
-Each learner has **one stable, user-reversible** AXOM correspondent selected
-from **explicitly chosen** accent and declared work-style preferences. This is
+Each learner has **one stable, user-reversible** AXOM companion selected
+from explicit academic order, declared study preferences, preferred rhythm and
+support style. Accent affects presentation only and does not determine personality. This is
 an aesthetic/workflow match, **not a psychological personality assessment**.
-Without declared preferences, the learner gets a deterministic starter name
-with an honest explanation; that is not described as a personality match.
+Without declared preferences, the learner gets a deterministic starter name;
+this is not a personality inference. Matching inputs and scoring evidence are
+visible only in an optional inspection/settings view, not in a welcome email.
 A manual choice always takes precedence. Once saved, the correspondent must
 remain pinned until changed by the user.
 
@@ -29,8 +39,9 @@ must not print the underlying tag or private writing.
 
 The prototype's email includes the original AXOM Orb, Ink/Graphite/Bone/Gold
 identity palette, inbox-safe typography and an accessible table-rendered
-**SOURCE → MATCH → CORRESPONDENT** diagram. The text clearly explains the
-criteria that were actually present. It has a plain-text counterpart and
+**ORIGIN → NATURE → COMPANION** diagram. The narrative communicates a fictional
+character's qualities, learning philosophy and future role, without describing
+the learner's color, journal, or scoring signals. It has a plain-text counterpart and
 identifies the pseudonym as an AXOM-generated communication identity, not a
 human support representative.
 
@@ -39,11 +50,11 @@ The subject for a proof-of-concept begins with its exact use case, e.g.
 must use its real source-backed template rather than relabel a welcome mockup.
 
 The final welcome delivery should occur after account verification and the
-onboarding preference decision. If there are no declared preferences, the
-starter rationale is shown. The existing account/security sender must remain
+onboarding preference decision. If there are no declared preferences, the intro describes the character's
+story without asserting a scientific or psychological match. The existing account/security sender must remain
 unaffected.
 
-## Generate all 25 local previews
+## Generate all 40 local previews
 
 ~~~sh
 node --experimental-strip-types scripts/render-correspondents-poc.mjs
