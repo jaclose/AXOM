@@ -14,6 +14,8 @@ export interface UpdateState {
   totalBytes?: number;
   error?: string;
   canContinueWithoutRecoverySnapshot?: boolean;
+  /** A web-only, explicitly confirmed escape hatch after checkpoint failure. */
+  canRefreshWithoutVerifiedSave?: boolean;
   deferred: boolean;
   /** Installation/activation succeeded; retry only the checkpoint and restart. */
   restartPending: boolean;
@@ -46,6 +48,8 @@ export interface UpdateDependencies {
 }
 export interface UpdateApplyOptions {
   skipRecoverySnapshot?: boolean;
+  /** Web only: proceed after a failed checkpoint and separate user confirmation. */
+  skipFailedCheckpoint?: boolean;
 }
 
 /** Explicit lifecycle shared by Settings, automatic notices, and native menus.
@@ -96,7 +100,8 @@ export function createUpdateController(deps: UpdateDependencies) {
         const previous = candidate;
         candidate = null;
         update({
-          phase: "checking", error: undefined, canContinueWithoutRecoverySnapshot: false, version: undefined, buildId: undefined,
+          phase: "checking", error: undefined, canContinueWithoutRecoverySnapshot: false, canRefreshWithoutVerifiedSave: false,
+          version: undefined, buildId: undefined,
           notes: undefined, downloadedBytes: 0, totalBytes: undefined, deferred: false,
         });
         if (previous) await previous.close().catch(() => undefined);
@@ -136,13 +141,32 @@ export function createUpdateController(deps: UpdateDependencies) {
     },
     apply(options: UpdateApplyOptions = {}) {
       return run(async () => {
+        if (options.skipFailedCheckpoint && (
+          deps.desktop || state.phase !== "error" || !state.canRefreshWithoutVerifiedSave || options.skipRecoverySnapshot
+        )) {
+          throw new Error("Refreshing without a verified save is allowed only after a failed web checkpoint.");
+        }
         if (options.skipRecoverySnapshot && (deps.desktop || !state.canContinueWithoutRecoverySnapshot)) {
           throw new Error("The update cannot continue without a verified recovery snapshot.");
         }
         if (deps.desktop && !state.restartPending && (!candidate || !downloaded)) throw new Error("Download the update before installing it.");
         if (!deps.desktop && !state.version) throw new Error("Check for a web update before refreshing.");
-        update({ phase: "preparing", error: undefined, canContinueWithoutRecoverySnapshot: false });
-        await deps.checkpoint(options);
+        update({
+          phase: "preparing", error: undefined, canContinueWithoutRecoverySnapshot: false,
+          canRefreshWithoutVerifiedSave: false,
+        });
+        if (!options.skipFailedCheckpoint) {
+          try {
+            await deps.checkpoint(options);
+          } catch (error) {
+            // Only a failed save/checkpoint can unlock the web-only consent path.
+            // A missing update, failed installation, or failed worker must not.
+            if (!deps.desktop && !hasVerifiedSaveWithoutSnapshot(error)) {
+              update({ canRefreshWithoutVerifiedSave: true });
+            }
+            throw error;
+          }
+        }
         if (!state.restartPending) {
           if (deps.desktop) {
             update({ phase: "installing" });
