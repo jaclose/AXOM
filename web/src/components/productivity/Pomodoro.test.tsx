@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeSeed } from "../../lib/seed";
 import { usePomodoro } from "../../lib/pomodoro";
@@ -144,6 +144,37 @@ describe("Pomodoro custom presets", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete Keep history preset" }));
     expect(useStore.getState().profile.pomodoroPreferences?.savedPresets).toEqual([]);
     expect(useStore.getState().logs).toEqual(logs);
+  });
+});
+
+describe("Pomodoro session progress", () => {
+  it("updates the accessible focus meter from the shared clock without crediting the daily score", () => {
+    usePomodoro.setState({ presetId: "50-10", secondsLeft: 30 * 60, phase: "focus", autoLog: false });
+    render(<Pomodoro />);
+
+    const meter = screen.getByRole("progressbar", { name: "Focus session progress" });
+    expect(meter.getAttribute("aria-valuenow")).toBe("40");
+    expect(meter.getAttribute("aria-valuetext")).toContain("20 of 50 minutes elapsed");
+    expect(screen.getByText(/Auto-log is off/)).toBeTruthy();
+
+    act(() => usePomodoro.setState({ secondsLeft: 15 * 60, autoLog: true }));
+    expect(meter.getAttribute("aria-valuenow")).toBe("70");
+    expect(meter.getAttribute("aria-valuetext")).toContain("35 of 50 minutes elapsed");
+    expect(screen.getByText(/Auto-log is on/)).toBeTruthy();
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+
+  it("shows break progress without logging it as study and omits the full-size bar in compact mode", () => {
+    usePomodoro.setState({ presetId: "25-5", secondsLeft: 2 * 60, phase: "break", autoLog: true });
+    const { unmount } = render(<Pomodoro />);
+    const meter = screen.getByRole("progressbar", { name: "Break session progress" });
+    expect(meter.getAttribute("aria-valuenow")).toBe("60");
+    expect(meter.getAttribute("aria-valuetext")).toContain("3 of 5 minutes elapsed");
+    expect(useStore.getState().logs).toHaveLength(0);
+
+    unmount();
+    render(<Pomodoro compact />);
+    expect(screen.queryByRole("progressbar", { name: "Break session progress" })).toBeNull();
   });
 });
 
