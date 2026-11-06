@@ -136,7 +136,7 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
     <GlassCard pad className={`pomodoro ${compact ? "compact" : ""} ${pomo.running ? "running" : ""} phase-${pomo.phase}`} data-tour="pomodoro">
       <PanelHeader
         title="Pomodoro"
-        sub={compact ? (pomo.targetLabel ?? "Focus sprints that auto-log minutes") : "Focus sprints that auto-log their minutes to today when finished"}
+        sub={compact ? (pomo.targetLabel ?? "Focus and break timer") : "A live session clock. Activity credit follows your auto-log setting."}
         action={
           <span className={`pomo-phase-pill ${pomo.phase}`}>
             {isFocus ? <Flame size={ICON_SIZE.body} /> : <Coffee size={ICON_SIZE.body} />} {isFocus ? "Focus" : "Break"}
