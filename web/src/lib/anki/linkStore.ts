@@ -57,6 +57,14 @@ export interface PendingSuspend {
   at: string;
 }
 
+/** Separate from deletion policy: an old note must be suspended after a type switch. */
+export interface PendingRetirement {
+  axomId: string;
+  noteId: number;
+  cardIds: number[];
+  at: string;
+}
+
 export interface SyncSummary {
   at: string;
   added: number;
@@ -85,13 +93,15 @@ export interface LinkState {
   /** Cards the learner chose to keep out of Anki (e.g. after deleting the note there). */
   excluded: string[];
   pendingSuspends: PendingSuspend[];
+  /** Device-local, retryable old-note suspension receipts, not deleted-card requests. */
+  pendingRetirements?: PendingRetirement[];
   lastSync?: SyncSummary;
 }
 
 export const ANKI_LINK_STATE_KEY = "axom-anki-notes.v1";
 
 export function emptyLinkState(): LinkState {
-  return { version: 1, links: {}, failures: {}, excluded: [], pendingSuspends: [] };
+  return { version: 1, links: {}, failures: {}, excluded: [], pendingSuspends: [], pendingRetirements: [] };
 }
 
 function numberList(value: unknown): number[] {
@@ -152,12 +162,28 @@ export function normalizeLinkState(raw: unknown): LinkState {
     ? record.pendingSuspends.filter((item): item is PendingSuspend => Boolean(item) && typeof item === "object" && typeof (item as PendingSuspend).axomId === "string" && typeof (item as PendingSuspend).noteId === "number")
       .map((item) => ({ axomId: item.axomId, noteId: item.noteId, cardIds: numberList(item.cardIds), at: String(item.at ?? "") }))
     : [];
+  const pendingRetirements = Array.isArray(record.pendingRetirements)
+    ? record.pendingRetirements.filter((item): item is PendingRetirement =>
+        Boolean(item) && typeof item === "object" &&
+        typeof (item as PendingRetirement).axomId === "string" &&
+        (item as PendingRetirement).axomId.length > 0 &&
+        Number.isSafeInteger((item as PendingRetirement).noteId) &&
+        (item as PendingRetirement).noteId > 0)
+      .map((item) => ({
+        axomId: item.axomId,
+        noteId: item.noteId,
+        cardIds: numberList(item.cardIds).filter((id) => Number.isSafeInteger(id) && id > 0),
+        at: String(item.at ?? ""),
+      }))
+      .filter((item) => item.cardIds.length > 0)
+    : [];
   return {
     version: 1,
     links,
     failures,
     excluded: Array.isArray(record.excluded) ? [...new Set(record.excluded.filter((id): id is string => typeof id === "string"))] : [],
     pendingSuspends,
+    pendingRetirements,
     lastSync: record.lastSync && typeof record.lastSync === "object" ? record.lastSync as SyncSummary : undefined,
   };
 }
