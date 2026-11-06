@@ -5,6 +5,8 @@ on:
     paths:
       - "web/src/lib/localVault.ts"
       - "web/src/lib/localVault.test.ts"
+      - "web/src/lib/vaultActivity.ts"
+      - "web/src/lib/vaultActivity.test.ts"
       - "web/src/lib/retryLocalWorkspaceSave.ts"
       - "web/src/lib/retryLocalWorkspaceSave.test.ts"
       - "web/src/components/shell/AccountSyncPanel.tsx"
@@ -32,7 +34,7 @@ jobs:
       - run: node scripts/toolchain.mjs
       - run: npm --prefix web ci
       - name: Storage and Account recovery regressions
-        run: npm --prefix web run test -- src/lib/localVault.test.ts src/components/shell/AccountSyncPanel.test.tsx src/components/shell/DataHealthPanel.test.tsx src/lib/retryLocalWorkspaceSave.test.ts
+        run: npm --prefix web run test -- src/lib/localVault.test.ts src/components/shell/AccountSyncPanel.test.tsx src/components/shell/DataHealthPanel.test.tsx src/lib/retryLocalWorkspaceSave.test.ts src/lib/vaultActivity.test.ts
       - name: Typecheck current web source
         run: npm --prefix web run typecheck
       - name: Build release frontend
