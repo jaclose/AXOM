@@ -147,7 +147,15 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
   const downloadSelected = () => {
     let content: string;
     try {
-      content = buildIcs(events);
+      // Use the current canonical workspace at click time. An edit to a task
+      // outside this panel must not export the stale render-time snapshot.
+      const latest = useStore.getState();
+      const selected = calendarEvents(latest, { tasks, exams, dayPlans, fromDay: latest.activeDayKey });
+      if (!selected.length) {
+        setExportError("The selected calendar items changed. Review the choices above and try again.");
+        return;
+      }
+      content = buildIcs(selected);
     } catch {
       setExportError("A calendar item has an invalid date or identifier. Correct it in AXOM and try again.");
       return;
