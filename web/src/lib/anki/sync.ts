@@ -430,7 +430,7 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
     // --- unfinished replacement retirement ----------------------------------------
     // A new note may have been committed before a suspend response was lost.
     // Keep the receipt until we verify the exact former note and every card.
-    // Never suspend reused card IDs from a different Anki profile or note.
+    // Hold inconsistent note/card IDs; identical cross-profile IDs still need device acceptance.
     if (state.pendingRetirements?.length) {
       progress("Verifying replaced Anki cards are suspended…");
       const infos = await notesInfo(client, state.pendingRetirements.map((item) => item.noteId));
