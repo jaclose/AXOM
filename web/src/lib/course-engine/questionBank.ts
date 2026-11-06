@@ -68,7 +68,8 @@ export function buildCourseQuestionBank(
   for (const question of questions) {
     const related = memberships.get(question.id) ?? [];
     const first = related[0]?.scope;
-    const unanimousLegacy = !question.setId && Boolean(first?.module) && related.every((set) =>
+    const unanimousLegacy = !question.setId && Boolean(first?.module)
+      && related.some((set) => set.kind !== "review") && related.every((set) =>
       Boolean(set.scope?.module)
       && canonicalModuleKey(set.scope!.module!) === canonicalModuleKey(first!.module!)
       && set.scope?.courseId === first?.courseId
@@ -105,6 +106,7 @@ export function buildCourseQuestionBank(
       const own = scopesById.get(question.id)!;
       return (hasDeclaredWeek(question.week) && parseWeek(question.week) === undefined)
         || Boolean(question.setId && !setsById.has(question.setId))
+        || Boolean(question.setId && !memberships.get(question.id)?.some((set) => set.id === question.setId))
         || Boolean(scope.module && (!own.module
           || canonicalModuleKey(own.module) !== canonicalModuleKey(scope.module)))
         || Boolean(scope.courseId && own.courseId !== scope.courseId)
