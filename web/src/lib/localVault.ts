@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
+import { markVaultWrite, markVaultWriteFailure, readVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -975,6 +975,11 @@ export async function saveAndVerifyLocalWorkspace(serializeCurrent: () => string
   assertVaultWrite(checkpoint + 1);
   if (await localVaultStorage.getItem(STORAGE_KEYS.persistedState) !== value) {
     throw new Error("The saved workspace did not match the current copy. Keep AXOM open, export a backup, and retry after checking other tabs.");
+  }
+  // A newer workspace write can fail while the read-back is pending. Byte
+  // equality alone must not clear that failure or report the workspace safe.
+  if (readVaultWriteFailure()) {
+    throw new Error("The local vault reported another failed workspace save. Keep AXOM open and export a backup.");
   }
 }
 
