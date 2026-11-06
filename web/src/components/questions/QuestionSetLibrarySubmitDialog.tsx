@@ -232,7 +232,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       {missingExplanations > 0 && <div className="qsl-assist stack gap8">
         <b>{missingExplanations} missing explanation{missingExplanations === 1 ? "" : "s"}</b>
         <p>AXOM can draft rationales from your already-reviewed answers. No answer key changes. Model output is provisional until you inspect and save it.</p>
-        {provider && provider.info.kind !== "mock" ? <GButton disabled={generating || busy || draftable.length === 0} onClick={() => void generateExplanations()}>
+        {provider && provider.info.kind !== "mock" ? <GButton disabled={checking || statusIdentity !== `${accountId}:${set.id}` || generating || busy || draftable.length === 0} onClick={() => void generateExplanations()}>
           <Sparkles size={16} aria-hidden="true" /> {generating ? "Drafting explanations…" : `Draft explanations (${Math.min(draftable.length, 12)} at a time)`}
         </GButton> : <p>Enable AXOM Cloud AI or a local model in Settings to draft explanations, or write them in Question Bank.</p>}
         {generating && <GhostButton onClick={() => generationAbort.current?.abort()}>Cancel drafting</GhostButton>}
