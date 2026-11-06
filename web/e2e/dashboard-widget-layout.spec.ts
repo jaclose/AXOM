@@ -23,8 +23,11 @@ test("Dashboard widgets stay configurable, keyboard-reorderable, and responsive"
   await expect(settings).toBeVisible();
   await expect(settings.getByRole("button", { name: "Close Course Tracker settings" })).toBeFocused();
 
+  // Keep this journey aligned with DashboardWidgetFrame's supported sizes.
+  await expect.poll(() => settings.locator('input[type="radio"]').evaluateAll((inputs) => inputs.map((input) => input.getAttribute("value"))))
+    .toEqual(["small", "large"]);
   const originalSize = await settings.locator('input[type="radio"]:checked').getAttribute("value");
-  expect(originalSize).toBeTruthy();
+  expect(["small", "large"]).toContain(originalSize);
   const draftSize = originalSize === "small" ? "large" : "small";
   await settings.locator(`input[type="radio"][value="${draftSize}"]`).check();
   await settings.getByRole("button", { name: "Cancel" }).focus();
