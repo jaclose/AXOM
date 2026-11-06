@@ -258,6 +258,8 @@ describe("IndexedDB-first local vault", () => {
   });
 
   it("removes obsolete status on workspace deletion but not on auxiliary-key removal", async () => {
+    // This suite uses Node with a stubbed Storage. Model the browser's window.
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
     const key = STORAGE_KEYS.persistedState;
     const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "private" }, version: 34 });
     await localVaultStorage.setItem(key, saved);
@@ -277,6 +279,8 @@ describe("IndexedDB-first local vault", () => {
   });
 
   it("drops a saved badge if hydration finds the previously saved vault missing", async () => {
+    // This suite uses Node with a stubbed Storage. Model the browser's window.
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
     const key = STORAGE_KEYS.persistedState;
     const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "protected" }, version: 34 });
     await localVaultStorage.setItem(key, saved);
