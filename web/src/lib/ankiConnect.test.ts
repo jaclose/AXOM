@@ -116,6 +116,30 @@ describe("AnkiConnect client", () => {
     expect(addressSpaceFor(new URL("http://169.254.attacker.example:8765"))).toBeNull();
   });
 
+  it("classifies the entire IPv6 link-local /10 boundary without admitting public or deprecated-site addresses", async () => {
+    // RFC 4291 reserves fe80::/10 (fe80 through febf); fe80::/64 alone is too narrow.
+    for (const address of ["fe80::1", "fe8f::12", "fe90::1", "fea0::21", "febf::ffff"]) {
+      expect(addressSpaceFor(new URL(`http://[${address}]:8765`))).toBe("local");
+    }
+    for (const address of ["fe7f::1", "fec0::1", "fdff::ffff", "2001:4860:4860::8888", "::ffff:808:808"]) {
+      expect(addressSpaceFor(new URL(`http://[${address}]:8765`)))
+        .toBe(address === "fdff::ffff" ? "local" : null);
+    }
+
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ result: 6, error: null })));
+    await expect(createAnkiClient({ endpoint: "http://[fe90::12]:8765", apiKey: "device-secret", fetchImpl }).call("version")).resolves.toBe(6);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].redirect).toBe("error");
+    for (const endpoint of [
+      "http://[fe7f::1]:8765", "http://[fec0::1]:8765",
+      "http://[2001:4860:4860::8888]:8765", "http://[::ffff:8.8.8.8]:8765",
+    ]) {
+      await expect(createAnkiClient({ endpoint, apiKey: "device-secret", fetchImpl }).call("version"))
+        .rejects.toMatchObject({ kind: "malformed-endpoint" });
+    }
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("reads a review snapshot in chart order", async () => {
     const fake = new FakeAnkiConnect();
     const [cid] = fake.seedPremadeDeck("Deck", [{ text: "{{c1::x}}", tags: [] }]);
