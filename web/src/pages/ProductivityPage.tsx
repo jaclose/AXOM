@@ -131,7 +131,6 @@ export function ProductivityPage() {
             </div>
           ) : <div className="row wrap gap6"><GButton size="sm" onClick={() => setPickedDay(null)}>Back to today</GButton><GButton size="sm" onClick={() => setModuleTourOpen(true)} aria-label="Open Productivity help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton></div>} />
         <DailyProgressVessel result={dailyProgress} dayLabel={isActive ? "Today" : "Selected day"} />
-        {isActive && <StudyStreakMonitor state={s} result={dailyProgress} />}
 
         {isActive ? (
           <>
@@ -193,7 +192,10 @@ export function ProductivityPage() {
         </div>
       </GlassCard>
 
-      <div id="productivity-focus" data-module-tour="productivity-focus"><Pomodoro /></div>
+      <div id="productivity-focus" className="productivity-focus-stack" data-module-tour="productivity-focus">
+        <Pomodoro />
+        {isActive && <StudyStreakMonitor state={s} result={dailyProgress} />}
+      </div>
       </div>
       {isActive && <TrackerManager />}
 
