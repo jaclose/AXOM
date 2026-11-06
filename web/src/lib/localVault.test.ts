@@ -620,6 +620,45 @@ describe("a save that could not reach IndexedDB", () => {
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
   });
 
+  it("does not report a workspace failure when an auxiliary cache cannot save", async () => {
+    await localVaultStorage.setItem(key, snapshot("workspace"));
+    expect(readVaultWriteFailure()).toBeNull();
+
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === STORAGE_KEYS.aiGenerations) throw new Error("auxiliary cache quota exceeded");
+        storage.setItem(name, value);
+      },
+    });
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, JSON.stringify({ generations: [] }));
+    expect(readVaultWriteFailure()).toBeNull();
+  });
+
+  it("keeps a real workspace failure visible after an unrelated cache succeeds", async () => {
+    await localVaultStorage.setItem(key, snapshot("workspace"));
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === key) throw new Error("workspace quota exceeded");
+        storage.setItem(name, value);
+      },
+    });
+    await localVaultStorage.setItem(key, snapshot("unsaved"));
+    expect(readVaultWriteFailure()).not.toBeNull();
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("localStorage", storage);
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, JSON.stringify({ generations: [] }));
+    expect(readVaultWriteFailure()).not.toBeNull();
+
+    await localVaultStorage.setItem(key, snapshot("recovered"));
+    expect(readVaultWriteFailure()).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("recovered"));
+  });
+
   it("is reported while no store accepts it, and the report clears once saving works", async () => {
     await localVaultStorage.setItem(key, snapshot("saved"));
     expect(readVaultWriteFailure()).toBeNull();
