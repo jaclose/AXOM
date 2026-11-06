@@ -214,16 +214,24 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   let unassignedCollections = 0;
   for (const set of input.sets) {
-    if (set.questionIds.some((id) => ambiguousOwners.has(id))) {
+    const indexedSetWeek = parseWeek(set.scope?.week);
+    const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
+    // Never choose an arbitrary last duplicate row as a collection's proof.
+    // Conflicted original IDs stay review-held; independently filed source
+    // collections can still show their own source-declared week and missing IDs.
+    const presentMembers = [...new Set(set.questionIds)]
+      .filter((id) => !conflictingOriginals.has(id))
+      .flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
+    // A secondary review collection cannot make a conflicted original's
+    // otherwise unsupported week count as fresh source evidence. A review
+    // collection with another valid member still undergoes scope checks below.
+    if (set.kind === "review" && presentMembers.length === 0
+      && set.questionIds.some((id) => conflictingOriginals.has(id))) {
       unassignedCollections += 1;
       continue;
     }
-    const indexedSetWeek = parseWeek(set.scope?.week);
-    const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
     // Set-owned metadata wins if it resolves. A collection whose membership
     // spans different modules is not assigned by a filename or first record.
-    const presentMembers = [...new Set(set.questionIds)].flatMap((id) =>
-      byId.has(id) ? [byId.get(id)!] : []);
     const memberAssignments = presentMembers.map((member) => {
       const scope = questionScope(member, setsById);
       return { scope, assignment: resolve(scope),
