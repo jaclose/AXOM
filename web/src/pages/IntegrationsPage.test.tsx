@@ -88,6 +88,12 @@ describe("Integrations", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
     expect(createObjectURL).not.toHaveBeenCalled();
 
+    // An unrelated store revision must not discard a still-applicable error.
+    // Keeping the exact tasks reference simulates a non-calendar state update.
+    const unchangedTasks = useStore.getState().tasks;
+    act(() => useStore.setState({ tasks: unchangedTasks }));
+    expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
+
     act(() => useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] }));
     // Exercise React's mounted update boundary after the external store write.
     // The real-browser E2E separately proves automatic subscription refresh.
