@@ -55,7 +55,7 @@ function tidy(value: string): string {
 }
 
 function matchesPhrase(haystack: string, phrase: string): boolean {
-  const escaped = phrase.replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&");
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(haystack);
 }
 
