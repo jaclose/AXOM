@@ -88,13 +88,10 @@ describe("Integrations", () => {
     expect(createObjectURL).not.toHaveBeenCalled();
 
     act(() => useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] }));
-    // The date is edited outside Integrations. Close and reopen its actual
-    // panel to discard the stale validation error without unmounting the
-    // test's React root, then export the corrected task.
-    fireEvent.click(screen.getByRole("button", { name: /Hide options/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
+    // The learner repairs the task elsewhere while this panel remains open.
+    // Retrying must use the updated store values, download valid bytes and
+    // clear the stale validation error without reloading or remounting.
     expect(screen.getByText(/^1 event/)).toBeTruthy();
-    expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(createObjectURL).toHaveBeenCalledOnce();
