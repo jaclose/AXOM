@@ -105,6 +105,31 @@ describe("every question in a prepared library is accounted for", () => {
     expect(ledger.inCourses.questions).toBe(accountQuestions(inventory, plan).inCourses.questions - rows);
   });
 
+  it("reports repeated empty bank source IDs separately from truthful zero question counts", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const bank = inventory.sources.find(source => source.name === "goer-pq.pdf")!;
+    const plan = planPublication(inventory);
+    const originalRows = bank.rows ?? bank.ready + bank.review;
+    const zero = { ...bank, rows: 0, ready: 0, review: 0 };
+    const second = { ...zero, name: "other-empty.pdf", checksum: "f".repeat(64) };
+    const otherSources = inventory.sources.filter(source => source.id !== bank.id);
+    const reference = accountQuestions({ ...inventory, sources: [...otherSources, zero] }, plan);
+    const baseline = accountQuestions(inventory, plan);
+    expect(reference.duplicateSourceIds).toEqual([]);
+    expect(reference.unaccounted).toBe(0);
+    expect(reference.mismatched).toEqual([]);
+
+    for (const items of [[zero, second], [second, zero]]) {
+      const ledger = accountQuestions({ ...inventory, sources: [...otherSources, ...items] }, plan);
+      expect(ledger.total.questions).toBe(baseline.total.questions - originalRows);
+      expect(ledger.unaccounted).toBe(0); // No question rows can be fabricated to signal a collision.
+      expect(ledger.mismatched).toEqual([]);
+      expect(ledger.duplicateSourceIds).toEqual([bank.id]);
+      expect(ledger.inCourses.questions).toBe(reference.inCourses.questions);
+    }
+  });
+
   it("does not count a duplicate-linked catalog row as another copy of its bank", async () => {
     const { read } = await library();
     const inventory = await readPublicationInventory(read);
@@ -115,5 +140,6 @@ describe("every question in a prepared library is accounted for", () => {
     expect(ledger.total.questions).toBe(6);
     expect(ledger.leftOut.reduce((sum, group) => sum + group.questions, 0)).toBe(2);
     expect(ledger.unaccounted).toBe(0);
+    expect(ledger.duplicateSourceIds).toEqual([]); // A non-bank reference does not create a collision.
   });
 });
