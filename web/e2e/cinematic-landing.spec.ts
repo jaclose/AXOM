@@ -9,7 +9,7 @@ test("public page is responsive, static for reduced motion, and isolated from le
   page.on("request", (request) => requests.push(request.url()));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("A mind at work.A world in order.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("AXOM. A private academic operating system.");
   await expect(page.locator(".landing-film img")).toHaveJSProperty("complete", true);
   await expect(page.locator(".landing-film img")).not.toHaveJSProperty("naturalWidth", 0);
   for (const [width, height] of [[1440, 900], [390, 844], [2560, 1080]]) {
@@ -17,8 +17,7 @@ test("public page is responsive, static for reduced motion, and isolated from le
     await expect(page.getByRole("button", { name: "Download for Desktop" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`landing-${width}.png`), fullPage: true });
-    await page.getByRole("contentinfo").scrollIntoViewIfNeeded();
-    await expect(page.getByText("Built for the way you learn.")).toBeVisible();
+    await expect(page.getByRole("contentinfo").getByRole("button", { name: "Download for Desktop" })).toBeVisible();
   }
   expect(requests.some((url) => /\.(webm|mp4)(\?|$)/.test(url))).toBe(false);
   expect(requests.some((url) => /lib\/store|workspaceBootstrap|src\/main.tsx/.test(url))).toBe(false);
@@ -57,7 +56,7 @@ test("download retries failures and downloads a validated release fixture", asyn
 
 test("browser launch retains first-run setup and sign-in reuses the existing account panel", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("link", { name: "Launch in Browser" }).click();
+  await page.getByRole("link", { name: "Open AXOM", exact: true }).click();
   await expect(page).toHaveURL(/app=1/);
   await expect(page.locator(".setup-root")).toBeVisible();
   await page.goto("/");
@@ -108,7 +107,7 @@ test("failed playback leaves the poster and working actions", async ({ page }) =
   await page.locator("video").evaluate((element) => element.dispatchEvent(new Event("error")));
   await expect(page.locator("video")).toHaveCount(0);
   await expect(page.locator(".landing-film img")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Launch in Browser" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open AXOM", exact: true })).toBeVisible();
 });
 
 test("account entry preserves system light and dark appearance", async ({ page }, testInfo) => {
