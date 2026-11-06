@@ -299,12 +299,13 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
           // a learner-authored duplicate. Hold for review rather than merging
           // unknown fields or deleting either note.
           const prior = priorReplacements.get(id);
-          if (prior) {
+          if (prior || info.modelName === note.modelName) {
+            const existingId = prior?.noteId ?? info.noteId;
             state.links[id] = {
               ...link,
               issue: {
                 kind: "conflict",
-                message: `Anki already contains note ${prior.noteId} with this AXOM ID and the requested note type. AXOM did not create another. Review both notes in Anki before retrying this conversion.`,
+                message: `Anki already contains note ${existingId} with this AXOM ID and the requested note type. AXOM did not create another. Review both notes in Anki before retrying this conversion.`,
                 at,
               },
             };
