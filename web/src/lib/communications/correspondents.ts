@@ -108,7 +108,7 @@ export function renderCorrespondentIntroduction(match:CorrespondentMatch,options
   const subject=(options.poc===false?"AXOM · Meet ":"AXOM POC · "+options.useCase.toUpperCase().replaceAll("_"," ")+" · Meet ")+match.name;
   const font="Arial,Helvetica,sans-serif", mono="'Courier New',Consolas,monospace";
   const stage=(number:string,title:string,copy:string)=>[
-    '<td valign="top" style="width:33.333%;padding:16px 11px;vertical-align:top;background:#252528;border:1px solid #494640">',
+    '<td valign="top" style="width:100%;padding:16px 14px;vertical-align:top;background:#252528;border:1px solid #494640">',
     '<p style="color:#C8A96A;font:10px '+mono+';margin:0 0 14px">'+number+'</p>',
     '<p style="color:#E6E2D6;font:bold 11px '+font+';margin:0 0 9px;letter-spacing:1px">'+title+'</p>',
     '<p style="color:#BCB7AC;font:12px/19px '+font+';margin:0">'+copy+'</p></td>'
@@ -127,11 +127,11 @@ export function renderCorrespondentIntroduction(match:CorrespondentMatch,options
     '<p style="margin:0 0 12px;color:#BCB7AC;font:14px/22px ',font,'">',name,', meet your AXOM correspondent.</p>',
     '<h1 style="font:normal 46px/54px Georgia,Times,serif;color:#E6E2D6;margin:0 0 17px">',alias,'.</h1>',
     '<p style="font:15px/24px ',font,';color:#E6E2D6;margin:0 0 26px">',escapeHtml(explain),'</p>',
-    '<table role="presentation" width="100%" cellspacing="3" cellpadding="0" style="margin-bottom:26px"><tr>',
-    stage("01 / SOURCE","YOUR CHOICES",match.basis==="starter"?"No preferences required":"Explicit preferences"),
-    stage("02 / MATCH","TRANSPARENT RULES","Color and work-style fit"),
-    stage("03 / IDENTITY","CORRESPONDENT",alias),
-    '</tr></table>',
+    '<table role="presentation" width="100%" cellspacing="3" cellpadding="0" style="margin-bottom:26px">',
+    '<tr>',stage("01 / SOURCE","YOUR CHOICES",match.basis==="starter"?"No preferences required":"Explicit preferences"),'</tr>',
+    '<tr>',stage("02 / MATCH","TRANSPARENT RULES","Color and work-style fit"),'</tr>',
+    '<tr>',stage("03 / IDENTITY","CORRESPONDENT",alias),'</tr>',
+    '</table>',
     '<p style="font:10px ',mono,';color:#C8A96A;letter-spacing:1.4px;margin:0 0 9px">WHY THIS CORRESPONDENT</p>',
     '<table role="presentation" width="100%" cellspacing="0" cellpadding="0">',why,'</table>',
     '<p style="color:#BCB7AC;font:13px/22px ',font,';margin:22px 0">',escapeHtml(match.description),'</p>',
