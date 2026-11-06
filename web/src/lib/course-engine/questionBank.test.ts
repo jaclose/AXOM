@@ -86,6 +86,16 @@ describe("course bank read model", () => {
     const source = { ...set, scope: { week: 2 } };
     expect(indexed([source], [question])).toEqual([]);
   });
+  it("does not infer a source week from review-only legacy memberships", () => {
+    const legacy = { ...question, setId: undefined };
+    expect(indexed([{ ...set, kind: "review" }], [legacy])).toEqual([]);
+  });
+  it("rejects a secondary review-set member when its claimed primary source does not contain it", () => {
+    const emptyPrimary = { ...set, questionIds: [] };
+    const secondary = { ...set, id: "secondary", kind: "review" as const };
+    expect(indexed([emptyPrimary, secondary], [question])
+      .flatMap((module) => module.weeks.flatMap((week) => week.questionIds))).toEqual([]);
+  });
   it("does not mutate saved question IDs, progress or the original source-set membership", () => {
     const original = structuredClone(set);
     const row = structuredClone(question);
