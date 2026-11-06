@@ -178,6 +178,53 @@ describe("canonical source proof survives Tracker collection lookup", () => {
     });
   });
 
+  it("holds an entire module-wide collection when one member declares a malformed week", () => {
+    const sets = [bank("set", ["valid", "bad"], { module: "NB2", courseId: "core" })];
+    const questions = [
+      q("valid", { setId: "set" }),
+      q("bad", { setId: "set", week: 0 }),
+    ];
+    expect(verify(["valid", "bad"], questions, sets, { module: "NB2", courseId: "core" })).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: true,
+      conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+    });
+  });
+
+  it("does not mistake a malformed source-set week for legitimately unscheduled material", () => {
+    for (const invalid of [0, 100, "Week 3-4", "2026-11-06"]) {
+      const sets = [bank("set", ["q"], {
+        module: "NB2", courseId: "core", week: invalid as number,
+      })];
+      expect(verify(["q"], [q("q", { setId: "set" })], sets,
+        { module: "NB2", courseId: "core" })).toEqual({
+        readyQuestionIds: [], sourceReviewRequired: true,
+        conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+      });
+    }
+  });
+
+  it("does not use a clean review collection to bypass an invalid primary week", () => {
+    const sets = [
+      bank("primary", ["q"], { module: "NB2", courseId: "core", week: 0 }),
+      bank("set", ["q"], { module: "NB2", courseId: "core" }),
+    ];
+    expect(verify(["q"], [q("q", { setId: "primary" })], sets,
+      { module: "NB2", courseId: "core" })).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: true,
+      conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+    });
+  });
+
+  it("accepts a valid textual source week as the matching numbered week", () => {
+    const sets = [bank("set", ["q"], {
+      module: "NB2", courseId: "core", week: "Week 3" as unknown as number,
+    })];
+    expect(verify(["q"], [q("q", { setId: "set" })], sets)).toEqual({
+      readyQuestionIds: ["q"], sourceReviewRequired: false,
+      conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+  });
+
   it("keeps module-wide unscheduled practice distinct from assigning a source week", () => {
     const sets = [bank("primary", ["q"], { module: "NB2", courseId: "core" }), bank("set", ["q"], { module: "NB2", courseId: "core" })];
     const questions = [q("q", { setId: "primary" })];
