@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { Profiler } from "react";
+import { create } from "zustand";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
@@ -16,20 +16,80 @@ beforeEach(() => {
   useAccount.setState({ phase: "unconfigured", user: null });
   useUi.getState().clearSettingsRequest();
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+let restoreCalendarObjectUrls: (() => void) | undefined;
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  restoreCalendarObjectUrls?.();
+  restoreCalendarObjectUrls = undefined;
+  vi.unstubAllGlobals();
+});
 
-// Keep URL constructible for app/library consumers while replacing only the
-// browser object-URL surface exercised by the calendar download action.
+// Keep the native URL constructor identity stable for jsdom, React and
+// the app. Only replace the two browser Blob URL methods actually tested.
 function stubCalendarObjectUrl(createObjectURL: (blob: Blob | MediaSource) => string) {
-  const NativeURL = globalThis.URL;
-  class DownloadURL extends NativeURL {
-    static createObjectURL = createObjectURL;
-    static revokeObjectURL = vi.fn();
-  }
-  vi.stubGlobal("URL", DownloadURL);
+  const nativeURL = globalThis.URL;
+  const createDescriptor = Object.getOwnPropertyDescriptor(nativeURL, "createObjectURL");
+  const revokeDescriptor = Object.getOwnPropertyDescriptor(nativeURL, "revokeObjectURL");
+  Object.defineProperty(nativeURL, "createObjectURL", {
+    configurable: true, writable: true, value: createObjectURL,
+  });
+  Object.defineProperty(nativeURL, "revokeObjectURL", {
+    configurable: true, writable: true, value: vi.fn(),
+  });
+  // jsdom does not implement navigation for downloaded Blob URLs. Preserve
+  // the generated Blob and anchor cleanup assertions without queuing a fake
+  // navigation between React test cases. Dedicated tests override to throw.
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  restoreCalendarObjectUrls = () => {
+    if (createDescriptor) Object.defineProperty(nativeURL, "createObjectURL", createDescriptor);
+    else Reflect.deleteProperty(nativeURL, "createObjectURL");
+    if (revokeDescriptor) Object.defineProperty(nativeURL, "revokeObjectURL", revokeDescriptor);
+    else Reflect.deleteProperty(nativeURL, "revokeObjectURL");
+  };
 }
 
 describe("Integrations", () => {
+  it("diagnostic: independent Zustand hook commits a subscribed change", async () => {
+    const useCounter = create<{ count: number }>(() => ({ count: 0 }));
+    function Counter() {
+      const count = useCounter((state) => state.count);
+      return <output data-testid="counter-probe">{count}</output>;
+    }
+    render(<Counter />);
+    expect(screen.getByTestId("counter-probe").textContent).toBe("0");
+    await act(async () => { useCounter.setState({ count: 1 }); });
+    expect(screen.getByTestId("counter-probe").textContent).toBe("1");
+  });
+
+  it("diagnostic: persisted AXOM task hook commits a subscribed change", async () => {
+    function TaskProbe() {
+      const due = useStore((state) => state.tasks[0]?.due ?? "missing");
+      return <output data-testid="task-probe">{due}</output>;
+    }
+    function WholeStateProbe() {
+      const store = useStore();
+      return <output data-testid="whole-store-probe">{store.tasks[0]?.due ?? "missing"}</output>;
+    }
+    render(<><TaskProbe /><WholeStateProbe /></>);
+    expect(screen.getByTestId("task-probe").textContent).toBe("2999-01-01");
+    expect(screen.getByTestId("whole-store-probe").textContent).toBe("2999-01-01");
+    const id = useStore.getState().tasks[0].id;
+    await act(async () => { useStore.getState().updateTask(id, { due: "2999-03-01" }); });
+    expect(useStore.getState().tasks[0].due).toBe("2999-03-01");
+    expect(screen.getByTestId("task-probe").textContent).toBe("2999-03-01");
+    expect(screen.getByTestId("whole-store-probe").textContent).toBe("2999-03-01");
+  });
+
+  it("diagnostic: an open calendar panel follows task completion without errors", async () => {
+    render(<IntegrationsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
+    expect(screen.getByText(/^1 event/)).toBeTruthy();
+    await act(async () => { useStore.getState().updateTask("t1", { done: true }); });
+    expect(useStore.getState().tasks[0].done).toBe(true);
+    await waitFor(() => expect(screen.getByText(/^0 events/)).toBeTruthy());
+  });
+
   it("groups integrations by readiness and states what leaves the device", () => {
     render(<IntegrationsPage />);
     expect(screen.getByRole("heading", { name: "Works today" })).toBeTruthy();
@@ -67,7 +127,6 @@ describe("Integrations", () => {
     expect(within(panel).getByText(/may skip, update, or duplicate events/i)).toBeTruthy();
     fireEvent.click(within(panel).getByRole("button", { name: /Download .ics/ }));
     expect(createObjectURL).toHaveBeenCalledOnce();
-    vi.unstubAllGlobals();
   });
 
   it("explains an empty calendar export and points to a dated task", () => {
@@ -83,13 +142,7 @@ describe("Integrations", () => {
     stubCalendarObjectUrl(createObjectURL);
     const task = useStore.getState().tasks[0];
     useStore.setState({ tasks: [{ ...task, due: "2999-02-31" }] });
-    let calendarCommits = 0;
-    const onCalendarCommit = () => { calendarCommits++; };
-    const { rerender } = render(
-      <Profiler id="calendar-recovery" onRender={onCalendarCommit}>
-        <IntegrationsPage />
-      </Profiler>,
-    );
+    render(<IntegrationsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
@@ -98,36 +151,26 @@ describe("Integrations", () => {
     // An unrelated store revision must not discard a still-applicable error.
     // Keeping the exact tasks reference simulates a non-calendar state update.
     const unchangedTasks = useStore.getState().tasks;
-    act(() => useStore.setState({ tasks: unchangedTasks }));
+    await act(async () => {
+      useStore.setState({ tasks: unchangedTasks });
+    });
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
 
     // Use the actual learner task-update action rather than mutating the
     // persisted Zustand store directly from the harness. Verify that it emits
     // a new tasks reference for the mounted calendar subscriber.
-    const commitsBeforeRepair = calendarCommits;
     const tasksBeforeRepair = useStore.getState().tasks;
     let taskChangeNotifications = 0;
     const unsubscribeTaskCheck = useStore.subscribe((state, previous) => {
       if (state.tasks !== previous.tasks) taskChangeNotifications++;
     });
-    // Await React's full external-store/effect flush, not only synchronous
-    // Zustand notification, before asserting the mounted panel's update.
+    // The actual task action changes the source while the panel stays mounted.
     await act(async () => {
       useStore.getState().updateTask(task.id, { due: "2999-03-01" });
     });
     unsubscribeTaskCheck();
     expect(taskChangeNotifications).toBe(1);
     expect(useStore.getState().tasks).not.toBe(tasksBeforeRepair);
-    // An external task edit must commit a mounted React update, not merely
-    // notify Zustand listeners while leaving the calendar UI stale.
-    expect(calendarCommits).toBeGreaterThan(commitsBeforeRepair);
-    // Exercise React's mounted update boundary after the task action.
-    // The real-browser E2E separately proves automatic subscription refresh.
-    rerender(
-      <Profiler id="calendar-recovery" onRender={onCalendarCommit}>
-        <IntegrationsPage />
-      </Profiler>,
-    );
     // The learner repairs the task elsewhere while this panel remains open.
     // Retrying must use the updated store values, download valid bytes and
     // clear the stale validation error without reloading or remounting.
@@ -139,11 +182,13 @@ describe("Integrations", () => {
     expect(eligible).toEqual([expect.objectContaining({ uid: "task-t1", day: "2999-03-01" })]);
     expect(buildIcs(eligible)).toContain("DTSTART;VALUE=DATE:29990301");
     expect(screen.getByText(/^1 event/)).toBeTruthy();
-    // Source errors refer to the old data and must disappear as soon as the
-    // canonical task is repaired, even when the panel is never remounted.
+    // The mounted panel must remove obsolete validation errors before the
+    // learner retries, not merely clear the warning after a successful click.
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    // A same-mounted retry must also read the corrected canonical source.
     const retry = screen.getByRole("button", { name: /Download .ics/ });
     expect(retry.hasAttribute("disabled")).toBe(false);
+    // The user retries from the same mounted panel after repairing the task.
     fireEvent.click(retry);
     expect(useStore.getState().tasks[0].due).toBe("2999-03-01");
     expect(createObjectURL).toHaveBeenCalledOnce();
@@ -159,7 +204,6 @@ describe("Integrations", () => {
     });
     expect(wire).toContain("DTSTART;VALUE=DATE:29990301");
     expect(wire).not.toContain("29990231");
-    vi.unstubAllGlobals();
   });
 
   it("reports a browser download failure separately and clears the error after changing choices", () => {
@@ -171,7 +215,6 @@ describe("Integrations", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/could not be downloaded/i);
     fireEvent.click(screen.getByRole("checkbox", { name: /Open tasks with due dates/ }));
     expect(screen.queryByRole("alert")).toBeNull();
-    vi.unstubAllGlobals();
   });
 
   it("releases a generated URL and temporary link when the browser refuses the click", () => {
