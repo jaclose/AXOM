@@ -1090,6 +1090,11 @@ function JournalWritingPage({
             <span className="journal-inline-quote">A record you can return to.</span>
             <p>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Page saved locally" : saveState === "failed" ? "Your changes need saving" : "Ready when you are"}</p>
             {saveError && <p className="journal-inline-save-error" role="alert">{saveError}</p>}
+            {saveState === "failed" && (
+              <GButton size="sm" disabled={addingImage} onClick={() => { void persist(); }}>
+                <Save size={ICON_SIZE.body} /> Retry save
+              </GButton>
+            )}
             <GButton variant="primary" onClick={openFullPage}><BookOpen size={ICON_SIZE.body} /> Write full page</GButton>
           </div>
         </div>
