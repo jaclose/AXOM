@@ -128,7 +128,6 @@ describe("Integrations", () => {
     expect(within(panel).getByText(/may skip, update, or duplicate events/i)).toBeTruthy();
     fireEvent.click(within(panel).getByRole("button", { name: /Download .ics/ }));
     expect(createObjectURL).toHaveBeenCalledOnce();
-    vi.unstubAllGlobals();
   });
 
   it("explains an empty calendar export and points to a dated task", () => {
@@ -204,7 +203,6 @@ describe("Integrations", () => {
     });
     expect(wire).toContain("DTSTART;VALUE=DATE:29990301");
     expect(wire).not.toContain("29990231");
-    vi.unstubAllGlobals();
   });
 
   it("reports a browser download failure separately and clears the error after changing choices", () => {
@@ -216,7 +214,6 @@ describe("Integrations", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/could not be downloaded/i);
     fireEvent.click(screen.getByRole("checkbox", { name: /Open tasks with due dates/ }));
     expect(screen.queryByRole("alert")).toBeNull();
-    vi.unstubAllGlobals();
   });
 
   it("releases a generated URL and temporary link when the browser refuses the click", () => {
