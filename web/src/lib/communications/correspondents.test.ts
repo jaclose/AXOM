@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AXOM_CORRESPONDENTS, matchCorrespondent, renderCorrespondentIntroduction, correspondentSender, type CorrespondentId } from "./correspondents";
+import { AXOM_CORRESPONDENTS, CORRESPONDENT_ORDERS, matchCorrespondent, renderCorrespondentIntroduction, correspondentSender, type CorrespondentId } from "./correspondents";
 
 const base = { userKey: "3c48cf9a-b93d-4de5-8d2a-f5af7efc213a" };
 const ids = AXOM_CORRESPONDENTS.map(item => item.id);
@@ -15,6 +15,24 @@ describe("AXOM Correspondents V2", () => {
       expect(item.name.length).toBeGreaterThan(2);
       expect(item.description.length).toBeGreaterThan(20);
     }
+  });
+
+  it("places each of the 40 companions in exactly one of eight five-member orders", () => {
+    expect(Object.keys(CORRESPONDENT_ORDERS)).toHaveLength(8);
+    const listed = Object.values(CORRESPONDENT_ORDERS).flat();
+    expect(listed).toHaveLength(40);
+    expect(new Set(listed).size).toBe(40);
+    expect(new Set(listed)).toEqual(new Set(ids));
+    for (const row of Object.values(CORRESPONDENT_ORDERS)) expect(row).toHaveLength(5);
+  });
+
+  it("never treats color as a measure of personality or changes an academic preference match", () => {
+    const sample = { ...base, academicHouse: "KEEPERS" as const, declaredStyles: ["writing", "reflection"] };
+    const warm = matchCorrespondent({ ...sample, selectedAccent: "#DC6C39" });
+    const cold = matchCorrespondent({ ...sample, selectedAccent: "#3475CF" });
+    expect(warm.id).toBe(cold.id);
+    expect(warm.accent).not.toBe(cold.accent);
+    expect(warm.reasons.join(" ")).not.toMatch(/color|blue|orange/i);
   });
 
   it("assigns a deterministic initial name without pretending a personality inference", () => {
