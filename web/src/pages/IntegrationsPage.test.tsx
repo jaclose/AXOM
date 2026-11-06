@@ -100,9 +100,15 @@ describe("Integrations", () => {
     expect(eligible).toEqual([expect.objectContaining({ uid: "task-t1", day: "2999-03-01" })]);
     expect(buildIcs(eligible)).toContain("DTSTART;VALUE=DATE:29990301");
     expect(screen.getByText(/^1 event/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    const retry = screen.getByRole("button", { name: /Download .ics/ });
+    expect(retry.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(retry);
+    // Separate dispatch/eligibility from the React error-surface assertion.
+    // A click that never reaches the Blob boundary must fail here, not be
+    // mistaken for an async rendering delay or a successful recovery.
+    expect(useStore.getState().tasks[0].due).toBe("2999-03-01");
     expect(createObjectURL).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     // Inspect the real generated file, not only whether the browser was asked
     // to download something. The repaired task date must replace the old one.
     const exported = createObjectURL.mock.calls[0][0] as Blob;
