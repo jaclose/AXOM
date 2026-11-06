@@ -17,6 +17,7 @@ import { CommunityPostCard } from "./CommunityPostCard";
 import { CommunityThread } from "./CommunityThread";
 import { CommunityFriendAction } from "./CommunityPeople";
 import { retryCommunityProgress } from "./CommunityProgressSync";
+import { createCommunityDraftCache } from "./communityDraftCache";
 
 vi.mock("../../lib/store", () => ({
   useStore: (select: (state: { logs: []; questionSets: Array<{ id: string; title: string }> }) => unknown) =>
@@ -59,6 +60,26 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Explicit community publishing", () => {
+  it("keeps exact field labels when composer and reply drafts are restored", async () => {
+    const user = userEvent.setup();
+    const draftCache = createCommunityDraftCache();
+    draftCache.replies.set("post-one", { draft: "A retained reply.", editBody: "" });
+    render(<>
+      <CommunityComposer accountId="me" profile={profile} posts={[]} onPublished={() => {}}
+        initialDraft={{ kind: "update", audience: "private", day: today(), caption: "A retained update.", setId: "" }} />
+      <CommunityThread accountId="me" postId="post-one" canReply draftCache={draftCache} onOpenProfile={() => {}} />
+    </>);
+    const update = screen.getByRole("textbox", { name: "Your update" }) as HTMLTextAreaElement;
+    const reply = screen.getByRole("textbox", { name: "Write a reply" }) as HTMLTextAreaElement;
+    expect(update.value).toBe("A retained update.");
+    expect(reply.value).toBe("A retained reply.");
+    expect(Array.from(update.labels ?? [], label => label.textContent)).toEqual(["Your update"]);
+    expect(Array.from(reply.labels ?? [], label => label.textContent)).toEqual(["Write a reply"]);
+    expect(update.id).not.toBe(reply.id);
+    await user.click(screen.getByText("Write a reply", { selector: "label" }));
+    expect(document.activeElement).toBe(reply);
+  });
+
   it("defaults each new post to Only me and resets its audience only after a confirmed save", async () => {
     const user = userEvent.setup();
     const onPublished = vi.fn();
@@ -129,6 +150,9 @@ describe("Community identity and shared profiles", () => {
     const user = userEvent.setup();
     const onSaved = vi.fn(), onClose = vi.fn();
     render(<CommunityIdentityDialog accountId="me" profile={profile} onSaved={onSaved} onClose={onClose} />);
+    const bio = screen.getByRole("textbox", { name: "Biography" }) as HTMLTextAreaElement;
+    expect(bio.value).toBe(profile.bio);
+    expect(Array.from(bio.labels ?? [], label => label.textContent)).toEqual(["Biography"]);
     const name = screen.getByRole("textbox", { name: "Display name" });
     await user.clear(name); await user.type(name, "Kai Noor");
     await user.click(screen.getByRole("button", { name: "Save profile" }));
@@ -189,6 +213,9 @@ describe("Posts and replies", () => {
     const props = { accountId: "me", profile, liked: false, reactionCount: 0, canParticipate: true, onChanged, onOpenProfile: vi.fn() };
     const view = render(<CommunityPostCard {...props} post={post({ revision: 4 })} />);
     await user.click(screen.getByRole("button", { name: "Edit post" }));
+    const caption = screen.getByRole("textbox", { name: "Edit your post" }) as HTMLTextAreaElement;
+    expect(caption.value).toBe("A useful connection today.");
+    expect(Array.from(caption.labels ?? [], label => label.textContent)).toEqual(["Edit your post"]);
     await user.clear(screen.getByRole("textbox", { name: "Edit your post" }));
     await user.type(screen.getByRole("textbox", { name: "Edit your post" }), "My unfinished edit.");
     view.rerender(<CommunityPostCard {...props} post={post({ revision: 5, caption: "Newer edit on another device" })} />);
@@ -236,7 +263,10 @@ describe("Posts and replies", () => {
     const edit = await screen.findByRole("button", { name: "Edit reply" });
     expect(screen.getAllByRole("button", { name: "Delete reply" })).toHaveLength(1);
     await user.click(edit);
-    const input = screen.getByRole("textbox", { name: "Edit your reply" });
+    const input = screen.getByRole("textbox", { name: "Edit your reply" }) as HTMLTextAreaElement;
+    // Browser label matching must not include the textarea's saved contents.
+    expect(input.value).toBe("I can join after class.");
+    expect(Array.from(input.labels ?? [], label => label.textContent)).toEqual(["Edit your reply"]);
     await user.clear(input); await user.type(input, "I can join at five.");
     await user.click(screen.getByRole("button", { name: "Save reply" }));
     await waitFor(() => expect(editCommunityComment).toHaveBeenCalledWith("me", "reply-one", "I can join at five.", "2026-11-05T12:00:00Z"));

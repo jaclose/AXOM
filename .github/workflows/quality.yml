@@ -129,9 +129,13 @@ jobs:
       - run: cargo check --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
-  community-browser:
+  browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -143,13 +147,13 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm --prefix web ci
       - run: npm --prefix web exec -- playwright install --with-deps chromium
-      - name: Community, account privacy, and dashboard browser acceptance
-        run: npm --prefix web run test:e2e -- e2e/platform.local.spec.ts e2e/community-experience.spec.ts e2e/dashboard-widget-layout.spec.ts e2e/dashboard-inboxes.spec.ts --workers=1
-      - name: Community browser evidence
+      - name: Full browser regression, including Community and account privacy
+        run: npm --prefix web run test:e2e -- --workers=1 --shard=${{ matrix.shard }}/3
+      - name: Browser evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: community-browser-${{ github.run_id }}
+          name: browser-${{ matrix.shard }}-${{ github.run_id }}
           path: |
             web/test-results/
             /tmp/axom-community-*.png

@@ -18,6 +18,10 @@ async function seedPrivateProgress(page: Page) {
   }, day);
 }
 async function inspectResponsive(page: Page, area: "community" | "host") {
+  if (area === "community") {
+    await expect(page.locator(".community-own-profile")).toBeVisible();
+    await expect(page.locator(".community-page").getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
+  }
   for (const [width, height, theme] of [[1440, 900, "dark"], [390, 844, "light"]] as const) {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ colorScheme: theme, reducedMotion: width === 390 ? "reduce" : "no-preference" });
@@ -26,7 +30,7 @@ async function inspectResponsive(page: Page, area: "community" | "host") {
     await scroller.evaluate(element => { element.scrollTop = 0; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     expect(await page.locator(`.${area}-page`).evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-    await page.screenshot({ path: `/tmp/axom-pr30-${area}-${width}-${theme}.png` });
+    await page.screenshot({ path: `/tmp/axom-pr30-${area}-${width}-${theme}.png`, animations: "disabled" });
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await scroller.evaluate(element => { element.scrollTop = 0; });

@@ -25,6 +25,7 @@ export function CommunityPostCard({ accountId, post, profile, liked, reactionCou
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState<"spam" | "harassment" | "copyright" | "inaccurate" | "other">("other");
   const threadId = useId();
+  const captionId = useId();
   const own = post.user_id === accountId;
 
   useEffect(() => {
@@ -51,8 +52,9 @@ export function CommunityPostCard({ accountId, post, profile, liked, reactionCou
     {editing ? <form className="community-post-edit" onSubmit={event => {
       event.preventDefault(); void mutate(() => editCommunityPost(accountId, post.id, { caption, visibility: audience, expectedRevision }), "Your post is updated.", () => setEditing(false));
     }}>
-      <label>Edit your post<textarea value={caption} maxLength={500} rows={4} disabled={busy}
-        required={post.kind === "update" || post.kind === "study_invite"} onChange={event => setCaption(event.target.value)} /></label>
+      <div className="community-textarea-field"><label htmlFor={captionId}>Edit your post</label>
+        <textarea id={captionId} value={caption} maxLength={500} rows={4} disabled={busy}
+          required={post.kind === "update" || post.kind === "study_invite"} onChange={event => setCaption(event.target.value)} /></div>
       <label>Who can see this?<select value={audience} disabled={busy} onChange={event => setAudience(event.target.value as CommunityPost["visibility"])}>
         <option value="private">Only me</option><option value="friends">Accepted friends</option><option value="community">Community</option>
       </select></label>

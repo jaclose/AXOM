@@ -25,7 +25,7 @@ test("Dashboard widgets stay configurable, keyboard-reorderable, and responsive"
 
   const originalSize = await settings.locator('input[type="radio"]:checked').getAttribute("value");
   expect(originalSize).toBeTruthy();
-  const draftSize = originalSize === "small" ? "medium" : "small";
+  const draftSize = originalSize === "small" ? "large" : "small";
   await settings.locator(`input[type="radio"][value="${draftSize}"]`).check();
   await settings.getByRole("button", { name: "Cancel" }).focus();
   await page.keyboard.press("Enter");

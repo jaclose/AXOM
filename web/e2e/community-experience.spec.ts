@@ -26,7 +26,9 @@ test("community conversations, profile edits and audience withdrawal work across
   const [owner, member] = PLATFORM_USERS;
   try {
     for (const [index, target] of [page, other].entries()) {
+      target.setDefaultTimeout(15_000);
       target.on("pageerror", error => errors.push(error.message));
+      target.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
       unexpected.push(await database.attach(target, index as 0 | 1));
       await target.goto(`${baseURL}/#communities`);
       await seedOnboarded(target, { dailyLoopReminders: { checkInEnabled: false, closeoutEnabled: false } });
@@ -67,7 +69,7 @@ test("community conversations, profile edits and audience withdrawal work across
     await invitation.getByRole("button", { name: "Save reply", exact: true }).click();
     await expect(invitation).toContainText("I can join at 18:15.");
     await invitation.scrollIntoViewIfNeeded();
-    await other.screenshot({ path: "/tmp/axom-community-conversation-desktop.png" });
+    await other.screenshot({ path: "/tmp/axom-community-conversation-desktop.png", animations: "disabled" });
 
     const ownPost = page.locator(".community-post").filter({ hasText: "Renal review at 18:00." });
     await ownPost.getByRole("button", { name: "Edit post", exact: true }).click();
@@ -98,9 +100,9 @@ test("community conversations, profile edits and audience withdrawal work across
     const studiedProfile = other.getByRole("dialog", { name: `${owner.name}'s profile` });
     await expect(studiedProfile).toContainText("1-day shared streak");
     await expect(studiedProfile).not.toContainText("PRIVATE COMMUNITY ACCEPTANCE NOTE");
-    await other.screenshot({ path: "/tmp/axom-community-profile-desktop.png" });
+    await other.screenshot({ path: "/tmp/axom-community-profile-desktop.png", animations: "disabled" });
     await other.setViewportSize({ width: 390, height: 844 });
-    await other.screenshot({ path: "/tmp/axom-community-profile-mobile.png" });
+    await other.screenshot({ path: "/tmp/axom-community-profile-mobile.png", animations: "disabled" });
     await other.keyboard.press("Escape");
 
     for (const width of [320, 390, 768, 1440]) {
@@ -113,7 +115,7 @@ test("community conversations, profile edits and audience withdrawal work across
         }, theme);
         expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         expect(await other.locator(".community-page").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-        await other.screenshot({ path: `/tmp/axom-community-${width}-${theme}.png` });
+        await other.screenshot({ path: `/tmp/axom-community-${width}-${theme}.png`, animations: "disabled" });
       }
     }
     expect(unexpected.flat()).toEqual([]);
@@ -171,6 +173,6 @@ test("automatic sharing corrects totals, revokes server access and keeps deliber
     const widget = other.locator(".community-widget");
     await expect(widget).toContainText("A deliberate message that stays shared when automatic sharing stops.");
     await expect(widget.getByRole("link", { name: /Open Community/ })).toHaveAttribute("href", "#communities");
-    await other.screenshot({ path: "/tmp/axom-community-dashboard-widget.png" });
+    await other.screenshot({ path: "/tmp/axom-community-dashboard-widget.png", animations: "disabled" });
   } finally { await otherContext.close(); await database.close(); }
 });

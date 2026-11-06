@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Flag, RefreshCw } from "lucide-react";
 import { GButton, GhostButton, GlassCard, PanelHeader } from "../ui/primitives";
 import { loadOperatorReports, refreshOperatorAccess, resolveReport, useOperatorAccessStatus, type OperatorReport } from "../../lib/operator/hostClient";
@@ -13,6 +13,7 @@ const REASON_LABEL: Record<string, string> = {
 /** Report review for moderators and administrators inside Community. Host stays
  * the owner's alone; Postgres still decides who may read and resolve reports. */
 export function CommunityReportsPanel({ accountId }: { accountId: string }) {
+  const reasonId = useId();
   const { role } = useOperatorAccessStatus();
   const [reports, setReports] = useState<OperatorReport[]>();
   const [loading, setLoading] = useState(false);
@@ -75,11 +76,11 @@ export function CommunityReportsPanel({ accountId }: { accountId: string }) {
           <small>{report.reports} {report.reports === 1 ? "report" : "reports"} · {new Date(report.latest_at).toLocaleDateString()}</small>
         </div>
         <p><strong>{REASON_LABEL[report.reason] ?? report.reason}</strong>{report.note ? ` · ${report.note}` : ""}</p>
-        <label className="community-report-reason">Reason for your decision
-          <textarea value={reasons[report.post_id] ?? ""} maxLength={500} rows={2} disabled={busyPost === report.post_id}
+        <div className="community-report-reason"><label htmlFor={`${reasonId}-${report.post_id}`}>Reason for your decision</label>
+          <textarea id={`${reasonId}-${report.post_id}`} value={reasons[report.post_id] ?? ""} maxLength={500} rows={2} disabled={busyPost === report.post_id}
             placeholder="At least 8 characters, kept in the audit history"
             onChange={event => setReasons(current => ({ ...current, [report.post_id]: event.target.value }))} />
-        </label>
+        </div>
         <div className="row wrap gap8">
           <GButton size="sm" disabled={Boolean(busyPost)} onClick={() => void decide(report, "dismiss")}>Keep post</GButton>
           <GhostButton disabled={Boolean(busyPost)} onClick={() => void decide(report, "remove")}>Remove post</GhostButton>

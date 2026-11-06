@@ -5,6 +5,7 @@
 :is(.community-page,.community-dialog) :is(button,input,textarea,select,a,summary):focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 :is(.community-page,.community-dialog) :is(input,textarea)::placeholder { color: var(--text-60); }
 :is(.community-page,.community-dialog) label { display: grid; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; }
+.community-textarea-field { display: grid; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; }
 :is(.community-page,.community-dialog) label > span { display: inline-flex; align-items: center; gap: 6px; }
 :is(.community-page,.community-dialog) textarea { resize: vertical; line-height: 1.6; }
 :is(.community-page,.community-dialog) .sub { color: var(--text-70); font-size: 12px; line-height: 1.6; }

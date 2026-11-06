@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Check, CornerDownRight, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
 import {
   deleteCommunityComment, editCommunityComment, loadCommunityComments, publishCommunityComment,
@@ -12,6 +12,8 @@ import type { CommunityDraftCache } from "./communityDraftCache";
 export function CommunityThread({ accountId, postId, canReply, refreshKey = 0, draftCache, onOpenProfile }: {
   accountId: string; postId: string; canReply: boolean; refreshKey?: number; draftCache?: CommunityDraftCache; onOpenProfile: (id: string) => void;
 }) {
+  const editReplyId = useId();
+  const newReplyId = useId();
   const [comments, setComments] = useState<CommunityComment[]>();
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
@@ -83,7 +85,8 @@ export function CommunityThread({ accountId, postId, canReply, refreshKey = 0, d
         {editing === comment.id ? <form className="community-reply-edit" onSubmit={event => {
           event.preventDefault(); void mutate(() => editCommunityComment(accountId, comment.id, editBody, editUpdatedAt), "Your reply is updated.", () => setEditing(undefined));
         }}>
-          <label>Edit your reply<textarea value={editBody} maxLength={500} rows={3} required disabled={busy} onChange={event => setEditBody(event.target.value)} /></label>
+          <div className="community-textarea-field"><label htmlFor={editReplyId}>Edit your reply</label>
+            <textarea id={editReplyId} value={editBody} maxLength={500} rows={3} required disabled={busy} onChange={event => setEditBody(event.target.value)} /></div>
           <div className="community-form-actions"><GhostButton type="button" disabled={busy} onClick={() => setEditing(undefined)}>Cancel</GhostButton>
             <GButton type="submit" size="sm" disabled={busy || !editBody.trim()}><Check size={14} aria-hidden="true" /> Save reply</GButton></div>
         </form> : <p className="community-reply-body">{comment.body}</p>}
@@ -101,7 +104,8 @@ export function CommunityThread({ accountId, postId, canReply, refreshKey = 0, d
     {canReply ? <form className="community-reply-composer" onSubmit={event => {
       event.preventDefault(); if (draft.trim()) void mutate(() => publishCommunityComment(accountId, postId, draft), "Your reply is posted.", () => setDraft(""));
     }}>
-      <label>Write a reply<textarea value={draft} maxLength={500} rows={2} required disabled={busy} placeholder="Add to the conversation…" onChange={event => setDraft(event.target.value)} /></label>
+      <div className="community-textarea-field"><label htmlFor={newReplyId}>Write a reply</label>
+        <textarea id={newReplyId} value={draft} maxLength={500} rows={2} required disabled={busy} placeholder="Add to the conversation…" onChange={event => setDraft(event.target.value)} /></div>
       <div className="community-form-actions"><span className="sub">{draft.length}/500 · Same audience as this post</span>
         <GButton type="submit" size="sm" disabled={busy || !draft.trim()}><Send size={14} aria-hidden="true" /> {busy ? "Saving…" : "Post reply"}</GButton></div>
     </form> : <p className="sub">Create your community profile to join the conversation.</p>}

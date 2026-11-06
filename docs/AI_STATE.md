@@ -21,9 +21,10 @@ Supabase `jofkmfwkidubxcutkwzf`. This session's Supabase connection exposes only
 also does not list the existing AXOM project. Do not mistake the accessible
 project for production, or release the client before its matching migration and
 Communications function. No live schema change has been made by this candidate.
-Focused tests pass; combined gates and the new `community-browser` CI job are
-being completed. Local Chromium is blocked by the runtime's socket policy;
-synthetic browser evidence must come from a supported runner.
+[PR #121](https://github.com/jaclose/AXOM/pull/121) tracks exact-candidate checks
+and browser artifacts. Prior CI quality passed 4,819 tests (35 skips); the full
+browser suite now runs in three shards. Local Chromium is blocked by this
+runtime's socket policy.
 
 ## Host and Communities repair · 2026-11-04
 

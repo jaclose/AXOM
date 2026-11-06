@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { AtSign, Check, Pencil, UserRound } from "lucide-react";
 import { joinCommunity, updateCommunityProfile, type CommunityProfile } from "../../lib/community/community";
 import { useUi } from "../../lib/uiStore";
@@ -28,6 +28,7 @@ export function CommunityPersonButton({ profile, name, onClick }: {
 export function CommunityIdentityDialog({ accountId, profile, displayName, onClose, onSaved }: {
   accountId: string; profile?: CommunityProfile; displayName?: string; onClose: () => void; onSaved: (message: string) => void;
 }) {
+  const bioId = useId();
   const [handle, setHandle] = useState(profile?.handle ?? (displayName ?? "").trim().toLowerCase()
     .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30));
   const [name, setName] = useState(profile?.display_name ?? displayName ?? "");
@@ -68,8 +69,9 @@ export function CommunityIdentityDialog({ accountId, profile, displayName, onClo
             onChange={event => setHandle(event.target.value.toLowerCase())} placeholder="your_handle" />
           <small>3–30 letters, numbers or underscores.</small></label>
       </div>
-      <label>Biography <textarea name="bio" value={bio} maxLength={240} rows={3} disabled={saving}
-        placeholder="What are you learning? What would you like to study together?" onChange={event => setBio(event.target.value)} /></label>
+      <div className="community-textarea-field"><label htmlFor={bioId}>Biography</label>
+        <textarea id={bioId} name="bio" value={bio} maxLength={240} rows={3} disabled={saving}
+          placeholder="What are you learning? What would you like to study together?" onChange={event => setBio(event.target.value)} /></div>
       <span className="community-character-count">{bio.length}/240</span>
       <p className="sub">Your sharing choices are managed in account settings. Editing this profile does not change them.</p>
       {error && <p role="alert" className="community-error">{error}</p>}

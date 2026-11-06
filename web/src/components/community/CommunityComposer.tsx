@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Activity, BookOpen, LockKeyhole, MessageCircle, Send, Users } from "lucide-react";
 import { dayProgress, publishCommunityPost, type CommunityPost, type CommunityProfile } from "../../lib/community/community";
 import { useStore } from "../../lib/store";
@@ -21,6 +21,7 @@ export function CommunityComposer({ accountId, profile, posts, onPublished, prog
   accountId: string; profile: CommunityProfile; posts: CommunityPost[]; onPublished: (message: string) => void; progressReview?: number;
   initialDraft?: CommunityComposerDraft; onDraftChange?: (draft: CommunityComposerDraft) => void;
 }) {
+  const captionId = useId();
   const logs = useStore(state => state.logs);
   const sets = useStore(state => state.questionSets);
   const today = isoDate(new Date());
@@ -93,11 +94,12 @@ export function CommunityComposer({ accountId, profile, posts, onPublished, prog
         <p className="sub">Shares the title only. The questions, files and private links stay in your workspace.</p>
         {!sets.some(set => Boolean(set.title?.trim())) && <a className="community-text-link" href="#questions">Create a set in Question Bank</a>}
       </div>}
-      <label className="community-caption">{kind === "study_invite" ? "Your study invitation" : needsCaption ? "Your update" : "Write a note (optional)"}
-        <textarea name="caption" value={caption} maxLength={500} rows={3} required={needsCaption} disabled={saving}
+      <div className="community-caption community-textarea-field">
+        <label htmlFor={captionId}>{kind === "study_invite" ? "Your study invitation" : needsCaption ? "Your update" : "Write a note (optional)"}</label>
+        <textarea id={captionId} name="caption" value={caption} maxLength={500} rows={3} required={needsCaption} disabled={saving}
           placeholder={kind === "study_invite" ? "What are you studying, when are you starting, and how can others join?" : "What would you like to share with your circle?"}
           onChange={event => setCaption(event.target.value)} />
-      </label>
+      </div>
       <div className="community-caption-foot"><span>{kind === "study_invite" ? "People can reply to plan a session with you." : "Your words appear exactly as you write them."}</span>
         <span>{caption.length}/500</span></div>
       <div className="community-publish">
