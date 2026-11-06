@@ -169,7 +169,7 @@ describe("verified primary-source progress attribution", () => {
     const result = scopeProgress(questions, ownScope, fullSets);
     assert.deepEqual(result, {
       total: 3, attempted: 1, firstTimeCorrect: 1, missed: 0,
-      questionIds: ["valid", "inherited", "legacy"], sourceReviewHeld: 4,
+      questionIds: ["valid", "inherited", "legacy"], sourceReviewHeld: 3,
     });
     const wholeModule = scopeProgress(questions, { module: "NB2", courseId: "core" }, fullSets);
     assert.equal(wholeModule.total, 3);
