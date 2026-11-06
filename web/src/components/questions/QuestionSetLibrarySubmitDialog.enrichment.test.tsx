@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
@@ -67,6 +67,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Question Set draft explanation review", () => {
+  it("requires an account-specific submission check before automatic AI", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    let completeLookup!: (value: []) => void;
+    mocks.submissions.mockImplementationOnce(() => new Promise<[]>(resolve => { completeLookup = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { completeLookup([]); });
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+  });
+
+
   it("prepares explanations automatically only after opening a Community publication review", async () => {
     const source = question();
     mocks.workspace.questions = [source];
@@ -93,7 +107,9 @@ describe("Question Set draft explanation review", () => {
     expect(await screen.findByText(/1 missing explanation/)).toBeTruthy();
     const send = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: /Draft explanations \(1 at a time\)/ }));
+    const draftButton = screen.getByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
     expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText(/Question 1 · Review explanation and choices/));
@@ -124,7 +140,9 @@ describe("Question Set draft explanation review", () => {
     const source = question();
     mocks.workspace.questions = [source];
     render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /Draft explanations/ }));
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
     expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
     mocks.workspace.questions = [{ ...source, stem: "Changed source stem" }];
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
