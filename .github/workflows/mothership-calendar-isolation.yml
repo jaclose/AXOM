@@ -37,15 +37,23 @@ jobs:
         shell: bash
         run: |
           single_status=0
+          download_error_status=0
+          blocked_click_status=0
           file_status=0
           npm --prefix web test -- src/pages/IntegrationsPage.test.tsx -t 'surfaces invalid dates instead of downloading a malformed calendar, then recovers' --reporter=verbose > "$RUNNER_TEMP/calendar-single.log" 2>&1 || single_status=$?
+          npm --prefix web test -- src/pages/IntegrationsPage.test.tsx -t 'reports a browser download failure separately and clears the error after changing choices' --reporter=verbose > "$RUNNER_TEMP/calendar-download-error.log" 2>&1 || download_error_status=$?
+          npm --prefix web test -- src/pages/IntegrationsPage.test.tsx -t 'releases a generated URL and temporary link when the browser refuses the click' --reporter=verbose > "$RUNNER_TEMP/calendar-blocked-click.log" 2>&1 || blocked_click_status=$?
           npm --prefix web test -- src/pages/IntegrationsPage.test.tsx --reporter=verbose > "$RUNNER_TEMP/calendar-file.log" 2>&1 || file_status=$?
-          echo "SINGLE_TEST_EXIT=$single_status FULL_FILE_EXIT=$file_status"
-          echo '=== isolated failing case ==='
-          tail -n 100 "$RUNNER_TEMP/calendar-single.log"
+          echo "SINGLE_TEST_EXIT=$single_status DOWNLOAD_ERROR_EXIT=$download_error_status BLOCKED_CLICK_EXIT=$blocked_click_status FULL_FILE_EXIT=$file_status"
+          echo '=== isolated invalid-date recovery ==='
+          tail -n 65 "$RUNNER_TEMP/calendar-single.log"
+          echo '=== isolated browser-blocked recovery ==='
+          tail -n 65 "$RUNNER_TEMP/calendar-download-error.log"
+          echo '=== isolated blocked-click cleanup ==='
+          tail -n 65 "$RUNNER_TEMP/calendar-blocked-click.log"
           echo '=== all calendar panel tests ==='
-          tail -n 120 "$RUNNER_TEMP/calendar-file.log"
-          test "$single_status" -eq 0 && test "$file_status" -eq 0
+          tail -n 110 "$RUNNER_TEMP/calendar-file.log"
+          test "$single_status" -eq 0 && test "$download_error_status" -eq 0 && test "$blocked_click_status" -eq 0 && test "$file_status" -eq 0
       - name: Preserve diagnostic evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -53,6 +61,8 @@ jobs:
           name: calendar-isolation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/calendar-single.log
+            ${{ runner.temp }}/calendar-download-error.log
+            ${{ runner.temp }}/calendar-blocked-click.log
             ${{ runner.temp }}/calendar-file.log
           if-no-files-found: warn
           retention-days: 7
