@@ -508,7 +508,17 @@ async function addBatch(
     if (!(error instanceof AnkiError) || isAnkiOffline(error)) throw error;
     // Newer AnkiConnect throws after trying every note, keeping the ones that
     // worked: find those by AxomId, then add the rest one by one for reasons.
-    const found = await findByAxomId(client, batch);
+    // A failed replacement batch always has an older linked note with the
+    // same AxomId. Recover only notes of the *requested* model and never
+    // count the old or intentionally retired notes as successful additions.
+    // Otherwise an unsuccessful Cloze conversion can relink the old Basic
+    // note, falsely report a replacement and suspend the wrong cards.
+    const found = await findByAxomId(client, batch, (info, id) => {
+      const previous = replaced.get(id);
+      return info.modelName === desired.get(id)!.note.modelName &&
+        (!previous || (info.noteId !== previous.noteId &&
+          !(previous.retiredNoteIds ?? []).includes(info.noteId)));
+    });
     for (const [id, info] of found) created.set(id, info.noteId);
     for (const id of batch) {
       if (created.has(id)) continue;
