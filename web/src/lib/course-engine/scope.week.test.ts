@@ -329,3 +329,35 @@ describe("source module inheritance after course refiling", () => {
     assert.equal(JSON.stringify(moved), before);
   });
 });
+
+describe("secondary collections cannot replace primary source evidence", () => {
+  it("holds review, custom and legacy missed-review primary pointers without losing attempts", () => {
+    const sources = [
+      { kind: "review" as const, tags: [] },
+      { kind: "custom" as const, tags: [] },
+      { kind: undefined, tags: ["missed-review"] },
+    ];
+    for (const meta of sources) {
+      const sets = new Map([["secondary", { scope: sourceScope, questionIds: ["q"], ...meta }]]);
+      const q = question("q", {
+        setId: "secondary", ...sourceScope, status: "correct",
+        attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct" }],
+      });
+      const snapshot = JSON.stringify(q);
+      const progress = scopeProgress([q], sourceScope, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(groupQuestionsByScope([q], sets).find((group) => group.key === "unassigned")?.questionIds, ["q"]);
+      assert.equal(JSON.stringify(q), snapshot);
+    }
+  });
+
+  it("retains a genuine generated primary source when its own record is compatible", () => {
+    const generated = new Map([["generated", {
+      kind: "generated" as const, scope: sourceScope, questionIds: ["q"],
+    }]]);
+    const q = question("q", { setId: "generated", ...sourceScope });
+    assert.equal(scopeProgress([q], sourceScope, generated).total, 1);
+    assert.deepEqual(groupQuestionsByScope([q], generated).flatMap((group) => group.questionIds), ["q"]);
+  });
+});

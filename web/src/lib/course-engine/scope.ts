@@ -29,7 +29,14 @@ export type QuestionSetScope = Pick<CourseScope, "module" | "week" | "courseId">
  * Older analysis callers may only have a source's scope, not its membership.
  * Such scope-only maps cannot establish immutable membership provenance.
  */
-export type QuestionSourceEvidence = Pick<QuestionSet, "scope"> & Partial<Pick<QuestionSet, "questionIds">>;
+export type QuestionSourceEvidence = Pick<QuestionSet, "scope"> & Partial<Pick<QuestionSet, "questionIds" | "kind" | "tags">>;
+
+/** Review/custom snapshots reference existing originals and cannot serve as
+ * their primary evidence. Older missed-review sets used a tag before kind. */
+export function isSecondaryQuestionSet(set: Pick<QuestionSourceEvidence, "kind" | "tags"> | undefined): boolean {
+  return Boolean(set && (set.kind === "review" || set.kind === "custom"
+    || (!set.kind && set.tags?.includes("missed-review"))));
+}
 
 export const UNASSIGNED_SCOPE_KEY = "unassigned";
 
@@ -112,7 +119,7 @@ function hasConsistentPrimaryFiling(
     && parseWeek(rawQuestionWeek) === undefined) return false;
   if (!question.setId || !setsById) return true;
   const primary = setsById.get(question.setId);
-  if (!primary) return false;
+  if (!primary || isSecondaryQuestionSet(primary)) return false;
   if (!primary.questionIds) return true; // Legacy scope-only analysis is not proof of membership.
   if (!primary.questionIds.includes(question.id)) return false;
   const declaredWeek = (value: unknown): boolean =>

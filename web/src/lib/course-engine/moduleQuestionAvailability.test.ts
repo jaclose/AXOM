@@ -594,3 +594,37 @@ describe("held originals cannot erase invalid primary source evidence", () => {
     }
   });
 });
+
+describe("secondary collection IDs do not confer primary academic provenance", () => {
+  it("holds review, custom and legacy missed-review primary pointers even with matching membership", () => {
+    for (const meta of [
+      { kind: "review" as const, tags: [] },
+      { kind: "custom" as const, tags: [] },
+      { kind: undefined, tags: ["missed-review"] },
+    ]) {
+      const secondary = set("secondary", ["original"], { scope: goerScope, ...meta });
+      const original = question("original", {
+        setId: "secondary", ...goerScope, status: "correct",
+        attempts: [{ at: stamp, status: "correct" }],
+      });
+      const before = JSON.stringify([secondary, original]);
+      const index = buildQuestionAvailabilityIndex(input([secondary], [original]));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+        unresolvedWeekQuestions: 1, collections: 0, indexedWeeks: [],
+      });
+      expect(index.unassignedCollections).toBe(1);
+      expect(JSON.stringify([secondary, original])).toBe(before);
+    }
+  });
+
+  it("preserves a compatible generated primary source as a distinct reviewed-content path", () => {
+    const generated = set("generated", ["verified"], { scope: goerScope, kind: "generated" });
+    const original = question("verified", { setId: "generated", ...goerScope });
+    const index = buildQuestionAvailabilityIndex(input([generated], [original]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 1, reviewQuestions: 0,
+      collections: 1, indexedWeeks: [2],
+    });
+  });
+});

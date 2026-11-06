@@ -2,7 +2,7 @@ import type { CurriculumTemplate } from "../curricula";
 import type { QuestionSet } from "../library";
 import { questionMappingStatus, type QuestionRecord } from "../questions";
 import type { Course, Term } from "../types";
-import { conflictingDuplicateIds, parseWeek, questionScope, type CourseScope } from "./scope";
+import { conflictingDuplicateIds, isSecondaryQuestionSet, parseWeek, questionScope, type CourseScope } from "./scope";
 import { canonicalModuleKey } from "./vocabulary";
 
 /**
@@ -155,7 +155,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   for (const set of input.sets) {
     // A secondary review list is never original source evidence for legacy
     // questions that have no declared primary collection.
-    if (set.kind === "review") continue;
+    if (isSecondaryQuestionSet(set)) continue;
     for (const id of new Set(set.questionIds)) {
       if (!set.scope) continue;
       memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
@@ -210,7 +210,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     const sourceReviewHeld = conflictingOriginals.has(question.id)
       || (hasDeclaredWeek(question.week) && parseWeek(question.week) === undefined)
       || (question.setId != null && (
-        !primary || !primary.questionIds.includes(question.id)
+        !primary || isSecondaryQuestionSet(primary) || !primary.questionIds.includes(question.id)
         || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
         || Boolean(primaryScope?.module && finalScope.module
           && canonicalModuleKey(primaryScope.module) !== canonicalModuleKey(finalScope.module))
@@ -236,7 +236,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     // validate an otherwise stale collection. Two disputed originals may
     // independently verify distinct source sets, but neither becomes ready.
     const sourceOwner = set.scope ? resolve(set.scope) : undefined;
-    const hasInvalidHeldPrimary = set.kind !== "review" && [...new Set(set.questionIds)].some((id) => {
+    const hasInvalidHeldPrimary = !isSecondaryQuestionSet(set) && [...new Set(set.questionIds)].some((id) => {
       if (!sourceHeldIds.has(id)) return false;
       const variants = originalsById.get(id);
       if (!variants?.length) return false; // Uninstalled originals are missing, not forged local rows.
@@ -265,7 +265,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     // A secondary review collection cannot make a conflicted original's
     // otherwise unsupported week count as fresh source evidence. A review
     // collection with another valid member still undergoes scope checks below.
-    if (set.kind === "review" && presentMembers.length === 0
+    if (isSecondaryQuestionSet(set) && presentMembers.length === 0
       && set.questionIds.some((id) => sourceHeldIds.has(id))) {
       unassignedCollections += 1;
       continue;
@@ -282,7 +282,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     // Review-only metadata cannot independently turn a legacy or personal
     // unscheduled question into a source-indexed week. The inferred scope here
     // comes only from an original set or an explicit question assignment.
-    if (set.kind === "review" && indexedSetWeek !== undefined
+    if (isSecondaryQuestionSet(set) && indexedSetWeek !== undefined
       && !presentMembers.some((member) => resolvedScopesById.get(member.id)?.week === indexedSetWeek)) {
       unassignedCollections += 1;
       continue;
