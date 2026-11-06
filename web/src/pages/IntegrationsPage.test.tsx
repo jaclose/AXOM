@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { create } from "zustand";
+import { flushSync } from "react-dom";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
@@ -182,7 +183,9 @@ describe("Integrations", () => {
     // Here, prove a same-mounted retry reads the corrected canonical source.
     const retry = screen.getByRole("button", { name: /Download .ics/ });
     expect(retry.hasAttribute("disabled")).toBe(false);
-    fireEvent.click(retry);
+    // Flush the same-mounted retry synchronously to distinguish deferred
+    // React rendering from a source/error state that refuses to clear.
+    flushSync(() => fireEvent.click(retry));
     expect(useStore.getState().tasks[0].due).toBe("2999-03-01");
     expect(createObjectURL).toHaveBeenCalledOnce();
     expect(screen.queryByRole("alert")).toBeNull();
