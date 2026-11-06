@@ -161,9 +161,9 @@ describe("publishing a prepared library", () => {
     const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
     await chooseLibrary(container);
     // A collision is unsafe regardless of the ledger's truthful zero question rows.
-    expect(screen.getByText("Every question is counted once.")).toBeTruthy();
+    expect(screen.getByText("Question counts reconcile, but duplicate source identities require review.")).toBeTruthy();
     expect(screen.queryByText(/question set disagrees with its catalog counts/)).toBeNull();
-    const collision = screen.getByText(/1 repeated bank source ID require source identity review/);
+    const collision = screen.getByText(/1 repeated bank source ID requires source identity review/);
     expect(collision.getAttribute("role")).toBe("alert");
     const publish = screen.getByRole("button", { name: /Publish 2 courses/ }) as HTMLButtonElement;
     expect(publish.disabled).toBe(true);

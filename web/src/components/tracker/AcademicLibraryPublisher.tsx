@@ -455,8 +455,8 @@ function QuestionCount({ ledger, duplicateBankSourceIds }: { ledger: QuestionLed
       ({ledger.inCourses.ready} ready, {ledger.inCourses.held} awaiting review){waiting ? `, ${waiting} of them waiting for a confirmed term` : ""}, and {leftOut} staying on this device.</p>
     <p role={ledger.unaccounted ? "alert" : undefined}>{ledger.unaccounted
       ? `${plural(ledger.unaccounted, "question")} could not be placed. Do not publish this library; choose it again or prepare it again.`
-      : "Every question is counted once."}</p>
-    {duplicateBankSourceIds.length > 0 && <p role="alert">{plural(duplicateBankSourceIds.length, "repeated bank source ID")} require source identity review even when their question sets are empty. Do not publish until the duplicate catalog entries are resolved.</p>}
+      : duplicateBankSourceIds.length > 0 ? "Question counts reconcile, but duplicate source identities require review." : "Every question is counted once."}</p>
+    {duplicateBankSourceIds.length > 0 && <p role="alert">{plural(duplicateBankSourceIds.length, "repeated bank source ID")} {duplicateBankSourceIds.length === 1 ? "requires" : "require"} source identity review even when their question sets are empty. Do not publish until the duplicate catalog entries are resolved.</p>}
     {ledger.mismatched.length > 0 && <p role="alert">{plural(ledger.mismatched.length, "question set")} {ledger.mismatched.length === 1 ? "disagrees" : "disagree"} with
       {" "}{ledger.mismatched.length === 1 ? "its" : "their"} catalog counts and cannot be published until prepared again: {ledger.mismatched.map(entry => entry.name).join(", ")}.</p>}
     {ledger.leftOut.length > 0 && <details className="academic-publisher-notes">
