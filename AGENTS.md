@@ -3,6 +3,11 @@
 Canonical repository policy for Codex, Claude Code and Copilot. User instructions
 take precedence. Optimize correct implementation, reasoning and validation per token.
 
+AXOM FORGE owns ordinary combined releases. Source workers submit pinned
+candidates to [gateway #140](https://github.com/jaclose/AXOM/issues/140),
+not directly to main. Read the [engineering SOP](docs/operations/engineering-sop.md)
+and [context router](docs/INDEX.md) only when relevant.
+
 ## Orient and retrieve
 
 Start with only **AGENTS + [AI_STATE](docs/AI_STATE.md) + task**. Check
