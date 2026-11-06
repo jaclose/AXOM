@@ -157,6 +157,9 @@ function recheckOperatorAccess(discardCurrent: boolean) {
   checkOperatorAccess();
 }
 const retryOperatorAccess = () => recheckOperatorAccess(true);
+/** Ask the server again without dropping the current answer, e.g. when a screen
+ * that offers role-based tools opens: a newly granted role appears without a reload. */
+export function refreshOperatorAccess() { if (accessListeners.size) recheckOperatorAccess(false); }
 
 function subscribeOperatorAccess(listener: () => void) {
   if (!accessEventsBound && typeof window !== "undefined") {
@@ -203,6 +206,17 @@ export async function loadOperatorDashboard(accountId: string): Promise<Operator
   };
   if (!validOperatorDashboard(result)) throw new Error("The host console returned incomplete data. Refresh before continuing.");
   return result;
+  });
+}
+const validOperatorReports = (value: unknown): value is OperatorReport[] =>
+  bounded(value, 100, item => row(item) && [item.post_id, item.author_handle, item.post_kind, item.reason, item.note, item.latest_at].every(text) && count(item.reports));
+/** Open reports for Community's moderation panel. Postgres admits any operator role. */
+export async function loadOperatorReports(accountId: string): Promise<OperatorReport[]> {
+  return withClient(accountId, async client => {
+    const { data, error } = await client.rpc("axom_operator_reports");
+    if (error) throw new Error("Reported posts could not be loaded. Retry when connected.");
+    if (!validOperatorReports(data)) throw new Error("The moderation queue returned incomplete data. Refresh before continuing.");
+    return data;
   });
 }
 export async function searchOperatorAccounts(accountId: string, query: string): Promise<OperatorAccount[]> {

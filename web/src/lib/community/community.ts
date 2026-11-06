@@ -1,7 +1,7 @@
-import { accountOperationClient } from "../account/supabase";
-import type { StudyLog } from "../types";
+import { accountOperationClient, loadSupabase } from "../account/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { academicAccountScope } from "../academicLibrary/accountScope";
+import { SHARE_MODE_KEY, shareModeFrom, type DayTotals, type ShareMode } from "./progressBoard";
 
 export interface CommunityProfile {
   user_id: string;
@@ -266,20 +266,7 @@ export async function reportCommunityPost(accountId: string, postId: string,
   });
 }
 
-/** Shares only a per-day aggregate and only after the learner explicitly publishes.
- * Duplicate log IDs are ignored as in the existing personal leaderboard. */
-export function dayProgress(logs: readonly StudyLog[], dayKey: string): { minutes: number; cards: number; questions: number } {
-  const ids = new Set<string>();
-  let minutes = 0, cards = 0, questions = 0;
-  for (const log of logs) {
-    if (log.dayKey !== dayKey || log.academic === false || ids.has(log.id)) continue;
-    ids.add(log.id);
-    if (Number.isFinite(log.minutes)) minutes += Math.max(0, log.minutes);
-    if (Number.isFinite(log.cards)) cards += Math.max(0, log.cards);
-    if (log.quantityKind === "questions" && Number.isFinite(log.quantity)) questions += Math.max(0, log.quantity ?? 0);
-  }
-  return { minutes: Math.min(1440, Math.round(minutes)), cards: Math.min(20000, Math.round(cards)), questions: Math.min(20000, Math.round(questions)) };
-}
+export { dayProgress } from "./progressBoard";
 
 /** Compare only activity people chose to share, never private device totals. */
 export function sharedWeeklyStandings(posts: readonly CommunityPost[], today: string): Array<{ userId: string; minutes: number; cards: number; questions: number; days: number }> {
@@ -301,4 +288,136 @@ export function sharedWeeklyStandings(posts: readonly CommunityPost[], today: st
     byUser.set(post.user_id, current);
   }
   return [...byUser.values()].sort((a,b) => b.minutes-a.minutes || b.questions-a.questions || b.cards-a.cards || a.userId.localeCompare(b.userId));
+}
+
+const postFields = "id,user_id,kind,visibility,activity_day,minutes,cards,questions,set_title,caption,created_at";
+const maxBoardPosts = 2000;
+const boardError = "Leaderboards could not be loaded. Your study records are unchanged.";
+const syncError = "Your daily totals could not be shared right now. Your study records are unchanged.";
+const validProfile = (item: unknown) => row(item) && [item.user_id, item.handle, item.display_name, item.bio].every(text) && typeof item.discoverable === "boolean";
+const validPost = (item: unknown) => row(item) && [item.id, item.user_id, item.caption, item.created_at].every(text)
+  && ["progress", "question_set"].includes(String(item.kind)) && ["private", "friends", "community"].includes(String(item.visibility))
+  && (item.activity_day === null || text(item.activity_day)) && (item.set_title === null || text(item.set_title))
+  && count(item.minutes) && count(item.cards) && count(item.questions);
+const dayKey = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T12:00:00Z`));
+
+export interface ProgressBoardData {
+  me: CommunityProfile | null;
+  friendIds: string[];
+  profiles: CommunityProfile[];
+  posts: CommunityPost[];
+  connectionsError?: string;
+}
+
+/** Shared daily totals since `fromDay`. RLS decides what this viewer may read:
+ * their own shared days, accepted friends' shared days and days posted to
+ * Community by discoverable learners. Private days are never requested. */
+export async function loadProgressBoard(accountId: string, fromDay: string): Promise<ProgressBoardData> {
+  if (!dayKey(fromDay)) throw new Error("Choose a valid leaderboard period.");
+  return withClient(accountId, async client => {
+    const [own, shared] = await Promise.all([
+      client.from("social_profiles").select(profileFields).eq("user_id", accountId).limit(1),
+      client.from("social_posts").select(postFields).eq("kind", "progress").neq("visibility", "private").gte("activity_day", fromDay)
+        .order("activity_day", { ascending: false }).order("id", { ascending: true }).limit(maxBoardPosts),
+    ]);
+    if (own.error || shared.error || !bounded(own.data, 1, validProfile) || !bounded(shared.data, maxBoardPosts, validPost)) throw new Error(boardError);
+    let friendIds: string[] = [];
+    let connectionsError: string | undefined;
+    try {
+      friendIds = (await loadConnections(client)).filter(connection => connection.status === "accepted")
+        .map(connection => connection.requester_id === accountId ? connection.addressee_id : connection.requester_id);
+    } catch (cause) {
+      connectionsError = cause instanceof Error ? cause.message : "Friend connections could not be loaded. Refresh before comparing friends.";
+    }
+    const posts = shared.data as CommunityPost[];
+    const profiles = [...own.data as CommunityProfile[]];
+    const authors = [...new Set(posts.map(post => post.user_id))].filter(id => id !== accountId);
+    for (let offset = 0; offset < authors.length; offset += 100) {
+      const { data, error } = await client.from("social_profiles").select(profileFields).in("user_id", authors.slice(offset, offset + 100)).limit(100);
+      if (error || !bounded(data, 100, validProfile)) throw new Error(boardError);
+      profiles.push(...data as CommunityProfile[]);
+    }
+    return { me: (own.data as CommunityProfile[])[0] ?? null, friendIds, profiles, posts, connectionsError };
+  });
+}
+
+/** The sharing choice lives on the account, so every signed-in device agrees. */
+export async function readShareMode(accountId: string): Promise<ShareMode> {
+  const shared = await loadSupabase();
+  if (!shared) return "off";
+  const { data, error } = await shared.auth.getUser();
+  if (error || !data.user) throw new Error("Your sharing choice could not be checked. Retry when connected.");
+  if (data.user.id !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
+  return shareModeFrom(data.user.user_metadata);
+}
+
+export async function saveShareMode(accountId: string, mode: ShareMode): Promise<void> {
+  if (mode !== "off" && mode !== "friends" && mode !== "community") throw new Error("Choose who sees your daily totals.");
+  const shared = await loadSupabase();
+  if (!shared) throw new Error("Accounts aren’t configured in this build.");
+  const { data: { session } } = await shared.auth.getSession();
+  if (session?.user.id !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
+  const { data, error } = await shared.auth.updateUser({ data: { [SHARE_MODE_KEY]: mode } });
+  if (error || data.user?.id !== accountId || shareModeFrom(data.user.user_metadata) !== mode) {
+    throw new Error("Your sharing choice could not be saved. Nothing new was shared.");
+  }
+}
+
+export interface DailyTotals extends DayTotals { day: string }
+export type ShareSyncAction = "inserted" | "updated" | "unchanged" | "kept-private" | "skipped";
+/** Thrown when automatic sharing runs for an account that has no Community profile. */
+export class CommunityProfileMissingError extends Error { override name = "CommunityProfileMissingError"; }
+type OwnDay = { id: string; visibility: CommunityPost["visibility"]; minutes: number; cards: number; questions: number };
+
+async function readOwnDay(client: SupabaseClient, accountId: string, day: string): Promise<OwnDay | null> {
+  const { data, error } = await client.from("social_posts").select("id,visibility,minutes,cards,questions")
+    .eq("user_id", accountId).eq("kind", "progress").eq("activity_day", day).limit(1);
+  if (error || !Array.isArray(data) || data.length > 1) throw new Error(syncError);
+  const item: unknown = data[0];
+  if (item === undefined) return null;
+  if (!row(item) || !text(item.id) || !["private", "friends", "community"].includes(String(item.visibility))
+    || ![item.minutes, item.cards, item.questions].every(count)) throw new Error(syncError);
+  return item as OwnDay;
+}
+
+/** Keeps the learner's automatic daily posts current. A figure never drops below a
+ * larger one another device already shared, and a day posted as "Only me" is never
+ * widened. Days after today's UTC date wait, because the server would refuse them. */
+export async function syncSharedProgress(accountId: string, mode: Exclude<ShareMode, "off">, entries: readonly DailyTotals[]): Promise<Array<{ day: string; action: ShareSyncAction }>> {
+  if (mode !== "friends" && mode !== "community") throw new Error("Automatic sharing is off.");
+  if (entries.length > 7 || !entries.every(entry => dayKey(entry.day) && entry.day >= "2020-01-01" && [entry.minutes, entry.cards, entry.questions].every(count)
+    && entry.minutes <= 1440 && entry.cards <= 20000 && entry.questions <= 20000)) throw new Error("The recorded study totals are outside the supported limits.");
+  const utcToday = new Date().toISOString().slice(0, 10);
+  return withClient(accountId, async client => {
+    const outcomes: Array<{ day: string; action: ShareSyncAction }> = [];
+    for (const entry of entries) {
+      if (entry.day > utcToday) { outcomes.push({ day: entry.day, action: "skipped" }); continue; }
+      let current = await readOwnDay(client, accountId, entry.day);
+      if (!current) {
+        if (!entry.minutes && !entry.cards && !entry.questions) { outcomes.push({ day: entry.day, action: "skipped" }); continue; }
+        const { error } = await client.from("social_posts").insert({
+          user_id: accountId, kind: "progress", visibility: mode, activity_day: entry.day,
+          minutes: entry.minutes, cards: entry.cards, questions: entry.questions, set_title: null, caption: "",
+        });
+        if (!error) { outcomes.push({ day: entry.day, action: "inserted" }); continue; }
+        if (error.code === "23503") throw new CommunityProfileMissingError("Join Community before sharing your daily totals.");
+        if (error.code !== "23505") throw new Error(syncError);
+        current = await readOwnDay(client, accountId, entry.day);
+        if (!current) throw new Error(syncError);
+      }
+      if (current.visibility === "private") { outcomes.push({ day: entry.day, action: "kept-private" }); continue; }
+      const next = {
+        minutes: Math.max(current.minutes, entry.minutes), cards: Math.max(current.cards, entry.cards),
+        questions: Math.max(current.questions, entry.questions), visibility: mode,
+      };
+      if (next.minutes === current.minutes && next.cards === current.cards && next.questions === current.questions && current.visibility === mode) {
+        outcomes.push({ day: entry.day, action: "unchanged" });
+        continue;
+      }
+      const updated = await client.from("social_posts").update(next).eq("id", current.id).eq("user_id", accountId).select("id");
+      if (updated.error || !Array.isArray(updated.data) || updated.data.length !== 1) throw new Error(syncError);
+      outcomes.push({ day: entry.day, action: "updated" });
+    }
+    return outcomes;
+  });
 }

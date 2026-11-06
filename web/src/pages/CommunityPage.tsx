@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Check, Heart, LockKeyhole, RefreshCw, Share2, Trophy, UserPlus, Users, EyeOff, Trash2 } from "lucide-react";
+import { Activity, Check, Heart, LockKeyhole, RefreshCw, Share2, UserPlus, Users, EyeOff, Trash2 } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import { useStore } from "../lib/store";
 import { isoDate } from "../lib/scoring";
 import {
   acceptFriend, dayProgress, deleteCommunityPost, joinCommunity, leaveCommunity, loadCommunity,
-  publishCommunityPost, reportCommunityPost, removeFriend, requestFriend, searchCommunityProfiles, setDiscoverable, setReaction, sharedWeeklyStandings,
+  publishCommunityPost, reportCommunityPost, removeFriend, requestFriend, saveShareMode, searchCommunityProfiles, setDiscoverable, setReaction,
   type CommunityConnection, type CommunityProfile, type CommunitySnapshot,
 } from "../lib/community/community";
+import { setCommunityShareMode, useCommunityShare } from "../lib/community/shareStore";
+import { CommunityLeaderboard } from "../components/community/CommunityLeaderboard";
+import { CommunityReportsPanel } from "../components/community/CommunityReportsPanel";
+import { CommunityShareCard } from "../components/community/CommunityShareCard";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { useAccountIdentity, useOperatorAccess } from "../lib/operator/hostClient";
 import { canOpenHost } from "../lib/operator/hostAccess";
@@ -108,10 +112,9 @@ function CommunityAccountPage() {
       .sort((a, b) => Number(friendIds.has(b.user_id)) - Number(friendIds.has(a.user_id)) || a.handle.localeCompare(b.handle));
   const people = peopleMatches.slice(0, 50);
   const progress = useMemo(() => dayProgress(logs, day), [logs, day]);
-  const rankings = useMemo(() => sharedWeeklyStandings(
-    (data?.posts ?? []).filter(post => post.user_id === accountId || friendIds.has(post.user_id)), today
-  ), [data, friendIds, today, accountId]);
-  const maxMinutes = Math.max(1, ...rankings.map(r => r.minutes));
+  // A confirmed automatic share changes the feed and the leaderboard; show it.
+  const lastSharedAt = useCommunityShare(state => state.accountId === accountId ? state.lastSharedAt : undefined);
+  useEffect(() => { if (lastSharedAt) setRefreshId(value => value + 1); }, [lastSharedAt]);
   const socialPosts = data?.posts ?? [];
   const reactions = useMemo(() => data?.reactions ?? [], [data?.reactions]);
   const reactCounts = useMemo(() => {
@@ -179,7 +182,7 @@ function CommunityAccountPage() {
         <label>Biography <textarea name="bio" value={bio} maxLength={240} disabled={busy} onChange={event => setBio(event.target.value)} /></label>
       </div>
       <label className="community-checkbox"><input type="checkbox" checked={joinDiscoverable} disabled={busy} onChange={event => setJoinDiscoverable(event.target.checked)} /> Make my profile discoverable</label>
-      <p className="sub">Your journal, notes, question answers, exam results and study history are never posted automatically.</p>
+      <p className="sub">Nothing is shared automatically. After joining you can choose to share your daily study totals; your journal, notes, question answers and exam results are never posted.</p>
       <GButton type="submit" variant="primary" disabled={busy}>{busy ? "Creating profile…" : "Create profile"}</GButton>
       </form>
     </GlassCard>}
@@ -187,8 +190,9 @@ function CommunityAccountPage() {
     {data && mine && <>
       <div className="community-grid">
         <div className="community-main stack">
+          <CommunityShareCard accountId={accountId} discoverable={mine.discoverable} />
           <GlassCard pad className="community-composer">
-            <PanelHeader headingLevel={2} title="Share an update" sub="Posting is manual. Others see only this card, never your underlying workspace." />
+            <PanelHeader headingLevel={2} title="Share an update" sub="Post a study day with a note, or celebrate a Question Set. Others see only this card, never your workspace." />
             <div className="community-choice" role="group" aria-label="Update type">
               <button className={kind === "progress" ? "selected" : ""} type="button" disabled={busy} onClick={() => setKind("progress")} aria-pressed={kind === "progress"}><Activity size={16} aria-hidden="true" /> Daily progress</button>
               <button className={kind === "question_set" ? "selected" : ""} type="button" disabled={busy} onClick={() => setKind("question_set")} aria-pressed={kind === "question_set"}><Share2 size={16} aria-hidden="true" /> Question Set</button>
@@ -275,20 +279,8 @@ function CommunityAccountPage() {
           </GlassCard>
         </div>
         <aside className="community-aside stack">
-          <GlassCard pad>
-            <PanelHeader headingLevel={2} title="Friends leaderboard" sub="Last 7 days, shared activity only." />
-            <div className="community-ranking">
-              {data.connectionsError ? <p className="sub">Friend standings are unavailable until your connections load.</p>
-                : rankings.length === 0 && <p className="sub">Share a study day to appear. Scores never expose private logs.</p>}
-              {!data.connectionsError && rankings.map((rank, idx) => <div key={rank.userId} className="community-rank">
-                <div><span className="community-rank-number">{idx + 1}</span><b>{rank.userId === accountId ? "You" : person(rank.userId)}</b><strong>{Math.round(rank.minutes / 6) / 10} h</strong></div>
-                <div className="community-rank-track"><i style={{ width: (rank.minutes / maxMinutes) * 100 + "%" }} /></div>
-                <small>{rank.days} days shared · {rank.cards} cards · {rank.questions} questions</small>
-              </div>)}
-            </div>
-            <p className="sub"><Trophy size={14} /> Self-shared totals, not independently verified. AXOM Daily Challenges retain separate server-verified standings.</p>
-            <a className="ghost-btn" href="#leaderboards">Open Daily Challenges</a>
-          </GlassCard>
+          <CommunityReportsPanel accountId={accountId} />
+          <CommunityLeaderboard accountId={accountId} refreshKey={refreshId} />
           <GlassCard pad>
             <PanelHeader headingLevel={2} title="Find friends" sub="Discoverable learners and friends you already know." />
             <label className="community-search">Find someone<input type="search" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} maxLength={80} placeholder="Name or handle" /></label>
@@ -331,7 +323,11 @@ function CommunityAccountPage() {
             </div>
             <GhostButton disabled={busy} onClick={() => {
               if (window.confirm("Leave Community? Your profile, friend connections, posts and reactions will be permanently removed. Private AXOM data stays intact."))
-                void act(() => leaveCommunity(accountId), "Community profile and shared activity removed.");
+                void act(async () => {
+                  await leaveCommunity(accountId);
+                  // Without a profile nothing can be shared; turn automatic sharing off too.
+                  await saveShareMode(accountId, "off").then(() => setCommunityShareMode(accountId, "off"), () => undefined);
+                }, "Community profile and shared activity removed.");
             }}>Leave Community</GhostButton>
           </GlassCard>
         </aside>

@@ -98,6 +98,8 @@ export async function createPlatformDatabase() {
     for (const [column, value] of url.searchParams.entries()) {
       if (["select", "order", "limit", "offset", "on_conflict"].includes(column)) continue;
       if (value.startsWith("eq.")) predicates.push(`${identifier(column)} = ${bind(value.slice(3))}`);
+      else if (value.startsWith("neq.")) predicates.push(`${identifier(column)} <> ${bind(value.slice(4))}`);
+      else if (value.startsWith("gte.")) predicates.push(`${identifier(column)} >= ${bind(value.slice(4))}`);
       else if (value.startsWith("ilike.")) predicates.push(`${identifier(column)} ilike ${bind(value.slice(6))}`);
       else if (value.startsWith("in.(") && value.endsWith(")")) {
         const members = value.slice(4, -1).split(",");
@@ -139,6 +141,7 @@ export async function createPlatformDatabase() {
   const attach = async (page: Page, index: 0 | 1) => {
     const person = PLATFORM_USERS[index];
     const unexpected: string[] = [];
+    const metadata: Record<string, unknown> = { display_name: person.name };
     await page.addInitScript(({ url, person, nudges }) => {
       Object.assign(window, { __AXOM_E2E_ACCOUNT__: { url, key: "synthetic-public-fixture-key" } });
       const user = { id: person.id, aud: "authenticated", role: "authenticated", email: `${person.handle}@example.test`,
@@ -172,7 +175,11 @@ export async function createPlatformDatabase() {
         return json(200, { preferences: [], identity: { accent: "gold", theme: "dark" }, history: [], privacy: [], admin: false,
           deliveryMode: "disabled", deletionEnabled: false, hasProtectedCopy: false });
       }
-      if (url.pathname === "/auth/v1/user") return json(200, { id: person.id, aud: "authenticated", role: "authenticated", email: `${person.handle}@example.test`, user_metadata: { display_name: person.name }, app_metadata: {} });
+      if (url.pathname === "/auth/v1/user") {
+        // Account metadata persists per synthetic account, like Supabase Auth's merge.
+        if (request.method() === "PUT") Object.assign(metadata, (request.postDataJSON() as { data?: Record<string, unknown> } | null)?.data ?? {});
+        return json(200, { id: person.id, aud: "authenticated", role: "authenticated", email: `${person.handle}@example.test`, user_metadata: { ...metadata }, app_metadata: {} });
+      }
       unexpected.push(`${request.method()} ${url.pathname}${url.search}`);
       return json(404, { message: "Request is outside this local fixture" });
     });
