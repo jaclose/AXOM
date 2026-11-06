@@ -76,7 +76,7 @@ describe("Integrations", () => {
     expect(within(panel).getByRole("button", { name: /Download .ics/ }).hasAttribute("disabled")).toBe(true);
     expect(within(panel).getByRole("link", { name: /Add a task with a due date/ }).getAttribute("href")).toBe("#productivity");
   });
-  it("surfaces invalid dates instead of downloading a malformed calendar, then recovers", () => {
+  it("surfaces invalid dates instead of downloading a malformed calendar, then recovers", async () => {
     const createObjectURL = vi.fn(() => "blob:ics");
     stubCalendarObjectUrl(createObjectURL);
     const task = useStore.getState().tasks[0];
@@ -95,6 +95,17 @@ describe("Integrations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(createObjectURL).toHaveBeenCalledOnce();
+    // Inspect the real generated file, not only whether the browser was asked
+    // to download something. The repaired task date must replace the old one.
+    const exported = createObjectURL.mock.calls[0][0] as Blob;
+    const wire = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => resolve(String(reader.result)));
+      reader.addEventListener("error", () => reject(reader.error));
+      reader.readAsText(exported);
+    });
+    expect(wire).toContain("DTSTART;VALUE=DATE:29990301");
+    expect(wire).not.toContain("29990231");
     vi.unstubAllGlobals();
   });
 
