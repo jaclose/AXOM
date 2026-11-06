@@ -141,3 +141,41 @@ describe("source-week integrity", () => {
     assert.equal(JSON.stringify(questions), snapshot);
   });
 });
+
+
+describe("source module inheritance after course refiling", () => {
+  it("does not assign the old source module to a question moved to a different course", () => {
+    const moved = question("moved", { courseId: "course-b" });
+    assert.deepEqual(questionScope(moved, sourceSets()), {
+      module: undefined, week: undefined, courseId: "course-b",
+    });
+    assert.equal(scopeProgress([moved], { module: "FTM 1", courseId: "course-b" }, sourceSets()).total, 0);
+  });
+
+  it("preserves an explicit week without borrowing a module from the previous course", () => {
+    const moved = question("moved", { courseId: "course-b", week: 8 });
+    assert.deepEqual(questionScope(moved, sourceSets()), {
+      module: undefined, week: 8, courseId: "course-b",
+    });
+    assert.equal(scopeProgress([moved], { module: "FTM 1", week: 8, courseId: "course-b" }, sourceSets()).total, 0);
+  });
+
+  it("preserves explicit new module evidence and compatible inherited module evidence", () => {
+    const explicit = question("explicit", { module: "FTM 1", week: 8, courseId: "course-b" });
+    assert.deepEqual(questionScope(explicit, sourceSets()), { module: "FTM 1", week: 8, courseId: "course-b" });
+    assert.deepEqual(questionScope(question("same", { courseId: "course-a" }), sourceSets()), sourceScope);
+    assert.deepEqual(questionScope(question("legacy", { courseId: "course-b" }),
+      sourceSets({ module: "FTM 1", week: 3 })), { module: "FTM 1", week: 3, courseId: "course-b" });
+  });
+
+  it("keeps unresolved moved questions visible without rewriting their source links or attempts", () => {
+    const moved = question("moved", { courseId: "course-b", week: 8,
+      attempts: [{ at: "2026-11-05T00:00:00Z", status: "correct" }] });
+    const before = JSON.stringify(moved);
+    Object.freeze(moved);
+    assert.deepEqual(groupQuestionsByScope([moved], sourceSets()), [{
+      key: "unassigned", module: undefined, week: undefined, questionIds: ["moved"],
+    }]);
+    assert.equal(JSON.stringify(moved), before);
+  });
+});

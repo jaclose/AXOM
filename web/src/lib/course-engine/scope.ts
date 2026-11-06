@@ -43,8 +43,9 @@ export function parseWeek(value: unknown): number | undefined {
 }
 
 /**
- * Own filing wins. Only an absent week may inherit from a compatible source
- * set; invalid weeks and contradictory refiling stay unassigned.
+ * Own filing wins. Inherited modules require compatible course ownership.
+ * Only an absent week may inherit from a compatible source set; invalid weeks
+ * and contradictory refiling stay unassigned.
  */
 export function questionScope(
   question: Pick<QuestionRecord, "module" | "week" | "courseId" | "setId">,
@@ -58,7 +59,7 @@ export function questionScope(
     || canonicalModuleKey(question.module) === canonicalModuleKey(inherited.module);
   const sameCourse = question.courseId == null || inherited?.courseId == null || question.courseId === inherited.courseId;
   return {
-    module: question.module ?? inherited?.module,
+    module: question.module ?? (sameCourse ? inherited?.module : undefined),
     week: hasOwnWeek ? parseWeek(declaredWeek) : sameModule && sameCourse ? parseWeek(inherited?.week) : undefined,
     courseId: question.courseId ?? inherited?.courseId,
   };
