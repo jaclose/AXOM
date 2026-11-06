@@ -47,7 +47,7 @@ describe("AppUpdatePanel risky refresh confirmation", () => {
     render(<AppUpdatePanel />);
     expect(screen.getByRole("button", { name: "Save and refresh" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh anyway" })).toBeTruthy();
-    expect(screen.getByText(/may lose recent changes/i)).toBeTruthy();
+    expect(document.getElementById("update-unverified-save-warning")?.textContent).toMatch(/may lose recent changes/i);
   });
 
   it("does not bypass saving when the user cancels", () => {
