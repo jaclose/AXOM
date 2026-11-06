@@ -58,7 +58,7 @@ export function calendarEvents(state: Pick<NoctyriumState, "tasks" | "boardPrep"
 
 /** RFC 5545 TEXT escaping. Calendar values can contain CR, LF or CRLF. */
 export function escapeIcsText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
+  return value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n")\n    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, " ");
 }
 
 /** Fold at 75 UTF-8 octets, reserving one octet for continuation whitespace. */
@@ -82,14 +82,17 @@ export function foldIcsLine(line: string): string {
   return lines.join("\r\n");
 }
 
-function compactDay(day: string) {
-  return day.replace(/-/g, "");
-}
-
-function nextDay(day: string) {
-  const date = new Date(`${day}T12:00:00`);
-  date.setDate(date.getDate() + 1);
-  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+/** Fail closed on malformed all-day values; UTC keeps the next day timezone-independent. */
+function allDayDates(day: string): [string, string] {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(day) || day.startsWith("0000"))
+    throw new RangeError("AXOM calendar event has an invalid day");
+  const date = new Date(`${day}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== day)
+    throw new RangeError("AXOM calendar event has an invalid day");
+  const next = new Date(date.getTime() + 86_400_000).toISOString().slice(0, 10);
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(next))
+    throw new RangeError("AXOM calendar event day exceeds supported range");
+  return [day.replace(/-/g, ""), next.replace(/-/g, "")];
 }
 
 export function buildIcs(events: readonly CalendarEventInput[], now: Date = new Date()): string {
@@ -102,13 +105,23 @@ export function buildIcs(events: readonly CalendarEventInput[], now: Date = new 
     "METHOD:PUBLISH",
     "X-WR-CALNAME:AXOM study plan",
   ];
+  const seenUids = new Set<string>();
   for (const event of events) {
+    // UID is an RFC 5545 TEXT value, not an arbitrary unescaped content line.
+    // Reject ambiguous IDs rather than allowing collisions or additional events.
+    if (!event.uid || seenUids.has(event.uid)
+      || /[\\u0000-\\u0008\\u000B-\\u001F\\u007F]/.test(event.uid)
+      || [...event.uid].some((character) => character.length === 1
+        && character.charCodeAt(0) >= 0xD800 && character.charCodeAt(0) <= 0xDFFF))
+      throw new RangeError("AXOM calendar event UID is missing, duplicated, or invalid");
+    seenUids.add(event.uid);
+    const [start, end] = allDayDates(event.day);
     lines.push(
       "BEGIN:VEVENT",
-      `UID:${event.uid}@axom.local`,
+      `UID:${escapeIcsText(event.uid)}@axom.local`,
       `DTSTAMP:${stamp}`,
-      `DTSTART;VALUE=DATE:${compactDay(event.day)}`,
-      `DTEND;VALUE=DATE:${nextDay(event.day)}`,
+      `DTSTART;VALUE=DATE:${start}`,
+      `DTEND;VALUE=DATE:${end}`,
       `SUMMARY:${escapeIcsText(event.title)}`,
       ...(event.description ? [`DESCRIPTION:${escapeIcsText(event.description)}`] : []),
       `CATEGORIES:${escapeIcsText(event.category)}`,
