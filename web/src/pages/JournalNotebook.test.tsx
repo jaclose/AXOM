@@ -376,6 +376,38 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/still open.*export.*retry Save/i);
   });
 
+  it("retries a failed inline desk autosave without abandoning the private draft", async () => {
+    vi.useFakeTimers();
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockRejectedValueOnce(new Error("Interrupted local write"))
+      .mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    const writing = screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement;
+    fireEvent.change(writing, { target: { value: "Keep this private entry through the retry." } });
+
+    await act(async () => { vi.advanceTimersByTime(450); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Your changes need saving")).toBeTruthy();
+    expect(writing.value).toBe("Keep this private entry through the retry.");
+    const retry = screen.getByRole("button", { name: "Retry save" });
+    vi.useRealTimers();
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(screen.getByText("Page saved locally")).toBeTruthy());
+    expect(flush).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Retry save" })).toBeNull();
+    expect((screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value)
+      .toBe("Keep this private entry through the retry.");
+    expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ freeWriting: "Keep this private entry through the retry." });
+    const unload = new Event("beforeunload", { cancelable: true }) as BeforeUnloadEvent;
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+  });
+
   it("does not close to the Library until the current draft is durable", async () => {
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced durable write failure"));
     render(<JournalPage />);
