@@ -77,6 +77,15 @@ describe("course bank read model", () => {
     }
     expect(indexed([{ ...set, scope: { ...set.scope!, week: "Week 2" as unknown as number } }], [question])[0].weeks[0].week).toBe(2);
   });
+  it("rejects cross-course members when an unowned set infers a course from its module", () => {
+    const source = { ...set, questionIds: ["q1", "q2"] };
+    const other = { ...question, id: "q2", courseId: "c2" };
+    expect(indexed([source], [{ ...question, courseId: "c1" }, other])).toEqual([]);
+  });
+  it("does not treat an ownerless source week as a course-indexed week", () => {
+    const source = { ...set, scope: { week: 2 } };
+    expect(indexed([source], [question])).toEqual([]);
+  });
   it("does not mutate saved question IDs, progress or the original source-set membership", () => {
     const original = structuredClone(set);
     const row = structuredClone(question);
