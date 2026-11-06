@@ -29,6 +29,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const accountId = useAccount(state => state.user?.id);
   const [submission, setSubmission] = useState<LibrarySubmission>();
   const [checking, setChecking] = useState(true);
+  const [statusIdentity, setStatusIdentity] = useState("");
   const [busy, setBusy] = useState(false);
   const [rights, setRights] = useState(false);
   const [answers, setAnswers] = useState(false);
@@ -60,18 +61,29 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   });
 
   async function refresh() {
-    if (!accountId) { setChecking(false); return; }
+    if (!accountId) { setStatusIdentity(""); setChecking(false); return; }
     const owned = await listMyQuestionSetSubmissions(accountId);
+    if (useAccount.getState().user?.id !== accountId) throw new Error("The account changed during submission lookup.");
     const found = owned.find(item => item.sourceId === set.id);
     setSubmission(found);
+    setStatusIdentity(`${accountId}:${set.id}`);
     setChecking(false);
     return found;
   }
   useEffect(() => {
     let alive = true;
+    // A status result from the previous account must never unlock another
+    // account's AI processing, publication, or existing-submission controls.
+    setChecking(true);
+    setSubmission(undefined);
+    setStatusIdentity("");
     if (!accountId) { setChecking(false); return; }
     void listMyQuestionSetSubmissions(accountId).then(owned => {
-      if (alive) { setSubmission(owned.find(item => item.sourceId === set.id)); setChecking(false); }
+      if (alive && useAccount.getState().user?.id === accountId) {
+        setSubmission(owned.find(item => item.sourceId === set.id));
+        setStatusIdentity(`${accountId}:${set.id}`);
+        setChecking(false);
+      }
     }).catch(cause => {
       if (alive) { setError(cause instanceof Error ? cause.message : "Your submissions could not be checked."); setChecking(false); }
     });
@@ -87,7 +99,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   }, [accountId, set.id]);
 
   const generateExplanations = useCallback(async () => {
-    if (!provider || !accountId || generating || generationAbort.current || !draftable.length) return;
+    if (!provider || !accountId || statusIdentity !== `${accountId}:${set.id}`
+      || generating || generationAbort.current || !draftable.length) return;
     const controller = new AbortController();
     generationAbort.current = controller;
     setGenerating(true);
@@ -122,20 +135,22 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (generationAbort.current === controller) generationAbort.current = null;
       setGenerating(false);
     }
-  }, [provider, accountId, generating, draftable]);
+  }, [provider, accountId, set.id, statusIdentity, generating, draftable]);
 
   useEffect(() => {
-    if (!autoDraft || checking || !accountId || !provider || provider.info.kind === "mock"
+    if (!autoDraft || checking || !accountId || statusIdentity !== `${accountId}:${set.id}`
+      || !provider || provider.info.kind === "mock"
       || !draftable.length || (submission && submission.status !== "rejected")
       || autoDraftStarted.current) return;
     // The explicit Community "Review and submit" action authorizes this capped
     // preparation. Re-renders never create additional inference batches.
     autoDraftStarted.current = true;
     void generateExplanations();
-  }, [autoDraft, accountId, checking, submission, provider, draftable.length, generateExplanations]);
+  }, [autoDraft, accountId, set.id, statusIdentity, checking, submission, provider, draftable.length, generateExplanations]);
 
   function saveReviewedDrafts() {
-    if (generating || !accountId || !drafts.length || useAccount.getState().user?.id !== accountId) return;
+    if (generating || !accountId || statusIdentity !== `${accountId}:${set.id}`
+      || !drafts.length || useAccount.getState().user?.id !== accountId) return;
     const bank = useStore.getState();
     const current = new Map((bank.questions ?? []).map(question => [question.id, question]));
     for (const draft of drafts) {
@@ -170,7 +185,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   }
 
   async function submit() {
-    if (!accountId || !rights || !answers || checking || busy || generating || drafts.length
+    if (!accountId || statusIdentity !== `${accountId}:${set.id}`
+      || !rights || !answers || checking || busy || generating || drafts.length
       || unresolved || withMedia || missingExplanations
       || (submission && submission.status !== "rejected")) return;
     setBusy(true); setError(""); setMessage("");
@@ -269,7 +285,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           <span>I own this content or have permission to distribute every question, answer and explanation.</span></label>
         <label className="qsl-check"><input type="checkbox" checked={answers} disabled={busy} onChange={event => setAnswers(event.target.checked)} />
           <span>I checked every answer and explanation against its source and resolved any source-key conflicts.</span></label>
-        <GButton variant="primary" disabled={busy || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
+        <GButton variant="primary" disabled={busy || checking || statusIdentity !== `${accountId}:${set.id}` || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
           <ShieldCheck size={16} aria-hidden="true" /> {busy ? "Submitting…" : "Send for review"}
         </GButton>
       </>}
