@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { completeSetup, deferPromisePrompt, expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
-import type { NoctyriumState } from "../src/lib/types";
+import type { AxomState } from "../src/lib/types";
 import { STORAGE_KEYS } from "../src/lib/brand";
 const file=process.env.AXOM_CHALLENGE_FIXTURE;
 test.skip(!file,"Prepare the isolated local challenge fixture first.");
@@ -20,7 +20,7 @@ test("two learners complete the same real daily pool and receive independent ver
   const other=await browser.newContext({reducedMotion:"reduce",viewport:{width:1440,height:900}});
   const second=await other.newPage(); second.setDefaultTimeout(20_000);
   const progress=(target:Page)=>target.evaluate(async()=>{
-    const dev=await(window as unknown as {__AXOM_DEV__:Promise<{useStore:{getState:()=>NoctyriumState};flushVault:()=>Promise<void>}>}).__AXOM_DEV__;
+    const dev=await(window as unknown as {__AXOM_DEV__:Promise<{useStore:{getState:()=>AxomState};flushVault:()=>Promise<void>}>}).__AXOM_DEV__;
     await dev.flushVault(); const s=dev.useStore.getState();
     return {questions:s.questions.length,attempts:s.questions.flatMap(q=>q.attempts).length};
   });

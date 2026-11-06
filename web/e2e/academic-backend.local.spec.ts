@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { completeSetup, deferPromisePrompt, expect, test, waitForWorkspace } from "./fixtures";
-import type { NoctyriumState } from "../src/lib/types";
+import type { AxomState } from "../src/lib/types";
 import type { Page } from "@playwright/test";
 import { STORAGE_KEYS } from "../src/lib/brand";
 
@@ -14,7 +14,7 @@ test.use({ trace: "off", screenshot: "off", video: "off" });
 test("real sign-in, private course, scoped study and cross-device recovery", async ({ page, browser }) => {
   test.setTimeout(180_000);
   const verifyOriginals = async (target: Page) => target.evaluate(async () => {
-      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState } }> }).__AXOM_DEV__;
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState } }> }).__AXOM_DEV__;
       const { readSourceOriginal } = await import("/src/lib/decode/sources.ts" /* @vite-ignore */);
       const { sha256Hex } = await import("/src/lib/checksum.ts" /* @vite-ignore */);
       const state = dev.useStore.getState();
@@ -105,7 +105,7 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
   const progress = async (target: Page) => {
     await waitForWorkspace(target);
     return target.evaluate(async () => {
-    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; useAccount: { getState: () => { protection: string } }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState }; useAccount: { getState: () => { protection: string } }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
     await dev.flushVault(); const state = dev.useStore.getState();
     return { questions: state.questions.length, attempts: [...state.questions, ...(state.deferredContent?.questions ?? [])].flatMap(q => (q.attempts ?? []).map(attempt => ({ questionId: q.id, ...attempt }))).sort((a,b) => a.questionId.localeCompare(b.questionId)), protection: dev.useAccount.getState().protection };
     });
@@ -155,7 +155,7 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     expect((await progress(device)).questions).toBe(0);
     expect(bootstrapSources).toEqual([]);
     const pending = await device.evaluate(async () => {
-      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState } }> }).__AXOM_DEV__;
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState } }> }).__AXOM_DEV__;
       return dev.useStore.getState().deferredContent?.questions.length;
     });
     expect(pending).toBe(25);
@@ -254,7 +254,7 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     for (let index = 0; index < 11; index++) {
       await expect(device.getByRole("heading", { name: `Question ${index + 1} of 11`, exact: true })).toBeAttached();
       const expectsImage = await device.evaluate(async (key) => {
-        const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState } }> }).__AXOM_DEV__;
+        const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState } }> }).__AXOM_DEV__;
         const active = JSON.parse(localStorage.getItem(key) ?? "null") as { poolIds: string[]; index: number } | null;
         return dev.useStore.getState().questions.find(question => question.id === active?.poolIds[active.index])?.attachments?.some(attachment => ["question", "stem", "choice"].includes(attachment.role ?? ""));
       }, STORAGE_KEYS.quizActiveSession);

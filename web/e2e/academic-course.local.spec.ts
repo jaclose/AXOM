@@ -1,6 +1,6 @@
 import { test, expect, waitForWorkspace } from "./fixtures";
 import { completeSetup } from "../scripts/setup-flow.mjs";
-import type { NoctyriumState } from "../src/lib/types";
+import type { AxomState } from "../src/lib/types";
 
 const bundle = process.env.AXOM_ACADEMIC_PILOT;
 test.skip(!bundle, "Provide the private reviewed FTM1 pilot bundle.");
@@ -16,7 +16,7 @@ test("reviewed FTM1 plan loads selected weeks and opens its image-rich quiz", as
   const read = async () => {
     await waitForWorkspace(page);
     return page.evaluate(async () => {
-    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
     await dev.flushVault(); const s = dev.useStore.getState();
     return { questions: s.questions, tracker: s.tracker, sets: s.questionSets };
     });
