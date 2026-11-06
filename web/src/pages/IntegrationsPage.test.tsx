@@ -38,6 +38,10 @@ function stubCalendarObjectUrl(createObjectURL: (blob: Blob | MediaSource) => st
   Object.defineProperty(nativeURL, "revokeObjectURL", {
     configurable: true, writable: true, value: vi.fn(),
   });
+  // jsdom does not implement navigation for downloaded Blob URLs. Preserve
+  // the generated Blob and anchor cleanup assertions without queuing a fake
+  // navigation between React test cases. Dedicated tests override to throw.
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   restoreCalendarObjectUrls = () => {
     if (createDescriptor) Object.defineProperty(nativeURL, "createObjectURL", createDescriptor);
     else Reflect.deleteProperty(nativeURL, "createObjectURL");
