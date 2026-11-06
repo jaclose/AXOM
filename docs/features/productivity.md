@@ -61,3 +61,17 @@ counts as a result. Its freeze data stays in its device-local log.
 Existing journal unlocks and completed study session earnings remain spendable.
 New completed sessions also earn credits once per unique session ID, alongside
 the dated daily goal receipts and streak bonuses.
+
+The Productivity page projects its next step from current target evaluation,
+recorded activity, the running focus timer and actual local save failures. Duplicate
+study-log identities are resolved globally before dates are selected; the newest
+timestamp and a deterministic field tie-break select a record without changing
+stored history. Question Bank runs use their stable session-linked activity ID;
+unlinked finished runs from today and duplicate identities prompt review in Activity. Card
+reviews and tracker pass events are shown as separate evidence, resolving each
+identity to its latest valid timestamp before selecting the local date, without
+inferring minutes or mastery. Period boundaries and activity shortcuts use the
+same canonical study logs as the totals. Historical views are read-only and
+current target settings apply to their target display. Trends require three
+recorded dates; future calendar dates are unavailable and quiet dates are not
+failures. Calendar labels use local dates rather than UTC date-only parsing.

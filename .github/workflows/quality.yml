@@ -73,6 +73,19 @@ jobs:
         run: npm --prefix web run test:e2e -- e2e/shared-academic-catalog.spec.ts e2e/cloud-catalog.spec.ts --workers=1
       - name: Native ZIP question package browser acceptance (no catalog file)
         run: npm --prefix web run test:e2e -- e2e/native-package-zip.spec.ts
+      - name: Soundscape playback and Productivity browser contracts
+        run: npm --prefix web run test:e2e -- e2e/soundscape-main.spec.ts e2e/focus-dock-soundscapes.spec.ts e2e/productivity-tour-layout.spec.ts --workers=1
+      - name: Soundscape and Productivity browser evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: productivity-soundscape-browser-${{ github.run_id }}
+          path: |
+            web/test-results/soundscape-main-*/
+            web/test-results/focus-dock-soundscapes-*/
+            web/test-results/productivity-tour-layout-*/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Shared library browser evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -95,6 +108,44 @@ jobs:
         run: npm --prefix web run verify:app-updates
       - run: npm --prefix web run verify:daily-games-offline
       - run: npm --prefix web audit --omit=dev --audit-level=high
+
+  browser:
+    name: Browser acceptance (${{ matrix.shard }}/3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Record candidate and supported toolchain
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          node scripts/toolchain.mjs
+      - run: npm --prefix web ci
+      - name: Install isolated browser runtime
+        run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Complete browser acceptance (no live-account credentials)
+        run: npm --prefix web run test:e2e -- --shard=${{ matrix.shard }}/3 --workers=1
+      - name: Preserve browser evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-acceptance-${{ matrix.shard }}-${{ github.run_id }}
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: warn
+          retention-days: 7
 
   native:
     runs-on: ubuntu-24.04

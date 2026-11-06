@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LISTENING_REGIMEN, SOUNDSCAPES, SOUNDSCAPE_ORDER, isSoundscapeId, versionOf } from "./presets";
+import { LISTENING_REGIMEN, SOUNDSCAPES, SOUNDSCAPE_ORDER, applyUserSounds, isSoundscapeId, versionOf } from "./presets";
 import { COMFORT, MAX_TRIM_DB, carrierPair, fillNoise, volumeToGain } from "./engine";
 import { MONAURAL_BEAT_DEPTH } from "./synth";
 import { LISTENING_LOG_KEY, MIN_COMPARISON_SAMPLE, appendListeningInterval, compareListeningConditions, readListeningLog } from "./listeningLog";
@@ -173,7 +173,7 @@ describe("listening log and comparison", () => {
 
 describe("soundscape store", () => {
   const fake = {
-    play: vi.fn(async () => undefined),
+    play: vi.fn(async (): Promise<void> => undefined),
     pause: vi.fn(async () => undefined),
     resume: vi.fn(async () => undefined),
     stop: vi.fn(async () => undefined),
@@ -187,9 +187,14 @@ describe("soundscape store", () => {
     Object.values(fake).forEach((value) => typeof value === "function" && (value as ReturnType<typeof vi.fn>).mockClear());
     const { setSoundscapeEngineForTests, useSoundscape } = await import("./store");
     setSoundscapeEngineForTests(fake as never);
-    useSoundscape.setState({ status: "idle", presetId: null, stopAt: undefined });
+    useSoundscape.setState({ status: "idle", presetId: null, loadedVersionId: null, stopAt: undefined, previewing: false, versions: {} });
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(async () => {
+    const { useSoundscape } = await import("./store");
+    await useSoundscape.getState().stop();
+    applyUserSounds([]);
+    vi.useRealTimers();
+  });
 
   it("plays, logs the listening interval on stop, and remembers the preset", async () => {
     const { useSoundscape } = await import("./store");
@@ -224,10 +229,106 @@ describe("soundscape store", () => {
     expect(fake.resume).toHaveBeenCalled();
   });
 
+  it("applies a paused version choice only on resume", async () => {
+    const { useSoundscape } = await import("./store");
+    await useSoundscape.getState().play("gamma-40", { version: "clean" });
+    await useSoundscape.getState().pause();
+    useSoundscape.getState().setVersion("gamma-40", "deep-focus");
+    expect(fake.play).toHaveBeenCalledTimes(1);
+    expect(useSoundscape.getState().loadedVersionId).toBe("clean");
+    await useSoundscape.getState().resume();
+    expect(fake.play).toHaveBeenLastCalledWith(SOUNDSCAPES["gamma-40"], expect.objectContaining({ versionId: "deep-focus", replacePaused: true }));
+    expect(useSoundscape.getState()).toMatchObject({ status: "playing", loadedVersionId: "deep-focus" });
+  });
+
   it("reports an engine failure instead of pretending to play", async () => {
     const { useSoundscape } = await import("./store");
     fake.play.mockRejectedValueOnce(new Error("This browser can’t synthesize audio."));
     await useSoundscape.getState().play("gamma-40");
     expect(useSoundscape.getState()).toMatchObject({ status: "idle", error: "This browser can’t synthesize audio." });
+  });
+
+  it("does not replace a newer choice when an older start finishes late", async () => {
+    const { useSoundscape } = await import("./store");
+    let finish!: () => void;
+    fake.play.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const pending = useSoundscape.getState().play("gamma-40");
+    await useSoundscape.getState().play("beta-20");
+    finish();
+    await pending;
+    expect(useSoundscape.getState()).toMatchObject({ status: "playing", presetId: "beta-20", lastPresetId: "beta-20" });
+    expect(useSoundscape.getState().versions["gamma-40"]).toBeUndefined();
+  });
+
+  it("keeps a valid pending start synchronized after rejecting an empty shelf", async () => {
+    const { useSoundscape } = await import("./store");
+    let finish!: () => void;
+    fake.play.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const pending = useSoundscape.getState().play("axom-1");
+
+    const versions = SOUNDSCAPES.yours.versions;
+    try {
+      SOUNDSCAPES.yours.versions = [];
+      await useSoundscape.getState().play("yours");
+    } finally {
+      SOUNDSCAPES.yours.versions = versions;
+    }
+    expect(useSoundscape.getState()).toMatchObject({ status: "idle", error: "Add a file first. This shelf is empty." });
+    expect(fake.play).toHaveBeenCalledTimes(1);
+
+    finish();
+    await pending;
+    expect(useSoundscape.getState()).toMatchObject({
+      status: "playing", presetId: "axom-1", loadedVersionId: "axom-soundscape-1", lastPresetId: "axom-1", error: undefined,
+    });
+    expect(JSON.parse(localStorage.getItem("axom.soundscapes.v1")!)).toMatchObject({
+      lastPresetId: "axom-1", versions: { "axom-1": "axom-soundscape-1" },
+    });
+  });
+
+  it("does not report playback after a loading sound is stopped", async () => {
+    const { useSoundscape } = await import("./store");
+    let finish!: () => void;
+    fake.play.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const pending = useSoundscape.getState().play("axom-1");
+    await useSoundscape.getState().stop();
+    finish();
+    await pending;
+    expect(useSoundscape.getState()).toMatchObject({ status: "idle", loadedVersionId: null });
+    expect(fake.stop).toHaveBeenCalled();
+  });
+
+  it("does not turn a resumed preview into a listening record", async () => {
+    const { useSoundscape } = await import("./store");
+    await useSoundscape.getState().play("alpha-10", { preview: true });
+    await useSoundscape.getState().pause();
+    await useSoundscape.getState().resume();
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    await useSoundscape.getState().stop();
+    expect(readListeningLog()).toEqual([]);
+  });
+
+  it("resumes the preview that was loaded without changing saved preferences", async () => {
+    const { useSoundscape } = await import("./store");
+    useSoundscape.getState().setVersion("gamma-40", "clean");
+    await useSoundscape.getState().play("gamma-40", { version: "deep-focus", preview: true });
+    await useSoundscape.getState().pause();
+    await useSoundscape.getState().resume();
+    expect(fake.play).toHaveBeenCalledTimes(1);
+    expect(fake.resume).toHaveBeenCalledOnce();
+    expect(useSoundscape.getState()).toMatchObject({ loadedVersionId: "deep-focus", previewing: true, versions: { "gamma-40": "clean" } });
+  });
+
+  it("stops an imported file that is removed while its start is pending", async () => {
+    const { useSoundscape } = await import("./store");
+    applyUserSounds([{ id: "pending", name: "Pending", presetId: "yours", url: "blob:pending" }]);
+    let finish!: () => void;
+    fake.play.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const pending = useSoundscape.getState().play("yours", { version: "user-pending" });
+    applyUserSounds([]);
+    finish();
+    await pending;
+    expect(fake.stop).toHaveBeenCalled();
+    expect(useSoundscape.getState()).toMatchObject({ status: "idle", loadedVersionId: null });
   });
 });
