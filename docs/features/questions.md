@@ -62,8 +62,11 @@ The owner opens **Review and submit set** for an explicitly selected set. A conf
 real AI provider can automatically prepare at most 12 missing explanations per
 review, from *already confirmed, non-media answer keys*. A user can request another
 batch if needed. The model returns an explanation and per-choice rationales as
-**provisional private drafts**, never a new answer key. The student must inspect and
-save each batch to their private bank, then attest to answer, explanation and
+**provisional private drafts**, never a new answer key. Batches can be canceled
+without discarding completed drafts. Explanations and distractor rationales are
+editable in place, and the saved explanation is explicitly labeled AI-assisted,
+not source-authored. The student must inspect and save each batch to their
+private bank, then attest to answer, explanation and
 distribution rights before sending the exact current snapshot for academic review.
 No model or deterministic hint is proof of correctness, citations or source rights.
 Absent/unreachable AI, unresolved answer mappings, inaccessible media and failed
