@@ -93,8 +93,8 @@ export function AppUpdatePanel() {
       <div className="settings-update-actions">
         <GButton size="sm" disabled={busy || appUpdates.hasDownloaded() || state.restartPending} onClick={() => { void appUpdates.check(true); }}><RefreshCw size={16} /> Check for updates</GButton>
         {state.desktop && state.version && !appUpdates.hasDownloaded() && <GButton size="sm" variant="primary" disabled={busy} onClick={() => { void appUpdates.download(); }}><Download size={16} /> Download update</GButton>}
-        {canApply && <GButton size="sm" variant="primary" disabled={busy} onClick={apply}><ShieldCheck size={16} /> {canContinueWithVerifiedSave ? "Confirm and refresh" : state.desktop ? (state.restartPending ? "Save and restart" : "Install and restart") : canRefreshWithoutVerifiedSave ? "Retry save and refresh" : "Save and refresh"}</GButton>
-        {canContinueWithVerifiedSave && <GButton size="sm" disabled={busy} onClick={requestApplyUpdate}><RefreshCw size={16} /> Retry full backup</GButton>
+        {canApply && <GButton size="sm" variant="primary" disabled={busy} onClick={apply}><ShieldCheck size={16} /> {canContinueWithVerifiedSave ? "Confirm and refresh" : state.desktop ? (state.restartPending ? "Save and restart" : "Install and restart") : canRefreshWithoutVerifiedSave ? "Retry save and refresh" : "Save and refresh"}</GButton>}
+        {canContinueWithVerifiedSave && <GButton size="sm" disabled={busy} onClick={requestApplyUpdate}><RefreshCw size={16} /> Retry full backup</GButton>}
         {canRefreshWithoutVerifiedSave && <GButton size="sm" disabled={busy} aria-describedby="update-unverified-save-warning" onClick={requestApplyUpdateWithoutVerifiedSave}><RefreshCw size={16} /> Refresh anyway</GButton>}
         {state.version && !busy && <GButton size="sm" onClick={() => appUpdates.defer()}>Remind me next time</GButton>}
       </div>
