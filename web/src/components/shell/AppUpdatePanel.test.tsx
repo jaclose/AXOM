@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     deferred: false,
     restartPending: false,
     canRefreshWithoutVerifiedSave: true,
+    canContinueWithoutRecoverySnapshot: false,
     error: "Could not verify the saved workspace.",
   },
   apply: vi.fn(async (_options?: { skipFailedCheckpoint?: boolean }) => undefined),
@@ -38,6 +39,7 @@ beforeEach(() => {
   mocks.state.phase = "error";
   mocks.state.desktop = false;
   mocks.state.canRefreshWithoutVerifiedSave = true;
+  mocks.state.canContinueWithoutRecoverySnapshot = false;
   mocks.apply.mockClear();
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -45,7 +47,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe("AppUpdatePanel risky refresh confirmation", () => {
   it("explains potential data loss and offers a separate action when verification fails", () => {
     render(<AppUpdatePanel />);
-    expect(screen.getByRole("button", { name: "Save and refresh" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry save and refresh" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh anyway" })).toBeTruthy();
     expect(document.getElementById("update-unverified-save-warning")?.textContent).toMatch(/may lose recent changes/i);
   });
@@ -64,6 +66,19 @@ describe("AppUpdatePanel risky refresh confirmation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh anyway" }));
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Are you sure"));
     expect(mocks.apply).toHaveBeenCalledWith({ skipFailedCheckpoint: true });
+  });
+
+  it("offers a confirmed refresh and safe backup retry when only the extra copy fails", () => {
+    mocks.state.canContinueWithoutRecoverySnapshot = true;
+    mocks.state.canRefreshWithoutVerifiedSave = false;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<AppUpdatePanel />);
+    expect(screen.getByRole("button", { name: "Confirm and refresh" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry full backup" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh anyway" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and refresh" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("verified your latest workspace"));
+    expect(mocks.apply).toHaveBeenCalledWith({ skipRecoverySnapshot: true });
   });
 
   it("does not offer an unsafe refresh outside the failed-save state", () => {
