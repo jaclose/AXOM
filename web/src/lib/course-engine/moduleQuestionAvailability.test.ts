@@ -416,3 +416,68 @@ describe("duplicate original IDs cannot inflate shared academic availability", (
     }
   });
 });
+
+
+describe("original-ID collection provenance is independent of record order", () => {
+  it("preserves two independently indexed source weeks while holding the conflicted original", () => {
+    const second = { module: "GOER", week: 2, courseId: "ppm-501" };
+    const third = { module: "GOER", week: 3, courseId: "ppm-501" };
+    const sources = [
+      set("primary-w2", ["shared"], { scope: second }),
+      set("primary-w3", ["shared"], { scope: third }),
+    ];
+    const q2 = question("shared", { setId: "primary-w2", ...second });
+    const q3 = question("shared", { setId: "primary-w3", ...third });
+    const before = JSON.stringify([sources, q2, q3]);
+    for (const records of [[q2, q3], [q3, q2]]) {
+      const index = buildQuestionAvailabilityIndex(input(sources, records));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+        unresolvedWeekQuestions: 1, collections: 2, indexedWeeks: [2, 3],
+      });
+      expect(index.unassignedCollections).toBe(0);
+    }
+    expect(JSON.stringify([sources, q2, q3])).toBe(before);
+  });
+
+  it("does not let a review-only collection create a third source week for the conflict", () => {
+    const second = { module: "GOER", week: 2, courseId: "ppm-501" };
+    const third = { module: "GOER", week: 3, courseId: "ppm-501" };
+    const sources = [
+      set("primary-w2", ["shared"], { scope: second }),
+      set("primary-w3", ["shared"], { scope: third }),
+      set("secondary-review", ["shared"], { scope: { ...third, week: 4 }, kind: "review" }),
+    ];
+    for (const records of [
+      [question("shared", { setId: "primary-w2", ...second }), question("shared", { setId: "primary-w3", ...third })],
+      [question("shared", { setId: "primary-w3", ...third }), question("shared", { setId: "primary-w2", ...second })],
+    ]) {
+      const index = buildQuestionAvailabilityIndex(input(sources, records));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+        collections: 2, indexedWeeks: [2, 3],
+      });
+      expect(index.unassignedCollections).toBe(1);
+    }
+  });
+
+  it("keeps a compatible independently sourced question eligible when its set also references a held ID", () => {
+    const second = { module: "GOER", week: 2, courseId: "ppm-501" };
+    const third = { module: "GOER", week: 3, courseId: "ppm-501" };
+    const sources = [
+      set("primary-w2", ["shared", "distinct"], { scope: second }),
+      set("primary-w3", ["shared"], { scope: third }),
+    ];
+    const q2 = question("shared", { setId: "primary-w2", ...second });
+    const q3 = question("shared", { setId: "primary-w3", ...third });
+    const distinct = question("distinct", { setId: "primary-w2", ...second });
+    for (const rows of [[q2, distinct, q3], [q3, distinct, q2]]) {
+      const index = buildQuestionAvailabilityIndex(input(sources, rows));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 2, readyQuestions: 1, reviewQuestions: 1,
+        unresolvedWeekQuestions: 1, collections: 2, indexedWeeks: [2, 3],
+      });
+      expect(index.unassignedCollections).toBe(0);
+    }
+  });
+});
