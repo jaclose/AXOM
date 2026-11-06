@@ -255,6 +255,41 @@ describe("verified primary-source progress attribution", () => {
     assert.deepEqual(groupQuestionsByScope([b, a], sets).flatMap(group => group.questionIds),
       ["shared"]);
   });
+
+  it("keeps unrelated week memberships unread during a scoped progress query", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const unrelatedIds = ["other"];
+    unrelatedIds.includes = () => { throw new Error("unrelated source membership was scanned"); };
+    const sets = new Map([
+      ["primary", { scope: filing, questionIds: ["tracked"] }],
+      ["unrelated", { scope: { module: "FTM 1", week: 4, courseId: "elective" },
+        questionIds: unrelatedIds }],
+    ]);
+    const records = [
+      question("tracked", { setId: "primary", ...filing }),
+      question("other", { setId: "unrelated", module: "FTM 1", week: 4, courseId: "elective" }),
+    ];
+    const progress = scopeProgress(records, filing, sets);
+    assert.equal(progress.total, 1);
+    assert.equal(progress.sourceReviewHeld, undefined);
+  });
+
+  it("holds same-ID duplicates with different source documents or scoring keys", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const baseline = question("shared", { setId: "primary", ...filing,
+      sourceDocumentId: "source-a", correctKey: "A" });
+    for (const changes of [{ sourceDocumentId: "source-b" }, { correctKey: "B" }]) {
+      const altered = { ...baseline, ...changes };
+      for (const pair of [[baseline, altered], [altered, baseline]]) {
+        const progress = scopeProgress(pair, filing, sets);
+        assert.equal(progress.total, 0);
+        assert.equal(progress.sourceReviewHeld, 1);
+        assert.deepEqual(groupQuestionsByScope(pair, sets)
+          .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+      }
+    }
+  });
 });
 
 
