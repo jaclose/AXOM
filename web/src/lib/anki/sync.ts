@@ -102,6 +102,7 @@ export function cardSyncStatus(cardId: string, fingerprint: string, state: LinkS
   if (state.excluded.includes(cardId)) return "excluded";
   const link = state.links[cardId];
   if (link?.issue) return link.issue.kind;
+  if ((state.pendingRetirements ?? []).some((item) => item.axomId === cardId)) return "pending";
   if (link) return link.fingerprint === fingerprint && !link.force ? "synced" : "pending";
   const failure = state.failures[cardId];
   if (failure && failure.fingerprint === fingerprint) return "failed";
@@ -181,6 +182,7 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
     links: { ...input.state.links },
     failures: { ...input.state.failures },
     pendingSuspends: [...input.state.pendingSuspends],
+    pendingRetirements: [...(input.state.pendingRetirements ?? [])],
     excluded: [...input.state.excluded],
   };
   const progress = input.onProgress ?? (() => {});
@@ -208,7 +210,7 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
   }
   const deleted = Object.keys(state.links).filter((id) => !cardById.has(id));
 
-  const remaining = () => toAdd.length + toCheck.length + deleted.length + state.pendingSuspends.length;
+  const remaining = () => toAdd.length + toCheck.length + deleted.length + state.pendingSuspends.length + (state.pendingRetirements?.length ?? 0);
   if (!remaining()) {
     return { state: { ...state, lastSync: summarize(report) }, report };
   }
@@ -293,6 +295,21 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
           report.missingIds.push(id);
           continue;
         }
+        // A numeric note ID can be reused in a different Anki profile.
+        // Never mutate a note unless its AXOM identity still matches.
+        if (info.fields[AXOM_ID_FIELD]?.value?.trim() !== id) {
+          state.links[id] = {
+            ...link,
+            issue: {
+              kind: "conflict",
+              message: "The linked Anki note has another AXOM ID or cannot be identified. Nothing was changed. Check the active Anki profile before retrying.",
+              at,
+            },
+          };
+          report.conflicts += 1;
+          report.conflictIds.push(id);
+          continue;
+        }
         if (note.kind !== link.kind) {
           // Never create a second replacement while a desired-kind note may
           // already exist. It could be an applied add whose reply was lost or
@@ -307,6 +324,24 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
                 kind: "conflict",
                 message: `Anki already contains note ${existingId} with this AXOM ID and the requested note type. AXOM did not create another. Review both notes in Anki before retrying this conversion.`,
                 at,
+              },
+            };
+            report.conflicts += 1;
+            report.conflictIds.push(id);
+            continue;
+          }
+          // A learner may have edited the old note directly in Anki since
+          // our last sync. Preserve that edited copy until they explicitly
+          // choose AXOM's version; do not silently retire it on conversion.
+          const ankiFields = managedFieldsOf(info, link.kind);
+          if (fieldsHash(ankiFields, link.kind) !== link.fieldsHash && !link.force) {
+            state.links[id] = {
+              ...link,
+              issue: {
+                kind: "conflict",
+                message: "The note was edited in Anki. Review its changes before converting the note type.",
+                at,
+                ankiFields,
               },
             };
             report.conflicts += 1;
@@ -425,6 +460,36 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
       }
     }
 
+    // --- unfinished replacement retirement ----------------------------------------
+    // A new note may have been committed before a suspend response was lost.
+    // Keep the receipt until we verify the exact former note and every card.
+    // Hold inconsistent note/card IDs; identical cross-profile IDs still need device acceptance.
+    if (state.pendingRetirements?.length) {
+      progress("Verifying replaced Anki cards are suspended…");
+      const infos = await notesInfo(client, state.pendingRetirements.map((item) => item.noteId));
+      for (const item of [...state.pendingRetirements]) {
+        const info = infos.get(item.noteId);
+        if (!info ||
+            info.fields[AXOM_ID_FIELD]?.value?.trim() !== item.axomId ||
+            info.cards.length !== item.cardIds.length ||
+            item.cardIds.some((cardId) => !info.cards.includes(cardId))) {
+          throw new Error(`Cannot safely retry Anki retirement for ${item.axomId}: old note/card identity changed. Check the Anki profile and notes.`);
+        }
+        const before = await client.call<Array<boolean | null>>("areSuspended", { cards: item.cardIds });
+        if (before.length !== item.cardIds.length || before.some((value) => value === null)) {
+          throw new Error(`Cannot verify old Anki cards for ${item.axomId}; retirement remains pending.`);
+        }
+        const unsuspended = item.cardIds.filter((_cardId, index) => before[index] === false);
+        if (unsuspended.length) await client.call("suspend", { cards: unsuspended });
+        const after = await client.call<Array<boolean | null>>("areSuspended", { cards: item.cardIds });
+        if (after.length !== item.cardIds.length || after.some((value) => value !== true)) {
+          throw new Error(`Cannot verify suspension of old Anki cards for ${item.axomId}; retirement remains pending.`);
+        }
+        state.pendingRetirements = state.pendingRetirements.filter((receipt) =>
+          receipt.axomId !== item.axomId || receipt.noteId !== item.noteId);
+      }
+    }
+
     // --- deletions --------------------------------------------------------------------
     for (const id of deleted) {
       const link = state.links[id];
@@ -437,13 +502,37 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
       }
     }
     if (state.pendingSuspends.length) {
-      progress("Suspending deleted cards in Anki…");
-      const cardIds = [...new Set(state.pendingSuspends.flatMap((item) => item.cardIds))];
-      const existing = cardIds.length ? await client.call<Array<boolean | null>>("areSuspended", { cards: cardIds }) : [];
-      const toSuspend = cardIds.filter((_id, index) => existing[index] === false);
-      if (toSuspend.length) await client.call("suspend", { cards: toSuspend });
-      report.deletedSuspended += state.pendingSuspends.length;
-      state.pendingSuspends = [];
+      progress("Verifying deleted AXOM cards before suspending in Anki…");
+      // A deletion is permission to suspend its original Anki note, not to
+      // suspend whatever now owns a reused numeric ID in another profile.
+      // Keep each receipt until the exact note/cards and postcondition agree.
+      const infos = await notesInfo(client, state.pendingSuspends.map((item) => item.noteId));
+      for (const item of [...state.pendingSuspends]) {
+        const info = infos.get(item.noteId);
+        const cards = item.cardIds;
+        if (!Number.isSafeInteger(item.noteId) || item.noteId <= 0 ||
+            !item.axomId || !cards.length ||
+            new Set(cards).size !== cards.length ||
+            cards.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+            !info || info.fields[AXOM_ID_FIELD]?.value?.trim() !== item.axomId ||
+            info.cards.length !== cards.length ||
+            cards.some((id) => !info.cards.includes(id))) {
+          throw new Error(`Cannot safely suspend deleted AXOM card ${item.axomId}: original Anki note/card identity changed. Check the Anki profile and notes.`);
+        }
+        const before = await client.call<Array<boolean | null>>("areSuspended", { cards });
+        if (before.length !== cards.length || before.some((value) => value !== true && value !== false)) {
+          throw new Error(`Cannot verify deleted AXOM card ${item.axomId}; suspension remains pending.`);
+        }
+        const unsuspended = cards.filter((_id, index) => before[index] === false);
+        if (unsuspended.length) await client.call("suspend", { cards: unsuspended });
+        const after = await client.call<Array<boolean | null>>("areSuspended", { cards });
+        if (after.length !== cards.length || after.some((value) => value !== true)) {
+          throw new Error(`Anki did not confirm suspension of deleted AXOM card ${item.axomId}; request remains pending.`);
+        }
+        state.pendingSuspends = state.pendingSuspends.filter((receipt) =>
+          receipt.axomId !== item.axomId || receipt.noteId !== item.noteId);
+        report.deletedSuspended += 1;
+      }
     }
   } catch (error) {
     if (error instanceof NoteTypeConflictError) {
@@ -463,9 +552,10 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
 }
 
 function countStillPending(cards: readonly AnkiCard[], desired: Map<string, { fingerprint: string }>, state: LinkState): number {
-  let pending = state.pendingSuspends.length;
+  const retirementIds = new Set((state.pendingRetirements ?? []).map((item) => item.axomId));
+  let pending = state.pendingSuspends.length + (state.pendingRetirements?.length ?? 0);
   const ids = new Set(cards.map((card) => card.id));
-  for (const card of cards) if (cardSyncStatus(card.id, desired.get(card.id)!.fingerprint, state) === "pending") pending += 1;
+  for (const card of cards) if (!retirementIds.has(card.id) && cardSyncStatus(card.id, desired.get(card.id)!.fingerprint, state) === "pending") pending += 1;
   for (const id of Object.keys(state.links)) if (!ids.has(id)) pending += 1;
   return pending;
 }
@@ -545,7 +635,6 @@ async function addBatch(
   }
   const infos = created.size ? await notesInfo(client, [...created.values()]) : new Map<number, AnkiNoteInfo>();
   const suspendNow: number[] = [];
-  const suspendOld: number[] = [];
   for (const [id, noteId] of created) {
     const { note, fingerprint } = desired.get(id)!;
     const info = infos.get(noteId);
@@ -566,13 +655,18 @@ async function addBatch(
     delete state.failures[id];
     if (note.suspended) suspendNow.push(...cardIds);
     if (previous) {
-      suspendOld.push(...previous.cardIds);
+      if (previous.cardIds.length && !(state.pendingRetirements ?? []).some(
+        (receipt) => receipt.axomId === id && receipt.noteId === previous.noteId)) {
+        state.pendingRetirements = [...(state.pendingRetirements ?? []), {
+          axomId: id, noteId: previous.noteId, cardIds: [...previous.cardIds], at,
+        }];
+      }
       report.replaced += 1;
     } else {
       report.added += 1;
     }
   }
-  if (suspendNow.length || suspendOld.length) await client.call("suspend", { cards: [...suspendNow, ...suspendOld] });
+  if (suspendNow.length) await client.call("suspend", { cards: suspendNow });
   for (const [id, message] of failed) {
     state.failures[id] = { message, fingerprint: desired.get(id)!.fingerprint, at };
     report.failed += 1;

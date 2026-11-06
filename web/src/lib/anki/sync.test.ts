@@ -6,7 +6,7 @@ import { buildCourseCatalog } from "./courseAdapter";
 import { DEFAULT_DECK_LAYOUT } from "./deckLayout";
 import { createFakeFetch, FakeAnkiConnect } from "./fake/fakeAnkiConnect";
 import {
-  acceptAnkiVersion, emptyLinkState, excludeFromAnki, includeInAnki, keepAxomVersion, recordAxomDeletion, type LinkState,
+  acceptAnkiVersion, emptyLinkState, excludeFromAnki, includeInAnki, keepAxomVersion, normalizeLinkState, recordAxomDeletion, type LinkState,
 } from "./linkStore";
 import { ankiHtmlToText, fieldsHash } from "./noteBuilder";
 import { cardSyncStatus, desiredNotes, pendingChangeCount, syncCardsToAnki, type SyncInput } from "./sync";
@@ -41,6 +41,30 @@ function harness(options: ConstructorParameters<typeof FakeAnkiConnect>[0] = {})
   };
   const deckOf = (cardId: number) => Object.keys(fake.call<Record<string, number[]>>("getDecks", { cards: [cardId] }))[0];
   return { fake, client, run, noteOf, deckOf, get state() { return state; }, set state(next: LinkState) { state = next; } };
+}
+
+function interruptedRetirement(mode: "before" | "after") {
+  const fake = new FakeAnkiConnect();
+  const realFetch = createFakeFetch(fake);
+  let interrupt = true;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const action = JSON.parse(String(init?.body)) as { action?: string };
+    if (interrupt && mode === "before" && action.action === "suspend") {
+      interrupt = false;
+      throw new TypeError("Anki disconnected before suspension");
+    }
+    const reply = await realFetch(input, init);
+    if (interrupt && mode === "after" && action.action === "suspend") {
+      interrupt = false;
+      throw new TypeError("Anki lost the response after suspension");
+    }
+    return reply;
+  };
+  const client = createAnkiClient({ fetchImpl });
+  const run = (cards: AnkiCard[], state: LinkState) => syncCardsToAnki({
+    client, cards, catalog, layout: DEFAULT_DECK_LAYOUT, deletePolicy: "ask", state,
+  });
+  return { fake, run };
 }
 
 describe("pushing AXOM cards to Anki", () => {
@@ -184,6 +208,134 @@ describe("pushing AXOM cards to Anki", () => {
     expect(policy.fake.call("areSuspended", { cards: cardsX })).toEqual([true]);
   });
 
+  it("holds deletion suspension when an Anki note is replaced under the same numeric ID", async () => {
+    const h = harness();
+    await h.run([card("a")]);
+    const former = h.state.links.a;
+    h.state = recordAxomDeletion(h.state, "a", "suspend");
+    h.fake.call("updateNoteFields", { note: { id: former.noteId, fields: { AxomId: "a-different-profile" } } });
+    const held = await h.run([]);
+    expect(held).toMatchObject({ deletedSuspended: 0, pending: 1 });
+    expect(held.error).toMatch(/identity changed/);
+    expect(h.state.pendingSuspends).toHaveLength(1);
+    expect(h.fake.call("areSuspended", { cards: former.cardIds })).toEqual([false]);
+    expect(h.fake.actionsCalled("suspend")).toHaveLength(0);
+  });
+
+  it("does not clear a deleted-card receipt when Anki acknowledges but does not suspend", async () => {
+    const fake = new FakeAnkiConnect();
+    const realFetch = createFakeFetch(fake);
+    let suppressOnce = true;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const action = JSON.parse(String(init?.body)) as { action?: string };
+      if (suppressOnce && action.action === "suspend") {
+        suppressOnce = false;
+        return new Response(JSON.stringify({ result: true, error: null }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
+      return realFetch(input, init);
+    };
+    const client = createAnkiClient({ fetchImpl });
+    const run = (cards: AnkiCard[], state: LinkState) => syncCardsToAnki({
+      client, cards, catalog, layout: DEFAULT_DECK_LAYOUT, deletePolicy: "ask", state,
+    });
+    const initial = await run([card("a")], emptyLinkState());
+    const ids = initial.state.links.a.cardIds;
+    const deletion = recordAxomDeletion(initial.state, "a", "suspend");
+    const held = await run([], deletion);
+    expect(held.report).toMatchObject({ deletedSuspended: 0, pending: 1, offline: false });
+    expect(held.report.error).toMatch(/did not confirm suspension/);
+    expect(held.state.pendingSuspends).toHaveLength(1);
+    expect(fake.call("areSuspended", { cards: ids })).toEqual([false]);
+    const recovered = await run([], normalizeLinkState(JSON.parse(JSON.stringify(held.state))));
+    expect(recovered.report).toMatchObject({ deletedSuspended: 1, pending: 0, offline: false });
+    expect(recovered.state.pendingSuspends).toEqual([]);
+    expect(fake.call("areSuspended", { cards: ids })).toEqual([true]);
+    expect(fake.actionsCalled("deleteNotes")).toEqual([]);
+  });
+
+  it("persists only the unfinished deletion receipt after partial multi-note disconnection", async () => {
+    const fake = new FakeAnkiConnect();
+    const realFetch = createFakeFetch(fake);
+    const interruptCard = { value: -1 };
+    let interrupted = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = JSON.parse(String(init?.body)) as { action?: string; params?: { cards?: number[] } };
+      if (!interrupted && request.action === "suspend" &&
+          request.params?.cards?.includes(interruptCard.value)) {
+        interrupted = true;
+        throw new TypeError("Anki disconnected before the second deleted note was suspended");
+      }
+      return realFetch(input, init);
+    };
+    const client = createAnkiClient({ fetchImpl });
+    const run = (cards: AnkiCard[], state: LinkState) => syncCardsToAnki({
+      client, cards, catalog, layout: DEFAULT_DECK_LAYOUT, deletePolicy: "ask", state,
+    });
+    const initial = await run([card("a"), card("b")], emptyLinkState());
+    const aCards = initial.state.links.a.cardIds;
+    const bCards = initial.state.links.b.cardIds;
+    interruptCard.value = bCards[0];
+    const deletion = recordAxomDeletion(recordAxomDeletion(initial.state, "a", "suspend"), "b", "suspend");
+    const partial = await run([], deletion);
+    expect(partial.report).toMatchObject({ deletedSuspended: 1, pending: 1, offline: true });
+    expect(partial.state.pendingSuspends).toMatchObject([{ axomId: "b" }]);
+    expect(fake.call("areSuspended", { cards: aCards })).toEqual([true]);
+    expect(fake.call("areSuspended", { cards: bCards })).toEqual([false]);
+    const resumed = await run([], normalizeLinkState(JSON.parse(JSON.stringify(partial.state))));
+    expect(resumed.report).toMatchObject({ deletedSuspended: 1, pending: 0, offline: false });
+    expect(resumed.state.pendingSuspends).toEqual([]);
+    expect(fake.call("areSuspended", { cards: bCards })).toEqual([true]);
+    expect(fake.actionsCalled("deleteNotes")).toEqual([]);
+  });
+
+  it("rejects linked-note identity mismatch for both field updates and kind switches, even when forced", async () => {
+    for (const convert of [false, true]) {
+      const h = harness();
+      await h.run([card("a")]);
+      const previous = h.state.links.a;
+      h.fake.call("updateNoteFields", { note: { id: previous.noteId, fields: { AxomId: "different-card" } } });
+      const desired = convert
+        ? card("a", { type: "cloze", front: "{{c1::Different}} content", back: "" })
+        : card("a", { back: "Do not overwrite a different Anki note" });
+      const held = await h.run([desired]);
+      expect(held).toMatchObject({ updated: 0, replaced: 0, added: 0, conflicts: 1, offline: false });
+      expect(h.state.links.a).toMatchObject({ noteId: previous.noteId, kind: "basic", issue: { kind: "conflict" } });
+      expect(h.fake.call<Array<{ fields: Record<string, { value: string }> }>>("notesInfo", { notes: [previous.noteId] })[0].fields.AxomId.value)
+        .toBe("different-card");
+      expect(h.fake.actionsCalled("addNotes")).toHaveLength(1);
+      expect(h.fake.actionsCalled("updateNoteFields")).toHaveLength(1); // only simulated outside edit
+      expect(h.fake.actionsCalled("suspend")).toEqual([]);
+      h.state = keepAxomVersion(h.state, "a");
+      const forced = await h.run([desired]);
+      expect(forced).toMatchObject({ updated: 0, replaced: 0, conflicts: 1 });
+      expect(h.fake.actionsCalled("addNotes")).toHaveLength(1);
+    }
+  });
+
+  it("holds a Basic-to-Cloze conversion if the learner edited the original note in Anki", async () => {
+    const h = harness();
+    await h.run([card("a")]);
+    const previous = h.state.links.a;
+    h.fake.call("updateNoteFields", { note: { id: previous.noteId, fields: { Back: "learner-edited answer" } } });
+    const cloze = card("a", { type: "cloze", front: "{{c1::Kidney}} anatomy", back: "" });
+    const held = await h.run([cloze]);
+    expect(held).toMatchObject({ conflicts: 1, replaced: 0, added: 0, offline: false });
+    expect(h.state.links.a.issue).toMatchObject({ kind: "conflict", ankiFields: { Back: "learner-edited answer" } });
+    expect(h.fake.notes.size).toBe(1);
+    expect(h.fake.call("areSuspended", { cards: previous.cardIds })).toEqual([false]);
+    expect(h.fake.actionsCalled("addNotes")).toHaveLength(1);
+
+    h.state = keepAxomVersion(h.state, "a");
+    const approved = await h.run([cloze]);
+    expect(approved).toMatchObject({ replaced: 1, conflicts: 0, pending: 0, offline: false });
+    expect(h.fake.call("areSuspended", { cards: previous.cardIds })).toEqual([true]);
+    expect(h.fake.call<Array<{ fields: Record<string, { value: string }> }>>("notesInfo", { notes: [previous.noteId] })[0].fields.Back.value)
+      .toBe("learner-edited answer"); // historical note preserved intact
+    expect(h.fake.notes.size).toBe(2);
+  });
+
   it("replaces the note when a card switches between Basic and Cloze, keeping the old one suspended", async () => {
     const h = harness();
     await h.run([card("a")]);
@@ -264,6 +416,121 @@ describe("pushing AXOM cards to Anki", () => {
     expect(h.state.links.a.noteId).not.toBe(originalId);
     expect(h.state.links.a.retiredNoteIds).toEqual([originalId, clozeId]);
     expect(h.fake.notes.size).toBe(3); // historical notes remain, but no accidental conflict
+  });
+
+  it("persists and retries unfinished old-note retirement after a suspension fails before applying", async () => {
+    const { fake, run } = interruptedRetirement("before");
+    const original = await run([card("a")], emptyLinkState());
+    const old = original.state.links.a;
+    const converted = [card("a", { type: "cloze", front: "{{c1::Kidney}} function", back: "" })];
+
+    const interrupted = await run(converted, original.state);
+    expect(interrupted.report).toMatchObject({ replaced: 1, offline: true, pending: 1, deletedSuspended: 0 });
+    expect(interrupted.state.links.a.kind).toBe("cloze");
+    expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([false]);
+    const restored = normalizeLinkState(JSON.parse(JSON.stringify(interrupted.state)));
+    expect(restored.pendingRetirements).toEqual([{
+      axomId: "a", noteId: old.noteId, cardIds: old.cardIds, at: expect.any(String),
+    }]);
+    expect(cardSyncStatus("a", desiredNotes(converted, catalog, DEFAULT_DECK_LAYOUT).get("a")!.fingerprint, restored)).toBe("pending");
+
+    const resumed = await run(converted, restored);
+    expect(resumed.report).toMatchObject({ replaced: 0, pending: 0, offline: false, deletedSuspended: 0 });
+    expect(resumed.state.pendingRetirements).toEqual([]);
+    expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([true]);
+    expect(fake.actionsCalled("addNotes")).toHaveLength(2);
+    expect(fake.notes.size).toBe(2);
+  });
+
+  it("confirms an applied suspension after its HTTP response vanished without replaying the write", async () => {
+    const { fake, run } = interruptedRetirement("after");
+    const original = await run([card("a")], emptyLinkState());
+    const old = original.state.links.a;
+    const converted = [card("a", { type: "cloze", front: "{{c1::Kidney}} function", back: "" })];
+    const interrupted = await run(converted, original.state);
+    expect(interrupted.report).toMatchObject({ replaced: 1, offline: true, pending: 1 });
+    expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([true]);
+    const suspendCount = fake.actionsCalled("suspend").length;
+
+    const recovered = await run(converted, normalizeLinkState(JSON.parse(JSON.stringify(interrupted.state))));
+    expect(recovered.report).toMatchObject({ replaced: 0, pending: 0, deletedSuspended: 0 });
+    expect(recovered.state.pendingRetirements).toEqual([]);
+    expect(fake.actionsCalled("suspend")).toHaveLength(suspendCount);
+    expect(fake.actionsCalled("addNotes")).toHaveLength(2);
+  });
+
+  it("keeps only the incomplete receipt when a multi-note replacement stops midway", async () => {
+    const fake = new FakeAnkiConnect();
+    const realFetch = createFakeFetch(fake);
+    let suspendCount = 0;
+    const client = createAnkiClient({ fetchImpl: (async (input, init) => {
+      const action = JSON.parse(String(init?.body)) as { action?: string };
+      if (action.action === "suspend" && ++suspendCount === 2)
+        throw new TypeError("Anki disconnected between retirements");
+      return realFetch(input, init);
+    }) as typeof fetch });
+    const run = (cards: AnkiCard[], state: LinkState) => syncCardsToAnki({
+      client, cards, catalog, layout: DEFAULT_DECK_LAYOUT, deletePolicy: "ask", state,
+    });
+    const original = await run([card("a"), card("b")], emptyLinkState());
+    const converted = [
+      card("a", { type: "cloze", front: "{{c1::A}} card", back: "" }),
+      card("b", { type: "cloze", front: "{{c1::B}} card", back: "" }),
+    ];
+    const interrupted = await run(converted, original.state);
+    expect(interrupted.report).toMatchObject({ replaced: 2, offline: true, pending: 1 });
+    expect(interrupted.state.pendingRetirements?.map((item) => item.axomId)).toEqual(["b"]);
+    expect(fake.call("areSuspended", { cards: original.state.links.a.cardIds })).toEqual([true]);
+    expect(fake.call("areSuspended", { cards: original.state.links.b.cardIds })).toEqual([false]);
+    const restored = normalizeLinkState(JSON.parse(JSON.stringify(interrupted.state)));
+    const resolved = await run(converted, restored);
+    expect(resolved.report).toMatchObject({ replaced: 0, pending: 0, deletedSuspended: 0 });
+    expect(resolved.state.pendingRetirements).toEqual([]);
+    expect(fake.call("areSuspended", { cards: original.state.links.b.cardIds })).toEqual([true]);
+    expect(fake.actionsCalled("addNotes")).toHaveLength(2);
+  });
+
+  it("holds retirement when a reused note ID has a different AXOM ID; deletion keeps receipts", async () => {
+    const { fake, run } = interruptedRetirement("before");
+    const original = await run([card("a")], emptyLinkState());
+    const old = original.state.links.a;
+    const converted = [card("a", { type: "cloze", front: "{{c1::A}} card", back: "" })];
+    const interrupted = await run(converted, original.state);
+    const deleted = recordAxomDeletion(interrupted.state, "a", "leave");
+    expect(deleted.pendingRetirements).toHaveLength(1);
+    fake.call("updateNoteFields", { note: { id: old.noteId, fields: { AxomId: "another-profile" } } });
+
+    const held = await run([], normalizeLinkState(JSON.parse(JSON.stringify(deleted))));
+    expect(held.report.error).toMatch(/identity changed/);
+    expect(held.report).toMatchObject({ deletedSuspended: 0, pending: 1 });
+    expect(held.state.pendingRetirements).toHaveLength(1);
+    expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([false]);
+    expect(fake.actionsCalled("suspend")).toHaveLength(0);
+  });
+
+  it("retires the former note after AXOM deletion without double-counting delete suspension", async () => {
+    for (const policy of ["leave", "suspend"] as const) {
+      const { fake, run } = interruptedRetirement("before");
+      const original = await run([card("a")], emptyLinkState());
+      const old = original.state.links.a;
+      const converted = [card("a", { type: "cloze", front: "{{c1::Tubule}} transport", back: "" })];
+      const interrupted = await run(converted, original.state);
+      expect(interrupted.report).toMatchObject({ offline: true, replaced: 1, pending: 1 });
+      const replacementCards = interrupted.state.links.a.cardIds;
+      const deleted = recordAxomDeletion(interrupted.state, "a", policy);
+      const restored = normalizeLinkState(JSON.parse(JSON.stringify(deleted)));
+
+      const resolved = await run([], restored);
+      expect(resolved.report).toMatchObject({
+        offline: false, replaced: 0, pending: 0, deletedSuspended: policy === "suspend" ? 1 : 0,
+      });
+      expect(resolved.state.pendingRetirements).toEqual([]);
+      expect(resolved.state.pendingSuspends).toEqual([]);
+      expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([true]);
+      expect(fake.call("areSuspended", { cards: replacementCards })).toEqual([policy === "suspend"]);
+      expect(fake.notes.size).toBe(2); // both kept, never deleted
+      expect(fake.actionsCalled("deleteNotes")).toEqual([]);
+    }
   });
 
   it("creates the reverse card for basic-reversed cards", async () => {
