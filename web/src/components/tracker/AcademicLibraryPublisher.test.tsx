@@ -87,6 +87,7 @@ describe("publishing a prepared library", () => {
     expect(within(screen.getByText("CPR 1").closest("article")!).getByText("Term you confirmed.")).toBeTruthy();
 
     expect(screen.getByText("2 course plans need attention")).toBeTruthy();
+    expect(screen.queryByText(/Publishing is disabled because/)).toBeNull();
     expect(screen.getByText(/source files stay on this device/)).toBeTruthy();
     const publish = screen.getByRole("button", { name: /Publish 3 courses/ });
     expect((publish as HTMLButtonElement).disabled).toBe(true);
@@ -105,6 +106,73 @@ describe("publishing a prepared library", () => {
     expect(onPublished).toHaveBeenCalledOnce();
     // Published courses are cleared from the selection so a retry does not redo them.
     expect(screen.getByText(/0 courses selected to publish/)).toBeTruthy();
+  });
+
+
+  it("holds a loaded library with inconsistent claimed bank counts before any upload, even after rights attestation", async () => {
+    const catalog = JSON.parse(new TextDecoder().decode(fixture.files.get("catalog.json")!));
+    catalog.sources.find((source: { name: string }) => source.name === "goer-pq.pdf").ready = 5;
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(catalog)));
+    mocks.batch.mockImplementation(simulatedBatch([]));
+
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    expect(screen.getByText(/1 question set disagrees with its catalog counts/)).toBeTruthy();
+    const explanation = screen.getByText(/Publishing is disabled because this prepared library/);
+    expect(explanation.getAttribute("role")).toBe("alert");
+    const publish = screen.getByRole("button", { name: /Publish 2 courses/ }) as HTMLButtonElement;
+    expect(publish.disabled).toBe(true);
+    expect(publish.getAttribute("aria-describedby")).toBe("academic-publisher-ledger-hold");
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    expect(publish.disabled).toBe(true);
+    fireEvent.click(publish);
+    expect(mocks.batch).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: /Check 2 courses/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("holds a contradictory duplicate source ID across different courses without choosing a winner", async () => {
+    const catalog = JSON.parse(new TextDecoder().decode(fixture.files.get("catalog.json")!));
+    const goer = catalog.sources.find((source: { name: string }) => source.name === "goer-pq.pdf");
+    const ncrs = catalog.sources.find((source: { name: string }) => source.name === "ncrs-pq.pdf");
+    goer.id = ncrs.id; // Malformed source identity in an otherwise synthetic valid fixture.
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(catalog)));
+    mocks.batch.mockImplementation(simulatedBatch([]));
+
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    expect(screen.getByText(/could not be placed/)).toBeTruthy();
+    expect(screen.getByText(/Publishing is disabled because/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Submit for academic review to share/ }));
+    expect((screen.getByRole("button", { name: /Publish 2 courses/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.batch).not.toHaveBeenCalled();
+    expect(mocks.share).not.toHaveBeenCalled();
+  });
+
+  it("blocks repeated bank source IDs with zero question rows without inventing unaccounted questions", async () => {
+    const source = fixture.catalog.sources.find(entry => entry.name === "goer-pq.pdf")!;
+    // A prepared zero-question bank can be read, but its source ID cannot name two bank rows.
+    source.ready = 0;
+    source.review = 0;
+    fixture.files.set(source.bankFile!, new TextEncoder().encode(JSON.stringify(bank("goer-pq", "GOER", 5, source.checksum, 0))));
+    fixture.catalog.sources.push({ ...source, name: "second-empty-goer.pdf" });
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+    mocks.batch.mockImplementation(simulatedBatch([]));
+
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    // A collision is unsafe regardless of the ledger's truthful zero question rows.
+    expect(screen.getByText("Question counts reconcile, but duplicate source identities require review.")).toBeTruthy();
+    expect(screen.queryByText(/question set disagrees with its catalog counts/)).toBeNull();
+    const collision = screen.getByText(/1 repeated bank source ID requires source identity review/);
+    expect(collision.getAttribute("role")).toBe("alert");
+    const publish = screen.getByRole("button", { name: /Publish 2 courses/ }) as HTMLButtonElement;
+    expect(publish.disabled).toBe(true);
+    expect(publish.getAttribute("aria-describedby")).toBe("academic-publisher-ledger-hold");
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    expect(publish.disabled).toBe(true);
+    fireEvent.click(publish);
+    expect(mocks.batch).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: /Check 2 courses/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("does not approve courses during publishing even when sharing is requested", async () => {
