@@ -143,6 +143,66 @@ describe("source-week integrity", () => {
 });
 
 
+describe("verified primary-source progress attribution", () => {
+  it("holds conflicting, missing, forged and malformed primary evidence without discarding attempts", () => {
+    const at = "2026-11-06T00:00:00Z";
+    const ownScope = { module: "NB2", week: 3, courseId: "core" };
+    const fullSets = new Map([
+      ["primary", { scope: ownScope, questionIds: ["valid", "inherited", "malformed"] }],
+      ["elsewhere", { scope: { module: "FTM 1", week: 4, courseId: "elective" },
+        questionIds: ["conflict"] }],
+      ["review", { scope: ownScope, questionIds: ["valid", "valid", "conflict"] }],
+    ]);
+    const correct = [{ at, status: "correct" as const }];
+    const questions = [
+      question("valid", { setId: "primary", ...ownScope, status: "correct", attempts: correct }),
+      question("inherited", { setId: "primary" }),
+      question("legacy", { setId: undefined, ...ownScope }),
+      question("conflict", { setId: "elsewhere", ...ownScope,
+        status: "incorrect", attempts: [{ at, status: "incorrect" }] }),
+      question("forged", { setId: "primary", ...ownScope, attempts: correct }),
+      question("missing", { setId: "missing", ...ownScope, attempts: correct }),
+      question("malformed", { setId: "primary", ...ownScope,
+        week: legacyWeek("Week 3-4"), attempts: correct }),
+    ];
+    const before = JSON.stringify(questions);
+    const result = scopeProgress(questions, ownScope, fullSets);
+    assert.deepEqual(result, {
+      total: 3, attempted: 1, firstTimeCorrect: 1, missed: 0,
+      questionIds: ["valid", "inherited", "legacy"], sourceReviewHeld: 4,
+    });
+    const wholeModule = scopeProgress(questions, { module: "NB2", courseId: "core" }, fullSets);
+    assert.equal(wholeModule.total, 3);
+    assert.equal(wholeModule.sourceReviewHeld, 4);
+    const groups = groupQuestionsByScope(questions, fullSets);
+    assert.deepEqual(groups.find(group => group.key === "nb2|w3")?.questionIds,
+      ["valid", "inherited", "legacy"]);
+    assert.deepEqual(groups.find(group => group.key === "unassigned")?.questionIds,
+      ["conflict", "forged", "missing", "malformed"]);
+    // The old answers remain on the same original records for later review.
+    assert.equal(JSON.stringify(questions), before);
+  });
+
+  it("deduplicates the same original question rather than inflating progress", () => {
+    const attempt = { at: "2026-11-06T00:00:00Z", status: "correct" as const };
+    const questionRecord = question("original", {
+      setId: "primary", module: "NB2", week: 3, courseId: "core",
+      attempts: [attempt], status: "correct",
+    });
+    const sets = new Map([["primary", { scope: { module: "NB2", week: 3, courseId: "core" },
+      questionIds: ["original", "original"] }]]);
+    const original = JSON.stringify(questionRecord);
+    assert.deepEqual(scopeProgress([questionRecord, questionRecord],
+      { module: "NB2", week: 3, courseId: "core" }, sets), {
+      total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0, questionIds: ["original"],
+    });
+    assert.deepEqual(groupQuestionsByScope([questionRecord, questionRecord], sets)
+      .flatMap(group => group.questionIds), ["original"]);
+    assert.equal(JSON.stringify(questionRecord), original);
+  });
+});
+
+
 describe("source module inheritance after course refiling", () => {
   it("does not assign the old source module to a question moved to a different course", () => {
     const moved = question("moved", { courseId: "course-b" });

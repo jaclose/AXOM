@@ -24,6 +24,13 @@ export interface CourseScope {
 /** A set's own place in the course, which its questions inherit unless they say otherwise. */
 export type QuestionSetScope = Pick<CourseScope, "module" | "week" | "courseId">;
 
+/**
+ * Progress consumers receive full question sets from the installed workspace.
+ * Older analysis callers may only have a source's scope, not its membership.
+ * Such scope-only maps cannot establish immutable membership provenance.
+ */
+export type QuestionSourceEvidence = Pick<QuestionSet, "scope"> & Partial<Pick<QuestionSet, "questionIds">>;
+
 export const UNASSIGNED_SCOPE_KEY = "unassigned";
 
 /** "ftm1|w2". Two spellings of a module are one scope. */
@@ -83,6 +90,36 @@ export interface ScopeProgress {
   /** Questions whose latest answer is wrong. */
   missed: number;
   questionIds: ID[];
+  /** Excluded from current scope progress because the declared primary is missing,
+   * forged, invalid or contradictory. Historical attempts remain untouched. */
+  sourceReviewHeld?: number;
+}
+
+/** Complete primary-source evidence is needed before a question counts as
+ * currently filed progress. Scope-only legacy projections preserve their old
+ * semantics; the installed workspace supplies immutable questionIds too. */
+function hasConsistentPrimaryFiling(
+  question: QuestionRecord,
+  own: CourseScope,
+  setsById?: ReadonlyMap<ID, QuestionSourceEvidence>,
+): boolean {
+  if (!question.setId || !setsById) return true;
+  const primary = setsById.get(question.setId);
+  if (!primary) return false;
+  if (!primary.questionIds) return true; // Legacy scope-only analysis is not proof of membership.
+  if (!primary.questionIds.includes(question.id)) return false;
+  const declaredWeek = (value: unknown): boolean =>
+    value != null && (typeof value !== "string" || value.trim() !== "");
+  if ((declaredWeek(question.week) && parseWeek(question.week) === undefined)
+    || (declaredWeek(primary.scope?.week) && parseWeek(primary.scope?.week) === undefined)) return false;
+  const source = primary.scope;
+  return !(
+    (source?.module && own.module
+      && canonicalModuleKey(source.module) !== canonicalModuleKey(own.module))
+    || (parseWeek(source?.week) !== undefined && own.week !== undefined
+      && parseWeek(source?.week) !== own.week)
+    || (source?.courseId && own.courseId && source.courseId !== own.courseId)
+  );
 }
 
 /**
@@ -92,10 +129,12 @@ export interface ScopeProgress {
 export function scopeProgress(
   questions: readonly QuestionRecord[],
   scope: CourseScope,
-  setsById?: ReadonlyMap<ID, Pick<QuestionSet, "scope">>,
+  setsById?: ReadonlyMap<ID, QuestionSourceEvidence>,
 ): ScopeProgress {
   const key = scopeKey(scope);
   const progress: ScopeProgress = { total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0, questionIds: [] };
+  const counted = new Set<ID>();
+  const held = new Set<ID>();
   for (const question of questions) {
     const own = questionScope(question, setsById);
     // A scope without a week counts every week of the module.
@@ -103,6 +142,13 @@ export function scopeProgress(
     // An explicitly course-owned query must not absorb answers from another
     // course or from records with unresolved course ownership.
     if (!matches || (scope.courseId && own.courseId !== scope.courseId)) continue;
+    if (!hasConsistentPrimaryFiling(question, own, setsById)) {
+      held.add(question.id);
+      continue;
+    }
+    // One original question can appear in multiple secondary collections.
+    if (counted.has(question.id)) continue;
+    counted.add(question.id);
     progress.total += 1;
     progress.questionIds.push(question.id);
     const first = question.attempts[0];
@@ -111,6 +157,7 @@ export function scopeProgress(
     if (first.status === "correct") progress.firstTimeCorrect += 1;
     if (question.status === "incorrect") progress.missed += 1;
   }
+  if (held.size > 0) progress.sourceReviewHeld = held.size;
   return progress;
 }
 
@@ -124,11 +171,17 @@ export interface ScopeGroup {
 /** Questions grouped by module, then week, in course order. Unassigned comes last. */
 export function groupQuestionsByScope(
   questions: readonly QuestionRecord[],
-  setsById?: ReadonlyMap<ID, Pick<QuestionSet, "scope">>,
+  setsById?: ReadonlyMap<ID, QuestionSourceEvidence>,
 ): ScopeGroup[] {
   const groups = new Map<string, ScopeGroup>();
+  const seen = new Set<ID>();
   for (const question of questions) {
-    const scope = questionScope(question, setsById);
+    if (seen.has(question.id)) continue;
+    seen.add(question.id);
+    const own = questionScope(question, setsById);
+    // Keep held questions discoverable in Unassigned, not in an invented
+    // eligible module/week; this is a read model, not a refile or deletion.
+    const scope = hasConsistentPrimaryFiling(question, own, setsById) ? own : {};
     const key = scopeKey(scope);
     const group = groups.get(key) ?? { key, module: scope.module, week: scope.module ? scope.week : undefined, questionIds: [] };
     group.questionIds.push(question.id);

@@ -101,6 +101,35 @@ describe("the course by week", () => {
     expect(withOwners.every((module) => !module.weeks[0].questionScopeAmbiguous)).toBe(true);
   });
 
+
+  it("does not report held primary-source attempts as eligible week progress", () => {
+    const rows = [row({ path: "Term 2/BPM 501/NB2/Week 3" })];
+    const at = "2026-11-06T00:00:00Z";
+    const answers = [
+      question({ id: "eligible", module: "NB2", week: 3, courseId: "core", setId: "core-source",
+        status: "correct", attempts: [{ at, status: "correct" }] }),
+      question({ id: "held", module: "NB2", week: 3, courseId: "core", setId: "other-source",
+        status: "incorrect", attempts: [{ at, status: "incorrect" }] }),
+      question({ id: "forged", module: "NB2", week: 3, courseId: "core", setId: "core-source",
+        status: "correct", attempts: [{ at, status: "correct" }] }),
+    ];
+    const snapshot = JSON.stringify(answers);
+    const sets = new Map([
+      ["core-source", { scope: { module: "NB2", week: 3, courseId: "core" }, questionIds: ["eligible"] }],
+      ["other-source", { scope: { module: "FTM 1", week: 4, courseId: "elective" }, questionIds: ["held"] }],
+    ]);
+    const [module] = buildModuleWeeks(rows, answers, sets, {
+      terms: [{ id: "t2", name: "Term 2" }],
+      courses: [{ id: "core", termId: "t2", code: "BPM 501", name: "Core", files: 0,
+        modules: [{ id: "nb2", name: "NB2" }] }],
+    });
+    expect(module.weeks[0].questions).toEqual({
+      total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0,
+      questionIds: ["eligible"], sourceReviewHeld: 2,
+    });
+    expect(JSON.stringify(answers)).toBe(snapshot);
+  });
+
   it("counts absences per category against the term's allowance, a flipped lecture as a lecture", () => {
     const tracker = [
       row({ activity: "lecture", attendance: "missed" }),
