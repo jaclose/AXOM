@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, BookOpen, CalendarDays, Clock, HelpCircle, History, Layers, Minus, Plus, Target, Timer, TrendingUp, X, Zap } from "lucide-react";
 import { useStore } from "../lib/store";
-import { dayTotals, gradeColor, gradeLegend, gradeTargetsFor, isoDate, prettyDate, productiveTotals, todayGrade, type Grade, type GradeTargets } from "../lib/scoring";
+import { dayTotals, gradeTargetsFor, isoDate, prettyDate, productiveTotals, todayGrade, type Grade, type GradeTargets } from "../lib/scoring";
 import { previousLocalDateKey } from "../lib/dailyRollover";
 import type { StudyLog } from "../lib/types";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
@@ -13,12 +13,17 @@ import { StudyStreakMonitor } from "../components/productivity/StudyStreakMonito
 import { DailyRequirementsEditor } from "../components/productivity/DailyRequirementsEditor";
 import { TrackerManager } from "../components/productivity/TrackerManager";
 import { useInView } from "../lib/useInView";
-import { missedStandupDays } from "../lib/journal";
 import { gotoJournalDay } from "../lib/uiStore";
 import { evaluateDailySuccess } from "../lib/dailySuccess";
 import { frequentActivityShortcuts, recentActivityShortcuts, type ActivityShortcut } from "../lib/activityShortcuts";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { ICON_SIZE } from "../lib/iconSize";
+import { canonicalStudyLogs } from "../lib/targetContributions";
+import { productivityInsight, formatStudyMinutes, recordedActivityEvidence } from "../lib/productivityInsights";
+import { usePomodoro } from "../lib/pomodoro";
+import { ActivityIntelligence } from "../components/productivity/ActivityIntelligence";
+import { ProductivitySaveStatus, useProductivitySaveStatus } from "../components/productivity/ProductivitySaveStatus";
+import "../styles/productivity.css";
 
 export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
   { target: "productivity-log", title: "Log activity", body: "Name what mattered, then add time, quantity, or a note only when it helps. One Log button records the activity." },
@@ -39,6 +44,9 @@ const QUANTITY_META: Record<ManualQuantityType, { label: string; placeholder: st
 
 export function ProductivityPage() {
   const s = useStore();
+  const saveStatus = useProductivitySaveStatus();
+  const running = usePomodoro((state) => state.running);
+  const logs = useMemo(() => canonicalStudyLogs(s.logs).reverse(), [s.logs]);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [manualType, setManualType] = useState("");
   const [manualMinutes, setManualMinutes] = useState("");
@@ -50,25 +58,25 @@ export function ProductivityPage() {
   const strip = useInView<HTMLDivElement>();
 
   const viewKey = pickedDay ?? s.activeDayKey;
-  const totals = dayTotals(s.logs, viewKey);
-  const productive = productiveTotals(s.logs, viewKey);
+  const evidence = recordedActivityEvidence(s, viewKey);
+  const totals = dayTotals(logs, viewKey);
+  const productive = productiveTotals(logs, viewKey);
   const isActive = viewKey === s.activeDayKey;
   const yesterdayKey = previousLocalDateKey(s.activeDayKey);
   // Cheap selector over the current store snapshot. Memoizing the whole store
   // object here was both unnecessary and dependency-fragile; calculate it on
   // render so new requirements/logs can never leave the period floor stale.
-  const trackingFloor = productivityTrackingFloor(s);
-  const weekly = useMemo(() => summarizePeriod(s.logs, daysEndingOn(s.activeDayKey, 7).filter((date) => isoDate(date) >= trackingFloor), "week", s.activeDayKey, gradeTargetsFor(s.profile)), [s.logs, s.activeDayKey, trackingFloor, s.profile]);
-  const monthly = useMemo(() => summarizePeriod(s.logs, currentMonthDays(s.activeDayKey).filter((date) => isoDate(date) >= trackingFloor), "month", s.activeDayKey, gradeTargetsFor(s.profile)), [s.logs, s.activeDayKey, trackingFloor, s.profile]);
+  const trackingFloor = productivityTrackingFloor(s, logs);
+  const weekly = useMemo(() => summarizePeriod(logs, daysEndingOn(s.activeDayKey, 7).filter((date) => isoDate(date) >= trackingFloor), "week", s.activeDayKey, gradeTargetsFor(s.profile)), [logs, s.activeDayKey, trackingFloor, s.profile]);
+  const monthly = useMemo(() => summarizePeriod(logs, currentMonthDays(s.activeDayKey), "month", s.activeDayKey, gradeTargetsFor(s.profile)), [logs, s.activeDayKey, s.profile]);
   const monthCells = useMemo(() => buildMonthCells(monthly.days), [monthly.days]);
   const calendarToday = s.activeDayKey;
-  const missedSet = useMemo(() => new Set(missedStandupDays({ journal: s.journal, logs: s.logs, dayPlans: s.dayPlans }, s.activeDayKey)), [s.journal, s.logs, s.dayPlans, s.activeDayKey]);
   const visibleTrackers = s.productivityTrackers.filter((tracker) => tracker.visible && !tracker.archived);
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, viewKey, s.activeDayKey), [s, viewKey]);
-  const recent = useMemo(() => recentActivityShortcuts(s.logs, s.profile.hiddenActivityShortcuts), [s.logs, s.profile.hiddenActivityShortcuts]);
+  const recent = useMemo(() => recentActivityShortcuts(logs, s.profile.hiddenActivityShortcuts), [logs, s.profile.hiddenActivityShortcuts]);
   const recentSignatures = useMemo(() => new Set(recent.map((item) => item.signature)), [recent]);
-  const frequent = useMemo(() => frequentActivityShortcuts(s.logs, s.profile.hiddenActivityShortcuts, 2, 3, recentSignatures), [s.logs, s.profile.hiddenActivityShortcuts, recentSignatures]);
-  const patternDays = new Set(s.logs.filter((log) => log.dayKey >= trackingFloor).map((log) => log.dayKey)).size;
+  const frequent = useMemo(() => frequentActivityShortcuts(logs, s.profile.hiddenActivityShortcuts, 2, 3, recentSignatures), [logs, s.profile.hiddenActivityShortcuts, recentSignatures]);
+  const patternDays = new Set(logs.filter((log) => log.dayKey <= s.activeDayKey).map((log) => log.dayKey)).size;
 
   function logManual() {
     const minutes = Number(manualMinutes) || 0;
@@ -107,11 +115,14 @@ export function ProductivityPage() {
 
   return (
     <>
-      <GlassCard pad data-tour="log" data-module-tour="productivity-log">
+      {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
+      <ProductivitySaveStatus status={saveStatus} />
+      <div className="productivity-primary-grid">
+      <GlassCard pad id="productivity-log" data-tour="log" data-module-tour="productivity-log">
         <PanelHeader
           title="Log an activity"
           headingLevel={2}
-          sub={isActive ? "Record study, questions, exercise, reading, or anything else that mattered." : `Viewing ${prettyDate(`${viewKey}T12:00:00`)}`}
+          sub={isActive ? "Record study, questions, exercise, reading, or anything else that mattered." : `Viewing ${prettyDate(`${viewKey}T12:00:00`)}. Targets reflect current settings.`}
           action={isActive ? (
             <div className="row wrap gap6">
               <GButton size="sm" onClick={() => setPickedDay(yesterdayKey)}><History size={ICON_SIZE.body} /> Yesterday</GButton>
@@ -156,7 +167,7 @@ export function ProductivityPage() {
                 {frequent.length > 0 && <ShortcutGroup title="Frequent" items={frequent} onFill={fillShortcut} onHide={hideShortcut} />}
               </div>
             )}
-            <section className="today-targets" aria-labelledby="today-targets-title" data-module-tour="productivity-targets">
+            <section id="productivity-targets" className="today-targets" aria-labelledby="today-targets-title" data-module-tour="productivity-targets">
               <div>
                 <h3 id="today-targets-title">What makes today successful</h3>
                 <p>These are optional signals you chose. AXOM only scores the ones scheduled for today.</p>
@@ -170,6 +181,7 @@ export function ProductivityPage() {
             <span><b>History is read-only.</b><small>Return to today before logging so an old view cannot change the current day.</small></span>
           </div>
         )}
+        <div className="productivity-evidence">{evidence.cardReviews} in-app card reviews · {evidence.trackerPasses} recorded tracker passes <small>Separate records, dated in your current local time zone. No time or mastery inferred.</small></div>
         <div className="console-totals" aria-label="Viewed day totals">
           <span><Clock size={ICON_SIZE.body} /> {totals.minutes} study minutes</span>
           {totals.cards > 0 && <span><Layers size={ICON_SIZE.body} /> {totals.cards} cards</span>}
@@ -177,17 +189,19 @@ export function ProductivityPage() {
         </div>
       </GlassCard>
 
+      <div id="productivity-focus" data-module-tour="productivity-focus"><Pomodoro /></div>
+      </div>
       {isActive && <TrackerManager />}
 
       {patternDays >= 3 && <div className="productivity-analytics" data-module-tour="productivity-trends">
         <GlassCard pad className="productivity-intel" data-tour="insights">
           <PanelHeader title="Weekly activity" sub="Calendar-aligned 7-day view of minutes and optional quantities"
-            action={<Tag tone={weekly.activeDays ? scoreTone(weekly.grade) : "neutral"}>{weekly.activeDays}/{weekly.days.length} active</Tag>} />
+            action={<Tag tone="neutral">{weekly.activeDays}/{weekly.days.length} active</Tag>} />
           <div className="period-metrics">
-            <Metric icon={<Clock size={ICON_SIZE.body} />} label="Study time" value={`${Math.round(weekly.minutes / 60)}h ${weekly.minutes % 60}m`} note={`${weekly.avgMinutes}m / active day`} />
+            <Metric icon={<Clock size={ICON_SIZE.body} />} label="Study time" value={formatStudyMinutes(weekly.minutes)} note={`${weekly.avgMinutes}m / active day`} />
             <Metric icon={<Layers size={ICON_SIZE.body} />} label="Cards" value={`${weekly.cards}`} note={`${weekly.avgCards} / active day`} />
-            <Metric icon={<TrendingUp size={ICON_SIZE.body} />} label="Consistency" value={`${weekly.consistency}%`} note={`${weekly.strongDays.length} strong day${weekly.strongDays.length === 1 ? "" : "s"}`} />
-            <Metric icon={<Target size={ICON_SIZE.body} />} label="Activity review" value={`${weekly.needsWorkDays.length}`} note="quiet or low-volume calendar days" />
+            <Metric icon={<TrendingUp size={ICON_SIZE.body} />} label="Consistency" value={`${weekly.consistency}%`} note="Days with recorded activity" />
+            <Metric icon={<Target size={ICON_SIZE.body} />} label="Recorded days" value={`${weekly.activeDays}`} note="Activity recorded in this period" />
           </div>
           <div className={`productivity-strip reveal-bars ${strip.inView ? "in-view" : ""}`} ref={strip.ref}>
             {weekly.days.map((d) => <DayPillar key={d.key} day={d} onPick={() => setPickedDay(d.key)} />)}
@@ -197,34 +211,29 @@ export function ProductivityPage() {
 
         <GlassCard pad className="month-intel">
           <PanelHeader title="Monthly activity calendar" sub={`${monthly.label} · each cell follows the real calendar day`}
-            action={<Tag tone={monthly.activeDays ? scoreTone(monthly.grade) : "neutral"}>{monthly.activeDays}/{monthly.days.length} active</Tag>} />
+            action={<Tag tone="neutral">{monthly.activeDays}/{monthly.days.filter((day) => day.key <= s.activeDayKey && day.key >= trackingFloor).length} active</Tag>} />
           <div className="month-summary">
-            <Metric icon={<Activity size={ICON_SIZE.body} />} label="Month result" value={`${Math.round(monthly.minutes / 60)}h`} note={`${monthly.cards} cards`} />
+            <Metric icon={<Activity size={ICON_SIZE.body} />} label="Month result" value={formatStudyMinutes(monthly.minutes)} note={`${monthly.cards} cards`} />
             <Metric icon={<CalendarDays size={ICON_SIZE.body} />} label="Best day" value={monthly.bestDay ? shortDate(monthly.bestDay.key) : "None"} note={monthly.bestDay ? `${monthly.bestDay.minutes}m · ${monthly.bestDay.cards} cards` : "log a session"} />
           </div>
           <div className="calendar-month">
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <span className="cal-head" key={d}>{d}</span>)}
             {monthCells.map((cell, i) => cell
-              ? <button key={cell.key} className={`cal-day ${cell.key === viewKey ? "on" : ""} ${cell.key === calendarToday ? "today" : ""} ${missedSet.has(cell.key) ? "remediable" : ""}`}
-                  style={{ borderColor: !missedSet.has(cell.key) && cell.active ? gradeColor(cell.grade) : undefined }}
-                  title={missedSet.has(cell.key) ? `${prettyDate(cell.key)}: missed standup — click to remediate` : `${prettyDate(cell.key)}: ${cell.minutes}m, ${cell.cards} cards`}
-                  onClick={() => (missedSet.has(cell.key) ? gotoJournalDay(cell.key) : setPickedDay(cell.key))}>
+              ? <button key={cell.key} disabled={cell.key > calendarToday} className={`cal-day ${cell.key === viewKey ? "on" : ""} ${cell.key === calendarToday ? "today" : ""}`}
+                  style={{ borderColor: cell.active ? "var(--gold-line)" : undefined }}
+                  title={cell.key > calendarToday ? `${shortDate(cell.key)}: future date` : `${shortDate(cell.key)}: ${cell.minutes}m, ${cell.cards} cards`}
+                  onClick={() => setPickedDay(cell.key)}>
                   <span>{cell.date.getDate()}</span>
-                  <i style={{ background: cell.active ? gradeColor(cell.grade) : "rgba(255,255,255,0.08)" }} />
+                  <i style={{ background: cell.active ? "var(--gold)" : "var(--hairline)" }} />
                 </button>
               : <span className="cal-day blank" key={`blank-${i}`} />)}
           </div>
           <InsightList insights={monthly.insights} compact />
-          <div className="heat-legend">
-            {gradeLegend(gradeTargetsFor(s.profile)).map((row) => (
-              <span className="lg" key={row.grade}><span className="sw" style={{ background: gradeColor(row.grade) }} /> {row.label}</span>
-            ))}
-          </div>
+
         </GlassCard>
       </div>}
 
-      <div data-module-tour="productivity-focus"><Pomodoro /></div>
-      <ActivityLog logs={s.logs} activeDayKey={s.activeDayKey} />
+      <ActivityLog logs={isActive ? logs : logs.filter((log) => log.dayKey === viewKey)} activeDayKey={s.activeDayKey} />
       {moduleTourOpen && (
         <ModuleTour name="Productivity" route="productivity" steps={PRODUCTIVITY_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />
       )}
@@ -314,15 +323,15 @@ function Metric({
 function DayPillar({ day, onPick }: { day: PeriodDay; onPick: () => void }) {
   const label = day.date.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 3);
   return (
-    <button className="day-pillar" onClick={onPick} title={`${prettyDate(day.key)}: ${day.minutes}m, ${day.cards} cards`}>
+    <button className="day-pillar" onClick={onPick} title={`${shortDate(day.key)}: ${day.minutes}m, ${day.cards} cards`}>
       <div className="day-pillar-track">
         <div
           className="day-pillar-fill"
-          style={{ height: `${day.active ? Math.max(10, day.intensity) : 4}%`, background: day.active ? gradeColor(day.grade) : "rgba(255,255,255,0.12)" }}
+          style={{ height: `${day.active ? Math.max(10, day.intensity) : 4}%`, background: day.active ? "var(--gold)" : "var(--hairline)" }}
         />
       </div>
       <span>{label}</span>
-      <small>{day.minutes || day.cards ? `${Math.round(day.minutes / 60)}h` : "off"}</small>
+      <small>{day.minutes || day.cards ? formatStudyMinutes(day.minutes) : "none"}</small>
     </button>
   );
 }
@@ -347,10 +356,11 @@ function InsightList({
 function summarizePeriod(logs: ReturnType<typeof useStore.getState>["logs"], dates: Date[], span: "week" | "month", activeDayKey: string, targets?: GradeTargets): PeriodSummary {
   const days = dates.map((date) => {
     const key = isoDate(date);
-    const totals = dayTotals(logs, key);
+    const totals = key > activeDayKey ? { minutes: 0, cards: 0 } : dayTotals(logs, key);
     const grade = todayGrade(totals.minutes, totals.cards, targets);
+    const recorded = key <= activeDayKey && logs.some((log) => log.dayKey === key);
     const intensity = Math.min(100, Math.max((totals.minutes / 480) * 100, (totals.cards / 350) * 100));
-    return { key, date, minutes: totals.minutes, cards: totals.cards, grade, active: totals.minutes > 0 || totals.cards > 0, intensity };
+    return { key, date, minutes: totals.minutes, cards: totals.cards, grade, active: recorded, intensity };
   });
   const minutes = days.reduce((sum, d) => sum + d.minutes, 0);
   const cards = days.reduce((sum, d) => sum + d.cards, 0);
@@ -362,9 +372,10 @@ function summarizePeriod(logs: ReturnType<typeof useStore.getState>["logs"], dat
   const needsWorkDays = [...redActiveDays, ...quietDays];
   const avgMinutes = activeDays ? Math.round(minutes / activeDays) : 0;
   const avgCards = activeDays ? Math.round(cards / activeDays) : 0;
-  const consistency = Math.round((activeDays / Math.max(days.length, 1)) * 100);
+  const elapsedDays = days.filter((day) => day.key <= activeDayKey).length;
+  const consistency = Math.round((activeDays / Math.max(elapsedDays, 1)) * 100);
   const grade = todayGrade(avgMinutes, avgCards, targets);
-  const bestDay = [...days].sort((a, b) => b.intensity - a.intensity || b.minutes - a.minutes || b.cards - a.cards)[0];
+  const bestDay = [...active].sort((a, b) => b.intensity - a.intensity || b.minutes - a.minutes || b.cards - a.cards)[0];
   const monthName = days[0]?.date.toLocaleDateString(undefined, { month: "long", year: "numeric" }) ?? "Month";
   const label = span === "week" ? "Last 7 days" : monthName;
 
@@ -386,7 +397,7 @@ function summarizePeriod(logs: ReturnType<typeof useStore.getState>["logs"], dat
 }
 
 function buildInsights({
-  span, days, activeDays, strongDays, redActiveDays, quietDays, avgMinutes, avgCards, bestDay,
+  activeDays, avgMinutes, avgCards, bestDay,
 }: {
   span: "week" | "month";
   days: PeriodDay[];
@@ -398,43 +409,10 @@ function buildInsights({
   avgCards: number;
   bestDay?: PeriodDay;
 }): PeriodSummary["insights"] {
-  const label = span === "week" ? "This week" : "This month";
   const insights: PeriodSummary["insights"] = [];
 
-  if (bestDay?.active && (bestDay.grade === "green" || bestDay.grade === "blue")) {
-    insights.push({
-      tone: "green",
-      title: "Strong day detected",
-      body: `${shortDate(bestDay.key)} was excellent: ${bestDay.minutes} minutes and ${bestDay.cards} cards. Good work - that pattern is worth repeating.`,
-    });
-  } else if (bestDay?.active) {
-    insights.push({
-      tone: "cyan",
-      title: "Best day logged",
-      body: `${shortDate(bestDay.key)} led the period with ${bestDay.minutes} minutes and ${bestDay.cards} cards. Build from that baseline.`,
-    });
-  }
-
-  if (strongDays.length >= Math.ceil(days.length * 0.35)) {
-    insights.push({
-      tone: "green",
-      title: "Momentum is real",
-      body: `${label} has ${strongDays.length} strong day${strongDays.length === 1 ? "" : "s"}. Keep the same rhythm and protect recovery.`,
-    });
-  }
-
-  if (quietDays.length > Math.ceil(days.length * 0.35)) {
-    insights.push({
-      tone: "orange",
-      title: "Some calendar days are quiet",
-      body: `${quietDays.length} past calendar day${quietDays.length === 1 ? " has" : "s have"} no logged activity in this ${span}. Scheduled target scoring lives in Reports, so off-days are not treated as misses here.`,
-    });
-  } else if (redActiveDays.length) {
-    insights.push({
-      tone: "orange",
-      title: "Fragile days need a floor",
-      body: `${redActiveDays.length} active day${redActiveDays.length === 1 ? "" : "s"} stayed below the current floor. Review the requirements you actually want to protect.`,
-    });
+  if (bestDay?.active) {
+    insights.push({ tone: "cyan", title: "Most activity recorded", body: `${shortDate(bestDay.key)}: ${bestDay.minutes} minutes and ${bestDay.cards} cards.` });
   }
 
   if (activeDays === 0) {
@@ -447,7 +425,7 @@ function buildInsights({
     insights.push({
       tone: "cyan",
       title: "Current active-day average",
-      body: `${avgMinutes} minutes${avgCards ? ` and ${avgCards} cards` : ""} per active day. The next useful target is consistency before intensity.`,
+      body: `${avgMinutes} minutes${avgCards ? ` and ${avgCards} cards` : ""} per active day. These are recorded amounts, not a measure of mastery.`,
     });
   }
 
@@ -458,7 +436,8 @@ function currentMonthDays(activeDayKey: string): Date[] {
   const now = localDateFromKey(activeDayKey);
   const first = new Date(now.getFullYear(), now.getMonth(), 1);
   const days: Date[] = [];
-  for (let d = new Date(first); d <= now; d.setDate(d.getDate() + 1)) {
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 12);
+  for (let d = new Date(first); d <= end; d.setDate(d.getDate() + 1)) {
     days.push(new Date(d));
   }
   return days;
@@ -478,14 +457,13 @@ function localDateFromKey(dayKey: string): Date {
   return new Date(year, month - 1, day, 12, 0, 0, 0);
 }
 
-function productivityTrackingFloor(state: ReturnType<typeof useStore.getState>): string {
+function productivityTrackingFloor(state: ReturnType<typeof useStore.getState>, logs: readonly StudyLog[]): string {
   const starts = state.profile.dailySuccess?.requirements
     .filter((requirement) => requirement.enabled)
     .map((requirement) => requirement.trackingStartsAt)
     .filter(Boolean) ?? [];
-  if (starts.length) return [...starts].sort()[0];
-  const firstLog = [...state.logs].sort((a, b) => a.dayKey.localeCompare(b.dayKey))[0]?.dayKey;
-  return firstLog ?? state.activeDayKey;
+  const firstLog = [...logs].sort((a, b) => a.dayKey.localeCompare(b.dayKey))[0]?.dayKey;
+  return [...starts, ...(firstLog ? [firstLog] : [])].sort()[0] ?? state.activeDayKey;
 }
 
 function buildMonthCells(days: PeriodDay[]): Array<PeriodDay | null> {
@@ -617,11 +595,4 @@ function formatLogTime(ts: string): string {
 
 function shortDate(key: string): string {
   return prettyDate(`${key}T00:00:00`);
-}
-
-function scoreTone(grade: Grade): "green" | "orange" | "red" | "cyan" {
-  if (grade === "blue") return "cyan";
-  if (grade === "green") return "green";
-  if (grade === "orange") return "orange";
-  return "red";
 }

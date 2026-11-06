@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CORONA_WAVES, MAX_SWELL, SILENT, coronaShape, follow, orbPose, readBands } from "./orbMotion";
+import { CORONA_WAVES, MAX_SWELL, SILENT, coronaShape, follow, followTime, orbPose, readBands } from "./orbMotion";
 
 describe("how the orb answers sound", () => {
   it("is still and unlit in silence", () => {
@@ -34,6 +34,14 @@ describe("how the orb answers sound", () => {
   it("follows up quickly and down slowly", () => {
     expect(follow(0, 1, 0.5, 0.1)).toBe(0.5);
     expect(follow(1, 0, 0.5, 0.1)).toBeCloseTo(0.9);
+  });
+
+  it("smooths consistently across frame rates", () => {
+    let thirty = 0;
+    let sixty = 0;
+    for (let i = 0; i < 30; i++) thirty = followTime(thirty, 1, 1 / 30, 0.2, 0.5);
+    for (let i = 0; i < 60; i++) sixty = followTime(sixty, 1, 1 / 60, 0.2, 0.5);
+    expect(thirty).toBeCloseTo(sixty, 6);
   });
 
   it("shapes the corona from smooth waves: wide ones for bass, fine ones for highs, never more than its limit", () => {

@@ -124,7 +124,8 @@ function readOperatorAccess() {
   const current = accessResult?.identity === identity ? accessResult : undefined;
   const state: OperatorAccessState = !signedIn ? "signed-out" : !current ? "checking" : current.failed ? "error" : current.role ? "verified" : "denied";
   const role = state === "verified" ? current?.role ?? null : null;
-  const key = `${state}:${role ?? ""}`;
+  // Account switches must publish a new snapshot even when both roles are still checking.
+  const key = `${identity}:${state}:${role ?? ""}`;
   if (accessView?.key !== key) accessView = { key, value: { role, state } };
   return accessView.value;
 }

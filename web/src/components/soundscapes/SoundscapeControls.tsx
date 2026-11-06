@@ -56,7 +56,7 @@ export function VersionChips({ presetId }: { presetId: SoundscapeId }) {
           title={"src" in version ? `${version.label}. ${version.description}` : version.description}
           onClick={() => setVersion(presetId, version.id)}
         >
-          <span className="version-label">{version.label}</span>{"src" in version && <span className="version-own">your file</span>}
+          <span className="version-label">{version.label}</span>{"src" in version && <span className="version-own">{version.id === "axom-soundscape-1" || version.id === "axom-afterlight" ? "AXOM original" : "your file"}</span>}
         </button>
       ))}
     </div>

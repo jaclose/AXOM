@@ -60,10 +60,19 @@ and isolated server, not an unrelated running app. Install its Chromium if requi
 `AXOM_E2E_CHANNEL=chrome`. UI edits additionally need 1440×900 / 390×844 interaction,
 console, resize and reduced-motion review.
 
+When browser downloads are unavailable, `AXOM_BROWSER_EXECUTABLE_PATH` selects an
+installed Chromium executable for Playwright, update recovery, and offline checks.
+It takes precedence over channel settings. Report the actual browser version used.
+
 `.github/workflows/quality.yml` runs web quality, release tests, update/offline checks,
 production dependency audit and native checks on PRs, main/integration pushes and merge
-groups. Both root and web dependencies are installed. It does not currently run the general
-Playwright E2E suite; do not equate CI green with the full local gate.
+groups. Both root and web dependencies are installed. The complete Playwright suite runs
+in three independent browser jobs with one worker each. Conditional private-content and
+live-account journeys remain skipped without their explicit fixtures or credentials.
+Selected catalog,
+native ZIP, Soundscape playback/dock and Productivity browser journeys run in CI. The
+Soundscape acceptance uses the bundled recording, including its loop boundary, paused
+clock, resume, analyser response, reduced motion and imported-main persistence.
 
 Do not retry unrelated failures blindly. Reproduce them on the base revision, capture
 an exact failing test/command, and keep scope clear. Known environment traps and

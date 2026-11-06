@@ -1,7 +1,7 @@
 import type { BankCollection } from "../bookshelf/questionBankBooks";
 import type { QuestionSet } from "../library";
 import { questionMappingStatus, type QuestionRecord } from "../questions";
-import { questionScope, type CourseScope } from "./scope";
+import { parseWeek, questionScope, type CourseScope } from "./scope";
 import { canonicalModuleKey } from "./vocabulary";
 
 /** Tracker-side read-only guard; it does not change imported source metadata. */
@@ -15,6 +15,10 @@ export interface VerifiedCourseCollection {
 
 const equivalent = (left?: string, right?: string): boolean =>
   !left || !right || canonicalModuleKey(left) === canonicalModuleKey(right);
+
+const invalidExplicitWeek = (value: unknown): boolean =>
+  value != null && (typeof value !== "string" || value.trim() !== "")
+    && parseWeek(value) === undefined;
 
 const scopeMatches = (
   actual: CourseScope, requested: CourseScope, requireCourseProof: boolean,
@@ -51,10 +55,12 @@ export function verifyCollectionForCourse(
     };
   }
   const sourceScope = sourceSet?.scope;
-  // A set that explicitly belongs elsewhere cannot be shown as ready here.
-  const declaredConflict = Boolean(sourceScope && (
+  const sourceWeek = parseWeek(sourceScope?.week);
+  // Invalid *declared* weeks are not the same as genuinely unscheduled
+  // material, even when the requested practice scope spans a whole module.
+  const declaredConflict = invalidExplicitWeek(sourceScope?.week) || Boolean(sourceScope && (
     !equivalent(sourceScope.module, requested.module)
-    || (sourceScope.week !== undefined && requested.week !== undefined && sourceScope.week !== requested.week)
+    || (sourceWeek !== undefined && requested.week !== undefined && sourceWeek !== requested.week)
     || (sourceScope.courseId && requested.courseId && sourceScope.courseId !== requested.courseId)
   ));
   const setIds = sourceSet ? sourceSet.questionIds : collection.questionIds ?? collection.readyQuestionIds ?? [];
@@ -69,19 +75,39 @@ export function verifyCollectionForCourse(
   for (const id of memberIds) {
     const question = questionsById.get(id);
     if (!question) { unavailableQuestionCount += 1; continue; }
-    const own = questionScope(question, setsById);
-    // A primary set and a review set may disagree: never silently overwrite
-    // the question's primary documented owner with this collection's label.
-    const effective: CourseScope = {
-      module: own.module ?? sourceScope?.module,
-      week: own.week ?? sourceScope?.week,
-      courseId: own.courseId ?? sourceScope?.courseId,
-    };
+    // A legacy member may inherit this collection only when it declares no
+    // primary source set. Resolve once: a second fallback would refill invalid
+    // weeks or borrow missing source evidence from a review collection.
+    const own = questionScope({
+      module: question.module,
+      week: question.week,
+      courseId: question.courseId,
+      setId: question.setId ?? sourceSet?.id,
+    }, setsById);
+    const primary = question.setId != null ? setsById.get(question.setId) : sourceSet;
+    const primaryScope = primary?.scope;
+    const primaryWeek = parseWeek(primaryScope?.week);
+    // An explicitly declared primary association is a provenance claim, not
+    // permission to refile the question through an agreeing review collection.
+    // Until a verified refile receipt exists, contradictory or missing primary
+    // evidence must hold fresh practice even if the question's own fields agree.
+    const disagreesWithPrimary = question.setId != null && (
+      !primary || !primary.questionIds.includes(id)
+      || invalidExplicitWeek(primaryScope?.week)
+      || Boolean(primaryScope && (
+        !equivalent(own.module, primaryScope.module)
+        || (own.week !== undefined && primaryWeek !== undefined && own.week !== primaryWeek)
+        || (own.courseId && primaryScope.courseId && own.courseId !== primaryScope.courseId)
+      ))
+    );
     const disagreesWithSource = Boolean(sourceScope
       && (!equivalent(own.module, sourceScope.module)
-        || (own.week !== undefined && sourceScope.week !== undefined && own.week !== sourceScope.week)
+        || (own.week !== undefined && sourceWeek !== undefined && own.week !== sourceWeek)
         || (own.courseId && sourceScope.courseId && own.courseId !== sourceScope.courseId)));
-    if (!scopeMatches(effective, requested, requireCourseProof) || disagreesWithSource) {
+    // Parsing maps malformed numbers/ranges to undefined; without this guard,
+    // module-wide requests would mistake invalid evidence for an absent week.
+    if (invalidExplicitWeek(question.week) || disagreesWithPrimary
+      || !scopeMatches(own, requested, requireCourseProof) || disagreesWithSource) {
       conflictingQuestionCount += 1;
       continue;
     }

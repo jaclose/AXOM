@@ -16,7 +16,9 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
     // AXOM_E2E_CHANNEL=chrome runs against installed Google Chrome when the
     // bundled Playwright Chromium is not downloaded (npm run test:e2e:chrome).
-    ...(process.env.AXOM_E2E_CHANNEL ? { channel: process.env.AXOM_E2E_CHANNEL } : {}),
+    ...(process.env.AXOM_BROWSER_EXECUTABLE_PATH
+      ? { launchOptions: { executablePath: process.env.AXOM_BROWSER_EXECUTABLE_PATH } }
+      : process.env.AXOM_E2E_CHANNEL ? { channel: process.env.AXOM_E2E_CHANNEL } : {}),
     baseURL,
     headless: true,
     // A context option: at the top of \`use\` Playwright ignores it silently, so

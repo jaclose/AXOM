@@ -101,3 +101,9 @@ export function coronaShape(bands: OrbBands): number[] {
     high * 0.1,
   ];
 }
+
+/** Exponential envelope with attack and release expressed in seconds. */
+export function followTime(current: number, target: number, elapsed: number, attack: number, release: number): number {
+  const tau = target > current ? attack : release;
+  return current + (target - current) * (1 - Math.exp(-Math.max(0, elapsed) / Math.max(0.001, tau)));
+}

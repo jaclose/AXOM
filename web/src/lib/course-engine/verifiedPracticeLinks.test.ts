@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
+import type { CourseScope } from "./scope";
 import { verifyCollectionForCourse } from "./verifiedPracticeLinks";
 
 const stamp = "2026-10-14T12:00:00.000Z";
@@ -16,7 +17,7 @@ const bank = (id: string, ids: string[], scope?: QuestionSet["scope"]): Question
 });
 const verify = (
   readyIds: string[], questions: QuestionRecord[], sets: QuestionSet[],
-  requested = { module: "NB2", week: 3, courseId: "core" },
+  requested: CourseScope = { module: "NB2", week: 3, courseId: "core" },
   setId = "set", strict = true,
 ) => verifyCollectionForCourse({
   setId, readyQuestionIds: readyIds, questionIds: readyIds,
@@ -87,5 +88,208 @@ describe("review-gated Tracker-to-QBank links", () => {
     expect(verify(["in-set"], questions, sets)).toMatchObject({
       readyQuestionIds: [], sourceReviewRequired: false,
     });
+  });
+});
+
+
+describe("canonical source proof survives Tracker collection lookup", () => {
+  it("does not refill an explicitly invalid question week from its own source set", () => {
+    const sets = [bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" })];
+    for (const value of [0, -1, 100, 1.5, NaN, "2026-11-05", "FTM 3", "Week 3-4"]) {
+      const questions = [q("q", { setId: "set", week: value as number })];
+      expect(verify(["q"], questions, sets)).toEqual({
+        readyQuestionIds: [], sourceReviewRequired: true,
+        conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+      });
+    }
+  });
+
+  it("applies the same invalid-week gate to legacy members without a primary set", () => {
+    const sets = [bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" })];
+    expect(verify(["q"], [q("q", { week: 0 })], sets)).toMatchObject({
+      readyQuestionIds: [], sourceReviewRequired: true, conflictingQuestionCount: 1,
+    });
+  });
+
+  it("does not invent a source week from a review collection when the primary week is absent", () => {
+    const sets = [
+      bank("primary", ["q"], { module: "NB2", courseId: "core" }),
+      bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" }),
+    ];
+    expect(verify(["q"], [q("q", { setId: "primary" })], sets)).toMatchObject({
+      readyQuestionIds: [], sourceReviewRequired: true, conflictingQuestionCount: 1,
+    });
+  });
+
+  it("does not borrow a review collection's course as primary ownership proof", () => {
+    const sets = [
+      bank("primary", ["q"], { module: "NB2", week: 3 }),
+      bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" }),
+    ];
+    expect(verify(["q"], [q("q", { setId: "primary" })], sets)).toMatchObject({
+      readyQuestionIds: [], sourceReviewRequired: true, conflictingQuestionCount: 1,
+    });
+  });
+
+  it("keeps a missing or explicitly empty primary reference unresolved instead of rebinding it", () => {
+    const sets = [bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" })];
+    for (const setId of ["missing-primary", ""]) {
+      expect(verify(["q"], [q("q", { setId })], sets)).toMatchObject({
+        readyQuestionIds: [], sourceReviewRequired: true, conflictingQuestionCount: 1,
+      });
+    }
+  });
+
+  it("retains legitimate legacy inheritance when no primary set is declared", () => {
+    const sets = [bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" })];
+    for (const week of [undefined, null, "", "  "]) {
+      expect(verify(["q"], [q("q", { week: week as unknown as number })], sets)).toEqual({
+        readyQuestionIds: ["q"], sourceReviewRequired: false,
+        conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+      });
+    }
+  });
+
+  it("allows a review collection when primary source metadata agrees", () => {
+    const sets = [
+      bank("primary", ["q"], { module: "NB Block 2", week: 3, courseId: "core" }),
+      bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" }),
+    ];
+    expect(verify(["q"], [q("q", { setId: "primary" })], sets)).toEqual({
+      readyQuestionIds: ["q"], sourceReviewRequired: false,
+      conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+  });
+
+  it("holds valid but contradictory primary provenance even when the question and review set agree", () => {
+    const secondary = { ...bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" }), kind: "review" as const };
+    const record = q("q", { setId: "primary", module: "NB2", week: 3, courseId: "core" });
+    for (const primaryScope of [
+      { module: "FTM 1", week: 3, courseId: "core" },
+      { module: "NB2", week: 4, courseId: "core" },
+      { module: "NB2", week: 3, courseId: "elective" },
+    ]) {
+      const sources = [bank("primary", ["q"], primaryScope), secondary];
+      for (const requested of [
+        { module: "NB2", week: 3, courseId: "core" },
+        { module: "NB2", courseId: "core" },
+      ]) {
+        expect(verify(["q"], [record], sources, requested)).toEqual({
+          readyQuestionIds: [], sourceReviewRequired: true,
+          conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+        });
+      }
+    }
+  });
+
+  it("holds absent or forged declared primary membership despite a complete question filing", () => {
+    const secondary = { ...bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" }), kind: "review" as const };
+    const record = q("q", { setId: "primary", module: "NB2", week: 3, courseId: "core" });
+    for (const sources of [
+      [secondary],
+      [bank("primary", [], { module: "NB2", week: 3, courseId: "core" }), secondary],
+    ]) {
+      expect(verify(["q"], [record], sources)).toEqual({
+        readyQuestionIds: [], sourceReviewRequired: true,
+        conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+      });
+    }
+  });
+
+  it("honors the question's own explicit evidence without requiring fields on its primary set", () => {
+    const sets = [bank("primary", ["q"]), bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" })];
+    const questions = [q("q", { setId: "primary", module: "NB2", week: 3, courseId: "core" })];
+    expect(verify(["q"], questions, sets)).toMatchObject({
+      readyQuestionIds: ["q"], sourceReviewRequired: false,
+    });
+  });
+
+  it("holds the whole collection rather than silently dropping a conflicting week", () => {
+    const sets = [bank("set", ["good", "invalid", "missing"], { module: "NB2", week: 3, courseId: "core" })];
+    const questions = [q("good", { setId: "set" }), q("invalid", { setId: "set", week: 100 })];
+    expect(verify(["good", "invalid"], questions, sets)).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: true,
+      conflictingQuestionCount: 1, unavailableQuestionCount: 1,
+    });
+  });
+
+  it("holds an entire module-wide collection when one member declares a malformed week", () => {
+    const sets = [bank("set", ["valid", "bad"], { module: "NB2", courseId: "core" })];
+    const questions = [
+      q("valid", { setId: "set" }),
+      q("bad", { setId: "set", week: 0 }),
+    ];
+    expect(verify(["valid", "bad"], questions, sets, { module: "NB2", courseId: "core" })).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: true,
+      conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+    });
+  });
+
+  it("does not mistake a malformed source-set week for legitimately unscheduled material", () => {
+    for (const invalid of [0, 100, "Week 3-4", "2026-11-06"]) {
+      const sets = [bank("set", ["q"], {
+        module: "NB2", courseId: "core", week: invalid as number,
+      })];
+      expect(verify(["q"], [q("q", { setId: "set" })], sets,
+        { module: "NB2", courseId: "core" })).toEqual({
+        readyQuestionIds: [], sourceReviewRequired: true,
+        conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+      });
+    }
+  });
+
+  it("does not use a clean review collection to bypass an invalid primary week", () => {
+    const sets = [
+      bank("primary", ["q"], { module: "NB2", courseId: "core", week: 0 }),
+      bank("set", ["q"], { module: "NB2", courseId: "core" }),
+    ];
+    expect(verify(["q"], [q("q", { setId: "primary" })], sets,
+      { module: "NB2", courseId: "core" })).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: true,
+      conflictingQuestionCount: 1, unavailableQuestionCount: 0,
+    });
+  });
+
+  it("accepts a valid textual source week as the matching numbered week", () => {
+    const sets = [bank("set", ["q"], {
+      module: "NB2", courseId: "core", week: "Week 3" as unknown as number,
+    })];
+    expect(verify(["q"], [q("q", { setId: "set" })], sets)).toEqual({
+      readyQuestionIds: ["q"], sourceReviewRequired: false,
+      conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+  });
+
+  it("keeps module-wide unscheduled practice distinct from assigning a source week", () => {
+    const sets = [bank("primary", ["q"], { module: "NB2", courseId: "core" }), bank("set", ["q"], { module: "NB2", courseId: "core" })];
+    const questions = [q("q", { setId: "primary" })];
+    expect(verify(["q"], questions, sets, { module: "NB2", courseId: "core" })).toMatchObject({
+      readyQuestionIds: ["q"], sourceReviewRequired: false,
+    });
+    expect(verify(["q"], questions, sets)).toMatchObject({
+      readyQuestionIds: [], sourceReviewRequired: true,
+    });
+  });
+
+  it("keeps missing keys and unreviewed imported answers out of otherwise valid legacy membership", () => {
+    const questions = [q("keyless", { correctKey: undefined }), q("unreviewed", { extraction: { reviewed: false, confidence: "high" } })];
+    const sets = [bank("set", questions.map((item) => item.id), { module: "NB2", week: 3, courseId: "core" })];
+    expect(verify(questions.map((item) => item.id), questions, sets)).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: false,
+      conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+  });
+
+  it("does not rewrite primary links, source filing, membership or attempts while resolving legacy scope", () => {
+    const question = q("q");
+    const source = bank("set", ["q"], { module: "NB2", week: 3, courseId: "core" });
+    const before = JSON.stringify([question, source]);
+    Object.freeze(question);
+    Object.freeze(question.attempts);
+    Object.freeze(source);
+    Object.freeze(source.scope);
+    Object.freeze(source.questionIds);
+    expect(verify(["q"], [question], [source])).toMatchObject({ readyQuestionIds: ["q"] });
+    expect(JSON.stringify([question, source])).toBe(before);
   });
 });

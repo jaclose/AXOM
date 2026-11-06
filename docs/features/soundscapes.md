@@ -33,8 +33,15 @@ Generated noise loops stay below full scale. If a filtered random sequence excee
 that bound, attenuate the entire loop after its crossfade so the waveform and seam
 are preserved; ordinary lower-level loops are unchanged.
 
-Known integration questions from the coordination board: truthful optimization status
-in existing user-media imports and adoption of shared audio context/lifecycle boundaries.
+The bundled AXOM Soundscape 1 is the default main sound and initial pinned choice.
+Main selection persists by preset and version without autoplay. Imports keep their
+original bytes and report no savings unless a verified derivative exists.
+Playback labels refer to the version actually loaded, including while paused;
+choosing another version does not rewrite the identity of the paused recording.
+Recording errors surface without claiming successful playback. See the engine
+lifecycle in [Soundscapes](../SOUNDSCAPES.md#synthesis-websrclibsoundscapes).
+
+Known integration question from the coordination board: adoption of shared audio context/lifecycle boundaries.
 Recheck them against source before treating them as current blockers.
 
 Tests: `web/src/lib/media/assetService.test.ts`, `mediaPipeline.test.ts`, fingerprint/job

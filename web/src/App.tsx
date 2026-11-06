@@ -526,7 +526,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <StandupWatcher />
       <DailyLoopReminderWatcher />
       <SessionOverlay />
-      <FocusDock />
+      {!drawer && <FocusDock />}
       <RestOverlay />
       <SoundscapeTimerSync />
       <UserMediaBridge />

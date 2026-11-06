@@ -59,7 +59,19 @@ export const USER_MEDIA_DETAILS_KEY = "axom.soundscapes.userMediaDetails.v1";
 function readDetails(): Record<string, UserMediaDetails> {
   try {
     const raw = JSON.parse(window.localStorage.getItem(USER_MEDIA_DETAILS_KEY) ?? "{}") as unknown;
-    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, UserMediaDetails> : {};
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).flatMap(([id, value]) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const saved = value as Record<string, unknown>;
+      const detail: UserMediaDetails = {};
+      for (const key of ["name", "presetId", "provenance"] as const) if (typeof saved[key] === "string") detail[key] = saved[key];
+      for (const key of ["sourceSize", "optimizedSize", "percentSaved", "durationSeconds"] as const) {
+        const n = saved[key];
+        if (typeof n === "number" && Number.isFinite(n) && n >= 0 && (key !== "percentSaved" || n <= 100)) detail[key] = n;
+      }
+      if (["original", "optimized", "skipped", "failed"].includes(saved.processingStatus as string)) detail.processingStatus = saved.processingStatus as MediaOptimizationStatus;
+      return [[id, detail]];
+    }));
   } catch {
     return {};
   }
@@ -85,9 +97,9 @@ export function summarizeUserMediaAsset(
   overrides: Partial<UserMediaMeta> = {}
 ): UserMediaMeta {
   const sourceSize = Number.isFinite(file.size) ? Math.max(0, file.size) : 0;
-  const optimizedSize = kind === "sound" ? Math.min(sourceSize, Math.max(0, sourceSize * 0.82)) : sourceSize;
-  const percentSaved = sourceSize > 0 ? Math.max(0, Math.min(100, ((sourceSize - optimizedSize) / sourceSize) * 100)) : 0;
-  const processingStatus: MediaOptimizationStatus = kind === "sound" && sourceSize > 10 * 1024 * 1024 ? "optimized" : "original";
+  const optimizedSize = sourceSize;
+  const percentSaved = 0;
+  const processingStatus: MediaOptimizationStatus = "original";
 
   return {
     id: overrides.id ?? "",
@@ -187,7 +199,7 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
       const items = records
         .map(({ blob: _blob, ...meta }) => {
           const saved = details[meta.id];
-          return saved ? { ...meta, name: cleanName(saved.name, meta.name), presetId: typeof saved.presetId === "string" ? saved.presetId : meta.presetId } : meta;
+          return saved ? { ...meta, ...saved, name: cleanName(saved.name, meta.name), presetId: typeof saved.presetId === "string" ? saved.presetId : meta.presetId } : meta;
         })
         .sort((a, b) => a.addedAt.localeCompare(b.addedAt));
       set({ loaded: true, items, urls, error: undefined });
@@ -210,7 +222,7 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
     try {
       await tx("readwrite", (store) => store.put({ ...meta, blob: file } satisfies UserMediaRecord));
     } catch (error) {
-      set({ error: error instanceof Error && /quota/i.test(error.message) ? "Your browser ran out of space for files. Remove one and try again." : "Couldn’t save that file on this device." });
+      set({ error: error != null && typeof error === "object" && /quota/i.test(`${"name" in error ? error.name : ""} ${"message" in error ? error.message : ""}`) ? "Your browser ran out of space for files. Remove one and try again." : "Couldn’t save that file on this device." });
       return null;
     }
     set((state) => ({ items: [...state.items, meta], urls: { ...state.urls, [meta.id]: URL.createObjectURL(file) }, error: undefined }));
@@ -240,7 +252,10 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
   },
 
   async remove(id) {
-    await tx("readwrite", (store) => store.delete(id));
+    try { await tx("readwrite", (store) => store.delete(id)); } catch {
+      set({ error: "Couldn’t remove that file from this device." });
+      throw new Error("Couldn’t remove that file from this device.");
+    }
     const details = readDetails();
     if (id in details) {
       delete details[id];
@@ -251,7 +266,7 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
     set((state) => {
       const urls = { ...state.urls };
       delete urls[id];
-      return { items: state.items.filter((item) => item.id !== id), urls };
+      return { items: state.items.filter((item) => item.id !== id), urls, error: undefined };
     });
   },
 

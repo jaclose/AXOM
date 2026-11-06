@@ -90,4 +90,76 @@ describe("Host access recovery", () => {
     await waitFor(() => expect(shell.result.current.state).toBe("error"));
     expect(route.result.current.role).toBeNull();
   });
+
+  it("checks the new account when the previous account's role is still pending", async () => {
+    let finishOwner!: (response: { data: string; error: null }) => void;
+    let finishMember!: (response: { data: null; error: null }) => void;
+    rpc.mockReturnValueOnce(new Promise(resolve => { finishOwner = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { finishMember = resolve; }));
+    vi.mocked(accountOperationClient).mockImplementation(async () => ({
+      userId: account.getState().user?.id,
+      client: { rpc },
+      assertCurrent: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Awaited<ReturnType<typeof accountOperationClient>>));
+
+    const shell = renderHook(() => useOperatorAccessStatus());
+    const route = renderHook(() => useOperatorAccessStatus());
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+    expect(shell.result.current.state).toBe("checking");
+
+    act(() => account.change("pending-member-account"));
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    expect(shell.result.current.state).toBe("checking");
+    expect(route.result.current.role).toBeNull();
+
+    await act(async () => { finishMember({ data: null, error: null }); });
+    expect(shell.result.current.state).toBe("denied");
+    expect(route.result.current.state).toBe("denied");
+
+    await act(async () => { finishOwner({ data: "owner", error: null }); });
+    expect(shell.result.current.state).toBe("denied");
+    expect(shell.result.current.role).toBeNull();
+    expect(route.result.current.state).toBe("denied");
+    expect(route.result.current.role).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+  it("does not reuse the first pending owner grant after A to B to A", async () => {
+    let finishFirstOwner!: (response: { data: string; error: null }) => void;
+    let finishMember!: (response: { data: null; error: null }) => void;
+    let finishReturn!: (response: { data: null; error: null }) => void;
+    rpc.mockReturnValueOnce(new Promise(resolve => { finishFirstOwner = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { finishMember = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { finishReturn = resolve; }));
+    vi.mocked(accountOperationClient).mockImplementation(async () => ({
+      userId: account.getState().user?.id,
+      client: { rpc },
+      assertCurrent: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Awaited<ReturnType<typeof accountOperationClient>>));
+
+    const { result } = renderHook(() => useOperatorAccessStatus());
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+
+    act(() => account.change("transient-member"));
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    act(() => account.change("owner-account"));
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(3));
+    expect(result.current.state).toBe("checking");
+    expect(result.current.role).toBeNull();
+
+    // The same user ID returns in a *new epoch*. Neither earlier request
+    // may authorize Host for that new session, even if the old owner RPC
+    // eventually resolves with a positive answer.
+    await act(async () => {
+      finishFirstOwner({ data: "owner", error: null });
+      finishMember({ data: null, error: null });
+    });
+    expect(result.current.state).toBe("checking");
+    expect(result.current.role).toBeNull();
+
+    await act(async () => { finishReturn({ data: null, error: null }); });
+    await waitFor(() => expect(result.current.state).toBe("denied"));
+    expect(result.current.role).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(3);
+  });
+
 });

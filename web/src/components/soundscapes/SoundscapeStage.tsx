@@ -20,6 +20,7 @@ export function SoundscapeStage({ preset, animate, reactive = false, ring = true
   className?: string;
   label?: string;
 }) {
+  const status = useSoundscape((state) => state.status);
   const versionId = useSoundscape((state) => state.versions[preset.id]);
   const chosen = useSoundscape((state) => state.scenes[preset.id]);
   useSoundscape((state) => state.catalog);
@@ -36,7 +37,7 @@ export function SoundscapeStage({ preset, animate, reactive = false, ring = true
         : <SoundscapeVisual visual={look.visual} overlay={look.overlay} overlayMix={look.overlayMix} animate={animate} reactive={reactive} />}
       {scene && <div className="scene-vignette" />}
       {orb
-        ? <SoundOrb tint={preset.significance?.tint} active={animate} reactive={reactive} />
+        ? <SoundOrb tint={preset.significance?.tint} active={animate && status === "playing"} reactive={reactive} />
         : ring && <PulseRing tint={preset.significance?.tint} active={animate} />}
     </div>
   );

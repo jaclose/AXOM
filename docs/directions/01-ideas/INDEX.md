@@ -292,7 +292,16 @@ All current evidence is local; no item below claims main or production shipment.
 [Ideas 11](IDEAS-11.md) preserves the prompt verbatim. The welcome email's designed graphic
 was already asked for in [Ideas 4](IDEAS-4.md).
 
+**ID reconciliation (2026-11-05):** The two 2026-10-30 entries originally used
+`I11-01` (branded email) and `I11-02` (autonomous academic OS). The later
+2026-11-01 scoped audit independently assigned those same IDs to Journal desk
+and Sidebar copy. To make this index unambiguous without rewriting source notes,
+this older pair now has canonical IDs `I11-15` and `I11-16`, respectively.
+Historical `I11-01`/`I11-02` references **without a date or idea description are
+ambiguous**; disambiguate by source context rather than silently treating them
+as either canonical row. The original status and idea wording are unchanged.
+
 | ID | Idea | Status | Where |
 | --- | --- | --- | --- |
-| I11-01 | AXOM-branded emails at the Pulse standard, sent through Resend, with a designed graphic in the welcome email | NEEDS JD | templates render (I9-02); the welcome email has its hero Orb and first steps on jd-claude/eloquent-shannon-b2xof9; Resend domain, SMTP and function activation per the [runbook](../../operations/communications-resend.md) |
-| I11-02 | AXOM runs semi or fully autonomously from measured activity, with no reliance on self-report: an all-inclusive, exclusive academic OS | NEW | product direction; first step is an audit of what is still self-reported |
+| I11-15 | AXOM-branded emails at the Pulse standard, sent through Resend, with a designed graphic in the welcome email | NEEDS JD | templates render (I9-02); the welcome email has its hero Orb and first steps on jd-claude/eloquent-shannon-b2xof9; Resend domain, SMTP and function activation per the [runbook](../../operations/communications-resend.md) |
+| I11-16 | AXOM runs semi or fully autonomously from measured activity, with no reliance on self-report: an all-inclusive, exclusive academic OS | NEW | product direction; first step is an audit of what is still self-reported |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTargetContributionLedger, normalizeTargetUnit } from "./targetContributions";
+import { buildTargetContributionLedger, canonicalStudyLogs, normalizeTargetUnit } from "./targetContributions";
 import { makeDailyRequirement } from "./dailySuccess";
 import type {
   DailySuccessManualContribution,
@@ -337,5 +337,28 @@ describe("target contribution ledger", () => {
     ["reps", "repetitions"],
   ])("normalizes %s to its native unit", (input, expected) => {
     expect(normalizeTargetUnit(input)).toBe(expected);
+  });
+});
+
+
+describe("canonical study logs", () => {
+  it("resolves identities globally before filtering by day and never mutates inputs", () => {
+    const old = log({ id: "same", dayKey: DAY, quantity: 20, quantityKind: "questions" });
+    const latest = log({ id: "same", dayKey: "2026-07-14", ts: "2026-07-14T08:00:00Z", quantity: 10, quantityKind: "questions" });
+    const input = [latest, old];
+    expect(ledger({ logs: input }).value).toBe(0);
+    expect(canonicalStudyLogs(input)).toEqual([latest]);
+    expect(input).toEqual([latest, old]);
+  });
+  it("orders timestamp offsets by actual time", () => {
+    const earlier = log({ id: "same", ts: "2026-07-13T10:00:00-05:00", minutes: 10 });
+    const later = log({ id: "same", ts: "2026-07-13T16:00:00Z", minutes: 20 });
+    expect(canonicalStudyLogs([later, earlier])).toEqual([later]);
+  });
+  it("uses deterministic accounting fields including day for equal timestamps", () => {
+    const a = log({ id: "same", dayKey: DAY });
+    const b = log({ id: "same", dayKey: "2026-07-14" });
+    expect(canonicalStudyLogs([a, b])).toEqual(canonicalStudyLogs([b, a]));
+    expect(canonicalStudyLogs([a, b])).toEqual([b]);
   });
 });
