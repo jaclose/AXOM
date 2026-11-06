@@ -164,6 +164,8 @@ describe("verified primary-source progress attribution", () => {
       question("missing", { setId: "missing", ...ownScope, attempts: correct }),
       question("malformed", { setId: "primary", ...ownScope,
         week: legacyWeek("Week 3-4"), attempts: correct }),
+      question("unbound-malformed", { setId: undefined, ...ownScope,
+        week: legacyWeek("Week 3/4"), attempts: correct }),
     ];
     const before = JSON.stringify(questions);
     const result = scopeProgress(questions, ownScope, fullSets);
@@ -173,12 +175,12 @@ describe("verified primary-source progress attribution", () => {
     });
     const wholeModule = scopeProgress(questions, { module: "NB2", courseId: "core" }, fullSets);
     assert.equal(wholeModule.total, 3);
-    assert.equal(wholeModule.sourceReviewHeld, 4);
+    assert.equal(wholeModule.sourceReviewHeld, 5);
     const groups = groupQuestionsByScope(questions, fullSets);
     assert.deepEqual(groups.find(group => group.key === "nb2|w3")?.questionIds,
       ["valid", "inherited", "legacy"]);
     assert.deepEqual(groups.find(group => group.key === "unassigned")?.questionIds,
-      ["conflict", "forged", "missing", "malformed"]);
+      ["conflict", "forged", "missing", "malformed", "unbound-malformed"]);
     // The old answers remain on the same original records for later review.
     assert.equal(JSON.stringify(questions), before);
   });

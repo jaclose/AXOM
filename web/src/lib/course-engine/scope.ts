@@ -102,7 +102,13 @@ function hasConsistentPrimaryFiling(
   question: QuestionRecord,
   own: CourseScope,
   setsById?: ReadonlyMap<ID, QuestionSourceEvidence>,
+  hasFullSourceIndex = false,
 ): boolean {
+  // A source-unbound legacy question may be valid, but a malformed *declared*
+  // week cannot become module-wide eligible progress when full evidence exists.
+  if (hasFullSourceIndex && question.week != null
+    && (typeof question.week !== "string" || question.week.trim() !== "")
+    && parseWeek(question.week) === undefined) return false;
   if (!question.setId || !setsById) return true;
   const primary = setsById.get(question.setId);
   if (!primary) return false;
@@ -135,6 +141,7 @@ export function scopeProgress(
   const progress: ScopeProgress = { total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0, questionIds: [] };
   const counted = new Set<ID>();
   const held = new Set<ID>();
+  const hasFullSourceIndex = [...(setsById?.values() ?? [])].some((set) => Array.isArray(set.questionIds));
   for (const question of questions) {
     const own = questionScope(question, setsById);
     // A scope without a week counts every week of the module.
@@ -142,7 +149,7 @@ export function scopeProgress(
     // An explicitly course-owned query must not absorb answers from another
     // course or from records with unresolved course ownership.
     if (!matches || (scope.courseId && own.courseId !== scope.courseId)) continue;
-    if (!hasConsistentPrimaryFiling(question, own, setsById)) {
+    if (!hasConsistentPrimaryFiling(question, own, setsById, hasFullSourceIndex)) {
       held.add(question.id);
       continue;
     }
@@ -175,13 +182,14 @@ export function groupQuestionsByScope(
 ): ScopeGroup[] {
   const groups = new Map<string, ScopeGroup>();
   const seen = new Set<ID>();
+  const hasFullSourceIndex = [...(setsById?.values() ?? [])].some((set) => Array.isArray(set.questionIds));
   for (const question of questions) {
     if (seen.has(question.id)) continue;
     seen.add(question.id);
     const own = questionScope(question, setsById);
     // Keep held questions discoverable in Unassigned, not in an invented
     // eligible module/week; this is a read model, not a refile or deletion.
-    const scope = hasConsistentPrimaryFiling(question, own, setsById) ? own : {};
+    const scope = hasConsistentPrimaryFiling(question, own, setsById, hasFullSourceIndex) ? own : {};
     const key = scopeKey(scope);
     const group = groups.get(key) ?? { key, module: scope.module, week: scope.module ? scope.week : undefined, questionIds: [] };
     group.questionIds.push(question.id);
