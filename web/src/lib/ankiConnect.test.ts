@@ -45,6 +45,27 @@ describe("AnkiConnect client", () => {
       expect(first).toMatchObject({ targetAddressSpace: "loopback", redirect: "error" });
       expect(second).toMatchObject({ redirect: "error" });
       expect(second.targetAddressSpace).toBeUndefined();
+
+      // AXOM's source-relink lookup uses multi([findNotes]); preserve its
+      // compatibility fallback, without ever replaying a mixed mutation batch.
+      const readBatchFetch = vi.fn()
+        .mockRejectedValueOnce(new TypeError("hint blocked before read-only multi"))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          result: [{ result: [123], error: null }], error: null,
+        })));
+      await expect(createAnkiClient({ endpoint: "http://127.0.0.1:8765", fetchImpl: readBatchFetch }).multi([
+        { action: "findNotes", params: { query: "tag:AXOM" } },
+      ])).resolves.toEqual([{ ok: true, result: [123] }]);
+      expect(readBatchFetch).toHaveBeenCalledTimes(2);
+      expect((readBatchFetch.mock.calls[0] as unknown as [string, RequestInit & { targetAddressSpace?: string }])[1].targetAddressSpace).toBe("loopback");
+      expect((readBatchFetch.mock.calls[1] as unknown as [string, RequestInit & { targetAddressSpace?: string }])[1].targetAddressSpace).toBeUndefined();
+
+      const mixedFetch = vi.fn(async () => { throw new TypeError("after mixed batch applied"); });
+      await expect(createAnkiClient({ endpoint: "http://127.0.0.1:8765", fetchImpl: mixedFetch }).multi([
+        { action: "findNotes", params: { query: "tag:AXOM" } },
+        { action: "addNote", params: { note: { deckName: "AXOM" } } },
+      ])).rejects.toMatchObject({ message: expect.stringContaining("may already have applied") });
+      expect(mixedFetch).toHaveBeenCalledOnce();
     } finally {
       vi.unstubAllGlobals();
     }

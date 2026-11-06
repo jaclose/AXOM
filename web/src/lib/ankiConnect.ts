@@ -289,6 +289,15 @@ const RETRYABLE_READ_ACTIONS = new Set([
   "modelNames", "modelNamesAndIds", "modelFieldNames", "modelTemplates", "getTags",
 ]);
 
+/** A multi batch is replay-safe only when every embedded action is a known read. */
+function canRetryRead(action: string, payload: Record<string, unknown>): boolean {
+  if (action !== "multi") return RETRYABLE_READ_ACTIONS.has(action);
+  const actions = payload.actions;
+  return Array.isArray(actions) && actions.length > 0 && actions.every(
+    (entry) => isRecord(entry) && typeof entry.action === "string" && RETRYABLE_READ_ACTIONS.has(entry.action),
+  );
+}
+
 export function createAnkiClient(options: AnkiClientOptions = {}): AnkiClient {
   const endpoint = (options.endpoint ?? getAnkiEndpoint()).trim() || DEFAULT_ANKI_ENDPOINT;
   const fetchImpl = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
@@ -306,7 +315,7 @@ export function createAnkiClient(options: AnkiClientOptions = {}): AnkiClient {
       // A TypeError cannot distinguish a preflight rejection from a lost
       // response after Anki applied a write. Replay only idempotent reads.
       if (hint && error instanceof TypeError) {
-        if (!RETRYABLE_READ_ACTIONS.has(action)) {
+        if (!canRetryRead(action, payload)) {
           const diagnosed = classifyFetchFailure(error, url, timeoutMs, action);
           throw new AnkiError(
             `${diagnosed.message} AXOM did not repeat this action because Anki may already have applied it. Check Anki before retrying.`,
