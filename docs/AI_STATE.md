@@ -5,19 +5,6 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Mothership Host access checkpoint · 2026-11-05
-
-Branch `codex/mothership-host-identity-20261105` is based on `ecc5f2c0`.
-Host snapshots include account identity: an account switch during a pending role
-check starts the new request and rejects the previous account's late owner result.
-The regression failed before the fix; all three access tests, focused ESLint,
-web typecheck and repository hygiene pass on Node 24.22.1. Required Node 22.23.4,
-browser and hosted acceptance remain unverified. No database or role changes.
-[Mothership](https://github.com/jaclose/AXOM/issues/106) coordinates with
-[APEX](https://github.com/jaclose/AXOM/issues/101); preserve its worktree and the
-Soundscapes/Productivity worktree. [PLATFORM](https://github.com/jaclose/AXOM/issues/108)
-tracks release evidence and the next validation.
-
 ## Host and Communities repair · 2026-11-04
 
 Branch `claude/host-communities-20261104` from `a96f1491`. Host now shows only

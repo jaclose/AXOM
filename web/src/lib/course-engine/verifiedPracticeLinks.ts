@@ -69,19 +69,20 @@ export function verifyCollectionForCourse(
   for (const id of memberIds) {
     const question = questionsById.get(id);
     if (!question) { unavailableQuestionCount += 1; continue; }
-    const own = questionScope(question, setsById);
-    // A primary set and a review set may disagree: never silently overwrite
-    // the question's primary documented owner with this collection's label.
-    const effective: CourseScope = {
-      module: own.module ?? sourceScope?.module,
-      week: own.week ?? sourceScope?.week,
-      courseId: own.courseId ?? sourceScope?.courseId,
-    };
+    // A legacy member may inherit this collection only when it declares no
+    // primary source set. Resolve once: a second fallback would refill invalid
+    // weeks or borrow missing source evidence from a review collection.
+    const own = questionScope({
+      module: question.module,
+      week: question.week,
+      courseId: question.courseId,
+      setId: question.setId ?? sourceSet?.id,
+    }, setsById);
     const disagreesWithSource = Boolean(sourceScope
       && (!equivalent(own.module, sourceScope.module)
         || (own.week !== undefined && sourceScope.week !== undefined && own.week !== sourceScope.week)
         || (own.courseId && sourceScope.courseId && own.courseId !== sourceScope.courseId)));
-    if (!scopeMatches(effective, requested, requireCourseProof) || disagreesWithSource) {
+    if (!scopeMatches(own, requested, requireCourseProof) || disagreesWithSource) {
       conflictingQuestionCount += 1;
       continue;
     }
