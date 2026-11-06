@@ -67,6 +67,25 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Question Set draft explanation review", () => {
+  it("prepares explanations automatically only after opening a Community publication review", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("never auto-generates from a held answer or publishes it", async () => {
+    const source = question({ correctKey: undefined, needsReview: true });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/still held for answer or source review/)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("drafts explanations and displays them for human review before any local write", async () => {
     const source = question();
     mocks.workspace.questions = [source];
