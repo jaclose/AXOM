@@ -380,6 +380,31 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("suspend")).toHaveLength(0);
   });
 
+  it("retires the former note after AXOM deletion without double-counting delete suspension", async () => {
+    for (const policy of ["leave", "suspend"] as const) {
+      const { fake, run } = interruptedRetirement("before");
+      const original = await run([card("a")], emptyLinkState());
+      const old = original.state.links.a;
+      const converted = [card("a", { type: "cloze", front: "{{c1::Tubule}} transport", back: "" })];
+      const interrupted = await run(converted, original.state);
+      expect(interrupted.report).toMatchObject({ offline: true, replaced: 1, pending: 1 });
+      const replacementCards = interrupted.state.links.a.cardIds;
+      const deleted = recordAxomDeletion(interrupted.state, "a", policy);
+      const restored = normalizeLinkState(JSON.parse(JSON.stringify(deleted)));
+
+      const resolved = await run([], restored);
+      expect(resolved.report).toMatchObject({
+        offline: false, replaced: 0, pending: 0, deletedSuspended: policy === "suspend" ? 1 : 0,
+      });
+      expect(resolved.state.pendingRetirements).toEqual([]);
+      expect(resolved.state.pendingSuspends).toEqual([]);
+      expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([true]);
+      expect(fake.call("areSuspended", { cards: replacementCards })).toEqual([policy === "suspend"]);
+      expect(fake.notes.size).toBe(2); // both kept, never deleted
+      expect(fake.actionsCalled("deleteNotes")).toEqual([]);
+    }
+  });
+
   it("creates the reverse card for basic-reversed cards", async () => {
     const h = harness();
     await h.run([card("a")]);
