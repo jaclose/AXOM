@@ -35,8 +35,20 @@ for (const width of [1440, 390]) {
     await expect(panel.getByRole("alert")).toContainText("invalid date or identifier");
     await expect(action).toBeVisible();
 
-    // The correction survives save and reload; it never mutates existing IDs.
+    // A corrected source must clear the obsolete error without closing the
+    // panel. The current mounted button must download the repaired event.
     await saveTask("2026-12-31");
+    await expect(panel.getByRole("alert")).toHaveCount(0);
+    const liveDownloadPromise = page.waitForEvent("download");
+    await action.click();
+    const liveDownload = await liveDownloadPromise;
+    const livePath = await liveDownload.path();
+    expect(livePath).toBeTruthy();
+    const liveText = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(livePath!));
+    expect(liveText).toContain("DTSTART;VALUE=DATE:20261231");
+    expect(liveText).not.toContain("20261232");
+
+    // The correction also survives save and reload with the same event UID.
     await page.reload({ waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Create calendar file" }).click();
     const repaired = page.locator(".calendar-export");
