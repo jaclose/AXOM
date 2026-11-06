@@ -7,8 +7,10 @@
 .productivity-save { text-align: right; font-size: var(--fs-xs); margin: 8px 0 14px; }
 /* This view should occupy its available canvas, not inherit the generic 1180px page cap. */
 .page:has(> .productivity-primary-grid) { inline-size: 100%; max-width: none; }
-.productivity-primary-grid, .surface-scroll .productivity-analytics { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: start; gap: clamp(14px, 1.4vw, 20px); }
-.productivity-primary-grid > *, .surface-scroll .productivity-analytics > * { min-width: 0; }
+.productivity-primary-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: start; gap: clamp(14px, 1.4vw, 20px); }
+.productivity-primary-grid > * { min-width: 0; }
+.surface-scroll .productivity-analytics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); align-items: stretch; gap: 16px; }
+.surface-scroll .productivity-analytics > * { min-width: 0; height: 100%; }
 .productivity-primary-grid > div > .pomodoro { height: auto; }
 .productivity-primary-grid .fast-activity-logger { grid-template-columns: minmax(0, 1fr) auto; gap: 12px 10px; align-items: end; }
 .productivity-primary-grid .today-targets { grid-template-columns: minmax(0, 1fr); }
