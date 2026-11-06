@@ -124,6 +124,12 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     return next;
   };
   const byId = new Map(input.questions.map((question) => [question.id, question]));
+  // Keep every original-row variant for per-collection proof. The single-row
+  // lookup below is used only for the already-uncontested member path.
+  const originalsById = new Map<string, QuestionRecord[]>();
+  for (const question of input.questions) {
+    originalsById.set(question.id, [...(originalsById.get(question.id) ?? []), question]);
+  }
   const setsById = new Map(input.sets.map((set) => [set.id, set]));
   // The same original ID must have one disposition across availability and
   // Tracker progress. Source/scoring conflicts are review-held, not runnable.
@@ -224,6 +230,32 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   for (const set of input.sets) {
     const indexedSetWeek = parseWeek(set.scope?.week);
     const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
+    // A held original cannot disappear before validating the source that
+    // originally claimed it. Require a compatible *exact primary* record,
+    // rather than letting a contradictory sole member (or a healthy sibling)
+    // validate an otherwise stale collection. Two disputed originals may
+    // independently verify distinct source sets, but neither becomes ready.
+    const sourceOwner = set.scope ? resolve(set.scope) : undefined;
+    const hasInvalidHeldPrimary = set.kind !== "review" && [...new Set(set.questionIds)].some((id) => {
+      if (!sourceHeldIds.has(id)) return false;
+      const variants = originalsById.get(id);
+      if (!variants?.length) return false; // Uninstalled originals are missing, not forged local rows.
+      return !variants.some((member) => {
+        if (member.setId !== set.id
+          || (hasDeclaredWeek(member.week) && parseWeek(member.week) === undefined)) return false;
+        const own = questionScope(member, setsById);
+        const actualOwner = resolve(own);
+        if (!actualOwner || (sourceOwner && actualOwner.key !== sourceOwner.key)) return false;
+        if (set.scope?.module && canonicalModuleKey(own.module ?? "") !== canonicalModuleKey(set.scope.module)) return false;
+        if (set.scope?.courseId && own.courseId !== set.scope.courseId) return false;
+        if (indexedSetWeek !== undefined && own.week !== indexedSetWeek) return false;
+        return true;
+      });
+    });
+    if (hasInvalidHeldPrimary) {
+      unassignedCollections += 1;
+      continue;
+    }
     // Never choose an arbitrary last duplicate row as a collection's proof.
     // Conflicted original IDs stay review-held; independently filed source
     // collections can still show their own source-declared week and missing IDs.

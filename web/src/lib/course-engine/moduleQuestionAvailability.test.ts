@@ -560,3 +560,37 @@ describe("review-set weeks require original source or explicit question-week evi
     expect(index.unassignedCollections).toBe(1);
   });
 });
+
+
+describe("held originals cannot erase invalid primary source evidence", () => {
+  it("quarantines a source with one incompatible held primary even beside a valid member, both orders", () => {
+    const original = set("original", ["verified", "refiled"], { scope: goerScope });
+    const verified = question("verified", { setId: "original", ...goerScope });
+    const refiled = question("refiled", {
+      setId: "original", module: "NCRS", week: 2, courseId: "ppm-500",
+    });
+    const before = JSON.stringify([original, verified, refiled]);
+    for (const rows of [[verified, refiled], [refiled, verified]]) {
+      const index = buildQuestionAvailabilityIndex(input([original], rows));
+      expect(index.unassignedCollections).toBe(1);
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        collections: 0, storedQuestions: 1, readyQuestions: 1,
+      });
+    }
+    expect(JSON.stringify([original, verified, refiled])).toBe(before);
+  });
+
+  it("preserves independently proven original metadata while holding a conflicting duplicate", () => {
+    const original = set("original", ["shared"], { scope: goerScope });
+    const real = question("shared", { setId: "original", ...goerScope });
+    const orphan = question("shared", { setId: "removed-source", ...goerScope });
+    for (const rows of [[real, orphan], [orphan, real]]) {
+      const index = buildQuestionAvailabilityIndex(input([original], rows));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        collections: 1, storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+        indexedWeeks: [2], unresolvedWeekQuestions: 1,
+      });
+      expect(index.unassignedCollections).toBe(0);
+    }
+  });
+});
