@@ -182,9 +182,10 @@ describe("Integrations", () => {
     expect(eligible).toEqual([expect.objectContaining({ uid: "task-t1", day: "2999-03-01" })]);
     expect(buildIcs(eligible)).toContain("DTSTART;VALUE=DATE:29990301");
     expect(screen.getByText(/^1 event/)).toBeTruthy();
-    // Automatic warning clearance before retry is covered by the real
-    // 1440px/390px Chromium journeys in calendar-export-integrity.spec.ts.
-    // Here, prove a same-mounted retry reads the corrected canonical source.
+    // The mounted panel must remove obsolete validation errors before the
+    // learner retries, not merely clear the warning after a successful click.
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    // A same-mounted retry must also read the corrected canonical source.
     const retry = screen.getByRole("button", { name: /Download .ics/ });
     expect(retry.hasAttribute("disabled")).toBe(false);
     // The user retries from the same mounted panel after repairing the task.
