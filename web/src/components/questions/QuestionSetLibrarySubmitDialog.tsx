@@ -17,10 +17,12 @@ import { Modal } from "../ui/Modal";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import "../../styles/question-set-library.css";
 
-export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
+export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDraft = false }: {
   set: QuestionSet;
   questions: readonly QuestionRecord[];
   onClose: () => void;
+  /** Only for an explicit Community publish action when configured AI is real. */
+  autoDraft?: boolean;
 }) {
   const accountId = useAccount(state => state.user?.id);
   const [submission, setSubmission] = useState<LibrarySubmission>();
@@ -36,6 +38,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
   const [generationProgress, setGenerationProgress] = useState("");
   const [generationError, setGenerationError] = useState("");
   const generationAbort = useRef<AbortController | null>(null);
+  const autoDraftStarted = useRef(false);
   const provider = useRef(resolveActiveProvider()).current;
   const byId = new Map(questions.map(question => [question.id, question]));
   const sourceQuestions = set.questionIds.map(id => byId.get(id));
@@ -72,6 +75,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
 
   useEffect(() => {
     setDrafts([]);
+    autoDraftStarted.current = false;
     setGenerationProgress("");
     setGenerationError("");
     return () => { generationAbort.current?.abort(); };
@@ -113,6 +117,16 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
       setGenerating(false);
     }
   }
+
+  useEffect(() => {
+    if (!autoDraft || checking || !accountId || !provider || provider.info.kind === "mock"
+      || !draftable.length || (submission && submission.status !== "rejected")
+      || autoDraftStarted.current) return;
+    // The explicit Community "Review and submit" action authorizes this capped
+    // preparation. Re-renders never create additional inference batches.
+    autoDraftStarted.current = true;
+    void generateExplanations();
+  }, [autoDraft, accountId, checking, submission, provider, draftable.length, generateExplanations]);
 
   function saveReviewedDrafts() {
     if (generating || !accountId || !drafts.length || useAccount.getState().user?.id !== accountId) return;
