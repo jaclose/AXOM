@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookUp2, ShieldCheck, Sparkles } from "lucide-react";
 import { resolveActiveProvider } from "../../lib/ai";
 import { draftQuestionExplanation, eligibleForExplanationDraft, questionExplanationFingerprint, type QuestionExplanationDraft } from "../../lib/ai/questionTeaching";
@@ -39,15 +39,18 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const [generationError, setGenerationError] = useState("");
   const generationAbort = useRef<AbortController | null>(null);
   const autoDraftStarted = useRef(false);
-  const provider = useRef(resolveActiveProvider()).current;
-  const byId = new Map(questions.map(question => [question.id, question]));
-  const sourceQuestions = set.questionIds.map(id => byId.get(id));
+  const provider = useMemo(() => resolveActiveProvider(), []);
+  const sourceQuestions = useMemo(() => {
+    const byId = new Map(questions.map(question => [question.id, question]));
+    return set.questionIds.map(id => byId.get(id));
+  }, [questions, set.questionIds]);
   const unresolved = sourceQuestions.filter(question => !question || questionPracticeReadiness(question) !== "ready").length;
   const withMedia = sourceQuestions.filter(question => question && ((question.attachments?.length ?? 0) > 0
     || (question.content?.assets.length ?? 0) > 0)).length;
   const missingExplanations = sourceQuestions.filter(question => question && !question.explanation?.trim()).length;
-  const draftable = sourceQuestions.filter((question): question is QuestionRecord => Boolean(question)
-    && eligibleForExplanationDraft(question!) && !drafts.some(draft => draft.questionId === question!.id));
+  const draftable = useMemo(() => sourceQuestions.filter((question): question is QuestionRecord => Boolean(question)
+    && eligibleForExplanationDraft(question!) && !drafts.some(draft => draft.questionId === question!.id)),
+  [sourceQuestions, drafts]);
   const visualPlans = sourceQuestions.flatMap(question => {
     if (!question) return [];
     const plan = planMedicalVisual(question);
@@ -81,8 +84,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     return () => { generationAbort.current?.abort(); };
   }, [accountId, set.id]);
 
-  async function generateExplanations() {
-    if (!provider || !accountId || generating || !draftable.length) return;
+  const generateExplanations = useCallback(async () => {
+    if (!provider || !accountId || generating || generationAbort.current || !draftable.length) return;
     const controller = new AbortController();
     generationAbort.current = controller;
     setGenerating(true);
@@ -116,7 +119,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (generationAbort.current === controller) generationAbort.current = null;
       setGenerating(false);
     }
-  }
+  }, [provider, accountId, generating, draftable]);
 
   useEffect(() => {
     if (!autoDraft || checking || !accountId || !provider || provider.info.kind === "mock"
