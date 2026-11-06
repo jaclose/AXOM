@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
 import {
   AlertTriangle, BadgeCheck, ChevronDown, Cloud, CloudOff, Download, GitMerge, HardDrive, History,
-  KeyRound, Laptop, LogOut, Mail, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Trash2, UserPlus,
+  KeyRound, Laptop, LogOut, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Trash2, UserPlus,
 } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { GButton, Tag } from "../ui/primitives";
@@ -19,7 +19,7 @@ import { readVaultWriteFailure } from "../../lib/vaultActivity";
 import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
 import { TechnicalDetails } from "./TechnicalDetails";
 
-type AuthMode = "sign-in" | "create" | "code" | "forgot";
+type AuthMode = "sign-in" | "create" | "forgot";
 
 const PROTECTION_HEADING: Record<ProtectionStatus, string> = {
   "local-only": "Cloud protection is starting.",
@@ -152,7 +152,7 @@ function UnconfiguredCard({ onOpenBackup }: { onOpenBackup?: () => void }) {
 }
 
 function AuthCard() {
-  const { busy, signIn, signUp, sendCode, verifyCode, requestPasswordReset, pendingCodeEmail, pendingCodeKind, clearNotice } = useAccount();
+  const { busy, signIn, signUp, verifyCode, requestPasswordReset, pendingCodeEmail, pendingCodeKind, clearNotice } = useAccount();
   const profileName = useStore((state) => state.profile.name);
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
@@ -173,7 +173,6 @@ function AuthCard() {
     else if (mode === "sign-in") await signIn(email, password);
     else if (mode === "create") await signUp(email, password, displayName);
     else if (mode === "forgot") await requestPasswordReset(email);
-    else await sendCode(email);
   }
 
   return (
@@ -186,7 +185,7 @@ function AuthCard() {
       </div>
       <div className="account-auth-content">
         <div className="account-auth-topline">
-          <span>{pendingCodeEmail ? "Verify your email" : mode === "forgot" ? "Password recovery" : mode === "create" ? "Create an account" : mode === "code" ? "Sign in with a code" : "Welcome back"}</span>
+          <span>{pendingCodeEmail ? "Complete password recovery" : mode === "forgot" ? "Password recovery" : mode === "create" ? "Create an account" : "Welcome back"}</span>
           <span>Account access</span>
         </div>
         {!pendingCodeEmail && mode !== "forgot" && (
@@ -194,7 +193,6 @@ function AuthCard() {
             {([
               ["sign-in", "Sign in", KeyRound],
               ["create", "Create", UserPlus],
-              ["code", "Email code", Mail],
             ] as const).map(([id, label, Icon]) => (
               <button key={id} type="button" aria-pressed={mode === id} className={mode === id ? "on" : ""} onClick={() => choose(id)} disabled={busy}>
                 <Icon size={ICON_SIZE.body} aria-hidden="true" /> {label}
@@ -233,19 +231,19 @@ function AuthCard() {
         )}
         {pendingCodeEmail && (
           <label>
-            <span>{pendingCodeKind === "signup" ? "Confirmation code" : pendingCodeKind === "recovery" ? "Password reset code" : "Sign-in code"} sent to {pendingCodeEmail}</span>
+            <span>{pendingCodeKind === "recovery" ? "Password reset code" : "Email verification code"} sent to {pendingCodeEmail}</span>
             <input className="field account-code" name="code" inputMode="numeric" autoComplete="one-time-code" spellCheck={false} required maxLength={10} value={code} onChange={(event) => setCode(event.target.value)} />
           </label>
         )}
         <div className="account-form-actions">
           <GButton className="account-submit" variant="primary" type="submit" disabled={busy}>
-            {busy ? "Working…" : pendingCodeEmail ? "Verify code" : mode === "sign-in" ? "Sign in" : mode === "create" ? "Create account" : mode === "forgot" ? "Send reset code" : "Send code"}
+            {busy ? "Working…" : pendingCodeEmail ? "Verify reset code" : mode === "sign-in" ? "Sign in" : mode === "create" ? "Create account" : "Send reset email"}
           </GButton>
           {!pendingCodeEmail && mode === "sign-in" && <button type="button" className="account-link" onClick={() => choose("forgot")}>Forgot password?</button>}
           {!pendingCodeEmail && mode === "forgot" && <button type="button" className="account-link" onClick={() => choose("sign-in")}>Back to sign in</button>}
           {pendingCodeEmail && <button type="button" className="account-link" onClick={() => choose(mode === "forgot" ? "sign-in" : mode)}>Use a different email</button>}
         </div>
-        {(mode === "code" || pendingCodeEmail) && <p className="account-form-note">Codes work in the browser and the desktop app.</p>}
+        {pendingCodeEmail && <p className="account-form-note">Use the password-reset link in your email, or enter its one-time recovery code here.</p>}
       </form>
       </div>
     </section>
