@@ -18,7 +18,7 @@ export interface QuestionExplanationDraft {
 export function questionExplanationFingerprint(question: QuestionRecord): string {
   return JSON.stringify([
     question.id, question.updatedAt, question.stem, question.options,
-    question.correctKey, question.explanation ?? "", question.needsReview ?? false,
+    question.correctKey, question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
   ]);
 }
 
@@ -26,6 +26,7 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
   return questionPracticeReadiness(question) === "ready"
     && Boolean(question.correctKey)
     && !question.explanation?.trim()
+    && Object.keys(question.choiceRationales ?? {}).length === 0
     && !question.attachments?.length
     && !question.content?.assets.length;
 }
