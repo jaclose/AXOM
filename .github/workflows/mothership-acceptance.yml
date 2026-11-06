@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'web/e2e/dashboard-widget-layout.spec.ts'
+      - 'web/src/lib/operator/hostClient.ts'
+      - 'web/src/lib/operator/hostClient.access.test.tsx'
       - '.github/workflows/mothership-acceptance.yml'
   workflow_dispatch:
 
@@ -40,6 +42,20 @@ jobs:
         run: npm run test:repo && npm run repo:check
       - name: Install isolated browser runtime
         run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Focused Host account-switch and role-cache tests
+        run: |
+          result=0
+          npm --prefix web test -- src/lib/operator/hostClient.access.test.tsx --reporter=verbose > "$RUNNER_TEMP/mothership-host.log" 2>&1 || result=$?
+          tail -n 100 "$RUNNER_TEMP/mothership-host.log"
+          exit "$result"
+      - name: Preserve Host race-test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mothership-host-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mothership-host.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Focused widget contract and browser journey
         run: |
           result=0
