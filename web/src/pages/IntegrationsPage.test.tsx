@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { create } from "zustand";
-import { flushSync } from "react-dom";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
@@ -152,7 +151,9 @@ describe("Integrations", () => {
     // An unrelated store revision must not discard a still-applicable error.
     // Keeping the exact tasks reference simulates a non-calendar state update.
     const unchangedTasks = useStore.getState().tasks;
-    act(() => useStore.setState({ tasks: unchangedTasks }));
+    await act(async () => {
+      useStore.setState({ tasks: unchangedTasks });
+    });
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
 
     // Use the actual learner task-update action rather than mutating the
@@ -186,9 +187,8 @@ describe("Integrations", () => {
     // Here, prove a same-mounted retry reads the corrected canonical source.
     const retry = screen.getByRole("button", { name: /Download .ics/ });
     expect(retry.hasAttribute("disabled")).toBe(false);
-    // Flush the same-mounted retry synchronously to distinguish deferred
-    // React rendering from a source/error state that refuses to clear.
-    flushSync(() => fireEvent.click(retry));
+    // The user retries from the same mounted panel after repairing the task.
+    fireEvent.click(retry);
     expect(useStore.getState().tasks[0].due).toBe("2999-03-01");
     expect(createObjectURL).toHaveBeenCalledOnce();
     expect(screen.queryByRole("alert")).toBeNull();
