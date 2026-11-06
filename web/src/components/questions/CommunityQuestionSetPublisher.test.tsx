@@ -31,7 +31,7 @@ const set = (id: string, title: string, kind: QuestionSet["kind"] = "custom"): Q
   id, title, kind, questionIds: ["q-1"], sourceDocumentIds: [], tags: [],
   createdAt: "2026-11-06T12:00:00Z", aiEnhanced: false, parserWarnings: [],
 });
-const question = { id: "q-1", stem: "Synthetic stem" } as QuestionRecord;
+const question = { id: "q-1", stem: "Synthetic stem", options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }], correctKey: "A", tags: [], attempts: [] } as QuestionRecord;
 
 describe("Community Question Set publisher", () => {
   beforeEach(() => {
