@@ -481,3 +481,37 @@ describe("original-ID collection provenance is independent of record order", () 
     }
   });
 });
+
+
+describe("review-only source collections cannot certify unsupported weeks", () => {
+  it("holds a review-only week when its sole question declares a missing primary", () => {
+    const review = set("secondary", ["unproven"], {
+      scope: { module: "GOER", week: 3, courseId: "ppm-501" }, kind: "review",
+    });
+    const unproven = question("unproven", {
+      setId: "missing-source", module: "GOER", week: 3, courseId: "ppm-501",
+    });
+    const before = JSON.stringify([review, unproven]);
+    const index = buildQuestionAvailabilityIndex(input([review], [unproven]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+      unresolvedWeekQuestions: 1, indexedWeeks: [], collections: 0,
+    });
+    expect(index.unassignedCollections).toBe(1);
+    expect(JSON.stringify([review, unproven])).toBe(before);
+  });
+
+  it("preserves a review set's aligned week when another valid primary member proves it", () => {
+    const scope = { module: "GOER", week: 3, courseId: "ppm-501" };
+    const primary = set("primary", ["verified"], { scope });
+    const review = set("review", ["verified", "unproven"], { scope, kind: "review" });
+    const verified = question("verified", { setId: "primary", ...scope });
+    const unproven = question("unproven", { setId: "missing-source", ...scope });
+    const index = buildQuestionAvailabilityIndex(input([primary, review], [verified, unproven]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 2, readyQuestions: 1, reviewQuestions: 1,
+      unresolvedWeekQuestions: 1, indexedWeeks: [3], collections: 2,
+    });
+    expect(index.unassignedCollections).toBe(0);
+  });
+});
