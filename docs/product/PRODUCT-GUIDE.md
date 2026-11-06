@@ -30,7 +30,7 @@ Five connected intelligence pillars:
 
 ## 02. The single canonical learning loop
 
-\`\`\`text
+```text
 Original source
    → curriculum/term/module/week
    → source-linked assessment
@@ -40,7 +40,7 @@ Original source
    → targeted repair and retrieval
    → reassessment
    → updated evidence-backed learner view
-\`\`\`
+```
 
 Never create parallel versions of quiz events, attempt history, source identity or course membership for a new attractive feature. Decode, Tutor, QBank and Course Tracker are different views of compatible source and attempt contracts. A filtered scope must remain reversible; selected week, through-week cumulative and full-module access do not erase the term-wide learning context.
 
