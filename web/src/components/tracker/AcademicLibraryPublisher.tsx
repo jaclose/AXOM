@@ -36,6 +36,18 @@ const fileSize = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(1, Math.ro
 /** A course is worth selecting by default when it brings a plan or practice-ready questions. */
 const usefulByDefault = (course: PlannedCourse) => course.termBasis !== "proposed" && (course.sections.length > 0 || course.ready > 0);
 
+/** Count catalog identity collisions independently from question rows: even two empty banks are unsafe. */
+function repeatedBankSourceIds(inventory: PublicationInventory): string[] {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const source of inventory.sources) {
+    if (!source.hasBank) continue; // A duplicate-linked reference is not another bank.
+    if (seen.has(source.id)) repeated.add(source.id);
+    else seen.add(source.id);
+  }
+  return [...repeated].sort((a, b) => a.localeCompare(b));
+}
+
 /** Publish a prepared library as one private course per term and module. */
 export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => void }) {
   const accountId = useAccount(state => state.user?.id);
@@ -63,9 +75,12 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   const current = library && library.accountId === accountId ? library : undefined;
   const plan = useMemo(() => current ? planPublication(current.inventory, confirmedTerms) : undefined, [current, confirmedTerms]);
   const ledger = useMemo(() => current && plan ? accountQuestions(current.inventory, plan) : undefined, [current, plan]);
+  // Fail closed on duplicate bank source identities even if both packages hold zero rows.
+  // This defensive check is independent of #153's pending ledger signal until release integration.
+  const duplicateBankSourceIds = useMemo(() => current ? repeatedBankSourceIds(current.inventory) : [], [current]);
   // A contradictory prepared-library ledger is a whole-batch publication hold, not a warning.
   // The uploader also validates each course, but it must not receive a known-invalid batch.
-  const ledgerHold = Boolean(ledger && (ledger.unaccounted !== 0 || ledger.mismatched.length > 0));
+  const ledgerHold = Boolean(ledger && (ledger.unaccounted !== 0 || ledger.mismatched.length > 0 || duplicateBankSourceIds.length > 0));
   const chosen = plan?.courses.filter(course => selected.has(course.catalogId) && course.termBasis !== "proposed") ?? [];
   const terms = [...new Set(plan?.courses.map(course => course.term) ?? [])];
 
@@ -352,9 +367,9 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           {current.corrected && <GhostButton disabled={Boolean(busy)} onClick={() => void correctMi()}>Remove MI to NMI decision</GhostButton>}
         </div>
       </div>}
-      {ledger && <QuestionCount ledger={ledger} />}
+      {ledger && <QuestionCount ledger={ledger} duplicateBankSourceIds={duplicateBankSourceIds} />}
       {ledgerHold && <p id="academic-publisher-ledger-hold" role="alert" className="academic-publisher-hint">
-        Publishing is disabled because this prepared library has unaccounted questions or inconsistent question-set counts.
+        Publishing is disabled because this prepared library has unaccounted questions, inconsistent question-set counts, or repeated bank source IDs.
         Correct or reprepare the library before publishing any course. You can still check courses locally without uploading.
       </p>}
       {terms.map(term => <fieldset key={term} className="academic-publisher-term" disabled={Boolean(busy)}>
@@ -432,7 +447,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
 }
 
 /** Every question the library holds, counted once: in a course, or staying on this device with its reason. */
-function QuestionCount({ ledger }: { ledger: QuestionLedger }) {
+function QuestionCount({ ledger, duplicateBankSourceIds }: { ledger: QuestionLedger; duplicateBankSourceIds: string[] }) {
   const leftOut = ledger.leftOut.reduce((sum, group) => sum + group.questions, 0);
   const waiting = ledger.courses.filter(course => !course.publishable).reduce((sum, course) => sum + course.questions, 0);
   return <div className="academic-publisher-ledger">
@@ -441,6 +456,7 @@ function QuestionCount({ ledger }: { ledger: QuestionLedger }) {
     <p role={ledger.unaccounted ? "alert" : undefined}>{ledger.unaccounted
       ? `${plural(ledger.unaccounted, "question")} could not be placed. Do not publish this library; choose it again or prepare it again.`
       : "Every question is counted once."}</p>
+    {duplicateBankSourceIds.length > 0 && <p role="alert">{plural(duplicateBankSourceIds.length, "repeated bank source ID")} require source identity review even when their question sets are empty. Do not publish until the duplicate catalog entries are resolved.</p>}
     {ledger.mismatched.length > 0 && <p role="alert">{plural(ledger.mismatched.length, "question set")} {ledger.mismatched.length === 1 ? "disagrees" : "disagree"} with
       {" "}{ledger.mismatched.length === 1 ? "its" : "their"} catalog counts and cannot be published until prepared again: {ledger.mismatched.map(entry => entry.name).join(", ")}.</p>}
     {ledger.leftOut.length > 0 && <details className="academic-publisher-notes">
