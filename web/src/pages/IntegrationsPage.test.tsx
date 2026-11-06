@@ -16,6 +16,17 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+// Keep URL constructible for app/library consumers while replacing only the
+// browser object-URL surface exercised by the calendar download action.
+function stubCalendarObjectUrl(createObjectURL: (blob: Blob | MediaSource) => string) {
+  const NativeURL = globalThis.URL;
+  class DownloadURL extends NativeURL {
+    static createObjectURL = createObjectURL;
+    static revokeObjectURL = vi.fn();
+  }
+  vi.stubGlobal("URL", DownloadURL);
+}
+
 describe("Integrations", () => {
   it("groups integrations by readiness and states what leaves the device", () => {
     render(<IntegrationsPage />);
@@ -45,7 +56,7 @@ describe("Integrations", () => {
 
   it("builds a calendar file from chosen items", () => {
     const createObjectURL = vi.fn(() => "blob:ics");
-    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    stubCalendarObjectUrl(createObjectURL);
     render(<IntegrationsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
     const panel = screen.getByText(/event.*from today onward/).closest(".calendar-export") as HTMLElement;
@@ -65,7 +76,7 @@ describe("Integrations", () => {
   });
   it("surfaces invalid dates instead of downloading a malformed calendar, then recovers", () => {
     const createObjectURL = vi.fn(() => "blob:ics");
-    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    stubCalendarObjectUrl(createObjectURL);
     const task = useStore.getState().tasks[0];
     useStore.setState({ tasks: [{ ...task, due: "2999-02-31" }] });
     render(<IntegrationsPage />);
@@ -88,7 +99,7 @@ describe("Integrations", () => {
 
   it("reports a browser download failure separately and clears the error after changing choices", () => {
     const createObjectURL = vi.fn(() => { throw new Error("downloads blocked"); });
-    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    stubCalendarObjectUrl(createObjectURL);
     render(<IntegrationsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
