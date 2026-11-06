@@ -17,11 +17,16 @@ Updates menu allow manual checks. Active study sessions suppress notices.
 Download, installation and restart always require user actions. Users are asked
 to finish unsaved form edits before applying an update.
 
-Before applying, AXOM awaits persisted writes, saves the current workspace,
-reads it back and verifies an automatic recovery snapshot. Desktop also writes
-a SQLite snapshot. An error leaves the current app open. The downloaded update
-must pass the Tauri cryptographic signature check. Failed network checks do not
-disable the current app.
+Before applying, AXOM awaits persisted writes, saves the current workspace
+and reads it back. It also attempts an additional automatic recovery snapshot.
+Desktop must verify its local and SQLite snapshots before installing. If only
+the additional web recovery copy fails, AXOM keeps the old build open and
+offers a separately confirmed refresh using the saved workspace. It verifies
+the authoritative saved workspace and unchanged live state again immediately
+before that refresh. A failed primary save or changed workspace still blocks
+the update; no consent bypasses those checks. The downloaded update must pass
+the Tauri cryptographic signature check. Failed network checks do not disable
+the current app.
 
 The service worker stages a new build without skipWaiting during installation.
 Activation occurs after the user approves refresh. Prior hashed assets are
