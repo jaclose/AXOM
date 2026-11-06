@@ -11,10 +11,10 @@ import { resetCommunityShare, setCommunityShareMode } from "../lib/community/sha
 import { isoDate } from "../lib/scoring";
 import { CommunityPage } from "./CommunityPage";
 
-vi.mock("../lib/account/accountStore", () => ({
-  useAccount: (select: (state: { user: { id: string; displayName: string } }) => unknown) =>
-    select({ user: { id: "me", displayName: "Current learner" } }),
-}));
+vi.mock("../lib/account/accountStore", () => {
+  const state = { user: { id: "me", displayName: "Current learner" } };
+  return { useAccount: Object.assign((select: (value: typeof state) => unknown) => select(state), { getState: () => state }) };
+});
 vi.mock("../lib/store", () => ({
   useStore: (select: (state: { logs: []; questionSets: [] }) => unknown) => select({ logs: [], questionSets: [] }),
 }));
