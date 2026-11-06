@@ -362,7 +362,7 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("addNotes")).toHaveLength(2);
   });
 
-  it("never suspends a reused note ID from another Anki profile; deletion does not discard receipts", async () => {
+  it("holds retirement when a reused note ID has a different AXOM ID; deletion keeps receipts", async () => {
     const { fake, run } = interruptedRetirement("before");
     const original = await run([card("a")], emptyLinkState());
     const old = original.state.links.a;
