@@ -129,6 +129,34 @@ function hasConsistentPrimaryFiling(
   );
 }
 
+/** A duplicate original ID with competing filing or scoring evidence is not
+ * an eligible question. Resolve the conflict before attributing any mastery.
+ * Identical repeats remain one record; original attempts are never rewritten. */
+function unreliableOriginalIds(
+  questions: readonly QuestionRecord[],
+  setsById: ReadonlyMap<ID, QuestionSourceEvidence> | undefined,
+  hasFullSourceIndex: boolean,
+): Set<ID> {
+  const signatures = new Map<ID, string>();
+  const held = new Set<ID>();
+  for (const question of questions) {
+    const own = questionScope(question, setsById);
+    if (!hasConsistentPrimaryFiling(question, own, setsById, hasFullSourceIndex)) held.add(question.id);
+    // These are the provenance and outcome fields the read models use.
+    // Two different primaries or incompatible attempt snapshots must not win
+    // based on which duplicate happened to arrive first.
+    const signature = JSON.stringify([
+      question.setId ?? null, own.courseId ?? null,
+      canonicalModuleKey(own.module ?? ""), own.week ?? null,
+      question.status, question.attempts[0]?.status ?? null, question.attempts.length > 0,
+    ]);
+    const previous = signatures.get(question.id);
+    if (previous !== undefined && previous !== signature) held.add(question.id);
+    else signatures.set(question.id, signature);
+  }
+  return held;
+}
+
 /**
  * What the learner has done with the questions in a scope, read from the
  * attempts themselves. Nothing here is reported by the learner.
@@ -143,6 +171,7 @@ export function scopeProgress(
   const counted = new Set<ID>();
   const held = new Set<ID>();
   const hasFullSourceIndex = [...(setsById?.values() ?? [])].some((set) => Array.isArray(set.questionIds));
+  const unreliable = unreliableOriginalIds(questions, setsById, hasFullSourceIndex);
   for (const question of questions) {
     const own = questionScope(question, setsById);
     // A scope without a week counts every week of the module.
@@ -150,7 +179,7 @@ export function scopeProgress(
     // An explicitly course-owned query must not absorb answers from another
     // course or from records with unresolved course ownership.
     if (!matches || (scope.courseId && own.courseId !== scope.courseId)) continue;
-    if (!hasConsistentPrimaryFiling(question, own, setsById, hasFullSourceIndex)) {
+    if (unreliable.has(question.id)) {
       held.add(question.id);
       continue;
     }
@@ -184,13 +213,14 @@ export function groupQuestionsByScope(
   const groups = new Map<string, ScopeGroup>();
   const seen = new Set<ID>();
   const hasFullSourceIndex = [...(setsById?.values() ?? [])].some((set) => Array.isArray(set.questionIds));
+  const unreliable = unreliableOriginalIds(questions, setsById, hasFullSourceIndex);
   for (const question of questions) {
     if (seen.has(question.id)) continue;
     seen.add(question.id);
     const own = questionScope(question, setsById);
     // Keep held questions discoverable in Unassigned, not in an invented
     // eligible module/week; this is a read model, not a refile or deletion.
-    const scope = hasConsistentPrimaryFiling(question, own, setsById, hasFullSourceIndex) ? own : {};
+    const scope = unreliable.has(question.id) ? {} : own;
     const key = scopeKey(scope);
     const group = groups.get(key) ?? { key, module: scope.module, week: scope.module ? scope.week : undefined, questionIds: [] };
     group.questionIds.push(question.id);

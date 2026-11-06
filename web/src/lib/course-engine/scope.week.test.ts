@@ -202,6 +202,59 @@ describe("verified primary-source progress attribution", () => {
       .flatMap(group => group.questionIds), ["original"]);
     assert.equal(JSON.stringify(questionRecord), original);
   });
+
+  it("holds duplicate IDs with competing primary-source claims in either input order", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([
+      ["primary-a", { scope: filing, questionIds: ["shared"] }],
+      ["primary-b", { scope: filing, questionIds: ["shared"] }],
+    ]);
+    const correct = [{ at: "2026-11-06T00:00:00Z", status: "correct" as const }];
+    const wrong = [{ at: "2026-11-06T00:00:00Z", status: "incorrect" as const }];
+    const a = question("shared", { setId: "primary-a", ...filing, attempts: correct, status: "correct" });
+    const b = question("shared", { setId: "primary-b", ...filing, attempts: wrong, status: "incorrect" });
+    const before = JSON.stringify([a, b, [...sets]]);
+    for (const records of [[a, b], [b, a]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.attempted, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(progress.questionIds, []);
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+    assert.equal(JSON.stringify([a, b, [...sets]]), before);
+  });
+
+  it("holds duplicate practice snapshots whose first answers or latest states disagree", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const first = question("shared", { setId: "primary", ...filing, status: "correct",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct" }] });
+    const second = question("shared", { setId: "primary", ...filing, status: "incorrect",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "incorrect" }] });
+    for (const records of [[first, second], [second, first]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+  });
+
+  it("counts equivalent cloned records once without holding legitimate source evidence", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const a = question("shared", { setId: "primary", ...filing, status: "correct",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct" }] });
+    const b = question("shared", { setId: "primary", ...filing, status: "correct",
+      attempts: [{ at: "2026-11-06T01:00:00Z", status: "correct" }] });
+    assert.deepEqual(scopeProgress([a, b], filing, sets), {
+      total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0, questionIds: ["shared"],
+    });
+    assert.deepEqual(groupQuestionsByScope([b, a], sets).flatMap(group => group.questionIds),
+      ["shared"]);
+  });
 });
 
 
