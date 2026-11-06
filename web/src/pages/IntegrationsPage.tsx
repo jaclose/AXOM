@@ -152,7 +152,10 @@ function CalendarExportPanel() {
     sources: Pick<ReturnType<typeof useStore.getState>,
       "tasks" | "boardPrep" | "dayPlans" | "activeDayKey">;
   } | null>(null);
-  const currentSources = useStore.getState();
+  // Render from one consistent subscribed Zustand snapshot. An imperative
+  // getState() read here could disagree with useSyncExternalStore during a
+  // concurrent task edit and leave a previous validation warning visible.
+  const currentSources = state;
   const errorMessage = exportError
     && exportError.sources.tasks === currentSources.tasks
     && exportError.sources.boardPrep === currentSources.boardPrep
