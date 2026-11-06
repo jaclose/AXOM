@@ -63,6 +63,9 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   const current = library && library.accountId === accountId ? library : undefined;
   const plan = useMemo(() => current ? planPublication(current.inventory, confirmedTerms) : undefined, [current, confirmedTerms]);
   const ledger = useMemo(() => current && plan ? accountQuestions(current.inventory, plan) : undefined, [current, plan]);
+  // A contradictory prepared-library ledger is a whole-batch publication hold, not a warning.
+  // The uploader also validates each course, but it must not receive a known-invalid batch.
+  const ledgerHold = Boolean(ledger && (ledger.unaccounted !== 0 || ledger.mismatched.length > 0));
   const chosen = plan?.courses.filter(course => selected.has(course.catalogId) && course.termBasis !== "proposed") ?? [];
   const terms = [...new Set(plan?.courses.map(course => course.term) ?? [])];
 
@@ -218,7 +221,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   }
 
   async function publish() {
-    if (!accountId || !current || !plan || busy || !chosen.length || (share && !rights)) return;
+    if (!accountId || !current || !plan || !ledger || ledgerHold || busy || !chosen.length || (share && !rights)) return;
     const scope = academicAccountScope(accountId);
     const abort = new AbortController();
     controller.current = abort;
@@ -350,6 +353,10 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         </div>
       </div>}
       {ledger && <QuestionCount ledger={ledger} />}
+      {ledgerHold && <p id="academic-publisher-ledger-hold" role="alert" className="academic-publisher-hint">
+        Publishing is disabled because this prepared library has unaccounted questions or inconsistent question-set counts.
+        Correct or reprepare the library before publishing any course. You can still check courses locally without uploading.
+      </p>}
       {terms.map(term => <fieldset key={term} className="academic-publisher-term" disabled={Boolean(busy)}>
         <legend>{term}</legend>
         {plan.courses.filter(course => course.term === term).map(course => {
@@ -408,7 +415,8 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         <GButton disabled={Boolean(busy) || !chosen.length} onClick={() => void check()}>
           <ListChecks size={ICON_SIZE.emphasis} /> {busy === "checking" ? "Checking…" : `Check ${plural(chosen.length, "course")}`}
         </GButton>
-        <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || (share && !rights)} onClick={() => void publish()}>
+        <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || !ledger || ledgerHold || (share && !rights)}
+          aria-describedby={ledgerHold ? "academic-publisher-ledger-hold" : undefined} onClick={() => void publish()}>
           <UploadCloud size={ICON_SIZE.emphasis} /> {busy === "publishing" ? "Publishing…" : `Publish ${plural(chosen.length, "course")}`}
         </GButton>
         {(busy === "checking" || busy === "publishing") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
