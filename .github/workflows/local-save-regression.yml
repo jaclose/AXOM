@@ -32,7 +32,7 @@ jobs:
       - run: node scripts/toolchain.mjs
       - run: npm --prefix web ci
       - name: Storage and Account recovery regressions
-        run: npm --prefix web run test -- src/lib/localVault.test.ts src/components/shell/AccountSyncPanel.test.tsx src/components/shell/DataHealthPanel.test.tsx
+        run: npm --prefix web run test -- src/lib/localVault.test.ts src/components/shell/AccountSyncPanel.test.tsx src/components/shell/DataHealthPanel.test.tsx src/lib/retryLocalWorkspaceSave.test.ts
       - name: Typecheck current web source
         run: npm --prefix web run typecheck
       - name: Build release frontend
