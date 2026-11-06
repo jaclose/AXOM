@@ -12,6 +12,9 @@
 .surface-scroll .productivity-analytics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); align-items: stretch; gap: 16px; }
 .surface-scroll .productivity-analytics > * { min-width: 0; height: 100%; }
 .productivity-primary-grid > div > .pomodoro { height: auto; }
+.productivity-focus-stack { display: flex; flex-direction: column; gap: 14px; }
+.productivity-focus-stack > .pomodoro { width: 100%; }
+.productivity-focus-stack > .study-streak-monitor { margin-top: 0; }
 .productivity-primary-grid .fast-activity-logger { grid-template-columns: minmax(0, 1fr) auto; gap: 12px 10px; align-items: end; }
 .productivity-primary-grid .today-targets { grid-template-columns: minmax(0, 1fr); }
 .productivity-primary-grid .fast-activity-logger > * { min-width: 0; }
