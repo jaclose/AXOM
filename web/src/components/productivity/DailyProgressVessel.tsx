@@ -55,7 +55,7 @@ export function DailyProgressVessel({ result, compact = false, dayLabel = "Today
         tabIndex={0}
         aria-expanded={open}
         aria-controls={breakdownId}
-        aria-label="Where today’s progress came from"
+        aria-label={dayLabel === "Today" ? "Where today’s progress came from" : "Where selected-day progress came from"}
         onMouseEnter={() => setPeek(true)}
         onMouseLeave={() => setPeek(false)}
         onFocus={() => setPeek(true)}
