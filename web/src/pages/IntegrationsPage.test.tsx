@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
+import { buildIcs, calendarEvents } from "../lib/calendarExport";
 import { useStore } from "../lib/store";
 import { useAccount } from "../lib/account/accountStore";
 import { useUi } from "../lib/uiStore";
@@ -91,9 +92,16 @@ describe("Integrations", () => {
     // The learner repairs the task elsewhere while this panel remains open.
     // Retrying must use the updated store values, download valid bytes and
     // clear the stale validation error without reloading or remounting.
+    expect(useStore.getState().tasks.map((entry) => entry.due)).toEqual(["2999-03-01"]);
+    const current = useStore.getState();
+    const eligible = calendarEvents(current, {
+      tasks: true, exams: true, dayPlans: false, fromDay: current.activeDayKey,
+    });
+    expect(eligible).toEqual([expect.objectContaining({ uid: "task-t1", day: "2999-03-01" })]);
+    expect(buildIcs(eligible)).toContain("DTSTART;VALUE=DATE:29990301");
     expect(screen.getByText(/^1 event/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
-    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(createObjectURL).toHaveBeenCalledOnce();
     // Inspect the real generated file, not only whether the browser was asked
     // to download something. The repaired task date must replace the old one.
