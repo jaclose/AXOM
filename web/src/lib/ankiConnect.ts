@@ -2,8 +2,10 @@
 // AnkiConnect client. AnkiConnect is an Anki add-on (code 2055492159) that
 // exposes a localhost HTTP API (default http://127.0.0.1:8765). With Anki open
 // and the add-on installed, AXOM can link to the collection: push its cards
-// into an AXOM deck, read review stats, and log review counts. Requests never
-// leave the machine. Endpoint config and the sync ledger live in localStorage
+// into an AXOM deck, read review stats, and log review counts. Requests are
+// limited to loopback or explicitly configured private-LAN endpoints; LAN
+// endpoints receive the user's Anki data and optional API key. Endpoint config
+// and the sync ledger live in localStorage
 // so they are never bundled into the persisted vault or a backup.
 //
 // Requests are CORS "simple requests" (a JSON string body with no custom
@@ -103,11 +105,25 @@ interface LocalFetchInit extends RequestInit {
 /** Loopback (127.0.0.1, localhost, ::1) or private-network address, else null. */
 export function addressSpaceFor(url: URL): AddressSpace | null {
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || /^127\./.test(host) || host === "::1") return "loopback";
-  if (
-    /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-    /^169\.254\./.test(host) || host.endsWith(".local") || /^f[cd][0-9a-f]{2}:/.test(host) || host.startsWith("fe80:")
-  ) return "local";
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return "loopback";
+
+  // Match complete numeric IPv4 addresses, not DNS names that start with
+  // an apparent private-IP prefix (127.attacker.example, 10.attacker.example).
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4) {
+    const octets = ipv4.slice(1).map(Number);
+    if (octets.some((octet) => octet > 255)) return null;
+    const [first, second] = octets;
+    if (first === 127) return "loopback";
+    if (
+      first === 10 || (first === 192 && second === 168) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 169 && second === 254)
+    ) return "local";
+    return null;
+  }
+
+  if (host.endsWith(".local") || /^f[cd][0-9a-f]{2}:/.test(host) || host.startsWith("fe80:")) return "local";
   return null;
 }
 
@@ -157,6 +173,11 @@ function endpointUrl(endpoint: string): URL {
   if (!["http:", "https:"].includes(url.protocol)) {
     throw new AnkiError("The endpoint must start with http:// or https://. AnkiConnect normally uses http://127.0.0.1:8765.", "malformed-endpoint");
   }
+  // The transport may contain a device-local API key. Do not send it to a
+  // public origin or a misleading URL containing embedded credentials.
+  if (url.username || url.password || addressSpaceFor(url) === null) {
+    throw new AnkiError("Use AnkiConnect on this computer or a trusted private network address. Public endpoints and URLs containing login details are blocked to protect your Anki data and API key.", "malformed-endpoint");
+  }
   return url;
 }
 
@@ -184,6 +205,7 @@ async function send(url: URL, body: string, timeoutMs: number, fetchImpl: typeof
       mode: "cors",
       cache: "no-store",
       credentials: "omit",
+      redirect: "error", // Do not forward the Anki API key across redirects.
       referrerPolicy: "no-referrer",
       // No headers: a string body keeps this a CORS simple request.
       body,
