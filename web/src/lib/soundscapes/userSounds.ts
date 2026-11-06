@@ -16,13 +16,13 @@ export function homeOf(item: Pick<UserMediaMeta, "presetId">): SoundscapeId {
 
 /** Fold your sounds into the preset catalog and let every list re-render. */
 export function syncUserSoundCatalog(): void {
-  const { items, urls, loaded } = useUserMedia.getState();
+  const { items, urls, loaded, error } = useUserMedia.getState();
   applyUserSounds(items
     .filter((item) => item.kind === "sound" && urls[item.id])
     .map((item) => ({ id: item.id, name: item.name, presetId: item.presetId, url: urls[item.id] })));
   const player = useSoundscape.getState();
   // Before your files have loaded, an empty shelf says nothing about what exists.
-  if (loaded) player.settleCatalog();
+  if (loaded && !error) player.settleCatalog();
   player.bumpCatalog();
 }
 

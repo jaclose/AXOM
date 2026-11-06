@@ -43,7 +43,7 @@
 }
 .focus-dock-goo .dock-capsule { background: rgb(var(--dock-bg)); }
 .focus-dock-goo .dock-capsule > * { visibility: hidden; }
-.focus-dock-content .dock-capsule { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.09), inset 0 0 0 1px rgb(255 255 255 / 0.05); }
+.focus-dock-content .dock-capsule { background: rgb(var(--dock-bg)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.09), inset 0 0 0 1px rgb(255 255 255 / 0.05); }
 
 .dock-icon {
   flex: 0 0 auto;
@@ -334,3 +334,40 @@
 .dock-rest .dock-ring { color: rgba(var(--cool-rgb, 120, 160, 190), 1); }
 .dock-rest.ringing .dock-ring { color: #f0b37e; animation: dock-live 2.4s ease-out infinite; border-radius: 50%; }
 .dock-rest .dock-sound-name b { font-variant-numeric: tabular-nums; }
+
+/* The dock keeps the same footprint through timer and sound changes. */
+.focus-dock { width: min(440px, calc(100vw - 24px)); }
+.focus-dock-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 12px; }
+.focus-dock-row > * { width: 100%; min-width: 0; }
+.focus-dock .dock-capsule { width: 100%; animation: none; }
+.dock-sound-wrap, .dock-sound-inner { width: 100%; min-width: 0; }
+.dock-sound-name { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.dock-sound-name b, .dock-sound-name small { overflow: hidden; text-overflow: ellipsis; }
+.dock-timer .dock-label { flex: 1; min-width: 0; }
+.dock-timer-trigger { padding: 0; color: inherit; background: transparent; border: 0; cursor: pointer; }
+.dock-timer-trigger:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); border-radius: 4px; }
+.dock-more, .dock-timer.expanded .dock-more, .dock-setup {
+  position: absolute; bottom: calc(100% + 12px); left: 0; right: auto; z-index: 1;
+  width: max-content; max-width: calc(100vw - 24px); max-height: none; overflow: visible;
+  opacity: 1; padding: 7px; border-radius: 16px; background: rgb(var(--dock-bg));
+  box-shadow: 0 18px 40px rgb(0 0 0 / .35); transition: none;
+}
+.dock-setup { display: grid; gap: 7px; color: rgb(var(--dock-ink)); font-size: 12px; }
+.dock-setup label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dock-setup select, .dock-setup button { color: inherit; background: rgb(255 255 255 / .09); border: 1px solid rgb(255 255 255 / .12); border-radius: 8px; padding: 7px; }
+.dock-setup select:disabled, .dock-setup button:disabled { opacity: .5; cursor: not-allowed; }
+.dock-log-menu { left: 0; right: auto; bottom: calc(100% + 62px); max-width: calc(100vw - 24px); }
+.dock-genie { max-height: calc(100dvh - 96px - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+.dock-genie.closing { pointer-events: none; }
+.surface-scroll { scroll-padding-bottom: 100px; }
+.surface-scroll > .page { padding-bottom: max(100px, env(safe-area-inset-bottom)); }
+@media (max-width: 560px) {
+  .focus-dock-row { gap: 10px; }
+  .dock-timer .dock-label, .dock-eq { display: none; }
+  .dock-timer { justify-content: space-between; }
+  .dock-sound-inner { gap: 2px; }
+  .dock-sound-name { padding-inline: 2px; }
+  .dock-sound-name b { max-width: 100%; }
+}
+/* Keep the floating controls reachable across the gap above the pill. */
+.dock-timer.expanded::before { content: ""; position: absolute; bottom: 100%; left: 0; width: 100%; height: 12px; }

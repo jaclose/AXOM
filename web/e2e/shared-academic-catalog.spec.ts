@@ -9,7 +9,12 @@ const state = (page: Page) => page.evaluate(async () => {
 });
 for (const width of [1440,390]) test(`one catalog links QBank to course weeks, images and saved answers at ${width}px`, async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
-  page.on("console", message => { if (["error","warning"].includes(message.type())) errors.push(message.text()); });
+  page.on("console", message => {
+    const text = message.text();
+    // Screenshot/readback driver diagnostics are not application errors.
+    if (message.type() === "warning" && /^\[\.WebGL-0x[\da-f]+\]GL Driver Message \(OpenGL, Performance, GL_CLOSE_PATH_NV, High\): GPU stall due to ReadPixels$/i.test(text)) return;
+    if (["error", "warning"].includes(message.type())) errors.push(text);
+  });
   await page.setViewportSize({ width, height: width===390 ? 844 : 900 });
   const backend = await academicCatalogFixture(page);
   const catalog = page.getByRole("region", { name: "Available question banks" });

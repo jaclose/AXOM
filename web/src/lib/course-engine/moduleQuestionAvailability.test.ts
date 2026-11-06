@@ -206,3 +206,84 @@ describe("course tracker source-versus-question availability", () => {
     expect(report.unassignedCollections).toBe(1);
   });
 });
+
+describe("source-week availability proof", () => {
+  it("does not infer a week from a set when the question declares an invalid one", () => {
+    for (const raw of [0, 100, -1, "2026-11-05", "Week 2-3"]) {
+      const report = buildQuestionAvailabilityIndex(input(
+        [set("source", ["q"], { scope: goerScope })],
+        [question("q", { week: raw as number })],
+      ));
+      expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, unresolvedWeekQuestions: 1, collections: 0,
+      });
+      expect(report.unassignedCollections).toBe(1);
+    }
+  });
+
+  it("does not borrow a review collection's week when the primary set is unscheduled", () => {
+    const report = buildQuestionAvailabilityIndex(input([
+      set("primary", ["q"], { scope: { module: "GOER", courseId: "ppm-501" } }),
+      set("review", ["q"], { scope: { module: "GOER", courseId: "ppm-501", week: 3 }, kind: "review" }),
+    ], [question("q", { setId: "primary" })]));
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, unresolvedWeekQuestions: 1, collections: 1, indexedWeeks: [],
+    });
+    expect(report.unassignedCollections).toBe(1);
+  });
+
+  it("keeps a legacy question unscheduled when one of two sets has no week", () => {
+    const report = buildQuestionAvailabilityIndex(input([
+      set("dated", ["q"], { scope: { module: "GOER", week: 2 } }),
+      set("undated", ["q"], { scope: { module: "GOER" } }),
+    ], [question("q")]));
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, unresolvedWeekQuestions: 1, indexedWeeks: [2],
+    });
+  });
+
+  it("does not attribute a moved question to its previous course's shared module", () => {
+    const curriculum: CurriculumTemplate = { id: "collision", label: "Collision",
+      terms: [{ name: "Term 4", courses: [
+        { code: "PPM 500", name: "Core", modules: ["SHARED"] },
+        { code: "ELECTIVE", name: "Elective", modules: ["SHARED"] },
+      ] }] };
+    const sharedCourses = [
+      { ...courses[0], modules: [{ id: "core-shared", name: "SHARED" }] },
+      { id: "elective", termId: "term-4", code: "ELECTIVE", name: "Elective", files: 0,
+        modules: [{ id: "elective-shared", name: "SHARED" }] },
+    ];
+    const report = buildQuestionAvailabilityIndex({ curriculum, terms, courses: sharedCourses,
+      sets: [set("original", ["moved"], { scope: { module: "SHARED", courseId: "ppm-500", week: 2 } })],
+      questions: [question("moved", { setId: "original", courseId: "elective" })],
+    });
+    expect(report.unassignedQuestions).toBe(1);
+    expect(report.unassignedCollections).toBe(1);
+  });
+
+  it("holds malformed source-set week metadata rather than displaying indexed weeks", () => {
+    for (const raw of [0, 100, "Week 3-4", "2026-11-05"]) {
+      const report = buildQuestionAvailabilityIndex(input([
+        set("invalid", ["q"], { scope: { module: "GOER", courseId: "ppm-501", week: raw as number } }),
+      ], [question("q", { setId: "invalid" })]));
+      expect(report.unassignedCollections).toBe(1);
+      expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        indexedWeeks: [], unresolvedWeekQuestions: 1, storedQuestions: 1,
+      });
+    }
+  });
+
+  it("preserves valid legacy week tokens and source IDs without mutating records", () => {
+    const source = set("legacy", ["q"], {
+      scope: { module: "GOER", week: "Week 3" as unknown as number, courseId: "ppm-501" },
+    });
+    const record = question("q", { setId: "legacy" });
+    const before = JSON.stringify([source, record]);
+    const report = buildQuestionAvailabilityIndex(input([source], [record]));
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 1, collections: 1, indexedWeeks: [3], unresolvedWeekQuestions: 0,
+    });
+    expect(report.unassignedCollections).toBe(0);
+    expect(JSON.stringify([source, record])).toBe(before);
+  });
+});

@@ -28,7 +28,7 @@ preview.stderr.on("data", (chunk) => { previewOutput += String(chunk); });
 let browser;
 try {
   await waitForServer(origin);
-  browser = await chromium.launch({ headless: true, ...(process.env.AXOM_BROWSER_CHANNEL ? { channel: process.env.AXOM_BROWSER_CHANNEL } : {}) });
+  browser = await chromium.launch({ headless: true, ...(process.env.AXOM_BROWSER_EXECUTABLE_PATH ? { executablePath: process.env.AXOM_BROWSER_EXECUTABLE_PATH } : process.env.AXOM_BROWSER_CHANNEL ? { channel: process.env.AXOM_BROWSER_CHANNEL } : {}) });
   const context = await browser.newContext({ reducedMotion: "reduce" });
   const page = await context.newPage();
   await page.goto(`${origin}/#daily-word`, { waitUntil: "networkidle" });

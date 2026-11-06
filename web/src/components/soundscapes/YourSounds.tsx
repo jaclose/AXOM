@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, FileAudio, Music2, Pause, Pencil, Play, Plus, Trash2, Upload } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
-import { SOUNDSCAPES, FREQUENCY_ORDER, AMBIENT_ORDER, type SoundscapeId, type SoundscapeVersion } from "../../lib/soundscapes/presets";
-import { useSoundscape } from "../../lib/soundscapes/store";
+import { DEFAULT_SOUNDSCAPE_ID, DEFAULT_SOUNDSCAPE_VERSION, SOUNDSCAPES, FREQUENCY_ORDER, AMBIENT_ORDER, type SoundscapeId, type SoundscapeVersion } from "../../lib/soundscapes/presets";
+import { DEFAULT_MAIN_SOUND, useSoundscape } from "../../lib/soundscapes/store";
 import { useUserMedia, type UserMediaMeta } from "../../lib/soundscapes/userMedia";
 import { assignUserSound, homeOf, renameUserSound, syncUserSoundCatalog, userVersionId } from "../../lib/soundscapes/userSounds";
 import { pushToast } from "../../lib/toast";
@@ -23,19 +23,36 @@ function sizeLabel(bytes: number): string {
 export function YourSounds() {
   const items = useUserMedia((state) => state.items).filter((item) => item.kind === "sound");
   const libraryRecordings = SOUNDSCAPES.yours.versions.filter((version): version is Extract<SoundscapeVersion, { src: string }> => "src" in version && !version.userFile);
+  const axomOriginal = SOUNDSCAPES[DEFAULT_SOUNDSCAPE_ID].versions.find((version): version is Extract<SoundscapeVersion, { src: string }> => "src" in version && version.id === DEFAULT_SOUNDSCAPE_VERSION);
   const error = useUserMedia((state) => state.error);
   const add = useUserMedia((state) => state.add);
   const againUnlocked = useUnlocked("again");
   const [home, setHome] = useState<SoundscapeId>("yours");
+  const [makeMain, setMakeMain] = useState(false);
+  const makeMainRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const node = input.current;
+    const cancel = () => { makeMainRef.current = false; setMakeMain(false); };
+    node?.addEventListener("cancel", cancel);
+    return () => node?.removeEventListener("cancel", cancel);
+  }, []);
 
   async function addFiles(files: FileList | File[]) {
     setBusy(true);
     try {
       for (const file of Array.from(files)) {
         const added = await add(file, "sound", home);
+        if (!added) break;
+        if (makeMainRef.current) {
+          syncUserSoundCatalog();
+          useSoundscape.getState().setMainSound(home, userVersionId(added.id));
+          makeMainRef.current = false;
+          setMakeMain(false);
+        }
         // Added straight into a preset: it becomes what that preset plays.
         if (added && home !== "yours") {
           syncUserSoundCatalog();
@@ -55,6 +72,7 @@ export function YourSounds() {
       </div>
       <div className="your-sounds">
         {againUnlocked && <AgainCard />}
+        {axomOriginal && <LibraryRecordingRow presetId={DEFAULT_SOUNDSCAPE_ID} version={axomOriginal} />}
         {libraryRecordings.map((version) => <LibraryRecordingRow key={version.id} version={version} />)}
         {items.map((item) => <YourSoundRow key={item.id} item={item} />)}
         <div
@@ -78,6 +96,7 @@ export function YourSounds() {
               {HOMES.map((id) => <option key={id} value={id}>{id === "yours" ? "Your sounds only" : `Play it for ${SOUNDSCAPES[id].name}`}</option>)}
             </select>
           </label>
+          <label><input type="checkbox" checked={makeMain} onChange={(event) => { makeMainRef.current = event.target.checked; setMakeMain(event.target.checked); }} /> Make the next added sound my main sound</label>
           <button type="button" className="gbtn primary" disabled={busy} onClick={() => input.current?.click()}>
             <Plus size={ICON_SIZE.body} aria-hidden="true" /> Add a sound
           </button>
@@ -93,32 +112,37 @@ export function YourSounds() {
   );
 }
 
-function LibraryRecordingRow({ version }: { version: Extract<SoundscapeVersion, { src: string }> }) {
-  const original = version.id === "axom-afterlight";
+function LibraryRecordingRow({ version, presetId = "yours" }: { version: Extract<SoundscapeVersion, { src: string }>; presetId?: SoundscapeId }) {
+  const original = version.id === "axom-afterlight" || version.id === DEFAULT_SOUNDSCAPE_VERSION;
   return (
     <div className={`your-sound library-recording ${original ? "axom-original" : "personal-recording"}`}>
-      <PlayToggle presetId="yours" versionId={version.id} label={version.label} />
+      <PlayToggle presetId={presetId} versionId={version.id} label={version.label} />
       {original
         ? <img className="your-sound-orb" src={`${import.meta.env.BASE_URL}icons/axom-orb-512.png`} alt="" width="28" height="28" />
         : <FileAudio size={ICON_SIZE.emphasis} aria-hidden="true" className="your-sound-icon" />}
       <div className="your-sound-copy">
         <b>{original ? `AXOM Original · ${version.label}` : version.label}</b>
-        <small>{original ? "Composed for AXOM · no borrowed samples" : "Your local recording · kept on this Mac"}</small>
+        <small>{version.id === "axom-afterlight" ? "Composed for AXOM · no borrowed samples" : original ? "AXOM Soundscapes · 9 min 27 sec loop" : "Your local recording · kept on this Mac"}</small>
         <small>{version.description}</small>
       </div>
-      <span className="your-sound-source">{original ? "ORIGINAL 01" : "LOCAL FILE"}</span>
+      <span className="your-sound-source">{original ? "AXOM ORIGINAL" : "LOCAL FILE"}</span>
+      <MakeMainButton presetId={presetId} versionId={version.id} />
     </div>
   );
 }
 
 function PlayToggle({ presetId, versionId, label }: { presetId: SoundscapeId; versionId: string; label: string }) {
   const status = useSoundscape((state) => state.status);
-  const active = useSoundscape((state) => state.presetId === presetId && state.versions[presetId] === versionId);
+  const active = useSoundscape((state) => state.presetId === presetId && state.loadedVersionId === versionId);
   const playing = status === "playing" && active;
   return (
     <button type="button" className="your-sound-play" aria-label={playing ? `Pause ${label}` : `Play ${label}`} onClick={() => {
       const store = useSoundscape.getState();
       if (playing) void store.pause();
+      else if (store.status === "paused" && active) {
+        store.setVersion(presetId, versionId);
+        void store.resume();
+      }
       else void store.play(presetId, { version: versionId });
     }}>
       {playing ? <Pause size={ICON_SIZE.body} aria-hidden="true" /> : <Play size={ICON_SIZE.body} aria-hidden="true" />}
@@ -183,6 +207,7 @@ function YourSoundRow({ item }: { item: UserMediaMeta }) {
           {HOMES.map((id) => <option key={id} value={id}>{id === "yours" ? "Your sounds only" : SOUNDSCAPES[id].name}</option>)}
         </select>
       </label>
+      <MakeMainButton presetId={presetId} versionId={userVersionId(item.id)} />
       {editing ? (
         // onMouseDown keeps the field from blurring (and saving) before this click lands.
         <button type="button" className="gbtn sm icon primary" aria-label="Save name" onMouseDown={(event) => event.preventDefault()} onClick={saveName}><Check size={ICON_SIZE.body} aria-hidden="true" /></button>
@@ -192,8 +217,16 @@ function YourSoundRow({ item }: { item: UserMediaMeta }) {
       <button type="button" className="gbtn sm icon danger" aria-label={`Remove ${item.name}`} onClick={() => {
         if (window.confirm(`Remove “${item.name}” from this device?`)) {
           const versionId = userVersionId(item.id);
-          if (useSoundscape.getState().versions[presetId] === versionId && useSoundscape.getState().status !== "idle") void useSoundscape.getState().stop();
-          void remove(item.id);
+          void (async () => {
+            try {
+              await remove(item.id);
+              const player = useSoundscape.getState();
+              if (player.loadedVersionId === versionId && player.status !== "idle") await player.stop();
+              const current = useSoundscape.getState();
+              if (current.mainSound.versionId === versionId) current.setMainSound(DEFAULT_MAIN_SOUND.presetId, DEFAULT_MAIN_SOUND.versionId);
+              syncUserSoundCatalog();
+            } catch { /* the media store reports the error; keep the selection */ }
+          })();
         }
       }}><Trash2 size={ICON_SIZE.body} aria-hidden="true" /></button>
     </div>
@@ -211,4 +244,9 @@ function AgainCard() {
       </div>
     </div>
   );
+}
+
+function MakeMainButton({ presetId, versionId }: { presetId: SoundscapeId; versionId: string }) {
+  const selected = useSoundscape((state) => state.mainSound.presetId === presetId && state.mainSound.versionId === versionId);
+  return <button type="button" className="gbtn sm" disabled={selected} onClick={() => useSoundscape.getState().setMainSound(presetId, versionId)}>{selected ? "Main sound" : "Make main"}</button>;
 }

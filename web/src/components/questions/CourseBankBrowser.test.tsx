@@ -125,7 +125,11 @@ describe("CourseBankBrowser academic navigation", () => {
 describe("CourseBankBrowser ambiguous curriculum scope", () => {
   it("does not infer a course from a repeated module name", async () => {
     state.courses[0] = { ...state.courses[0], modules: [{ id: "m2", name: "Neuro" }] };
-    state.questionSets[2] = { ...state.questionSets[2], scope: { courseId: "c2", module: "Neuro", week: 1 } };
+    // A second course must have its own source question. Moving a review
+    // collection while keeping c4's question would be conflicting provenance.
+    state.questions.push(question("c2-source", { setId: "unresolved", courseId: "c2", module: "Neuro", week: 1 }));
+    state.questionSets[2] = { ...state.questionSets[2], questionIds: ["c2-source"],
+      scope: { courseId: "c2", module: "Neuro", week: 1 } };
     const user = userEvent.setup();
     render(<CourseBankBrowser initialScope={{ module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
     expect(screen.getByRole("alert").textContent).toContain("Multiple courses contain Neuro");
@@ -176,7 +180,10 @@ describe("CourseBankBrowser recovery routes", () => {
 describe("CourseBankBrowser shared curriculum aliases", () => {
   it("opens a verified long-form module when its incoming scope uses a short code", () => {
     state.courses[1] = { ...state.courses[1], modules: [{ id: "m4", name: "NB Block 2" }] };
-    state.questionSets[0] = { ...state.questionSets[0], scope: { courseId: "c4", module: "NB Block 2", week: 1 } };
+    // The same questions also appear in the two review collections. Refile
+    // those views alongside their source rather than borrowing a stale module.
+    state.questionSets = state.questionSets.map((entry) =>
+      entry.scope?.courseId === "c4" ? { ...entry, scope: { ...entry.scope, module: "NB Block 2" } } : entry);
     render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "NB2", week: 1 }} onPractice={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "Week 1" })).toBeTruthy();
     expect(screen.getByText("IMCQ 1")).toBeTruthy();

@@ -110,3 +110,115 @@ async function completeOnboarding(page: Page): Promise<void> {
   const reviewLater = page.getByRole("button", { name: "Review later" });
   if (await reviewLater.count()) await reviewLater.click();
 }
+
+test("Productivity primary panels stay usable across themes and narrow screens", async ({ page }, testInfo) => {
+  test.setTimeout(120_000); // Ten rendered layouts, including screenshot/font settling.
+  await page.goto("/#productivity", { waitUntil: "networkidle" });
+  await completeOnboarding(page);
+  await page.evaluate(() => { window.location.hash = "productivity"; });
+  for (const theme of ["dark", "light"]) {
+    for (const width of [1440, 1024, 768, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
+      await expect(page.getByRole("heading", { name: "Log an activity" })).toBeVisible();
+      const bounds = await page.locator(".productivity-primary-grid").evaluate((grid) => {
+        const [log, focus] = Array.from(grid.children).map((element) => element.getBoundingClientRect());
+        return { logHeight: log.height, focusHeight: focus.height, logTop: log.top, focusTop: focus.top, scroll: grid.scrollWidth, width: grid.clientWidth };
+      });
+      expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
+      if (width === 1440) {
+        expect(Math.abs(bounds.logTop - bounds.focusTop)).toBeLessThan(2);
+        expect(Math.abs(bounds.logHeight - bounds.focusHeight)).toBeLessThan(2);
+      } else expect(bounds.focusTop).toBeGreaterThan(bounds.logTop);
+      const progress = await page.locator("#productivity-log .daily-progress-vessel").evaluate((vessel) => {
+        const outer = vessel.getBoundingClientRect();
+        const track = vessel.querySelector(".daily-progress-track")!.getBoundingClientRect();
+        return { left: track.left - outer.left, right: track.right - outer.right };
+      });
+      expect(progress.left).toBeGreaterThanOrEqual(0);
+      expect(progress.right).toBeLessThanOrEqual(1);
+      const logFields = await page.locator("#productivity-log .fast-activity-logger").evaluate((logger) => {
+        const outer = logger.getBoundingClientRect();
+        return Array.from(logger.querySelectorAll("input, select, button")).map((field) => {
+          const rect = field.getBoundingClientRect();
+          return { left: rect.left - outer.left, right: rect.right - outer.right, width: rect.width };
+        });
+      });
+      expect(logFields.length).toBeGreaterThanOrEqual(6);
+      for (const field of logFields) {
+        expect(field.left).toBeGreaterThanOrEqual(0);
+        expect(field.right).toBeLessThanOrEqual(1);
+        expect(field.width).toBeGreaterThan(40);
+      }
+      const fields = await page.locator(".productivity-primary-grid .pomo-target-box").evaluate((box) => {
+        const outer = box.getBoundingClientRect();
+        return Array.from(box.querySelectorAll("input, select")).map((field) => {
+          const rect = field.getBoundingClientRect();
+          return { width: rect.width, left: rect.left - outer.left, right: rect.right - outer.right };
+        });
+      });
+      expect(fields).toHaveLength(2);
+      for (const field of fields) {
+        expect(field.width).toBeGreaterThan(160);
+        expect(field.left).toBeGreaterThanOrEqual(0);
+        expect(field.right).toBeLessThanOrEqual(1);
+      }
+      if (width <= 560) {
+        const next = await page.locator(".productivity-next").evaluate((section) => {
+          const copy = section.querySelector("p")!.getBoundingClientRect();
+          const action = section.querySelector(".gbtn")!.getBoundingClientRect();
+          return { copyWidth: copy.width, copyBottom: copy.bottom, actionTop: action.top };
+        });
+        expect(next.copyWidth).toBeGreaterThan(160);
+        expect(next.actionTop).toBeGreaterThanOrEqual(next.copyBottom);
+      }
+      await page.locator(".surface-scroll").evaluate((surface) => { surface.scrollTop = 0; });
+      await page.screenshot({ path: testInfo.outputPath(`productivity-${theme}-${width}.png`) });
+    }
+  }
+});
+
+test("expanded Productivity target settings and custom form stay inside the Log panel", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await page.goto("/#productivity", { waitUntil: "networkidle" });
+  await completeOnboarding(page);
+  await page.evaluate(() => { window.location.hash = "productivity"; });
+  const editor = page.locator("#productivity-log .daily-requirements-editor");
+  await editor.locator(":scope > summary").click();
+  const custom = editor.locator(".daily-custom-requirement");
+  await custom.locator("summary").click();
+  await custom.getByPlaceholder("Gym, reading, prayer, steps…").fill("Reading practice");
+  await custom.getByLabel("Target", { exact: true }).fill("3");
+  await custom.getByRole("button", { name: "Add target" }).click();
+  const card = editor.locator(".daily-requirement-card").filter({ hasText: "Reading practice" });
+  await card.locator(".daily-requirement-settings > summary").click();
+  await card.getByLabel("Schedule", { exact: true }).selectOption("weekdays");
+  await expect(card.getByLabel("Sunday", { exact: true })).not.toBeChecked();
+  await card.getByLabel("Sunday", { exact: true }).check();
+  await expect(card.getByLabel("Sunday", { exact: true })).toBeChecked();
+  await custom.getByLabel("Completion source").selectOption("activity");
+  await custom.getByRole("combobox", { name: /^Schedule/ }).selectOption("times-per-week");
+  await expect(custom.getByLabel("Activity aliases", { exact: true })).toBeVisible();
+  await expect(custom.getByLabel("Times", { exact: true })).toBeVisible();
+
+  for (const width of [1440, 1024, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const controls = await editor.evaluate((element) => {
+      const panel = element.closest("#productivity-log")!.getBoundingClientRect();
+      return Array.from(element.querySelectorAll<HTMLElement>("input, select, button, .daily-weekdays span")).filter((control) => control.getClientRects().length > 0 && getComputedStyle(control).opacity !== "0").map((control) => {
+        const rect = control.getBoundingClientRect();
+        return { label: control.getAttribute("aria-label") || control.textContent || control.tagName, width: rect.width, left: rect.left - panel.left, right: rect.right - panel.right };
+      });
+    });
+    expect(controls.length).toBeGreaterThanOrEqual(20);
+    for (const control of controls) {
+      expect(control.left, control.label).toBeGreaterThanOrEqual(0);
+      expect(control.right, control.label).toBeLessThanOrEqual(1);
+      expect(control.width, control.label).toBeGreaterThanOrEqual(18);
+    }
+    await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await card.screenshot({ path: testInfo.outputPath(`target-settings-${width}.png`) });
+    await custom.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await custom.screenshot({ path: testInfo.outputPath(`target-custom-${width}.png`) });
+  }
+});

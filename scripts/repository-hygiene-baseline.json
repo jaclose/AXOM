@@ -8,6 +8,14 @@
   ],
   "exceptions": [
     {
+      "path": "web/public/soundscapes/axom-soundscape-1.m4a",
+      "bytes": 11504140,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "JD authorized publication as AXOM Soundscape 1 / AXOM Originals on 2026-11-05 and confirmed permission to use the recording. Reviewed runtime asset: one 566.920-second stereo AAC loop, reduced from the supplied two-hour recording. This exact-size ceiling permits only the reviewed bundled default, not source recordings or personal imports."
+    },
+    {
       "path": "AGAIN*. .m4a",
       "bytes": 1252378,
       "rules": [

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 
 /** First visits open the "What are you into?" opener; tests that aren't about it skip it. */
@@ -13,6 +13,7 @@ async function skipSoundscapeOpener(page: Page) {
 /** Dev-only live-store handle installed by src/main.tsx. */
 type DevWindow = Window & {
   __AXOM_DEV__: Promise<{
+    useStore: typeof import("../src/lib/store").useStore;
     usePomodoro: { getState: () => { start: () => void; running: boolean } };
     useSoundscape: { getState: () => { status: string; presetId: string | null } };
   }>;
@@ -44,7 +45,7 @@ test("the focus dock splits for a soundscape, genies its visual, and stops clean
   const dock = page.getByRole("region", { name: "Focus dock" });
   await expect(dock).toBeVisible();
   await expect(dock.getByRole("status")).toContainText("Focus running");
-  await expect(dock).not.toHaveClass(/split/);
+  await expect(dock).toHaveClass(/split/);
 
   await page.goto("/#soundscapes");
   await skipSoundscapeOpener(page);
@@ -71,15 +72,104 @@ test("the focus dock splits for a soundscape, genies its visual, and stops clean
 
   await dock.getByRole("button", { name: "Stop sound" }).click();
   await expect.poll(() => soundStatus(page)).toBe("idle");
-  await expect(dock).not.toHaveClass(/split/);
+  await expect(dock).toHaveClass(/split/);
   await expect(dock.getByRole("status")).toContainText("Focus running");
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  const box = await dock.boundingBox();
-  expect(box!.x).toBeGreaterThanOrEqual(0);
-  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const pills = dock.locator(".focus-dock-content .dock-capsule");
+    const first = await pills.nth(0).boundingBox();
+    const second = await pills.nth(1).boundingBox();
+    expect(first!.width).toBeCloseTo(second!.width, 0);
+    expect(first!.height).toBe(second!.height);
+    expect(first!.x).toBeGreaterThanOrEqual(0);
+    expect(second!.x + second!.width).toBeLessThanOrEqual(width);
+  }
   expect(errors).toEqual([]);
 });
+
+test("dock popovers and keyboard controls remain usable across themes and narrow viewports", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openWorkspace(page);
+  const dock = page.getByRole("region", { name: "Focus dock" });
+  const viewports = [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }];
+
+  for (const theme of ["dark", "light"]) {
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
+      const pills = dock.locator(".focus-dock-content .dock-capsule");
+      const first = await pills.nth(0).boundingBox();
+      const second = await pills.nth(1).boundingBox();
+      expect(first!.width).toBeCloseTo(second!.width, 0);
+      expect(first!.height).toBe(second!.height);
+
+      await dock.getByRole("button", { name: "Timer options" }).click();
+      const setup = dock.getByRole("group", { name: "Timer options" });
+      await expect(setup).toBeVisible();
+      await expectWithinViewport(setup, viewport);
+      await setup.getByRole("combobox", { name: "Timer duration" }).selectOption("50-10");
+      await page.keyboard.press("Escape");
+      await expect(dock.getByRole("button", { name: "Timer options" })).toBeFocused();
+      await expect(setup).toHaveCount(0);
+
+      const soundTrigger = dock.getByRole("button", { name: /soundscape.*show visual and controls/ });
+      await soundTrigger.focus();
+      const panel = dock.getByRole("dialog");
+      await expect(panel).toBeVisible();
+      await expectWithinViewport(panel, viewport);
+      await page.keyboard.press("Tab");
+      await expect(dock.getByRole("button", { name: "Play sound" })).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(dock.getByRole("button", { name: "Stop sound" })).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(panel.getByRole("group", { name: "Soundscape", exact: true }).getByRole("button").first()).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(soundTrigger).toBeFocused();
+      await expect(panel).toBeHidden();
+    }
+  }
+
+  // A standalone session has its own actions rather than Pomodoro setup.
+  await page.evaluate(async () => {
+    const { useStore } = await (window as unknown as DevWindow).__AXOM_DEV__;
+    useStore.getState().startSession({ title: "Dock keyboard review", link: { kind: "free", label: "Free study" }, source: "manual" });
+  });
+  for (const theme of ["dark", "light"]) {
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
+      const sessionControl = dock.getByRole("button", { name: "Pause session" });
+      await sessionControl.focus();
+      await dock.getByRole("button", { name: "Log a quick note" }).click();
+      const menu = dock.getByRole("menu", { name: "Quick log" });
+      await expect(menu).toBeVisible();
+      await expectWithinViewport(menu, viewport);
+      await expectWithinViewport(dock.locator(".dock-more"), viewport);
+      const menuBounds = await menu.boundingBox();
+      const actionBounds = await dock.locator(".dock-more").boundingBox();
+      expect(menuBounds!.y + menuBounds!.height).toBeLessThanOrEqual(actionBounds!.y);
+      await menu.getByRole("menuitem").first().focus();
+      await page.keyboard.press("Escape");
+      await expect(sessionControl).toBeFocused();
+      await expect(menu).toHaveCount(0);
+      // Leave the collapsed control before the next viewport re-enters it.
+      await page.keyboard.press("Shift+Tab");
+      await expect(sessionControl).not.toBeFocused();
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
+async function expectWithinViewport(locator: Locator, viewport: { width: number; height: number }) {
+  const bounds = await locator.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+}
 
 test("opening-film settings persist and a preview can be skipped", async ({ page }) => {
   await openWorkspace(page);

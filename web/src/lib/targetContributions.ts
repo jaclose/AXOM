@@ -61,7 +61,7 @@ export function buildTargetContributionLedger(input: TargetContributionInput): T
   const { requirement, dayKey } = input;
   const unit = targetUnit(requirement, input.productivityTrackers, input.habits);
   const rows = new Map<string, TargetContribution>();
-  const logs = canonicalLogs(input.logs.filter((log) => log.dayKey === dayKey));
+  const logs = canonicalStudyLogs(input.logs).filter((log) => log.dayKey === dayKey);
   const excluded = new Set(requirement.excludedSourceRecordIds ?? []);
   const included = new Set(requirement.includedSourceRecordIds ?? []);
 
@@ -390,7 +390,7 @@ function put(rows: Map<string, TargetContribution>, row: TargetContribution) {
   }
 }
 
-function canonicalLogs(logs: StudyLog[]): StudyLog[] {
+export function canonicalStudyLogs(logs: readonly StudyLog[]): StudyLog[] {
   const byId = new Map<string, StudyLog>();
   for (const log of [...logs].sort(compareLogs)) byId.set(log.id, log);
   return [...byId.values()].sort(compareLogs);
@@ -427,13 +427,17 @@ function logMatchesAlias(log: StudyLog, aliases: Set<string>): boolean {
 }
 
 function compareLogs(a: StudyLog, b: StudyLog): number {
-  return a.ts.localeCompare(b.ts)
-    || a.id.localeCompare(b.id)
-    || logFingerprint(a).localeCompare(logFingerprint(b));
+  const aTime = Date.parse(a.ts);
+  const bTime = Date.parse(b.ts);
+  const timeOrder = Number.isFinite(aTime) && Number.isFinite(bTime)
+    ? aTime - bTime
+    : Number.isFinite(aTime) ? 1 : Number.isFinite(bTime) ? -1 : a.ts.localeCompare(b.ts);
+  return timeOrder || a.id.localeCompare(b.id)
+    || logFingerprint(a).localeCompare(logFingerprint(b)) || a.ts.localeCompare(b.ts);
 }
 
 function logFingerprint(log: StudyLog): string {
-  return [log.type, log.minutes, log.cards, log.quantity, log.quantityKind, log.quantityLabel, log.trackerId].join("|");
+  return [log.dayKey, log.type, log.minutes, log.cards, log.quantity, log.quantityKind, log.quantityLabel, log.trackerId, log.unitType, log.academic, log.productive, log.note].map((value) => JSON.stringify(value) ?? "").join("|");
 }
 
 function compareManual(a: DailySuccessManualContribution, b: DailySuccessManualContribution): number {
