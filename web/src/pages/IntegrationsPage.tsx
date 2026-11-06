@@ -142,18 +142,35 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
   const [tasks, setTasks] = useState(true);
   const [exams, setExams] = useState(true);
   const [dayPlans, setDayPlans] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const events = calendarEvents(state, { tasks, exams, dayPlans, fromDay: state.activeDayKey });
+  const downloadSelected = () => {
+    let content: string;
+    try {
+      content = buildIcs(events);
+    } catch {
+      setExportError("A calendar item has an invalid date or identifier. Correct it in AXOM and try again.");
+      return;
+    }
+    try {
+      downloadIcs(content);
+      setExportError(null);
+    } catch {
+      setExportError("The calendar file could not be downloaded. Check your browser settings and retry.");
+    }
+  };
   return (
     <div className="calendar-export">
-      <label><input type="checkbox" checked={tasks} onChange={(event) => setTasks(event.target.checked)} /> Open tasks with due dates</label>
-      <label><input type="checkbox" checked={exams} onChange={(event) => setExams(event.target.checked)} /> Exam dates (Boards)</label>
-      <label><input type="checkbox" checked={dayPlans} onChange={(event) => setDayPlans(event.target.checked)} /> Upcoming daily intentions</label>
+      <label><input type="checkbox" checked={tasks} onChange={(event) => { setTasks(event.target.checked); setExportError(null); }} /> Open tasks with due dates</label>
+      <label><input type="checkbox" checked={exams} onChange={(event) => { setExams(event.target.checked); setExportError(null); }} /> Exam dates (Boards)</label>
+      <label><input type="checkbox" checked={dayPlans} onChange={(event) => { setDayPlans(event.target.checked); setExportError(null); }} /> Upcoming daily intentions</label>
       <div className="calendar-export-foot">
         <span>{events.length} event{events.length === 1 ? "" : "s"} from today onward · all-day · no notes or journal text</span>
-        <GButton size="sm" variant="primary" disabled={!events.length} onClick={() => downloadIcs(buildIcs(events))}>
+        <GButton size="sm" variant="primary" disabled={!events.length} onClick={downloadSelected}>
           <Download size={ICON_SIZE.body} /> Download .ics
         </GButton>
       </div>
+      {exportError && <p className="calendar-export-next" role="alert">{exportError}</p>}
       {!events.length && <p className="calendar-export-next">Nothing dated is ready to export. <a href="#productivity">Add a task with a due date</a> or choose another source above.</p>}
       <p>Import it in Google Calendar (Settings → Import), Apple Calendar (File → Import), or Outlook. Re-export any time; events keep stable IDs so re-importing updates instead of duplicating in most apps.</p>
     </div>
