@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight, CalendarDays, CheckCircle2, Cloud, Download, FileJson, HardDrive, Layers, Link2, Lock, NotebookPen, Plug,
   Puzzle, Smartphone, Sparkles,
@@ -143,6 +143,11 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
   const [exams, setExams] = useState(true);
   const [dayPlans, setDayPlans] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  // A learner may repair a malformed task or exam elsewhere while this panel
+  // remains mounted. Do not keep an error describing an obsolete snapshot.
+  useEffect(() => {
+    setExportError(null);
+  }, [state.tasks, state.boardPrep, state.dayPlans, state.activeDayKey]);
   const events = calendarEvents(state, { tasks, exams, dayPlans, fromDay: state.activeDayKey });
   const downloadSelected = () => {
     let content: string;
