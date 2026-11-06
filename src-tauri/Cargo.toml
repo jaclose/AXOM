@@ -4,7 +4,7 @@ version = "0.0.3-prebeta"
 description = "AXOM desktop application"
 authors = ["AXOM"]
 license = "UNLICENSED"
-repository = "https://github.com/jaclose/Noctyrium"
+repository = "https://github.com/jaclose/AXOM"
 edition = "2021"
 rust-version = "1.77.2"
 

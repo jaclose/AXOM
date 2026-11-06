@@ -137,8 +137,8 @@ export function withApi(methods: string[], handler: Handler, options: { rateLimi
         res.status(error.status).json({ error: "api_error", message: error.message, details: error.details });
         return;
       }
-      console.error("Noctyrium API error:", safeError(error));
-      res.status(500).json({ error: "internal_error", message: "Noctyrium cloud backend error." });
+      console.error("AXOM API error:", safeError(error));
+      res.status(500).json({ error: "internal_error", message: "AXOM cloud backend error." });
     }
   };
 }
@@ -207,7 +207,7 @@ export function getOptionalParam(req: ApiRequest, key: string) {
 
   if (req.url) {
     try {
-      const parsed = new URL(req.url, "http://noctyrium.local");
+      const parsed = new URL(req.url, "http://axom.local");
       const queryValue = parsed.searchParams.get(key);
       if (queryValue) return queryValue;
     } catch {

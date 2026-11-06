@@ -19,7 +19,7 @@ export function getSql() {
 
 export async function getReadySql() {
   const sql = getSql();
-  if (process.env.NOCTYRIUM_AUTO_MIGRATE !== "false") {
+  if ((process.env.AXOM_AUTO_MIGRATE ?? process.env.NOCTYRIUM_AUTO_MIGRATE) !== "false") {
     if (!schemaReady) schemaReady = ensureSchema(sql);
     await schemaReady;
   }

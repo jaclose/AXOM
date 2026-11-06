@@ -168,7 +168,7 @@ struct HubView: View {
     @State private var smartSuggestions: [SmartSuggestion] = []
     @State private var manualStudyDayOffset: Int = 0
     @State private var bsceItems: [CourseTrackerItem] = []
-    @State private var status = "Noctyrium online."
+    @State private var status = "AXOM online."
     @State private var refreshing = false
 
     @State private var standupToday = ""
@@ -355,7 +355,7 @@ func subtractStudy30() {
         case "Integrations": return "Framework for Anki, ScreenTime, Calendar, and manual time correction"
         case "Productivity": return "Study time, Anki cards, lecture blocks, day usefulness"
         case "Reports": return "Visual summaries of your medical school operating system"
-        default: return "Noctyrium command center for medical school execution"
+        default: return "AXOM academic operating system for medical school"
         }
     }
 
@@ -3233,7 +3233,7 @@ struct Sidebar: View {
                     .frame(width: 36, height: 36)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Noctyrium")
+                    Text("AXOM")
                         .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                     Text("v0.03.01")

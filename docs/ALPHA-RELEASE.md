@@ -45,7 +45,7 @@ find api -maxdepth 1 -type f -name '*.ts' | wc -l  # expected: 5
 ```
 
 - Set env on Vercel: `AI_PROVIDER=mock` for Alpha 1; optionally `DATABASE_URL`
-  and `NOCTYRIUM_AUTO_MIGRATE=true`.
+  and `AXOM_AUTO_MIGRATE=true`.
 - Public API URLs such as `/api/user/login`, `/api/data/:userId/backup`, and
   `/api/ai/next-move` are compatibility rewrites into grouped functions. Do not
   add one serverless file per tiny action during Alpha unless the function budget

@@ -2176,7 +2176,7 @@ export const useStore = create<Store>()(
       },
     }),
     {
-      name: "noctyrium-state",
+      name: STORAGE_KEYS.persistedState,
       version: SCHEMA_VERSION,
       storage: createJSONStorage(() => localVaultStorage),
       migrate: (persisted, fromVersion) => migratePersistedState(persisted, fromVersion),

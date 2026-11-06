@@ -3,12 +3,12 @@ import SwiftUI
 import WebKit
 
 @main
-struct NoctyriumWebApp: App {
+struct AXOMWebApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
         WindowGroup {
-            NoctyriumWebView()
+            AXOMWebView()
                 .frame(minWidth: 1180, idealWidth: 1360, minHeight: 760, idealHeight: 900)
                 .background(Color.black)
         }
@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-struct NoctyriumWebView: NSViewRepresentable {
+struct AXOMWebView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -38,7 +38,7 @@ struct NoctyriumWebView: NSViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.setValue(false, forKey: "drawsBackground")
-        webView.loadNoctyrium()
+        webView.loadAXOM()
         return webView
     }
 
@@ -84,7 +84,7 @@ struct NoctyriumWebView: NSViewRepresentable {
 }
 
 private extension WKWebView {
-    func loadNoctyrium() {
+    func loadAXOM() {
         guard let resourceURL = Bundle.main.resourceURL else {
             loadHTMLString(errorPage("AXOM resources were not bundled into this app."), baseURL: nil)
             return
