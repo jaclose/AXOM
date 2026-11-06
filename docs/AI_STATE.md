@@ -15,8 +15,8 @@ dock; [Productivity](features/productivity.md) owns source accounting. No worksp
 schema change. Initial CI passed 4,765 unit tests (35 skips), 89 release tests and
 typecheck/lint/build. Local update/offline and feature browser checks passed.
 Review fixes cover audio races, best-day selection, responsive forms, mobile dock
-interception and readable capsule surfaces. Final CI (three browser shards) and
-live readback remain pending.
+interception and readable capsule surfaces. Hosted acceptance and production
+readback are tracked in PR #122.
 Production Supabase denies this connection access: the regenerated Communications
 export bundle still needs deployment. The frontend does not depend on that update.
 
