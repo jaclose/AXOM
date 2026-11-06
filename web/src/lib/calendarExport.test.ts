@@ -42,6 +42,23 @@ describe("calendar export", () => {
     expect(foldIcsLine("SUMMARY:short")).toBe("SUMMARY:short");
   });
 
+  it.each(
+    ["x", "é", "ط", "中", "🧠"].flatMap((character) =>
+      [0, 65, 66, 67, 68, 69, 73, 74, 75, 139, 140, 141, 142, 143, 144, 145]
+        .map((prefixLength) => ({ character, prefixLength })),
+    ),
+  )("preserves UTF-8 wire text for $character after $prefixLength ASCII characters", ({ character, prefixLength }) => {
+    const original = `SUMMARY:${"x".repeat(prefixLength)}${character.repeat(80)}`;
+    const folded = foldIcsLine(original);
+    // Unfold after byte serialization: JS-only equality can hide split surrogate pairs.
+    const encoded = new TextEncoder().encode(folded);
+    const wireText = new TextDecoder("utf-8", { fatal: true }).decode(encoded);
+    const segments = wireText.split("\r\n");
+    expect(wireText.replace(/\r\n /g, "")).toBe(original);
+    expect(segments.every((segment) => new TextEncoder().encode(segment).length <= 75)).toBe(true);
+    expect(segments.slice(1).every((segment) => segment.startsWith(" "))).toBe(true);
+  });
+
   it("escapes lone CR, LF and CRLF in user event text as TEXT, not calendar records", () => {
     expect(escapeIcsText("one\rtwo\nthree\r\nfour")).toBe("one\\ntwo\\nthree\\nfour");
     const ics = buildIcs([{
