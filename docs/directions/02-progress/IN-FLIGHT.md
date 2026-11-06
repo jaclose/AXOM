@@ -19,7 +19,7 @@ Source snapshot: GitHub `main` `382308aba5ececd039285d4b8ccee9a181b40d7c` plus o
 
 ### Subsequent source/ownership readback (2026-11-06 22:26 UTC)
 
-The table above remains an **immutable 20:39 UTC snapshot**. Later GitHub source evidence supersedes any apparently current head or `QUEUED` label there. These are **not** new deployments, academic/content approvals, authorized emails, or authenticated learner acceptance. Re-read each branch before integration.
+The table above is a **dated 20:39 UTC source snapshot**, with its ownership wording corrected to match the later [#140](https://github.com/jaclose/AXOM/issues/140) authority decision. Later GitHub source evidence supersedes any apparently current head or `QUEUED` label there. These are **not** new deployments, academic/content approvals, authorized emails, or authenticated learner acceptance. Re-read each branch before integration.
 
 | Workstream | Later remote evidence | Source disposition / next gate |
 | --- | --- | --- |
