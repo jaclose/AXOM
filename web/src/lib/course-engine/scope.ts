@@ -132,7 +132,7 @@ function hasConsistentPrimaryFiling(
 /** Duplicate originals with competing primary/progress evidence cannot
  * receive mastery credit. Only duplicate IDs need the expensive source checks;
  * unique records are checked when they match the requested scope. */
-function conflictingDuplicateIds(
+export function conflictingDuplicateIds(
   questions: readonly QuestionRecord[],
   setsById: ReadonlyMap<ID, QuestionSourceEvidence> | undefined,
   hasFullSourceIndex: boolean,

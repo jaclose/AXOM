@@ -2,7 +2,7 @@ import type { CurriculumTemplate } from "../curricula";
 import type { QuestionSet } from "../library";
 import { questionMappingStatus, type QuestionRecord } from "../questions";
 import type { Course, Term } from "../types";
-import { parseWeek, questionScope, type CourseScope } from "./scope";
+import { conflictingDuplicateIds, parseWeek, questionScope, type CourseScope } from "./scope";
 import { canonicalModuleKey } from "./vocabulary";
 
 /**
@@ -125,6 +125,26 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   };
   const byId = new Map(input.questions.map((question) => [question.id, question]));
   const setsById = new Map(input.sets.map((set) => [set.id, set]));
+  // The same original ID must have one disposition across availability and
+  // Tracker progress. Source/scoring conflicts are review-held, not runnable.
+  const conflictingOriginals = conflictingDuplicateIds(
+    input.questions, setsById, input.sets.length > 0,
+  );
+  const mappingReviewIds = new Set(input.questions
+    .filter((question) => questionMappingStatus(question) !== "ready")
+    .map((question) => question.id));
+  // An original claimed by two different academic owners cannot be placed in
+  // either course just because one duplicate happened to arrive first.
+  const firstOwner = new Map<string, string | undefined>();
+  const ambiguousOwners = new Set<string>();
+  for (const question of input.questions) {
+    const owner = resolve(questionScope(question, setsById))?.key;
+    if (firstOwner.has(question.id) && firstOwner.get(question.id) !== owner) {
+      ambiguousOwners.add(question.id);
+    } else if (!firstOwner.has(question.id)) {
+      firstOwner.set(question.id, owner);
+    }
+  }
   const memberships = new Map<string, CourseScope[]>();
   for (const set of input.sets) {
     for (const id of new Set(set.questionIds)) {
@@ -133,6 +153,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     }
   }
   let unassignedQuestions = 0;
+  const unassignedIds = new Set<string>();
   for (const question of input.questions) {
     const scope = questionScope(question, setsById);
     // Older questions sometimes have immutable set membership but no setId.
@@ -160,14 +181,21 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       week: scope.week ?? (!hasDeclaredWeek(question.week) && compatibleFallback ? inheritedWeek : undefined),
     };
     const resolved = resolve(finalScope);
-    if (!resolved) { unassignedQuestions += 1; continue; }
+    if (!resolved || ambiguousOwners.has(question.id)) {
+      if (!unassignedIds.has(question.id)) {
+        unassignedIds.add(question.id);
+        unassignedQuestions += 1;
+      }
+      continue;
+    }
     // A key can be score-ready without its claimed primary source being valid.
     // Keep the stored record visible, but never advertise it as scheduled,
     // runnable material when exact source membership or filing disagrees.
     const primary = question.setId != null ? setsById.get(question.setId) : undefined;
     const primaryScope = primary?.scope;
     const primaryWeek = parseWeek(primaryScope?.week);
-    const sourceReviewHeld = (hasDeclaredWeek(question.week) && parseWeek(question.week) === undefined)
+    const sourceReviewHeld = conflictingOriginals.has(question.id)
+      || (hasDeclaredWeek(question.week) && parseWeek(question.week) === undefined)
       || (question.setId != null && (
         !primary || !primary.questionIds.includes(question.id)
         || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
@@ -179,13 +207,17 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       ));
     const draft = draftFor(resolved);
     draft.present.add(question.id);
-    (!sourceReviewHeld && questionMappingStatus(question) === "ready" ? draft.ready : draft.review).add(question.id);
+    (!sourceReviewHeld && !mappingReviewIds.has(question.id) ? draft.ready : draft.review).add(question.id);
     if (!sourceReviewHeld && finalScope.week !== undefined) draft.weeks.add(finalScope.week);
     else draft.unresolvedWeeks.add(question.id);
     (resolved.method === "course" ? draft.courseAssignments : draft.outlineAssignments).add(question.id);
   }
   let unassignedCollections = 0;
   for (const set of input.sets) {
+    if (set.questionIds.some((id) => ambiguousOwners.has(id))) {
+      unassignedCollections += 1;
+      continue;
+    }
     const indexedSetWeek = parseWeek(set.scope?.week);
     const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
     // Set-owned metadata wins if it resolves. A collection whose membership
