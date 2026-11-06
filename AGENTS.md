@@ -41,7 +41,11 @@ regions. A passing log excerpt cannot hide a failing command.
   without authority; uncertain provenance is REVIEW_REQUIRED.
 - This repository is public: no credentials, personal study data, private PDFs, phone
   numbers or unlicensed media. Do not print secrets. No paid action, outbound message,
-  push, merge to main or production deployment without explicit authority. JD pushes.
+  push, merge to main or production deployment without explicit authority. The owner
+  authorized the [unified release gateway](docs/operations/deployment.md#axom-unified-release-gateway)
+  on 2026-11-06 for routine non-destructive batch integrations, commits, pushes,
+  merges and verified releases. Authorization does not waive its risk, test, privacy,
+  deployment or irreversible-operation gates.
 
 ## Implement with focused tools
 
