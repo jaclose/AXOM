@@ -5,6 +5,23 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## Community standalone Question Sets · 2026-11-06
+
+Draft [PR #148](https://github.com/jaclose/AXOM/pull/148) on
+`codex/community-qbank-enrichment-20261106` adds a direct Community QBank
+publisher and approved-set discovery beside existing course sharing. A
+deliberate publish-review action may automatically draft up to 12
+explanations from confirmed keys with configured, non-demo AI. All teaching
+prose remains editable, explicitly AI-assisted, review-gated and private
+until saved and submitted; unsupported media and unresolved keys stay held.
+Future diagram keywords and source directory are text-only and asset rights
+fail closed. The existing Question Set Library migration and five required
+RPC endpoints were confirmed on production Supabase; no schema or media
+migration is required. CI and acceptance remain release gates; no merge,
+production deployment, or live-account publication occurred here.
+[Questions](features/questions.md#community-question-set-publishing-and-explanation-assistance)
+owns the behavior.
+
 ## Homepage alpha
 
 See [cinematic entry](features/cinematic-landing.md).
