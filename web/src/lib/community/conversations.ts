@@ -135,7 +135,9 @@ export async function editCommunityComment(accountId: string, commentId: string,
 
 export async function deleteCommunityComment(accountId: string, commentId: string): Promise<void> {
   return withCommunityClient(accountId, async client => {
-    const { error } = await client.from("social_comments").delete().eq("id", commentId);
+    const { data, error } = await client.from("social_comments").delete().eq("id", commentId).select("id");
     if (error) throw new Error("The reply could not be removed. Refresh the conversation.");
+    if (data?.length !== 1 || data[0].id !== commentId)
+      throw new Error("This reply is no longer available or you cannot remove it. Refresh the conversation.");
   });
 }

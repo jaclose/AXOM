@@ -100,6 +100,6 @@ export function CommunityPostCard({ accountId, post, profile, liked, reactionCou
       <GButton type="submit" size="sm" disabled={busy}>Send report</GButton><GhostButton type="button" disabled={busy} onClick={() => setReporting(false)}>Cancel</GhostButton>
     </form>}
     {error && <p role="alert" className="community-error">{error}</p>}
-    {threadOpen && <div id={threadId}><CommunityThread accountId={accountId} postId={post.id} canReply={canParticipate} refreshKey={refreshKey} draftCache={draftCache} onOpenProfile={onOpenProfile} /></div>}
+    {threadOpen && <div id={threadId}><CommunityThread accountId={accountId} postId={post.id} canReply={canParticipate} canRemoveReplies={own} refreshKey={refreshKey} draftCache={draftCache} onOpenProfile={onOpenProfile} /></div>}
   </article>;
 }

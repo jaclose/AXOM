@@ -83,6 +83,12 @@ account deletion cascades them. Leaving Community removes the social profile,
 posts, replies and relationships and turns sharing/discovery off while leaving
 the private workspace and Auth account intact.
 
+The migration preserves existing discovery choices and initializes automatic
+sharing to Off. Preexisting posts lack source provenance, so they are classified
+as manual and keep their audience. Off cannot retrospectively distinguish any
+automatic posts made by older preview clients; those posts can be removed
+individually or by leaving Community.
+
 `axom_save_community_preferences` serializes account consent changes with automatic
 publishing. Each change advances a consent generation. A delayed request from an
 older generation fails even if sharing has subsequently been reenabled. Off

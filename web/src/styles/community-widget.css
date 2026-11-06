@@ -1,4 +1,7 @@
 .community-widget { min-width: 0; height: 100%; }
+.community-widget .panel-head .panel-sub { color: var(--text-70); }
+.community-widget .ghost-btn:where(:not(:disabled):not([aria-disabled="true"])) { color: var(--text-70); }
+.community-widget .ghost-btn:where(:not(:disabled):not([aria-disabled="true"]):not(.danger)):hover { color: var(--text); }
 .community-widget-body { display: grid; gap: 14px; min-width: 0; }
 .community-widget-empty { display: grid; justify-items: start; gap: 12px; color: var(--text-70); }
 .community-widget-empty p { margin: 0; line-height: 1.6; }

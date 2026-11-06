@@ -276,6 +276,41 @@ describe("Posts and replies", () => {
     await waitFor(() => expect(deleteCommunityComment).toHaveBeenCalledWith("me", "reply-one"));
   });
 
+  it("lets post owners remove another learner's reply after confirmation without editing it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadCommunityComments).mockResolvedValue([comment({ user_id: "friend", author: undefined })]);
+    render(<CommunityPostCard accountId="me" post={post()} profile={profile} liked={false} reactionCount={0}
+      canParticipate onChanged={() => {}} onOpenProfile={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Replies" }));
+    const thread = within(screen.getByRole("region", { name: "Post replies" }));
+    await user.click(await thread.findByRole("button", { name: "Delete reply" }));
+    expect(thread.queryByRole("button", { name: "Edit reply" })).toBeNull();
+    expect(thread.getByText("Remove this reply from your post?")).toBeTruthy();
+    expect(deleteCommunityComment).not.toHaveBeenCalled();
+    await user.click(thread.getByRole("button", { name: "Keep reply" }));
+    expect(thread.queryByRole("group", { name: "Confirm reply removal" })).toBeNull();
+    await user.click(thread.getByRole("button", { name: "Delete reply" }));
+    vi.mocked(loadCommunityComments).mockResolvedValue([]);
+    await user.click(thread.getByRole("button", { name: "Remove reply" }));
+    await waitFor(() => expect(deleteCommunityComment).toHaveBeenCalledWith("me", "reply-one"));
+    expect(await thread.findByText("Reply removed from your post.")).toBeTruthy();
+    expect(editCommunityComment).not.toHaveBeenCalled();
+  });
+
+  it("does not let ordinary readers remove or edit another learner's replies", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadCommunityComments).mockResolvedValue([comment({ user_id: "third-learner", author: undefined })]);
+    render(<CommunityPostCard accountId="me" post={post({ user_id: "friend" })} liked={false} reactionCount={0}
+      canParticipate onChanged={() => {}} onOpenProfile={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Replies" }));
+    const thread = within(screen.getByRole("region", { name: "Post replies" }));
+    expect(await thread.findByText("I can join after class.")).toBeTruthy();
+    expect(thread.queryByRole("button", { name: "Delete reply" })).toBeNull();
+    expect(thread.queryByRole("button", { name: "Edit reply" })).toBeNull();
+    expect(deleteCommunityComment).not.toHaveBeenCalled();
+    expect(editCommunityComment).not.toHaveBeenCalled();
+  });
+
   it("loads another chronological page of replies instead of silently truncating the conversation", async () => {
     const user = userEvent.setup();
     const firstPage = Array.from({ length: 100 }, (_, index) => comment({ id: `reply-${index}`, body: `Reply ${index}`, user_id: "friend", author: undefined }));

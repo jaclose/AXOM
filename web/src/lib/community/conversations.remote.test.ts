@@ -17,7 +17,7 @@ const reply = { id: "r1", post_id: "p1", user_id: "learner", body: "We can study
 const progress: CommunityPost = { id: "day", user_id: "learner", kind: "progress", visibility: "friends", activity_day: "2026-11-05",
   minutes: 40, cards: 20, questions: 5, caption: "", set_title: null, created_at: "2026-11-05T10:00:00Z", revision: 1 };
 
-function backend(answer: (query: Query) => Response) {
+function backend(answer: (query: Query) => Response, accountId = "me") {
   const queries: Query[] = [];
   const client = { from: (table: string) => {
     const query: Query = { table, filters: {} };
@@ -38,7 +38,7 @@ function backend(answer: (query: Query) => Response) {
     };
     return builder;
   } };
-  vi.mocked(accountOperationClient).mockResolvedValue({ userId: "me", client, assertCurrent: async () => {} } as unknown as Awaited<ReturnType<typeof accountOperationClient>>);
+  vi.mocked(accountOperationClient).mockResolvedValue({ userId: accountId, client, assertCurrent: async () => {} } as unknown as Awaited<ReturnType<typeof accountOperationClient>>);
   return queries;
 }
 beforeEach(() => vi.clearAllMocks());
@@ -87,12 +87,22 @@ describe("Community conversation visibility and author changes", () => {
     expect(queries).toHaveLength(1);
   });
 
-  it("compares the original reply timestamp and permits host removal through server RLS", async () => {
+  it("compares the original reply timestamp", async () => {
     const queries = backend(() => ok([]));
     await expect(editCommunityComment("me", "r1", "Changed draft", reply.updated_at)).rejects.toThrow(/changed on another device/);
     expect(queries[0]).toMatchObject({ update: { body: "Changed draft" }, filters: { id: "r1", user_id: "me", updated_at: reply.updated_at } });
-    await deleteCommunityComment("me", "r1");
-    expect(queries[1]).toMatchObject({ deleted: true, filters: { id: "r1" } });
+  });
+
+  it.each(["reply-author", "post-owner"])("confirms %s deletion with the row returned by server RLS", async accountId => {
+    const queries = backend(() => ok([{ id: "r1" }]), accountId);
+    await expect(deleteCommunityComment(accountId, "r1")).resolves.toBeUndefined();
+    // No author-only client filter: RLS also permits the post owner to remove replies.
+    expect(queries[0]).toMatchObject({ deleted: true, fields: "id", filters: { id: "r1" } });
+  });
+
+  it("does not report deletion success after an RLS no-op or disappeared reply", async () => {
+    backend(() => ok([]));
+    await expect(deleteCommunityComment("me", "r1")).rejects.toThrow(/no longer available or you cannot remove it/);
   });
 
   it("does not request hidden profile activity and preserves month totals behind a busy feed", async () => {

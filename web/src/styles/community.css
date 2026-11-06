@@ -11,6 +11,9 @@
 :is(.community-page,.community-dialog) .sub { color: var(--text-70); font-size: 12px; line-height: 1.6; }
 :is(.community-page,.community-dialog) h3 { font-size: 14px; line-height: 1.4; margin: 0; }
 :is(.community-page,.community-dialog) button { touch-action: manipulation; }
+:is(.community-page,.community-dialog) .panel-head .panel-sub { color: var(--text-70); }
+:is(.community-page,.community-dialog) .ghost-btn:where(:not(:disabled):not([aria-disabled="true"])) { color: var(--text-70); }
+:is(.community-page,.community-dialog) .ghost-btn:where(:not(:disabled):not([aria-disabled="true"]):not(.danger)):hover { color: var(--text); }
 .community-page .glass-card { box-shadow: none; }
 .community-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; padding: 4px 0; }
 .community-heading > div:first-child { flex: 1 1 280px; min-width: 0; }

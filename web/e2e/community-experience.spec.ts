@@ -90,6 +90,20 @@ test("community conversations, profile edits and audience withdrawal work across
     await invitation.getByRole("button", { name: "Remove reply", exact: true }).click();
     await expect(invitation.getByText("I can join at 18:15. Let’s start with acid-base reasoning.", { exact: true })).toHaveCount(0);
 
+    // A post's author can remove another learner's reply, but cannot edit it.
+    await invitation.getByLabel("Write a reply", { exact: true }).fill("A second reply for the post owner to moderate.");
+    await invitation.getByRole("button", { name: "Post reply", exact: true }).click();
+    await expect(invitation).toContainText("A second reply for the post owner to moderate.");
+    await refreshCommunity(page);
+    await ownPost.getByRole("button", { name: "Replies", exact: true }).click();
+    await expect(ownPost).toContainText("A second reply for the post owner to moderate.");
+    await expect(ownPost.getByRole("button", { name: "Edit reply", exact: true })).toHaveCount(0);
+    await ownPost.getByRole("button", { name: "Delete reply", exact: true }).click();
+    await ownPost.getByRole("button", { name: "Remove reply", exact: true }).click();
+    await expect.poll(() => database.asUser(owner.id, "select id from public.social_comments")).toEqual([]);
+    await refreshCommunity(other);
+    await expect(invitation.getByText("A second reply for the post owner to moderate.", { exact: true })).toHaveCount(0);
+
     await loggedDay(page, 45);
     await page.getByRole("button", { name: "Daily progress", exact: true }).click();
     await page.getByRole("combobox", { name: "Who can see this?", exact: true }).selectOption("friends");
@@ -115,7 +129,7 @@ test("community conversations, profile edits and audience withdrawal work across
         }, theme);
         expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         expect(await other.locator(".community-page").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-        await other.screenshot({ path: `/tmp/axom-community-${width}-${theme}.png`, animations: "disabled" });
+        await other.screenshot({ path: `/tmp/axom-community-circle-${width}-${theme}.png`, animations: "disabled" });
       }
     }
     expect(unexpected.flat()).toEqual([]);

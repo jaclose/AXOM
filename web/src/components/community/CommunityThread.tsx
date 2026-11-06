@@ -9,8 +9,8 @@ import { CommunityPersonButton } from "./CommunityIdentity";
 import { communityDate } from "./CommunityPostContent";
 import type { CommunityDraftCache } from "./communityDraftCache";
 
-export function CommunityThread({ accountId, postId, canReply, refreshKey = 0, draftCache, onOpenProfile }: {
-  accountId: string; postId: string; canReply: boolean; refreshKey?: number; draftCache?: CommunityDraftCache; onOpenProfile: (id: string) => void;
+export function CommunityThread({ accountId, postId, canReply, canRemoveReplies = false, refreshKey = 0, draftCache, onOpenProfile }: {
+  accountId: string; postId: string; canReply: boolean; canRemoveReplies?: boolean; refreshKey?: number; draftCache?: CommunityDraftCache; onOpenProfile: (id: string) => void;
 }) {
   const editReplyId = useId();
   const newReplyId = useId();
@@ -82,7 +82,7 @@ export function CommunityThread({ accountId, postId, canReply, refreshKey = 0, d
       {comments.map(comment => <li key={comment.id} className="community-reply">
         <div className="community-reply-heading"><CommunityPersonButton profile={comment.author} name={comment.user_id === accountId ? "You" : "Learner"}
           onClick={() => onOpenProfile(comment.user_id)} /><time dateTime={comment.created_at}>{communityDate(comment.created_at, true)}</time></div>
-        {editing === comment.id ? <form className="community-reply-edit" onSubmit={event => {
+        {editing === comment.id && comment.user_id === accountId ? <form className="community-reply-edit" onSubmit={event => {
           event.preventDefault(); void mutate(() => editCommunityComment(accountId, comment.id, editBody, editUpdatedAt), "Your reply is updated.", () => setEditing(undefined));
         }}>
           <div className="community-textarea-field"><label htmlFor={editReplyId}>Edit your reply</label>
@@ -90,12 +90,14 @@ export function CommunityThread({ accountId, postId, canReply, refreshKey = 0, d
           <div className="community-form-actions"><GhostButton type="button" disabled={busy} onClick={() => setEditing(undefined)}>Cancel</GhostButton>
             <GButton type="submit" size="sm" disabled={busy || !editBody.trim()}><Check size={14} aria-hidden="true" /> Save reply</GButton></div>
         </form> : <p className="community-reply-body">{comment.body}</p>}
-        {comment.user_id === accountId && editing !== comment.id && <div className="community-reply-actions">
-          <GhostButton disabled={busy} onClick={() => { setEditing(comment.id); setEditBody(comment.body); setEditUpdatedAt(comment.updated_at); setRemoving(undefined); }}><Pencil size={13} aria-hidden="true" /> Edit reply</GhostButton>
+        {(comment.user_id === accountId || canRemoveReplies) && editing !== comment.id && <div className="community-reply-actions">
+          {comment.user_id === accountId && <GhostButton disabled={busy} onClick={() => { setEditing(comment.id); setEditBody(comment.body); setEditUpdatedAt(comment.updated_at); setRemoving(undefined); }}><Pencil size={13} aria-hidden="true" /> Edit reply</GhostButton>}
           <GhostButton disabled={busy} onClick={() => setRemoving(removing === comment.id ? undefined : comment.id)}><Trash2 size={13} aria-hidden="true" /> Delete reply</GhostButton>
         </div>}
-        {removing === comment.id && <div className="community-confirm" role="group" aria-label="Confirm reply removal"><p>Remove your reply?</p>
-          <GButton size="sm" variant="danger" disabled={busy} onClick={() => void mutate(() => deleteCommunityComment(accountId, comment.id), "Your reply is removed.", () => setRemoving(undefined))}>Remove reply</GButton>
+        {removing === comment.id && (comment.user_id === accountId || canRemoveReplies) && <div className="community-confirm" role="group" aria-label="Confirm reply removal">
+          <p>{comment.user_id === accountId ? "Remove your reply?" : "Remove this reply from your post?"}</p>
+          <GButton size="sm" variant="danger" disabled={busy} onClick={() => void mutate(() => deleteCommunityComment(accountId, comment.id),
+            comment.user_id === accountId ? "Your reply is removed." : "Reply removed from your post.", () => setRemoving(undefined))}>Remove reply</GButton>
           <GhostButton disabled={busy} onClick={() => setRemoving(undefined)}>Keep reply</GhostButton></div>}
       </li>)}
     </ol>}

@@ -28,9 +28,12 @@ const identifier = (value: string) => {
 };
 
 export async function createPlatformDatabase() {
-  // PGlite's default DATE parser creates a Date, while PostgREST sends YYYY-MM-DD.
-  // Preserve SQL date text so date-window logic sees the production wire shape.
-  const db = new PGlite({ extensions: { pgcrypto }, parsers: { 1082: value => value } });
+  // Preserve PostgREST's date strings and full timestamp precision. A JS Date
+  // truncates microseconds, which can make an unchanged reply fail its edit CAS.
+  const db = new PGlite({ extensions: { pgcrypto }, parsers: {
+    1082: value => value,
+    1184: value => value.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00"),
+  } });
   await db.exec(`
     create schema extensions;
     create extension pgcrypto with schema extensions;

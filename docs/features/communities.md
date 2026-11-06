@@ -100,4 +100,8 @@ The page uses the actual AXOM Orb, palette tokens, a short optional entrance,
 and a static reduced-motion state. `#help` remains the route for community feedback.
 Real account and catalog acceptance must be checked separately from local UI tests.
 The forward migration `20261106020000_community_experience.sql` and regenerated
-Communications export function must be deployed before releasing this client.
+Communications export function must be deployed before releasing this client,
+in that order. Existing cached clients must load the matching update: their
+legacy profile/progress writes are intentionally denied, and their older feed
+validator cannot read the new discussion post kinds. A frontend rollback after
+the migration therefore needs a compatible client, not the previous build.
