@@ -128,7 +128,7 @@ test("Productivity primary panels stay usable across themes and narrow screens",
       expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
       if (width === 1440) {
         expect(Math.abs(bounds.logTop - bounds.focusTop)).toBeLessThan(2);
-        expect(Math.abs(bounds.logHeight - bounds.focusHeight)).toBeLessThan(2);
+        expect(bounds.focusHeight).toBeLessThan(bounds.logHeight); // No empty card stretched to match a long logger.
       } else expect(bounds.focusTop).toBeGreaterThan(bounds.logTop);
       const progress = await page.locator("#productivity-log .daily-progress-vessel").evaluate((vessel) => {
         const outer = vessel.getBoundingClientRect();
@@ -150,6 +150,9 @@ test("Productivity primary panels stay usable across themes and narrow screens",
         expect(field.right).toBeLessThanOrEqual(1);
         expect(field.width).toBeGreaterThan(40);
       }
+      const focusMeter = page.getByRole("progressbar", { name: "Focus session progress" });
+      await expect(focusMeter).toBeVisible();
+      await expect(focusMeter).toHaveAttribute("aria-valuenow", /^(0|[1-9]\\d?|100)$/);
       const fields = await page.locator(".productivity-primary-grid .pomo-target-box").evaluate((box) => {
         const outer = box.getBoundingClientRect();
         return Array.from(box.querySelectorAll("input, select")).map((field) => {
