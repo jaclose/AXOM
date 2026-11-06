@@ -14,7 +14,7 @@ beforeEach(() => {
   useAccount.setState({ phase: "unconfigured", user: null });
   useUi.getState().clearSettingsRequest();
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Integrations", () => {
   it("groups integrations by readiness and states what leaves the device", () => {
@@ -75,6 +75,11 @@ describe("Integrations", () => {
     expect(createObjectURL).not.toHaveBeenCalled();
 
     act(() => useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] }));
+    // Editing a task occurs outside the export panel. Reopen it to exercise the
+    // actual return journey, not an impossible in-panel date editor.
+    fireEvent.click(screen.getByRole("button", { name: /Hide options/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
+    expect(screen.getByText(/^1 event/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(createObjectURL).toHaveBeenCalledOnce();
