@@ -94,8 +94,19 @@ describe("Integrations", () => {
     act(() => useStore.setState({ tasks: unchangedTasks }));
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
 
-    act(() => useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] }));
-    // Exercise React's mounted update boundary after the external store write.
+    // Use the actual learner task-update action rather than mutating the
+    // persisted Zustand store directly from the harness. Verify that it emits
+    // a new tasks reference for the mounted calendar subscriber.
+    const tasksBeforeRepair = useStore.getState().tasks;
+    let taskChangeNotifications = 0;
+    const unsubscribeTaskCheck = useStore.subscribe((state, previous) => {
+      if (state.tasks !== previous.tasks) taskChangeNotifications++;
+    });
+    act(() => useStore.getState().updateTask(task.id, { due: "2999-03-01" }));
+    unsubscribeTaskCheck();
+    expect(taskChangeNotifications).toBe(1);
+    expect(useStore.getState().tasks).not.toBe(tasksBeforeRepair);
+    // Exercise React's mounted update boundary after the task action.
     // The real-browser E2E separately proves automatic subscription refresh.
     rerender(<IntegrationsPage />);
     // The learner repairs the task elsewhere while this panel remains open.
