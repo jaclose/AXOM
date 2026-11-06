@@ -232,6 +232,26 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("addNotes")).toHaveLength(2);
   });
 
+  it("does not mistake intentionally retired note types for an uncertain new replacement", async () => {
+    const h = harness();
+    const basic = card("a");
+    const cloze = card("a", { type: "cloze", front: "{{c1::Card}} A", back: "" });
+    const first = await h.run([basic]);
+    expect(first.added).toBe(1);
+    const originalId = h.state.links.a.noteId;
+
+    const second = await h.run([cloze]);
+    expect(second).toMatchObject({ replaced: 1, conflicts: 0 });
+    const clozeId = h.state.links.a.noteId;
+    expect(h.state.links.a.retiredNoteIds).toEqual([originalId]);
+
+    const third = await h.run([basic]);
+    expect(third).toMatchObject({ replaced: 1, conflicts: 0 });
+    expect(h.state.links.a.noteId).not.toBe(originalId);
+    expect(h.state.links.a.retiredNoteIds).toEqual([originalId, clozeId]);
+    expect(h.fake.notes.size).toBe(3); // historical notes remain, but no accidental conflict
+  });
+
   it("creates the reverse card for basic-reversed cards", async () => {
     const h = harness();
     await h.run([card("a")]);
