@@ -11,8 +11,8 @@ Architects (structure), Seekers (inquiry), Sentinels (discrimination), Keepers
 (adaptation), Wardens (sustainable effort), and Luminaries (purpose and
 leadership). Each order has five **unique** characters, not generic skins.
 
-The detailed creative authority is the 54-page *AXOM: The Forty - Companions
-of the Living Atlas* character bible supplied as a reviewed artifact. Character
+The proposed visual and storytelling reference is the 54-page *AXOM: The Forty - Companions
+of the Living Atlas* character bible, which still awaits owner review and approval. Character
 names, canonical IDs, silhouettes, pronunciation, taxonomy, myths, academic
 strengths and limitations, strengths, rituals, movement, and image-generation
 prompts should be imported from a **versioned, reviewed record** before
