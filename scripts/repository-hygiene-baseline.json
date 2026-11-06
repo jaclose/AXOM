@@ -8,6 +8,22 @@
   ],
   "exceptions": [
     {
+      "path": "web/public/landing/alpha-v1/axom-launch-web.mp4",
+      "bytes": 11194267,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "JD explicitly approved this uploaded desktop launch film as v1 alpha for the public axom.info homepage and authorized commit, push and publication. Original H.264/AAC 1920x1080, 30 fps SDR bytes retained without re-encoding. SHA-256 c2ce3ef5f23c6a3b88df772daaaa1c982618c333b9b4aeab43ef85d0a7cf4035 verified by import and browser-suite integrity checks. This exact-path ceiling permits only this approved public film, not source recordings or learner media."
+    },
+    {
+      "path": "web/public/landing/alpha-v1/axom-launch-mobile.mp4",
+      "bytes": 12069804,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "JD explicitly approved this uploaded portrait launch film as v1 alpha for the public axom.info homepage and authorized commit, push and publication. Original H.264/AAC 1080x1920, 30 fps SDR bytes retained without re-encoding. SHA-256 8822f5bf922f2f50f35ee69085fb0a7a88065db823d768b36e4a5e18fc1f0e64 verified by import and browser-suite integrity checks. This exact-path ceiling permits only this approved public film, not source recordings or learner media."
+    },
+    {
       "path": "web/public/soundscapes/axom-soundscape-1.m4a",
       "bytes": 11504140,
       "rules": [

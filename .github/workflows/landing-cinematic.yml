@@ -1,0 +1,59 @@
+name: AXOM Homepage Cinematic
+on:
+  pull_request:
+    paths:
+      - 'web/src/components/landing/**'
+      - 'web/src/styles/landing*.css'
+      - 'web/public/landing/**'
+      - 'web/e2e/cinematic*.spec.ts'
+      - '.github/workflows/landing-cinematic.yml'
+  push:
+    branches: [main, codex/homepage-cinematic-alpha-20261106]
+    paths:
+      - 'web/src/components/landing/**'
+      - 'web/src/styles/landing*.css'
+      - 'web/public/landing/**'
+      - 'web/e2e/cinematic*.spec.ts'
+      - '.github/workflows/landing-cinematic.yml'
+permissions:
+  contents: read
+concurrency:
+  group: homepage-cinematic-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  cinematic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - run: node scripts/toolchain.mjs
+      - run: npm ci
+      - run: npm --prefix web ci
+      - run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Prove the approved full-page homepage contract first
+        run: npm --prefix web run test:e2e -- e2e/cinematic-alpha.spec.ts --grep 'approved film occupies' --retries=0
+      - name: Exact media, responsive playback, accessibility and existing entry flows
+        run: npm --prefix web run test:e2e -- e2e/cinematic-alpha.spec.ts e2e/cinematic-landing.spec.ts --workers=1
+      - name: Repository checks
+        run: npm run test:repo && npm run repo:check
+      - name: Full web typecheck, lint, unit tests and production build
+        run: npm --prefix web run quality
+      - name: Update and offline boundaries
+        run: npm --prefix web run verify:app-updates && npm --prefix web run verify:daily-games-offline
+      - name: Browser review evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: homepage-cinematic-${{ github.run_id }}
+          path: web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
