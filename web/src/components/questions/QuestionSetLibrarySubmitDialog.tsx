@@ -105,6 +105,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           const draft = await draftQuestionExplanation(provider, question, controller.signal);
           if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
           next.push(draft);
+          setDrafts(previous => previous.some(item => item.questionId === draft.questionId)
+            ? previous : [...previous, draft]);
           setGenerationProgress(`Prepared ${next.length} of ${batch.length} draft explanations…`);
         } catch (cause) {
           if (controller.signal.aborted) return;
@@ -113,7 +115,6 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         }
       }
       if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
-      setDrafts(previous => [...previous, ...next.filter(draft => !previous.some(item => item.questionId === draft.questionId))]);
       setGenerationProgress(next.length
         ? `${next.length} provisional explanations prepared. Inspect them before saving. ${failures ? `${failures} need manual review.` : ""}`
         : "No explanations could be drafted. Review your source or AI settings.");
@@ -206,8 +207,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     finally { setBusy(false); }
   }
 
-  return <Modal title={`Submit ${set.title}`} onClose={busy || generating ? () => {} : onClose}>
-    <div className="qsl-submit stack gap12" aria-busy={busy || checking}>
+  return <Modal title={`Submit ${set.title}`} onClose={busy ? () => {} : () => { generationAbort.current?.abort(); onClose(); }}>
+    <div className="qsl-submit stack gap12" aria-busy={busy || checking || generating}>
       <p>Offer this Question Set to every signed-in AXOM learner. An academic reviewer checks it before it appears in search.</p>
       <div className="qsl-submit-facts"><BookUp2 size={20} aria-hidden="true" /><b>{set.questionIds.length} questions</b><span>Only question text, choices, answers, explanations, tags and citations are submitted. Your attempts, notes, files and course filing stay private.</span></div>
       {unresolved > 0 && <p role="alert" className="qsl-error">{unresolved} question{unresolved === 1 ? " is" : "s are"} still held for answer or source review. Resolve them before submitting this set.</p>}
@@ -215,9 +216,10 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       {missingExplanations > 0 && <div className="qsl-assist stack gap8">
         <b>{missingExplanations} missing explanation{missingExplanations === 1 ? "" : "s"}</b>
         <p>AXOM can draft rationales from your already-reviewed answers. No answer key changes. Model output is provisional until you inspect and save it.</p>
-        {provider ? <GButton disabled={generating || busy || draftable.length === 0} onClick={() => void generateExplanations()}>
+        {provider && provider.info.kind !== "mock" ? <GButton disabled={generating || busy || draftable.length === 0} onClick={() => void generateExplanations()}>
           <Sparkles size={16} aria-hidden="true" /> {generating ? "Drafting explanations…" : `Draft explanations (${Math.min(draftable.length, 12)} at a time)`}
         </GButton> : <p>Enable AXOM Cloud AI or a local model in Settings to draft explanations, or write them in Question Bank.</p>}
+        {generating && <GhostButton onClick={() => generationAbort.current?.abort()}>Cancel drafting</GhostButton>}
       </div>}
       {generationProgress && <p role="status">{generationProgress}</p>}
       {generationError && <p role="alert" className="qsl-error">{generationError}</p>}
