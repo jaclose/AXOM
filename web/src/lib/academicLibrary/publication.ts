@@ -393,6 +393,24 @@ export interface PublicationJobNotes {
   failures: Map<string, string>;
 }
 
+/** Reject ambiguous original source identities before any network upload is prepared.
+ * Question counts alone cannot catch duplicate empty banks. */
+function assertUniquePublicationSourceIds(inventory: PublicationInventory, course: PlannedCourse) {
+  const selected = new Set<string>();
+  for (const id of course.sourceIds) {
+    if (selected.has(id)) throw new Error("The course repeats a source ID. Review the prepared course filing before publishing.");
+    selected.add(id);
+  }
+  const originalBanks = new Set<string>();
+  for (const source of inventory.sources) {
+    if (!source.hasBank || !selected.has(source.id)) continue;
+    if (originalBanks.has(source.id)) {
+      throw new Error("Two question banks share one original source ID. Resolve the catalog collision before publishing.");
+    }
+    originalBanks.add(source.id);
+  }
+}
+
 /**
  * One batch job per course. A course over 512 MiB or 1,500 files retries
  * first without its original-only files, then without any original files;
@@ -406,6 +424,7 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
     async prepare(signal) {
       try {
         if (course.termBasis === "proposed") throw new Error("Confirm this course's term before publishing it.");
+        assertUniquePublicationSourceIds(inventory, course);
         const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"
           ? { term: course.term, evidence: "human-reviewed" } : undefined;
         const optional = new Set(course.optionalSourceIds);

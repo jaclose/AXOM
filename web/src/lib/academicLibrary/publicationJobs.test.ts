@@ -41,6 +41,42 @@ describe("publication jobs", () => {
     vi.mocked(preflightAcademicUpload).mockReset().mockResolvedValue([]);
   });
 
+  it("refuses duplicate bank source IDs before preparing uploads, even when both banks have zero question rows", async () => {
+    const original = { ...inventory.sources[0], ready: 0, review: 0, rows: 0 };
+    const conflict = { ...original, name: "empty-duplicate-bank.pdf", checksum: "c".repeat(64) };
+    const emptyCourse = { ...course, ready: 0, review: 0 };
+    for (const copies of [[original, conflict], [conflict, original]]) {
+      const input: PublicationInventory = { ...inventory, sources: [...copies, inventory.sources[1]] };
+      const { jobs, notes } = publicationJobs(read, input, [emptyCourse]);
+      await expect(jobs[0].prepare()).rejects.toThrow(/Two question banks share one original source ID/);
+      expect(notes.failures.get(emptyCourse.catalogId)).toMatch(/catalog collision/);
+    }
+    expect(prepareAcademicUpload).not.toHaveBeenCalled();
+    expect(preflightAcademicUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses repeated selected source IDs before preparing even when their question counts are zero", async () => {
+    const zero: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => source.id === "bank"
+      ? { ...source, ready: 0, review: 0, rows: 0 } : source) };
+    const withRepeatedSelection = { ...course, sourceIds: ["bank", "bank", "slides"], ready: 0, review: 0 };
+    const { jobs, notes } = publicationJobs(read, zero, [withRepeatedSelection]);
+    await expect(jobs[0].prepare()).rejects.toThrow(/course repeats a source ID/);
+    expect(notes.failures.get(course.catalogId)).toMatch(/prepared course filing/);
+    expect(prepareAcademicUpload).not.toHaveBeenCalled();
+  });
+
+  it("allows a nonbank duplicate-linked reference without mistaking it for an original bank", async () => {
+    const linked = { ...inventory.sources[0], status: "duplicate-linked" as const, hasBank: false,
+      duplicateOf: "bank", name: "duplicate-linked.pdf", ready: 0, review: 0 };
+    const input: PublicationInventory = { ...inventory, sources: [...inventory.sources, linked] };
+    const upload = prepared();
+    vi.mocked(prepareAcademicUpload).mockResolvedValue(upload);
+    const { jobs, notes } = publicationJobs(read, input, [course]);
+    await expect(jobs[0].prepare()).resolves.toBe(upload);
+    expect(notes.failures.size).toBe(0);
+    expect(prepareAcademicUpload).toHaveBeenCalledOnce();
+  });
+
   it("keeps optional originals on this device only when the course exceeds its size limit", async () => {
     const upload = prepared();
     vi.mocked(prepareAcademicUpload)
