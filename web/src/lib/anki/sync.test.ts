@@ -232,6 +232,20 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("addNotes")).toHaveLength(2);
   });
 
+  it("does not relink the old Basic note as a new Cloze when an addNotes batch partially fails", async () => {
+    const h = harness({ addNotesFailure: "throw" });
+    const original = card("a");
+    expect(await h.run([original])).toMatchObject({ added: 1 });
+    const originalId = h.state.links.a.noteId;
+    const invalidCloze = card("a", { type: "cloze", front: "missing a cloze deletion", back: "" });
+
+    const report = await h.run([invalidCloze]);
+    expect(report).toMatchObject({ replaced: 0, failed: 1 });
+    expect(h.state.links.a).toMatchObject({ noteId: originalId, kind: "basic" });
+    expect(h.fake.notes.size).toBe(1); // invalid replacement never existed
+    expect(h.fake.call("areSuspended", { cards: h.state.links.a.cardIds })).toEqual([false]);
+  });
+
   it("does not mistake intentionally retired note types for an uncertain new replacement", async () => {
     const h = harness();
     const basic = card("a");
