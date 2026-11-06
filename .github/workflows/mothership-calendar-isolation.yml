@@ -1,9 +1,10 @@
 name: Mothership Calendar Isolation
 
 on:
-  pull_request:
+  push:
+    branches:
+      - codex/mothership-ics114-diagnostic-20261106
     paths:
-      - 'web/src/pages/IntegrationsPage.tsx'
       - 'web/src/pages/IntegrationsPage.test.tsx'
       - '.github/workflows/mothership-calendar-isolation.yml'
   workflow_dispatch:
