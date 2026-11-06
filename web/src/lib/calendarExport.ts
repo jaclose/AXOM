@@ -56,19 +56,30 @@ export function calendarEvents(state: Pick<NoctyriumState, "tasks" | "boardPrep"
   return events.sort((a, b) => a.day.localeCompare(b.day) || a.title.localeCompare(b.title));
 }
 
-/** RFC 5545 text escaping. */
+/** RFC 5545 TEXT escaping. Calendar values can contain CR, LF or CRLF. */
 export function escapeIcsText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+  return value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
 }
 
-/** Fold long lines at 75 octets (approximated by characters) per RFC 5545. */
+/** Fold at 75 UTF-8 octets, reserving one octet for continuation whitespace. */
 export function foldIcsLine(line: string): string {
-  if (line.length <= 75) return line;
-  const parts: string[] = [];
-  for (let index = 0; index < line.length; index += index === 0 ? 75 : 74) {
-    parts.push((index === 0 ? "" : " ") + line.slice(index, index + (index === 0 ? 75 : 74)));
+  const encoder = new TextEncoder();
+  const lines: string[] = [];
+  let current = "";
+  let octets = 0;
+  // for...of iterates Unicode code points, so no UTF-8 sequence is split.
+  for (const character of line) {
+    const width = encoder.encode(character).length;
+    if (octets + width > 75) {
+      lines.push(current);
+      current = " ";
+      octets = 1;
+    }
+    current += character;
+    octets += width;
   }
-  return parts.join("\r\n");
+  lines.push(current);
+  return lines.join("\r\n");
 }
 
 function compactDay(day: string) {
