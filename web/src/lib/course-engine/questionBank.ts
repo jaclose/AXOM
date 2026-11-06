@@ -93,6 +93,10 @@ export function buildCourseQuestionBank(
       courseId: set.scope?.courseId ?? sameValue(scopes.map((entry) => entry.courseId)),
     };
 
+    // Week numbering without a module has no unambiguous academic owner.
+    if (!scope.module && scope.week !== undefined) continue;
+    const catalogCourse = courseForScope(scope, courses);
+
     // A contradictory source set is not a safe practice collection. Exclude
     // the *entire* set from this course/week navigator (not from the library)
     // so its raw IDs cannot still launch through Practice week or a set card.
@@ -104,11 +108,12 @@ export function buildCourseQuestionBank(
         || Boolean(scope.module && (!own.module
           || canonicalModuleKey(own.module) !== canonicalModuleKey(scope.module)))
         || Boolean(scope.courseId && own.courseId !== scope.courseId)
+        || Boolean(catalogCourse && own.courseId && own.courseId !== catalogCourse.id)
         || (scope.week !== undefined && own.week !== scope.week);
     });
     if (conflicting) continue;
 
-    const course = courseForScope(scope, courses);
+    const course = catalogCourse;
     const term = terms.find((item) => item.id === course?.termId)?.name ?? "Not yet assigned";
     const key = JSON.stringify([course?.id ?? scope.courseId ?? "unassigned", canonicalModuleKey(scope.module ?? "")]);
     const branch = modules.get(key) ?? {
