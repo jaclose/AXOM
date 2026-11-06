@@ -61,6 +61,8 @@ describe("Integrations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
     const panel = screen.getByText(/event.*from today onward/).closest(".calendar-export") as HTMLElement;
     expect(within(panel).getByText(/^1 event/)).toBeTruthy();
+    expect(within(panel).getByText(/file export, not live sync/i)).toBeTruthy();
+    expect(within(panel).getByText(/may skip, update, or duplicate events/i)).toBeTruthy();
     fireEvent.click(within(panel).getByRole("button", { name: /Download .ics/ }));
     expect(createObjectURL).toHaveBeenCalledOnce();
     vi.unstubAllGlobals();
