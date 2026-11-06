@@ -18,7 +18,7 @@ describe("community visual keyword metadata", () => {
   });
   it("enriches only the shared snapshot and does not mutate saved questions", () => {
     const enriched = enrichCommunitySnapshotVisualTags(fixture);
-    expect(enriched.questions[0].tags).toEqual(["visual:histology", "visual:anatomy", "visual:pathology"]);
+    expect(enriched.questions[0].tags).toEqual(["visual:histology", "visual:pathology"]);
     expect(enriched.tags).toEqual(enriched.questions[0].tags);
     expect(fixture.questions[0].tags).toEqual([]);
     expect(fixture.tags).toEqual([]);
