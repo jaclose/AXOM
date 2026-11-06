@@ -16,6 +16,8 @@ import {
 import type { AccountDevice, ProtectionStatus, RevisionSummary } from "../../lib/sync/syncTypes";
 import { useStore } from "../../lib/store";
 import { readVaultWriteFailure } from "../../lib/vaultActivity";
+import { retryLocalWorkspaceSave } from "../../lib/retryLocalWorkspaceSave";
+import { pushToast } from "../../lib/toast";
 import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
 import { TechnicalDetails } from "./TechnicalDetails";
 
@@ -49,7 +51,7 @@ export function AccountSyncPanel({ onOpenBackup }: { onOpenBackup?: () => void }
   return (
     <div className="account-center">
       <div className="account-stage">
-        <AccountHero user={account.user} status={account.protection} phase={account.phase} lastProtectedAt={account.lastProtectedAt} />
+        <AccountHero user={account.user} status={account.protection} phase={account.phase} lastProtectedAt={account.lastProtectedAt} onOpenBackup={onOpenBackup} />
         <div className="account-stage-work">
           {account.phase === "unconfigured" && <UnconfiguredCard onOpenBackup={onOpenBackup} />}
           {account.phase === "loading" && <div className="account-loading" role="status">Checking your account…</div>}
@@ -93,12 +95,29 @@ export function AccountSyncPanel({ onOpenBackup }: { onOpenBackup?: () => void }
   );
 }
 
-function AccountHero({ user, status, phase, lastProtectedAt }: {
+function AccountHero({ user, status, phase, lastProtectedAt, onOpenBackup }: {
   user: AccountUser | null;
   status: ProtectionStatus;
   phase: string;
   lastProtectedAt?: string;
+  onOpenBackup?: () => void;
 }) {
+  const [retryingLocalSave, setRetryingLocalSave] = useState(false);
+  async function retrySave() {
+    setRetryingLocalSave(true);
+    try {
+      await retryLocalWorkspaceSave();
+      pushToast({ title: "Workspace saved on this device", tone: "success" });
+    } catch (error) {
+      pushToast({
+        title: "Local save still needs attention",
+        body: error instanceof Error ? error.message : "Keep AXOM open and export a backup.",
+        tone: "warn",
+      });
+    } finally {
+      setRetryingLocalSave(false);
+    }
+  }
   const lastWrite = useLastVaultWrite();
   const writeFailure = useSyncExternalStore(subscribeVault, readVaultWriteFailure, () => null);
   const localState = writeFailure ? "failure" : lastWrite ? "saved" : "pending";
@@ -109,6 +128,12 @@ function AccountHero({ user, status, phase, lastProtectedAt }: {
           <span className="account-eyebrow">Save map</span>
           <h5>{writeFailure ? "Local saving needs attention." : "Where your work lives."}</h5>
           <p>{writeFailure ? "Keep AXOM open while you resolve the local save. Your account copy may also be behind." : "Your device holds your working copy. An account can hold a second, protected version."}</p>
+          {writeFailure && (
+            <div className="account-overview-actions">
+              <GButton variant="primary" onClick={() => void retrySave()} disabled={retryingLocalSave}>{retryingLocalSave ? "Saving…" : "Retry local save"}</GButton>
+              {onOpenBackup && <GButton onClick={onOpenBackup}>Open Emergency recovery</GButton>}
+            </div>
+          )}
         </div>
       </div>
       <div className="account-location-track" aria-label="Where your work is saved">

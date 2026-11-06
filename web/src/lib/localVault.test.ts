@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertVaultWrite,
   assertVaultWritesSince,
+  saveAndVerifyLocalWorkspace,
   DB_VERSION,
   getVaultWriteCheckpoint,
   flushLocalVaultWrites,
@@ -657,6 +658,31 @@ describe("a save that could not reach IndexedDB", () => {
     await localVaultStorage.setItem(key, snapshot("recovered"));
     expect(readVaultWriteFailure()).toBeNull();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("recovered"));
+  });
+
+  it("acknowledges a manual retry only after exact local read-back", async () => {
+    const value = snapshot("verified retry");
+    await saveAndVerifyLocalWorkspace(() => value);
+    expect(readVaultWriteFailure()).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBe(value);
+  });
+
+  it("does not acknowledge a retry when IndexedDB and the fallback both fail", async () => {
+    await localVaultStorage.setItem(key, snapshot("older verified"));
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === key) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    await expect(saveAndVerifyLocalWorkspace(() => snapshot("unsaved retry")))
+      .rejects.toThrow(/QuotaExceededError/);
+    expect(readVaultWriteFailure()).not.toBeNull();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("localStorage", storage);
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("older verified"));
   });
 
   it("is reported while no store accepts it, and the report clears once saving works", async () => {

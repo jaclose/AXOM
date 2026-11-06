@@ -10,6 +10,7 @@
 .account-overview { display: grid; gap: 24px; min-width: 0; padding: clamp(20px, 3vw, 29px); }
 .account-overview-heading { display: grid; gap: 8px; }
 .account-overview-heading > div { display: grid; gap: 8px; }
+.account-overview-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .account-overview h5 { color: var(--text); font-family: var(--font-display); font-size: clamp(24px, 2.4vw, 29px); font-weight: var(--fw-medium); letter-spacing: -.035em; line-height: 1.12; text-wrap: balance; }
 .account-overview p { max-width: 53ch; color: var(--text-60); font-size: var(--fs-sm); }
 .account-location-track { display: grid; grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr); align-items: center; gap: 9px; padding-top: 19px; border-top: 1px solid var(--hairline); }

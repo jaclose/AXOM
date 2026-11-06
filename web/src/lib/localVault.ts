@@ -805,12 +805,12 @@ const vaultStorage: StateStorage = {
       await writeVault(name, value, userId, vaultExpectation);
       clearFallbackCopy(fallbackStore, name, userId);
       rememberVaultSnapshot(name, value);
-      markVaultWrite("indexeddb");
+      if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
     } catch (indexedDbError) {
       if (isVaultConflictError(indexedDbError)) {
         if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         vaultWriteFailures.set(writeSequence, indexedDbError);
-        markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
         return;
       }
       // Try the established localStorage recovery path for any workspace.
@@ -845,7 +845,7 @@ const vaultStorage: StateStorage = {
       }
       if (saved) {
         rememberVaultSnapshot(name, value);
-        markVaultWrite("local-fallback");
+        if (name === STORAGE_KEYS.persistedState) markVaultWrite("local-fallback");
       } else {
         // A quota failure leaves the preceding workspace in place. Keep its
         // valid marker too, or the next start would prefer the older vault.
@@ -865,7 +865,7 @@ const vaultStorage: StateStorage = {
             : combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
-        markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
       }
     }
   },
@@ -906,13 +906,13 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
     clearFallbackCopy(localFallback(), name, userId);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
-    markVaultWrite("indexeddb");
+    if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
   } catch (error) {
     vaultWriteFailures.set(
       writeSequence,
       error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
     );
-    markVaultWriteFailure();
+    if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
   }
 }
 
@@ -959,6 +959,24 @@ export const localVaultStorage: StateStorage = {
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };
+
+/**
+ * Retry the current workspace after prior asynchronous writes settle. Read the
+ * current state only AFTER that flush, then enqueue it without an intervening
+ * await. A conflicting newer tab cannot be overwritten by the vault's
+ * fingerprint guard. Success requires both a successful write and exact
+ * read-back; best-effort Zustand persistence alone is not an acknowledgement.
+ */
+export async function saveAndVerifyLocalWorkspace(serializeCurrent: () => string): Promise<void> {
+  await flushLocalVaultWrites();
+  const value = serializeCurrent();
+  const checkpoint = getVaultWriteCheckpoint();
+  await localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+  assertVaultWrite(checkpoint + 1);
+  if (await localVaultStorage.getItem(STORAGE_KEYS.persistedState) !== value) {
+    throw new Error("The saved workspace did not match the current copy. Keep AXOM open, export a backup, and retry after checking other tabs.");
+  }
+}
 
 /** Schedule an explicit verified-backup replacement after earlier writes. */
 export function replaceLocalVaultItem(name: string, value: string): Promise<void> {
