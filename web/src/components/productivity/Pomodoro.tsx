@@ -181,7 +181,7 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
             </div>
             <div className="pomo-live-progress-foot">
               <span>{pomo.running ? "Running" : elapsed > 0 ? "Paused" : "Ready"}</span>
-              <span>Session time, not daily target credit</span>
+              <span>Targets update only after time is recorded</span>
             </div>
           </div>
         )}
