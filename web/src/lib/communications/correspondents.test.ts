@@ -5,9 +5,9 @@ const base = { userKey: "3c48cf9a-b93d-4de5-8d2a-f5af7efc213a" };
 const ids = AXOM_CORRESPONDENTS.map(item => item.id);
 const slugs = AXOM_CORRESPONDENTS.map(item => item.localPart);
 
-describe("AXOM Correspondents V1", () => {
-  it("keeps exactly 25 distinct, recognizable pseudonyms with safe email local-parts", () => {
-    expect(AXOM_CORRESPONDENTS).toHaveLength(25);
+describe("AXOM Correspondents V2", () => {
+  it("keeps exactly 40 distinct, recognizable pseudonyms with safe email local-parts", () => {
+    expect(AXOM_CORRESPONDENTS).toHaveLength(40);
     expect(new Set(ids).size).toBe(25);
     expect(new Set(slugs).size).toBe(25);
     for (const item of AXOM_CORRESPONDENTS) {
@@ -25,11 +25,12 @@ describe("AXOM Correspondents V1", () => {
     expect(first.inferredPersonality).toBe(false);
   });
 
-  it("uses intentionally selected colors and declared work styles, not a secret personality score", () => {
-    const sample = { ...base, selectedAccent: "#226cb4", declaredStyles: ["visual", "systems"] as const };
+  it("uses declared academic preferences rather than color as personality evidence", () => {
+    const sample = { ...base, academicHouse: "ARCHITECTS", selectedAccent: "#226cb4", declaredStyles: ["visual", "systems"] as const };
     const result = matchCorrespondent(sample);
     expect(result.basis).toBe("preferences");
-    expect(result.reasons.join(" ")).toMatch(/color|visual|systems/i);
+    expect(result.reasons.join(" ")).toMatch(/academic|study|preferences/i);
+    expect(result.reasons.join(" ")).not.toMatch(/color|blue|226cb4/i);
     expect(result.inferredPersonality).toBe(false);
     expect(matchCorrespondent(sample).id).toBe(result.id);
   });
@@ -67,9 +68,9 @@ describe("AXOM Correspondents V1", () => {
     const match = matchCorrespondent({ ...base, selectedAccent: "#3260ca", declaredStyles: ["precision"] });
     const email = renderCorrespondentIntroduction(match, { displayName: "Alex", useCase: "welcome", orbUrl: "https://axom.info/icons/axom-orb-512.png" });
     expect(email.subject).toMatch(/^AXOM POC · WELCOME · Meet /);
-    expect(email.html).toMatch(/SOURCE/);
-    expect(email.html).toMatch(/MATCH/);
-    expect(email.html).toMatch(/CORRESPONDENT/);
+    expect(email.html).toMatch(/ORIGIN/);
+    expect(email.html).toMatch(/NATURE/);
+    expect(email.html).toMatch(/COMPANION/);
     expect(email.html).toContain("#0D0D0E");
     expect(email.html).toContain("#E6E2D6");
     expect(email.html).toContain("#C8A96A");
@@ -87,6 +88,19 @@ describe("AXOM Correspondents V1", () => {
     expect(sender).toEqual({ from: expect.stringContaining("<" + match.localPart + "@axom.info>"), replyTo: "team@axom.info" });
   });
 
+  it("includes all eight orders and the fifteen new academic companions", () => {
+    const expected = ["orrery", "eidolon", "rook", "thren", "virelai", "tessera", "zephyr", "halcyon", "thistle", "calyx", "aureline", "helion", "caelum", "solara", "noctis"];
+    for (const id of expected) expect(ids).toContain(id);
+  });
+
+  it("keeps public welcome copy focused on the character, not the private matching rationale", () => {
+    const result = matchCorrespondent({ ...base, preferredId: "juniper" });
+    const email = renderCorrespondentIntroduction(result, { displayName: "Alex", useCase: "welcome" });
+    expect(email.html).toContain("Juniper");
+    expect(email.text).toMatch(/living atlas|archive|companion/i);
+    expect(email.text).not.toMatch(/you chose this correspondent|selected from your color|because you chose/i);
+  });
+
   it("never enables personalized FROM for security or authentication use cases", () => {
     const match = matchCorrespondent(base);
     const opts = { domain: "axom.info", verifiedDomains: ["axom.info"], replyTo: "team@axom.info" };
@@ -99,7 +113,8 @@ describe("AXOM Correspondents V1", () => {
   it("does not claim a journal inference when none was permitted", () => {
     const result = matchCorrespondent({ ...base, selectedAccent: "#C8A96A" });
     const email = renderCorrespondentIntroduction(result, { displayName: "Learner", useCase: "welcome" });
-    expect(email.text).toMatch(/based on preferences you shared|starter/i);
+    expect(email.text).toMatch(/archive|companion|learning/i);
+    expect(email.text).not.toMatch(/chosen because|selected because|color|you chose/i);
     expect(email.text).not.toMatch(/your diary reveals|we analyzed your journal|clinical profile/i);
   });
 });
