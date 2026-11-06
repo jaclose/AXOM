@@ -123,12 +123,18 @@ test("Productivity primary panels stay usable across themes and narrow screens",
       await expect(page.getByRole("heading", { name: "Log an activity" })).toBeVisible();
       const bounds = await page.locator(".productivity-primary-grid").evaluate((grid) => {
         const [log, focus] = Array.from(grid.children).map((element) => element.getBoundingClientRect());
-        return { logHeight: log.height, focusHeight: focus.height, logTop: log.top, focusTop: focus.top, scroll: grid.scrollWidth, width: grid.clientWidth };
+        const focusCard = grid.querySelector<HTMLElement>(".pomodoro");
+        if (!focusCard) throw new Error("Focus card is missing");
+        const previousHeight = focusCard.style.height;
+        focusCard.style.height = "auto";
+        const naturalFocusHeight = focusCard.getBoundingClientRect().height;
+        focusCard.style.height = previousHeight;
+        return { logTop: log.top, focusTop: focus.top, focusHeight: focus.height, naturalFocusHeight, scroll: grid.scrollWidth, width: grid.clientWidth };
       });
       expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
       if (width === 1440) {
         expect(Math.abs(bounds.logTop - bounds.focusTop)).toBeLessThan(2);
-        expect(bounds.focusHeight).toBeLessThan(bounds.logHeight); // No empty card stretched to match a long logger.
+        expect(Math.abs(bounds.focusHeight - bounds.naturalFocusHeight)).toBeLessThan(3); // The timer card cannot be stretched to the logger's height.
       } else expect(bounds.focusTop).toBeGreaterThan(bounds.logTop);
       const progress = await page.locator("#productivity-log .daily-progress-vessel").evaluate((vessel) => {
         const outer = vessel.getBoundingClientRect();
