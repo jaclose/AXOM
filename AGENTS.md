@@ -16,14 +16,15 @@ when location or authority is unclear. Retrieve the relevant doc, source region,
 tests, then necessary contracts. Dependency relevance beats directory proximity.
 Stop retrieving when evidence is sufficient to implement safely; correctness wins.
 
-Do not preload directions, archives, source trees, all branches/worktrees, previous
-sessions or the Obsidian graph. Graph links are optional retrieval routes: normally
-one relevant semantic hop, then reassess. Historical claims are not current behavior.
-Filter logs and large files; do not reread understood material. For noisy commands,
-write output to `/tmp/axom-<task>.log`, inspect the exit code and relevant `rg`/`tail`
-regions. A passing log excerpt cannot hide a failing command.
+Avoid bulk preloads (archives, worktrees, prior sessions, graph); retrieve only
+relevant sources. Follow one semantic graph hop before reassessing. Historical
+claims are not live state. For noisy commands, save `/tmp/axom-<task>.log`,
+inspect exit status and filtered lines; never hide a failed command.
 
 ## Protect before editing
+
+All AXOM AI workers follow [SOP V1](docs/operations/ai-worker-sop-v1.md)
+for ownership claims, pre-push evidence and coordinated release gates.
 
 - Read only current ownership/contracts and relevant latest entries in
   `/Users/jd/Developer/AXOM-coordination/BOARD.md` when available. Its linked state
@@ -86,13 +87,11 @@ claim to create/clear a session when the tool cannot do so.
 ORIENT → LOCATE → RETRIEVE → PROTECT → IMPLEMENT → VALIDATE → DOCUMENT →
 GRAPH (only meaningful architecture relationships) → HANDOFF → CHECKPOINT → STOP.
 
-One concept has one canonical explanation. Put durable behavior in the domain doc,
-architectural choices in decisions, and deferred cleanup in the registry. Preserve
-reasoning with provenance before replacing it; archive uncertainty, never erase it.
-Use [directions](docs/directions/README.md) only for ideas/execution history; preserve
-new ideas verbatim and index them, and record shipment only on actual shipment.
-Governance IDs and owner decisions retain authority. Choose routed locations for new
-files; do not add duplicate manuals, random root notes or speculative instruction files.
+One concept has one canonical explanation: behavior in domain docs, decisions in
+records, deferred cleanup in the registry. Preserve provenance and archive
+uncertainty. [Directions](docs/directions/README.md) track ideas/history, not
+shipment; preserve verbatim ideas and log shipment only after proof. Maintain
+owner/governance decisions; route new files, not duplicate manuals or root notes.
 
 Keep [AI_STATE](docs/AI_STATE.md) a small rolling handoff: dated checkout, protected
 work, blockers, relevant decisions, validation and next action. Replace stale narrative
@@ -100,12 +99,3 @@ with canonical links. Keep permanent rules here and bridges tiny. The repository
 enforces bootstrap size, not total client/global context or actual agent reading.
 Before finishing run `repo:check`, review the scoped diff and hand off honestly. Stop;
 do not start the next feature in this session.
-
-## AXOM AI worker protocol (V1)
-
-Every AXOM coding, research, design, infrastructure, QA and scheduled AI worker
-follows [the V1 SOP](docs/operations/ai-worker-sop-v1.md) for scoped ownership,
-pre-push test receipts, exact-head CI diagnosis, draft-PR handoff, Vercel
-preview budgets and unified release acceptance. Feature workers prepare;
-the owner-authorized gateway publishes only independently verified batches.
-No worker may promote pushed to tested, merged or deployed without evidence.
