@@ -344,3 +344,75 @@ describe("primary-source proof gates runnable course availability", () => {
     });
   });
 });
+
+
+describe("duplicate original IDs cannot inflate shared academic availability", () => {
+  it("holds valid and forged primary copies as one review question in either order", () => {
+    const primary = set("primary", ["shared"], { scope: goerScope });
+    const legitimate = question("shared", { setId: "primary", ...goerScope });
+    const forged = question("shared", { setId: "missing-source", ...goerScope });
+    const before = JSON.stringify([primary, legitimate, forged]);
+    for (const records of [[legitimate, forged], [forged, legitimate]]) {
+      const index = buildQuestionAvailabilityIndex(input([primary], records));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+        unresolvedWeekQuestions: 1,
+      });
+      expect(index.unassignedQuestions).toBe(0);
+    }
+    expect(JSON.stringify([primary, legitimate, forged])).toBe(before);
+  });
+
+  it("holds one original ID with conflicting scoring keys in either order", () => {
+    const primary = set("primary", ["shared"], { scope: goerScope });
+    const keyA = question("shared", { setId: "primary", ...goerScope, correctKey: "A" });
+    const keyB = question("shared", { setId: "primary", ...goerScope, correctKey: "B" });
+    for (const records of [[keyA, keyB], [keyB, keyA]]) {
+      const index = buildQuestionAvailabilityIndex(input([primary], records));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+        unresolvedWeekQuestions: 1,
+      });
+    }
+  });
+
+  it("never allows one reviewed mapping to make an unreviewed duplicate ready", () => {
+    const primary = set("primary", ["shared"], { scope: goerScope });
+    const ready = question("shared", { setId: "primary", ...goerScope });
+    const unreviewed = question("shared", { setId: "primary", ...goerScope,
+      extraction: { reviewed: false } as QuestionRecord["extraction"] });
+    for (const records of [[ready, unreviewed], [unreviewed, ready]]) {
+      const index = buildQuestionAvailabilityIndex(input([primary], records));
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+      });
+    }
+  });
+
+  it("keeps identical source and scoring duplicates eligible exactly once", () => {
+    const primary = set("primary", ["shared"], { scope: goerScope });
+    const first = question("shared", { setId: "primary", ...goerScope });
+    const duplicate = { ...first, updatedAt: "2026-11-06T12:00:00Z" };
+    const index = buildQuestionAvailabilityIndex(input([primary], [first, duplicate]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 1, reviewQuestions: 0,
+      unresolvedWeekQuestions: 0, indexedWeeks: [2],
+    });
+  });
+
+  it("does not attribute the same original ID to two conflicting course owners", () => {
+    const goer = set("goer-source", ["shared"], { scope: goerScope });
+    const ncrs = set("ncrs-source", ["shared"], {
+      scope: { module: "NCRS", week: 4, courseId: "ppm-500" },
+    });
+    const left = question("shared", { setId: "goer-source", ...goerScope });
+    const right = question("shared", { setId: "ncrs-source",
+      module: "NCRS", week: 4, courseId: "ppm-500" });
+    for (const records of [[left, right], [right, left]]) {
+      const index = buildQuestionAvailabilityIndex(input([goer, ncrs], records));
+      expect(index.unassignedQuestions).toBe(1);
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.readyQuestions ?? 0).toBe(0);
+      expect(index.byModule.get(questionAvailabilityModuleKey("Term 4", "NCRS"))?.readyQuestions ?? 0).toBe(0);
+    }
+  });
+});
