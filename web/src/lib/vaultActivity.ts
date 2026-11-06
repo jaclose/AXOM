@@ -82,32 +82,78 @@ export function invalidateVaultWrite(): void {
   }
 }
 
-export function readLastVaultWrite(): VaultWriteRecord | null {
-  if (statusInvalidated) return null;
-  if (lastWrite) return lastWrite;
+/** Read only a valid workspace-specific marker, never a legacy auxiliary write. */
+function readStoredWorkspaceMarker(): VaultWriteRecord | null {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const marker = parsed as Record<string, unknown>;
-    // Legacy {at,target} may represent only an auxiliary/cache save. Fail closed
-    // until the next actual workspace write, preserving all stored learner data.
     if (
-      marker.version === WORKSPACE_WRITE_MARKER_VERSION &&
-      marker.scope === "workspace" &&
-      typeof marker.at === "string" &&
-      Number.isFinite(Date.parse(marker.at)) &&
-      (marker.target === "indexeddb" || marker.target === "local-fallback")
-    ) {
-      lastWrite = {
-        at: marker.at,
-        target: marker.target,
-        version: WORKSPACE_WRITE_MARKER_VERSION,
-        scope: "workspace",
-      };
-      return lastWrite;
-    }
+      marker.version !== WORKSPACE_WRITE_MARKER_VERSION ||
+      marker.scope !== "workspace" ||
+      typeof marker.at !== "string" ||
+      !Number.isFinite(Date.parse(marker.at)) ||
+      (marker.target !== "indexeddb" && marker.target !== "local-fallback")
+    ) return null;
+    return {
+      at: marker.at,
+      target: marker.target,
+      version: WORKSPACE_WRITE_MARKER_VERSION,
+      scope: "workspace",
+    };
   } catch {
-    // Fall through.
+    return null;
   }
-  return null;
+}
+
+/**
+ * The in-memory marker must be rechecked against browser storage. A different
+ * tab can remove the workspace while Settings is unmounted (no subscriber).
+ * Keep a newer same-tab write: the local metadata marker is throttled to 1/s.
+ */
+export function readLastVaultWrite(): VaultWriteRecord | null {
+  if (statusInvalidated) return null;
+  const stored = readStoredWorkspaceMarker();
+  if (!stored) {
+    lastWrite = null;
+    return null;
+  }
+  if (!lastWrite || Date.parse(stored.at) > Date.parse(lastWrite.at)) lastWrite = stored;
+  return lastWrite;
+}
+
+/**
+ * React subscribers hear same-tab write/failure events AND native storage
+ * events from other tabs. StorageEvent never fires in the tab that wrote the
+ * key. Only the workspace marker and whole-store clear affect saved status.
+ * A sessionStorage or unrelated-key event must not erase a good local save.
+ */
+export function subscribeVaultWriteStatus(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== STORAGE_KEYS.lastVaultWriteAt && event.key !== null) return;
+    try {
+      if (event.storageArea && event.storageArea !== window.localStorage) return;
+    } catch {
+      // Storage access is now blocked: discard optimistic status instead.
+    }
+    lastWrite = null;
+    lastPersistedAt = 0;
+    try {
+      // Reconcile with the latest persisted value, rather than assuming
+      // one queued event is newer than every write from another tab.
+      statusInvalidated = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) === null;
+    } catch {
+      statusInvalidated = true;
+    }
+    listener();
+  };
+  window.addEventListener(VAULT_WRITE_EVENT, listener);
+  window.addEventListener(VAULT_WRITE_FAILURE_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(VAULT_WRITE_EVENT, listener);
+    window.removeEventListener(VAULT_WRITE_FAILURE_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+  };
 }

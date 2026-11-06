@@ -22,7 +22,7 @@ import {
 } from "../../lib/focusCheckIn";
 import { FOCUS_CHECKIN_TEST_EVENT } from "./FocusCheckIn";
 import { RESTORE_EVENT_LABELS, RESTORE_HISTORY_EVENT, readRestoreHistory } from "../../lib/restoreHistory";
-import { VAULT_WRITE_EVENT, VAULT_WRITE_FAILURE_EVENT, readLastVaultWrite, readVaultWriteFailure } from "../../lib/vaultActivity";
+import { readLastVaultWrite, readVaultWriteFailure, subscribeVaultWriteStatus } from "../../lib/vaultActivity";
 
 // ---------------------------------------------------------------------------
 // Profile
@@ -199,12 +199,7 @@ export function ProfileSection({
 // ---------------------------------------------------------------------------
 
 export function subscribeVault(listener: () => void) {
-  window.addEventListener(VAULT_WRITE_EVENT, listener);
-  window.addEventListener(VAULT_WRITE_FAILURE_EVENT, listener);
-  return () => {
-    window.removeEventListener(VAULT_WRITE_EVENT, listener);
-    window.removeEventListener(VAULT_WRITE_FAILURE_EVENT, listener);
-  };
+  return subscribeVaultWriteStatus(listener);
 }
 function vaultSnapshot() {
   const record = readLastVaultWrite();

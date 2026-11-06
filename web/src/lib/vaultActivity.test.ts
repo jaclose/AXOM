@@ -87,3 +87,78 @@ describe("verified local workspace save timestamps across upgrades", () => {
   });
 
 });
+
+describe("cross-tab workspace marker consistency", () => {
+  it("invalidates a cached green save after another tab removes the marker and preserves workspace bytes", async () => {
+    const preservedWorkspace = JSON.stringify({ state: { notes: "synthetic private draft untouched" } });
+    window.localStorage.setItem(STORAGE_KEYS.persistedState, preservedWorkspace);
+    const { markVaultWrite, readLastVaultWrite, subscribeVaultWriteStatus } = await import("./vaultActivity");
+    markVaultWrite("indexeddb", new Date(savedAt));
+    expect(readLastVaultWrite()?.scope).toBe("workspace");
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeVaultWriteStatus(listener);
+    const previous = window.localStorage.getItem(markerKey);
+    window.localStorage.removeItem(markerKey);
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: markerKey, oldValue: previous, newValue: null, storageArea: window.localStorage,
+    }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(preservedWorkspace);
+
+    const shortlyAfter = new Date(Date.parse(savedAt) + 200);
+    markVaultWrite("indexeddb", shortlyAfter);
+    expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null").at).toBe(shortlyAfter.toISOString());
+    unsubscribe();
+    const count = listener.mock.calls.length;
+    window.localStorage.removeItem(markerKey);
+    window.dispatchEvent(new StorageEvent("storage", { key: markerKey, storageArea: window.localStorage }));
+    expect(listener).toHaveBeenCalledTimes(count);
+    // A hidden Settings panel must also notice absent metadata on its next read.
+    expect(readLastVaultWrite()).toBeNull();
+  });
+
+  it("recognizes a remote verified save but holds legacy or invalid replacements", async () => {
+    const { readLastVaultWrite, subscribeVaultWriteStatus } = await import("./vaultActivity");
+    const listener = vi.fn();
+    const unsubscribe = subscribeVaultWriteStatus(listener);
+    const valid = { at: savedAt, target: "indexeddb", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(valid));
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: markerKey, newValue: JSON.stringify(valid), storageArea: window.localStorage,
+    }));
+    expect(readLastVaultWrite()).toEqual(valid);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    window.localStorage.setItem(markerKey, JSON.stringify({ at: savedAt, target: "indexeddb" }));
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: markerKey, newValue: JSON.stringify({ at: savedAt, target: "indexeddb" }), storageArea: window.localStorage,
+    }));
+    expect(readLastVaultWrite()).toBeNull();
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
+  it("ignores unrelated and sessionStorage events but preserves unsaved-failure alerts", async () => {
+    const { markVaultWrite, markVaultWriteFailure, readLastVaultWrite, readVaultWriteFailure, subscribeVaultWriteStatus } =
+      await import("./vaultActivity");
+    markVaultWrite("local-fallback", new Date(savedAt));
+    const listener = vi.fn();
+    const unsubscribe = subscribeVaultWriteStatus(listener);
+    window.dispatchEvent(new StorageEvent("storage", { key: "other-cache", storageArea: window.localStorage }));
+    window.dispatchEvent(new StorageEvent("storage", { key: markerKey, storageArea: window.sessionStorage }));
+    expect(listener).not.toHaveBeenCalled();
+    expect(readLastVaultWrite()?.target).toBe("local-fallback");
+
+    const failureTime = new Date(Date.parse(savedAt) + 300);
+    markVaultWriteFailure(failureTime);
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.localStorage.removeItem(markerKey);
+    window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: window.localStorage }));
+    expect(readLastVaultWrite()).toBeNull();
+    expect(readVaultWriteFailure()).toBe(failureTime.toISOString());
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+});
