@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from "react";
-import { BookUp2, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BookUp2, ShieldCheck, Sparkles } from "lucide-react";
+import { resolveActiveProvider } from "../../lib/ai";
+import { draftQuestionExplanation, eligibleForExplanationDraft, questionExplanationFingerprint, type QuestionExplanationDraft } from "../../lib/ai/questionTeaching";
+import { planMedicalVisual } from "../../lib/diagrams/publicationHints";
+import { useStore } from "../../lib/store";
 import { useAccount } from "../../lib/account/accountStore";
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
-import { createQuestionSetShare, type SharedQuestionSetSnapshot } from "../../lib/sharing/questionSetShare";
+import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
 import {
   listMyQuestionSetSubmissions, submitQuestionSetToLibrary, withdrawQuestionSetSubmission,
   type LibrarySubmission,
@@ -13,53 +17,183 @@ import { Modal } from "../ui/Modal";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import "../../styles/question-set-library.css";
 
-export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
+const AI_EXPLANATION_PREFIX = "AXOM AI-assisted explanation (verify against source): ";
+
+export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDraft = false }: {
   set: QuestionSet;
   questions: readonly QuestionRecord[];
   onClose: () => void;
+  /** Only for an explicit Community publish action when configured AI is real. */
+  autoDraft?: boolean;
 }) {
   const accountId = useAccount(state => state.user?.id);
   const [submission, setSubmission] = useState<LibrarySubmission>();
   const [checking, setChecking] = useState(true);
+  const [statusIdentity, setStatusIdentity] = useState("");
   const [busy, setBusy] = useState(false);
   const [rights, setRights] = useState(false);
   const [answers, setAnswers] = useState(false);
   const [credit, setCredit] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const snapshotRef = useRef<SharedQuestionSetSnapshot>();
-  const byId = new Map(questions.map(question => [question.id, question]));
-  const sourceQuestions = set.questionIds.map(id => byId.get(id));
+  const [drafts, setDrafts] = useState<QuestionExplanationDraft[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState("");
+  const [generationError, setGenerationError] = useState("");
+  const generationAbort = useRef<AbortController | null>(null);
+  const autoDraftStarted = useRef(false);
+  const provider = useMemo(() => resolveActiveProvider(), []);
+  const sourceQuestions = useMemo(() => {
+    const byId = new Map(questions.map(question => [question.id, question]));
+    return set.questionIds.map(id => byId.get(id));
+  }, [questions, set.questionIds]);
   const unresolved = sourceQuestions.filter(question => !question || questionPracticeReadiness(question) !== "ready").length;
   const withMedia = sourceQuestions.filter(question => question && ((question.attachments?.length ?? 0) > 0
     || (question.content?.assets.length ?? 0) > 0)).length;
+  const missingExplanations = sourceQuestions.filter(question => question && !question.explanation?.trim()).length;
+  const draftable = useMemo(() => sourceQuestions.filter((question): question is QuestionRecord => Boolean(question)
+    && eligibleForExplanationDraft(question!) && !drafts.some(draft => draft.questionId === question!.id)),
+  [sourceQuestions, drafts]);
+  const visualPlans = sourceQuestions.flatMap(question => {
+    if (!question) return [];
+    const plan = planMedicalVisual(question);
+    return plan.kind === "none" ? [] : [{ id: question.id, ...plan }];
+  });
 
   async function refresh() {
-    if (!accountId) { setChecking(false); return; }
+    if (!accountId) { setStatusIdentity(""); setChecking(false); return; }
     const owned = await listMyQuestionSetSubmissions(accountId);
+    if (useAccount.getState().user?.id !== accountId) throw new Error("The account changed during submission lookup.");
     const found = owned.find(item => item.sourceId === set.id);
     setSubmission(found);
+    setStatusIdentity(`${accountId}:${set.id}`);
     setChecking(false);
     return found;
   }
   useEffect(() => {
     let alive = true;
+    // A status result from the previous account must never unlock another
+    // account's AI processing, publication, or existing-submission controls.
+    setChecking(true);
+    setSubmission(undefined);
+    setStatusIdentity("");
     if (!accountId) { setChecking(false); return; }
     void listMyQuestionSetSubmissions(accountId).then(owned => {
-      if (alive) { setSubmission(owned.find(item => item.sourceId === set.id)); setChecking(false); }
+      if (alive && useAccount.getState().user?.id === accountId) {
+        setSubmission(owned.find(item => item.sourceId === set.id));
+        setStatusIdentity(`${accountId}:${set.id}`);
+        setChecking(false);
+      }
     }).catch(cause => {
       if (alive) { setError(cause instanceof Error ? cause.message : "Your submissions could not be checked."); setChecking(false); }
     });
     return () => { alive = false; };
   }, [accountId, set.id]);
 
+  useEffect(() => {
+    setDrafts([]);
+    autoDraftStarted.current = false;
+    setGenerationProgress("");
+    setGenerationError("");
+    return () => { generationAbort.current?.abort(); };
+  }, [accountId, set.id]);
+
+  const generateExplanations = useCallback(async () => {
+    if (!provider || !accountId || statusIdentity !== `${accountId}:${set.id}`
+      || generating || generationAbort.current || !draftable.length) return;
+    const controller = new AbortController();
+    generationAbort.current = controller;
+    setGenerating(true);
+    setGenerationError("");
+    setGenerationProgress("");
+    const next: QuestionExplanationDraft[] = [];
+    let failures = 0;
+    try {
+      // Each user-requested batch is bounded, so provider quotas and failures do not
+      // trigger an uncontrolled upload of an entire private Question Bank.
+      const batch = draftable.slice(0, 12);
+      for (const question of batch) {
+        if (controller.signal.aborted) return;
+        try {
+          const draft = await draftQuestionExplanation(provider, question, controller.signal);
+          if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
+          next.push(draft);
+          setDrafts(previous => previous.some(item => item.questionId === draft.questionId)
+            ? previous : [...previous, draft]);
+          setGenerationProgress(`Prepared ${next.length} of ${batch.length} draft explanations…`);
+        } catch (cause) {
+          if (controller.signal.aborted) return;
+          failures += 1;
+          if (!next.length) setGenerationError(cause instanceof Error ? cause.message : "The AI provider could not draft this explanation.");
+        }
+      }
+      if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
+      setGenerationProgress(next.length
+        ? `${next.length} provisional explanations prepared. Inspect them before saving. ${failures ? `${failures} need manual review.` : ""}`
+        : "No explanations could be drafted. Review your source or AI settings.");
+    } finally {
+      if (generationAbort.current === controller) generationAbort.current = null;
+      setGenerating(false);
+    }
+  }, [provider, accountId, set.id, statusIdentity, generating, draftable]);
+
+  useEffect(() => {
+    if (!autoDraft || checking || !accountId || statusIdentity !== `${accountId}:${set.id}`
+      || !provider || provider.info.kind === "mock"
+      || !draftable.length || (submission && submission.status !== "rejected")
+      || autoDraftStarted.current) return;
+    // The explicit Community "Review and submit" action authorizes this capped
+    // preparation. Re-renders never create additional inference batches.
+    autoDraftStarted.current = true;
+    void generateExplanations();
+  }, [autoDraft, accountId, set.id, statusIdentity, checking, submission, provider, draftable.length, generateExplanations]);
+
+  function saveReviewedDrafts() {
+    if (generating || !accountId || statusIdentity !== `${accountId}:${set.id}`
+      || !drafts.length || useAccount.getState().user?.id !== accountId) return;
+    const bank = useStore.getState();
+    const current = new Map((bank.questions ?? []).map(question => [question.id, question]));
+    for (const draft of drafts) {
+      const question = current.get(draft.questionId);
+      if (!question || questionExplanationFingerprint(question) !== draft.sourceFingerprint
+        || !eligibleForExplanationDraft(question) || !set.questionIds.includes(question.id)) {
+        setGenerationError("One or more questions changed. Reopen the set to avoid overwriting newer work.");
+        return;
+      }
+    }
+    for (const draft of drafts) {
+      const question = current.get(draft.questionId);
+      const keys = question?.options.map(option => option.key) ?? [];
+      if (draft.explanation.trim().length < 40 || draft.explanation.trim().length + AI_EXPLANATION_PREFIX.length > 30_000
+        || keys.some(key => (draft.choiceRationales[key] ?? "").trim().length < 10
+          || draft.choiceRationales[key].length > 10_000)) {
+        setGenerationError("Finish the explanation and every choice rationale before saving.");
+        return;
+      }
+    }
+    for (const draft of drafts) {
+      bank.updateQuestion(draft.questionId, {
+        // Do not silently masquerade AI-authored teaching prose as a source rationale.
+        explanation: `${AI_EXPLANATION_PREFIX}${draft.explanation.trim()}`,
+        choiceRationales: draft.choiceRationales,
+      });
+    }
+    setDrafts([]);
+    setGenerationError("");
+    setGenerationProgress("");
+    setMessage("Reviewed explanations saved privately. They still require a source check before publication.");
+  }
+
   async function submit() {
-    if (!accountId || !rights || !answers || checking || busy || unresolved || withMedia
+    if (!accountId || statusIdentity !== `${accountId}:${set.id}`
+      || !rights || !answers || checking || busy || generating || drafts.length
+      || unresolved || withMedia || missingExplanations
       || (submission && submission.status !== "rejected")) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      snapshotRef.current ??= createQuestionSetShare(set, questions);
-      const id = await submitQuestionSetToLibrary(accountId, set.id, snapshotRef.current, credit);
+      // Always serialize the current private revision; never reuse a stale share snapshot.
+      const snapshot = createQuestionSetShare(set, questions);
+      const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit);
       const result = await refresh();
       if (!result || result.id !== id) throw new Error("The submission could not be read back. Check its status before retrying.");
       setMessage(result?.status === "rejected"
@@ -83,19 +217,57 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
     setBusy(true); setError(""); setMessage("");
     try {
       await withdrawQuestionSetSubmission(accountId, submission.id);
-      snapshotRef.current = undefined;
       await refresh();
       setMessage("The submission was withdrawn from the library.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Withdrawal could not be confirmed."); }
     finally { setBusy(false); }
   }
 
-  return <Modal title={`Submit ${set.title}`} onClose={busy ? () => {} : onClose}>
-    <div className="qsl-submit stack gap12" aria-busy={busy || checking}>
+  return <Modal title={`Submit ${set.title}`} onClose={busy ? () => {} : () => { generationAbort.current?.abort(); onClose(); }}>
+    <div className="qsl-submit stack gap12" aria-busy={busy || checking || generating}>
       <p>Offer this Question Set to every signed-in AXOM learner. An academic reviewer checks it before it appears in search.</p>
       <div className="qsl-submit-facts"><BookUp2 size={20} aria-hidden="true" /><b>{set.questionIds.length} questions</b><span>Only question text, choices, answers, explanations, tags and citations are submitted. Your attempts, notes, files and course filing stay private.</span></div>
       {unresolved > 0 && <p role="alert" className="qsl-error">{unresolved} question{unresolved === 1 ? " is" : "s are"} still held for answer or source review. Resolve them before submitting this set.</p>}
       {withMedia > 0 && <p role="alert" className="qsl-error">{withMedia} question{withMedia === 1 ? " uses" : "s use"} an image or media that this library snapshot cannot carry. Keep this set private until media-safe sharing is available.</p>}
+      {missingExplanations > 0 && <div className="qsl-assist stack gap8">
+        <b>{missingExplanations} missing explanation{missingExplanations === 1 ? "" : "s"}</b>
+        <p>AXOM can draft rationales from your already-reviewed answers. No answer key changes. Model output is provisional until you inspect and save it.</p>
+        {provider && provider.info.kind !== "mock" ? <GButton disabled={checking || statusIdentity !== `${accountId}:${set.id}` || generating || busy || draftable.length === 0} onClick={() => void generateExplanations()}>
+          <Sparkles size={16} aria-hidden="true" /> {generating ? "Drafting explanations…" : `Draft explanations (${Math.min(draftable.length, 12)} at a time)`}
+        </GButton> : <p>Enable AXOM Cloud AI or a local model in Settings to draft explanations, or write them in Question Bank.</p>}
+        {generating && <GhostButton onClick={() => generationAbort.current?.abort()}>Cancel drafting</GhostButton>}
+      </div>}
+      {generationProgress && <p role="status">{generationProgress}</p>}
+      {generationError && <p role="alert" className="qsl-error">{generationError}</p>}
+      {drafts.length > 0 && <div className="qsl-assist stack gap8" aria-label="Generated explanation drafts">
+        <b>{drafts.length} AI draft{drafts.length === 1 ? "" : "s"} to inspect</b>
+        {drafts.map((draft, index) => <details key={draft.questionId}>
+          <summary>Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} · Review explanation and choices</summary>
+          <p className="qsl-draft-stem">{sourceQuestions.find(question => question?.id === draft.questionId)?.stem}</p>
+          <ul className="qsl-draft-options">{sourceQuestions.find(question => question?.id === draft.questionId)?.options.map(option =>
+            <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
+          <label className="qsl-draft-field">Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} explanation
+            <textarea rows={4} maxLength={30_000} value={draft.explanation}
+              onChange={event => setDrafts(current => current.map(item => item.questionId === draft.questionId
+                ? { ...item, explanation: event.target.value } : item))} />
+          </label>
+          {Object.entries(draft.choiceRationales).map(([key, rationale]) => <label className="qsl-draft-field"
+            key={key}>Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} choice {key} rationale
+            <textarea rows={2} maxLength={10_000} value={rationale}
+              onChange={event => setDrafts(current => current.map(item => item.questionId === draft.questionId
+                ? { ...item, choiceRationales: { ...item.choiceRationales, [key]: event.target.value } } : item))} />
+          </label>)}
+        </details>)}
+        <GButton disabled={generating || busy} onClick={saveReviewedDrafts}>Save inspected explanations to my QBank</GButton>
+        <p className="sub">Check these AI-generated drafts against the actual source. No explanation is saved or published automatically.</p>
+      </div>}
+      {visualPlans.length > 0 && <details className="qsl-visual-hints">
+        <summary>Visual keywords for future AXOM diagrams ({visualPlans.length})</summary>
+        <p>Text-only requests, not generated images. Medical and usage-rights review remain required.</p>
+        <ul>{visualPlans.slice(0, 15).map(plan => <li key={plan.id}>
+          Question {set.questionIds.indexOf(plan.id) + 1}: {plan.kind.replaceAll("-", " ")} · {plan.keywords.join(", ") || "topic context"}
+        </li>)}</ul>
+      </details>}
       {!accountId && <p role="status">Sign in through Account to submit a set.</p>}
       {checking && <p role="status">Checking your existing submission…</p>}
       {submission && <div className="qsl-submission-status">
@@ -112,8 +284,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose }: {
         <label className="qsl-check"><input type="checkbox" checked={rights} disabled={busy} onChange={event => setRights(event.target.checked)} />
           <span>I own this content or have permission to distribute every question, answer and explanation.</span></label>
         <label className="qsl-check"><input type="checkbox" checked={answers} disabled={busy} onChange={event => setAnswers(event.target.checked)} />
-          <span>I checked every answer against its source and resolved any source-key conflicts.</span></label>
-        <GButton variant="primary" disabled={busy || !rights || !answers || unresolved > 0 || withMedia > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
+          <span>I checked every answer against its source, verified every explanation, and resolved source-key conflicts.</span></label>
+        <GButton variant="primary" disabled={busy || checking || statusIdentity !== `${accountId}:${set.id}` || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
           <ShieldCheck size={16} aria-hidden="true" /> {busy ? "Submitting…" : "Send for review"}
         </GButton>
       </>}

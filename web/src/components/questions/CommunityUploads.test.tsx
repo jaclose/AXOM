@@ -64,6 +64,16 @@ vi.mock("../../lib/academicLibrary/ownedCourses", () => ({
   ownedCourseStatus: (course: { visibility: string }) => course.visibility,
 }));
 vi.mock("../tracker/AcademicCourseUpload", () => ({ AcademicCourseUpload: () => <p>Prepared package uploader</p> }));
+vi.mock("./QuestionSetLibrarySubmitDialog", () => ({
+  QuestionSetLibrarySubmitDialog: ({ set, onClose }: { set: { title: string; questionIds: string[] }; onClose: () => void }) =>
+    <div role="dialog" aria-label={`Submit ${set.title}`}>
+      <p>{set.questionIds.length} questions selected for academic review</p>
+      <button type="button" onClick={onClose}>Close set review</button>
+    </div>,
+}));
+vi.mock("./CommunityQuestionSetLibrary", () => ({
+  CommunityQuestionSetLibrary: () => <section aria-label="Approved Community Question Sets">Approved standalone sets</section>,
+}));
 
 const row = { id: ids.collection, title: "Current course", module: "NCRS", term: "Term 4",
   current_revision_id: ids.revision, ready_questions: 8, review_questions: 2,
@@ -92,6 +102,38 @@ describe("Community Uploads", () => {
     mocks.prepareSaved.mockResolvedValue({ metadata: { ready_questions: 1, term: "Term 4", module: "NCRS" } });
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("lets an independent Question Set be selected and reviewed without a source file, term, or course", () => {
+    mocks.workspace.questionSets = [{
+      id: "local-set-1", title: "Standalone renal questions", questionIds: ["q-1"],
+      sourceDocumentIds: [], tags: ["renal"], aiEnhanced: false,
+      createdAt: "2026-11-06T12:00:00.000Z", parserWarnings: [], kind: "custom",
+    }];
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Share a Question Set" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Share a course" })).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "My Question Set" }), { target: { value: "local-set-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review and submit set" }));
+    expect(screen.getByRole("dialog", { name: "Submit Standalone renal questions" })).toBeTruthy();
+    expect(screen.getByText("1 questions selected for academic review")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close set review" }));
+    expect(screen.queryByRole("dialog", { name: /Standalone renal questions/ })).toBeNull();
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
+  it("only loads the approved Question Set catalog on request", () => {
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    expect(screen.queryByLabelText("Approved Community Question Sets")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Browse approved Question Sets" }));
+    expect(screen.getByLabelText("Approved Community Question Sets")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Hide approved Question Sets" }));
+    expect(screen.queryByLabelText("Approved Community Question Sets")).toBeNull();
+  });
+
+  it("points students with no saved Question Sets to Question Bank rather than requiring a course", () => {
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "Create one in Question Bank" }).getAttribute("href")).toBe("#questions");
+  });
 
   it("requires sign-in and keeps unreviewed courses outside the official catalog", () => {
     mocks.account.id = undefined;
