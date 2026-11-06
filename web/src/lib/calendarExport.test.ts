@@ -117,8 +117,8 @@ describe("calendar export", () => {
     expect(() => buildIcs([event, { ...event }], at)).toThrow(RangeError);
     // Distinct raw IDs can collapse to the same wire ID after RFC TEXT newline escaping.
     expect(() => buildIcs([
-      { ...event, uid: "task\\r\\nfirst".replace(/\\r/g, "\r").replace(/\\n/g, "\n") },
-      { ...event, uid: "task\\nfirst".replace(/\\n/g, "\n") },
+      { ...event, uid: "task\r\nfirst" },
+      { ...event, uid: "task\nfirst" },
     ], at)).toThrow(/duplicated after escaping/);
     expect(() => buildIcs([{ ...event, uid: "task-\u0000" }], at)).toThrow(RangeError);
     expect(() => buildIcs([{ ...event, uid: "task-\uD800" }], at)).toThrow(RangeError);
