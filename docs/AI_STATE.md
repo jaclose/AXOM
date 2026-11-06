@@ -5,22 +5,9 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Community standalone Question Sets · 2026-11-06
+## Community QBank · 2026-11-06
 
-Draft [PR #148](https://github.com/jaclose/AXOM/pull/148) on
-`codex/community-qbank-enrichment-20261106` adds a direct Community QBank
-publisher and approved-set discovery beside existing course sharing. A
-deliberate publish-review action may automatically draft up to 12
-explanations from confirmed keys with configured, non-demo AI. All teaching
-prose remains editable, explicitly AI-assisted, review-gated and private
-until saved and submitted; unsupported media and unresolved keys stay held.
-Future diagram keywords and source directory are text-only and asset rights
-fail closed. The existing Question Set Library migration and five required
-RPC endpoints were confirmed on production Supabase; no schema or media
-migration is required. CI and acceptance remain release gates; no merge,
-production deployment, or live-account publication occurred here.
-[Questions](features/questions.md#community-question-set-publishing-and-explanation-assistance)
-owns the behavior.
+Draft PR #148: standalone QBank sharing, guarded AI rationales and visual hints. Production RPCs confirmed; not merged/deployed. See [Questions](features/questions.md).
 
 ## Homepage alpha
 
@@ -149,14 +136,11 @@ source rights are approved by a passing code suite.
 
 ## Work protection and next action
 
-The original checkout and other worktrees contain independent owner material;
-preserve their staged, untracked and ignored files. Do not reset, stash, clean
-or bulk-merge them. In particular, `backup/pre-large-file-cleanup-2026-09-28`
-contains private assets and broad replacement/deletion. Check the
-`/Users/jd/Developer/AXOM-coordination/BOARD.md` ownership notes and
-[maintenance registry](operations/repository-audit.md#maintenance-registry)
-before shared edits. Historic receipts remain in Git history; do not reload
-them at startup without a specific question.
+Protect owner files and worktrees, including
+`backup/pre-large-file-cleanup-2026-09-28`; no resets, stashes, cleans or
+bulk merges. Check the coordination BOARD and
+[maintenance registry](operations/repository-audit.md#maintenance-registry).
+Retrieve historic receipts from Git only when needed.
 
 At `eaad98fa`, the clean combined gate passed typecheck, lint, 4,649 web
 tests (35 skipped), build, update safety, offline games and 167 browser
