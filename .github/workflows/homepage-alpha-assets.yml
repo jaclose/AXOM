@@ -1,0 +1,54 @@
+name: Import approved homepage alpha assets
+on:
+  push:
+    branches: [codex/homepage-cinematic-alpha-20261106]
+    paths: [.github/workflows/homepage-alpha-assets.yml]
+permissions:
+  contents: write
+jobs:
+  import:
+    if: github.repository == 'jaclose/AXOM' && github.ref == 'refs/heads/codex/homepage-cinematic-alpha-20261106'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .nvmrc
+      - name: Fetch only the four approved public assets and verify original bytes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdir, writeFile } from 'node:fs/promises';
+          import { createHash } from 'node:crypto';
+          const dir = 'web/public/landing/alpha-v1';
+          const assets = [
+            ['axom-launch-web.mp4','https://cdn.pika.art/v2/creation/uploads/5eb6e6cf-5f2c-48ba-88cd-f8ef2e55d28f/be9875eaa7304b6a9aa1e9dd2702aa83.mp4',11194267,'c2ce3ef5f23c6a3b88df772daaaa1c982618c333b9b4aeab43ef85d0a7cf4035'],
+            ['axom-launch-mobile.mp4','https://cdn.pika.art/v2/creation/uploads/5eb6e6cf-5f2c-48ba-88cd-f8ef2e55d28f/a2ab3806a8ec43c2ac8a733d0b0cc246.mp4',12069804,'8822f5bf922f2f50f35ee69085fb0a7a88065db823d768b36e4a5e18fc1f0e64'],
+            ['poster.jpg','https://cdn.pika.art/v2/creation/uploads/5eb6e6cf-5f2c-48ba-88cd-f8ef2e55d28f/31ab7d7a489343548face1e3933ad660.jpg',63301,'03ca1c872412af9a01d6a27f3bbf7252c43fe708352515fb9c281338f7f6c2c8'],
+            ['poster-mobile.jpg','https://cdn.pika.art/v2/creation/uploads/5eb6e6cf-5f2c-48ba-88cd-f8ef2e55d28f/11b4cc1fbfac4d47a84aca9dbf14e4f8.jpg',57555,'e67f6c89156b004ff643184fdddba9861f14dd910458b292683e6feb5747287c'],
+          ];
+          await mkdir(dir,{recursive:true});
+          for (const [name,url,bytes,sha256] of assets) {
+            const response = await fetch(url,{signal:AbortSignal.timeout(120000)});
+            if (!response.ok) throw new Error(`Download failed: ${name} ${response.status}`);
+            const data = Buffer.from(await response.arrayBuffer());
+            if (data.length !== bytes || createHash('sha256').update(data).digest('hex') !== sha256) throw new Error(`Integrity mismatch: ${name}`);
+            await writeFile(`${dir}/${name}`,data);
+            console.log(`Verified ${name}: ${bytes} bytes`);
+          }
+          await writeFile(`${dir}/manifest.json`,JSON.stringify({version:'alpha-v1',approval:'Owner approved the uploaded desktop and mobile launch films as v1 alpha for the public homepage.',format:'H.264/AAC, 30 fps, SDR. Desktop 1920x1080; mobile 1080x1920. No re-encoding.',files:assets.map(([name,,bytes,sha256])=>({name,bytes,sha256}))},null,2)+'\n');
+          NODE
+      - name: Commit only verified assets to the isolated branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh auth setup-git
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- web/public/landing/alpha-v1/axom-launch-web.mp4 web/public/landing/alpha-v1/axom-launch-mobile.mp4 web/public/landing/alpha-v1/poster.jpg web/public/landing/alpha-v1/poster-mobile.jpg web/public/landing/alpha-v1/manifest.json
+          git diff --cached --check
+          git commit -m 'feat(landing): import approved alpha launch films and posters unchanged'
+          git push origin HEAD:codex/homepage-cinematic-alpha-20261106
