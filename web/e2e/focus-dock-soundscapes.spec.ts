@@ -88,6 +88,55 @@ test("the focus dock splits for a soundscape, genies its visual, and stops clean
   expect(errors).toEqual([]);
 });
 
+test("timer secondary actions remain inside their capsule at desktop and phone widths", async ({ page }) => {
+  await openWorkspace(page);
+  await page.evaluate(async () => {
+    const { usePomodoro } = await (window as unknown as DevWindow).__AXOM_DEV__;
+    usePomodoro.getState().start();
+  });
+
+  const dock = page.getByRole("region", { name: "Focus dock" });
+  const timer = dock.locator(".focus-dock-content .dock-timer");
+  const sound = dock.locator(".focus-dock-content .dock-sound");
+
+  for (const width of [1440, 500, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await timer.getByRole("button", { name: "Pause timer" }).focus();
+    const skip = timer.getByRole("button", { name: "Skip to next phase" });
+    const reset = timer.getByRole("button", { name: "Reset timer" });
+    await expect(skip).toBeVisible();
+    await expect(reset).toBeVisible();
+
+    // The action cluster must never render as a separate floating capsule.
+    await expect(async () => {
+      const timerBounds = await timer.boundingBox();
+      const soundBounds = await sound.boundingBox();
+      expect(timerBounds).not.toBeNull();
+      expect(soundBounds).not.toBeNull();
+      expect(timerBounds!.width).toBeCloseTo(soundBounds!.width, 0);
+      expect(timerBounds!.height).toBe(soundBounds!.height);
+      const clockBounds = await timer.getByRole("button", { name: "Timer options" }).boundingBox();
+      const primaryBounds = await timer.getByRole("button", { name: "Pause timer" }).boundingBox();
+      for (const action of [skip, reset]) {
+        const bounds = await action.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(bounds!.x).toBeGreaterThanOrEqual(timerBounds!.x);
+        expect(bounds!.y).toBeGreaterThanOrEqual(timerBounds!.y);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(timerBounds!.x + timerBounds!.width);
+        expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(timerBounds!.y + timerBounds!.height);
+        if (width > 440) {
+          // At the intermediate no-label breakpoint, quick actions must not
+          // overlap the clock or the primary pause control.
+          expect(clockBounds).not.toBeNull();
+          expect(primaryBounds).not.toBeNull();
+          expect(bounds!.x).toBeGreaterThanOrEqual(clockBounds!.x + clockBounds!.width);
+          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(primaryBounds!.x);
+        }
+      }
+    }).toPass({ timeout: 5_000 });
+  }
+});
+
 test("dock popovers and keyboard controls remain usable across themes and narrow viewports", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
