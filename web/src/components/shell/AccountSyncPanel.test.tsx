@@ -33,16 +33,20 @@ describe("Account protection experience", () => {
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
 
-  it("lets signed-out learners switch between password, account creation, and email code", () => {
+  it("offers password sign-in and account creation without an optional email-code tab", () => {
     useAccount.setState({ phase: "signed-out", user: null, protection: "local-only" });
     render(<AccountSyncPanel />);
     expect(screen.getByRole("button", { name: "Sign in", pressed: true })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Email code" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.getByRole("button", { name: "Create", pressed: true })).toBeTruthy();
     expect(screen.getByText("Name on your account")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Email code" }));
-    expect(screen.queryByText("Password")).toBeNull();
-    expect(screen.getByRole("button", { name: "Send code" })).toBeTruthy();
+    expect(screen.getByText("Password")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create account" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send code" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
+    expect(screen.getByRole("button", { name: "Send reset email" })).toBeTruthy();
     expect(screen.getByText(/local workspace stays here until you choose/)).toBeTruthy();
   });
 
