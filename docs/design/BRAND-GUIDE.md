@@ -29,7 +29,7 @@ Product copy must be *specific, calm, inspectable*. “You answered 8 of 9 recen
 
 | Context | Correct source | Rule |
 | --- | --- | --- |
-| Product and email | \`web/public/icons/axom-orb-512.png\` | Use the actual raster, preserve its geometry, alt text and contrast |
+| Product and email | `web/public/icons/axom-orb-512.png` | Use the actual raster, preserve its geometry, alt text and contrast |
 | Flat editorial symbol | original source vector from the identity kit | Keep original paths and proportions, do not re-trace |
 | Name-recognition lockup | supplied original lettered AXOM wordmark | It is vector artwork, **not** a substitute typed font |
 | App/PWA/native installation | verified square icon and platform asset | Test at installed small sizes; preserve platform padding |
@@ -45,20 +45,20 @@ Protect proportions, negative space and visual contrast. Editorial starting clea
 
 | Name | Value | Job |
 | --- | --- | --- |
-| Ink | \`#0D0D0E\` | Primary dark foundation |
-| Graphite | \`#1C1C1E\` | Layered depth |
-| Bone | \`#E6E2D6\` | Reading and warm light |
-| Gold | \`#C8A96A\` | Sparse, meaningful emphasis |
+| Ink | `#0D0D0E` | Primary dark foundation |
+| Graphite | `#1C1C1E` | Layered depth |
+| Bone | `#E6E2D6` | Reading and warm light |
+| Gold | `#C8A96A` | Sparse, meaningful emphasis |
 
 The Atlas shows high contrast for Bone/Ink and Gold/Ink, but **Bone/Gold is insufficient for ordinary body text**. Re-test actual opacity, palette, gradients, focus rings and background images in context rather than extrapolating from flat swatches.
 
-**Current product system:** \`web/src/styles/theme.css\` and \`web/src/lib/palette.ts\` supply all theme tokens. AXOM Classic is the actual navy/gold default; AXOM Legacy is the original graphite/gold family. Other learner-selected palettes and System/Light/Dark remain supported. Do **not** globally replace the runtime theme with the four source swatches. Only permitted CSS variables and semantic components may carry color. Gold marks an action, decision or verified state, not every divider and heading. States use words/icons as well as color.
+**Current product system:** `web/src/styles/theme.css` and `web/src/lib/palette.ts` supply all theme tokens. AXOM Classic is the actual navy/gold default; AXOM Legacy is the original graphite/gold family. Other learner-selected palettes and System/Light/Dark remain supported. Do **not** globally replace the runtime theme with the four source swatches. Only permitted CSS variables and semantic components may carry color. Gold marks an action, decision or verified state, not every divider and heading. States use words/icons as well as color.
 
 Contrast gate: target at least WCAG AA 4.5:1 for ordinary text, 3:1 for large text and actionable graphical controls where applicable, with additional focus visibility and reduced transparency where necessary. Measure rendered state for each supported palette; do not claim compliance from a hex palette alone.
 
 ## 4. Typography and editorial hierarchy
 
-- **Application:** use \`--font-display\` (Poppins) for headings, \`--font-ui\` for body, \`--font-mono\` for versions, codes and evidence identifiers. Use \`--fs-*\`, \`--fw-*\` and existing line-height/spacing rules from the design contract.
+- **Application:** use `--font-display` (Poppins) for headings, `--font-ui` for body, `--font-mono` for versions, codes and evidence identifiers. Use `--fs-*`, `--fw-*` and existing line-height/spacing rules from the design contract.
 - **Atlas editorial:** the V3 Baskerville display treatment is a *proposal*, not an accepted web app typeface. Do not introduce fonts or fictional wordmarks based only on a sample PDF.
 - **Voice:** short active headings, one useful action first, supporting evidence second, technical metadata behind intentional disclosure. No em dash in product UI copy.
 - **Density:** prioritize readable stems and mechanisms, moderate line lengths, strong baseline spacing, consistent card edges. Avoid artificial tracking, giant orphan words, low-contrast captions and generic “AI dashboard” decorations.
@@ -69,13 +69,13 @@ Contrast gate: target at least WCAG AA 4.5:1 for ordinary text, 3:1 for large te
 
 **Layer 2 — Understand:** explanation/mechanism, confidence, source status, related work.
 
-**Layer 3 — Inspect:** raw source references, IDs, revision, AI/provider metadata, detailed log behind \`TechnicalDetails\`.
+**Layer 3 — Inspect:** raw source references, IDs, revision, AI/provider metadata, detailed log behind `TechnicalDetails`.
 
 A screen fails if the learner cannot find the next step without reading a diagnostic panel.
 
 ## 5. Layout and product components
 
-Reuse the existing \`GlassCard\`, \`PanelHeader\`, \`GButton\`, \`GhostButton\`, \`Tag\`, \`Modal\`, \`pushToast\`, \`CoachMark\`, and shell primitives. [DESIGN.md](DESIGN.md) is the exact implementation contract for breakpoints, z-index, motion and token usage. Validate at 1440 x 900, 390 x 844 and constrained 320px layouts where relevant.
+Reuse the existing `GlassCard`, `PanelHeader`, `GButton`, `GhostButton`, `Tag`, `Modal`, `pushToast`, `CoachMark`, and shell primitives. [DESIGN.md](DESIGN.md) is the exact implementation contract for breakpoints, z-index, motion and token usage. Validate at 1440 x 900, 390 x 844 and constrained 320px layouts where relevant.
 
 - One principal reading column for question attempts and study content; optional evidence rail must collapse gracefully on phones.
 - Cards mean organization, not a reason to wrap every sentence in another bordered container. Use whitespace and type more than glow.
