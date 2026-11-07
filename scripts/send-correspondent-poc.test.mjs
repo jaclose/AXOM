@@ -10,7 +10,7 @@ const env = {
   RESEND_API_KEY:"re_test_never_production",
 };
 const json = (value,status=200)=>new Response(JSON.stringify(value),{status,headers:{"content-type":"application/json"}});
-const sample = { recipient:"jdabbagh@sgu.edu", correspondentId:"vesper", revision:"axom-correspondents-v1", useCase:"welcome" };
+const sample = { recipient:"jdabbagh@sgu.edu", correspondentId:"juniper", revision:"axom-correspondents-v3", useCase:"welcome" };
 test("preview generates a category-labelled subject without contacting a provider", async ()=>{
   let calls=0;
   const result=await sendCorrespondentTest({ ...sample, env, fetcher:async()=>{calls++;throw new Error("no network");} });
@@ -44,7 +44,7 @@ test("approved test uses exact recipient, sender, reply-to and stable idempotenc
   assert.ok(sent);
   const body=JSON.parse(sent.init.body);
   assert.deepEqual(body.to,["jdabbagh@sgu.edu"]);
-  assert.match(body.from,/AXOM · Vesper <vesper@axom.info>/);
+  assert.match(body.from,/AXOM · Juniper <juniper@axom.info>/);
   assert.equal(body.reply_to,"team@axom.info");
   assert.match(body.subject,/AXOM POC · WELCOME/);
   assert.match(body.html,/ORIGIN/);
