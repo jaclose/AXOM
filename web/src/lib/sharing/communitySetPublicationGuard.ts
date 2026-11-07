@@ -1,6 +1,7 @@
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { questionPracticeReadiness } from "../questionFilters";
+import { enrichPublicQuestionSetVisualTags } from "../diagrams/communityVisualSnapshot";
 import { createQuestionSetShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
 
 const CHANGED = "This Question Set or its source review changed while publishing. Reopen the set and reconfirm the current answers and sharing rights.";
@@ -58,5 +59,7 @@ export function prepareCurrentCommunityQuestionSetSubmission(input: {
   const expected = createQuestionSetShare(openedSet, openedQuestions, now);
   const current = createQuestionSetShare(liveSet, liveQuestions, now);
   if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error(CHANGED);
-  return current;
+  // The public snapshot is now revision-checked; append only deterministic,
+  // non-clinical visual search hints derived from its already-shared text.
+  return enrichPublicQuestionSetVisualTags(current);
 }
