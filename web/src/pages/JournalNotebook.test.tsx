@@ -580,6 +580,50 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("acknowledges an unchanged legacy feedback draft without deleting later tab edits", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-legacy-ack";
+    const account = { id: "journal-legacy-receipt-account", email: "legacy-ack@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const receiptKey = `${draftKey}:submitted`;
+    const original = JSON.stringify({ rating: 4, liked: "Already sent legacy text" });
+    const newer = JSON.stringify({ rating: 4, liked: "A newer unsent legacy draft" });
+    window.localStorage.setItem(draftKey, original);
+    window.localStorage.removeItem(receiptKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("legacy-receipt");
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Already sent legacy text");
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Feedback received."));
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledWith(account.id, expect.objectContaining({ rating: 4, liked: "Already sent legacy text" }));
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+      expect(window.localStorage.getItem(receiptKey)).toBeTruthy();
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      // A newer, independently written legacy draft is never hidden by an old receipt.
+      window.localStorage.setItem(draftKey, newer);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("A newer unsent legacy draft");
+      expect(window.localStorage.getItem(draftKey)).toBe(newer);
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(receiptKey);
+    }
+  });
+
   it("keeps known-field legacy partial feedback editable without a schema migration", () => {
     const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const previousProfile = useStore.getState().profile;
