@@ -6,6 +6,7 @@
 // repeats faster than ~0.5 Hz (WCAG 2.3.1), including on 40 Hz presets.
 // ===========================================================================
 import type { SoundscapeVisual } from "../../lib/soundscapes/presets";
+import { shouldReleaseImmersiveCanvas } from "../../lib/soundscapes/canvasQuality";
 
 const HEADER = `#version 300 es
 precision highp float;
@@ -260,7 +261,11 @@ class SharedShaderRenderer {
     if (!gl || !this.canvas) return false;
     const entry = this.program(gl, visual);
     if (!entry) return false;
-    if (this.canvas.width < width || this.canvas.height < height) {
+    if (shouldReleaseImmersiveCanvas(this.canvas.width, this.canvas.height, width, height, Boolean(document.fullscreenElement))) {
+      // A former 8K stage must not retain hundreds of MB for ordinary previews.
+      this.canvas.width = width;
+      this.canvas.height = height;
+    } else if (this.canvas.width < width || this.canvas.height < height) {
       this.canvas.width = Math.max(this.canvas.width, width);
       this.canvas.height = Math.max(this.canvas.height, height);
     }
