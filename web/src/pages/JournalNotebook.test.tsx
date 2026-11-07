@@ -536,6 +536,44 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("does not overwrite a newer feedback draft from another tab after an old editor types", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-edit";
+    const account = { id: "journal-feedback-stale-edit-account", email: "stale-edit@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const oldDraft = { rating: 3, liked: "Original private feedback.", wantMore: "", missing: "", painPoints: "", comment: "" };
+    const newerDraft = JSON.stringify({ ...oldDraft, liked: "Newer changes from a second tab.", __axomRevision: "a".repeat(32) });
+    window.localStorage.setItem(draftKey, JSON.stringify(oldDraft));
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      expect(liked().value).toBe(oldDraft.liked);
+
+      // A different tab updates the shared key after this editor has read it.
+      window.localStorage.setItem(draftKey, newerDraft);
+      fireEvent.change(liked(), { target: { value: "My unsaved continuation." } });
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+      expect(liked().value).toBe("My unsaved continuation.");
+      expect(screen.getByRole("alert").textContent).toMatch(/another tab changed this feedback draft/i);
+      expect(screen.getByRole("button", { name: "Download draft" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(liked().value).toBe("Newer changes from a second tab.");
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
   it("does not clobber a newer local feedback draft merely by opening or reopening the dialog", () => {
     const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const previousProfile = useStore.getState().profile;

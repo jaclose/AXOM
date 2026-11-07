@@ -1425,6 +1425,7 @@ const JOURNAL_FEEDBACK_EMPTY: JournalExperienceFeedbackInput = {
 interface StoredJournalFeedbackDraft {
   draft: JournalExperienceFeedbackInput;
   revision: string | null;
+  raw: string | null;
 }
 
 // A receipt must never remove a shared localStorage key: another tab can write
@@ -1449,9 +1450,11 @@ function journalFeedbackRevision(): string {
 }
 
 function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
+  let raw: string | null = null;
   try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? "null");
-    if (!value || typeof value !== "object") return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null };
+    raw = window.localStorage.getItem(key);
+    const value: unknown = JSON.parse(raw ?? "null");
+    if (!value || typeof value !== "object") return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw };
     const record = value as Record<string, unknown>;
     const draft: JournalExperienceFeedbackInput = {
       rating: Number.isInteger(record.rating) && Number(record.rating) >= 1 && Number(record.rating) <= 5 ? Number(record.rating) : 0,
@@ -1464,11 +1467,11 @@ function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
     const revision = typeof record.__axomRevision === "string" && /^[a-f0-9]{32}$/.test(record.__axomRevision)
       ? record.__axomRevision : null;
     if (revision && window.localStorage.getItem(`${key}:submitted`) === `${revision}:${journalFeedbackFingerprint(draft)}`) {
-      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null };
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw };
     }
-    return { draft, revision };
+    return { draft, revision, raw };
   } catch {
-    return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null };
+    return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw };
   }
 }
 
@@ -1488,6 +1491,8 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   const [loaded] = useState(() => readJournalFeedbackDraft(draftKey));
   const [draft, setDraft] = useState(loaded.draft);
   const persistedRevisionRef = useRef(loaded.revision);
+  const persistedRawRef = useRef(loaded.raw);
+  const [conflicted, setConflicted] = useState(false);
   // Opening or remounting the dialog must never write a stale snapshot back
   // over a newer draft another tab saved between our read and first effect.
   const initialDraftRef = useRef(draft);
@@ -1501,14 +1506,26 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     // Persist only this editor's actual changes; a mount is not an edit.
     // The identity guard also survives React StrictMode effect replays.
     if (!sentId && draft === initialDraftRef.current) return;
+    if (conflicted) return;
     try {
       if (sentId) {
         // An acknowledgement cannot erase another tab's newer or concurrent edit.
         if (submittedReceiptRef.current)
           window.localStorage.setItem(`${draftKey}:submitted`, submittedReceiptRef.current);
       } else {
+        // Do not overwrite a newer draft loaded by another tab since this
+        // editor opened. Keep these in-memory edits available for export.
+        // localStorage has no atomic compare-and-set: simultaneous writes
+        // still need a separate concurrency policy and browser acceptance.
+        if (window.localStorage.getItem(draftKey) !== persistedRawRef.current) {
+          setConflicted(true);
+          setStorageError("Another tab changed this feedback draft. Your writing is still here. Download it, then close and reopen feedback to see the saved copy.");
+          return;
+        }
         const revision = journalFeedbackRevision();
-        window.localStorage.setItem(draftKey, JSON.stringify({ ...draft, __axomRevision: revision }));
+        const serialized = JSON.stringify({ ...draft, __axomRevision: revision });
+        window.localStorage.setItem(draftKey, serialized);
+        persistedRawRef.current = serialized;
         persistedRevisionRef.current = revision;
       }
       setStorageError("");
@@ -1517,10 +1534,10 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         ? "Feedback was received, but this browser could not mark your saved draft as submitted."
         : "This browser could not keep a local draft. Download it before closing.");
     }
-  }, [draft, draftKey, sentId]);
+  }, [conflicted, draft, draftKey, sentId]);
 
   async function send() {
-    if (!user) return;
+    if (!user || conflicted) return;
     if (draft.rating < 1) { setError("Choose a rating before sending."); return; }
     setSending(true);
     setError("");
@@ -1541,7 +1558,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     ) : <>
       <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>
       <GButton onClick={onClose}>Not now</GButton>
-      <GButton variant="primary" disabled={!user || sending} onClick={() => { void send(); }}>{sending ? "Sending…" : "Send feedback"}</GButton>
+      <GButton variant="primary" disabled={!user || sending || conflicted} onClick={() => { void send(); }}>{sending ? "Sending…" : "Send feedback"}</GButton>
     </>}>
       {sentId ? (
         <div className="journal-feedback-success" role="status"><CheckCircle2 size={ICON_SIZE.emphasis} /><b>Feedback received.</b><span>Thank you for helping shape the journal. Receipt {sentId.slice(0, 8)}.</span><span>Your saved local copy remains on this device to protect changes made in other tabs.</span>{storageError && <p role="alert">{storageError}</p>}</div>
