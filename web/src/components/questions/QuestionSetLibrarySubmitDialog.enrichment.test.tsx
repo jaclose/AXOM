@@ -192,6 +192,11 @@ describe("Question Set draft explanation review", () => {
     ["removed from the live set", { ...set, questionIds: [] }],
     ["replaced under the same set ID", { ...set, title: "Replacement set" }],
     ["moved to a different source filing", { ...set, sourceDocumentIds: ["new-source"] }],
+    ["moved to a different course", { ...set, scope: { courseId: "unapproved-course" } }],
+    ["replaced by another imported source", { ...set, importProvenance: {
+      version: 1 as const, shareId: "different-share", contentDigest: "a".repeat(64),
+    } }],
+    ["recreated under the same ID", { ...set, createdAt: "2026-11-07T12:00:00.000Z" }],
   ])("does not write a prepared draft when its set was %s", async (_reason, changedSet) => {
     const source = question();
     mocks.workspace.questions = [source];
@@ -206,6 +211,22 @@ describe("Question Set draft explanation review", () => {
     mocks.workspace.questionSets = [changedSet];
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
     expect(await screen.findByText(/set changed/i)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not transmit an imported set after silent course refiling", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    // This is a real privacy boundary: the source can remain answer-ready,
+    // but it no longer belongs to the same course/right-to-share context.
+    mocks.workspace.questionSets = [{ ...set, scope: { courseId: "private-course" } }];
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
