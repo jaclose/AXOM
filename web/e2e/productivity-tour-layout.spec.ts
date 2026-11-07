@@ -250,7 +250,7 @@ test("Quick self-report goals remain usable without overflow on desktop and phon
     await page.getByLabel("Goal name").fill(name);
     await page.getByLabel("Goal amount").fill("2");
     await page.getByLabel("How progress is recorded").selectOption("activity");
-    await page.locator("#productivity-log .quick-goals").screenshot({ path: testInfo.outputPath(`quick-goal-create-${width}.png`) });
+    await page.locator("#quick-goal-form").screenshot({ path: testInfo.outputPath(`quick-goal-create-${width}.png`) });
 
     const bounds = await page.locator("#quick-goal-form").evaluate((element) => {
       const panel = element.closest("#productivity-log")!.getBoundingClientRect();
@@ -269,6 +269,11 @@ test("Quick self-report goals remain usable without overflow on desktop and phon
 
     await page.getByRole("button", { name: "Save goal" }).click();
     await expect(page.getByRole("button", { name: `Use ${name} in self-report` })).toBeVisible();
+    if (width <= 390) {
+      const textWidth = await page.locator(".quick-goal-row").filter({ hasText: name })
+        .locator(".quick-goal-copy").evaluate((element) => element.getBoundingClientRect().width);
+      expect(textWidth).toBeGreaterThan(160); // A full goal name must not wrap character by character.
+    }
     await page.getByRole("button", { name: `Use ${name} in self-report` }).click();
     await expect(page.getByLabel("What did you do?")).toHaveValue(name);
     await page.getByRole("button", { name: "Log", exact: true }).click();
