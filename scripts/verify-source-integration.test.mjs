@@ -34,6 +34,18 @@ test("rejects invalid manifests, conflicting ownership, symlinks and missing blo
   for (const path of ["../secret", "web/../private", "/root/file", "-flag", "web\\file", "web//file", "web/./file"]) {
     assert.throws(() => validateSourceManifest(manifest([path])), /Unsafe/);
   }
+  // Git running on Linux can track these names, but Windows cannot check them out.
+  // Reject reserved DOS device basenames anywhere in the path, with any extension,
+  // plus components ending in a dot (trailing spaces are already disallowed).
+  for (const path of [
+    "docs/CON", "docs/CON.txt", "docs/aux", "docs/NUL.md", "docs/COM1.js",
+    "docs/com9", "docs/LPT1", "docs/sub/LpT9.webp", "docs/PRN.md",
+    "docs/guide.", "docs/folder./file", "docs/sub/afile..",
+  ]) assert.throws(() => validateSourceManifest(manifest([path])), /Unsafe/, path);
+  for (const path of [
+    "docs/console.txt", "docs/contemporary.txt", "docs/COM0.js",
+    "docs/COM10.js", "docs/LPT10.txt", "docs/guide..name", "docs/auxiliary.js",
+  ]) assert.equal(validateSourceManifest(manifest([path])).entries[0].path, path);
   for (const bad of ["main", "abc", "A".repeat(40), "a".repeat(39) + ";"]) {
     assert.throws(() => validateSourceManifest({ ...manifest(), integratedSha: bad }), /pinned/);
   }
@@ -60,9 +72,20 @@ test("checks real Git commit objects and fails closed on a changed integrated fi
   mkdirSync(join(cwd, "docs"));
   writeFileSync(join(cwd, "docs", "proof.txt"), "pinned source\n");
   writeFileSync(join(cwd, "docs", "other.txt"), "first\n");
+  // Real Git on Linux/macOS accepts pathnames that must never pass the verifier.
+  if (process.platform !== "win32") {
+    writeFileSync(join(cwd, "docs", "CON.txt"), "nonportable device name\n");
+    writeFileSync(join(cwd, "docs", "guide."), "nonportable trailing dot\n");
+  }
   git("add", "--", "docs");
   commit("pinned source");
   const sourceSha = git("rev-parse", "HEAD");
+  if (process.platform !== "win32") {
+    for (const illegal of ["docs/CON.txt", "docs/guide."]) {
+      assert.match(git("ls-tree", "-r", "--name-only", sourceSha, "--", illegal), /docs\//);
+      assert.throws(() => readGitFile(sourceSha, illegal, cwd), /Unsafe/);
+    }
+  }
   const sourceTreeSha = git("rev-parse", sourceSha + "^{tree}");
   assert.throws(() => readGitFile(sourceTreeSha, "docs/proof.txt", cwd), /Expected pinned commit object/);
   writeFileSync(join(cwd, "docs", "other.txt"), "second\n");

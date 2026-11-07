@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const SHA = /^[a-f0-9]{40}$/;
 const PATH = /^[A-Za-z0-9._/-]+$/;
+// Windows reserves device basenames even when followed by extensions.
+const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 const MODES = new Set(["100644", "100755"]);
 function validSha(value, label) {
   if (typeof value !== "string" || !SHA.test(value)) throw new Error(label + " must be a pinned 40-character lowercase commit SHA.");
@@ -16,7 +18,8 @@ function validSha(value, label) {
 function validPath(value) {
   if (typeof value !== "string" || !value || !PATH.test(value)
     || value.startsWith("/") || value.startsWith("-")
-    || value.split("/").some(segment => !segment || segment === "." || segment === "..")) {
+    || value.split("/").some(segment => !segment || segment === "." || segment === ".."
+      || segment.endsWith(".") || WINDOWS_DEVICE.test(segment))) {
     throw new Error("Unsafe/noncanonical release file path: " + String(value));
   }
   return value;
