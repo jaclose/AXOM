@@ -446,6 +446,14 @@ describe("Settings information architecture", () => {
     expect(useStore.getState().tasks).toEqual(tasks);
   });
 
+  it("opens the optional Atlas companion directly from a Settings request", () => {
+    render(<SettingsModal onClose={() => {}} initialTab="atlas" />);
+    expect(screen.getByRole("tab", { name: "Personalization" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("combobox", { name: "Choose your Atlas companion" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Atlas companion/ })).toBeTruthy();
+    expect(screen.getByText(/This is not a personality diagnosis/i)).toBeTruthy();
+  });
+
   it("opens Personalization on Study style and switches sub-sections without losing the tab", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
