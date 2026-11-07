@@ -39,6 +39,37 @@ describe("canonical flexible-weekly goal projection", () => {
     expect(result.sourceEntryIds).toHaveLength(3);
   });
 
+  it("counts a same-day tracker event and explicit habit check-in as one training day", () => {
+    const gym = { ...weekly, linkedTrackerId: "tracker-gym" };
+    const result = weeklyHabitSummary(gym, [entry("2026-11-04")], "2026-11-07", [
+      { id: "gym-tracker-log", dayKey: "2026-11-04", ts: "2026-11-04T18:00:00.000Z",
+        type: "Gym", minutes: 45, cards: 0, trackerId: "tracker-gym", academic: false },
+      { id: "gym-tracker-day2", dayKey: "2026-11-05", ts: "2026-11-05T18:00:00.000Z",
+        type: "Gym", minutes: 30, cards: 0, trackerId: "tracker-gym", academic: false },
+    ]);
+    expect(result.completedDays).toBe(2);
+    expect(result.sourceEntryIds).toContain("gym-tracker-day2");
+    expect(result.sourceEntryIds).toContain("gym-2026-11-04");
+  });
+
+  it("uses effective-week revisions so editing a goal cannot rescore completed weeks", () => {
+    const changed = {
+      ...weekly, weeklyMinimum: 3, weeklyPreferred: 4,
+      weeklyRevisions: [
+        { effectiveWeek: "2026-10-26", minimum: 4, preferred: 5 },
+        { effectiveWeek: "2026-11-02", minimum: 3, preferred: 4 },
+      ],
+    };
+    const checkIns = [
+      "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30",
+      "2026-11-02", "2026-11-03", "2026-11-04",
+    ].map((day) => entry(day));
+    const previous = weeklyHabitSummary(changed, checkIns, "2026-11-01");
+    expect(previous).toMatchObject({ completedDays: 4, minimum: 4, preferred: 5, metMinimum: true });
+    const current = weeklyHabitSummary(changed, checkIns, "2026-11-07");
+    expect(current).toMatchObject({ completedDays: 3, minimum: 3, preferred: 4, metMinimum: true });
+  });
+
   it("does not hold the user responsible for sessions before a weekly habit was created", () => {
     const fresh = { ...weekly, trackingStartsAt: "2026-11-07", createdAt: "2026-11-07T08:00:00.000Z" };
     const result = weeklyHabitSummary(fresh, [entry("2026-11-07")], "2026-11-07");
