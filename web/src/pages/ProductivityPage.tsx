@@ -127,6 +127,21 @@ export function ProductivityPage() {
     );
   }
 
+  function fillGoalActivity(label: string, unit: string) {
+    const quantity: ManualQuantityType =
+      unit === "cards" || unit === "questions" || unit === "pages" || unit === "repetitions"
+        ? unit
+        : "count";
+    setManualType(label);
+    setManualQuantityKind(quantity);
+    setManualMinutes("");
+    setManualQuantity("");
+    setManualTrackerId("");
+    setManualNote("");
+    setLastSelfReport(false);
+    document.querySelector<HTMLInputElement>("#productivity-log .fast-activity-label")?.focus();
+  }
+
   function hideShortcut(signature: string) {
     s.updateProfile({
       hiddenActivityShortcuts: [...new Set([...(s.profile.hiddenActivityShortcuts ?? []), signature])].slice(-100),
@@ -203,7 +218,7 @@ export function ProductivityPage() {
                 <h3 id="today-targets-title">What makes today successful</h3>
                 <p>Set one goal in seconds. Change the detailed rules only when you need them.</p>
               </div>
-              <DailyRequirementsEditor />
+              <DailyRequirementsEditor onFillActivity={fillGoalActivity} />
             </section>
           </>
         ) : (
