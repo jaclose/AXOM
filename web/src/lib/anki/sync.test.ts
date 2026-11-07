@@ -525,6 +525,25 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("addNotes")).toHaveLength(2);
   });
 
+  it("quarantines a deleted-note suspend receipt with invalid persisted card IDs", async () => {
+    const h = harness();
+    await h.run([card("a")]);
+    const old = h.state.links.a;
+    const saved = JSON.parse(JSON.stringify(recordAxomDeletion(h.state, "a", "suspend"))) as LinkState;
+    (saved.pendingSuspends[0] as unknown as { cardIds: unknown[] }).cardIds = [old.cardIds[0], "invalid"];
+    h.state = normalizeLinkState(saved);
+    expect(h.state.pendingSuspends).toHaveLength(1);
+    expect(h.state.pendingSuspends[0].quarantinedCardIds).toEqual([old.cardIds[0], "invalid"]);
+    const before = h.fake.actionsCalled("suspend").length;
+    const report = await h.run([]);
+    expect(report.error).toMatch(/corrupt.*card.*receipt/i);
+    expect(report).toMatchObject({ pending: 1, deletedSuspended: 0 });
+    expect(h.fake.actionsCalled("suspend")).toHaveLength(before);
+    expect(h.fake.call("areSuspended", { cards: old.cardIds })).toEqual([false]);
+    expect(normalizeLinkState(JSON.parse(JSON.stringify(h.state))).pendingSuspends[0].quarantinedCardIds)
+      .toEqual([old.cardIds[0], "invalid"]);
+  });
+
   it("keeps only the incomplete receipt when a multi-note replacement stops midway", async () => {
     const fake = new FakeAnkiConnect();
     const realFetch = createFakeFetch(fake);
