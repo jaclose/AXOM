@@ -22,7 +22,7 @@ export interface WeekSummary {
   byActivity: Array<{ activity: CourseActivity | "other"; total: number; done: number }>;
   /** What was answered of the questions filed under this module and week. */
   questions: ScopeProgress;
-  /** More than one term has this module code; question ownership is unresolved. */
+  /** Course ownership is unresolved (missing, duplicate or unverifiable); question progress is held. */
   questionScopeAmbiguous?: boolean;
   missed: number;
 }
@@ -60,10 +60,13 @@ export function buildModuleWeeks(
     const term = segments.length >= 3 ? segments[0] : undefined;
     const course = segments.length >= 4 ? segments.at(-3) : undefined;
     const key = `${(term ?? "").toLowerCase()}|${(course ?? "").toLowerCase()}|${canonicalModuleKey(scope.module)}`;
+    // Legacy Term/Module/Week paths have no course code. Attribute their
+    // question progress only when the known term/module has one course owner.
     const matchingCourses = context?.courses.filter((candidate) =>
-      context.terms.find((termRecord) => termRecord.id === candidate.termId)?.name.toLowerCase() === term?.toLowerCase()
-      && candidate.code.toLowerCase() === course?.toLowerCase()
-      && candidate.modules.some((module) => canonicalModuleKey(module.name) === canonicalModuleKey(scope.module!))) ?? [];
+      context.terms.some((termRecord) => termRecord.id === candidate.termId
+        && termRecord.name.trim().toLowerCase() === term?.trim().toLowerCase())
+      && (!course || candidate.code.trim().toLowerCase() === course.trim().toLowerCase())
+      && candidate.modules.some((known) => canonicalModuleKey(known.name) === canonicalModuleKey(scope.module!))) ?? [];
     const courseId = matchingCourses.length === 1 ? matchingCourses[0].id : undefined;
     const entry = modules.get(key) ?? {
       key, module: scope.module, term, course, courseId,
@@ -74,18 +77,12 @@ export function buildModuleWeeks(
     modules.set(key, entry);
   }
 
-  const termsByModule = new Map<string, Set<string>>();
-  for (const module of modules.values()) {
-    const key = canonicalModuleKey(module.module);
-    const terms = termsByModule.get(key) ?? new Set<string>();
-    terms.add(`${(module.term ?? "").toLowerCase()}|${(module.course ?? "").toLowerCase()}`);
-    termsByModule.set(key, terms);
-  }
-
   return [...modules.values()].map(({ byWeek, paths, ...module }) => {
-    // Without a course/term link on the question, reusing a module name in two
-    // terms cannot truthfully allocate those questions to either week.
-    const ambiguous = (termsByModule.get(canonicalModuleKey(module.module))?.size ?? 0) > 1 && !module.courseId;
+    // An attempt may count toward a week only when its unique course owner
+    // is proven by the supplied curriculum catalog. Even a lone legacy
+    // Term/Module/Week path is not ownership evidence without that catalog.
+    // Keep tracker activity passes independent of this question-only hold.
+    const ambiguous = !module.courseId;
     const weeks = [...byWeek.entries()].sort(([left], [right]) => left - right).map(([week, items]): WeekSummary => {
       const groups = new Map<CourseActivity | "other", { total: number; done: number }>();
       for (const item of items) {
