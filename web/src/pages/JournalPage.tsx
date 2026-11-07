@@ -1530,6 +1530,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
       : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
     : "");
   const submittedReceiptRef = useRef<string | null>(null);
+  const [saveRetryToken, setSaveRetryToken] = useState(0);
 
   useEffect(() => {
     // Persist only this editor's actual changes; a mount is not an edit.
@@ -1563,7 +1564,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         ? "Feedback was received, but this browser could not mark your saved draft as submitted."
         : "This browser could not keep a local draft. Download it before closing.");
     }
-  }, [conflicted, draft, draftKey, sentId]);
+  }, [conflicted, draft, draftKey, sentId, saveRetryToken]);
 
   async function send() {
     if (!user || conflicted) return;
@@ -1615,6 +1616,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         </div>
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
+        {storageError && !loaded.unreadable && !conflicted && <GButton size="sm" onClick={() => setSaveRetryToken((token) => token + 1)}>Retry draft save</GButton>}
         {error && <p className="journal-feedback-note" role="alert">{error}</p>}
       </>}
     </Modal>
