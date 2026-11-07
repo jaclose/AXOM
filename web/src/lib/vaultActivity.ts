@@ -32,7 +32,10 @@ export interface VaultWriteRecord {
 export const VAULT_WRITE_EVENT = "axom:vault-write";
 /** Account identity is kept out of the workspace and injected by accountStore. */
 let vaultAccountId: string | null = null;
+/** Monotonic session identity epoch: A → B → A is not the same A session. */
+let vaultAccountEpoch = 0;
 export function readVaultAccountIdentity(): string | null { return vaultAccountId; }
+export function readVaultAccountEpoch(): number { return vaultAccountEpoch; }
 /**
  * Switching accounts changes which local save receipt is trustworthy, not the
  * actual device workspace. Never erase local saves merely for an auth switch.
@@ -41,6 +44,7 @@ export function setVaultAccountIdentity(accountId: string | null): void {
   const next = typeof accountId === "string" && accountId.trim() ? accountId : null;
   if (vaultAccountId === next) return;
   vaultAccountId = next;
+  vaultAccountEpoch += 1;
   lastWrite = null;
   lastPersistedAt = 0;
   memoryOnlyConfirmedWrite = false;
@@ -129,9 +133,10 @@ function listenForCrossTabInvalidation(): void {
 export function markVaultWriteFailure(
   now: Date = new Date(),
   writeAccountId: string | null = vaultAccountId,
+  writeAccountEpoch: number = vaultAccountEpoch,
 ): void {
-  // A failed queued A write after switching to B is still an A operation.
-  if (writeAccountId !== vaultAccountId) return;
+  // A stale A operation must not report against A after A → B → A.
+  if (writeAccountId !== vaultAccountId || writeAccountEpoch !== vaultAccountEpoch) return;
   failingSince ??= now.toISOString();
   if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_FAILURE_EVENT));
@@ -147,10 +152,11 @@ export function markVaultWrite(
   target: VaultWriteTarget,
   now: Date = new Date(),
   writeAccountId: string | null = vaultAccountId,
+  writeAccountEpoch: number = vaultAccountEpoch,
 ): void {
-  // An async save queued under A must never be acknowledged under B.
-  // Clearing only the status marker fails closed without removing workspace bytes.
-  if (writeAccountId !== vaultAccountId) {
+  // A queued A save cannot acknowledge a later A session after A → B → A.
+  // Invalidate status only: never delete the confirmed workspace or backups.
+  if (writeAccountId !== vaultAccountId || writeAccountEpoch !== vaultAccountEpoch) {
     invalidateVaultWrite();
     return;
   }

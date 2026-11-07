@@ -13,7 +13,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
+import { readLastVaultWrite, readVaultWriteFailure, setVaultAccountIdentity } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -810,3 +810,32 @@ function deleteDatabase(name: string): Promise<void> {
     request.onblocked = () => resolve();
   });
 }
+
+describe("queued workspace writes retain their initiating account session", () => {
+  it("does not advertise a stale A write after a fast A → B → A switch", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const oldWorkspace = JSON.stringify({
+      state: { profile: { userId: "jd" }, journal: "retain the committed bytes" }, version: 34,
+    });
+    const newWorkspace = JSON.stringify({
+      state: { profile: { userId: "jd" }, journal: "current account-a session" }, version: 34,
+    });
+    setVaultAccountIdentity("account-a");
+    try {
+      const pending = localVaultStorage.setItem(key, oldWorkspace);
+      // The adapter has queued an asynchronous IndexedDB transaction.
+      setVaultAccountIdentity("account-b");
+      setVaultAccountIdentity("account-a");
+      await pending;
+      // The old bytes are still retrievable; only the stale success badge is revoked.
+      expect(await localVaultStorage.getItem(key)).toBe(oldWorkspace);
+      expect(readLastVaultWrite()).toBeNull();
+
+      await localVaultStorage.setItem(key, newWorkspace);
+      expect(await localVaultStorage.getItem(key)).toBe(newWorkspace);
+      expect(readLastVaultWrite()).toMatchObject({ accountId: "account-a", version: 4 });
+    } finally {
+      setVaultAccountIdentity(null);
+    }
+  });
+});

@@ -637,3 +637,45 @@ describe("account switch status invalidation safety", () => {
     expect(vault.readVaultWriteFailure()).toBeNull();
   });
 });
+
+describe("account session epoch for delayed writes", () => {
+  it("does not credit an A write queued before A → B → A to the returned A session", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    const oldEpoch = vault.readVaultAccountEpoch();
+    vault.setVaultAccountIdentity("account-b");
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readVaultAccountEpoch()).toBeGreaterThan(oldEpoch);
+
+    vault.markVaultWrite("indexeddb", new Date(savedAt), "account-a", oldEpoch);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+    vault.markVaultWrite("indexeddb", new Date(savedAt), "account-a", vault.readVaultAccountEpoch());
+    expect(vault.readLastVaultWrite()).toMatchObject({
+      version: 4, accountId: "account-a", target: "indexeddb",
+    });
+  });
+
+  it("does not report an old A failure after A → B → A, but reports a current A failure", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    const oldEpoch = vault.readVaultAccountEpoch();
+    vault.setVaultAccountIdentity("account-b");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWriteFailure(new Date(savedAt), "account-a", oldEpoch);
+    expect(vault.readVaultWriteFailure()).toBeNull();
+    vault.markVaultWriteFailure(new Date(savedAt), "account-a", vault.readVaultAccountEpoch());
+    expect(vault.readVaultWriteFailure()).toBe(savedAt);
+  });
+
+  it("does not advance the epoch when the account identity is unchanged", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    const epoch = vault.readVaultAccountEpoch();
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readVaultAccountEpoch()).toBe(epoch);
+    vault.markVaultWrite("local-fallback", new Date(savedAt), "account-a", epoch);
+    expect(vault.readLastVaultWrite()?.accountId).toBe("account-a");
+  });
+});

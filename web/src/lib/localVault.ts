@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { invalidateVaultWrite, markVaultWrite, markVaultWriteFailure, readVaultAccountIdentity, readVaultWriteFailure } from "./vaultActivity";
+import { invalidateVaultWrite, markVaultWrite, markVaultWriteFailure, readVaultAccountEpoch, readVaultAccountIdentity, readVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -30,8 +30,12 @@ const fallbackMarkerKey = (name: string) => `${name}:fallback-newer`;
 let vaultWriteSequence = 0;
 /** Set only while the single serialized vault drain processes one queued write. */
 let scheduledWriteAccountId: string | null | undefined;
+let scheduledWriteAccountEpoch: number | undefined;
 function writeAccountIdentity(): string | null {
   return scheduledWriteAccountId === undefined ? readVaultAccountIdentity() : scheduledWriteAccountId;
+}
+function writeAccountEpoch(): number {
+  return scheduledWriteAccountEpoch === undefined ? readVaultAccountEpoch() : scheduledWriteAccountEpoch;
 }
 const vaultWriteFailures = new Map<number, Error>();
 const observedVaultSnapshots = new Map<string, string | null>();
@@ -810,12 +814,12 @@ const vaultStorage: StateStorage = {
       await writeVault(name, value, userId, vaultExpectation);
       clearFallbackCopy(fallbackStore, name, userId);
       rememberVaultSnapshot(name, value);
-      if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb", new Date(), writeAccountIdentity());
+      if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb", new Date(), writeAccountIdentity(), writeAccountEpoch());
     } catch (indexedDbError) {
       if (isVaultConflictError(indexedDbError)) {
         if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         vaultWriteFailures.set(writeSequence, indexedDbError);
-        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity());
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity(), writeAccountEpoch());
         return;
       }
       // Try the established localStorage recovery path for any workspace.
@@ -850,7 +854,7 @@ const vaultStorage: StateStorage = {
       }
       if (saved) {
         rememberVaultSnapshot(name, value);
-        if (name === STORAGE_KEYS.persistedState) markVaultWrite("local-fallback", new Date(), writeAccountIdentity());
+        if (name === STORAGE_KEYS.persistedState) markVaultWrite("local-fallback", new Date(), writeAccountIdentity(), writeAccountEpoch());
       } else {
         // A quota failure leaves the preceding workspace in place. Keep its
         // valid marker too, or the next start would prefer the older vault.
@@ -870,7 +874,7 @@ const vaultStorage: StateStorage = {
             : combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
-        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity());
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity(), writeAccountEpoch());
       }
     }
   },
@@ -913,13 +917,13 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
     clearFallbackCopy(localFallback(), name, userId);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
-    if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb", new Date(), writeAccountIdentity());
+    if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb", new Date(), writeAccountIdentity(), writeAccountEpoch());
   } catch (error) {
     vaultWriteFailures.set(
       writeSequence,
       error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
     );
-    if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity());
+    if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity(), writeAccountEpoch());
   }
 }
 
@@ -928,7 +932,7 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
 // save can therefore never land after a newer one (the update checkpoint relies
 // on that), and a quick reload or tab close is not stuck behind a backlog of
 // stale full-workspace writes.
-type VaultOp = { kind: "set" | "replace"; value: string; accountId: string | null } | { kind: "remove" };
+type VaultOp = { kind: "set" | "replace"; value: string; accountId: string | null; accountEpoch: number } | { kind: "remove" };
 const pendingVaultOps = new Map<string, VaultOp>();
 let vaultDrain: Promise<void> | null = null;
 
@@ -938,7 +942,9 @@ async function drainVaultWrites(): Promise<void> {
       const [name, op] = pendingVaultOps.entries().next().value as [string, VaultOp];
       pendingVaultOps.delete(name);
       const priorAccountId = scheduledWriteAccountId;
+      const priorAccountEpoch = scheduledWriteAccountEpoch;
       scheduledWriteAccountId = op.kind === "remove" ? undefined : op.accountId;
+      scheduledWriteAccountEpoch = op.kind === "remove" ? undefined : op.accountEpoch;
       try {
         if (op.kind === "set") await vaultStorage.setItem(name, op.value);
         else if (op.kind === "replace") await replaceVaultItem(name, op.value);
@@ -947,6 +953,7 @@ async function drainVaultWrites(): Promise<void> {
         // setItem records failures itself (assertVaultWrite); keep draining.
       } finally {
         scheduledWriteAccountId = priorAccountId;
+        scheduledWriteAccountEpoch = priorAccountEpoch;
       }
     }
   } finally {
@@ -972,7 +979,7 @@ export const localVaultStorage: StateStorage = {
     if (name === STORAGE_KEYS.persistedState && value === null) invalidateVaultWrite();
     return value;
   },
-  setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value, accountId: readVaultAccountIdentity() }),
+  setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value, accountId: readVaultAccountIdentity(), accountEpoch: readVaultAccountEpoch() }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };
 
@@ -1001,7 +1008,7 @@ export async function saveAndVerifyLocalWorkspace(serializeCurrent: () => string
 
 /** Schedule an explicit verified-backup replacement after earlier writes. */
 export function replaceLocalVaultItem(name: string, value: string): Promise<void> {
-  return scheduleVaultWrite(name, { kind: "replace", value, accountId: readVaultAccountIdentity() });
+  return scheduleVaultWrite(name, { kind: "replace", value, accountId: readVaultAccountIdentity(), accountEpoch: readVaultAccountEpoch() });
 }
 
 function persistedUserId(raw: string): string {
