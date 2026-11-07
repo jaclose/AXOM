@@ -4,7 +4,7 @@ import { FIRST_RUN_WINDOW_MS } from "./passiveFirstRun";
 import {
   PASSIVE_ATLAS_SESSION_KEY, PASSIVE_ATLAS_CHOICE_KEY,
   confirmAtlasCompanion, disableAtlasCompanion, dismissPassiveAtlas,
-  notePassiveAtlasAction, readConfirmedAtlasCompanion, readPassiveAtlasProposal,
+  notePassiveAtlasAction, readConfirmedAtlasCompanion, readConfirmedAtlasPriority, readPassiveAtlasProposal,
   readPassiveAtlasSession, startPassiveAtlasOnboarding,
 } from "./passiveFirstRunClient";
 
@@ -54,6 +54,39 @@ describe("first-run Atlas local-only privacy boundary", () => {
     disableAtlasCompanion(accountA);
     expect(readConfirmedAtlasCompanion(accountA)).toBeNull();
     expect(readConfirmedAtlasCompanion(accountB)).toBe("atlas");
+  });
+
+  it("stores only the accepted layout suggestion, not the observation, and isolates it by account", () => {
+    startPassiveAtlasOnboarding({
+      consent: true, changedFields: ["tools", "questionTiming"], tools: ["questions"],
+      questionTiming: "after-first-pass",
+    }, t);
+    notePassiveAtlasAction("visit-questions", t + 65000);
+    notePassiveAtlasAction("begin-practice", t + 75000);
+    const recommendation = readPassiveAtlasProposal(t + 85000);
+    expect(recommendation.status).toBe("ready");
+    expect(confirmAtlasCompanion("juniper", t + 85000, accountA, "question-bank")).toBe(true);
+    expect(readConfirmedAtlasPriority(accountA)).toBe("question-bank");
+    expect(readConfirmedAtlasPriority(accountB)).toBeNull();
+    const saved = localStorage.getItem(PASSIVE_ATLAS_CHOICE_KEY + ":" + accountA) ?? "";
+    expect(saved).not.toContain("counts");
+    expect(saved).not.toContain("begin-practice");
+    expect(saved).not.toContain("tools");
+    expect(saved).not.toContain("questionTiming");
+    disableAtlasCompanion(accountA);
+    expect(readConfirmedAtlasPriority(accountA)).toBeNull();
+  });
+
+  it("notifies UI of confirmed changes without exposing user data", () => {
+    const observer = vi.fn();
+    window.addEventListener("axom:atlas-companion-changed", observer);
+    try {
+      expect(confirmAtlasCompanion("juniper", t, accountA)).toBe(true);
+      disableAtlasCompanion(accountA);
+      expect(observer).toHaveBeenCalledTimes(2);
+    } finally {
+      window.removeEventListener("axom:atlas-companion-changed", observer);
+    }
   });
 
   it("a reviewed choice clears the temporary observation, and explicit decline does too", () => {
