@@ -504,3 +504,39 @@ describe("account-scoped local save receipts", () => {
     expect(vault.readLastVaultWrite()?.accountId).toBe("account-b");
   });
 });
+
+
+describe("account switch status invalidation safety", () => {
+  it("does not revive a deleted workspace's marker if metadata removal was blocked across A-B-A", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const raw = window.localStorage.getItem(markerKey);
+    const nativeRemove = Storage.prototype.removeItem;
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (this: Storage, key: string) {
+      if (key === markerKey) throw new Error("blocked metadata removal");
+      return nativeRemove.call(this, key);
+    });
+    const nativeSet = Storage.prototype.setItem;
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === markerKey) throw new Error("blocked metadata replacement");
+      return nativeSet.call(this, key, value);
+    });
+    try { vault.invalidateVaultWrite(); }
+    finally { set.mockRestore(); remove.mockRestore(); }
+    expect(window.localStorage.getItem(markerKey)).toBe(raw);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.setVaultAccountIdentity("account-b");
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readLastVaultWrite()).toBeNull();
+  });
+
+  it("does not attribute a failed A save to B after an account switch", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWriteFailure(new Date(savedAt));
+    expect(vault.readVaultWriteFailure()).toBe(savedAt);
+    vault.setVaultAccountIdentity("account-b");
+    expect(vault.readVaultWriteFailure()).toBeNull();
+  });
+});

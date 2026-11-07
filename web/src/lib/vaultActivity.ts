@@ -34,8 +34,9 @@ export function setVaultAccountIdentity(accountId: string | null): void {
   lastPersistedAt = 0;
   memoryOnlyConfirmedWrite = false;
   lastObservedMarkerRaw = undefined;
-  statusInvalidated = false;
-  invalidatedMarkerValue = null;
+  // Preserve a failed-removal invalidation across A → B → A switches. The
+  // old marker must never be revived merely because the account changed.
+  failingSince = null;
   if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
   }
