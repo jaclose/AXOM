@@ -158,9 +158,12 @@ export function conflictingDuplicateIds(
     // when both copies have the same first answer and current status.
     // Also compare the selected key: two wrong choices can have equal status.
     // Ignore attempt timestamps: device-local replays can legitimately differ.
-    question.status, question.attempts.map((attempt) => [
-      attempt?.status ?? null, attempt?.answerKey ?? null,
-    ]),
+    // Imported legacy JSON can carry a missing/non-array attempts container.
+    // Its evidence is not equivalent to an authenticated empty answer history.
+    question.status, Array.isArray(question.attempts)
+      ? question.attempts.map((attempt) => [
+        attempt?.status ?? null, attempt?.answerKey ?? null,
+      ]) : null,
   ]);
   for (const question of questions) {
     const first = firstById.get(question.id);
@@ -209,7 +212,8 @@ export function scopeProgress(
     counted.add(question.id);
     progress.total += 1;
     progress.questionIds.push(question.id);
-    const first = question.attempts[0];
+    // Corrupt historical containers are not evidence of an attempted answer.
+    const first = Array.isArray(question.attempts) ? question.attempts[0] : undefined;
     if (!first) continue;
     progress.attempted += 1;
     if (first.status === "correct") progress.firstTimeCorrect += 1;
