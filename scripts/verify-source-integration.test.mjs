@@ -201,3 +201,43 @@ test("v2 rejects conflicting source ranges, Windows-unsafe paths, type changes a
     ...adapters, readFile: () => ({ mode: "120000", blob: B }),
   }), /nonregular/);
 });
+
+
+test("v2 rejects integrated Git paths colliding with unchanged inherited file and directory casing", t => {
+  if (process.platform === "win32") return t.skip("Git cannot create case-variant filenames on this host");
+  const cwd = mkdtempSync(join(tmpdir(), "axom-v2-case-inherited-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "AXOM Fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  mkdirSync(join(cwd, "Docs"));
+  writeFileSync(join(cwd, "docs", "Guide.ts"), "old file\n");
+  writeFileSync(join(cwd, "Docs", "untouched.md"), "old directory\n");
+  git("add", "-A");
+  git("commit", "-qm", "inherited base");
+  const baseSha = git("rev-parse", "HEAD");
+  writeFileSync(join(cwd, "docs", "guide.ts"), "case collision\n");
+  writeFileSync(join(cwd, "docs", "fresh.ts"), "directory variant\n");
+  git("add", "-A");
+  git("commit", "-qm", "source branch adds collision");
+  const headSha = git("rev-parse", "HEAD");
+  const input = { version: 2, integrationBaseSha: baseSha, integratedSha: headSha,
+    sources: [{ baseSha, sourceSha: headSha }] };
+  const adapters = {
+    listChanges: (a, b) => listGitChanges(a, b, cwd),
+    isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+    readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+    listTreePaths: sha => {
+      const output = execFileSync("git", ["ls-tree", "-r", "-z", "--name-only", "--full-tree", sha],
+        { cwd, encoding: "utf8" });
+      return output ? output.split("\0").slice(0, -1) : [];
+    },
+  };
+  assert.deepEqual(listGitChanges(baseSha, headSha, cwd).map(c => c.path).sort(),
+    ["docs/fresh.ts", "docs/guide.ts"]);
+  // RED on the old verifier: it wrongly returned completeForDeclaredRanges=true
+  // because its changed-only inventory never saw docs/Guide.ts or Docs/untouched.md.
+  assert.throws(() => verifyCompleteSourceIntegration(input, adapters), /[Cc]ase.colli|[Cc]ase.insensitive/);
+});
