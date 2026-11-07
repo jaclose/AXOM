@@ -10,6 +10,7 @@ import type { SourceDocument } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { GButton, GhostButton } from "../ui/primitives";
 import { SourcePagePreview } from "./SourcePagePreview";
+import { notePassiveAtlasAction } from "../../lib/communications/passiveFirstRunClient";
 
 const same = (a: string | undefined, b: string | undefined) => (a ?? "").replace(/\s+/g, " ").trim() === (b ?? "").replace(/\s+/g, " ").trim();
 
@@ -157,7 +158,10 @@ export function SourceTeaching({ question, document: source, siblings, provider,
       {source && page && (
         <div className="source-teaching-trace">
           <div className="row wrap gap6">
-            <GhostButton aria-expanded={showPage} onClick={() => setShowPage((open) => !open)}>
+            <GhostButton aria-expanded={showPage} onClick={() => {
+              if (!showPage) notePassiveAtlasAction("review-source");
+              setShowPage((open) => !open);
+            }}>
               {showPage ? <EyeOff size={ICON_SIZE.body} /> : <Eye size={ICON_SIZE.body} />} {showPage ? "Hide the source page" : `See the source, page ${page}`}
             </GhostButton>
             {showPage && pages.length > 1 && (
