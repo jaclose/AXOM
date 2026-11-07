@@ -815,7 +815,7 @@ const vaultStorage: StateStorage = {
       if (isVaultConflictError(indexedDbError)) {
         if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         vaultWriteFailures.set(writeSequence, indexedDbError);
-        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity());
         return;
       }
       // Try the established localStorage recovery path for any workspace.
@@ -870,7 +870,7 @@ const vaultStorage: StateStorage = {
             : combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
-        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity());
       }
     }
   },
@@ -919,7 +919,7 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
       writeSequence,
       error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
     );
-    if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
+    if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure(new Date(), writeAccountIdentity());
   }
 }
 

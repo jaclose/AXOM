@@ -531,6 +531,16 @@ describe("account switch status invalidation safety", () => {
     expect(vault.readLastVaultWrite()).toBeNull();
   });
 
+  it("does not report a late A failure against the switched B identity", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.setVaultAccountIdentity("account-b");
+    vault.markVaultWriteFailure(new Date(savedAt), "account-a");
+    expect(vault.readVaultWriteFailure()).toBeNull();
+    vault.markVaultWriteFailure(new Date(savedAt), "account-b");
+    expect(vault.readVaultWriteFailure()).toBe(savedAt);
+  });
+
   it("does not attribute a failed A save to B after an account switch", async () => {
     const vault = await import("./vaultActivity");
     vault.setVaultAccountIdentity("account-a");

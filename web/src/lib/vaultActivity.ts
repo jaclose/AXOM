@@ -115,7 +115,12 @@ function listenForCrossTabInvalidation(): void {
  * saves are best-effort, so without this the only sign was a "Saved at" time
  * in Settings that had quietly stopped moving.
  */
-export function markVaultWriteFailure(now: Date = new Date()): void {
+export function markVaultWriteFailure(
+  now: Date = new Date(),
+  writeAccountId: string | null = vaultAccountId,
+): void {
+  // A failed queued A write after switching to B is still an A operation.
+  if (writeAccountId !== vaultAccountId) return;
   failingSince ??= now.toISOString();
   if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_FAILURE_EVENT));
