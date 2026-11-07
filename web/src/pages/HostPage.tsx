@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { BarChart3, CircleAlert, Crown, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
+import { BarChart3, CircleAlert, Crown, Download, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import {
   loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, useAccountIdentity,
   type OperatorAccount, type OperatorDashboard,
 } from "../lib/operator/hostClient";
 import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
+import { auditCsv, filterHostAudit } from "../lib/operator/hostAuditExport";
 import { QuestionSetLibraryReviewQueue } from "../components/questions/QuestionSetLibraryReviewQueue";
 import { JournalFeedbackReview } from "../components/dashboard/JournalFeedbackReview";
 import "../styles/host-console.css";
@@ -41,6 +42,7 @@ function HostAccountPage() {
   const [aiDrafts, setAiDrafts] = useState<Record<string, { enabled: boolean; limit: string }>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [reportReasons, setReportReasons] = useState<Record<string, string>>({});
+  const [auditQuery, setAuditQuery] = useState("");
   useEffect(() => {
     let alive = true;
     setDashboard(undefined);
@@ -65,6 +67,30 @@ function HostAccountPage() {
   const attentionCount = (dashboard?.overview?.academic_review_pending ?? 0) + (dashboard?.overview?.reports_pending ?? 0);
   const canManageAccounts = owner || role === "admin";
   const normalizedSearch = search.trim();
+  const visibleAudit = filterHostAudit(dashboard?.audit ?? [], auditQuery);
+  function jumpToHostSection(id: string) {
+    document.getElementById(id)?.scrollIntoView({
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+  }
+  function exportAudit() {
+    // This is an owner-scoped snapshot received from the existing audited read
+    // path, not a full audit export or a new privileged API.
+    if (!owner || !dashboard) return;
+    const content = auditCsv(visibleAudit);
+    const url = URL.createObjectURL(new Blob(["\uFEFF", content], { type: "text/csv;charset=utf-8" }));
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `axom-host-audit-recent-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+  }
   useEffect(() => {
     if (!userId || !canManageAccounts || loading || !normalizedSearch) {
       setAccountSearch(undefined);
@@ -144,8 +170,9 @@ function HostAccountPage() {
     <div className="host-toolbar">
       <GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15} aria-hidden="true"/> Refresh</GButton>
       <nav className="host-quick-nav" aria-label="Host sections">
-        <a className="ghost-btn" href="#communities">Communities</a>
-        <a className="ghost-btn" href="#questions">Question Bank</a>
+        <button className="ghost-btn" type="button" onClick={() => jumpToHostSection("host-community-review")}>Communities</button>
+        <button className="ghost-btn" type="button" onClick={() => jumpToHostSection("host-academic-review")}>Question Bank</button>
+        {owner && <button className="ghost-btn" type="button" onClick={() => jumpToHostSection("host-audit-history")}>Audit</button>}
       </nav>
     </div>
     {loading && <p role="status">Checking operator access…</p>}
@@ -208,7 +235,7 @@ function HostAccountPage() {
           {!normalizedSearch && accounts.length === 0 && <p className="sub">No accounts to show.</p>}
           <p className="sub">Recent view shows up to 100 accounts. Search by name or email across the full directory. Project CEO access is bound to a verified account ID, never an editable name.</p>
         </GlassCard>}
-        <GlassCard pad>
+        <GlassCard pad id="host-academic-review">
           <PanelHeader headingLevel={2} title="Submitted QBank review" sub="Revision-bound collections intentionally submitted for sharing. Pending review never implies approval." />
           {dashboard.queue.length === 0 ? <p className="sub">No submitted Question Banks await review.</p> :
             <div className="host-queue">{dashboard.queue.map(item => <div className="host-queue-row" key={item.collection_id}>
@@ -219,7 +246,7 @@ function HostAccountPage() {
         </GlassCard>
         {userId && <QuestionSetLibraryReviewQueue accountId={userId} />}
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
-        <GlassCard pad>
+        <GlassCard pad id="host-community-review">
           <PanelHeader headingLevel={2} title="Reported community posts" sub="Only reported posts enter this moderation queue." />
           {dashboard.reports.length === 0 ? <p className="sub">No posts have been reported.</p> : dashboard.reports.map(report => <article key={report.post_id} className="host-report">
             <b>@{report.author_handle} · {report.post_kind}</b>
@@ -249,10 +276,19 @@ function HostAccountPage() {
           <div className="host-role" data-current={role === "moderator"}><Users size={17} aria-hidden="true"/><div><b>Moderator</b><small>Submitted bank metadata and reported community posts only.</small></div></div>
           <p className="sub">No operator role grants unrestricted access to individual private source files, notes, questions or saved progress.</p>
         </GlassCard>
-        {owner && <GlassCard pad>
-          <PanelHeader headingLevel={2} title="Audit history" sub="Recent privileged actions and their immutable account IDs." />
+        {owner && <GlassCard pad id="host-audit-history">
+          <PanelHeader headingLevel={2} title="Audit history" sub="Server-authorized recent actions, with immutable actor and target identities." />
+          <div className="host-audit-tools">
+            <label htmlFor="host-audit-search">Filter recent events
+              <input id="host-audit-search" type="search" value={auditQuery} maxLength={160}
+                placeholder="Action, account ID, reason…" onChange={(event) => setAuditQuery(event.target.value)} />
+            </label>
+            <GButton size="sm" disabled={visibleAudit.length === 0} onClick={exportAudit}><Download size={15} aria-hidden="true" /> Export visible CSV</GButton>
+          </div>
+          <p className="sub" role="status">Showing {visibleAudit.length} of {dashboard.audit.length} recently fetched events (maximum 30). This is not a complete audit history.</p>
           {dashboard.audit.length === 0 && <p className="sub">No privileged changes yet.</p>}
-          {dashboard.audit.map(item => <div className="host-audit" key={item.id}>
+          {dashboard.audit.length > 0 && visibleAudit.length === 0 && <p className="sub">No recent events match this filter.</p>}
+          {visibleAudit.map(item => <div className="host-audit" key={item.id}>
             <b>{item.action}</b><small>{date(item.created_at)}</small>
             <small>Actor: {item.actor_id?.slice(0,8) ?? "Deleted account"} · Target: {item.target_id?.slice(0,8) ?? "none"}</small>
             {typeof item.metadata.reason === "string" && <p className="sub">{item.metadata.reason}</p>}
