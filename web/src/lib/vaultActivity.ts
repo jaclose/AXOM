@@ -7,8 +7,17 @@ import { STORAGE_KEYS } from "./brand";
  * Legacy unscoped markers are not evidence of a workspace save.
  */
 export type VaultWriteTarget = "indexeddb" | "local-fallback";
-/** v3 isolates account-scoped receipts from older v2 clients that ignore accountId. */
-const WORKSPACE_WRITE_MARKER_VERSION = 3 as const;
+/** v4 separates account receipts from both old v2 readers and pre-stack main. */
+const WORKSPACE_WRITE_MARKER_VERSION = 4 as const;
+/**
+ * Persist an opaque target so pre-stack main's version-blind parser cannot
+ * mistake an account-scoped receipt for its old global timestamp marker.
+ * The public VaultWriteRecord target remains the normal, UI-facing value.
+ */
+const STORED_RECEIPT_TARGET = {
+  indexeddb: "axom-receipt-v4-indexeddb",
+  "local-fallback": "axom-receipt-v4-local-fallback",
+} as const;
 /** Historical v2 receipts are readable only for signed-out, local-only use. */
 const LEGACY_LOCAL_WRITE_MARKER_VERSION = 2 as const;
 export interface VaultWriteRecord {
@@ -159,7 +168,12 @@ export function markVaultWrite(
   if (now.getTime() - lastPersistedAt >= 1000) {
     lastPersistedAt = now.getTime();
     try {
-      const raw = JSON.stringify(lastWrite);
+      // The envelope is intentionally incompatible with pre-stack main,
+      // which validates only target and ignores account/version fields.
+      const raw = JSON.stringify({
+        ...lastWrite,
+        target: STORED_RECEIPT_TARGET[lastWrite.target],
+      });
       window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, raw);
       lastObservedMarkerRaw = raw;
       memoryOnlyConfirmedWrite = false;
@@ -226,20 +240,28 @@ function readStoredWorkspaceMarker(raw: string | null): VaultWriteRecord | null 
     const parsed: unknown = JSON.parse(raw ?? "null");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const marker = parsed as Record<string, unknown>;
+    const verifiedTarget =
+      marker.version === WORKSPACE_WRITE_MARKER_VERSION
+        ? marker.target === STORED_RECEIPT_TARGET.indexeddb ? "indexeddb"
+          : marker.target === STORED_RECEIPT_TARGET["local-fallback"] ? "local-fallback"
+          : null
+        : marker.target === "indexeddb" || marker.target === "local-fallback"
+          ? marker.target
+          : null;
     if (
       (marker.version !== WORKSPACE_WRITE_MARKER_VERSION &&
         !(vaultAccountId === null && marker.version === LEGACY_LOCAL_WRITE_MARKER_VERSION && marker.accountId === undefined)) ||
       marker.scope !== "workspace" ||
       typeof marker.at !== "string" ||
       !Number.isFinite(Date.parse(marker.at)) ||
-      (marker.target !== "indexeddb" && marker.target !== "local-fallback") ||
+      !verifiedTarget ||
       // A signed-in account requires a v3 receipt with the exact account identity.
       // Historical unscoped v2 receipts are never trusted while signed in.
       (vaultAccountId ? marker.accountId !== vaultAccountId : marker.accountId !== undefined)
     ) return null;
     return {
       at: marker.at,
-      target: marker.target,
+      target: verifiedTarget,
       version: marker.version as VaultWriteRecord["version"],
       scope: "workspace",
       ...(vaultAccountId ? { accountId: vaultAccountId } : {}),
