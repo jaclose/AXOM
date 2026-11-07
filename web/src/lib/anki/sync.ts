@@ -203,14 +203,16 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
   };
   const progress = input.onProgress ?? (() => {});
   const desired = desiredNotes(input.cards, input.catalog, input.layout);
-  // Corrupt persisted receipts must not be shortened into plausible identities.
-  // Stop before even ensuring note types or adding unrelated notes. The original
-  // malformed card IDs remain in the device-local receipt for manual recovery.
-  const corrupted = [...(state.pendingRetirements ?? []), ...state.pendingSuspends].find(
-    (receipt) => Object.prototype.hasOwnProperty.call(receipt, "quarantinedCardIds"),
+  // Corrupt persisted recovery intent must remain pending and non-actionable.
+  // Stop before even ensuring note types or adding unrelated notes. Neither
+  // invalid card sets nor invalid note/AXOM identities may be silently dropped.
+  const corrupted = [...(state.pendingRetirements ?? []), ...state.pendingSuspends].some(
+    (receipt) => Object.prototype.hasOwnProperty.call(receipt, "quarantinedCardIds") ||
+      Object.prototype.hasOwnProperty.call(receipt, "quarantinedReceipt"),
   );
   if (corrupted) {
-    report.error = `Cannot safely sync Anki: corrupt card identity receipt for ${corrupted.axomId}. Review the saved receipt and Anki profile before retrying.`;
+    // Do not expose untrusted raw receipt data in the visible error message.
+    report.error = "Cannot safely sync Anki: corrupt note/card identity receipt. Review the saved receipt and Anki profile before retrying.";
     report.pending = countStillPending(input.cards, desired, state);
     return { state: { ...state, lastSync: summarize(report) }, report };
   }
