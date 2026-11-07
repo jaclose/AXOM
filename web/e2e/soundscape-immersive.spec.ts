@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 
 type DevWindow = Window & {
@@ -10,16 +11,26 @@ type DevWindow = Window & {
   }>;
 };
 
-test("soundscape fullscreen shows the existing focus timer until it is reset", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+/** Finish setup before interacting with the page; the optional taste dialog
+ * mounts alongside Soundscapes and must not intercept user clicks.
+ */
+async function openSoundscapes(page: Page, setupName: string) {
   await page.goto("/#soundscapes", { waitUntil: "networkidle" });
-  await completeSetup(page, "Immersive timer", { ifVisible: true });
+  await completeSetup(page, setupName, { ifVisible: true });
   const later = page.getByRole("button", { name: "Review later", exact: true });
   if (await later.count()) await later.click();
   await page.goto("/#soundscapes", { waitUntil: "networkidle" });
   await expect(page.locator(".soundscapes-page")).toBeVisible();
-  const skip = page.getByRole("button", { name: "Skip for now", exact: true });
-  if (await skip.count()) await skip.click();
+  const opener = page.locator(".soundscape-opener");
+  if (await opener.count()) {
+    await opener.getByRole("button", { name: "Skip for now", exact: true }).click();
+  }
+  await expect(opener).toHaveCount(0);
+}
+
+test("soundscape fullscreen shows the existing focus timer until it is reset", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openSoundscapes(page, "Immersive timer");
 
   await expect(page.getByRole("group", { name: "Focus timer" })).toHaveCount(0);
   await page.evaluate(async () => {
@@ -39,7 +50,13 @@ test("soundscape fullscreen shows the existing focus timer until it is reset", a
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1441);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(901);
   for (const width of [390, 320]) {
+    // Chromium forbids resizing a native fullscreen window. Return to a normal
+    // viewport, resize, then enter fullscreen through the real page control.
+    await page.keyboard.press("Escape");
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
     await page.setViewportSize({ width, height: 844 });
+    await page.getByRole("button", { name: "Full screen", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement?.classList.contains("soundscape-hero") ?? false)).toBe(true);
     await expect(timer).toBeVisible();
     const mobile = await timer.boundingBox();
     expect(mobile).not.toBeNull();
@@ -60,14 +77,7 @@ test("soundscape fullscreen shows the existing focus timer until it is reset", a
 
 test("immersive Orb uses actual pixel density within the 8K budget", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/#soundscapes", { waitUntil: "networkidle" });
-  await completeSetup(page, "Immersive Orb", { ifVisible: true });
-  const later = page.getByRole("button", { name: "Review later", exact: true });
-  if (await later.count()) await later.click();
-  await page.goto("/#soundscapes", { waitUntil: "networkidle" });
-  await expect(page.locator(".soundscapes-page")).toBeVisible();
-  const skip = page.getByRole("button", { name: "Skip for now", exact: true });
-  if (await skip.count()) await skip.click();
+  await openSoundscapes(page, "Immersive Orb");
   await page.getByRole("button", { name: "Full screen", exact: true }).click();
   const orb = page.locator(".soundscape-hero.is-fullscreen .sound-orb");
   await expect(orb).toBeVisible();
@@ -82,13 +92,7 @@ test("immersive Orb uses actual pixel density within the 8K budget", async ({ pa
 });
 
 test("soundscape stop timer is shown in fullscreen even without a Pomodoro", async ({ page }) => {
-  await page.goto("/#soundscapes", { waitUntil: "networkidle" });
-  await completeSetup(page, "Immersive sound stop", { ifVisible: true });
-  const later = page.getByRole("button", { name: "Review later", exact: true });
-  if (await later.count()) await later.click();
-  await page.goto("/#soundscapes", { waitUntil: "networkidle" });
-  const skip = page.getByRole("button", { name: "Skip for now", exact: true });
-  if (await skip.count()) await skip.click();
+  await openSoundscapes(page, "Immersive sound stop");
   await page.getByRole("region", { name: "Main sound", exact: true }).getByRole("button", { name: "Play", exact: true }).click();
   await expect.poll(() => page.evaluate(async () => {
     const { useSoundscape } = await (window as unknown as DevWindow).__AXOM_DEV__;
