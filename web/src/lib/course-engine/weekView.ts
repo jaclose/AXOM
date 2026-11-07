@@ -60,10 +60,13 @@ export function buildModuleWeeks(
     const term = segments.length >= 3 ? segments[0] : undefined;
     const course = segments.length >= 4 ? segments.at(-3) : undefined;
     const key = `${(term ?? "").toLowerCase()}|${(course ?? "").toLowerCase()}|${canonicalModuleKey(scope.module)}`;
+    // Legacy Term/Module/Week paths have no course code. Attribute their
+    // question progress only when the known term/module has one course owner.
     const matchingCourses = context?.courses.filter((candidate) =>
-      context.terms.find((termRecord) => termRecord.id === candidate.termId)?.name.toLowerCase() === term?.toLowerCase()
-      && candidate.code.toLowerCase() === course?.toLowerCase()
-      && candidate.modules.some((module) => canonicalModuleKey(module.name) === canonicalModuleKey(scope.module!))) ?? [];
+      context.terms.some((termRecord) => termRecord.id === candidate.termId
+        && termRecord.name.trim().toLowerCase() === term?.trim().toLowerCase())
+      && (!course || candidate.code.trim().toLowerCase() === course.trim().toLowerCase())
+      && candidate.modules.some((known) => canonicalModuleKey(known.name) === canonicalModuleKey(scope.module!))) ?? [];
     const courseId = matchingCourses.length === 1 ? matchingCourses[0].id : undefined;
     const entry = modules.get(key) ?? {
       key, module: scope.module, term, course, courseId,
@@ -83,9 +86,15 @@ export function buildModuleWeeks(
   }
 
   return [...modules.values()].map(({ byWeek, paths, ...module }) => {
-    // Without a course/term link on the question, reusing a module name in two
-    // terms cannot truthfully allocate those questions to either week.
-    const ambiguous = (termsByModule.get(canonicalModuleKey(module.module))?.size ?? 0) > 1 && !module.courseId;
+    // A course-specific tracker path must not consume unowned/other-course
+    // attempts. A supplied catalog that cannot uniquely resolve the course
+    // also cannot justify week mastery. Legacy module-only/no-catalog reads
+    // retain their previous fallback unless multiple tracker owners collide.
+    const ambiguous = !module.courseId && (
+      (termsByModule.get(canonicalModuleKey(module.module))?.size ?? 0) > 1
+      || module.course !== undefined
+      || context !== undefined
+    );
     const weeks = [...byWeek.entries()].sort(([left], [right]) => left - right).map(([week, items]): WeekSummary => {
       const groups = new Map<CourseActivity | "other", { total: number; done: number }>();
       for (const item of items) {
