@@ -58,3 +58,35 @@ it("keeps the open course mounted during same-account refresh, but clears it for
   rerender({ query: "different" });
   expect(result.current.courses).toEqual([]);
 });
+
+
+it("holds a malformed first catalog page instead of displaying duplicate course identities", async () => {
+  vi.useFakeTimers();
+  vi.mocked(listAcademicCourses).mockResolvedValueOnce([course("same"), course("same")]);
+  const { result } = renderHook(() => useAcademicCatalog("a", "", ""));
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses).toEqual([]);
+  expect(result.current.error).toMatch(/overlapping course identities/i);
+  expect(result.current.more).toBe(false);
+});
+
+it("holds an overlapping cursor page and retries without losing confirmed courses", async () => {
+  vi.useFakeTimers();
+  const firstPage = Array.from({ length: 24 }, (_, i) => course(`id-${i}`));
+  vi.mocked(listAcademicCourses).mockResolvedValueOnce(firstPage)
+    .mockResolvedValueOnce([course("id-23"), course("id-24")])
+    .mockResolvedValueOnce([course("id-24")]);
+  const { result } = renderHook(() => useAcademicCatalog("a", "", ""));
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses.map(entry => entry.id)).toEqual(firstPage.map(entry => entry.id));
+  await act(async () => { await result.current.loadMore(); });
+  expect(result.current.courses.map(entry => entry.id)).toEqual(firstPage.map(entry => entry.id));
+  expect(result.current.error).toMatch(/overlapping course identities/i);
+  expect(result.current.more).toBe(true);
+  await act(async () => { await result.current.loadMore(); });
+  expect(result.current.courses.map(entry => entry.id)).toEqual([...firstPage.map(entry => entry.id), "id-24"]);
+  expect(result.current.error).toBe("");
+  expect(result.current.more).toBe(false);
+  expect(vi.mocked(listAcademicCourses).mock.calls[1][2]).toBe("id-23");
+  expect(vi.mocked(listAcademicCourses).mock.calls[2][2]).toBe("id-23");
+});
