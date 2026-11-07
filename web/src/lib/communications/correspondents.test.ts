@@ -44,7 +44,7 @@ describe("AXOM Correspondents V2", () => {
   });
 
   it("uses declared academic preferences rather than color as personality evidence", () => {
-    const sample = { ...base, academicHouse: "ARCHITECTS", selectedAccent: "#226cb4", declaredStyles: ["visual", "systems"] as const };
+    const sample = { ...base, academicHouse: "ARCHITECTS" as const, selectedAccent: "#226cb4", declaredStyles: ["visual", "systems"] as const };
     const result = matchCorrespondent(sample);
     expect(result.basis).toBe("preferences");
     expect(result.reasons.join(" ")).toMatch(/academic|study|preferences/i);
@@ -80,6 +80,21 @@ describe("AXOM Correspondents V2", () => {
     expect(result.id).toBe(preferredId);
     expect(result.basis).toBe("chosen");
     expect(result.reasons).toEqual(["You chose this correspondent."]);
+  });
+
+  it("introduces the AXOM academic system before the fictional companion, with a private opt-out", () => {
+    const match = matchCorrespondent({ ...base, preferredId: "juniper" });
+    const email = renderCorrespondentIntroduction(match, { displayName: "Alex", useCase: "welcome" });
+    const axomIntro = email.html.indexOf("Welcome to AXOM");
+    const atlasIntro = email.html.indexOf("The Living Atlas");
+    const nameReveal = email.html.indexOf("Juniper");
+    expect(axomIntro).toBeGreaterThan(0);
+    expect(atlasIntro).toBeGreaterThan(axomIntro);
+    expect(nameReveal).toBeGreaterThan(atlasIntro);
+    expect(email.text).toContain("forty fictional academic companions");
+    expect(email.text).toContain("questions");
+    expect(email.text).toContain("change or turn off");
+    expect(email.html).not.toMatch(/your color revealed|analyzed your journal|you chose this correspondent/i);
   });
 
   it("renders an accessible, AXOM-colored welcome diagram and truthful disclosure", () => {
