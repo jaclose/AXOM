@@ -54,12 +54,18 @@ export async function approveAcademicCourses(collectionIds: readonly string[], a
   for (const collectionId of collectionIds) {
     if (options.signal?.aborted) break;
     options.assertCurrent?.();
+    let outcome: AcademicApprovalOutcome;
     try {
       await reviewAcademicCourse(collectionId, true, accountId, options.receipts?.get(collectionId), options.rationaleReviewed);
-      outcomes.push({ collectionId, approved: true });
+      outcome = { collectionId, approved: true };
     } catch (cause) {
-      outcomes.push({ collectionId, approved: false, error: cause instanceof Error ? cause.message : "The approval was not saved." });
+      outcome = { collectionId, approved: false, error: cause instanceof Error ? cause.message : "The approval was not saved." };
     }
+    // The review request may have completed for the old account while the user
+    // switched identity. Do not report a stale success or failure to the new
+    // account, even when this was the final item in the batch.
+    options.assertCurrent?.();
+    outcomes.push(outcome);
     options.onProgress?.(outcomes.length);
   }
   return outcomes;

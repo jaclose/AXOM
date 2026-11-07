@@ -18,7 +18,7 @@ vi.mock("./accountScope", () => ({
     dispose: mocks.dispose,
   }),
 }));
-import { listOwnedAcademicCourses } from "./ownedCourses";
+import { approveAcademicCourses, listOwnedAcademicCourses } from "./ownedCourses";
 
 const course = (index: number, owned = true): AcademicCourse => ({
   id: `course-${index}`,
@@ -86,5 +86,71 @@ describe("owner catalog pagination integrity", () => {
     });
     await expect(listOwnedAcademicCourses("account")).rejects.toThrow(/account changed/);
     expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("reviewer approval account boundaries", () => {
+  it("rejects an in-flight approval after the signed-in account changes, even for one course", async () => {
+    let completeReview!: () => void;
+    const pending = new Promise<void>(resolve => { completeReview = resolve; });
+    mocks.review.mockImplementationOnce(() => pending);
+    let active = true;
+    mocks.assertCurrent.mockImplementation(() => {
+      if (!active) throw new Error("Academic account changed. Refresh before retrying.");
+    });
+    const onProgress = vi.fn();
+    const operation = approveAcademicCourses(["collection-a"], "account-a", {
+      assertCurrent: mocks.assertCurrent, onProgress,
+    });
+    expect(mocks.review).toHaveBeenCalledOnce();
+    active = false;
+    completeReview();
+    await expect(operation).rejects.toThrow(/account changed/i);
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("rejects a failed in-flight review if the account switched before the reply", async () => {
+    let rejectReview!: (reason?: Error) => void;
+    const pending = new Promise<void>((_, reject) => { rejectReview = reject; });
+    mocks.review.mockImplementationOnce(() => pending);
+    let active = true;
+    mocks.assertCurrent.mockImplementation(() => {
+      if (!active) throw new Error("Academic account changed. Refresh before retrying.");
+    });
+    const onProgress = vi.fn();
+    const operation = approveAcademicCourses(["collection-a", "collection-b"], "account-a", {
+      assertCurrent: mocks.assertCurrent, onProgress,
+    });
+    active = false;
+    rejectReview(new Error("The prior account's review was not saved."));
+    await expect(operation).rejects.toThrow(/account changed/i);
+    expect(mocks.review).toHaveBeenCalledOnce();
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("retains per-course failure recovery and progress when the account stays current", async () => {
+    mocks.review.mockRejectedValueOnce(new Error("Review unavailable")).mockResolvedValueOnce(undefined);
+    const onProgress = vi.fn();
+    const results = await approveAcademicCourses(["collection-a", "collection-b"], "account-a", {
+      assertCurrent: mocks.assertCurrent, onProgress,
+    });
+    expect(results).toEqual([
+      { collectionId: "collection-a", approved: false, error: "Review unavailable" },
+      { collectionId: "collection-b", approved: true },
+    ]);
+    expect(onProgress.mock.calls).toEqual([[1], [2]]);
+    expect(mocks.assertCurrent).toHaveBeenCalledTimes(4);
+  });
+
+  it("finishes a completed in-flight request but does not start the next after cancellation", async () => {
+    const controller = new AbortController();
+    mocks.review.mockImplementationOnce(async () => { controller.abort(); });
+    const onProgress = vi.fn();
+    const results = await approveAcademicCourses(["collection-a", "collection-b"], "account-a", {
+      signal: controller.signal, assertCurrent: mocks.assertCurrent, onProgress,
+    });
+    expect(results).toEqual([{ collectionId: "collection-a", approved: true }]);
+    expect(mocks.review).toHaveBeenCalledOnce();
+    expect(onProgress).toHaveBeenCalledExactlyOnceWith(1);
   });
 });
