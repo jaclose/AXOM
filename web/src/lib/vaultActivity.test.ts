@@ -183,3 +183,83 @@ describe("optional marker storage quota boundaries", () => {
     expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
   });
 });
+
+describe("independent-review save-marker regressions", () => {
+  it("recovers a renewed remote marker after invalidation while Settings was unmounted", async () => {
+    const vault = await import("./vaultActivity");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const first = window.localStorage.getItem(markerKey);
+    const unsubscribe = vault.subscribeVaultWriteStatus(vi.fn());
+    window.localStorage.removeItem(markerKey);
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: markerKey, oldValue: first, newValue: null, storageArea: window.localStorage,
+    }));
+    expect(vault.readLastVaultWrite()).toBeNull();
+    unsubscribe();
+
+    const renewed = { at: "2026-11-06T20:01:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(renewed));
+    // No subscriber, so a normal StorageEvent would have no listener.
+    expect(vault.readLastVaultWrite()).toEqual(renewed);
+  });
+
+  it("rejects an old persisted marker when invalidation could not remove it", async () => {
+    const vault = await import("./vaultActivity");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const old = window.localStorage.getItem(markerKey);
+    const nativeRemove = Storage.prototype.removeItem;
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function(this: Storage, key: string) {
+      if (key === markerKey) throw new Error("simulated remove blocked");
+      return nativeRemove.call(this, key);
+    });
+    const nativeSet = Storage.prototype.setItem;
+    const replace = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+      if (key === markerKey) throw new Error("simulated replacement blocked");
+      return nativeSet.call(this, key, value);
+    });
+    try { vault.invalidateVaultWrite(); }
+    finally { replace.mockRestore(); remove.mockRestore(); }
+    expect(window.localStorage.getItem(markerKey)).toBe(old);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    const renewed = { at: "2026-11-06T20:02:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(renewed));
+    expect(vault.readLastVaultWrite()).toEqual(renewed);
+  });
+
+  it("invalidates a quota-only in-memory save across tab modules without a storage-key event", async () => {
+    type FakeMessage = { data: unknown };
+    class FakeChannel {
+      static peers = new Set<FakeChannel>();
+      onmessage: ((event: FakeMessage) => void) | null = null;
+      constructor(readonly name: string) { FakeChannel.peers.add(this); }
+      postMessage(data: unknown) {
+        for (const peer of FakeChannel.peers) {
+          if (peer !== this && peer.name === this.name) peer.onmessage?.({ data });
+        }
+      }
+      close() { FakeChannel.peers.delete(this); }
+    }
+    const originalChannel = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
+    Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: FakeChannel });
+    try {
+      const firstTab = await import("./vaultActivity");
+      const nativeSet = Storage.prototype.setItem;
+      const reject = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+        if (key === markerKey) throw new Error("simulated status-only quota");
+        return nativeSet.call(this, key, value);
+      });
+      try { firstTab.markVaultWrite("indexeddb", new Date(savedAt)); }
+      finally { reject.mockRestore(); }
+      expect(firstTab.readLastVaultWrite()?.at).toBe(savedAt);
+      expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+      vi.resetModules(); // independent runtime copy, representing the other tab
+      const secondTab = await import("./vaultActivity");
+      secondTab.invalidateVaultWrite();
+      expect(firstTab.readLastVaultWrite()).toBeNull();
+    } finally {
+      if (originalChannel) Object.defineProperty(window, "BroadcastChannel", originalChannel);
+      else Reflect.deleteProperty(window, "BroadcastChannel");
+    }
+  });
+});

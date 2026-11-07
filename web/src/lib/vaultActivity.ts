@@ -25,6 +25,34 @@ let memoryOnlyConfirmedWrite = false;
 let failingSince: string | null = null;
 /** A removed/missing workspace must not rehydrate stale save-success metadata. */
 let statusInvalidated = false;
+/** Reject an invalidated marker that storage permissions prevented us removing. */
+let invalidatedMarkerValue: string | null = null;
+/** Same-origin, content-free notifications when quota blocks the optional localStorage marker. */
+const VAULT_STATUS_CHANNEL = "axom:vault-status";
+let statusChannel: BroadcastChannel | null = null;
+function rawStoredMarker(): string | null {
+  try { return window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt); }
+  catch { return null; }
+}
+function listenForCrossTabInvalidation(): void {
+  if (statusChannel || typeof window === "undefined" || typeof window.BroadcastChannel !== "function") return;
+  try {
+    statusChannel = new window.BroadcastChannel(VAULT_STATUS_CHANNEL);
+    statusChannel.onmessage = (event: MessageEvent<unknown>) => {
+      if (event.data !== "workspace-invalidated") return;
+      // Local metadata may never have existed (IndexedDB succeeded but the
+      // optional status key was quota-blocked). Native storage events cannot
+      // report that removal; this channel can, even while Settings is hidden.
+      invalidatedMarkerValue = rawStoredMarker();
+      statusInvalidated = true;
+      lastWrite = null;
+      lastPersistedAt = 0;
+      memoryOnlyConfirmedWrite = false;
+      window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+    };
+  } catch { /* Optional cross-tab channel unavailable; stored marker stays authoritative. */ }
+}
+
 
 /**
  * A save reached neither IndexedDB nor the browser-storage fallback. Ordinary
@@ -45,7 +73,9 @@ export function readVaultWriteFailure(): string | null {
 
 export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date()): void {
   // PR #128 only calls this after the persisted workspace key actually landed.
+  listenForCrossTabInvalidation();
   statusInvalidated = false;
+  invalidatedMarkerValue = null;
   lastWrite = { at: now.toISOString(), target, version: WORKSPACE_WRITE_MARKER_VERSION, scope: "workspace" };
   failingSince = null;
   // Keep the tiny localStorage marker current without hammering it on every
@@ -71,6 +101,8 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
  * The next confirmed write renews the marker, even inside the throttle window.
  */
 export function invalidateVaultWrite(): void {
+  listenForCrossTabInvalidation();
+  const invalidatedRaw = rawStoredMarker();
   const hadMemoryRecord = lastWrite !== null;
   let hadStoredRecord = false;
   try {
@@ -80,12 +112,16 @@ export function invalidateVaultWrite(): void {
   lastPersistedAt = 0;
   memoryOnlyConfirmedWrite = false;
   statusInvalidated = true;
+  invalidatedMarkerValue = invalidatedRaw;
   try {
     window.localStorage.removeItem(STORAGE_KEYS.lastVaultWriteAt);
   } catch {
     // Storage shims may forbid removal but allow a fail-closed replacement.
     try { window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, "null"); } catch { /* optional */ }
   }
+  // No marker-key storage event exists for a confirmed IndexedDB write whose
+  // optional status marker was quota-blocked. Send a content-free invalidation.
+  try { statusChannel?.postMessage("workspace-invalidated"); } catch { /* optional */ }
   if ((hadMemoryRecord || hadStoredRecord) && typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
   }
@@ -121,11 +157,20 @@ function readStoredWorkspaceMarker(): VaultWriteRecord | null {
  * Keep a newer same-tab write: the local metadata marker is throttled to 1/s.
  */
 export function readLastVaultWrite(): VaultWriteRecord | null {
-  if (statusInvalidated) return null;
-  // A confirmed in-process workspace write remains truthful when only the
-  // optional localStorage *status* marker was blocked by browser quota.
-  if (lastWrite && memoryOnlyConfirmedWrite) return lastWrite;
+  listenForCrossTabInvalidation();
   const stored = readStoredWorkspaceMarker();
+  if (statusInvalidated) {
+    // A newer verified marker can arrive while Settings is unmounted. Do not
+    // revive the exact invalidated value when removal was blocked.
+    if (!stored || rawStoredMarker() === invalidatedMarkerValue) return null;
+    lastWrite = stored;
+    memoryOnlyConfirmedWrite = false;
+    statusInvalidated = false;
+    invalidatedMarkerValue = null;
+  }
+  // A confirmed in-process IndexedDB write is locally valid even when the
+  // optional status marker could not persist. Cross-tab invalidation clears it.
+  if (lastWrite && memoryOnlyConfirmedWrite) return lastWrite;
   if (!stored) {
     lastWrite = null;
     return null;
@@ -142,6 +187,7 @@ export function readLastVaultWrite(): VaultWriteRecord | null {
  */
 export function subscribeVaultWriteStatus(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
+  listenForCrossTabInvalidation();
   const onStorage = (event: StorageEvent) => {
     if (event.key !== STORAGE_KEYS.lastVaultWriteAt && event.key !== null) return;
     try {
@@ -152,13 +198,11 @@ export function subscribeVaultWriteStatus(listener: () => void): () => void {
     lastWrite = null;
     lastPersistedAt = 0;
     memoryOnlyConfirmedWrite = false;
-    try {
-      // Reconcile with the latest persisted value, rather than assuming
-      // one queued event is newer than every write from another tab.
-      statusInvalidated = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) === null;
-    } catch {
-      statusInvalidated = true;
-    }
+    // Reconcile with the latest persisted value rather than the queued event.
+    // When absent, a later valid renewal can be recognized even if Settings
+    // unsubscribed before its event arrived.
+    statusInvalidated = rawStoredMarker() === null;
+    invalidatedMarkerValue = statusInvalidated ? event.oldValue : null;
     listener();
   };
   window.addEventListener(VAULT_WRITE_EVENT, listener);
