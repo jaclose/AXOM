@@ -383,3 +383,54 @@ test("two-tab fallback race preserves the latest durable winner across reloads",
     return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
   })).toBe(winner);
 });
+
+
+/**
+ * Exercise the BFCache suspension signal without depending on browser-history
+ * cache eligibility (which differs by Chromium runner). An IndexedDB save
+ * remains durable, but its quota-only, in-memory "Saved" receipt must retire
+ * on pagehide/pageshow instead of surviving as unverified green status.
+ * The storage failure is simulated only for optional metadata, never user data.
+ */
+test("BFCache-style page suspension retires unverifiable badge but preserves workspace bytes", async ({ context }) => {
+  const page = await probe(context);
+  const saved = snapshot("bfcache-workspace-kept", "🪶Δ".repeat(40_000));
+  const outcome = await page.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const activity = await import("/src/lib/vaultActivity.ts");
+    const key = STORAGE_KEYS.persistedState;
+    await vault.localVaultStorage.getItem(key);
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(key, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+    const originalSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name: string, data: string) {
+      if (name === STORAGE_KEYS.lastVaultWriteAt) {
+        throw new DOMException("Optional status receipt quota reached", "QuotaExceededError");
+      }
+      return originalSet.call(this, name, data);
+    };
+    try {
+      // Move the synthetic receipt clock forward to avoid the 1s metadata-write throttle.
+      activity.markVaultWrite("indexeddb", new Date(Date.now() + 60_000));
+      const before = activity.readLastVaultWrite() !== null;
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      const afterHide = activity.readLastVaultWrite();
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      const afterShow = activity.readLastVaultWrite();
+      const stored = await vault.localVaultStorage.getItem(key);
+      return { before, afterHide: afterHide === null, afterShow: afterShow === null, durable: stored === value };
+    } finally {
+      Storage.prototype.setItem = originalSet;
+    }
+  }, saved);
+  expect(outcome).toEqual({ before: true, afterHide: true, afterShow: true, durable: true });
+  await page.reload();
+  expect(await page.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return (await vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)) === value;
+  }, saved)).toBe(true);
+});
