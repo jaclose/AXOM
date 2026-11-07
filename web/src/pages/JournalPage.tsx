@@ -1432,7 +1432,7 @@ interface StoredJournalFeedbackDraft {
 // A receipt must never remove a shared localStorage key: another tab can write
 // between a getItem check and removeItem. The marker identifies exactly
 // the acknowledged revision without copying feedback text to a second key.
-function journalFeedbackFingerprint(draft: JournalExperienceFeedbackInput): string {
+function journalFeedbackFingerprint(draft: JournalExperienceFeedbackInput | string): string {
   const value = JSON.stringify(draft);
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
@@ -1484,7 +1484,13 @@ function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
     };
     const revision = typeof record.__axomRevision === "string" && /^[a-f0-9]{32}$/.test(record.__axomRevision)
       ? record.__axomRevision : null;
-    if (revision && window.localStorage.getItem(`${key}:submitted`) === `${revision}:${journalFeedbackFingerprint(draft)}`) {
+    // Legacy drafts have no revision. A receipt for their exact raw bytes
+    // prevents a second explicit send without rewriting or deleting the draft.
+    // Another tab changing those bytes must make its new text visible.
+    const acknowledged = revision
+      ? `${revision}:${journalFeedbackFingerprint(draft)}`
+      : `legacy:${journalFeedbackFingerprint(raw)}`;
+    if (window.localStorage.getItem(`${key}:submitted`) === acknowledged) {
       return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false };
     }
     return { draft, revision, raw, unreadable: false };
@@ -1565,7 +1571,9 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     setSending(true);
     setError("");
     submittedReceiptRef.current = persistedRevisionRef.current
-      ? `${persistedRevisionRef.current}:${journalFeedbackFingerprint(draft)}` : null;
+      ? `${persistedRevisionRef.current}:${journalFeedbackFingerprint(draft)}`
+      : persistedRawRef.current !== null
+        ? `legacy:${journalFeedbackFingerprint(persistedRawRef.current)}` : null;
     try {
       setSentId(await submitJournalFeedback(user.id, draft));
     } catch (cause) {
