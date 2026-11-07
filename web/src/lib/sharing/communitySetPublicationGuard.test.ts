@@ -83,6 +83,8 @@ describe("community Question Set exact-revision publication gate", () => {
     } }],
     ["filter provenance", { ...set, filterSnapshot: { courseId: "different-private-course" } }],
     ["seeded order", { ...set, ordering: "random" as const, seed: "different-seed" }],
+    ["parser warning review", { ...set, parserWarnings: ["Source questions require review"] }],
+    ["AI-enhancement provenance", { ...set, aiEnhanced: true }],
   ];
   it.each(silentSetRevisions)("refuses publishing after %s changed without any question timestamp update", (_label, liveSet) => {
     expect(() => publish({ liveSet })).toThrow(/changed while publishing/);
