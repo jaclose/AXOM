@@ -398,7 +398,7 @@ describe("Import Center persistence invariant", () => {
     });
 
     try {
-      const pendingRaw = "1. Unrelated uncommitted question?\nA. One\nB. Two\nAnswer: B";
+      const pendingRaw = "1. Unrelated uncommitted question?\nA. One\nB. Two\nAnswer: B\nExplanation: Another source rationale.";
       const pending = render(<ImportPanel seed={{
         drafts: parseQuestionBlocks(pendingRaw), rawText: pendingRaw, title: "Unrelated pending source",
         fileName: "pending-other.txt", fileType: "text", checksum: "pending-other-checksum",
