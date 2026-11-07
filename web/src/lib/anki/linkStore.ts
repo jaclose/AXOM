@@ -57,6 +57,8 @@ export interface PendingSuspend {
   at: string;
   /** Original untrusted card IDs, retained when a persisted receipt is corrupt. */
   quarantinedCardIds?: unknown;
+  /** Full original receipt, retained if note/AXOM identity is corrupt or unknown. */
+  quarantinedReceipt?: unknown;
 }
 
 /** Separate from deletion policy: an old note must be suspended after a type switch. */
@@ -67,6 +69,8 @@ export interface PendingRetirement {
   at: string;
   /** Original untrusted card IDs, retained when a persisted receipt is corrupt. */
   quarantinedCardIds?: unknown;
+  /** Full original receipt, retained if note/AXOM identity is corrupt or unknown. */
+  quarantinedReceipt?: unknown;
 }
 
 export interface SyncSummary {
@@ -165,6 +169,38 @@ function normalizeReceiptCardIds(record: { cardIds?: unknown; quarantinedCardIds
   };
 }
 
+/**
+ * Never discard a recovery intent because its note ID or AXOM identity was
+ * malformed in storage. A zero note ID is only a safe, non-actionable marker:
+ * sync rejects the complete raw receipt before issuing any Anki request.
+ * Existing quarantine is sticky across repeated serialize/normalize cycles.
+ */
+function normalizePendingReceipt(raw: unknown): PendingSuspend {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
+  const validNoteId = typeof record.noteId === "number" &&
+    Number.isSafeInteger(record.noteId) && record.noteId > 0;
+  const validAxomId = typeof record.axomId === "string" &&
+    record.axomId.trim().length > 0;
+  const quarantined = Object.prototype.hasOwnProperty.call(record, "quarantinedReceipt");
+  return {
+    axomId: typeof record.axomId === "string" ? record.axomId : "",
+    noteId: validNoteId ? record.noteId as number : 0,
+    ...normalizeReceiptCardIds(record),
+    at: typeof record.at === "string" ? record.at : "",
+    ...(!validNoteId || !validAxomId || quarantined
+      ? { quarantinedReceipt: quarantined ? (record.quarantinedReceipt ?? null) : (raw ?? null) }
+      : {}),
+  };
+}
+
+/** A malformed queue value is also a held instruction, not an empty queue. */
+function normalizePendingReceipts(raw: unknown, exists: boolean): PendingSuspend[] {
+  if (Array.isArray(raw)) return raw.map(normalizePendingReceipt);
+  return exists && raw !== undefined ? [normalizePendingReceipt(raw)] : [];
+}
+
 export function normalizeLinkState(raw: unknown): LinkState {
   const base = emptyLinkState();
   if (!raw || typeof raw !== "object") return base;
@@ -185,24 +221,12 @@ export function normalizeLinkState(raw: unknown): LinkState {
       }
     }
   }
-  const pendingSuspends = Array.isArray(record.pendingSuspends)
-    ? record.pendingSuspends.filter((item): item is PendingSuspend => Boolean(item) && typeof item === "object" && typeof (item as PendingSuspend).axomId === "string" && typeof (item as PendingSuspend).noteId === "number")
-      .map((item) => ({ axomId: item.axomId, noteId: item.noteId, ...normalizeReceiptCardIds(item), at: String(item.at ?? "") }))
-    : [];
-  const pendingRetirements = Array.isArray(record.pendingRetirements)
-    ? record.pendingRetirements.filter((item): item is PendingRetirement =>
-        Boolean(item) && typeof item === "object" &&
-        typeof (item as PendingRetirement).axomId === "string" &&
-        (item as PendingRetirement).axomId.length > 0 &&
-        Number.isSafeInteger((item as PendingRetirement).noteId) &&
-        (item as PendingRetirement).noteId > 0)
-      .map((item) => ({
-        axomId: item.axomId,
-        noteId: item.noteId,
-        ...normalizeReceiptCardIds(item),
-        at: String(item.at ?? ""),
-      }))
-    : [];
+  const pendingSuspends = normalizePendingReceipts(
+    record.pendingSuspends, Object.prototype.hasOwnProperty.call(record, "pendingSuspends"),
+  );
+  const pendingRetirements = normalizePendingReceipts(
+    record.pendingRetirements, Object.prototype.hasOwnProperty.call(record, "pendingRetirements"),
+  );
   return {
     version: 1,
     links,
