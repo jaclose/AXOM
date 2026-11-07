@@ -285,3 +285,101 @@ test("offline writer survives reconnect, a newly opened tab, and another reload"
   await second.reload();
   expect(await read()).toBe(offline);
 });
+
+/**
+ * Regression for a three-stage two-tab race: a newer localStorage fallback
+ * must defeat a stale tab, then a later durable IndexedDB commit must defeat
+ * the original fallback writer. Neither tab may claim a false save.
+ */
+test("two-tab fallback race preserves the latest durable winner across reloads", async ({ context }) => {
+  test.setTimeout(120_000);
+  const first = await probe(context);
+  const second = await context.newPage();
+  await second.goto(probePath);
+  const initial = snapshot("original-indexeddb");
+  const fallback = snapshot("newer-local-fallback");
+  const stale = snapshot("rejected-stale-writer");
+  const winner = snapshot("later-indexeddb-winner");
+  const late = snapshot("rejected-former-fallback-writer");
+
+  await first.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const key = STORAGE_KEYS.persistedState;
+    await vault.localVaultStorage.getItem(key);
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(key, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+  }, initial);
+  expect(await second.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(initial);
+
+  const hasFallback = await first.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const key = STORAGE_KEYS.persistedState;
+    const descriptor = Object.getOwnPropertyDescriptor(window, "indexedDB");
+    Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    try {
+      const checkpoint = vault.getVaultWriteCheckpoint();
+      await vault.localVaultStorage.setItem(key, value);
+      await vault.flushLocalVaultWrites();
+      vault.assertVaultWritesSince(checkpoint);
+      return localStorage.getItem(key) === value;
+    } finally {
+      if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+      else Reflect.deleteProperty(window, "indexedDB");
+    }
+  }, fallback);
+  expect(hasFallback).toBe(true);
+
+  const staleFailure = await second.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+    await vault.flushLocalVaultWrites();
+    try { vault.assertVaultWritesSince(checkpoint); return null; }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
+  }, stale);
+  expect(staleFailure).toContain("Another AXOM tab saved a newer workspace");
+
+  // Reload clears only the stale tab's in-memory conflict latch. The legitimate
+  // fallback is promoted from localStorage to IndexedDB without replacing data.
+  await second.reload();
+  expect(await second.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(fallback);
+  await second.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+  }, winner);
+
+  const lateFailure = await first.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+    await vault.flushLocalVaultWrites();
+    try { vault.assertVaultWritesSince(checkpoint); return null; }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
+  }, late);
+  expect(lateFailure).toContain("Another AXOM tab saved a newer workspace");
+
+  await first.reload();
+  expect(await first.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(winner);
+});
