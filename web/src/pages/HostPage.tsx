@@ -316,7 +316,7 @@ function HostAccountPage() {
             </label>
             <GButton size="sm" disabled={visibleAudit.length === 0} onClick={exportAudit}><Download size={15} aria-hidden="true" /> Export visible CSV</GButton>
           </div>
-          <p className="sub" role="status">{olderAudit.length
+          <p className="sub" aria-live="polite">{olderAudit.length
             ? `Showing ${visibleAudit.length} of ${loadedAudit.length} loaded events. This is a partial audit history.`
             : `Showing ${visibleAudit.length} of ${dashboard.audit.length} recently fetched events (maximum 30). This is not a complete audit history.`}</p>
           {dashboard.audit.length === 0 && <p className="sub">No privileged changes yet.</p>}
