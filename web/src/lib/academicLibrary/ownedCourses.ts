@@ -21,11 +21,21 @@ export async function listOwnedAcademicCourses(accountId: string, signal?: Abort
   const scope = academicAccountScope(accountId);
   try {
     const owned: AcademicCourse[] = [];
+    // Catalog cursors include public and other non-owned rows. Validate every
+    // returned identity so an overlapping page cannot double-count an owned
+    // course or silently turn an inconsistent cursor into a complete list.
+    const seen = new Set<string>();
     let after: string | undefined;
     for (let page = 0; page < MAX_PAGES; page++) {
       if (signal?.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
       const courses = await listAcademicCourses("", "", after);
       scope.assertCurrent();
+      if (signal?.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
+      if (courses.some(course => seen.has(course.id))
+        || new Set(courses.map(course => course.id)).size !== courses.length) {
+        throw new Error("The course catalog changed while loading. Retry to read the complete list.");
+      }
+      for (const course of courses) seen.add(course.id);
       owned.push(...courses.filter(course => course.owned));
       if (courses.length < PAGE_SIZE) return owned;
       after = courses[courses.length - 1].id;
