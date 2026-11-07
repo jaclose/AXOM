@@ -33,6 +33,31 @@ Tests: `web/src/lib/targetContributions.test.ts`, `pomodoroTrackerAttribution.te
 relevant productivity component tests and `web/e2e/productivity-tour-layout.spec.ts`.
 Exercise timer attribution with a real event and duplicate/repeated-event edge case.
 
+## Productivity V2 quick workflows
+
+The first visible action is **self-report**, not a daily score. A named activity
+can be logged without inventing minutes or quantity. Study, Questions, Anki,
+Reading and Exercise are editable starting labels, not inferred completion.
+Minutes and quantities are explicit user measurements; pressing Enter or Log
+writes one activity through `logActivity`. The local-save receipt sits next to
+the form. The timer's auto-log remains a separate source; do not enter the
+same focus minutes twice.
+
+**Your goals** is the light path over the same `dailySuccess` profile and
+`evaluateDailySuccess` projection. Quick creation supports source-backed
+study time/cards/questions/closeout goals, custom manual check-offs, and
+custom exact-label self-report goals, with an amount and simple recurrence.
+Manual completion writes a dated target override, not a study log. Linked
+goals can populate the self-report label but never write an event until Log
+is selected. Inline amount/schedule edits begin scoring under the new
+settings today, without retroactively changing historical dates.
+
+The original **Choose targets** editor remains the deliberate place for
+specific weekdays, weights, source matching/corrections, linked habits and
+review of provenance. Focus elapsed time and daily weighted-target progress
+are different measurements; neither is a mastery claim. Current and historical
+views preserve separate evidence and the historical view is read-only.
+
 ## Study streak and credits
 
 The Productivity streak uses the same `evaluateDailySuccess(...).progress` percentage
