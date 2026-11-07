@@ -264,7 +264,47 @@ function HabitRow({ habit }: { habit: Habit }) {
         </div>
       </div>
 
-      {!habit.archived && (
+
+      {!habit.archived && habit.type === "slots" && named && (
+        <div className="habit-named-slots" role="group" aria-label={habit.name + " named daily occurrences"}>
+          <p>{named.completed} of {named.total} reported complete. Each occurrence is recorded independently.</p>
+          <div className="habit-named-slot-grid">
+            {named.slots.map((slot) => <div className="habit-named-slot" key={slot.id}>
+              <button type="button" className={slot.status === "done" ? "is-done" : ""}
+                aria-label={(slot.status === "done" ? "Undo " : "Complete ") + slot.label}
+                aria-pressed={slot.status === "done"}
+                onClick={() => setHabitSlot(habit.id, today, slot.id, slot.status === "done" ? undefined : "done")}>
+                {slot.status === "done" ? <Check size={ICON_SIZE.body} aria-hidden="true" /> : null}
+                {slot.label}
+              </button>
+              <button type="button" className="habit-slot-skip"
+                aria-label={(slot.status === "skipped" ? "Undo skipped " : "Mark skipped ") + slot.label}
+                onClick={() => setHabitSlot(habit.id, today, slot.id, slot.status === "skipped" ? undefined : "skipped")}>
+                {slot.status === "skipped" ? "Skipped" : "Skip"}
+              </button>
+            </div>)}
+          </div>
+          <small>Unreported means unknown. No religious or moral judgment is inferred.</small>
+        </div>
+      )}
+      {!habit.archived && habit.type === "weekly" && cadence && (
+        <div className="habit-weekly-cadence">
+          <p><strong>{cadence.completedDays}/{cadence.minimum}</strong> minimum days · <strong>{cadence.preferred}</strong> preferred
+            {cadence.metMinimum ? " · Minimum met" : " · Still open"}
+          </p>
+          <div className="habit-weekly-meter" role="progressbar"
+            aria-label={habit.name + " weekly minimum"} aria-valuemin={0} aria-valuemax={Math.max(1,cadence.minimum)}
+            aria-valuenow={Math.min(cadence.completedDays, Math.max(1,cadence.minimum))}>
+            <span style={{ width: String(cadence.minimum ? Math.min(100, cadence.completedDays / cadence.minimum * 100) : 0) + "%" }} />
+          </div>
+          <GButton size="sm" variant={todayStatus === "done" ? "default" : "primary"} onClick={() => {
+            if (todayStatus === "done") clearHabitCheck(habit.id, today);
+            else checkHabit(habit.id, today, "done", 1);
+          }}>{todayStatus === "done" ? "Undo today's visit" : "Log a training day"}</GButton>
+          <small>Rest days are not misses. Matching tracker activity on the same day counts once.</small>
+        </div>
+      )}
+      {!habit.archived && habit.type !== "slots" && habit.type !== "weekly" && (
         <div className="habit-checkin">
           {targeted && (
             <input className="field habit-value-input" type="number" min={0} inputMode="numeric"
