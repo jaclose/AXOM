@@ -137,4 +137,79 @@ describe("bounded account image uploads", () => {
     releaseLater();
     await expect(pending).rejects.toMatchObject({ statusCode: "503" });
   });
+
+  it("fails closed when the account epoch changes during a blocked image upload, then writes only to the new account namespace", async () => {
+    const { state, hashes } = await fixture(1);
+    let signalStarted!: () => void;
+    let releaseUpload!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const resume = new Promise<void>((resolve) => { releaseUpload = resolve; });
+    upload.mockImplementation(async (path, blob) => {
+      signalStarted();
+      await resume;
+      objects.set(path, blob);
+      return { error: null };
+    });
+    let accountIsCurrent = true;
+    const checkEpoch = vi.fn(async () => {
+      if (!accountIsCurrent) throw new Error("synthetic account epoch changed");
+    });
+
+    const pending = uploadCloudMedia(client, "synthetic-owner-a", state, checkEpoch);
+    await started;
+    accountIsCurrent = false;
+    releaseUpload();
+    // Even though the bytes reached the first account bucket, the protected
+    // revision must not be acknowledged after its owning session changed.
+    await expect(pending).rejects.toThrow("synthetic account epoch changed");
+    expect(objects.has(`synthetic-owner-a/${hashes[0]}`)).toBe(true);
+
+    upload.mockImplementation(defaultUpload);
+    const restored = await uploadCloudMedia(client, "synthetic-owner-b", state, guard);
+    expect(restored).toHaveLength(1);
+    expect(restored[0].hash).toBe(hashes[0]);
+    expect(objects.has(`synthetic-owner-b/${hashes[0]}`)).toBe(true);
+    expect(upload.mock.calls.map(([path]) => path)).toEqual([
+      `synthetic-owner-a/${hashes[0]}`,
+      `synthetic-owner-b/${hashes[0]}`,
+    ]);
+  });
+
+  it("deduplicates concurrent identical attachment bytes while retaining both source references", async () => {
+    const { state, keys, hashes } = await fixture(2);
+    const sameBytes = new Uint8Array([137, 80, 78, 71, 1]);
+    await putQuestionAttachmentBlob(keys[1], {
+      questionId: "q1",
+      blob: new Blob([sameBytes], { type: "image/png" }),
+      mimeType: "image/png",
+      byteSize: sameBytes.byteLength,
+      updatedAt: state.questions[0].attachments![1].updatedAt,
+    });
+
+    const manifest = await uploadCloudMedia(client, "synthetic-owner", state, guard);
+    expect(manifest.map((row) => row.blobKey)).toEqual(keys);
+    expect(manifest.map((row) => row.hash)).toEqual([hashes[0], hashes[0]]);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(objects.size).toBe(1);
+    expect(objects.has(`synthetic-owner/${hashes[0]}`)).toBe(true);
+  });
+
+  it("rejects a 409 collision with a same-size but different image before permitting a repaired retry", async () => {
+    const { state, hashes } = await fixture(1);
+    const path = `synthetic-owner/${hashes[0]}`;
+    const tampered = new Blob([new Uint8Array([137, 80, 78, 71, 2])], { type: "image/png" });
+    expect(tampered.size).toBe(state.questions[0].attachments![0].byteSize);
+    objects.set(path, tampered);
+
+    await expect(uploadCloudMedia(client, "synthetic-owner", state, guard))
+      .rejects.toThrow("An account image could not be verified.");
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(download).toHaveBeenCalledWith(path);
+
+    objects.set(path, new Blob([new Uint8Array([137, 80, 78, 71, 1])], { type: "image/png" }));
+    const manifest = await uploadCloudMedia(client, "synthetic-owner", state, guard);
+    expect(manifest.map((row) => row.hash)).toEqual(hashes);
+    // A rejected collision never enters the successful upload cache.
+    expect(upload).toHaveBeenCalledTimes(2);
+  });
 });
