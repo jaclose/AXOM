@@ -1426,6 +1426,7 @@ interface StoredJournalFeedbackDraft {
   draft: JournalExperienceFeedbackInput;
   revision: string | null;
   raw: string | null;
+  unreadable: boolean;
 }
 
 // A receipt must never remove a shared localStorage key: another tab can write
@@ -1453,8 +1454,12 @@ function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
   let raw: string | null = null;
   try {
     raw = window.localStorage.getItem(key);
-    const value: unknown = JSON.parse(raw ?? "null");
-    if (!value || typeof value !== "object") return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw };
+    if (raw === null) return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false };
+    // A malformed stored draft is not a blank draft. Never overwrite its
+    // original bytes during a recovery attempt.
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true };
     const record = value as Record<string, unknown>;
     const draft: JournalExperienceFeedbackInput = {
       rating: Number.isInteger(record.rating) && Number(record.rating) >= 1 && Number(record.rating) <= 5 ? Number(record.rating) : 0,
@@ -1467,11 +1472,12 @@ function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
     const revision = typeof record.__axomRevision === "string" && /^[a-f0-9]{32}$/.test(record.__axomRevision)
       ? record.__axomRevision : null;
     if (revision && window.localStorage.getItem(`${key}:submitted`) === `${revision}:${journalFeedbackFingerprint(draft)}`) {
-      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw };
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false };
     }
-    return { draft, revision, raw };
+    return { draft, revision, raw, unreadable: false };
   } catch {
-    return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw };
+    // JSON corruption or a blocked localStorage read must fail closed.
+    return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true };
   }
 }
 
@@ -1492,14 +1498,18 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   const [draft, setDraft] = useState(loaded.draft);
   const persistedRevisionRef = useRef(loaded.revision);
   const persistedRawRef = useRef(loaded.raw);
-  const [conflicted, setConflicted] = useState(false);
+  const [conflicted, setConflicted] = useState(loaded.unreadable);
   // Opening or remounting the dialog must never write a stale snapshot back
   // over a newer draft another tab saved between our read and first effect.
   const initialDraftRef = useRef(draft);
   const [sending, setSending] = useState(false);
   const [sentId, setSentId] = useState("");
   const [error, setError] = useState("");
-  const [storageError, setStorageError] = useState("");
+  const [storageError, setStorageError] = useState(loaded.unreadable
+    ? loaded.raw === null
+      ? "AXOM could not read saved feedback in this browser. No draft was replaced. Close feedback and try again."
+      : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
+    : "");
   const submittedReceiptRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1556,7 +1566,9 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     <Modal title="How is the journal feeling?" onClose={onClose} className="journal-feedback-modal" footer={sentId ? (
       <GButton variant="primary" onClick={onClose}>Close</GButton>
     ) : <>
-      <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>
+      {loaded.unreadable && loaded.raw !== null
+        ? <GButton onClick={() => downloadBlob("axom-journal-feedback-unreadable.txt", new Blob([loaded.raw ?? ""], { type: "text/plain" }))}><Download size={ICON_SIZE.body} /> Download saved copy</GButton>
+        : <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>}
       <GButton onClick={onClose}>Not now</GButton>
       <GButton variant="primary" disabled={!user || sending || conflicted} onClick={() => { void send(); }}>{sending ? "Sending…" : "Send feedback"}</GButton>
     </>}>
@@ -1567,15 +1579,15 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         <fieldset className="journal-rating-fieldset">
           <legend>Overall experience</legend>
           <div className="journal-rating-choices">
-            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending} onClick={() => setDraft({ ...draft, rating: value })}>{value}</button>)}
+            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || loaded.unreadable} onClick={() => setDraft({ ...draft, rating: value })}>{value}</button>)}
           </div>
         </fieldset>
         <div className="journal-feedback-fields">
-          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, liked: event.target.value })} />
-          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, wantMore: event.target.value })} />
-          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, missing: event.target.value })} />
-          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, painPoints: event.target.value })} />
-          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending} maxLength={2000} onChange={(event) => setDraft({ ...draft, comment: event.target.value })} />
+          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, liked: event.target.value })} />
+          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, wantMore: event.target.value })} />
+          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, missing: event.target.value })} />
+          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, painPoints: event.target.value })} />
+          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || loaded.unreadable} maxLength={2000} onChange={(event) => setDraft({ ...draft, comment: event.target.value })} />
         </div>
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
