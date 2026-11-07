@@ -44,6 +44,7 @@ export const NAV = [
   { id: "simulations", label: "Simulations", subtitle: "Explore body mechanisms; first study: asthma and albuterol", icon: Activity },
   { id: "communities", label: "Communities", subtitle: "Shared courses and daily challenges with review status", icon: UsersRound },
   { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and import an unlisted Question Set link", icon: HelpCircle },
+  { id: "studio", label: "Study Studio", subtitle: "Techniques and reusable prompts in one deliberate workflow", icon: BookOpenCheck },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
   { id: "soundscapes", label: "Soundscapes", subtitle: "Study sounds, your own recordings, live visuals, and a listening log", icon: AudioWaveform },
   { id: "productivity", label: "Productivity", subtitle: "Study time, Anki cards, lecture blocks, day usefulness", icon: Calendar },
@@ -52,6 +53,7 @@ export const NAV = [
   { id: "daily-games", label: "Daily Games", subtitle: "Short daily puzzles, status, and verified destinations", icon: Gamepad2 },
   { id: "daily-word", label: "Daily Word", subtitle: "A daily five-letter word puzzle.", icon: WholeWord },
   { id: "doctordle", label: "Doctordle", subtitle: "Open the verified independent daily diagnosis game", icon: Stethoscope },
+  { id: "library", label: "Library", subtitle: "Evidence sources, links, project drives and folder shortcuts", icon: Library },
   { id: "resources", label: "Resources", subtitle: "Saved hyperlinks for courses, boards, references, and tools", icon: Link },
   { id: "step", label: "USMLE / Shelf Prep", subtitle: "Step 1, Step 2, Step 3, shelf exams, and blueprint strategy", icon: Brain },
   { id: "step2", label: "Step 2 CK", subtitle: "Clinical reasoning blueprint and CK execution", icon: Brain },
@@ -92,6 +94,7 @@ export const MODULE_STATUS_BY_NAV_ID = {
   questions: { status: "new", announcementId: "question-bank-entry-v1" },
   communities: { status: "new", announcementId: "communities-entry-v1" },
   simulations: { status: "wip" },
+  studio: { status: "new", announcementId: "study-studio-v1" },
   methods: { status: "new", announcementId: "study-methods-library-v1" },
   "daily-word": { status: "new", announcementId: "daily-word-launch-v1" },
   "daily-games": { status: "new", announcementId: "daily-games-hub-v1" },
@@ -123,15 +126,15 @@ export const navById = (id: string): NavItem | undefined => NAV.find((n) => n.id
 
 // Sidebar order (Alpha 2). Tools is a collapsible folder.
 export const SIDEBAR_TODAY = ["dashboard"] as const;
-export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "simulations", "communities", "anki"] as const;
+export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "simulations", "communities", "anki", "studio"] as const;
 export const SIDEBAR_REVIEW = ["productivity", "journal", "reports"] as const;
 export const SIDEBAR_TOP = [...SIDEBAR_TODAY, ...SIDEBAR_LEARN, ...SIDEBAR_REVIEW];
 export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
 // Tools are the daily-use tools, Soundscapes first (JD, Ideas 1 + 3). Rarely
-// used modules live in Misc and start hidden (lib/navLayout.ts).
-export const SIDEBAR_TOOLS = ["soundscapes", "habits", "resources", "integrations", "leaderboards"];
-export const SIDEBAR_MISC = ["tasks", "methods", "prompts", "patch-notes", "folders"];
-export const SIDEBAR_BOTTOM = ["host", "building"];
+// used modules are grouped by workstream rather than an obsolete Misc drawer.
+export const SIDEBAR_TOOLS = ["soundscapes", "library", "integrations", "leaderboards"];
+export const SIDEBAR_MISC: readonly string[] = []; // Legacy routes remain registered for bookmarks and data continuity.
+export const SIDEBAR_BOTTOM = ["host"];
 // Dashboard can't be hidden; everything else is subscribe/unsubscribe-able.
 export const SIDEBAR_LOCKED = new Set(["dashboard"]);
 

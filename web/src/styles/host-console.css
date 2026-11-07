@@ -80,3 +80,24 @@
 @media(max-width: 560px) { .host-overview-intro { display: grid; gap: 8px; } .host-overview-intro p { max-width: none; text-align: left; } .host-priority-metric { grid-template-columns: 1fr; justify-items: start; gap: 4px; padding: 14px; } .host-priority-icon { grid-row: auto; margin-bottom: 5px; } .host-toolbar { align-items: stretch; } .host-quick-nav { width: 100%; padding: 0; border: 0; } .host-quick-nav .ghost-btn { flex: 1; } .host-account-controls { grid-template-columns: 1fr; } }
 @media(max-width: 350px) { .host-priority-metrics { grid-template-columns: 1fr; } .host-priority-metric + .host-priority-metric { border-left: 0; border-top: 1px solid var(--hairline); } }
 @media(prefers-reduced-motion: reduce) { .host-page * { scroll-behavior: auto; } }
+
+/* Audited owner operations: explicit scope, readable at the narrowest layout. */
+.host-audit-tools {
+  margin: 15px 0 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: end;
+}
+.host-audit-tools > label { flex: 1 1 200px; }
+.host-audit-tools > button { flex: 0 1 auto; }
+.host-audit-tools input { min-width: 0; }
+.host-quick-nav { flex-wrap: wrap; }
+.host-quick-nav .ghost-btn { font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.host-page [id^="host-"] { scroll-margin-top: 90px; }
+@media(max-width: 560px) {
+  .host-audit-tools > label,
+  .host-audit-tools > button { flex: 1 1 100%; }
+  .host-quick-nav { flex-wrap: wrap; }
+  .host-quick-nav .ghost-btn { flex: 1 1 110px; }
+}
