@@ -59,7 +59,7 @@ export function prepareCurrentCommunityQuestionSetSubmission(input: {
 }): SharedQuestionSetSnapshot {
   const { openedSet, openedQuestions, liveSets, liveQuestions, now = new Date().toISOString() } = input;
   const liveSet = liveSets.find(candidate => candidate.id === openedSet.id);
-  if (!sameCommunitySetReviewRevision(openedSet, liveSet)
+  if (!liveSet || !sameCommunitySetReviewRevision(openedSet, liveSet)
     || openedSet.questionIds.length === 0
     || new Set(openedSet.questionIds).size !== openedSet.questionIds.length) throw new Error(CHANGED);
 
