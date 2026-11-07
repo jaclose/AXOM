@@ -458,7 +458,7 @@ describe("Journal notebook foundation", () => {
       expect(screen.getByRole("status").textContent).toContain("Feedback received.");
       expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
 
-      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
         .toBe("Another tab wrote this after the first submission.");
