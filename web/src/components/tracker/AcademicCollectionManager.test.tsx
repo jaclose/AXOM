@@ -136,6 +136,40 @@ describe("your published courses", () => {
     await waitFor(() => expect(screen.getByText(/1 awaiting review, 1 shared with everyone\./)).toBeTruthy());
   });
 
+  it("abandons stale explanation audits after an account switches away and back during readback", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" }), course(2, { visibility: "shared" })]);
+    let finishRead!: (receipt: unknown) => void;
+    mocks.explanations.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const check = await screen.findByRole("button", { name: "Check stored explanations" });
+    fireEvent.click(check);
+    await waitFor(() => expect(mocks.explanations).toHaveBeenCalledTimes(1));
+    // academicAccountScope permanently invalidates this operation after A→B→A.
+    mocks.scopeCheck.mockImplementation(() => { throw new Error("The account changed. Reopen this course."); });
+    finishRead({ collectionId: id(1), revisionId: id(1001), missingExplanations: 0, readyQuestions: 2 });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/account changed/i);
+    expect(mocks.explanations).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Explanation readback complete/)).toBeNull();
+    expect((screen.getByRole("button", { name: /Approve 2 courses/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
+  it("still checks remaining courses after an ordinary same-account explanation read failure", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" }), course(2, { visibility: "shared" })]);
+    mocks.explanations.mockRejectedValueOnce(new Error("Source read unavailable."));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const check = await screen.findByRole("button", { name: "Check stored explanations" });
+    fireEvent.click(check);
+    expect(await screen.findByText(/Explanation readback complete/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toMatch(/1 course could not be read/);
+    expect(mocks.explanations).toHaveBeenCalledTimes(2);
+    expect((screen.getByRole("button", { name: /Approve 2 courses/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("shows a missing explanation count and keeps bulk approval disabled", async () => {
     mocks.reviewer.mockResolvedValue(true);
     mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
