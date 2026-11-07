@@ -25,7 +25,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${count} ${cou
 const COMMUNITY_PAGE_SIZE = 24;
 const MAX_COMMUNITY_PAGES = 200;
 
-async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSignal): Promise<Set<string>> {
+async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSignal, assertCurrent: () => void): Promise<Set<string>> {
   const candidates = new Map(courses.filter(course => course.review_status === "pending")
     .map(course => [course.id, course.current_revision_id]));
   const pending = new Set<string>();
@@ -34,6 +34,9 @@ async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSigna
   for (let page = 0; page < MAX_COMMUNITY_PAGES; page++) {
     if (signal.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
     const uploads = await listCommunityUploads("", "", after);
+    // A switch away and back to the same account still invalidates this read.
+    assertCurrent();
+    if (signal.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
     for (const upload of uploads) {
       if (candidates.get(upload.id) === upload.current_revision_id) pending.add(upload.id);
     }
@@ -101,17 +104,19 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
 
   async function load() {
     if (!accountId || busy) return;
+    const scope = academicAccountScope(accountId);
     const abort = start("loading");
     setFailures({});
     setAudits({});
     try {
       const owned = await listOwnedAcademicCourses(accountId, abort.signal);
-      const pending = await pendingCommunityIds(owned, abort.signal);
+      const pending = await pendingCommunityIds(owned, abort.signal, scope.assertCurrent);
+      scope.assertCurrent();
       if (abort.signal.aborted) return;
       setLoaded({ accountId, courses: owned, communityIds: pending });
     } catch (cause) {
       if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : "Your courses could not be loaded.");
-    } finally { finish(abort); }
+    } finally { scope.dispose(); finish(abort); }
   }
 
   async function checkExplanations() {

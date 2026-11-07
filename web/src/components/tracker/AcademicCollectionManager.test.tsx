@@ -4,12 +4,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  list: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(),
+  explanations: vi.fn(), scopeCheck: vi.fn(), scopeDispose: vi.fn(),
+}));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner-1" } }),
 }));
 vi.mock("../../lib/academicLibrary/accountScope", () => ({
-  academicAccountScope: () => ({ key: "owner-1", assertCurrent: () => {}, dispose: () => {} }),
+  academicAccountScope: () => ({ key: "owner-1", assertCurrent: mocks.scopeCheck, dispose: mocks.scopeDispose }),
 }));
 vi.mock("../../lib/academicLibrary/client", () => ({
   listAcademicCourses: (...args: unknown[]) => mocks.list(...args),
@@ -38,6 +41,8 @@ const course = (n: number, patch: Partial<AcademicCourse> = {}): AcademicCourse 
 
 describe("your published courses", () => {
   beforeEach(() => {
+    mocks.scopeCheck.mockReset();
+    mocks.scopeDispose.mockReset();
     mocks.community.mockResolvedValue([]);
     mocks.reviewer.mockResolvedValue(false);
     mocks.share.mockImplementation(async (ids: string[]) =>
@@ -178,6 +183,42 @@ describe("your published courses", () => {
     fireEvent.click(share);
     await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
     expect(mocks.share.mock.calls[0][0]).toEqual([id(3)]);
+  });
+
+
+  it("rejects a stale community response after a switch away and back to the same account", async () => {
+    mocks.list.mockResolvedValueOnce([course(1)]);
+    let releaseCommunity!: (rows: unknown[]) => void;
+    mocks.community.mockImplementationOnce(() => new Promise(resolve => { releaseCommunity = resolve; }));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    await waitFor(() => expect(mocks.community).toHaveBeenCalledOnce());
+    // academicAccountScope remembers a transient account switch even if the
+    // active account ID has returned to owner-1 before the pending RPC resolves.
+    mocks.scopeCheck.mockImplementation(() => { throw new Error("The account changed. Reopen this course."); });
+    releaseCommunity([{ id: id(1), current_revision_id: id(1001), submitted_at: "2026-11-01T10:00:00Z" }]);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/account changed/i);
+    expect(screen.queryByText("1 course")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
+    await waitFor(() => expect(mocks.scopeDispose).toHaveBeenCalledTimes(2));
+  });
+
+  it("checks each page of community statuses without blocking a valid review inventory", async () => {
+    mocks.list.mockResolvedValueOnce([course(1)]);
+    const firstPage = Array.from({ length: 24 }, (_, n) => ({
+      id: id(n + 40), current_revision_id: id(n + 1040), submitted_at: "2026-11-01T10:00:00Z",
+    }));
+    mocks.community.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([
+      { id: id(1), current_revision_id: id(1001), submitted_at: "2026-11-01T10:01:00Z" },
+    ]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect(await screen.findByText(/Review 1 community upload in Question Bank → Community Uploads/)).toBeTruthy();
+    expect(screen.getByText("1 course")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
+    expect(mocks.community).toHaveBeenCalledTimes(2);
+    expect(mocks.scopeCheck.mock.calls.length).toBeGreaterThanOrEqual(3);
+    await waitFor(() => expect(mocks.scopeDispose).toHaveBeenCalledTimes(2));
   });
 
   it("does not offer bulk actions when community status cannot be checked", async () => {
