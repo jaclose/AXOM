@@ -260,10 +260,10 @@ const inFlightReviewedImportPlans = new Map<string, ReviewedImportPersistencePla
  * duplicates from tentative records and permanently hides duplicate warnings
  * in ImportPanel's one-time seed calculation.
  *
- * Exclude only records named by incomplete reviewed-import plans. Updating an
- * existing source document is also tentative, so withhold that document until
- * its write succeeds or rolls back. This is a read-only projection; it never
- * alters Zustand, original IDs or stored records.
+ * Exclude new records named by incomplete reviewed-import plans. An existing
+ * source-document update is also tentative: project its captured original,
+ * not a pending link that may roll back. This is a read-only projection; it
+ * never alters Zustand, original IDs or stored records.
  */
 export function settledReviewedImportSnapshot(library: {
   questions: readonly QuestionRecord[];
@@ -273,17 +273,23 @@ export function settledReviewedImportSnapshot(library: {
   if (inFlightReviewedImportPlans.size === 0) return library;
   const pendingQuestions = new Set<string>();
   const pendingSets = new Set<string>();
-  const pendingDocuments = new Set<string>();
+  const pendingCreatedDocuments = new Set<string>();
+  const originalDocuments = new Map<string, SourceDocument>();
   for (const plan of inFlightReviewedImportPlans.values()) {
     for (const question of plan.questions) pendingQuestions.add(question.id);
     if (plan.questionSet) pendingSets.add(plan.questionSet.id);
     const document = plan.documentWrite;
-    if (document) pendingDocuments.add(document.kind === "create" ? document.document.id : document.id);
+    if (document?.kind === "create") pendingCreatedDocuments.add(document.document.id);
+    if (document?.kind === "update" && !originalDocuments.has(document.id)) {
+      originalDocuments.set(document.id, document.original);
+    }
   }
   return {
     questions: library.questions.filter((question) => !pendingQuestions.has(question.id)),
     questionSets: library.questionSets.filter((set) => !pendingSets.has(set.id)),
-    documents: library.documents.filter((document) => !pendingDocuments.has(document.id)),
+    documents: library.documents
+      .filter((document) => !pendingCreatedDocuments.has(document.id))
+      .map((document) => originalDocuments.get(document.id) ?? document),
   };
 }
 
