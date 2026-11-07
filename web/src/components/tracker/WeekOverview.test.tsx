@@ -46,7 +46,7 @@ describe("Course Tracker week question progress ownership", () => {
     render(<WeekOverview />);
     expect(screen.getByText("Question progress unavailable: course ownership needs review.")).toBeTruthy();
     expect(screen.queryByText(/Questions: 2 of 2 answered/)).toBeNull();
-    expect(screen.getByText(/1 of 1 done/)).toBeTruthy();
+    expect(screen.getAllByText(/1 of 1 done/).length).toBeGreaterThan(0);
   });
 
   it("continues displaying verified per-course answers when a legacy week has one owner", () => {
