@@ -11,9 +11,9 @@ const initial = (changedFields: Array<"tools" | "questionTiming"> = ["tools", "q
   })!;
 
 function exercised(session: PassiveSession) {
-  const first = capturePassiveFirstRun(session, "visit-questions", 1_065_000);
-  const second = capturePassiveFirstRun(first, "begin-practice", 1_075_000);
-  return capturePassiveFirstRun(second, "review-source", 1_085_000);
+  const first = capturePassiveFirstRun(session, "visit-questions", 1_065_000)!;
+  const second = capturePassiveFirstRun(first, "begin-practice", 1_075_000)!;
+  return capturePassiveFirstRun(second, "review-source", 1_085_000)!;
 }
 
 describe("Living Atlas passive first-run evidence, not personality surveillance", () => {
@@ -31,7 +31,7 @@ describe("Living Atlas passive first-run evidence, not personality surveillance"
     const session = initial();
     const invalid = capturePassiveFirstRun(session, { kind: "click", x: 55, y: 99, journal: "secret note" } as never, 1_100_000);
     expect(invalid).toEqual(session);
-    const serialized = serializePassiveFirstRun(invalid);
+    const serialized = serializePassiveFirstRun(invalid!);
     expect(serialized).not.toContain("secret note");
     expect(serialized).not.toContain("\"x\"");
     expect(serialized).not.toContain("\"y\"");
@@ -40,7 +40,7 @@ describe("Living Atlas passive first-run evidence, not personality surveillance"
 
   it("keeps only bounded aggregate event counts without a clickstream timeline", () => {
     let session = initial();
-    for (let i = 0; i < 20; i++) session = capturePassiveFirstRun(session, "visit-questions", 1_070_000+i);
+    for (let i = 0; i < 20; i++) session = capturePassiveFirstRun(session, "visit-questions", 1_070_000+i)!;
     expect(session.counts["visit-questions"]).toBe(2);
     const serialized = serializePassiveFirstRun(session);
     expect(serialized).not.toContain("1_070_000");
@@ -50,9 +50,9 @@ describe("Living Atlas passive first-run evidence, not personality surveillance"
 
   it("does not call navigation, scrolling or a brief session personality evidence", () => {
     let session = initial([]);
-    session = capturePassiveFirstRun(session, "visit-tracker", 1_065_000);
-    session = capturePassiveFirstRun(session, "visit-reports", 1_075_000);
-    session = capturePassiveFirstRun(session, "explore-content", 1_085_000);
+    session = capturePassiveFirstRun(session, "visit-tracker", 1_065_000)!;
+    session = capturePassiveFirstRun(session, "visit-reports", 1_075_000)!;
+    session = capturePassiveFirstRun(session, "explore-content", 1_085_000)!;
     const result = proposePassiveAtlas(session, 1_130_000);
     expect(result.status).toBe("observing");
     expect(result.suggestion).toBeUndefined();
