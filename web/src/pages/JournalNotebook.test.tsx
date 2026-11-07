@@ -216,6 +216,28 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("region", { name: "Write at your desk" }).className).not.toContain("is-closing");
   });
 
+  it("keeps support options and writing open when a safety signal interrupts desk close", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Put book down" }));
+    expect(screen.getByRole("region", { name: "Write at your desk" }).className).toContain("is-closing");
+
+    // A local first-person support signal opens the full page automatically.
+    // The previously started close must not dismiss the support options or draft.
+    const writing = "I can't keep living";
+    fireEvent.change(screen.getByLabelText("Write freely at your desk"), { target: { value: writing } });
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+    expect(screen.getByText("Support options")).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1100); });
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+    expect(screen.getByText("Support options")).toBeTruthy();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe(writing);
+  });
+
   it("offers an explicit put-down and closes when the surrounding desk is clicked", async () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);

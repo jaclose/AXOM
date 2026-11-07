@@ -713,7 +713,7 @@ function JournalWritingPage({
     else setDeskTouched(true);
   }
 
-  function openFullPage() {
+  const openFullPage = useCallback(() => {
     // Invalidate a pending asynchronous close even after its timer has fired.
     deskCloseEpochRef.current += 1;
     // A keyboard-focused Write full page control can still activate while the
@@ -730,7 +730,7 @@ function JournalWritingPage({
     setSettling(false);
     setHasInteractedSinceOpen(dirtyRef.current || day !== today);
     setZoomed(true);
-  }
+  }, [day, today]);
 
   useEffect(() => {
     if (zoomed) pageHeadingRef.current?.focus({ preventScroll: true });
@@ -765,12 +765,14 @@ function JournalWritingPage({
 
   useEffect(() => {
     if (supportSignal && !previousSupportSignalRef.current) {
+      // Treat safety-triggered zoom as a reopen, so stale close operations
+      // cannot dismiss support options or the writer's unsaved draft.
+      openFullPage();
       setSupportOpen(true);
       setHasInteractedSinceOpen(true);
-      setZoomed(true);
     }
     previousSupportSignalRef.current = supportSignal;
-  }, [supportSignal]);
+  }, [supportSignal, openFullPage]);
 
   const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
     if (!mountedRef.current) return "aborted";
