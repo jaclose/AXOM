@@ -52,8 +52,12 @@ export function weeklyHabitSummary(
   const daysAvailable = firstEligible > weekEnd
     ? 0
     : Math.max(0, 7 - Math.round((localDateAtNoon(firstEligible).getTime() - localDateAtNoon(weekStart).getTime()) / 86_400_000));
-  const goalMinimum = clampWeekly(habit.weeklyMinimum ?? habit.weeklyTarget, 3);
-  const goalPreferred = Math.max(goalMinimum, clampWeekly(habit.weeklyPreferred, goalMinimum));
+  const rules = (habit.weeklyRevisions ?? []).filter((item) => item.effectiveWeek <= weekStart)
+    .sort((a,b) => a.effectiveWeek.localeCompare(b.effectiveWeek));
+  const rule = rules.at(-1);
+  const goalMinimum = clampWeekly(rule?.minimum ?? habit.weeklyMinimum ?? habit.weeklyTarget, 3);
+  const goalPreferred = Math.max(goalMinimum, clampWeekly(rule?.preferred ?? habit.weeklyPreferred, goalMinimum));
+  const linkedTrackerId = rule ? rule.linkedTrackerId : habit.linkedTrackerId;
   const minimum = Math.min(goalMinimum, daysAvailable);
   const preferred = Math.min(goalPreferred, daysAvailable);
   const byDay = new Map<string, Set<string>>();
@@ -67,9 +71,9 @@ export function weeklyHabitSummary(
     if (item.habitId !== habit.id || (item.status !== "done" && !(item.status === "partial" && (item.value ?? 0) >= 1))) continue;
     add(item.date, item.id);
   }
-  if (habit.linkedTrackerId) {
+  if (linkedTrackerId) {
     for (const log of logs) {
-      if (log.trackerId !== habit.linkedTrackerId || log.minutes <= 0 && (log.quantity ?? 0) <= 0 && log.cards <= 0) continue;
+      if (log.trackerId !== linkedTrackerId || log.minutes <= 0 && (log.quantity ?? 0) <= 0 && log.cards <= 0) continue;
       add(log.dayKey, log.id);
     }
   }
