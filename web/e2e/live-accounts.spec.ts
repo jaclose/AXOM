@@ -1,6 +1,12 @@
 import type { Browser, Page } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  assertUnusedEmail,
+  dedicatedLiveProjectUrl,
+  matchesRunOwnedUser,
+  signupResponseUserId,
+} from "../src/lib/liveAccountSafety";
 
 /**
  * LIVE account test against a real Supabase project. Skipped unless every
@@ -9,7 +15,12 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  *   AXOM_LIVE_ACCOUNTS=1
  *   AXOM_LIVE_EMAIL=you@example.com         # an address that can receive mail
  *   SUPABASE_SECRET_KEY=sb_secret_…         # test-runner only; never in .env files
- *   (web/.env.local must hold VITE_SUPABASE_URL and the publishable key)
+ *   VITE_SUPABASE_URL=https://<test-ref>.supabase.co
+ *   AXOM_LIVE_TEST_PROJECT_REF=<test-ref>    # must NOT be the production project
+ *   (web/.env.local also holds the app publishable key)
+ *
+ * Never run this destructive test against AXOM production or an existing account.
+ * An incomplete opted-in run fails closed rather than silently skipping.
  *
  * The admin credential verifies only the disposable test account if the
  * backend requires confirmation, then the test exercises password sign-in.
@@ -19,7 +30,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const live = process.env.AXOM_LIVE_ACCOUNTS === "1";
 const email = process.env.AXOM_LIVE_EMAIL ?? "";
 const secret = process.env.SUPABASE_SECRET_KEY ?? "";
-const url = process.env.VITE_SUPABASE_URL ?? "https://jofkmfwkidubxcutkwzf.supabase.co";
+const url = process.env.VITE_SUPABASE_URL;
+const testProjectRef = process.env.AXOM_LIVE_TEST_PROJECT_REF;
+const startedAtMs = Date.now();
 const password = `Axom-${Math.random().toString(36).slice(2, 10)}9`;
 
 type DevWindow = Window & {
@@ -32,30 +45,30 @@ type DevWindow = Window & {
 };
 
 test.describe.configure({ mode: "serial" });
-test.skip(!live || !email || !secret, "Live account test: set AXOM_LIVE_ACCOUNTS=1, AXOM_LIVE_EMAIL and SUPABASE_SECRET_KEY.");
+test.skip(!live, "Destructive live account test is opt-in: set AXOM_LIVE_ACCOUNTS=1.");
 
 let admin: SupabaseClient;
 let userId: string | undefined;
 
 test.beforeAll(async () => {
-  admin = createClient(url, secret, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  const existing = data?.users.find((user) => user.email?.toLowerCase() === email.toLowerCase());
-  if (existing) throw new Error(`${email} already has an account; use a fresh address so the test never touches real data.`);
+  // Validate the explicit test project BEFORE constructing an admin client.
+  const dedicatedUrl = dedicatedLiveProjectUrl(url, testProjectRef);
+  if (!secret) throw new Error("SUPABASE_SECRET_KEY is required for opted-in live-account acceptance.");
+  admin = createClient(dedicatedUrl, secret, { auth: { persistSession: false, autoRefreshToken: false } });
+  // The provider can paginate its user list. Never assume page one proves an address is unused.
+  await assertUnusedEmail(email, (page, perPage) => admin.auth.admin.listUsers({ page, perPage }));
 });
 
 test.afterAll(async () => {
-  if (userId) await admin.auth.admin.deleteUser(userId);
+  // No signup-response ID means no account is proven owned by this run.
+  if (!userId) return;
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !matchesRunOwnedUser(data?.user, userId, email, startedAtMs)) {
+    throw new Error("Refusing cleanup: the provider no longer proves the user belongs to this run.");
+  }
+  const removed = await admin.auth.admin.deleteUser(userId);
+  if (removed.error) throw removed.error;
 });
-
-async function captureDisposableUser(): Promise<string> {
-  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (error) throw error;
-  const user = data.users.find((item) => item.email?.toLowerCase() === email.toLowerCase());
-  if (!user) throw new Error("The new disposable test account is unavailable.");
-  userId = user.id;
-  return user.id;
-}
 
 async function openWorkspace(page: Page, taskTitle: string) {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
@@ -97,16 +110,32 @@ test("create with email and password, sign in, protect, merge, restore, devices,
   await panel(page).getByRole("button", { name: "Create", exact: true }).click();
   await panel(page).getByLabel("Email", { exact: true }).fill(email);
   await panel(page).getByLabel(/^Password/).fill(password);
+  // Capture the ID from THIS browser's signup request. Never recover it by email lookup.
+  const signupReply = page.waitForResponse((response) => {
+    try {
+      return new URL(response.url()).pathname === "/auth/v1/signup"
+        && response.request().method() === "POST";
+    } catch {
+      return false;
+    }
+  });
   await panel(page).getByRole("button", { name: "Create account", exact: true }).click();
+  const signupResponse = await signupReply;
+  if (!signupResponse.ok()) throw new Error("Live signup did not succeed; refusing account mutation.");
+  const signupId = signupResponseUserId(await signupResponse.json(), email);
+  const { data: created, error: createdError } = await admin.auth.admin.getUserById(signupId);
+  if (createdError || !matchesRunOwnedUser(created?.user, signupId, email, startedAtMs)) {
+    throw new Error("Signup response is not confirmed as a newly created test user; refusing mutation.");
+  }
+  userId = signupId;
   const signOut = panel(page).getByRole("button", { name: "Sign out" });
   const linkNotice = panel(page).getByText(/account confirmation link/i);
   await expect(signOut.or(linkNotice)).toBeVisible();
 
-  const testUserId = await captureDisposableUser();
   if (await linkNotice.isVisible()) {
     // Disposable-test-only confirmation avoids entering an OTP in the product UI.
     // Actual confirmation-link email delivery must be separately verified.
-    const { error } = await admin.auth.admin.updateUserById(testUserId, { email_confirm: true });
+    const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
     if (error) throw error;
     await panel(page).getByRole("button", { name: "Sign in", pressed: true }).click();
     await panel(page).getByLabel("Email", { exact: true }).fill(email);
