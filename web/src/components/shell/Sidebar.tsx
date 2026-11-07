@@ -116,6 +116,12 @@ export function Sidebar({
     return () => { cancelled = true; };
   }, []);
 
+  const activeDestination = ({
+    tasks: "productivity", habits: "productivity",
+    methods: "studio", prompts: "studio",
+    resources: "library", folders: "library",
+    building: "about", "patch-notes": "about",
+  } as Record<string, string>)[active] ?? active;
   const hidden = new Set(profile.hiddenNav ?? []);
   const toolsOpen = !profile.toolsCollapsed;
   const prepOpen = !profile.prepCollapsed;
@@ -185,10 +191,10 @@ export function Sidebar({
     }
     if (isHidden) return null;
     return (
-      <button type="button" className={`nav-item ${active === id ? "on" : ""}`}
+      <button type="button" className={`nav-item ${activeDestination === id ? "on" : ""}`}
         data-tour={`nav-${id}`}
         aria-label={accessibleLabel}
-        aria-current={active === id ? "page" : undefined}
+        aria-current={activeDestination === id ? "page" : undefined}
         onClick={() => { onSelect(id); onClose(); }}>
         <I size={ICON_SIZE.emphasis} /><span className="nav-item-label">{item.label}</span><DailyGameNavMeta id={id} />{statusBadge}
       </button>
@@ -334,7 +340,7 @@ export function Sidebar({
 
         <div className="sidebar-foot">
           {about && AboutIcon && (
-            <button type="button" className={`nav-item footer-action ${active === "about" ? "on" : ""}`}
+            <button type="button" className={`nav-item footer-action ${activeDestination === "about" ? "on" : ""}`}
               onClick={() => { onSelect("about"); onClose(); }}>
               <AboutIcon size={ICON_SIZE.emphasis} /><span>About</span>
             </button>
