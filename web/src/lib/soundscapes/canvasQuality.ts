@@ -12,3 +12,17 @@ export function canvasPixelRatio(width: number, height: number, deviceRatio: num
   if (!immersive) return requested;
   return Math.min(requested, 7680 / Math.max(w, h), Math.sqrt(MAX_IMMERSIVE_CANVAS_PIXELS / (w * h)));
 }
+
+/** The shared WebGL surface may grow for fullscreen but must not hold an 8K
+ * allocation after leaving it. Ignore small renders while fullscreen remains
+ * active, since card previews share the same renderer.
+ */
+export function shouldReleaseImmersiveCanvas(
+  backingWidth: number, backingHeight: number,
+  requestedWidth: number, requestedHeight: number,
+  fullscreenActive: boolean,
+): boolean {
+  const previous = backingWidth * backingHeight;
+  const next = requestedWidth * requestedHeight;
+  return !fullscreenActive && previous > 3840 * 2160 && next < previous / 3;
+}
