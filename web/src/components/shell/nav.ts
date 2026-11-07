@@ -94,6 +94,7 @@ export const MODULE_STATUS_BY_NAV_ID = {
   questions: { status: "new", announcementId: "question-bank-entry-v1" },
   communities: { status: "new", announcementId: "communities-entry-v1" },
   simulations: { status: "wip" },
+  studio: { status: "new", announcementId: "study-studio-v1" },
   methods: { status: "new", announcementId: "study-methods-library-v1" },
   "daily-word": { status: "new", announcementId: "daily-word-launch-v1" },
   "daily-games": { status: "new", announcementId: "daily-games-hub-v1" },
@@ -130,7 +131,7 @@ export const SIDEBAR_REVIEW = ["productivity", "journal", "reports"] as const;
 export const SIDEBAR_TOP = [...SIDEBAR_TODAY, ...SIDEBAR_LEARN, ...SIDEBAR_REVIEW];
 export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
 // Tools are the daily-use tools, Soundscapes first (JD, Ideas 1 + 3). Rarely
-// used modules live in Misc and start hidden (lib/navLayout.ts).
+// used modules are grouped by workstream rather than an obsolete Misc drawer.
 export const SIDEBAR_TOOLS = ["soundscapes", "library", "integrations", "leaderboards"];
 export const SIDEBAR_MISC: readonly string[] = []; // Legacy routes remain registered for bookmarks and data continuity.
 export const SIDEBAR_BOTTOM = ["host"];
