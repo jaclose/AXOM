@@ -50,9 +50,9 @@ test("soundscape fullscreen shows the existing focus timer until it is reset", a
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1441);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(901);
   for (const width of [390, 320]) {
-    // Chromium forbids resizing a native fullscreen window. Return to a normal
-    // viewport, resize, then enter fullscreen through the real page control.
-    await page.keyboard.press("Escape");
+    // Headless Chromium does not consistently leave native fullscreen on
+    // Escape. Exercise AXOM's explicit exit control before changing the viewport.
+    await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
     await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
     await page.setViewportSize({ width, height: 844 });
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
