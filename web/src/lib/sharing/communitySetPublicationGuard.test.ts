@@ -65,6 +65,10 @@ describe("community Question Set exact-revision publication gate", () => {
 
   it("rejects changed source evidence, source filing, replacement and membership", () => {
     expect(() => publish({ liveQuestion: { ...question, sourceDocumentId: "replaced-document" } })).toThrow(/changed while publishing/);
+    expect(() => publish({ liveQuestion: { ...question, courseId: "private-course" } })).toThrow(/changed while publishing/);
+    expect(() => publish({ liveQuestion: { ...question, module: "private-module" } })).toThrow(/changed while publishing/);
+    expect(() => publish({ liveQuestion: { ...question, setId: "different-origin-set" } })).toThrow(/changed while publishing/);
+    expect(() => publish({ liveQuestion: { ...question, createdAt: "2026-11-07T15:00:00.000Z" } })).toThrow(/changed while publishing/);
     expect(() => publish({ liveSet: { ...set, questionIds: ["another-question"] } })).toThrow(/changed while publishing/);
     expect(() => publish({ liveSet: null })).toThrow(/changed while publishing/);
     expect(() => publish({ liveQuestion: null })).toThrow(/changed while publishing/);
