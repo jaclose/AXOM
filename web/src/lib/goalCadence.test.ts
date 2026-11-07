@@ -70,6 +70,13 @@ describe("canonical flexible-weekly goal projection", () => {
     expect(current).toMatchObject({ completedDays: 3, minimum: 3, preferred: 4, metMinimum: true });
   });
 
+  it("uses the local civil date for creation timestamps near midnight", () => {
+    const nearMidnight = new Date(2026, 10, 1, 23, 30).toISOString();
+    const fresh = { ...weekly, trackingStartsAt: undefined, createdAt: nearMidnight };
+    const result = weeklyHabitSummary(fresh, [entry("2026-11-01")], "2026-11-01");
+    expect(result).toMatchObject({ completedDays: 1, minimum: 1, metMinimum: true, isPartialFirstWeek: true });
+  });
+
   it("does not hold the user responsible for sessions before a weekly habit was created", () => {
     const fresh = { ...weekly, trackingStartsAt: "2026-11-07", createdAt: "2026-11-07T08:00:00.000Z" };
     const result = weeklyHabitSummary(fresh, [entry("2026-11-07")], "2026-11-07");
