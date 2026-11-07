@@ -132,6 +132,22 @@ function emptyReport(at: string): SyncReport {
   };
 }
 
+/**
+ * Match the whole card identity, not only array length and membership. A
+ * corrupted receipt such as [1001, 1001] must not match [1001, 1002], since
+ * doing so could clear the recovery intent while one old card stays active.
+ * Re-check Anki's returned IDs too: the remote response is not a trusted set.
+ */
+function sameVerifiedCardIds(recorded: readonly number[], actual: readonly number[]): boolean {
+  if (!recorded.length || recorded.length !== actual.length) return false;
+  if (recorded.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+      actual.some((id) => !Number.isSafeInteger(id) || id <= 0)) return false;
+  const ids = new Set(recorded);
+  return ids.size === recorded.length &&
+    new Set(actual).size === actual.length &&
+    actual.every((id) => ids.has(id));
+}
+
 async function notesInfo(client: AnkiClient, noteIds: readonly number[]): Promise<Map<number, AnkiNoteInfo>> {
   const out = new Map<number, AnkiNoteInfo>();
   for (const ids of chunk([...new Set(noteIds)], INFO_BATCH)) {
@@ -469,10 +485,10 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
       const infos = await notesInfo(client, state.pendingRetirements.map((item) => item.noteId));
       for (const item of [...state.pendingRetirements]) {
         const info = infos.get(item.noteId);
-        if (!info ||
-            info.fields[AXOM_ID_FIELD]?.value?.trim() !== item.axomId ||
-            info.cards.length !== item.cardIds.length ||
-            item.cardIds.some((cardId) => !info.cards.includes(cardId))) {
+        if (!Number.isSafeInteger(item.noteId) || item.noteId <= 0 ||
+            !item.axomId || !info ||
+            info.fields?.[AXOM_ID_FIELD]?.value?.trim() !== item.axomId ||
+            !sameVerifiedCardIds(item.cardIds, info.cards)) {
           throw new Error(`Cannot safely retry Anki retirement for ${item.axomId}: old note/card identity changed. Check the Anki profile and notes.`);
         }
         const before = await client.call<Array<boolean | null>>("areSuspended", { cards: item.cardIds });
@@ -511,12 +527,9 @@ export async function syncCardsToAnki(input: SyncInput): Promise<SyncResult> {
         const info = infos.get(item.noteId);
         const cards = item.cardIds;
         if (!Number.isSafeInteger(item.noteId) || item.noteId <= 0 ||
-            !item.axomId || !cards.length ||
-            new Set(cards).size !== cards.length ||
-            cards.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
-            !info || info.fields[AXOM_ID_FIELD]?.value?.trim() !== item.axomId ||
-            info.cards.length !== cards.length ||
-            cards.some((id) => !info.cards.includes(id))) {
+            !item.axomId || !info ||
+            info.fields?.[AXOM_ID_FIELD]?.value?.trim() !== item.axomId ||
+            !sameVerifiedCardIds(cards, info.cards)) {
           throw new Error(`Cannot safely suspend deleted AXOM card ${item.axomId}: original Anki note/card identity changed. Check the Anki profile and notes.`);
         }
         const before = await client.call<Array<boolean | null>>("areSuspended", { cards });
