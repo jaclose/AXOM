@@ -150,7 +150,7 @@ describe("Question Set draft explanation review", () => {
     expect(await screen.findByText(/questions changed/)).toBeTruthy();
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
   });
-  it("refuses saving AI explanations when original source evidence is revoked without updating the question timestamp", async () => {
+  it("refuses saving AI explanations after a silent replacement of reviewed answer evidence", async () => {
     const source = question({
       citation: "Authoritative text, page 4",
       extraction: { confidence: "high", reviewed: true, answerEvidence: "Marked answer A" },
@@ -161,8 +161,11 @@ describe("Question Set draft explanation review", () => {
     await waitFor(() => expect(draftButton.disabled).toBe(false));
     fireEvent.click(draftButton);
     expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
-    mocks.workspace.questions = [{ ...source, extraction: {
-      ...source.extraction!, reviewed: false,
+    // The mapped answer remains marked reviewed, and no updatedAt is bumped.
+    // The old fingerprint checked neither source citation nor answer evidence,
+    // so this stale proposal previously appeared safe to save.
+    mocks.workspace.questions = [{ ...source, citation: "Replacement source, page 9", extraction: {
+      ...source.extraction!, answerEvidence: "Different original key annotation",
     } }];
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
     expect(await screen.findByText(/questions changed/)).toBeTruthy();
