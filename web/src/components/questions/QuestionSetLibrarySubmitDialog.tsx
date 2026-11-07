@@ -152,6 +152,17 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     if (generating || !accountId || statusIdentity !== `${accountId}:${set.id}`
       || !drafts.length || useAccount.getState().user?.id !== accountId) return;
     const bank = useStore.getState();
+    // The fingerprint protects individual question evidence; the live set also
+    // needs checking. An import, refile or removal can change membership and
+    // ownership context without touching any question's updatedAt.
+    const liveSet = (bank.questionSets ?? []).find(item => item.id === set.id);
+    if (!liveSet || liveSet.title !== set.title || liveSet.kind !== set.kind
+      || JSON.stringify(liveSet.questionIds) !== JSON.stringify(set.questionIds)
+      || JSON.stringify(liveSet.sourceDocumentIds) !== JSON.stringify(set.sourceDocumentIds)
+      || JSON.stringify(liveSet.tags) !== JSON.stringify(set.tags)) {
+      setGenerationError("The Question Set changed during explanation review. Reopen it before saving drafts.");
+      return;
+    }
     const current = new Map((bank.questions ?? []).map(question => [question.id, question]));
     for (const draft of drafts) {
       const question = current.get(draft.questionId);

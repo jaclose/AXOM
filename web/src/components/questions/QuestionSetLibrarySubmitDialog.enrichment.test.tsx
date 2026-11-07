@@ -28,7 +28,7 @@ vi.mock("../../lib/ai", () => ({
   }),
 }));
 vi.mock("../../lib/store", () => ({
-  useStore: { getState: () => ({ questions: mocks.workspace.questions, updateQuestion: mocks.updateQuestion }) },
+  useStore: { getState: () => ({ questions: mocks.workspace.questions, questionSets: mocks.workspace.questionSets, updateQuestion: mocks.updateQuestion }) },
 }));
 vi.mock("../../lib/sharing/questionSetLibrary", () => ({
   listMyQuestionSetSubmissions: (...args: unknown[]) => mocks.submissions(...args),
@@ -185,6 +185,28 @@ describe("Question Set draft explanation review", () => {
     mocks.workspace.questions = [{ ...source, correctKey: "B", needsReview: true }];
     fireEvent.click(send);
     expect(await screen.findByText(/changed while publishing/)).toBeTruthy();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["removed from the live set", { ...set, questionIds: [] }],
+    ["replaced under the same set ID", { ...set, title: "Replacement set" }],
+    ["moved to a different source filing", { ...set, sourceDocumentIds: ["new-source"] }],
+  ])("does not write a prepared draft when its set was %s", async (_reason, changedSet) => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    // An independent import or editor changed the set while the dialog stayed open.
+    // A question fingerprint alone remains valid, but the author's reviewed
+    // membership and source context are no longer the current workspace state.
+    mocks.workspace.questionSets = [changedSet];
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/set changed/i)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
