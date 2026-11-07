@@ -20,7 +20,7 @@ export const VAULT_WRITE_EVENT = "axom:vault-write";
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
 let lastPersistedAt = 0;
-/** Preserve verified current-runtime IndexedDB writes if the optional status key is quota-blocked. */
+/** Only advertise quota-only in-memory save receipts with an active cross-tab invalidation channel. */
 let memoryOnlyConfirmedWrite = false;
 let failingSince: string | null = null;
 /** A removed/missing workspace must not rehydrate stale save-success metadata. */
@@ -37,8 +37,8 @@ function rawStoredMarker(): string | null {
 function listenForCrossTabInvalidation(): void {
   if (statusChannel || typeof window === "undefined" || typeof window.BroadcastChannel !== "function") return;
   try {
-    statusChannel = new window.BroadcastChannel(VAULT_STATUS_CHANNEL);
-    statusChannel.onmessage = (event: MessageEvent<unknown>) => {
+    const channel = new window.BroadcastChannel(VAULT_STATUS_CHANNEL);
+    channel.onmessage = (event: MessageEvent<unknown>) => {
       if (event.data !== "workspace-invalidated") return;
       // Local metadata may never have existed (IndexedDB succeeded but the
       // optional status key was quota-blocked). Native storage events cannot
@@ -50,6 +50,8 @@ function listenForCrossTabInvalidation(): void {
       memoryOnlyConfirmedWrite = false;
       window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
     };
+    // A partially initialized/throwing constructor must not count as coverage.
+    statusChannel = channel;
   } catch { /* Optional cross-tab channel unavailable; stored marker stays authoritative. */ }
 }
 
@@ -86,8 +88,11 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
       window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(lastWrite));
       memoryOnlyConfirmedWrite = false;
     } catch {
-      // The IndexedDB workspace save can still be verified in this tab.
-      memoryOnlyConfirmedWrite = true;
+      // IndexedDB may have saved the bytes, but without a persistent marker
+      // AND cross-tab invalidation we cannot trust an unqualified green badge.
+      // Fail closed on status only; never remove or repeat the workspace write.
+      memoryOnlyConfirmedWrite = statusChannel !== null;
+      if (!memoryOnlyConfirmedWrite) lastWrite = null;
     }
   }
   if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {

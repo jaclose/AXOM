@@ -116,3 +116,49 @@ test("quota-blocked status metadata still receives real cross-tab invalidation",
   await first.close();
   await second.close();
 });
+
+test("quota-only receipt cannot show saved when BroadcastChannel is absent or throws", async ({ context }) => {
+  await context.route("**/__axom_vault_marker_probe__", (route) => route.fulfill({
+    status: 200, contentType: "text/html; charset=utf-8",
+    body: "<!doctype html><html><body><output id='vault-status'></output></body></html>",
+  }));
+  for (const mode of ["missing", "throws"] as const) {
+    const first = await context.newPage();
+    const second = await context.newPage();
+    await Promise.all([first.goto("/__axom_vault_marker_probe__"), second.goto("/__axom_vault_marker_probe__")]);
+    const result = await first.evaluate(async (channelMode) => {
+      Object.defineProperty(window, "BroadcastChannel", {
+        configurable: true,
+        value: channelMode === "missing" ? undefined : class RejectedChannel {
+          constructor() { throw new Error("simulated BroadcastChannel rejection"); }
+        },
+      });
+      const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+      const vault = await import("/src/lib/vaultActivity.ts");
+      window.localStorage.removeItem(STORAGE_KEYS.lastVaultWriteAt);
+      window.localStorage.setItem(STORAGE_KEYS.persistedState, '{"synthetic":"preserved"}');
+      const badge = document.getElementById("vault-status");
+      if (!badge) throw new Error("Missing probe output");
+      const paint = () => { badge.textContent = vault.readLastVaultWrite() ? "saved" : "waiting"; };
+      const stop = vault.subscribeVaultWriteStatus(paint);
+      const nativeSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key: string, value: string) {
+        if (key === STORAGE_KEYS.lastVaultWriteAt) throw new Error("simulated marker quota");
+        return nativeSet.call(this, key, value);
+      };
+      try { vault.markVaultWrite("indexeddb", new Date("2026-11-06T20:00:00.000Z")); }
+      finally { Storage.prototype.setItem = nativeSet; }
+      paint();
+      stop();
+      return { marker: window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt),
+        workspace: window.localStorage.getItem(STORAGE_KEYS.persistedState) };
+    }, mode);
+    expect(result.marker).toBeNull();
+    expect(result.workspace).toBe('{"synthetic":"preserved"}');
+    await expect(first.locator("#vault-status")).toHaveText("waiting");
+    await second.evaluate(async () => { (await import("/src/lib/vaultActivity.ts")).invalidateVaultWrite(); });
+    await expect(first.locator("#vault-status")).toHaveText("waiting");
+    await first.close();
+    await second.close();
+  }
+});

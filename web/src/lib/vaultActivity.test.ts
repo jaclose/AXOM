@@ -164,7 +164,10 @@ describe("cross-tab workspace marker consistency", () => {
 });
 
 describe("optional marker storage quota boundaries", () => {
-  it("retains a verified in-process workspace save when optional status metadata cannot be written", async () => {
+  it("retains a verified in-process save with an active invalidation channel even if status metadata is blocked", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
+    class WorkingChannel { onmessage: ((event: MessageEvent) => void) | null = null; postMessage() {} }
+    Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: WorkingChannel });
     const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
     const rejected = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("simulated metadata-only quota rejection");
@@ -176,12 +179,49 @@ describe("optional marker storage quota boundaries", () => {
       });
     } finally {
       rejected.mockRestore();
+      if (descriptor) Object.defineProperty(window, "BroadcastChannel", descriptor);
+      else Reflect.deleteProperty(window, "BroadcastChannel");
     }
     expect(window.localStorage.getItem(markerKey)).toBeNull();
     // An absent marker is never promoted to persisted success on another load.
     vi.resetModules();
     expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
   });
+  it.each(["missing", "constructor-rejected"] as const)(
+    "never advertises quota-only saves when the cross-tab channel is %s",
+    async (mode) => {
+      const descriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
+      Object.defineProperty(window, "BroadcastChannel", {
+        configurable: true,
+        value: mode === "missing" ? undefined : class RejectedChannel {
+          constructor() { throw new Error("simulated channel permission rejection"); }
+        },
+      });
+      const workspace = '{"synthetic":"preserve original workspace bytes"}';
+      window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
+      const nativeSet = Storage.prototype.setItem;
+      const reject = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+        if (key === markerKey) throw new Error("simulated optional status-only quota");
+        return nativeSet.call(this, key, value);
+      });
+      try {
+        const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+        markVaultWrite("indexeddb", new Date(savedAt));
+        // The workspace write has completed. The badge cannot safely claim
+        // current durability across tabs without either signalling channel.
+        expect(readLastVaultWrite()).toBeNull();
+        expect(window.localStorage.getItem(markerKey)).toBeNull();
+        expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+        window.localStorage.removeItem(STORAGE_KEYS.persistedState);
+        expect(readLastVaultWrite()).toBeNull();
+      } finally {
+        reject.mockRestore();
+        if (descriptor) Object.defineProperty(window, "BroadcastChannel", descriptor);
+        else Reflect.deleteProperty(window, "BroadcastChannel");
+      }
+    },
+  );
+
 });
 
 describe("independent-review save-marker regressions", () => {
