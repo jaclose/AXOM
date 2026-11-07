@@ -20,6 +20,8 @@ export const VAULT_WRITE_EVENT = "axom:vault-write";
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
 let lastPersistedAt = 0;
+/** Reconcile cached receipts with on-disk marker changes missed while Settings is unmounted. */
+let lastObservedMarkerRaw: string | null | undefined;
 /** Only advertise quota-only in-memory save receipts with an active cross-tab invalidation channel. */
 let memoryOnlyConfirmedWrite = false;
 let failingSince: string | null = null;
@@ -113,7 +115,9 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
   if (now.getTime() - lastPersistedAt >= 1000) {
     lastPersistedAt = now.getTime();
     try {
-      window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(lastWrite));
+      const raw = JSON.stringify(lastWrite);
+      window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, raw);
+      lastObservedMarkerRaw = raw;
       memoryOnlyConfirmedWrite = false;
     } catch {
       // IndexedDB may have saved the bytes, but without a persistent marker
@@ -173,9 +177,9 @@ export function invalidateVaultWrite(): void {
 }
 
 /** Read only a valid workspace-specific marker, never a legacy auxiliary write. */
-function readStoredWorkspaceMarker(): VaultWriteRecord | null {
+function readStoredWorkspaceMarker(raw: string | null): VaultWriteRecord | null {
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null");
+    const parsed: unknown = JSON.parse(raw ?? "null");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const marker = parsed as Record<string, unknown>;
     if (
@@ -203,7 +207,18 @@ function readStoredWorkspaceMarker(): VaultWriteRecord | null {
  */
 export function readLastVaultWrite(): VaultWriteRecord | null {
   listenForCrossTabInvalidation();
-  const stored = readStoredWorkspaceMarker();
+  const markerRaw = rawStoredMarker();
+  const stored = readStoredWorkspaceMarker(markerRaw);
+  // No storage event is delivered to an unmounted Settings subscriber. A tab
+  // can replace our last marker with an older but valid receipt, so timestamp
+  // ordering alone cannot authorize keeping the previous in-memory badge.
+  // An unchanged raw marker still permits a newer same-tab, throttled save.
+  if (lastObservedMarkerRaw !== undefined && markerRaw !== lastObservedMarkerRaw) {
+    lastWrite = null;
+    memoryOnlyConfirmedWrite = false;
+    lastPersistedAt = 0;
+  }
+  lastObservedMarkerRaw = markerRaw;
   if (statusInvalidated) {
     // A newer verified marker can arrive while Settings is unmounted. Do not
     // revive the exact invalidated value when removal was blocked.

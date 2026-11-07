@@ -89,6 +89,35 @@ describe("verified local workspace save timestamps across upgrades", () => {
 });
 
 describe("cross-tab workspace marker consistency", () => {
+  it("reconciles a silently replaced older valid marker while Settings is unmounted", async () => {
+    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    markVaultWrite("indexeddb", new Date(savedAt));
+    expect(readLastVaultWrite()?.at).toBe(savedAt);
+    const replacement = { at: "2026-11-06T19:00:00.000Z", target: "local-fallback", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(replacement));
+    // No subscriber is active to receive a storage event.
+    expect(readLastVaultWrite()).toEqual(replacement);
+  });
+
+  it("accepts a silent same-time marker target replacement", async () => {
+    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    markVaultWrite("indexeddb", new Date(savedAt));
+    expect(readLastVaultWrite()?.target).toBe("indexeddb");
+    const replacement = { at: savedAt, target: "local-fallback", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(replacement));
+    expect(readLastVaultWrite()).toEqual(replacement);
+  });
+
+  it("retains a same-tab confirmed write while its optional marker is throttled", async () => {
+    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    markVaultWrite("indexeddb", new Date(savedAt));
+    const persisted = window.localStorage.getItem(markerKey);
+    const renewed = new Date(Date.parse(savedAt) + 250).toISOString();
+    markVaultWrite("indexeddb", new Date(renewed));
+    expect(window.localStorage.getItem(markerKey)).toBe(persisted);
+    expect(readLastVaultWrite()?.at).toBe(renewed);
+  });
+
   it("invalidates a cached green save after another tab removes the marker and preserves workspace bytes", async () => {
     const preservedWorkspace = JSON.stringify({ state: { notes: "synthetic private draft untouched" } });
     window.localStorage.setItem(STORAGE_KEYS.persistedState, preservedWorkspace);
