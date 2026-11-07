@@ -30,7 +30,7 @@ const QUICK_GOAL_LABELS: Record<Exclude<QuickGoalKind, "custom">, string> = {
   "journal-closeout": "Daily closeout",
 };
 
-export function DailyRequirementsEditor() {
+export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (label: string, unit: string) => void } = {}) {
   const store = useStore();
   const [customName, setCustomName] = useState("");
   const [customTarget, setCustomTarget] = useState("1");
@@ -46,6 +46,11 @@ export function DailyRequirementsEditor() {
   const [quickRecording, setQuickRecording] = useState<"manual" | "activity">("manual");
   const [quickSchedule, setQuickSchedule] = useState<DailySuccessSchedule>({ kind: "daily" });
   const [quickError, setQuickError] = useState("");
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState("1");
+  const [editSchedule, setEditSchedule] = useState<DailySuccessSchedule>({ kind: "daily" });
+  const [editError, setEditError] = useState("");
+
 
   const config = store.profile.dailySuccess;
   const today = store.activeDayKey || localDateKey();
@@ -155,6 +160,30 @@ export function DailyRequirementsEditor() {
     }
     setQuickOpen(false);
     setQuickError("");
+  }
+
+  function beginQuickEdit(requirement: DailySuccessRequirement) {
+    setEditingGoalId(requirement.id);
+    setEditAmount(String(requirement.target));
+    setEditSchedule(requirement.schedule);
+    setEditError("");
+  }
+
+  function saveQuickEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const requirement = shown.find((item) => item.id === editingGoalId);
+    if (!requirement) return;
+    const amount = Number(editAmount);
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+      setEditError("Enter a positive whole-number goal.");
+      return;
+    }
+    const patch: Partial<DailySuccessRequirement> = {};
+    if (amount !== requirement.target) patch.target = amount;
+    if (JSON.stringify(editSchedule) !== JSON.stringify(requirement.schedule)) patch.schedule = editSchedule;
+    if (Object.keys(patch).length) update(requirement.id, patch);
+    setEditingGoalId(null);
+    setEditError("");
   }
 
   function addStandard(template: typeof STANDARD[number]) {
@@ -337,7 +366,7 @@ export function DailyRequirementsEditor() {
               const current = progress?.current ?? 0;
               const manual = requirement.source.kind === "manual" && !requirement.aliases?.length;
               const checked = progress?.status === "met";
-              return <div className="quick-goal-row" key={requirement.id}>
+              return <div className="quick-goal-entry" key={requirement.id}><div className="quick-goal-row">
                 <div className="quick-goal-copy">
                   <b>{requirement.label}</b>
                   <span>{progress?.eligible
@@ -362,7 +391,44 @@ export function DailyRequirementsEditor() {
                           onClick={() => setManualValue(requirement, current + 1)}>+</button>
                       </div>
                 )}
-                {!manual && <small className="quick-goal-origin">{completionSourceDescription(requirement)}</small>}
+                {requirement.source.kind === "activity-alias" && onFillActivity && (
+                  <GButton size="sm" type="button" aria-label={`Use ${requirement.label} in self-report`}
+                    onClick={() => onFillActivity(requirement.aliases?.[0] ?? requirement.label, requirement.unit)}>
+                    Use in log
+                  </GButton>
+                )}
+                {!manual && requirement.source.kind !== "activity-alias" && (
+                  <small className="quick-goal-origin">{completionSourceDescription(requirement)}</small>
+                )}
+                <button type="button" className="quick-goal-edit-trigger" aria-label={`Edit ${requirement.label} goal`}
+                  aria-expanded={editingGoalId === requirement.id}
+                  onClick={() => editingGoalId === requirement.id ? setEditingGoalId(null) : beginQuickEdit(requirement)}>Edit</button>
+              </div>
+              {editingGoalId === requirement.id && (
+                <form className="quick-goal-edit-form" onSubmit={saveQuickEdit} aria-label={`Edit ${requirement.label}`}>
+                  <label><span>Amount</span><input className="field" type="number" min="1" step="1"
+                    aria-label="Change goal amount" value={editAmount} onChange={(event) => setEditAmount(event.target.value)} /></label>
+                  <label><span>Schedule</span><select className="field" aria-label="Change goal schedule"
+                    value={editSchedule.kind} onChange={(event) => setEditSchedule(scheduleFromKind(event.target.value))}>
+                    <option value="daily">Every day</option>
+                    <option value="weekdays">Monday to Friday</option>
+                    <option value="times-per-week">Times per week</option>
+                  </select></label>
+                  {editSchedule.kind === "times-per-week" && (
+                    <label><span>Days per week</span><input className="field" type="number" min="1" max="7"
+                      aria-label="Change days per week" value={editSchedule.times}
+                      onChange={(event) => setEditSchedule({
+                        kind: "times-per-week", times: Math.max(1, Math.min(7, Math.round(Number(event.target.value) || 1))), weekStartsOn: 1,
+                      })} /></label>
+                  )}
+                  <p className="quick-goal-guide">Changes start today. Earlier activity and recorded goal results remain available.</p>
+                  {editError && <p className="quick-goal-error" role="alert">{editError}</p>}
+                  <div className="quick-goal-actions">
+                    <GButton size="sm" variant="primary" type="submit">Update goal</GButton>
+                    <GButton size="sm" type="button" onClick={() => setEditingGoalId(null)}>Cancel edit</GButton>
+                  </div>
+                </form>
+              )}
               </div>;
             })}
             {shown.filter((requirement) => requirement.enabled).length > 4 && (
