@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  Settings, Cloud, SlidersHorizontal, Check, ChevronDown, ChevronRight, Wrench, GraduationCap, MessageCircle, Archive,
+  Settings, Cloud, SlidersHorizontal, Check, ChevronDown, ChevronRight, Wrench, GraduationCap, MessageCircle,
 } from "lucide-react";
 import {
   DAILY_GAMES_FOLDER,
@@ -11,7 +11,6 @@ import {
   SIDEBAR_BOTTOM,
   SIDEBAR_LOCKED,
   SIDEBAR_LEARN,
-  SIDEBAR_MISC,
   SIDEBAR_PREP,
   SIDEBAR_REVIEW,
   SIDEBAR_TODAY,
@@ -37,8 +36,6 @@ const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
 const PREP_FOLDER_ITEMS_ID = "sidebar-academic-prep-items";
 const TOOLS_FOLDER_TOGGLE_ID = "sidebar-tools-toggle";
 const TOOLS_FOLDER_ITEMS_ID = "sidebar-tools-items";
-const MISC_FOLDER_TOGGLE_ID = "sidebar-misc-toggle";
-const MISC_FOLDER_ITEMS_ID = "sidebar-misc-items";
 const NAV_DRAG_TYPE = "text/x-axom-nav";
 
 function useMobileSidebar(): boolean {
@@ -122,7 +119,6 @@ export function Sidebar({
   const hidden = new Set(profile.hiddenNav ?? []);
   const toolsOpen = !profile.toolsCollapsed;
   const prepOpen = !profile.prepCollapsed;
-  const miscOpen = !profile.miscCollapsed;
   const ordered = (section: readonly string[]) => applyNavOrder(section, profile.navOrder);
 
   function toggleHidden(id: string) {
@@ -205,7 +201,6 @@ export function Sidebar({
   const navGate = (id: string) => id !== "habits" || habitsOn;
   const toolItems = ordered(manage ? SIDEBAR_TOOLS : SIDEBAR_TOOLS.filter((id) => !hidden.has(id))).filter(navGate);
   const prepItems = ordered(manage ? SIDEBAR_PREP : SIDEBAR_PREP.filter((id) => !hidden.has(id)));
-  const miscItems = ordered(manage ? SIDEBAR_MISC : SIDEBAR_MISC.filter((id) => !hidden.has(id)));
   const dailyGamesOpen = !profile.dailyGamesCollapsed;
   const dailyGameItems = ordered(manage
     ? DAILY_GAMES_FOLDER.routes
@@ -333,31 +328,6 @@ export function Sidebar({
                 {dailyGameItems.map((id) => <Item key={id} id={id} section={DAILY_GAMES_FOLDER.routes} />)}
               </div>
           </div>
-
-          {(miscItems.length > 0 || manage) && (
-            <div className="nav-folder">
-              <button
-                id={MISC_FOLDER_TOGGLE_ID}
-                type="button"
-                className="nav-folder-head"
-                aria-controls={MISC_FOLDER_ITEMS_ID}
-                aria-expanded={miscOpen}
-                onClick={() => updateProfile({ miscCollapsed: !profile.miscCollapsed })}>
-                {miscOpen ? <ChevronDown size={ICON_SIZE.body} /> : <ChevronRight size={ICON_SIZE.body} />}
-                <Archive size={ICON_SIZE.body} /><span>Misc</span>
-                {!miscOpen && <span className="nav-folder-count">{miscItems.length}</span>}
-              </button>
-              <div
-                id={MISC_FOLDER_ITEMS_ID}
-                className="nav-folder-items"
-                role="group"
-                aria-labelledby={MISC_FOLDER_TOGGLE_ID}
-                hidden={!miscOpen}
-              >
-                {miscItems.map((id) => <Item key={id} id={id} section={SIDEBAR_MISC} />)}
-              </div>
-            </div>
-          )}
 
           {SIDEBAR_BOTTOM.map((id) => <Item key={id} id={id} />)}
         </nav>
