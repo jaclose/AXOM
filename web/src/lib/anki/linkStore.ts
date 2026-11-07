@@ -55,6 +55,8 @@ export interface PendingSuspend {
   noteId: number;
   cardIds: number[];
   at: string;
+  /** Original untrusted card IDs, retained when a persisted receipt is corrupt. */
+  quarantinedCardIds?: unknown;
 }
 
 /** Separate from deletion policy: an old note must be suspended after a type switch. */
@@ -63,6 +65,8 @@ export interface PendingRetirement {
   noteId: number;
   cardIds: number[];
   at: string;
+  /** Original untrusted card IDs, retained when a persisted receipt is corrupt. */
+  quarantinedCardIds?: unknown;
 }
 
 export interface SyncSummary {
@@ -138,6 +142,29 @@ function normalizeLink(raw: unknown): NoteLink | null {
   };
 }
 
+/**
+ * Never silently shorten a stored suspension/retirement identity. A prior
+ * version filtered malformed elements before sync verified the card set.
+ * Keep a copy of those original values (including empty/missing lists) so
+ * sync can hold the receipt for review without touching Anki notes.
+ */
+function normalizeReceiptCardIds(record: { cardIds?: unknown; quarantinedCardIds?: unknown }): {
+  cardIds: number[];
+  quarantinedCardIds?: unknown;
+} {
+  const raw = record.cardIds;
+  const cardIds = numberList(raw).filter((id) => Number.isSafeInteger(id) && id > 0);
+  const invalid = !Array.isArray(raw) || raw.length === 0 ||
+    raw.length !== cardIds.length || new Set(cardIds).size !== cardIds.length;
+  const previouslyQuarantined = Object.prototype.hasOwnProperty.call(record, "quarantinedCardIds");
+  return {
+    cardIds,
+    ...(invalid || previouslyQuarantined
+      ? { quarantinedCardIds: previouslyQuarantined ? (record.quarantinedCardIds ?? null) : (raw ?? null) }
+      : {}),
+  };
+}
+
 export function normalizeLinkState(raw: unknown): LinkState {
   const base = emptyLinkState();
   if (!raw || typeof raw !== "object") return base;
@@ -160,7 +187,7 @@ export function normalizeLinkState(raw: unknown): LinkState {
   }
   const pendingSuspends = Array.isArray(record.pendingSuspends)
     ? record.pendingSuspends.filter((item): item is PendingSuspend => Boolean(item) && typeof item === "object" && typeof (item as PendingSuspend).axomId === "string" && typeof (item as PendingSuspend).noteId === "number")
-      .map((item) => ({ axomId: item.axomId, noteId: item.noteId, cardIds: numberList(item.cardIds), at: String(item.at ?? "") }))
+      .map((item) => ({ axomId: item.axomId, noteId: item.noteId, ...normalizeReceiptCardIds(item), at: String(item.at ?? "") }))
     : [];
   const pendingRetirements = Array.isArray(record.pendingRetirements)
     ? record.pendingRetirements.filter((item): item is PendingRetirement =>
@@ -172,10 +199,9 @@ export function normalizeLinkState(raw: unknown): LinkState {
       .map((item) => ({
         axomId: item.axomId,
         noteId: item.noteId,
-        cardIds: numberList(item.cardIds).filter((id) => Number.isSafeInteger(id) && id > 0),
+        ...normalizeReceiptCardIds(item),
         at: String(item.at ?? ""),
       }))
-      .filter((item) => item.cardIds.length > 0)
     : [];
   return {
     version: 1,
