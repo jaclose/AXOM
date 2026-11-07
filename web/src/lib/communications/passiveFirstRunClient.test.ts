@@ -4,7 +4,7 @@ import { FIRST_RUN_WINDOW_MS } from "./passiveFirstRun";
 import {
   PASSIVE_ATLAS_SESSION_KEY, PASSIVE_ATLAS_CHOICE_KEY,
   confirmAtlasCompanion, disableAtlasCompanion, dismissPassiveAtlas,
-  notePassiveAtlasAction, readConfirmedAtlasCompanion, readConfirmedAtlasPriority, readPassiveAtlasProposal,
+  notePassiveAtlasAction, readConfirmedAtlasCompanion, readConfirmedAtlasPriority, discardAtlasObservationOnAccountChange, readPassiveAtlasProposal,
   readPassiveAtlasSession, startPassiveAtlasOnboarding,
 } from "./passiveFirstRunClient";
 
@@ -24,6 +24,16 @@ describe("first-run Atlas local-only privacy boundary", () => {
     notePassiveAtlasAction("visit-questions", t + 1000);
     expect(sessionStorage.getItem(PASSIVE_ATLAS_SESSION_KEY)).toBeNull();
     expect(readPassiveAtlasProposal(t + 1000).status).toBe("off");
+  });
+
+  it("discards unaccepted first-run observations when the active account changes", () => {
+    startPassiveAtlasOnboarding({ consent: true, changedFields: ["tools"], tools: ["questions"] }, t);
+    expect(readPassiveAtlasSession(t)).not.toBeNull();
+    expect(discardAtlasObservationOnAccountChange(null, accountA)).toBe(true);
+    expect(sessionStorage.getItem(PASSIVE_ATLAS_SESSION_KEY)).toBeNull();
+    confirmAtlasCompanion("juniper", t, accountA);
+    expect(discardAtlasObservationOnAccountChange(accountA, accountA)).toBe(false);
+    expect(readConfirmedAtlasCompanion(accountA)).toBe("juniper");
   });
 
   it("keeps only bounded semantic counts in this tab and never posts to a provider", () => {
