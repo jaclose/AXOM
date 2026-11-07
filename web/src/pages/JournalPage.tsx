@@ -1576,6 +1576,19 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   async function send() {
     if (!user || conflicted) return;
     if (draft.rating < 1) { setError("Choose a rating before sending."); return; }
+    // Check for changes that arrived after the editor's last successful write.
+    // This prevents an observed stale send; localStorage cannot make the
+    // check atomic against a simultaneous update by an older browser tab.
+    try {
+      if (window.localStorage.getItem(draftKey) !== persistedRawRef.current) {
+        setConflicted(true);
+        setStorageError("Another tab changed this feedback draft. Your writing is still here. Download it, then close and reopen feedback to see the saved copy.");
+        return;
+      }
+    } catch {
+      setStorageError("AXOM could not check the saved feedback draft. No feedback was sent. Download your writing and retry when browser storage is available.");
+      return;
+    }
     setSending(true);
     setError("");
     // The network receives the in-memory draft. A failed local write must
