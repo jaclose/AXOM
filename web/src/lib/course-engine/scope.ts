@@ -157,7 +157,7 @@ export function conflictingDuplicateIds(
     // A duplicated original with different retake outcomes must be held even
     // when both copies have the same first answer and current status.
     // Ignore attempt timestamps: device-local replays can legitimately differ.
-    question.status, question.attempts.map((attempt) => attempt.status),
+    question.status, question.attempts.map((attempt) => attempt?.status ?? null),
   ]);
   for (const question of questions) {
     const first = firstById.get(question.id);
