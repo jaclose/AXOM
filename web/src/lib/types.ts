@@ -199,7 +199,8 @@ export type HabitType =
   | "duration" // minutes toward a target
   | "count" // reps/units toward a target
   | "avoidance" // a thing you're trying NOT to do (success = avoided)
-  | "weekly" // flexible: N times per week, any days
+  | "weekly" // flexible: N distinct days per week
+  | "slots" // multiple named occurrences per civil day
   | "scheduled" // specific weekdays
   | "recovery" // gentle restart habit, streak never punishes
   | "milestone"; // one-time / cumulative goal
@@ -215,7 +216,12 @@ export interface Habit {
   category?: string;
   target?: number; // count/duration target per day
   unit?: string; // "min", "reps", "pages"…
-  weeklyTarget?: number; // for flexible weekly habits
+  weeklyTarget?: number; // legacy flexible weekly minimum
+  weeklyMinimum?: number; // minimum distinct days to satisfy an ISO Mon–Sun week
+  weeklyPreferred?: number; // optional preferred distinct-day target, >= minimum
+  linkedTrackerId?: ID; // one authoritative tracker log can satisfy this habit without a duplicate check
+  occurrenceSlots?: Array<{ id: string; label: string }>; // independently addressed subdaily checks
+  includeInReports?: boolean; // private reporting is opt-in; never public by this flag
   schedule?: number[]; // weekday indices 0(Sun)–6(Sat) for scheduled habits
   reminderStart?: string; // "08:00" — start of a reminder WINDOW, not a fixed alarm
   reminderEnd?: string; // "10:00"
@@ -239,6 +245,8 @@ export interface HabitEntry {
   value?: number; // for count/duration habits
   note?: string;
   createdAt: string;
+  /** Named-slot receipts share this existing habit/day identity and survive backup/sync. */
+  slotCheckIns?: Array<{ id: ID; slotId: string; status: "done" | "skipped"; at: string }>;
 }
 
 export interface ExperimentalFlags {
