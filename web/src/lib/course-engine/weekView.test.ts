@@ -48,13 +48,41 @@ describe("the course by week", () => {
 
   it("reads a week's question progress from attempts, joining on module and week", () => {
     const answered = question({
-      module: "ftm1", week: 3, status: "correct",
+      courseId: "core", module: "ftm1", week: 3, status: "correct",
       attempts: [{ at: "2026-09-02T00:00:00.000Z", status: "correct" }],
     });
-    const [module] = buildModuleWeeks([row({})], [answered, question({ module: "FTM 1", week: 3 }), question({ module: "FTM 1", week: 9 })]);
+    const [module] = buildModuleWeeks([row({})], [
+      answered,
+      question({ courseId: "core", module: "FTM 1", week: 3 }),
+      question({ courseId: "core", module: "FTM 1", week: 9 }),
+    ], undefined, {
+      terms: [{ id: "term1", name: "Term 1" }],
+      courses: [{
+        id: "core", termId: "term1", code: "BPM 500", name: "Core", files: 0,
+        modules: [{ id: "ftm1", name: "FTM 1" }],
+      }],
+    });
     expect(module.weeks[0].questions).toMatchObject({ total: 2, attempted: 1, firstTimeCorrect: 1 });
   });
 
+
+  it("holds cross-course question credit when a legacy week has no authoritative catalog context", () => {
+    const tracker = [row({ path: "Term 2/NB2/Week 3", passes: 1 })];
+    const answers = [
+      question({ id: "foreign", module: "NB2", week: 3, courseId: "other",
+        status: "correct", attempts: [{ at: "2026-11-07T00:00:00Z", status: "correct" }] }),
+      question({ id: "unowned", module: "NB2", week: 3,
+        status: "correct", attempts: [{ at: "2026-11-07T00:00:00Z", status: "correct" }] }),
+    ];
+    const before = JSON.stringify([tracker, answers]);
+    const [module] = buildModuleWeeks(tracker, answers);
+    expect(module).toMatchObject({ courseId: undefined, done: 1, total: 1 });
+    expect(module.weeks[0]).toMatchObject({
+      questionScopeAmbiguous: true,
+      questions: { total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0, questionIds: [] },
+    });
+    expect(JSON.stringify([tracker, answers])).toBe(before);
+  });
 
   it("separates the same module in two terms instead of merging week progress", () => {
     const tracker = [
