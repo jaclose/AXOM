@@ -163,9 +163,12 @@ export function proposePassiveAtlas(session: PassiveSession | null, now: number)
   };
   const base: PassiveProposal = { status: "off", confidenceLabel: null, alternatives: [], explanation: [], proposedConfig: defaultConfig };
   if (!session) return base;
-  const events = FIRST_RUN_ACTIONS.filter(id => session.counts[id] > 0);
+  const events = FIRST_RUN_ACTIONS.filter(id => id !== "explore-content" && session.counts[id] > 0);
+  const hasQuestions = session.tools.some(tool => ["questions", "uworld", "amboss"].includes(tool));
+  const hasLectures = session.tools.includes("lectures");
+  const toolsAreDirectional = session.changedFields.includes("tools") && hasQuestions !== hasLectures;
   const strong = Number(session.questionTiming !== null)
-    + Number(session.changedFields.includes("tools") && session.tools.length > 0)
+    + Number(toolsAreDirectional)
     + Number(session.counts["begin-practice"] > 0)
     + Number(session.counts["review-source"] > 0);
   const elapsed = now - session.startedAt;
