@@ -1573,6 +1573,9 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     submittedReceiptRef.current = persistedRevisionRef.current
       ? `${persistedRevisionRef.current}:${journalFeedbackFingerprint(draft)}`
       : persistedRawRef.current !== null
+        && journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(initialDraftRef.current)
+        // If an edit failed to persist, the original raw bytes were not sent.
+        // Do not acknowledge and hide the still-recoverable older draft.
         ? `legacy:${journalFeedbackFingerprint(persistedRawRef.current)}` : null;
     try {
       setSentId(await submitJournalFeedback(user.id, draft));
