@@ -16,9 +16,18 @@ export interface QuestionExplanationDraft {
 }
 
 export function questionExplanationFingerprint(question: QuestionRecord): string {
+  // A source-review withdrawal or citation replacement can retain updatedAt.
+  // Bind an AI proposal to the precise source evidence used when it was drafted,
+  // not merely the visible stem/choices/key. The receipt remains device-local;
+  // no source evidence or private identifiers are sent with the public snapshot.
   return JSON.stringify([
     question.id, question.updatedAt, question.stem, question.options,
     question.correctKey, question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
+    question.source, question.sourceFile ?? null, question.sourceDocumentId ?? null,
+    question.sourcePage ?? null, question.questionNumber ?? null,
+    question.extraction ?? null, question.citation ?? null, question.ai ?? null,
+    question.system ?? null, question.topic ?? null,
+    question.category ?? null, question.subcategory ?? null,
   ]);
 }
 
