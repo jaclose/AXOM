@@ -183,6 +183,39 @@ describe("Journal notebook foundation", () => {
       .toBe("Continue writing after reopening.");
   });
 
+  it("does not close a reopened full page after the final desk save finishes", async () => {
+    vi.useFakeTimers();
+    let releaseFlush: (() => void) | undefined;
+    const flushWrite = vi.spyOn(localVault, "flushLocalVaultWrites").mockImplementation(
+      () => new Promise<void>((resolve) => { releaseFlush = resolve; }),
+    );
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Put book down" }));
+
+    // First gate was clean; a late edit needs a second vault check.
+    await act(async () => { await vi.advanceTimersByTimeAsync(850); });
+    const writing = "Keep this line even when a late save finishes after reopening.";
+    fireEvent.change(screen.getByLabelText("Write freely at your desk"), { target: { value: writing } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(flushWrite).toHaveBeenCalledTimes(1);
+    expect(releaseFlush).toBeTypeOf("function");
+
+    // The timer already fired. Its pending Promise can still call onClose.
+    const reopen = screen.getByRole("button", { name: "Write full page" });
+    reopen.focus();
+    fireEvent.click(reopen);
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+
+    await act(async () => { releaseFlush?.(); await Promise.resolve(); });
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe(writing);
+    fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
+    expect(screen.getByRole("region", { name: "Write at your desk" }).className).not.toContain("is-closing");
+  });
+
   it("offers an explicit put-down and closes when the surrounding desk is clicked", async () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
