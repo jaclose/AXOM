@@ -213,7 +213,7 @@ describe("your published courses", () => {
     ]);
     render(<AcademicCollectionManager onChanged={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
-    expect(await screen.findByText(/Review 1 unreviewed community upload in Question Bank/)).toBeTruthy();
+    expect(await screen.findByText(/Review 1 community upload in Question Bank → Community Uploads/)).toBeTruthy();
     expect(screen.getByText("1 course")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
     expect(mocks.community).toHaveBeenCalledTimes(2);
