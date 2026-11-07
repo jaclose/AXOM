@@ -35,7 +35,7 @@ describe("verified local workspace save timestamps across upgrades", () => {
   it("persists a verified workspace write across a fresh module reload", async () => {
     const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
     markVaultWrite("indexeddb", new Date(savedAt));
-    const expected = { at: savedAt, target: "indexeddb", version: 2, scope: "workspace" };
+    const expected = { at: savedAt, target: "indexeddb", version: 3, scope: "workspace" };
     expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual(expected);
     expect(readLastVaultWrite()).toEqual(expected);
 
@@ -56,10 +56,10 @@ describe("verified local workspace save timestamps across upgrades", () => {
 
   it.each([
     { at: savedAt, target: "indexeddb", version: 1, scope: "workspace" },
-    { at: savedAt, target: "indexeddb", version: 2, scope: "auxiliary" },
-    { at: "not-a-date", target: "indexeddb", version: 2, scope: "workspace" },
-    { at: savedAt, target: "cloud", version: 2, scope: "workspace" },
-    { at: 1234, target: "indexeddb", version: 2, scope: "workspace" },
+    { at: savedAt, target: "indexeddb", version: 3, scope: "auxiliary" },
+    { at: "not-a-date", target: "indexeddb", version: 3, scope: "workspace" },
+    { at: savedAt, target: "cloud", version: 3, scope: "workspace" },
+    { at: 1234, target: "indexeddb", version: 3, scope: "workspace" },
     [],
     null,
   ])("rejects malformed/unverified metadata %#", async (record) => {
@@ -82,7 +82,7 @@ describe("verified local workspace save timestamps across upgrades", () => {
     const shortlyAfter = new Date(new Date(savedAt).getTime() + 300);
     markVaultWrite("local-fallback", shortlyAfter);
     expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual({
-      at: shortlyAfter.toISOString(), target: "local-fallback", version: 2, scope: "workspace",
+      at: shortlyAfter.toISOString(), target: "local-fallback", version: 3, scope: "workspace",
     });
   });
 
@@ -93,7 +93,7 @@ describe("cross-tab workspace marker consistency", () => {
     const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
     markVaultWrite("indexeddb", new Date(savedAt));
     expect(readLastVaultWrite()?.at).toBe(savedAt);
-    const replacement = { at: "2026-11-06T19:00:00.000Z", target: "local-fallback", version: 2, scope: "workspace" };
+    const replacement = { at: "2026-11-06T19:00:00.000Z", target: "local-fallback", version: 3, scope: "workspace" };
     window.localStorage.setItem(markerKey, JSON.stringify(replacement));
     // No subscriber is active to receive a storage event.
     expect(readLastVaultWrite()).toEqual(replacement);
@@ -103,7 +103,7 @@ describe("cross-tab workspace marker consistency", () => {
     const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
     markVaultWrite("indexeddb", new Date(savedAt));
     expect(readLastVaultWrite()?.target).toBe("indexeddb");
-    const replacement = { at: savedAt, target: "local-fallback", version: 2, scope: "workspace" };
+    const replacement = { at: savedAt, target: "local-fallback", version: 3, scope: "workspace" };
     window.localStorage.setItem(markerKey, JSON.stringify(replacement));
     expect(readLastVaultWrite()).toEqual(replacement);
   });
@@ -152,7 +152,7 @@ describe("cross-tab workspace marker consistency", () => {
     const { readLastVaultWrite, subscribeVaultWriteStatus } = await import("./vaultActivity");
     const listener = vi.fn();
     const unsubscribe = subscribeVaultWriteStatus(listener);
-    const valid = { at: savedAt, target: "indexeddb", version: 2, scope: "workspace" };
+    const valid = { at: savedAt, target: "indexeddb", version: 3, scope: "workspace" };
     window.localStorage.setItem(markerKey, JSON.stringify(valid));
     window.dispatchEvent(new StorageEvent("storage", {
       key: markerKey, newValue: JSON.stringify(valid), storageArea: window.localStorage,
@@ -204,7 +204,7 @@ describe("optional marker storage quota boundaries", () => {
     try {
       markVaultWrite("indexeddb", new Date(savedAt));
       expect(readLastVaultWrite()).toEqual({
-        at: savedAt, target: "indexeddb", version: 2, scope: "workspace",
+        at: savedAt, target: "indexeddb", version: 3, scope: "workspace",
       });
     } finally {
       rejected.mockRestore();
@@ -254,7 +254,7 @@ describe("optional marker storage quota boundaries", () => {
   it("rejects stale prior metadata when a newer quota-only write has no channel, then permits immediate recovery", async () => {
     const descriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
     Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: undefined });
-    const previous = { at: "2026-11-06T19:59:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    const previous = { at: "2026-11-06T19:59:00.000Z", target: "indexeddb", version: 3, scope: "workspace" };
     window.localStorage.setItem(markerKey, JSON.stringify(previous));
     const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
     const nativeSet = Storage.prototype.setItem;
@@ -292,7 +292,7 @@ describe("independent-review save-marker regressions", () => {
     expect(vault.readLastVaultWrite()).toBeNull();
     unsubscribe();
 
-    const renewed = { at: "2026-11-06T20:01:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    const renewed = { at: "2026-11-06T20:01:00.000Z", target: "indexeddb", version: 3, scope: "workspace" };
     window.localStorage.setItem(markerKey, JSON.stringify(renewed));
     // No subscriber, so a normal StorageEvent would have no listener.
     expect(vault.readLastVaultWrite()).toEqual(renewed);
@@ -316,7 +316,7 @@ describe("independent-review save-marker regressions", () => {
     finally { replace.mockRestore(); remove.mockRestore(); }
     expect(window.localStorage.getItem(markerKey)).toBe(old);
     expect(vault.readLastVaultWrite()).toBeNull();
-    const renewed = { at: "2026-11-06T20:02:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    const renewed = { at: "2026-11-06T20:02:00.000Z", target: "indexeddb", version: 3, scope: "workspace" };
     window.localStorage.setItem(markerKey, JSON.stringify(renewed));
     expect(vault.readLastVaultWrite()).toEqual(renewed);
   });
@@ -459,6 +459,61 @@ describe("lifecycle receipts fail-closed", () => {
 
 
 describe("account-scoped local save receipts", () => {
+  it("writes v3 for signed-in saves so an offline v2 reader cannot misattribute A to B", async () => {
+    const workspace = JSON.stringify({ notes: "synthetic workspace remains untouched" });
+    window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const raw = window.localStorage.getItem(markerKey);
+    const saved = JSON.parse(raw ?? "null");
+    expect(saved).toMatchObject({ version: 3, scope: "workspace", accountId: "account-a" });
+    // The exact #170 reader required version 2 but ignored accountId. A v3
+    // marker is therefore rejected by old, rolled-back or offline v2 clients.
+    expect(saved.version === 2 && saved.scope === "workspace").toBe(false);
+    vault.setVaultAccountIdentity("account-b");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.setVaultAccountIdentity(null);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readLastVaultWrite()).toMatchObject(saved);
+    expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+  });
+
+  it("holds all v2 receipts while signed in, including forged account-tagged v2 markers", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    for (const marker of [
+      { at: savedAt, target: "indexeddb", scope: "workspace", version: 2 },
+      { at: savedAt, target: "indexeddb", scope: "workspace", version: 2, accountId: "account-a" },
+    ]) {
+      const raw = JSON.stringify(marker);
+      window.localStorage.setItem(markerKey, raw);
+      expect(vault.readLastVaultWrite()).toBeNull();
+      expect(window.localStorage.getItem(markerKey)).toBe(raw);
+    }
+    vault.setVaultAccountIdentity(null);
+    // Account-tagged v2 remains untrusted even in local-only mode.
+    expect(vault.readLastVaultWrite()).toBeNull();
+  });
+
+  it("reads an unscoped historical v2 receipt only while signed out without upgrading it", async () => {
+    const workspace = '{"local-only":"preserve"}';
+    const legacy = { at: savedAt, target: "local-fallback", scope: "workspace", version: 2 };
+    window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
+    window.localStorage.setItem(markerKey, JSON.stringify(legacy));
+    const vault = await import("./vaultActivity");
+    expect(vault.readLastVaultWrite()).toEqual(legacy);
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.setVaultAccountIdentity(null);
+    expect(vault.readLastVaultWrite()).toEqual(legacy);
+    expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual(legacy);
+    vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 5000));
+    expect(vault.readLastVaultWrite()?.version).toBe(3);
+    expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+  });
+
   it("does not reuse account A's saved badge for account B or signed-out; restores it only for A", async () => {
     const vault = await import("./vaultActivity");
     vault.setVaultAccountIdentity("account-a");
