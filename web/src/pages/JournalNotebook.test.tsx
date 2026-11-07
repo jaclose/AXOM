@@ -422,6 +422,54 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("allows only one in-flight feedback request per dialog and retries after failure", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-inflight-once";
+    const account = { id: "journal-feedback-inflight-account", email: "inflight@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const failures: Array<(error: Error) => void> = [];
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(
+      () => new Promise<string>((_resolve, reject) => { failures.push(reject); }),
+    );
+    window.localStorage.removeItem(draftKey);
+    window.localStorage.removeItem(`${draftKey}:submitted`);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(within(dialog).getByLabelText("What do you like?"), { target: { value: "Send this once." } });
+
+      // Two same-turn activations happen before React can commit disabled=true.
+      const sendButton = within(dialog).getByRole("button", { name: "Send feedback" });
+      act(() => {
+        sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(failures).toHaveLength(1);
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked).toBe("Send this once.");
+
+      await act(async () => { failures[0](new Error("Temporary failure")); await Promise.resolve(); });
+      expect(within(dialog).getByRole("alert").textContent).toContain("Temporary failure");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Send feedback" }));
+      expect(submit).toHaveBeenCalledTimes(2);
+      expect(failures).toHaveLength(2);
+      await act(async () => { failures[1](new Error("Retry refused")); await Promise.resolve(); });
+      expect((within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Send this once.");
+      expect(window.localStorage.getItem(draftKey)).toContain("Send this once.");
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
   it("stops a stale feedback editor from sending another tab's superseded draft", () => {
     const originalAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const originalProfile = useStore.getState().profile;
