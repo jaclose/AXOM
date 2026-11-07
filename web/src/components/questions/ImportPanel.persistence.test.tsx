@@ -10,7 +10,8 @@ import { importFromCsv } from "../../lib/questionImport";
 import { questionMappingStatus } from "../../lib/questions";
 import { parseImport, toPortableState } from "../../lib/backup";
 import { DB_NAME } from "../../lib/localVault";
-import { hasReviewedImportInFlight } from "../../lib/questionImportFinalization";
+import { hasReviewedImportInFlight, persistReviewedImportOnce, settledReviewedImportSnapshot, type ReviewedImportPersistenceResult } from "../../lib/questionImportFinalization";
+import type { SourceDocument } from "../../lib/library";
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
@@ -431,6 +432,37 @@ describe("Import Center persistence invariant", () => {
       if (!writeReleased && !blockNextWrite) rejectWrite(new Error("Cleanup pending write"));
       useStore.persist.setOptions({ storage });
     }
+  });
+
+  it("keeps the last durable source-document links while a newer link update is tentative", async () => {
+    const original = {
+      id: "previously-durable-source", title: "Committed source", fileName: "source.txt", fileType: "text",
+      uploadedAt: "2026-11-07T00:00:00.000Z", rawText: "Original source",
+      sizeBytes: 15, tags: [], libraryOnly: false, linkedQuestionSetIds: ["existing-set"],
+    } as SourceDocument;
+    const tentativeDocument = { ...original, linkedQuestionSetIds: ["existing-set", "tentative-set"] };
+    let resolveWrite!: (result: ReviewedImportPersistenceResult) => void;
+    const blocked = new Promise<ReviewedImportPersistenceResult>((resolve) => { resolveWrite = resolve; });
+    const persistence = { ...useStore.getState(), commitReviewedImport: () => blocked };
+    const pending = persistReviewedImportOnce("apex-pending-source-update", persistence, {
+      questions: [],
+      documentWrite: {
+        kind: "update", id: original.id, original,
+        patch: { linkedQuestionSetIds: tentativeDocument.linkedQuestionSetIds },
+      },
+    });
+    try {
+      expect(hasReviewedImportInFlight()).toBe(true);
+      const view = settledReviewedImportSnapshot({ questions: [], questionSets: [], documents: [tentativeDocument] });
+      expect(view.documents).toEqual([original]);
+      expect(tentativeDocument.linkedQuestionSetIds).toEqual(["existing-set", "tentative-set"]);
+    } finally {
+      resolveWrite({ ok: false, message: "Synthetic rejected source-link update", rollbackFailures: [] });
+      await pending;
+    }
+    expect(hasReviewedImportInFlight()).toBe(false);
+    const after = settledReviewedImportSnapshot({ questions: [], questionSets: [], documents: [tentativeDocument] });
+    expect(after.documents).toEqual([tentativeDocument]);
   });
 
   it("joins a tentative real-store import on remount and does not report success when durability fails", async () => {
