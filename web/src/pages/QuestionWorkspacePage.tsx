@@ -11,7 +11,6 @@ import {
   AlertTriangle, BarChart3, BookOpen, FileInput, ListFilter,
   Microscope, Play, RotateCcw, Sparkles, HelpCircle, MonitorPlay } from "lucide-react";
 import { useStore } from "../lib/store";
-import { notePassiveAtlasAction } from "../lib/communications/passiveFirstRunClient";
 import {
   analyzeQuestionStyle, dueQuestions, errorPatterns, questionCollectionMetrics,
   summarizeQuestionMappings, weakTopics,
@@ -278,11 +277,9 @@ export function QuestionWorkspacePage() {
   function runSet(set: QuestionSet) {
     const ids = new Set(set.questionIds);
     const ready = runnableQuestions.filter((question) => ids.has(question.id)).length;
-    if (ready > 0) notePassiveAtlasAction("begin-practice");
     setRunner({ mode: "tutor", presetFilters: { setIds: [set.id], count: Math.min(ready, 20) } });
   }
   function runBlock(block: QuizBlock) {
-    notePassiveAtlasAction("begin-practice");
     setRunner({ mode: block.mode, presetFilters: block.filters, presetTimed: block.timed, blockId: block.id });
   }
   function generateFrom(doc: SourceDocument) {
@@ -342,7 +339,6 @@ export function QuestionWorkspacePage() {
   }
 
   function launchRecommended() {
-    if (lastSession || due.length > 0 || unseen > 0 || runnable > 0) notePassiveAtlasAction("begin-practice");
     if (lastSession) {
       setRunner({ mode: lastSession.mode, presetFilters: lastSession.filters, presetTimed: lastSession.timed });
     } else if (due.length > 0) {
@@ -702,7 +698,7 @@ export function QuestionWorkspacePage() {
       }</>}
       {tab === "community" && <CommunityUploads onOpenLibrary={() => { setBankView("books"); setTab("sets"); }} />}
       {tab === "library" && <SourceLibrary onParseFrom={parseFrom} onGenerateFrom={generateFrom} />}
-      {tab === "blocks" && <BlockBuilder onRunBlock={runBlock} onNewBlock={() => { notePassiveAtlasAction("begin-practice"); setRunner({ mode: "tutor" }); }} />}
+      {tab === "blocks" && <BlockBuilder onRunBlock={runBlock} onNewBlock={() => setRunner({ mode: "tutor" })} />}
 
       {tab === "bank" && (
         <>
