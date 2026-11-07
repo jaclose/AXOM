@@ -265,7 +265,10 @@ describe("IndexedDB-first local vault", () => {
     await localVaultStorage.setItem(key, saved);
     const record = readLastVaultWrite();
     expect(record?.scope).toBe("workspace");
-    window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+    // Preserve the actual sealed on-disk receipt. Re-serializing the UI-facing
+    // normalized record would produce an invalid unsealed v4 fixture.
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null"))
+      .toMatchObject({ version: 4, target: "axom-receipt-v4-indexeddb" });
 
     await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, '{"generations":[]}');
     await localVaultStorage.removeItem(STORAGE_KEYS.aiGenerations);
@@ -286,7 +289,10 @@ describe("IndexedDB-first local vault", () => {
     await localVaultStorage.setItem(key, saved);
     const record = readLastVaultWrite();
     expect(record?.scope).toBe("workspace");
-    window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+    // Preserve the actual sealed on-disk receipt. Re-serializing the UI-facing
+    // normalized record would produce an invalid unsealed v4 fixture.
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null"))
+      .toMatchObject({ version: 4, target: "axom-receipt-v4-indexeddb" });
 
     // IndexedDB may be purged independently of the tiny browser status marker.
     await deleteDatabase(STORAGE_KEYS.vaultDb);
