@@ -45,6 +45,8 @@ export interface OperatorAudit {
   id: string; actor_id: string | null; action: string; target_id: string | null;
   metadata: Record<string, unknown>; created_at: string;
 }
+export interface OperatorAuditCursor { id: string; createdAt: string }
+export interface OperatorAuditPage { audit: OperatorAudit[]; hasMore: boolean }
 export interface OperatorDashboard {
   role: OperatorRole | null;
   overview: OperatorOverview | null;
@@ -77,6 +79,9 @@ const count = (value: unknown) => typeof value === "number" && Number.isSafeInte
 const nullableCount = (value: unknown) => value === null || count(value);
 const roleValue = (value: unknown) => value === "owner" || value === "admin" || value === "moderator";
 const bounded = (value: unknown, max: number, check: (item: unknown) => boolean) => Array.isArray(value) && value.length <= max && value.every(check);
+const validOperatorAuditRow = (item: unknown): item is OperatorAudit =>
+  row(item) && text(item.id) && nullableText(item.actor_id) && text(item.action)
+  && nullableText(item.target_id) && row(item.metadata) && text(item.created_at);
 const validOperatorAccounts = (value: unknown): value is OperatorAccount[] =>
   bounded(value, 100, item => row(item) && text(item.user_id) && nullableText(item.email) && nullableText(item.display_name)
     && (item.role === null || roleValue(item.role)) && text(item.created_at) && nullableText(item.last_sign_in_at)
@@ -91,7 +96,7 @@ export function validOperatorDashboard(value: unknown): value is OperatorDashboa
     && validOperatorAccounts(value.accounts)
     && bounded(value.queue, 100, item => row(item) && [item.collection_id, item.title, item.module, item.term, item.owner_id, item.visibility, item.updated_at].every(text) && count(item.ready_questions) && count(item.review_questions))
     && bounded(value.reports, 100, item => row(item) && [item.post_id, item.author_handle, item.post_kind, item.reason, item.note, item.latest_at].every(text) && count(item.reports))
-    && bounded(value.audit, 30, item => row(item) && text(item.id) && nullableText(item.actor_id) && text(item.action) && nullableText(item.target_id) && row(item.metadata) && text(item.created_at));
+    && bounded(value.audit, 30, validOperatorAuditRow);
 }
 
 export async function operatorRole(accountId: string): Promise<OperatorRole | null> {
@@ -206,6 +211,28 @@ export async function loadOperatorDashboard(accountId: string): Promise<Operator
   return result;
   });
 }
+/** Older audit receipts are read only from the verified owner's server RPC.
+ * The existing dashboard snapshot remains the first (30-row) page.
+ */
+export async function loadOperatorAuditPage(
+  accountId: string, cursor: OperatorAuditCursor, pageSize = 30,
+): Promise<OperatorAuditPage> {
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 99) {
+    throw new Error("The requested audit page size is invalid.");
+  }
+  if (!cursor.id || !cursor.createdAt) throw new Error("A complete audit cursor is required.");
+  return withClient(accountId, async (client) => {
+    const { data, error } = await client.rpc("axom_operator_audit_page", {
+      max_rows: pageSize + 1, before_created_at: cursor.createdAt, before_id: cursor.id,
+    });
+    if (error) throw new Error("Older audit receipts are unavailable. Verify the Host migration and connection.");
+    if (!bounded(data, pageSize + 1, validOperatorAuditRow)) {
+      throw new Error("Audit history returned incomplete records. No export was performed.");
+    }
+    return { audit: data.slice(0, pageSize), hasMore: data.length > pageSize };
+  });
+}
+
 export async function searchOperatorAccounts(accountId: string, query: string): Promise<OperatorAccount[]> {
   const term = query.trim();
   if (!term) return [];
