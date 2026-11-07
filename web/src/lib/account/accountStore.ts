@@ -1,6 +1,7 @@
 import { retainDownloadedContent } from "../sync/contentDownloads";
 import { snapshotWorkspace } from "../sync/workspaceSnapshot";
 import { assertVaultWritesSince, getVaultWriteCheckpoint, flushLocalVaultWrites } from "../localVault";
+import { setVaultAccountIdentity } from "../vaultActivity";
 import { create } from "zustand";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { authRedirectUrl, cloudConfigured, loadSupabase, readStoredSession } from "./supabase";
@@ -764,3 +765,11 @@ export function failureSummary(view: Pick<AccountState, "syncFailure" | "nextAtt
   const next = view.nextAttemptAt ? ` Next automatic try ${new Date(view.nextAttemptAt).toLocaleString()}.` : "";
   return `Last upload failed ${new Date(failure.at).toLocaleString()}: ${what}, ${answer}${failure.code ? `, code ${failure.code}` : ""}.${phase}${reason}${size}${next}`;
 }
+
+/** Bind device-save status to the current signed-in identity, not the origin. */
+setVaultAccountIdentity(useAccount.getState().user?.id ?? null);
+useAccount.subscribe((state, previous) => {
+  if (state.user?.id !== previous.user?.id) {
+    setVaultAccountIdentity(state.user?.id ?? null);
+  }
+});

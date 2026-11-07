@@ -456,3 +456,51 @@ describe("lifecycle receipts fail-closed", () => {
     expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual(prior);
   });
 });
+
+
+describe("account-scoped local save receipts", () => {
+  it("does not reuse account A's saved badge for account B or signed-out; restores it only for A", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const raw = window.localStorage.getItem(markerKey);
+    expect(JSON.parse(raw ?? "null").accountId).toBe("account-a");
+    expect(vault.readLastVaultWrite()?.accountId).toBe("account-a");
+    vault.setVaultAccountIdentity("account-b");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.setVaultAccountIdentity(null);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(markerKey)).toBe(raw);
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readLastVaultWrite()?.accountId).toBe("account-a");
+  });
+  it("holds unscoped historical markers for signed-in accounts while preserving them for local-only use", async () => {
+    const legacy = { at: savedAt, target: "indexeddb", scope: "workspace", version: 2 };
+    window.localStorage.setItem(markerKey, JSON.stringify(legacy));
+    const vault = await import("./vaultActivity");
+    expect(vault.readLastVaultWrite()).toEqual(legacy);
+    vault.setVaultAccountIdentity("account-b");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual(legacy);
+  });
+  it("does not attribute an A-origin queued save to a switched B session", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.setVaultAccountIdentity("account-b");
+    vault.markVaultWrite("indexeddb", new Date(savedAt), "account-a");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    expect(vault.readLastVaultWrite()?.accountId).toBe("account-b");
+  });
+  it("fails closed rather than keeping B green when an older A acknowledgement arrives", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-b");
+    vault.markVaultWrite("local-fallback", new Date(savedAt));
+    vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 50), "account-a");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+    vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 100));
+    expect(vault.readLastVaultWrite()?.accountId).toBe("account-b");
+  });
+});
