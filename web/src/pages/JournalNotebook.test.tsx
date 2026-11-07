@@ -470,6 +470,50 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("coalesces a pending feedback send across closing and reopening the modal", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-remount-pending";
+    const account = { id: "journal-feedback-remount-account", email: "remount@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    let resolveRequest!: (receipt: string) => void;
+    const response = new Promise<string>((resolve) => { resolveRequest = resolve; });
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(() => response);
+    window.localStorage.removeItem(draftKey);
+    window.localStorage.removeItem(`${draftKey}:submitted`);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Keep one pending request after remount." } });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+
+      // The parent unmounts the first dialog while the server request is still pending.
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      expect(screen.queryByRole("dialog", { name: "How is the journal feeling?" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("Keep one pending request after remount.");
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).toHaveBeenCalledTimes(1);
+
+      await act(async () => { resolveRequest("550e8400-e29b-41d4-a716-446655440000"); await response; });
+      expect(await screen.findByText("Feedback received.")).toBeTruthy();
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem(`${draftKey}:submitted`)).toBeTruthy();
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
   it("stops a stale feedback editor from sending another tab's superseded draft", () => {
     const originalAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const originalProfile = useStore.getState().profile;
