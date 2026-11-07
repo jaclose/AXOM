@@ -41,6 +41,8 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(snapshot.questions).toHaveLength(1);
     expect(snapshot.questions[0].correctKey).toBe("A");
     expect(snapshot.questions[0].id).toBe("shared-question-1");
+    expect(snapshot.questions[0].tags).toContain("visual:intent:anatomical-schematic");
+    expect(snapshot.tags).toContain("visual:intent:anatomical-schematic");
     expect(JSON.stringify(snapshot)).not.toMatch(/Sensitive private note|sourceDocumentId|attempts/);
   });
 

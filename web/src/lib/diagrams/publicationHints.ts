@@ -11,6 +11,7 @@ export type MedicalVisualKind =
   | "anatomical-schematic"
   | "histology-micrograph"
   | "pathology-comparison"
+  | "gross-pathology-specimen"
   | "microbiology-image"
   | "mechanism-diagram"
   | "none";
@@ -33,6 +34,7 @@ const LEXICON: readonly string[] = [
   "photomicrograph", "hematoxylin", "eosin", "neutrophils", "glomerulus",
   "atherosclerosis", "fibrous cap", "necrotic core", "foam cells", "granuloma",
   "dysplasia", "neoplasm", "necrosis", "infarction",
+  "gross specimen", "gross pathology", "cut surface", "resected specimen", "autopsy",
   "gram stain", "fungal hyphae", "acid-fast", "protozoa", "bacteria",
   "action potential", "feedback loop", "receptor signaling", "enzyme inhibition",
 ];
@@ -42,6 +44,8 @@ const DOMAIN_RULES: readonly { kind: Exclude<MedicalVisualKind, "none">; pattern
     pattern: /\b(?:histolog(?:y|ical)|histopatholog(?:y|ical)|photomicrograph|microscop(?:y|ic)|h\s*&\s*e|hematoxylin|chondrocytes|lacunae)\b/i },
   { kind: "anatomical-schematic",
     pattern: /\b(?:anatomy|anatomical|brachial plexus|posterior cord|cranial nerve|inguinal canal|inferior epigastric|spinal cord)\b/i },
+  { kind: "gross-pathology-specimen",
+    pattern: /\b(?:gross specimen|gross pathology|gross appearance|cut surface|resected specimen|organ specimen|autopsy)\b/i },
   { kind: "pathology-comparison",
     pattern: /\b(?:patholog(?:y|ical)|atherosclerosis|fibrous cap|necrotic core|granuloma|dysplasia|neoplasm|necrosis|infarction)\b/i },
   { kind: "microbiology-image",
