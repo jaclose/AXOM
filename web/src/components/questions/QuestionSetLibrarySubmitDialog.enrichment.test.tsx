@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   withdraw: vi.fn(),
   updateQuestion: vi.fn(),
-  workspace: { questions: [] as unknown[] },
+  workspace: { questions: [] as unknown[], questionSets: [] as unknown[] },
 }));
 vi.mock("../../lib/account/accountStore", () => {
   const getAccountState = () => ({ user: mocks.accountId ? { id: mocks.accountId } : null });
@@ -54,6 +54,7 @@ function question(patch: Partial<QuestionRecord> = {}): QuestionRecord {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.accountId = "owner-1";
+  mocks.workspace.questionSets = [set];
   mocks.submissions.mockResolvedValue([]);
   mocks.completeJson.mockResolvedValue({
     explanation: "Tunica media has concentric vascular smooth muscle layers that control arterial caliber and vascular resistance.",
@@ -149,4 +150,19 @@ describe("Question Set draft explanation review", () => {
     expect(await screen.findByText(/questions changed/)).toBeTruthy();
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
   });
+  it("rejects a previously reviewed question if its live answer becomes held before submission", async () => {
+    const source = question({ explanation: "The tunica media is the arterial smooth muscle layer, important for contraction and resistance." });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    // Simulate an out-of-band import/review update without rerendering the dialog.
+    mocks.workspace.questions = [{ ...source, correctKey: "B", needsReview: true }];
+    fireEvent.click(send);
+    expect(await screen.findByText(/changed while publishing/)).toBeTruthy();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
 });
