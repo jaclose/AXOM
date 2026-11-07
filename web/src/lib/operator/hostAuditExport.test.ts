@@ -23,6 +23,11 @@ describe("Host evidence register", () => {
     expect(csv.split("\r\n")).toHaveLength(4);
   });
 
+  it("preserves genuinely empty optional identifiers in CSV", () => {
+    const line = auditCsv([{ ...sample[0], actor_id: null, target_id: null, metadata: {} }]).split("\r\n")[1];
+    expect(line.split(",").slice(2, 5)).toEqual(["", "", ""]);
+  });
+
   it("handles an empty audit register without claiming a complete history", () => {
     const csv = auditCsv([]);
     expect(csv).toBe("Timestamp,Action,Actor ID,Target ID,Reason,Metadata\r\n");
