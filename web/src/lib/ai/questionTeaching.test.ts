@@ -73,6 +73,26 @@ describe("review-gated explanation drafting", () => {
     expect(model.completeJson).not.toHaveBeenCalled();
   });
 
+  it("invalidates drafts when source evidence or provenance changes without a timestamp bump", () => {
+    const original = question({
+      sourceDocumentId: "source-pdf-1",
+      sourcePage: 3,
+      citation: "Source A, page 3",
+      extraction: {
+        confidence: "high", reviewed: true,
+        answerEvidence: "Answer key A, page 3",
+      },
+    });
+    const fingerprint = questionExplanationFingerprint(original);
+    expect(questionExplanationFingerprint({ ...original, citation: "Unverified replacement citation" })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, sourceDocumentId: "source-pdf-2" })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, sourcePage: 4 })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, extraction: { ...original.extraction!, reviewed: false } })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, extraction: {
+      ...original.extraction!, answerEvidence: "Conflicting answer marker, page 3",
+    } })).not.toBe(fingerprint);
+  });
+
   it("detects changed questions before accepting AI-generated explanations", () => {
     const original = question();
     const fingerprint = questionExplanationFingerprint(original);
