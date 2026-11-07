@@ -486,6 +486,64 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("addNotes")).toHaveLength(2);
   });
 
+  it("quarantines corrupted persisted old-note receipts before Anki can suspend or clear them", async () => {
+    const { fake, run } = interruptedRetirement("before");
+    const original = await run([card("a")], emptyLinkState());
+    const old = original.state.links.a;
+    const converted = [card("a", { type: "cloze", front: "{{c1::Kidney}} function", back: "" })];
+    const interrupted = await run(converted, original.state);
+    expect(interrupted.report).toMatchObject({ replaced: 1, offline: true, pending: 1 });
+
+    // These were persisted JSON, not mutations after normalizeLinkState. The
+    // previous normalizer silently discarded invalid IDs and even empty rows.
+    for (const malformed of [[old.cardIds[0], "bad"], [], [old.cardIds[0], old.cardIds[0]], ["bad"]]) {
+      const saved = JSON.parse(JSON.stringify(interrupted.state)) as LinkState;
+      (saved.pendingRetirements![0] as unknown as { cardIds: unknown[] }).cardIds = malformed;
+      const restored = normalizeLinkState(saved);
+      expect(restored.pendingRetirements).toHaveLength(1);
+      expect(restored.pendingRetirements![0].quarantinedCardIds).toEqual(malformed);
+      expect(cardSyncStatus("a", desiredNotes(converted, catalog, DEFAULT_DECK_LAYOUT).get("a")!.fingerprint, restored)).toBe("pending");
+
+      const suspendsBefore = fake.actionsCalled("suspend").length;
+      const held = await run(converted, restored);
+      expect(held.report.error).toMatch(/corrupt.*card.*receipt/i);
+      expect(held.report).toMatchObject({ pending: 1, deletedSuspended: 0, replaced: 0 });
+      expect(fake.actionsCalled("suspend")).toHaveLength(suspendsBefore);
+      expect(fake.actionsCalled("addNotes")).toHaveLength(2);
+      expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([false]);
+      const resaved = normalizeLinkState(JSON.parse(JSON.stringify(held.state)));
+      expect(resaved.pendingRetirements).toHaveLength(1);
+      expect(resaved.pendingRetirements![0].quarantinedCardIds).toEqual(malformed);
+    }
+
+    // Intact receipt resumes without adding another replacement note.
+    const valid = normalizeLinkState(JSON.parse(JSON.stringify(interrupted.state)));
+    const resumed = await run(converted, valid);
+    expect(resumed.report).toMatchObject({ pending: 0, replaced: 0, offline: false });
+    expect(resumed.state.pendingRetirements).toEqual([]);
+    expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([true]);
+    expect(fake.actionsCalled("addNotes")).toHaveLength(2);
+  });
+
+  it("quarantines a deleted-note suspend receipt with invalid persisted card IDs", async () => {
+    const h = harness();
+    await h.run([card("a")]);
+    const old = h.state.links.a;
+    const saved = JSON.parse(JSON.stringify(recordAxomDeletion(h.state, "a", "suspend"))) as LinkState;
+    (saved.pendingSuspends[0] as unknown as { cardIds: unknown[] }).cardIds = [old.cardIds[0], "invalid"];
+    h.state = normalizeLinkState(saved);
+    expect(h.state.pendingSuspends).toHaveLength(1);
+    expect(h.state.pendingSuspends[0].quarantinedCardIds).toEqual([old.cardIds[0], "invalid"]);
+    const before = h.fake.actionsCalled("suspend").length;
+    const report = await h.run([]);
+    expect(report.error).toMatch(/corrupt.*card.*receipt/i);
+    expect(report).toMatchObject({ pending: 1, deletedSuspended: 0 });
+    expect(h.fake.actionsCalled("suspend")).toHaveLength(before);
+    expect(h.fake.call("areSuspended", { cards: old.cardIds })).toEqual([false]);
+    expect(normalizeLinkState(JSON.parse(JSON.stringify(h.state))).pendingSuspends[0].quarantinedCardIds)
+      .toEqual([old.cardIds[0], "invalid"]);
+  });
+
   it("keeps only the incomplete receipt when a multi-note replacement stops midway", async () => {
     const fake = new FakeAnkiConnect();
     const realFetch = createFakeFetch(fake);
