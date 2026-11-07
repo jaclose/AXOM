@@ -74,7 +74,7 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(() => publish({ liveQuestion: null })).toThrow(/changed while publishing/);
   });
 
-  it.each([
+  const silentSetRevisions: Array<[string, QuestionSet]> = [
     ["course filing", { ...set, scope: { courseId: "different-private-course", module: "M1" } }],
     ["parent lineage", { ...set, parentSetId: "new-parent" }],
     ["same-ID replacement", { ...set, createdAt: "2026-11-07T12:00:00.000Z" }],
@@ -83,7 +83,8 @@ describe("community Question Set exact-revision publication gate", () => {
     } }],
     ["filter provenance", { ...set, filterSnapshot: { courseId: "different-private-course" } }],
     ["seeded order", { ...set, ordering: "random" as const, seed: "different-seed" }],
-  ])("refuses publishing after %s changed without any question timestamp update", (_label, liveSet) => {
+  ];
+  it.each(silentSetRevisions)("refuses publishing after %s changed without any question timestamp update", (_label, liveSet) => {
     expect(() => publish({ liveSet })).toThrow(/changed while publishing/);
   });
 
