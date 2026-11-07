@@ -422,7 +422,7 @@ describe("Journal notebook foundation", () => {
     }
   });
 
-  it("retains a newer draft from another tab after a feedback receipt, but clears an unchanged submitted draft", async () => {
+  it("retains newer feedback and acknowledges only the submitted revision", async () => {
     const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const previousProfile = useStore.getState().profile;
     const workspaceId = "journal-feedback-concurrent-draft";
@@ -469,12 +469,70 @@ describe("Journal notebook foundation", () => {
       }));
       await act(async () => { resolveRequests[1]("second-receipt"); await Promise.resolve(); });
       expect(screen.getByRole("status").textContent).toContain("Feedback received.");
-      expect(window.localStorage.getItem(draftKey)).toBeNull();
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+      expect(window.localStorage.getItem(`${draftKey}:submitted`)).toBeTruthy();
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
     } finally {
       cleanup();
       useAccount.setState(previousAccount);
       useStore.setState({ profile: previousProfile });
       window.localStorage.removeItem(draftKey);
+    }
+  });
+
+  it("never deletes another tab's draft written during successful receipt", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-receipt-race";
+    const account = { id: "receipt-race-account", email: "race@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const receiptKey = `${draftKey}:submitted`;
+    let resolveRequest!: (receipt: string) => void;
+    vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(
+      () => new Promise<string>((resolve) => { resolveRequest = resolve; }),
+    );
+    window.localStorage.removeItem(draftKey);
+    window.localStorage.removeItem(receiptKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const nativeSet = Storage.prototype.setItem;
+    let injected = false;
+    let competingDraft = "";
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Sent first tab draft." } });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      const removed = vi.spyOn(Storage.prototype, "removeItem");
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+        if (this === window.localStorage && key === receiptKey && !injected) {
+          injected = true;
+          competingDraft = JSON.stringify({
+            ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"),
+            liked: "Second tab wrote during receipt.",
+          });
+          nativeSet.call(this, draftKey, competingDraft);
+        }
+        nativeSet.call(this, key, value);
+      });
+      await act(async () => { resolveRequest("race-receipt"); await Promise.resolve(); });
+      expect(injected).toBe(true);
+      expect(removed).not.toHaveBeenCalledWith(draftKey);
+      expect(window.localStorage.getItem(draftKey)).toBe(competingDraft);
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("Second tab wrote during receipt.");
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(receiptKey);
     }
   });
 
