@@ -434,3 +434,77 @@ test("BFCache-style page suspension retires unverifiable badge but preserves wor
     return (await vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)) === value;
   }, saved)).toBe(true);
 });
+
+
+/**
+ * Unlike a synthetic pageshow dispatch, this moves through actual Chromium
+ * history navigation. BFCache availability varies by browser/build: always
+ * require durable IndexedDB read-back; when Chromium really restores BFCache,
+ * assert the quota-only optimistic save badge was retired by pagehide/pageshow.
+ * Isolated synthetic origin and data only, never an authenticated account.
+ */
+test("real browser back/forward navigation retains durable workspace and retires BFCache-only status", async ({ context }) => {
+  const page = await probe(context);
+  const workspace = snapshot("real-history-restore", "保存🪶".repeat(24_000));
+  const before = await page.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const activity = await import("/src/lib/vaultActivity.ts");
+    const key = STORAGE_KEYS.persistedState;
+    await vault.localVaultStorage.getItem(key);
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(key, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+
+    // After a real durable write, force only the OPTIONAL receipt to exceed quota.
+    const nativeSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name: string, data: string) {
+      if (name === STORAGE_KEYS.lastVaultWriteAt) {
+        throw new DOMException("Synthetic metadata quota", "QuotaExceededError");
+      }
+      return nativeSetItem.call(this, name, data);
+    };
+    activity.markVaultWrite("indexeddb", new Date(Date.now() + 60_000));
+    (window as Window & { __qaRestoredFromBFCache?: boolean }).__qaRestoredFromBFCache = false;
+    window.addEventListener("pageshow", (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        (window as Window & { __qaRestoredFromBFCache?: boolean }).__qaRestoredFromBFCache = true;
+      }
+    });
+    return {
+      bytesDurable: (await vault.localVaultStorage.getItem(key)) === value,
+      optimisticReceipt: activity.readLastVaultWrite() !== null,
+    };
+  }, workspace);
+  expect(before).toEqual({ bytesDurable: true, optimisticReceipt: true });
+
+  await context.route("**/__axom_vault_history_away__", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html; charset=utf-8",
+    body: "<!doctype html><html><title>Unrelated synthetic history destination</title><body>away</body></html>",
+  }));
+  await page.goto("/__axom_vault_history_away__");
+  await page.goBack({ waitUntil: "domcontentloaded" });
+  const restored = await page.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const activity = await import("/src/lib/vaultActivity.ts");
+    const fromBFCache = (window as Window & { __qaRestoredFromBFCache?: boolean }).__qaRestoredFromBFCache === true;
+    return {
+      bytesDurable: (await vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)) === value,
+      fromBFCache,
+      staleOptimisticReceipt: fromBFCache && activity.readLastVaultWrite() !== null,
+    };
+  }, workspace);
+  expect(restored.bytesDurable).toBe(true);
+  expect(restored.staleOptimisticReceipt).toBe(false);
+
+  // Repeat on an entirely fresh module instance after reload; no account data.
+  await page.reload();
+  expect(await page.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return (await vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)) === value;
+  }, workspace)).toBe(true);
+});
