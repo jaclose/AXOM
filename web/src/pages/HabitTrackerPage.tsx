@@ -361,6 +361,7 @@ function scheduleLabel(schedule: number[]): string {
 function HabitEditor({ habit, onClose }: { habit: Habit; onClose: () => void }) {
   const updateHabit = useStore((s) => s.updateHabit);
   const scheduled = habit.type === "scheduled";
+  const trackers = useStore((s) => s.productivityTrackers);
   const sched = new Set(habit.schedule ?? []);
 
   function toggleDay(d: number) {
@@ -395,6 +396,32 @@ function HabitEditor({ habit, onClose }: { habit: Habit; onClose: () => void }) 
         </label>
       </div>
 
+      {habit.type === "weekly" && <div className="goal-cadence-config">
+        <label>Weekly minimum <input className="field" aria-label="Edit weekly minimum" type="number" min="1" max="7"
+          value={habit.weeklyMinimum ?? habit.weeklyTarget ?? 3}
+          onChange={(e) => {
+            const minimum = Math.max(1, Math.min(7, Number(e.target.value) || 1));
+            updateHabit(habit.id, { weeklyMinimum: minimum, weeklyTarget: minimum, weeklyPreferred: Math.max(minimum, habit.weeklyPreferred ?? minimum) });
+          }} /></label>
+        <label>Preferred days <input className="field" aria-label="Edit weekly preferred" type="number"
+          min={habit.weeklyMinimum ?? habit.weeklyTarget ?? 1} max="7"
+          value={habit.weeklyPreferred ?? habit.weeklyMinimum ?? habit.weeklyTarget ?? 3}
+          onChange={(e) => updateHabit(habit.id, {
+            weeklyPreferred: Math.max(habit.weeklyMinimum ?? habit.weeklyTarget ?? 1, Math.min(7, Number(e.target.value) || 1)),
+          })} /></label>
+        <label>Linked activity
+          <select className="field" aria-label="Edit linked tracker" value={habit.linkedTrackerId ?? ""}
+            onChange={(e) => updateHabit(habit.id, { linkedTrackerId: e.target.value || undefined })}>
+            <option value="">Check-ins only</option>
+            {trackers.filter((item) => !item.archived).map((tracker) => <option key={tracker.id} value={tracker.id}>{tracker.name}</option>)}
+          </select>
+        </label>
+      </div>}
+      <label className="habit-target-option">
+        <input type="checkbox" checked={habit.includeInReports === true}
+          onChange={(e) => updateHabit(habit.id, { includeInReports: e.target.checked })}/>
+        <span>Include in <b>my private Reports</b>. Never public. Changes do not create a new event.</span>
+      </label>
       {scheduled && (
         <div className="row gap6 wrap" style={{ marginTop: 12 }}>
           {WEEKDAYS.map((label, d) => (
