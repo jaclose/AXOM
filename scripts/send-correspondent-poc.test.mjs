@@ -47,7 +47,7 @@ test("approved test uses exact recipient, sender, reply-to and stable idempotenc
   assert.match(body.from,/AXOM · Vesper <vesper@axom.info>/);
   assert.equal(body.reply_to,"team@axom.info");
   assert.match(body.subject,/AXOM POC · WELCOME/);
-  assert.match(body.html,/SOURCE/);
+  assert.match(body.html,/ORIGIN/);
   assert.ok(sent.init.headers["Idempotency-Key"].startsWith("axom-poc-"));
   assert.ok(!JSON.stringify(result).includes(env.RESEND_API_KEY));
 });
