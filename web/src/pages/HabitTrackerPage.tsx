@@ -122,6 +122,18 @@ function HabitCreate() {
   return (
     <GlassCard pad>
       <PanelHeader title="New habit" sub="Self-monitoring with realistic, flexible recovery — not shame-driven streaks." />
+      <div className="goal-preset-choices" role="group" aria-label="Recurring goal templates">
+        <button type="button" onClick={() => {
+          setName("Gym"); setType("weekly"); setWeeklyMinimum(4); setWeeklyPreferred(5);
+          setLinkedTrackerId(trackers.find((item) => item.id === "tracker-gym" && !item.archived)?.id ?? "");
+          setCountInTargets(false); setIncludeInReports(true);
+        }}>Gym · 4–5 days/week</button>
+        <button type="button" onClick={() => {
+          setName("Daily prayers"); setType("slots");
+          setSlotNames(PRAYER_OCCURRENCE_SLOTS.map((slot) => slot.label).join(", "));
+          setCountInTargets(false); setIncludeInReports(false); setLinkedTrackerId("");
+        }}>Five named daily prayers</button>
+      </div>
       <div className="row wrap gap8">
         <input className="field grow" placeholder="e.g. Morning sunlight, 20 min of cardio, no doomscrolling"
           value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
@@ -131,6 +143,24 @@ function HabitCreate() {
         <GButton variant="primary" onClick={add}><Plus size={ICON_SIZE.body} /> Add</GButton>
       </div>
       <div className="sub" style={{ marginTop: 10 }}>{HABIT_TYPE_META[type].hint}</div>
+      {type === "weekly" && (
+        <div className="goal-cadence-config">
+          <label>Minimum days/week <input className="field" aria-label="Weekly minimum" type="number" min="1" max="7" value={weeklyMinimum} onChange={(e) => setWeeklyMinimum(Math.max(1, Math.min(7, Number(e.target.value) || 1)))} /></label>
+          <label>Preferred days/week <input className="field" aria-label="Weekly preferred" type="number" min={weeklyMinimum} max="7" value={weeklyPreferred} onChange={(e) => setWeeklyPreferred(Math.max(weeklyMinimum, Math.min(7, Number(e.target.value) || weeklyMinimum)))} /></label>
+          <label>Count activity from <select className="field" aria-label="Linked activity tracker" value={linkedTrackerId} onChange={(e) => setLinkedTrackerId(e.target.value)}>
+            <option value="">Check-ins only</option>
+            {trackers.filter((item) => !item.archived).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select></label>
+        </div>
+      )}
+      {type === "slots" && <label className="goal-cadence-slots-label">
+        <span>Distinct daily occurrences, separated by commas</span>
+        <input className="field" aria-label="Named daily occurrences" value={slotNames} onChange={(e) => setSlotNames(e.target.value)} />
+      </label>}
+      <label className="habit-target-option">
+        <input type="checkbox" checked={includeInReports} onChange={(e) => setIncludeInReports(e.target.checked)} />
+        <span>Include in <b>my private Reports</b> (never public). Named personal practices default to hidden.</span>
+      </label>
       <label className="habit-target-option">
         <input type="checkbox" checked={countInTargets} onChange={(event) => setCountInTargets(event.target.checked)} />
         <span>Count it in <b>Today’s targets</b> on Productivity — checking the habit fills the target automatically.</span>
