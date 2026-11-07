@@ -170,7 +170,7 @@ export function ProductivityPage() {
               <span><Activity size={ICON_SIZE.body} aria-hidden="true" /> Self-report</span>
               <small>These entries are reported by you. Focus time is recorded separately when auto-log is on.</small>
             </div>
-            <div className="fast-activity-logger">
+            <form className="fast-activity-logger" aria-label="Log self-reported activity" onSubmit={(event) => { event.preventDefault(); logManual(); }}>
               <ActivityLabelInput value={manualType} onChange={(value) => { setManualType(value); setLastSelfReport(false); }} />
               <div className="self-report-templates" aria-label="Quick self-report templates">
                 {SELF_REPORT_TEMPLATES.map((template) => (
@@ -193,8 +193,8 @@ export function ProductivityPage() {
                 </div></div>
               </div>
               <label className="fast-field fast-activity-note"><span>Note (optional)</span><input className="field" aria-label="Note (optional)" placeholder="Add context if it will help later" value={manualNote} onChange={(event) => setManualNote(event.target.value)} /></label>
-              <GButton variant="primary" onClick={logManual} disabled={!manualType.trim()}><Plus size={ICON_SIZE.body} /> Log</GButton>
-            </div>
+              <GButton variant="primary" type="submit" disabled={!manualType.trim()}><Plus size={ICON_SIZE.body} /> Log</GButton>
+            </form>
             {lastSelfReport && <p className="self-report-confirmation" role="status">
               Activity added. Your save status appears above.
             </p>}
