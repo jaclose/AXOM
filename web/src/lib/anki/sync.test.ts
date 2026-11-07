@@ -459,6 +459,33 @@ describe("pushing AXOM cards to Anki", () => {
     expect(fake.actionsCalled("addNotes")).toHaveLength(2);
   });
 
+  it("holds a corrupted duplicate-card retirement receipt without suspending a different card, then recovers", async () => {
+    const { fake, run } = interruptedRetirement("before");
+    const original = await run([card("a", { type: "basic-reversed" })], emptyLinkState());
+    const old = original.state.links.a;
+    expect(old.cardIds).toHaveLength(2);
+    const converted = [card("a", { type: "cloze", front: "{{c1::Kidney}} function", back: "" })];
+    const interrupted = await run(converted, original.state);
+    expect(interrupted.report).toMatchObject({ replaced: 1, offline: true, pending: 1 });
+    const duplicate = normalizeLinkState(JSON.parse(JSON.stringify(interrupted.state)));
+    duplicate.pendingRetirements![0].cardIds = [old.cardIds[0], old.cardIds[0]];
+    const before = fake.actionsCalled("suspend").length;
+    const held = await run(converted, duplicate);
+    expect(held.report.error).toMatch(/old note\/card identity changed/);
+    expect(held.report).toMatchObject({ pending: 1, deletedSuspended: 0 });
+    expect(held.state.pendingRetirements).toHaveLength(1);
+    expect(fake.actionsCalled("suspend")).toHaveLength(before);
+    expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([false, false]);
+
+    // Recover from intact persisted state; retry does not add another note.
+    const restored = normalizeLinkState(JSON.parse(JSON.stringify(interrupted.state)));
+    const resumed = await run(converted, restored);
+    expect(resumed.report).toMatchObject({ pending: 0, deletedSuspended: 0, replaced: 0, offline: false });
+    expect(resumed.state.pendingRetirements).toEqual([]);
+    expect(fake.call("areSuspended", { cards: old.cardIds })).toEqual([true, true]);
+    expect(fake.actionsCalled("addNotes")).toHaveLength(2);
+  });
+
   it("keeps only the incomplete receipt when a multi-note replacement stops midway", async () => {
     const fake = new FakeAnkiConnect();
     const realFetch = createFakeFetch(fake);
