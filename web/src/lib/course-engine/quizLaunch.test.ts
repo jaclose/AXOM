@@ -88,4 +88,88 @@ describe("course to canonical quiz handoff", () => {
     expect(readCourseQuizLaunch([])).toBeNull();
     expect(readCourseQuizLaunch(questions)?.questionIds).toEqual(["one", "two"]);
   });
+
+  it("rejects malformed or repeated set IDs before replacing the pending handoff", () => {
+    const valid = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: ["set-one"] };
+    launchCourseQuiz(valid);
+    const pending = sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY);
+    for (const ids of [["set-one", "set-one"], [" "], [null], [17]]) {
+      const malformed = { ...valid, setIds: ids as unknown as string[] };
+      expect(() => launchCourseQuiz(malformed)).toThrow(/selection is invalid/);
+      expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
+      sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(malformed));
+      expect(readCourseQuizLaunch(questions)).toBeNull();
+      // The next legitimate launch is still readable without rewriting question data.
+      sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, pending!);
+    }
+    expect(readCourseQuizLaunch(questions)?.questionIds).toEqual(["one"]);
+  });
+
+  it("does not launch when multiple on-device questions claim a requested original ID", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: ["set-one"] };
+    launchCourseQuiz(selection);
+    const pending = sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY);
+    const disputed = { ...questions[0], stem: "Conflicting original with the same saved ID" };
+    for (const local of [[questions[0], disputed], [disputed, questions[0]]]) {
+      expect(readCourseQuizLaunch(local)).toBeNull();
+      expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
+    }
+    // Duplicate unrelated records must not hold a valid fixed selection.
+    const unrelated = { ...questions[1], id: "unrelated" };
+    expect(readCourseQuizLaunch([questions[0], unrelated, { ...unrelated, stem: "Different" }])?.questionIds).toEqual(["one"]);
+    expect(readCourseQuizLaunch([questions[0]])?.questionIds).toEqual(["one"]);
+  });
+
+  it("holds parseable but malformed saved quiz snapshots without changing stored bytes", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    const startHash = location.hash;
+    for (const raw of ["{}", "[]", "0", '"unreadable"', '{"poolIds":[]}', '{"poolIds":"one"}', '{"poolIds":[1]}']) {
+      localStorage.setItem(STORAGE_KEYS.quizActiveSession, raw);
+      expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+      expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBe(raw);
+      expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+      expect(location.hash).toBe(startHash);
+    }
+  });
+
+  it("fails closed with recovery guidance when saved storage access is blocked", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    const currentHash = location.hash;
+    vi.stubGlobal("localStorage", { getItem: () => { throw new Error("storage denied"); } });
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("storage denied"); } });
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(location.hash).toBe(currentHash);
+  });
+
+  it("protects a tab-scoped unfinished quiz when the legacy mirror is missing", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    const startHash = location.hash;
+    const key = `${STORAGE_KEYS.quizActiveSession}:run:run-42`;
+    sessionStorage.setItem(`${STORAGE_KEYS.quizActiveSession}:run-id`, "run-42");
+    const recoverable = JSON.stringify({ mode: "tutor", poolIds: ["one"], answers: [], filters: {}, startedAt: "2026-11-06T23:00:00.000Z" });
+    localStorage.setItem(key, recoverable);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+    expect(() => launchCourseQuiz(selection)).toThrow(/Resume or finish/);
+    expect(localStorage.getItem(key)).toBe(recoverable);
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+    expect(location.hash).toBe(startHash);
+    localStorage.setItem(key, "{}");
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(localStorage.getItem(key)).toBe("{}");
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+  });
+
+  it("does not overwrite an unreadable saved quiz or navigate away from recovery", () => {
+    const currentHash = location.hash;
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, "{damaged session");
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBe("{damaged session");
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+    expect(location.hash).toBe(currentHash);
+  });
+
 });

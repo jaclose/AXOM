@@ -26,6 +26,22 @@ export function courseQuizSelection(bank: QuestionBankBook, week?: number): Cour
     setIds: [...new Set(collections.flatMap(entry => entry.setId ? [entry.setId] : []))] };
 }
 
+/** A stored session is either absent, resumable or held for non-destructive recovery.
+ * Legacy single-key snapshots and this tab's per-run mirror have the same guard.
+ * Full resume validity is checked by ExamRunner; this preflight must never
+ * interpret an existing malformed record as permission to start a new run. */
+function savedQuizPresence(raw: string | null): "none" | "active" | "corrupt" {
+  if (raw === null) return "none";
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { return "corrupt"; }
+  if (value === null) return "none"; // Preserve the historical explicit null sentinel.
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "corrupt";
+  const poolIds = (value as { poolIds?: unknown }).poolIds;
+  if (!Array.isArray(poolIds) || !poolIds.length
+    || poolIds.some(id => typeof id !== "string" || !id.trim())) return "corrupt";
+  return "active";
+}
+
 export function launchCourseQuiz(selection: CourseQuizLaunch): void {
   if (!selection.questionIds.length) throw new Error("No reviewed questions are available in this selection yet.");
   if (selection.questionIds.length > MAX_COURSE_QUIZ_QUESTIONS
@@ -34,11 +50,31 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
     || !selection.module.trim() || !selection.term.trim()
     || (selection.week !== undefined && (!Number.isSafeInteger(selection.week) || selection.week < 1))
     || (selection.courseId !== undefined && !selection.courseId.trim())
-    || selection.setIds.length > MAX_COURSE_QUIZ_QUESTIONS) {
+    || selection.setIds.length > MAX_COURSE_QUIZ_QUESTIONS
+    || new Set(selection.setIds).size !== selection.setIds.length
+    || selection.setIds.some(id => typeof id !== "string" || !id.trim())) {
     throw new Error("The course practice selection is invalid or exceeds its supported question limit.");
   }
-  const active = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { poolIds?: unknown[] } | null;
-  if (active?.poolIds?.length) throw new Error("Resume or finish your current quiz in Question Bank before starting another.");
+  // A legacy mirror may be absent when a modern run was saved only under its
+  // per-tab run key (e.g. a quota failure during legacy-mirror persistence).
+  let legacyPresence: ReturnType<typeof savedQuizPresence>;
+  let scopedPresence: ReturnType<typeof savedQuizPresence> = "none";
+  try {
+    legacyPresence = savedQuizPresence(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
+    const tabRunId = sessionStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run-id`);
+    if (tabRunId) {
+      scopedPresence = savedQuizPresence(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:${tabRunId}`));
+    }
+  } catch {
+    // An unavailable storage API is not evidence that an unfinished run ended.
+    throw new Error("Your saved Question Bank session cannot be read. Open Question Bank to recover it before starting a new quiz.");
+  }
+  if (legacyPresence === "corrupt" || scopedPresence === "corrupt") {
+    throw new Error("Your saved Question Bank session cannot be read. Open Question Bank to recover it before starting a new quiz.");
+  }
+  if (legacyPresence === "active" || scopedPresence === "active") {
+    throw new Error("Resume or finish your current quiz in Question Bank before starting another.");
+  }
   sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(selection));
   const alreadyInQuestionBank = location.hash === "#questions";
   location.hash = "questions";
@@ -60,12 +96,22 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
       || ("week" in value && value.week !== undefined && (!Number.isSafeInteger(value.week) || (value.week as number) < 1))
       || ("courseId" in value && value.courseId !== undefined && (typeof value.courseId !== "string" || !value.courseId.trim()))
       || ("setIds" in value && (!Array.isArray(value.setIds) || value.setIds.length > MAX_COURSE_QUIZ_QUESTIONS
+        || new Set(value.setIds).size !== value.setIds.length
         || value.setIds.some(id => typeof id !== "string" || !id.trim())))) return null;
     const questionIds = value.questionIds as string[];
-    const eligible = new Set(questions.filter(question => questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id));
-    // A partial hydration MUST NOT produce a shorter practice block. Keep the
-    // original request untouched until every exact question is ready on-device.
-    if (!questionIds.every(id => eligible.has(id))) return null;
+    const requestedIds = new Set(questionIds);
+    const seenOnDevice = new Set<string>();
+    const duplicateOnDevice = new Set<string>();
+    const eligible = new Set<string>();
+    for (const question of questions) {
+      if (!requestedIds.has(question.id)) continue;
+      if (seenOnDevice.has(question.id)) duplicateOnDevice.add(question.id);
+      seenOnDevice.add(question.id);
+      if (questionMappingStatus(question) === "ready" && question.options.length >= 2) eligible.add(question.id);
+    }
+    // A partial hydration or conflicting local identity must not launch a
+    // shorter or order-dependent block. Preserve the pending request for repair.
+    if (!questionIds.every(id => eligible.has(id) && !duplicateOnDevice.has(id))) return null;
     return { module: value.module, term: value.term, questionIds,
       ...("courseId" in value && typeof value.courseId === "string" ? { courseId: value.courseId } : {}),
       ...("week" in value && typeof value.week === "number" ? { week: value.week } : {}),
