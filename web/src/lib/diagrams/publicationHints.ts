@@ -45,7 +45,7 @@ const DOMAIN_RULES: readonly { kind: Exclude<MedicalVisualKind, "none">; pattern
   { kind: "anatomical-schematic",
     pattern: /\b(?:anatomy|anatomical|brachial plexus|posterior cord|cranial nerve|inguinal canal|inferior epigastric|spinal cord)\b/i },
   { kind: "gross-pathology-specimen",
-    pattern: /\\b(?:gross specimen|gross pathology|gross appearance|cut surface|resected specimen|organ specimen|autopsy)\\b/i },
+    pattern: /\b(?:gross specimen|gross pathology|gross appearance|cut surface|resected specimen|organ specimen|autopsy)\b/i },
   { kind: "pathology-comparison",
     pattern: /\b(?:patholog(?:y|ical)|atherosclerosis|fibrous cap|necrotic core|granuloma|dysplasia|neoplasm|necrosis|infarction)\b/i },
   { kind: "microbiology-image",
