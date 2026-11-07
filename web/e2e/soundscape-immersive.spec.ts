@@ -2,6 +2,7 @@ import { completeSetup, expect, test } from "./fixtures";
 
 type DevWindow = Window & {
   __AXOM_DEV__: Promise<{
+    useSoundscape: { getState: () => { setStopAfter: (minutes: number | null) => void; status: string } };
     usePomodoro: { getState: () => {
       setPreset: (id: string) => void; start: () => void; reset: () => void;
       pause: () => void; secondsLeft: number; running: boolean;
@@ -67,4 +68,30 @@ test("immersive Orb uses actual pixel density within the 8K budget", async ({ pa
   expect(values.width).toBeGreaterThanOrEqual(Math.floor(values.cssWidth * Math.min(values.density, 1.25)));
   expect(values.pixels).toBeLessThanOrEqual(7680 * 4320);
   expect(values.width).toBeGreaterThan(0);
+});
+
+test("soundscape stop timer is shown in fullscreen even without a Pomodoro", async ({ page }) => {
+  await page.goto("/#soundscapes", { waitUntil: "networkidle" });
+  await completeSetup(page, "Immersive sound stop", { ifVisible: true });
+  const later = page.getByRole("button", { name: "Review later", exact: true });
+  if (await later.count()) await later.click();
+  await page.goto("/#soundscapes", { waitUntil: "networkidle" });
+  const skip = page.getByRole("button", { name: "Skip for now", exact: true });
+  if (await skip.count()) await skip.click();
+  await page.getByRole("region", { name: "Main sound", exact: true }).getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(() => page.evaluate(async () => {
+    const { useSoundscape } = await (window as unknown as DevWindow).__AXOM_DEV__;
+    return useSoundscape.getState().status;
+  })).toBe("playing");
+  await page.evaluate(async () => {
+    const { useSoundscape } = await (window as unknown as DevWindow).__AXOM_DEV__;
+    useSoundscape.getState().setStopAfter(5);
+  });
+  await page.getByRole("button", { name: "Full screen", exact: true }).click();
+  const timer = page.getByRole("group", { name: "Focus timer" });
+  await expect(timer).toBeVisible();
+  await expect(timer).toContainText("AUDIO STOP");
+  await expect(timer).toContainText("Soundscape playback will stop");
+  await timer.getByRole("button", { name: "Cancel sound stop timer" }).click();
+  await expect(timer).toHaveCount(0);
 });
