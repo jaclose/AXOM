@@ -158,6 +158,8 @@ test("Productivity primary panels stay usable across themes and narrow screens",
       }
       await expect(page.locator("#productivity-focus .study-streak-monitor")).toBeVisible();
       await expect(page.locator("#productivity-log .study-streak-monitor")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Add a goal" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Use Questions template" })).toBeVisible();
       const focusMeter = page.getByRole("progressbar", { name: "Focus session progress" });
       await expect(focusMeter).toBeVisible();
       await expect(focusMeter).toHaveAttribute("aria-valuenow", /^(0|[1-9]\d?|100)$/);
