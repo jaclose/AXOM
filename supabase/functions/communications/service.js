@@ -4036,9 +4036,9 @@ function ge(e) {
 		}));
 	}
 	if (t.source.kind === "habit") {
-		let o = Ce(e.habitEntries, t.source.habitId, n), s = e.habits.find((e) => e.id === t.source.habitId);
-		if (!o && s?.type === "weekly" && s.linkedTrackerId) {
-			let e = a.find((e) => e.trackerId === s.linkedTrackerId && (e.minutes > 0 || (e.quantity ?? 0) > 0 || e.cards > 0));
+		let o = Ce(e.habitEntries, t.source.habitId, n), s = t.source.habitId, c = e.habits.find((e) => e.id === s);
+		if (!o && c?.type === "weekly" && c.linkedTrackerId) {
+			let e = a.find((e) => e.trackerId === c.linkedTrackerId && (e.minutes > 0 || (e.quantity ?? 0) > 0 || e.cards > 0));
 			e && H(i, V({
 				requirement: t,
 				dayKey: n,
