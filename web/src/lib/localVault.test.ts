@@ -13,7 +13,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
+import { readLastVaultWrite, readVaultWriteFailure, setVaultAccountIdentity } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -810,3 +810,53 @@ function deleteDatabase(name: string): Promise<void> {
     request.onblocked = () => resolve();
   });
 }
+
+describe("queued workspace writes retain their initiating account session", () => {
+  it("does not advertise a stale A write after a fast A → B → A switch", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const oldWorkspace = JSON.stringify({
+      state: { profile: { userId: "jd" }, journal: "retain the committed bytes" }, version: 34,
+    });
+    const newWorkspace = JSON.stringify({
+      state: { profile: { userId: "jd" }, journal: "current account-a session" }, version: 34,
+    });
+    setVaultAccountIdentity("account-a");
+    try {
+      const pending = localVaultStorage.setItem(key, oldWorkspace);
+      // The adapter has queued an asynchronous IndexedDB transaction.
+      setVaultAccountIdentity("account-b");
+      setVaultAccountIdentity("account-a");
+      await pending;
+      // The old bytes are still retrievable; only the stale success badge is revoked.
+      expect(await localVaultStorage.getItem(key)).toBe(oldWorkspace);
+      expect(readLastVaultWrite()).toBeNull();
+
+      await localVaultStorage.setItem(key, newWorkspace);
+      // This test uses Vitest's Node environment, which has no window.
+      // Browser receipt restoration is asserted in vaultActivity.test.ts (jsdom).
+      expect(readVaultWriteFailure()).toBeNull();
+      expect(await localVaultStorage.getItem(key)).toBe(newWorkspace);
+    } finally {
+      setVaultAccountIdentity(null);
+    }
+  });
+});
+
+describe("manual save verification account boundary", () => {
+  it("fails closed before writing when serialization switches A → B → A", async () => {
+    const value = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "unchanged" }, version: 34 });
+    setVaultAccountIdentity("account-a");
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      await expect(saveAndVerifyLocalWorkspace(() => {
+        setVaultAccountIdentity("account-b");
+        setVaultAccountIdentity("account-a");
+        return value;
+      })).rejects.toThrow(/account changed during workspace save verification/);
+      expect(getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
+    } finally {
+      setVaultAccountIdentity(null);
+    }
+  });
+});

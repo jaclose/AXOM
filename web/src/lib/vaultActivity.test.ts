@@ -488,7 +488,9 @@ describe("account-scoped local save receipts", () => {
     vault.setVaultAccountIdentity(null);
     expect(vault.readLastVaultWrite()).toBeNull();
     vault.setVaultAccountIdentity("account-a");
-    expect(vault.readLastVaultWrite()).toMatchObject({ ...saved, target: "indexeddb" });
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 1100));
+    expect(vault.readLastVaultWrite()).toMatchObject({ accountId: "account-a", target: "indexeddb" });
     expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
   });
 
@@ -539,14 +541,16 @@ describe("account-scoped local save receipts", () => {
     vault.setVaultAccountIdentity("account-a");
     expect(vault.readLastVaultWrite()).toBeNull();
     vault.setVaultAccountIdentity(null);
-    expect(vault.readLastVaultWrite()).toEqual(legacy);
-    expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual(legacy);
+    // Once a signed-in account has been left, the old guest receipt is no
+    // longer evidence of this session's current workspace. Its bytes remain.
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
     vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 5000));
     expect(vault.readLastVaultWrite()?.version).toBe(4);
     expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
   });
 
-  it("does not reuse account A's saved badge for account B or signed-out; restores it only for A", async () => {
+  it("does not reaccept account A's old badge after a completed A-B-A identity roundtrip", async () => {
     const vault = await import("./vaultActivity");
     vault.setVaultAccountIdentity("account-a");
     vault.markVaultWrite("indexeddb", new Date(savedAt));
@@ -557,8 +561,10 @@ describe("account-scoped local save receipts", () => {
     expect(vault.readLastVaultWrite()).toBeNull();
     vault.setVaultAccountIdentity(null);
     expect(vault.readLastVaultWrite()).toBeNull();
-    expect(window.localStorage.getItem(markerKey)).toBe(raw);
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
     vault.setVaultAccountIdentity("account-a");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 1100));
     expect(vault.readLastVaultWrite()?.accountId).toBe("account-a");
   });
   it("holds unscoped historical markers for signed-in accounts while preserving them for local-only use", async () => {
@@ -594,6 +600,75 @@ describe("account-scoped local save receipts", () => {
 
 
 describe("account switch status invalidation safety", () => {
+  it("retires an already completed A receipt across A-B-A without any queued write", async () => {
+    const workspace = JSON.stringify({ notebook: "confirmed bytes must survive identity changes" });
+    window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const prior = window.localStorage.getItem(markerKey);
+    expect(prior).not.toBeNull();
+    vault.setVaultAccountIdentity("account-a");
+    expect(window.localStorage.getItem(markerKey)).toBe(prior);
+    vault.setVaultAccountIdentity("account-b");
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+    vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 1100));
+    expect(vault.readLastVaultWrite()).toMatchObject({
+      accountId: "account-a", target: "indexeddb", at: "2026-11-06T20:00:01.100Z",
+    });
+    expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+  });
+
+  it("holds the old A receipt after identity switching even when marker removal and replacement are both denied", async () => {
+    const workspace = '{"synthetic":"do not discard durable workspace"}';
+    window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const old = window.localStorage.getItem(markerKey);
+    const nativeRemove = Storage.prototype.removeItem;
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function(this: Storage, key: string) {
+      if (key === markerKey) throw new Error("status removal denied");
+      return nativeRemove.call(this, key);
+    });
+    const nativeSet = Storage.prototype.setItem;
+    const replace = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+      if (key === markerKey) throw new Error("status replacement denied");
+      return nativeSet.call(this, key, value);
+    });
+    try {
+      vault.setVaultAccountIdentity("account-b");
+      vault.setVaultAccountIdentity("account-a");
+      expect(window.localStorage.getItem(markerKey)).toBe(old);
+      expect(vault.readLastVaultWrite()).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+    } finally {
+      replace.mockRestore();
+      remove.mockRestore();
+    }
+    vault.markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 1100));
+    expect(vault.readLastVaultWrite()?.accountId).toBe("account-a");
+  });
+
+  it("recognizes a matching persisted receipt on first signed-in identity hydration", async () => {
+    const raw = JSON.stringify({
+      at: savedAt, scope: "workspace", version: 4,
+      target: "axom-receipt-v4-indexeddb", accountId: "account-a",
+    });
+    window.localStorage.setItem(markerKey, raw);
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readLastVaultWrite()).toMatchObject({
+      at: savedAt, target: "indexeddb", accountId: "account-a",
+    });
+    expect(window.localStorage.getItem(markerKey)).toBe(raw);
+    // This tests initial metadata continuity, not actual workspace-revision equality.
+  });
+
   it("does not revive a deleted workspace's marker if metadata removal was blocked across A-B-A", async () => {
     const vault = await import("./vaultActivity");
     vault.setVaultAccountIdentity("account-a");
@@ -635,5 +710,80 @@ describe("account switch status invalidation safety", () => {
     expect(vault.readVaultWriteFailure()).toBe(savedAt);
     vault.setVaultAccountIdentity("account-b");
     expect(vault.readVaultWriteFailure()).toBeNull();
+  });
+});
+
+describe("account session epoch for delayed writes", () => {
+  it("does not credit an A write queued before A → B → A to the returned A session", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    const oldEpoch = vault.readVaultAccountEpoch();
+    vault.setVaultAccountIdentity("account-b");
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readVaultAccountEpoch()).toBeGreaterThan(oldEpoch);
+
+    vault.markVaultWrite("indexeddb", new Date(savedAt), "account-a", oldEpoch);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+    vault.markVaultWrite("indexeddb", new Date(savedAt), "account-a", vault.readVaultAccountEpoch());
+    expect(vault.readLastVaultWrite()).toMatchObject({
+      version: 4, accountId: "account-a", target: "indexeddb",
+    });
+  });
+
+  it("does not report an old A failure after A → B → A, but reports a current A failure", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    const oldEpoch = vault.readVaultAccountEpoch();
+    vault.setVaultAccountIdentity("account-b");
+    vault.setVaultAccountIdentity("account-a");
+    vault.markVaultWriteFailure(new Date(savedAt), "account-a", oldEpoch);
+    expect(vault.readVaultWriteFailure()).toBeNull();
+    vault.markVaultWriteFailure(new Date(savedAt), "account-a", vault.readVaultAccountEpoch());
+    expect(vault.readVaultWriteFailure()).toBe(savedAt);
+  });
+
+  it("does not advance the epoch when the account identity is unchanged", async () => {
+    const vault = await import("./vaultActivity");
+    vault.setVaultAccountIdentity("account-a");
+    const epoch = vault.readVaultAccountEpoch();
+    vault.setVaultAccountIdentity("account-a");
+    expect(vault.readVaultAccountEpoch()).toBe(epoch);
+    vault.markVaultWrite("local-fallback", new Date(savedAt), "account-a", epoch);
+    expect(vault.readLastVaultWrite()?.accountId).toBe("account-a");
+  });
+});
+
+describe("real queued IndexedDB write status across A-B-A", () => {
+  it("keeps stale write durable but suppresses its receipt, then restores fresh A receipt", async () => {
+    const { indexedDB: fakeIndexedDb, IDBKeyRange } = await import("fake-indexeddb");
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const key = STORAGE_KEYS.persistedState;
+    const oldWorkspace = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "old session" }, version: 34 });
+    const newWorkspace = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "current session" }, version: 34 });
+    const vault = await import("./vaultActivity");
+    const local = await import("./localVault");
+    try {
+      vault.setVaultAccountIdentity("account-a");
+      const pending = local.localVaultStorage.setItem(key, oldWorkspace);
+      vault.setVaultAccountIdentity("account-b");
+      vault.setVaultAccountIdentity("account-a");
+      await pending;
+      expect(await local.localVaultStorage.getItem(key)).toBe(oldWorkspace);
+      expect(vault.readLastVaultWrite()).toBeNull();
+      expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+      await local.localVaultStorage.setItem(key, newWorkspace);
+      expect(vault.readVaultWriteFailure()).toBeNull();
+      expect(vault.readLastVaultWrite()).toMatchObject({ accountId: "account-a", version: 4, target: "indexeddb" });
+      expect(window.localStorage.getItem(markerKey)).not.toBeNull();
+      expect(await local.localVaultStorage.getItem(key)).toBe(newWorkspace);
+      expect(vault.readLastVaultWrite()).toMatchObject({ accountId: "account-a", version: 4 });
+    } finally {
+      vault.setVaultAccountIdentity(null);
+      vi.unstubAllGlobals();
+    }
   });
 });
