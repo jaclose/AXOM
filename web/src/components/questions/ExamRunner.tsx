@@ -9,6 +9,7 @@ import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./Ques
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { BookOpenCheck, Check, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer, X } from "lucide-react";
 import { useStore } from "../../lib/store";
+import { notePassiveAtlasAction } from "../../lib/communications/passiveFirstRunClient";
 import { STORAGE_KEYS } from "../../lib/brand";
 import {
   buildQuizPool, missedQuestionIds, quizPoolCounts, quizSubjectCounts, scoreSession,
@@ -771,6 +772,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
         if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: new Date().toISOString() });
       }
+      notePassiveAtlasAction("begin-practice");
       setStage("sim");
       return;
     }
@@ -784,6 +786,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
       if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: runStartedAt });
     }
+    notePassiveAtlasAction("begin-practice");
     setStage("running");
   }
 

@@ -31,6 +31,7 @@ import { protectionLabel, useAccount } from "../../lib/account/accountStore";
 import { useOperatorAccess } from "../../lib/operator/hostClient";
 import { canOpenHost } from "../../lib/operator/hostAccess";
 import { APP_VERSION_LABEL } from "../../lib/brand";
+import { notePassiveAtlasAction } from "../../lib/communications/passiveFirstRunClient";
 
 const MOBILE_SIDEBAR_QUERY = "(max-width: 880px)";
 const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
@@ -193,7 +194,14 @@ export function Sidebar({
         data-tour={`nav-${id}`}
         aria-label={accessibleLabel}
         aria-current={active === id ? "page" : undefined}
-        onClick={() => { onSelect(id); onClose(); }}>
+        onClick={() => {
+          const signal = ({
+            questions: "visit-questions", tracker: "visit-tracker",
+            reports: "visit-reports", productivity: "visit-productivity",
+          } as const)[id as "questions" | "tracker" | "reports" | "productivity"];
+          if (signal) notePassiveAtlasAction(signal);
+          onSelect(id); onClose();
+        }}>
         <I size={ICON_SIZE.emphasis} /><span className="nav-item-label">{item.label}</span><DailyGameNavMeta id={id} />{statusBadge}
       </button>
     );

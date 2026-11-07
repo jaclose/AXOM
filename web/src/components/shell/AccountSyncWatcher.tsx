@@ -1,5 +1,5 @@
 import { installCloudMediaCache } from "../../lib/sync/cloudMediaCache";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { deviceLabel, platformName, protectionView, useAccount } from "../../lib/account/accountStore";
 import { useCompactAvatar } from "../../lib/avatarImage";
 import { SyncCoordinator } from "../../lib/sync/syncCoordinator";
@@ -7,6 +7,7 @@ import { SupabaseSyncTransport } from "../../lib/sync/supabaseTransport";
 import { SYNC_METADATA_KEY, deviceId, read } from "../../lib/sync/syncMetadata";
 import { restingStatus } from "../../lib/sync/syncPolicy";
 import { useStore } from "../../lib/store";
+import { discardAtlasObservationOnAccountChange } from "../../lib/communications/passiveFirstRunClient";
 
 /** Debounce for background protection after the last change. */
 const SYNC_DELAY_MS = 8000;
@@ -22,6 +23,7 @@ export function AccountSyncWatcher() {
   const phase = useAccount((state) => state.phase);
   const link = useAccount((state) => state.link);
   const userId = useAccount((state) => state.user?.id);
+  const atlasObservedScope = useRef<string | null | undefined>(undefined);
   // Lives here because this is the always-mounted owner of what gets uploaded;
   // it also keeps local saves and backup files small without an account.
   useCompactAvatar();
@@ -29,6 +31,14 @@ export function AccountSyncWatcher() {
   useEffect(() => {
     useAccount.getState().init();
   }, []);
+
+  useEffect(() => {
+    if (phase === "loading" || phase === "unconfigured") return;
+    const current = phase === "signed-in" ? userId ?? null : null;
+    const previous = atlasObservedScope.current;
+    if (previous !== undefined) discardAtlasObservationOnAccountChange(previous, current);
+    atlasObservedScope.current = current;
+  }, [phase, userId]);
 
   useEffect(() => {
     if (phase !== "signed-in" || link !== "linked" || !userId) return;
