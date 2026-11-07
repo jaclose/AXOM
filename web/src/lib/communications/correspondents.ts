@@ -155,10 +155,16 @@ export function renderCorrespondentIntroduction(match:CorrespondentMatch,options
     '<td style="font:bold 16px ',font,';color:#E6E2D6;letter-spacing:4px">AXOM<p style="font:10px ',mono,';letter-spacing:1px;color:#C8A96A;margin:5px 0 0">THE LIVING ATLAS</p></td>',
     '<td align="right" style="font:10px ',mono,';color:#BCB7AC">01 / 40</td></tr></table></td></tr>',
     '<tr><td style="padding:30px 28px"><table role="presentation"><tr><td width="90" height="3" bgcolor="',escapeHtml(match.accent),'"></td></tr></table>',
-    '<p style="margin:25px 0 15px;color:#C8A96A;font:10px ',mono,';letter-spacing:1.3px">WELCOME / A NAME FOR THE WORK</p>',
-    '<p style="margin:0 0 12px;color:#BCB7AC;font:14px/22px ',font,'">',name,', the Archive opens to a new companion.</p>',
-    '<h1 style="font:normal 46px/54px Georgia,Times,serif;color:#E6E2D6;margin:0 0 17px">',alias,'.</h1>',
-    '<p style="font:15px/24px ',font,';color:#E6E2D6;margin:0 0 26px">',escapeHtml(explain),'</p>',
+    '<p style="margin:25px 0 15px;color:#C8A96A;font:10px ',mono,';letter-spacing:1.3px">WELCOME TO AXOM / THE FIRST LETTER</p>',
+    '<h1 style="font:normal 42px/49px Georgia,Times,serif;color:#E6E2D6;margin:0 0 19px">Welcome to AXOM, ',name,'.</h1>',
+    '<p style="font:15px/26px ',font,';color:#E6E2D6;margin:0 0 17px">A private academic workspace built to connect what was taught, what you practiced, and what you truly understood.</p>',
+    '<p style="font:14px/25px ',font,';color:#BCB7AC;margin:0 0 24px">AXOM brings your courses, source-linked questions, reviewed explanations and learning objectives into one coherent record. Its purpose is not to count how hard you worked. It is to help you see the evidence and choose a worthwhile next move.</p>',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#252426;border:1px solid #504A3E;margin:0 0 27px"><tr><td style="padding:19px"><p style="font:10px ',mono,';color:#C8A96A;letter-spacing:1.4px;margin:0 0 10px">THE LIVING ATLAS / WHAT IT IS</p>',
+    '<p style="font:14px/25px ',font,';color:#E6E2D6;margin:0">The Living Atlas is a fellowship of forty fictional academic companions in eight orders. Each has a story, learning method, strength and limitation. A companion is a character, never a diagnosis or a verdict on your personality.</p></td></tr></table>',
+    '<p style="font:14px/25px ',font,';color:#BCB7AC;margin:0 0 21px">AXOM may suggest a starting companion using academic preferences you voluntarily share. Your choice takes precedence. You can change or turn off your companion in Settings, and private journal entries are excluded by default.</p>',
+    '<p style="font:10px ',mono,';color:#C8A96A;letter-spacing:1.3px;margin:24px 0 13px">YOUR CORRESPONDENT / A FIRST ENCOUNTER</p>',
+    '<h2 style="font:normal 43px/50px Georgia,Times,serif;color:#E6E2D6;margin:0 0 15px">Meet ',alias,'.</h2>',
+    '<p style="font:15px/25px ',font,';color:#E6E2D6;margin:0 0 24px">',escapeHtml(explain),'</p>',
     '<table role="presentation" width="100%" cellspacing="3" cellpadding="0" style="margin-bottom:26px">',
     '<tr>',stage("01 / ORIGIN","THE ARCHIVE","Where the story begins"),'</tr>',
     '<tr>',stage("02 / NATURE","THE METHOD","How this creature learns"),'</tr>',
@@ -168,15 +174,30 @@ export function renderCorrespondentIntroduction(match:CorrespondentMatch,options
     '<table role="presentation" width="100%" cellspacing="0" cellpadding="0">',why,'</table>',
     '<p style="color:#BCB7AC;font:13px/22px ',font,';margin:22px 0">',escapeHtml(match.description),'</p>',
     '<p style="background:#161618;border-left:2px solid #C8A96A;color:#BCB7AC;font:12px/20px ',font,';padding:17px;margin:0 0 25px">',escapeHtml(disclaimer),'</p>',
-    '<a href="https://axom.info/#communications" style="background:#E6E2D6;color:#0D0D0E;display:inline-block;text-decoration:none;font:bold 13px ',font,';padding:15px 19px">Review email preferences</a>',
+    '<p style="color:#BCB7AC;font:14px/23px ',font,';margin:0 0 21px">Begin with one course, one reviewed question or one trusted source. The Atlas will accompany the work, not replace it.</p>',
+    '<a href="https://axom.info/#dashboard" style="background:#E6E2D6;color:#0D0D0E;display:inline-block;text-decoration:none;font:bold 13px ',font,';padding:15px 19px">Enter your workspace</a>',
+    '<p style="font:11px/18px ',font,';color:#BCB7AC;margin:16px 0 0">You remain in control. <a href="https://axom.info/#communications" style="color:#D4B87E">Manage the companion and email preferences</a>.</p>',
     '</td></tr><tr><td style="border-top:1px solid #48433C;padding:20px 28px"><p style="color:#C8A96A;font:11px ',mono,';margin:0 0 8px">THE WORK, MADE LEGIBLE.</p>',
     '<p style="color:#BCB7AC;font:11px/19px ',font,';margin:0">This is an AXOM email identity, not a human support agent. Security mail always uses the official account sender.</p></td></tr>',
     '</table></td></tr></table></body></html>'
   ].join("");
-  const text=["AXOM / THE LIVING ATLAS", (options.displayName||"Learner")+", meet "+match.name+".",explain,
-    "ORIGIN -> NATURE -> COMPANION","The character:",match.description,disclaimer,
-    "Review email preferences: https://axom.info/#communications",
-    "This is an AXOM email identity, not a human support agent."].join("\n\n");
+  const text=[
+    "AXOM / WELCOME TO THE WORKSPACE",
+    "Welcome to AXOM, "+(options.displayName||"Learner")+".",
+    "AXOM is a private academic workspace that connects your courses, questions, reviewed explanations and original sources so you can choose a better next step. It does not equate logged hours with mastery.",
+    "WHAT IS THE LIVING ATLAS?",
+    "The Living Atlas is a fellowship of forty fictional academic companions in eight orders. Each has a different story, learning method, strength and limitation. Companions are creative learning guides, not personality diagnoses.",
+    "A starting character can be suggested from academic preferences you voluntarily share, or you can pick your own. You can change or turn off this companion at any time. Raw journal entries are excluded by default.",
+    "YOUR CORRESPONDENT: "+match.name,
+    explain,
+    "ORIGIN -> NATURE -> COMPANION",
+    "The character: "+match.description,
+    disclaimer,
+    "Begin with one course, reviewed question or trusted source.",
+    "Enter your workspace: https://axom.info/#dashboard",
+    "Companion and email preferences: https://axom.info/#communications",
+    "This is a fictional AXOM correspondent, not a human support agent."
+  ].join("\n\n");
   return {subject,html,text};
 }
 export interface CorrespondentSenderOptions { domain:string;verifiedDomains:readonly string[];replyTo:string }
