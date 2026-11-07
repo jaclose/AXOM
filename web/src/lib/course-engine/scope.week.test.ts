@@ -414,7 +414,7 @@ describe("verified primary-source progress attribution", () => {
     // still provide scored evidence and must not lose progress.
     const legacy = question("candidate", {
       setId: "primary", ...filing, status: "correct",
-      attempts: [{ status: "correct" }] as QuestionRecord["attempts"],
+      attempts: [{ status: "correct" }] as unknown as QuestionRecord["attempts"],
     });
     assert.equal(scopeProgress([legacy], filing, sets).firstTimeCorrect, 1);
   });
