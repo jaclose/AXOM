@@ -114,6 +114,7 @@ describe("Account protection experience", () => {
       render(<AccountSyncPanel />);
       const localStatus = screen.getByRole("alert", { name: "Local save status" });
       expect(localStatus.textContent).toContain("Save needs attention");
+      expect(screen.getByRole("button", { name: "Retry local save" })).toBeTruthy();
       expect(localStatus.textContent).toContain(`Not saved since ${failedAt.toLocaleTimeString()}`);
       expect(document.querySelector(".account-location-indicator.local-failure")).toBeTruthy();
       expect(document.querySelector(".account-location-indicator.local-saved")).toBeNull();

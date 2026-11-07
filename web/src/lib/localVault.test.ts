@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertVaultWrite,
   assertVaultWritesSince,
+  saveAndVerifyLocalWorkspace,
   DB_VERSION,
   getVaultWriteCheckpoint,
   flushLocalVaultWrites,
@@ -12,7 +13,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readVaultWriteFailure } from "./vaultActivity";
+import { readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -254,6 +255,46 @@ describe("IndexedDB-first local vault", () => {
     await localVaultStorage.removeItem(STORAGE_KEYS.persistedState);
     expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
     expect(localStorage.getItem(`${STORAGE_KEYS.persistedState}:active-user`)).toBeNull();
+  });
+
+  it("removes obsolete status on workspace deletion but not on auxiliary-key removal", async () => {
+    // This suite uses Node with a stubbed Storage. Model the browser's window.
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "private" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    const record = readLastVaultWrite();
+    expect(record?.scope).toBe("workspace");
+    window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, '{"generations":[]}');
+    await localVaultStorage.removeItem(STORAGE_KEYS.aiGenerations);
+    expect(readLastVaultWrite()).toEqual(record);
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+
+    await localVaultStorage.removeItem(key);
+    expect(readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+  });
+
+  it("drops a saved badge if hydration finds the previously saved vault missing", async () => {
+    // This suite uses Node with a stubbed Storage. Model the browser's window.
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "protected" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    const record = readLastVaultWrite();
+    expect(record?.scope).toBe("workspace");
+    window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+
+    // IndexedDB may be purged independently of the tiny browser status marker.
+    await deleteDatabase(STORAGE_KEYS.vaultDb);
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
   });
 
   it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
@@ -618,6 +659,70 @@ describe("a save that could not reach IndexedDB", () => {
     // The workspace itself is on disk, so this is a save, not a failure.
     expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+  });
+
+  it("does not report a workspace failure when an auxiliary cache cannot save", async () => {
+    await localVaultStorage.setItem(key, snapshot("workspace"));
+    expect(readVaultWriteFailure()).toBeNull();
+
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === STORAGE_KEYS.aiGenerations) throw new Error("auxiliary cache quota exceeded");
+        storage.setItem(name, value);
+      },
+    });
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, JSON.stringify({ generations: [] }));
+    expect(readVaultWriteFailure()).toBeNull();
+  });
+
+  it("keeps a real workspace failure visible after an unrelated cache succeeds", async () => {
+    await localVaultStorage.setItem(key, snapshot("workspace"));
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === key) throw new Error("workspace quota exceeded");
+        storage.setItem(name, value);
+      },
+    });
+    await localVaultStorage.setItem(key, snapshot("unsaved"));
+    expect(readVaultWriteFailure()).not.toBeNull();
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("localStorage", storage);
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, JSON.stringify({ generations: [] }));
+    expect(readVaultWriteFailure()).not.toBeNull();
+
+    await localVaultStorage.setItem(key, snapshot("recovered"));
+    expect(readVaultWriteFailure()).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("recovered"));
+  });
+
+  it("acknowledges a manual retry only after exact local read-back", async () => {
+    const value = snapshot("verified retry");
+    await saveAndVerifyLocalWorkspace(() => value);
+    expect(readVaultWriteFailure()).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBe(value);
+  });
+
+  it("does not acknowledge a retry when IndexedDB and the fallback both fail", async () => {
+    await localVaultStorage.setItem(key, snapshot("older verified"));
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === key) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    await expect(saveAndVerifyLocalWorkspace(() => snapshot("unsaved retry")))
+      .rejects.toThrow(/QuotaExceededError/);
+    expect(readVaultWriteFailure()).not.toBeNull();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("localStorage", storage);
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("older verified"));
   });
 
   it("is reported while no store accepts it, and the report clears once saving works", async () => {
