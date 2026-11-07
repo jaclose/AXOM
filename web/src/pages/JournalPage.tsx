@@ -713,6 +713,13 @@ function JournalWritingPage({
   }
 
   function openFullPage() {
+    // A keyboard-focused Write full page control can still activate while the
+    // inline book is closing. Do not let its stale timer unmount the reopened page.
+    if (deskCloseTimerRef.current !== null) {
+      window.clearTimeout(deskCloseTimerRef.current);
+      deskCloseTimerRef.current = null;
+      setDeskClosing(false);
+    }
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
