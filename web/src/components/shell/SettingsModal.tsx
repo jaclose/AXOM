@@ -3,13 +3,14 @@ import { useNotificationPermission } from "../../lib/useNotificationPermission";
 import {
   Bell, Clock3, Database, Download, FileJson, Palette, RotateCcw, ShieldCheck,
   Sparkles, Trash2, Upload, UserCircle2, Check, MessageCircle, Settings2,
-  Paintbrush, BookOpen, LayoutGrid, GraduationCap, Globe2,
+  Paintbrush, BookOpen, LayoutGrid, GraduationCap, Globe2, Compass,
 } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { otherWorkspaceUrl } from "../../lib/otherWorkspace";
 import { Modal, Field } from "../ui/Modal";
 import { AxomWordmark } from "../ui/BrandMark";
 import { GButton, Tag } from "../ui/primitives";
+import { AtlasPreferencesSettings } from "./AtlasPreferencesSettings";
 import { useStore, type Store } from "../../lib/store";
 import { privateReviewMedia } from "../../lib/privateLibrary/media";
 import { compactAvatarDataUrl } from "../../lib/avatarImage";
@@ -62,7 +63,7 @@ import {
 } from "../../lib/dashboardWidgets";
 
 type SettingsSection = "profile" | "account" | "appearance" | "personalization" | "data" | "backup" | "advanced";
-export type PersonalizationSubsection = "study" | "rhythm" | "dashboard" | "program";
+export type PersonalizationSubsection = "study" | "rhythm" | "dashboard" | "program" | "atlas";
 /** Legacy names remain accepted so existing deep links keep opening safely. */
 export type SettingsTab = SettingsSection | PersonalizationSubsection | "general" | "ai";
 
@@ -81,17 +82,18 @@ const PERSONALIZATION_SUBSECTIONS: Array<{ id: PersonalizationSubsection; label:
   { id: "rhythm", label: "Daily rhythm", detail: "Reminders, lock-in check-ins, clock", icon: Clock3 },
   { id: "dashboard", label: "Dashboard", detail: "Which widgets appear", icon: LayoutGrid },
   { id: "program", label: "Program & lanes", detail: "Track, focus lanes, early features", icon: GraduationCap },
+  { id: "atlas", label: "Atlas companion", detail: "Choose or disable your academic guide", icon: Compass },
 ];
 
 function normalizeSettingsTab(tab: SettingsTab): SettingsSection {
   if (tab === "general") return "profile";
   if (tab === "ai") return "advanced";
-  if (tab === "study" || tab === "rhythm" || tab === "dashboard" || tab === "program") return "personalization";
+  if (tab === "study" || tab === "rhythm" || tab === "dashboard" || tab === "program" || tab === "atlas") return "personalization";
   return tab;
 }
 
 function initialSubsection(tab: SettingsTab): PersonalizationSubsection {
-  return tab === "rhythm" || tab === "dashboard" || tab === "program" ? tab : "study";
+  return tab === "rhythm" || tab === "dashboard" || tab === "program" || tab === "atlas" ? tab : "study";
 }
 
 type PortableRestoreMode = "replace" | "merge";
@@ -519,6 +521,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
           {personalTab === "rhythm" && <DailyUtilitiesSettings />}
           {personalTab === "dashboard" && <DashboardVisibilitySettings />}
           {personalTab === "program" && <PersonalizationPanel />}
+          {personalTab === "atlas" && <AtlasPreferencesSettings />}
         </section>
       )}
 
