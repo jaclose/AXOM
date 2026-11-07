@@ -107,8 +107,9 @@ async function taskTitles(page: Page) {
 
 async function secondDevice(browser: Browser) {
   const context = await browser.newContext({ serviceWorkers: "block" });
+  // Route HTTP(S) and WebSockets before this account's first page exists.
+  await isolateLiveAccountNetwork(context, dedicatedOrigin, "http://127.0.0.1:5187");
   const page = await context.newPage();
-  await isolateSupabaseRequests(page);
   return { context, page };
 }
 
