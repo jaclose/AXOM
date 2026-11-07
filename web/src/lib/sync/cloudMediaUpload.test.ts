@@ -6,7 +6,7 @@ import { sha256 } from "../compressedText";
 import { deleteQuestionAttachmentBlobs, putQuestionAttachmentBlob } from "../questionAttachments";
 import { makeSeed } from "../seed";
 import type { NoctyriumState } from "../types";
-import { MEDIA_BUCKET, clearCloudMediaUploadCache, uploadCloudMedia } from "./cloudMedia";
+import { MEDIA_BUCKET, clearCloudMediaUploadCache, downloadCloudMediaAsset, uploadCloudMedia } from "./cloudMedia";
 
 const objects = new Map<string, Blob>();
 const defaultUpload = async (path: string, blob: Blob) => {
@@ -212,4 +212,72 @@ describe("bounded account image uploads", () => {
     // A rejected collision never enters the successful upload cache.
     expect(upload).toHaveBeenCalledTimes(2);
   });
+
+  it("retains a previously protected original when only the local image cache was lost", async () => {
+    const { state, keys, hashes } = await fixture(1);
+    const protectedIndex = await uploadCloudMedia(client, "synthetic-owner", state, guard);
+    expect(protectedIndex).toHaveLength(1);
+    expect(upload).toHaveBeenCalledTimes(1);
+
+    // The already-acknowledged original remains in the synthetic remote bucket.
+    // Deleting only a fake IndexedDB cache cannot invalidate that cloud copy.
+    await deleteQuestionAttachmentBlobs([keys[0]]);
+    const reused = await uploadCloudMedia(client, "synthetic-owner", state, guard, protectedIndex);
+    expect(reused).toEqual(protectedIndex);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(objects.has("synthetic-owner/" + hashes[0])).toBe(true);
+
+    const restored = await downloadCloudMediaAsset(client, "synthetic-owner", reused[0]);
+    expect(new Uint8Array(await restored.arrayBuffer()))
+      .toEqual(new Uint8Array([137, 80, 78, 71, 1]));
+    expect(download).toHaveBeenCalledWith("synthetic-owner/" + hashes[0]);
+  });
+
+  it("stale acknowledged manifest cannot authenticate a changed missing figure; restore retries with immutable originals", async () => {
+    const { state, keys, hashes } = await fixture(1);
+    const first = await uploadCloudMedia(client, "synthetic-owner", state, guard);
+    const originalPath = "synthetic-owner/" + hashes[0];
+    expect(objects.has(originalPath)).toBe(true);
+
+    // Same-size edited metadata is not evidence that the updated image exists.
+    // The prior protected version must stay intact, not silently certify a new one.
+    await deleteQuestionAttachmentBlobs([keys[0]]);
+    const attachment = state.questions[0].attachments![0];
+    attachment.updatedAt = new Date(Date.parse(attachment.updatedAt) + 60_000).toISOString();
+    await expect(uploadCloudMedia(client, "synthetic-owner", state, guard, first))
+      .rejects.toMatchObject({
+        failure: { kind: "rejected", rejection: "missing-image", status: 0 },
+      });
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(objects.has(originalPath)).toBe(true);
+
+    // An actual new source image can be added back to the synthetic local
+    // cache and then protected under a different immutable hash.
+    const revisedBytes = new Uint8Array([137, 80, 78, 71, 29]);
+    const revisedBlob = new Blob([revisedBytes], { type: "image/png" });
+    await putQuestionAttachmentBlob(keys[0], {
+      questionId: "q1",
+      blob: revisedBlob,
+      mimeType: "image/png",
+      byteSize: revisedBlob.size,
+      updatedAt: attachment.updatedAt,
+    });
+    const second = await uploadCloudMedia(client, "synthetic-owner", state, guard, first);
+    const revisedHash = await sha256(revisedBytes);
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({
+      blobKey: keys[0], hash: revisedHash, byteSize: revisedBytes.length, updatedAt: attachment.updatedAt,
+    });
+    expect(second[0].hash).not.toBe(first[0].hash);
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(objects.has("synthetic-owner/" + revisedHash)).toBe(true);
+    expect(objects.has(originalPath)).toBe(true);
+
+    const oldOriginal = await downloadCloudMediaAsset(client, "synthetic-owner", first[0]);
+    const newOriginal = await downloadCloudMediaAsset(client, "synthetic-owner", second[0]);
+    expect(new Uint8Array(await oldOriginal.arrayBuffer()))
+      .toEqual(new Uint8Array([137, 80, 78, 71, 1]));
+    expect(new Uint8Array(await newOriginal.arrayBuffer())).toEqual(revisedBytes);
+  });
+
 });
