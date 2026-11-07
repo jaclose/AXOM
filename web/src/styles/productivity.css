@@ -139,6 +139,7 @@
 .self-report-templates > button:hover,
 .self-report-templates > button.on { border-color: var(--gold-line); color: var(--text); background: var(--gold-soft); }
 .self-report-templates > button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#productivity-log .productivity-save { margin: 5px 2px 5px; text-align: left; font-size: var(--fs-tiny); }
 .self-report-confirmation { margin: 8px 0 0; color: var(--text-70); font-size: var(--fs-xs); }
 .productivity-primary-grid #productivity-log > .daily-progress-vessel { margin-top: 20px; }
 .productivity-primary-grid .daily-progress-vessel { margin-top: 18px; margin-bottom: 4px; }
