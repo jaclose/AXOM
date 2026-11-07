@@ -129,6 +129,37 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
   });
 
+  it("does not close the desk with a late unsaved edit after storage rejects the write", async () => {
+    vi.useFakeTimers();
+    const saveCheck = vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => {
+      throw new Error("Simulated storage write failure");
+    });
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Put book down" }));
+    expect(screen.getByRole("region", { name: "Write at your desk" }).className).toContain("is-closing");
+
+    // The delayed 900ms animation must not bypass durability when a late
+    // input/composition event updates the page after the initial save gate.
+    const text = "This late line must not disappear when storage fails.";
+    fireEvent.change(screen.getByLabelText("Write freely at your desk"), { target: { value: text } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    const desk = screen.getByRole("region", { name: "Write at your desk" });
+    expect(desk.className).not.toContain("is-closing");
+    expect((within(desk).getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value).toBe(text);
+    expect(within(desk).getByText("Your changes need saving")).toBeTruthy();
+    expect(within(desk).getByRole("button", { name: "Retry save" })).toBeTruthy();
+
+    saveCheck.mockImplementation(() => undefined);
+    fireEvent.click(within(desk).getByRole("button", { name: "Retry save" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(within(desk).getByText("Page saved locally")).toBeTruthy();
+    const entry = useStore.getState().journal.find((item) => dayKey(new Date(item.date)) === TODAY_KEY);
+    expect(entry?.freeWriting).toBe(text);
+  });
+
   it("offers an explicit put-down and closes when the surrounding desk is clicked", async () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
