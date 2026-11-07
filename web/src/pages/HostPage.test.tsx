@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
+import { loadOperatorAuditPage, loadOperatorDashboard, resolveReport, searchOperatorAccounts, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -11,6 +11,7 @@ vi.mock("../lib/account/accountStore", () => ({
 vi.mock("../lib/operator/hostClient", () => ({
   useAccountIdentity: () => "verified-account",
   loadOperatorDashboard: vi.fn(),
+  loadOperatorAuditPage: vi.fn(),
   searchOperatorAccounts: vi.fn(),
   resolveReport: vi.fn(),
   setOperatorAI: vi.fn(),
@@ -53,6 +54,35 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Host page authorization and moderation", () => {
+  it("pages and filters owner-only privileged evidence without claiming complete history", async () => {
+    const user = userEvent.setup();
+    const recent = Array.from({ length: 30 }, (_, index) => ({
+      id: `receipt-${index}`, actor_id: "owner-id", target_id: "member-id",
+      action: index === 0 ? "account.role" : "ai.policy",
+      metadata: { reason: "Review logged with source evidence" },
+      created_at: `2026-11-07T09:${String(59 - index).padStart(2, "0")}:00Z`,
+    }));
+    vi.mocked(loadOperatorDashboard).mockResolvedValue({ ...dashboard("owner"), audit: recent });
+    vi.mocked(loadOperatorAuditPage).mockResolvedValue({
+      audit: [{
+        id: "older-record", actor_id: "owner-id", target_id: "member-id",
+        action: "account.role.older", metadata: { reason: "Historical account change verified" },
+        created_at: "2026-11-06T09:00:00Z",
+      }],
+      hasMore: false,
+    });
+    render(<HostPage />);
+    expect(await screen.findByText("Showing 30 of 30 recently fetched events (maximum 30). This is not a complete audit history.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Load older actions" }));
+    await waitFor(() => expect(loadOperatorAuditPage).toHaveBeenCalledWith(
+      "verified-account", { id: "receipt-29", createdAt: "2026-11-07T09:30:00Z" }, 30,
+    ));
+    expect(await screen.findByText("account.role.older")).toBeTruthy();
+    await user.type(screen.getByRole("searchbox", { name: "Filter recent events" }), "Historical");
+    expect(screen.getByText("Showing 1 of 31 loaded events. This is a partial audit history.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load older actions" })).toBeNull();
+  });
+
   it("finds an older account through server search and restores the recent view when cleared", async () => {
     const user = userEvent.setup();
     const older = deferred<OperatorAccount[]>();
