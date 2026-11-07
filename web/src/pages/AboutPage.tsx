@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Brain, CheckCircle2, ExternalLink, LineChart, Loader, ShieldCheck, Sparkles, CircleDashed,
 } from "lucide-react";
@@ -8,6 +8,9 @@ import { ICON_SIZE } from "../lib/iconSize";
 import { InstallAxomCard } from "../components/shell/InstallAxomCard";
 
 const WEBSITE_URL = "https://www.jafardabbagh.com/";
+const LazyBuildingPage = lazy(() => import("./BuildingPage").then((module) => ({ default: module.BuildingPage })));
+const LazyPatchNotesPage = lazy(() => import("./PatchNotesPage").then((module) => ({ default: module.PatchNotesPage })));
+export type AboutTab = "axom" | "developer" | "building" | "updates";
 
 type FeatureStatus = "ready" | "progress" | "planned";
 
@@ -52,16 +55,20 @@ const STATUS_META: Record<FeatureStatus, { label: string; sub: string; icon: typ
   planned: { label: "Planned", sub: "Designed, not built yet", icon: CircleDashed, tone: "neutral" },
 };
 
-export function AboutPage() {
-  const [tab, setTab] = useState<"axom" | "developer">("axom");
+export function AboutPage({ initialTab = "axom" }: { initialTab?: AboutTab }) {
+  const [tab, setTab] = useState<AboutTab>(initialTab);
   return (
     <>
       <div className="about-tabs" role="tablist" aria-label="About">
         <button role="tab" id="about-tab-axom" aria-controls="about-panel" aria-selected={tab === "axom"} onClick={() => setTab("axom")}>About AXOM</button>
         <button role="tab" id="about-tab-developer" aria-controls="about-panel" aria-selected={tab === "developer"} onClick={() => setTab("developer")}>The developer</button>
+        <button role="tab" id="about-tab-building" aria-controls="about-panel" aria-selected={tab === "building"} onClick={() => setTab("building")}>Building AXOM</button>
+        <button role="tab" id="about-tab-updates" aria-controls="about-panel" aria-selected={tab === "updates"} onClick={() => setTab("updates")}>Patch Notes</button>
       </div>
       <div id="about-panel" role="tabpanel" aria-labelledby={`about-tab-${tab}`} className="about-panel">
-        {tab === "axom" ? <AboutAxom /> : <WebsitePreview />}
+        {tab === "axom" ? <AboutAxom /> : tab === "developer" ? <WebsitePreview /> : <Suspense fallback={<p role="status">Opening AXOM's development record…</p>}>
+          {tab === "building" ? <LazyBuildingPage /> : <LazyPatchNotesPage />}
+        </Suspense>}
       </div>
     </>
   );
