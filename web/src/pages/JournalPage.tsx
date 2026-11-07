@@ -1523,6 +1523,8 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   // over a newer draft another tab saved between our read and first effect.
   const initialDraftRef = useRef(draft);
   const [sending, setSending] = useState(false);
+  // State-based disabling renders later; guard against a second same-turn activation.
+  const submissionPendingRef = useRef(false);
   const [sentId, setSentId] = useState("");
   const [error, setError] = useState("");
   const [storageError, setStorageError] = useState(loaded.unreadable
@@ -1574,7 +1576,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   }, [conflicted, draft, draftKey, sentId, saveRetryToken]);
 
   async function send() {
-    if (!user || conflicted) return;
+    if (!user || conflicted || sentId || submissionPendingRef.current) return;
     if (draft.rating < 1) { setError("Choose a rating before sending."); return; }
     // Check for changes that arrived after the editor's last successful write.
     // This prevents an observed stale send; localStorage cannot make the
@@ -1589,6 +1591,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
       setStorageError("AXOM could not check the saved feedback draft. No feedback was sent. Download your writing and retry when browser storage is available.");
       return;
     }
+    submissionPendingRef.current = true;
     setSending(true);
     setError("");
     // The network receives the in-memory draft. A failed local write must
@@ -1603,6 +1606,8 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     try {
       setSentId(await submitJournalFeedback(user.id, draft));
     } catch (cause) {
+      // Only a failed request may be retried; a receipt seals this dialog.
+      submissionPendingRef.current = false;
       setError(cause instanceof Error ? cause.message : "Feedback could not be sent. Your draft is still here.");
     } finally {
       setSending(false);
