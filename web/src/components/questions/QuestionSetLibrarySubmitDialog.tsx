@@ -8,7 +8,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
-import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
+import { prepareCurrentCommunityQuestionSetSubmission } from "../../lib/sharing/communitySetPublicationGuard";
 import {
   listMyQuestionSetSubmissions, submitQuestionSetToLibrary, withdrawQuestionSetSubmission,
   type LibrarySubmission,
@@ -191,8 +191,13 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       || (submission && submission.status !== "rejected")) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      // Always serialize the current private revision; never reuse a stale share snapshot.
-      const snapshot = createQuestionSetShare(set, questions);
+      // Bind the publisher's attestations to the exact latest local set, including
+      // source-review evidence not carried in the privacy-stripped public snapshot.
+      const live = useStore.getState();
+      const snapshot = prepareCurrentCommunityQuestionSetSubmission({
+        openedSet: set, openedQuestions: questions,
+        liveSets: live.questionSets ?? [], liveQuestions: live.questions ?? [],
+      });
       const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit);
       const result = await refresh();
       if (!result || result.id !== id) throw new Error("The submission could not be read back. Check its status before retrying.");
