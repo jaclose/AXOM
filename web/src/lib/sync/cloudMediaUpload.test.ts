@@ -280,4 +280,45 @@ describe("bounded account image uploads", () => {
     expect(new Uint8Array(await newOriginal.arrayBuffer())).toEqual(revisedBytes);
   });
 
+
+  it("recovers a partially failed concurrent transfer without losing or reuploading verified original images", async () => {
+    const { state, keys, hashes } = await fixture(3);
+    const owner = "synthetic-retry-owner";
+    const failedPath = `${owner}/${hashes[1]}`;
+    let rejectOnce = true;
+    upload.mockImplementation(async (path, blob) => {
+      if (path === failedPath && rejectOnce) {
+        rejectOnce = false;
+        return { error: { statusCode: "503" } };
+      }
+      return defaultUpload(path, blob);
+    });
+
+    // Other in-flight images may reach the private bucket, but no complete
+    // protected revision may be acknowledged while one original is missing.
+    await expect(uploadCloudMedia(client, owner, state, guard))
+      .rejects.toMatchObject({ statusCode: "503" });
+    expect(upload).toHaveBeenCalledTimes(3);
+    expect(objects.has(`${owner}/${hashes[0]}`)).toBe(true);
+    expect(objects.has(failedPath)).toBe(false);
+    expect(objects.has(`${owner}/${hashes[2]}`)).toBe(true);
+
+    // A retry must upload exactly the failed original, preserving successful
+    // immutable objects, attachment order, and every source byte.
+    const protectedManifest = await uploadCloudMedia(client, owner, state, guard);
+    expect(protectedManifest.map((entry) => entry.blobKey)).toEqual(keys);
+    expect(protectedManifest.map((entry) => entry.hash)).toEqual(hashes);
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls.filter(([path]) => path === failedPath)).toHaveLength(2);
+    for (const hash of [hashes[0], hashes[2]]) {
+      expect(upload.mock.calls.filter(([path]) => path === `${owner}/${hash}`)).toHaveLength(1);
+    }
+    expect(objects.size).toBe(3);
+    for (const [index, entry] of protectedManifest.entries()) {
+      const original = await downloadCloudMediaAsset(client, owner, entry);
+      expect(new Uint8Array(await original.arrayBuffer()))
+        .toEqual(new Uint8Array([137, 80, 78, 71, index + 1]));
+    }
+  });
+
 });
