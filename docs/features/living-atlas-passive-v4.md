@@ -69,7 +69,7 @@ No single navigation action, palette choice or scroll can produce a personality 
 ## Technical paths and retention
 
 - Source: web/src/lib/communications/passiveFirstRun.ts, a deterministic pure scoring engine with explicit allowlist, bounded counters and evidence sufficiency.
-- Browser adapter: web/src/lib/communications/passiveFirstRunClient.ts, using sessionStorage. The observation window is six minutes; unaccepted summaries are removed after an additional short review grace period.
+- Browser adapter: web/src/lib/communications/passiveFirstRunClient.ts, using sessionStorage. The observation window is six minutes; unaccepted summaries are removed after an additional short review grace period. A separate, ephemeral account-scope key is stored in that tab solely to prevent a guest or other-account aggregate from being reused after signup, even after refresh. The account ID is never included in the behavioral aggregate, emailed or transmitted to a provider; the scope key is deleted with the aggregate.
 - Setup opt-in: web/src/components/setup/SetupFlow.tsx.
 - User actions: sidebar navigation, actual dashboard edits, **media-validated QBank block starts**, explicit SourceTeaching page reveals, and one coarse scroll milestone per eligible content section. Opening a practice setup screen does not count as practicing.
 - Optional dashboard review: web/src/components/dashboard/AtlasFirstRunCard.tsx.
