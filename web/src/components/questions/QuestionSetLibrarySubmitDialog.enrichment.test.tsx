@@ -65,7 +65,7 @@ beforeEach(() => {
     keywords: ["Vascular smooth muscle", "Tunica media"],
   });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("Question Set draft explanation review", () => {
   it("requires an account-specific submission check before automatic AI", async () => {
@@ -311,6 +311,65 @@ describe("Question Set draft explanation review", () => {
     expect(screen.queryByText(/AI draft.*to inspect/)).toBeNull();
     expect(mocks.completeJson).toHaveBeenCalledTimes(1);
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  const publishedSubmission = {
+    id: "11111111-1111-4111-8111-111111111111",
+    sourceId: set.id,
+    title: set.title,
+    credit: "",
+    questionCount: 1,
+    status: "pending" as const,
+    reviewNote: "",
+    createdAt: "2026-11-07T10:00:00.000Z",
+  };
+
+  it("refuses withdrawal of a cached submission after an account switch", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([publishedSubmission]);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+    await waitFor(() => expect(withdraw.hasAttribute("disabled")).toBe(false));
+
+    // The account store can change before React has rerendered this modal.
+    mocks.accountId = "owner-2";
+    fireEvent.click(withdraw);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("refuses withdrawal when the account switches during native confirmation", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([publishedSubmission]);
+    vi.spyOn(window, "confirm").mockImplementationOnce(() => {
+      mocks.accountId = "owner-2";
+      return true;
+    });
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+
+    fireEvent.click(withdraw);
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("does not report successful withdrawal if the same submission is still returned", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([publishedSubmission]);
+    mocks.withdraw.mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+
+    fireEvent.click(withdraw);
+    expect(await screen.findByText(/Withdrawal could not be confirmed/)).toBeTruthy();
+    expect(mocks.withdraw).toHaveBeenCalledWith("owner-1", publishedSubmission.id);
+    expect(screen.queryByText(/was withdrawn from the library/)).toBeNull();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
