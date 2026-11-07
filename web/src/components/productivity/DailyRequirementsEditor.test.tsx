@@ -43,6 +43,59 @@ afterEach(() => {
   cleanup();
 });
 
+describe("Quick goal creation and check-off", () => {
+  it("creates a self-reported activity goal with an exact label and no synthetic log", async () => {
+    const state = makeSeed();
+    today = state.activeDayKey;
+    state.profile.dailySuccess = { version: 1, configuredAt: today, requirements: [] };
+    state.logs = [];
+    useStore.setState(state);
+    render(<DailyRequirementsEditor />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a goal" }));
+    fireEvent.change(screen.getByLabelText("Goal type"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByLabelText("Goal name"), { target: { value: "Renal question review" } });
+    fireEvent.change(screen.getByLabelText("Goal amount"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("How progress is recorded"), { target: { value: "activity" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
+
+    const [goal] = useStore.getState().profile.dailySuccess!.requirements;
+    expect(goal).toMatchObject({
+      label: "Renal question review", target: 2, unit: "times",
+      source: { kind: "activity-alias" }, aliases: ["Renal question review"],
+      trackingStartsAt: today,
+    });
+    expect(useStore.getState().logs).toHaveLength(0);
+    await act(async () => { useStore.getState().logActivity({ label: "RENAL QUESTION REVIEW", quantity: 1, quantityKind: "count" }); });
+    expect(screen.getByText("1 of 2 times")).toBeTruthy();
+  });
+
+  it("checks a manual quick goal without inventing activity and allows undo", () => {
+    const state = makeSeed();
+    today = state.activeDayKey;
+    state.profile.dailySuccess = { version: 1, configuredAt: today, requirements: [] };
+    state.logs = [];
+    useStore.setState(state);
+    render(<DailyRequirementsEditor />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a goal" }));
+    fireEvent.change(screen.getByLabelText("Goal type"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByLabelText("Goal name"), { target: { value: "Review flashcards" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Complete Review flashcards" }));
+    expect(currentRequirement().manualContributions?.at(-1)).toMatchObject({ value: 1, mode: "override", dayKey: today });
+    expect(useStore.getState().logs).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Undo Review flashcards" }));
+    expect(currentRequirement().manualContributions?.at(-1)?.value).toBe(0);
+  });
+
+  it("does not offer duplicate standard goals in the quick form", () => {
+    render(<DailyRequirementsEditor />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a goal" }));
+    const option = screen.getByRole("option", { name: "Study time (already set)" }) as HTMLOptionElement;
+    expect(option.disabled).toBe(true);
+    expect(useStore.getState().profile.dailySuccess?.requirements).toHaveLength(1);
+  });
+});
+
 describe("DailyRequirementsEditor scoring boundaries", () => {
   it("starts a target change today instead of rescoring older dates", () => {
     render(<DailyRequirementsEditor />);
