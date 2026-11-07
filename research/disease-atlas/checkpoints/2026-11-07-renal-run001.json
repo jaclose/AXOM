@@ -1,0 +1,186 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "checkpoint": "V2/Run001",
+  "timestamp": "2026-11-07",
+  "status": "versioned_build_unmerged",
+  "docs": {
+    "master": "AXOM_Disease_Pathology_Atlas_V2_Run001.docx",
+    "pdf": "AXOM_Disease_Pathology_Atlas_V2_Run001.pdf",
+    "gallery": "AXOM_Renal_Pathology_Online_Gallery_Run001.html",
+    "registry": "registry_v2_run001.csv",
+    "provenance": "image_provenance_v2_run001.csv"
+  },
+  "metrics": {
+    "legacy_brief": 132,
+    "new_deep": 16,
+    "unique_internal_profiles": 148,
+    "ontology_denominator": null,
+    "ontology_mapping_completed": false,
+    "licensed_online_image_pages": 12,
+    "images_embedded_locally": 0,
+    "images_referenced_in_online_gallery": 12,
+    "pdf_pages": 51
+  },
+  "notes": "This checkpoint preserves summary metadata, IDs, and photo provenance. The generated complete DOCX/PDF/HTML and structured data were returned as conversation artifacts. Attempts to upload source binaries into persistent ChatGPT Library failed with AccessDeny. This Git branch is not merged or deployed. Official MONDO/ICD11/Orphanet mapping and human specialist peer review remain incomplete. The HTML image gallery loads genuine remote Wikimedia source files, and the Word/PDF have links, not embedded photos.",
+  "diseases": [
+    [
+      "AXOM-REN-013",
+      "Lupus nephritis"
+    ],
+    [
+      "AXOM-REN-014",
+      "ANCA-associated pauci-immune necrotizing glomerulonephritis"
+    ],
+    [
+      "AXOM-REN-015",
+      "Anti-glomerular basement membrane disease"
+    ],
+    [
+      "AXOM-REN-016",
+      "C3 glomerulonephritis"
+    ],
+    [
+      "AXOM-REN-017",
+      "Dense deposit disease"
+    ],
+    [
+      "AXOM-REN-018",
+      "Alport syndrome"
+    ],
+    [
+      "AXOM-REN-019",
+      "Thin basement membrane/COL4A3-COL4A4 hematuria spectrum"
+    ],
+    [
+      "AXOM-REN-020",
+      "Renal AL amyloidosis"
+    ],
+    [
+      "AXOM-REN-021",
+      "Fibrillary glomerulonephritis"
+    ],
+    [
+      "AXOM-REN-022",
+      "Immunotactoid glomerulopathy"
+    ],
+    [
+      "AXOM-REN-023",
+      "Cryoglobulinemic glomerulonephritis"
+    ],
+    [
+      "AXOM-REN-024",
+      "Renal thrombotic microangiopathy lesion"
+    ],
+    [
+      "AXOM-REN-025",
+      "Fabry nephropathy"
+    ],
+    [
+      "AXOM-REN-026",
+      "Drug-induced acute interstitial nephritis"
+    ],
+    [
+      "AXOM-REN-027",
+      "Autosomal dominant polycystic kidney disease"
+    ],
+    [
+      "AXOM-REN-028",
+      "Renal papillary necrosis"
+    ]
+  ],
+  "source_refs": [
+    "https://kdigo.org/guidelines/lupus-nephritis/",
+    "https://kdigo.org/guidelines/anca-associated-vasculitis/",
+    "https://kdigo.org/guidelines/adpkd/",
+    "https://kdigo.org/guidelines/gd/",
+    "https://www.ncbi.nlm.nih.gov/books/NBK1207/",
+    "https://www.fda.gov/"
+  ],
+  "image_source_pages": [
+    {
+      "image_id": "REN-IMG-001",
+      "disease_id": "AXOM-REN-013",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Diffuse_proliferative_lupus_nephritis_-_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-002",
+      "disease_id": "AXOM-REN-013",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Diffuse_proliferative_lupus_nephritis_-a-_very_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-003",
+      "disease_id": "AXOM-REN-015",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Crescentic_glomerulonephritis_-_intermed_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-004",
+      "disease_id": "AXOM-REN-015",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Crescentic_glomerulonephritis_-_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-005",
+      "disease_id": "AXOM-REN-020",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Renal_amyloidosis_-_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-006",
+      "disease_id": "AXOM-REN-020",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Renal_amyloidosis_-_very_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-007",
+      "disease_id": "AXOM-REN-024",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Acute_thrombotic_microangiopathy_-_pas_-_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-008",
+      "disease_id": "AXOM-REN-024",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Acute_thrombotic_microangiopathy_-_pas_-_very_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-009",
+      "disease_id": "AXOM-REN-025",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Morbus_Fabry_kidney_biopsy_01.jpg",
+      "creator": "Courtesy Pr Marie-Claire Gubler / Commons attribution",
+      "license": "CC BY 2.0"
+    },
+    {
+      "image_id": "REN-IMG-010",
+      "disease_id": "AXOM-REN-027",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Polycystic_kidneys%2C_gross_pathology_20G0027_lores.jpg",
+      "creator": "CDC / Dr. Edwin P. Ewing Jr.",
+      "license": "Public domain"
+    },
+    {
+      "image_id": "REN-IMG-011",
+      "disease_id": "AXOM-REN-020",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Renal_amyloidosis_-_2_-_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    },
+    {
+      "image_id": "REN-IMG-012",
+      "disease_id": "AXOM-REN-024",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Thrombotic_microangiopathy_-_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0"
+    }
+  ],
+  "next": "Import MONDO snapshot and map stable ontology IDs, continue with other organ systems, embed original photographs once source bytes can be fetched lawfully, update manifest with verified completeness."
+}
