@@ -7,6 +7,7 @@ import { SetupFlow } from "./SetupFlow";
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   const seed = makeSeed();
   seed.profile.onboarded = false;
   seed.profile.tourDone = undefined;
@@ -55,6 +56,32 @@ describe("SetupFlow", () => {
     expect(state.tracker.some((row) => /^example/i.test(row.label))).toBe(false);
     expect(state.profile.dailySuccess?.requirements.map((requirement) => requirement.label)).toContain("Anki cards");
     expect(localStorage.getItem("axom.setup.v2")).toBeNull();
+  });
+
+  it("does not enable passive observation unless the learner explicitly opts in", () => {
+    render(<SetupFlow mode="first-run" />);
+    next(); next();
+    const toggle = screen.getByRole("switch", { name: "Allow on-device first-run Atlas suggestions" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Enter AXOM" }));
+    expect(sessionStorage.getItem("axom.atlas.first-run-session.v1")).toBeNull();
+  });
+
+  it("counts only changed study preferences when the optional first-run signal is enabled", () => {
+    render(<SetupFlow mode="first-run" />);
+    fireEvent.change(screen.getByLabelText("What should we call you?"), { target: { value: "Private Learner" } });
+    next();
+    fireEvent.click(tool("Anki"));
+    next();
+    const toggle = screen.getByRole("switch", { name: "Allow on-device first-run Atlas suggestions" });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Enter AXOM" }));
+    const raw = sessionStorage.getItem("axom.atlas.first-run-session.v1") ?? "";
+    expect(raw).toContain('"tools"');
+    expect(raw).not.toContain("Private Learner");
+    expect(raw).not.toContain("journal");
+    expect(raw).not.toContain("clickstream");
   });
 
   it("starts a non-SGU student clean, and a no-flashcards routine gets no card target", () => {
