@@ -29,12 +29,31 @@ export function dedicatedLiveProjectUrl(rawUrl: string | undefined, expectedRef:
   return parsed.origin;
 }
 
-/** Disallow network calls from a reused dev server aimed at a different Supabase project. */
-export function permitsSupabaseRequest(requestUrl: string, dedicatedOrigin: string): boolean {
+/**
+ * Opt-in destructive tests permit only their local loopback app, the named
+ * nonproduction Supabase project, and that project's resumable-upload host.
+ * Reject custom backends and other projects instead of assuming they are safe.
+ */
+export function permitsLiveAccountRequest(
+  requestUrl: string,
+  dedicatedOrigin: string,
+  appOrigin: string,
+): boolean {
   try {
     const requested = new URL(requestUrl);
-    if (requested.hostname.endsWith(".supabase.co")) return requested.origin === dedicatedOrigin;
-    return true;
+    const dedicated = new URL(dedicatedOrigin);
+    const app = new URL(appOrigin);
+    const project = /^([a-z0-9]{20}\.supabase\.co)$/.exec(dedicated.hostname);
+    if (!project || dedicated.protocol !== "https:" || dedicated.origin !== dedicatedOrigin
+      || project[1].startsWith(productionProjectRef + ".") || dedicated.username || dedicated.password
+      || app.protocol !== "http:" || app.hostname !== "127.0.0.1" || !app.port
+      || app.pathname !== "/" || app.search || app.hash || app.username || app.password
+      || requested.username || requested.password) return false;
+    if (requested.origin === app.origin) return true;
+    if (requested.protocol !== "https:") return false;
+    const ref = project[1].slice(0, 20);
+    return requested.origin === dedicated.origin
+      || requested.origin === `https://${ref}.storage.supabase.co`;
   } catch {
     return false;
   }

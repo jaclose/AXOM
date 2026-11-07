@@ -32,7 +32,9 @@ export default defineConfig({
     : {
         command: "npm run dev -- --host 127.0.0.1 --port 5187 --strictPort",
         url: baseURL,
-        reuseExistingServer: true,
+        // Destructive opt-in acceptance must never attach to an unknown server
+        // whose compiled account configuration could target AXOM production.
+        reuseExistingServer: process.env.AXOM_LIVE_ACCOUNTS !== "1",
         timeout: 120_000,
       },
 });

@@ -3,7 +3,7 @@ import {
   assertUnusedEmail,
   dedicatedLiveProjectUrl,
   matchesRunOwnedUser,
-  permitsSupabaseRequest,
+  permitsLiveAccountRequest,
   signupResponseUserId,
 } from "./liveAccountSafety";
 
@@ -25,12 +25,23 @@ describe("destructive live-account safety gates", () => {
     expect(() => dedicatedLiveProjectUrl(testUrl + "?target=other", testRef)).toThrow(/HTTPS/);
   });
 
-  it("blocks a reused dev server from contacting production or a different Supabase project", () => {
-    expect(permitsSupabaseRequest(testUrl + "/auth/v1/signup", testUrl)).toBe(true);
-    expect(permitsSupabaseRequest("https://jofkmfwkidubxcutkwzf.supabase.co/auth/v1/signup", testUrl)).toBe(false);
-    expect(permitsSupabaseRequest("https://anotherprojectabcde.supabase.co/rest/v1/workspace", testUrl)).toBe(false);
-    expect(permitsSupabaseRequest("https://fonts.googleapis.com/css2", testUrl)).toBe(true);
-    expect(permitsSupabaseRequest("not a url", testUrl)).toBe(false);
+  it("permits only the dedicated cloud project, its storage host and local Vite origin", () => {
+    const appOrigin = "http://127.0.0.1:5187";
+    const allows = (url: string) => permitsLiveAccountRequest(url, testUrl, appOrigin);
+    expect(allows(testUrl + "/auth/v1/signup")).toBe(true);
+    expect(allows(testUrl + "/rest/v1/workspace_revisions")).toBe(true);
+    expect(allows(`https://${testRef}.storage.supabase.co/storage/v1/upload/resumable`)).toBe(true);
+    expect(allows(appOrigin + "/@vite/client")).toBe(true);
+    expect(allows("https://jofkmfwkidubxcutkwzf.supabase.co/auth/v1/signup")).toBe(false);
+    expect(allows("https://anotherprojectabcde.supabase.co/rest/v1/workspace")).toBe(false);
+    expect(allows("https://anotherprojectabcde.storage.supabase.co/storage/v1/upload/resumable")).toBe(false);
+    expect(allows("https://backend.example.test/auth/v1/signup")).toBe(false);
+    expect(allows("https://fonts.googleapis.com/css2")).toBe(false);
+    expect(allows("http://127.0.0.1:5188/auth/v1/signup")).toBe(false);
+    expect(allows("http://localhost:5187/")).toBe(false);
+    expect(allows("not a url")).toBe(false);
+    expect(permitsLiveAccountRequest(testUrl, testUrl, "https://axom.info")).toBe(false);
+    expect(permitsLiveAccountRequest(testUrl, "https://jofkmfwkidubxcutkwzf.supabase.co", appOrigin)).toBe(false);
   });
 
   it("rejects first-page API failures instead of treating missing data as an unused email", async () => {
