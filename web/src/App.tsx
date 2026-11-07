@@ -40,6 +40,7 @@ import { markAppReady, usePageEntrance } from "./lib/presentation";
 import type { StorageMigrationResult } from "./lib/storageMigrations";
 import type { OnboardingDestination, OnboardingMode } from "./lib/onboardingProgress";
 import { readSetupDraftMode } from "./lib/setupPlan";
+import { notePassiveAtlasAction } from "./lib/communications/passiveFirstRunClient";
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
 
 import { DashboardPage } from "./pages/DashboardPage";
@@ -149,6 +150,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   const [route, setRoute] = useState<string>(() => location.hash.replace("#", "") || "dashboard");
   const routeRef = useRef(route);
   const surfaceScrollRef = useRef<HTMLDivElement>(null);
+  const atlasExploredSections = useRef<Set<string>>(new Set());
   routeRef.current = route;
   const routeTransitionGuardRef = useRef<JournalTransitionGuard | null>(null);
   const appTransitionPendingRef = useRef(false);
@@ -480,7 +482,18 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
             onRefresh={refresh}
             refreshing={refreshing}
           />
-          <div ref={surfaceScrollRef} className="surface-scroll">
+          <div ref={surfaceScrollRef} className="surface-scroll"
+            onScroll={event => {
+              // A single coarse content-depth milestone, never pixel-by-pixel
+              // scroll history. It has no personality-score weight.
+              if (!["questions", "tracker", "reports"].includes(routeKey) || atlasExploredSections.current.has(routeKey)) return;
+              const surface = event.currentTarget;
+              const available = surface.scrollHeight - surface.clientHeight;
+              if (available > 450 && surface.scrollTop / available >= 0.75) {
+                atlasExploredSections.current.add(routeKey);
+                notePassiveAtlasAction("explore-content");
+              }
+            }}>
             <div className={route === "tracker" ? "page page-tracker" : "page"} data-enter={pageEnter ? "" : undefined}>
               <RouteErrorBoundary key={routeKey} onHome={() => go("dashboard")}>
                 <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
