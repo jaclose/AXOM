@@ -3,6 +3,7 @@ import {
   assertUnusedEmail,
   dedicatedLiveProjectUrl,
   matchesRunOwnedUser,
+  permitsSupabaseRequest,
   signupResponseUserId,
 } from "./liveAccountSafety";
 
@@ -22,6 +23,14 @@ describe("destructive live-account safety gates", () => {
     expect(() => dedicatedLiveProjectUrl("https://evil.example", testRef)).toThrow(/HTTPS/);
     expect(() => dedicatedLiveProjectUrl(testUrl + "/auth/v1", testRef)).toThrow(/HTTPS/);
     expect(() => dedicatedLiveProjectUrl(testUrl + "?target=other", testRef)).toThrow(/HTTPS/);
+  });
+
+  it("blocks a reused dev server from contacting production or a different Supabase project", () => {
+    expect(permitsSupabaseRequest(testUrl + "/auth/v1/signup", testUrl)).toBe(true);
+    expect(permitsSupabaseRequest("https://jofkmfwkidubxcutkwzf.supabase.co/auth/v1/signup", testUrl)).toBe(false);
+    expect(permitsSupabaseRequest("https://anotherprojectabcde.supabase.co/rest/v1/workspace", testUrl)).toBe(false);
+    expect(permitsSupabaseRequest("https://fonts.googleapis.com/css2", testUrl)).toBe(true);
+    expect(permitsSupabaseRequest("not a url", testUrl)).toBe(false);
   });
 
   it("rejects first-page API failures instead of treating missing data as an unused email", async () => {
