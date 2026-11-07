@@ -1,10 +1,78 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCloudProvider, cloudAiRemaining } from "./cloud";
+import { createCloudProvider, cloudAiRemaining, trustedCloudAiEndpoint } from "./cloud";
 import { aiProxyCorsPolicy, buildAnthropicRequest, cloudAllowance, parseJsonLoose, readJsonRequest, textFromAnthropic, upstreamError, validateBody } from "../../../../supabase/functions/ai-proxy/core";
 
 function reply(status: number, body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
 }
+
+
+describe("Cloud AI credential destination", () => {
+  const base = "https://abcdefghijklmnopqrst.supabase.co";
+  const expected = base + "/functions/v1/ai-proxy";
+
+  it("uses only the build-configured Supabase function and accepts its exact saved value", () => {
+    expect(trustedCloudAiEndpoint(base)).toBe(expected);
+    expect(trustedCloudAiEndpoint(base + "/", expected)).toBe(expected);
+    expect(trustedCloudAiEndpoint(base, expected)).toBe(expected);
+  });
+
+  it("rejects malicious or stale saved endpoints rather than silently routing prompts elsewhere", () => {
+    for (const override of [
+      "https://attacker.example/functions/v1/ai-proxy",
+      "https://abcdefghijklmnopqrst.supabase.co.attacker.example/functions/v1/ai-proxy",
+      "https://abcdefghijklmnopqrst.supabase.co@attacker.example/functions/v1/ai-proxy",
+      "http://abcdefghijklmnopqrst.supabase.co/functions/v1/ai-proxy",
+      "https://abcdefghijklmnopqrst.supabase.co:8443/functions/v1/ai-proxy",
+      expected + "?next=https://attacker.example",
+      expected + "#sneaky",
+      expected + "/other",
+      base + "/functions/v1/another-proxy",
+      base + "/functions/v1/%61i-proxy",
+      "//attacker.example/functions/v1/ai-proxy",
+      "javascript:alert(1)",
+      " " + expected,
+      "https://otherproject1234567.supabase.co/functions/v1/ai-proxy",
+    ]) {
+      expect(trustedCloudAiEndpoint(base, override), override).toBeNull();
+    }
+  });
+
+  it("fails closed on untrusted build configuration and keeps the local emulator dev-only", () => {
+    for (const invalid of [
+      undefined,
+      "not-a-url",
+      "http://abcdefghijklmnopqrst.supabase.co",
+      "https://attacker.example",
+      "https://abcdefghijklmnopqrst.supabase.co:8443",
+      "https://user@abcdefghijklmnopqrst.supabase.co",
+      base + "/other",
+      base + "?debug=1",
+      base + "#frag",
+    ]) {
+      expect(trustedCloudAiEndpoint(invalid), String(invalid)).toBeNull();
+    }
+    const local = "http://127.0.0.1:54321";
+    expect(trustedCloudAiEndpoint(local)).toBeNull();
+    expect(trustedCloudAiEndpoint(local, undefined, true)).toBe(local + "/functions/v1/ai-proxy");
+    expect(trustedCloudAiEndpoint(local, local + "/functions/v1/ai-proxy", true)).toBe(local + "/functions/v1/ai-proxy");
+    expect(trustedCloudAiEndpoint(local, "https://attacker.example", true)).toBeNull();
+  });
+
+  it("refuses to construct an authenticated provider when a saved cloud destination is untrusted", async () => {
+    const { cloudEndpoint, resolveActiveProvider } = await import("./index");
+    vi.stubEnv("VITE_SUPABASE_URL", base);
+    vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_dummy");
+    try {
+      const settings = { mode: "cloud" as const, localEndpoint: "http://localhost:11434", cloudProxyUrl: "https://attacker.example" };
+      expect(cloudEndpoint(settings)).toBeNull();
+      expect(resolveActiveProvider(settings)).toBeNull();
+      expect(resolveActiveProvider({ ...settings, cloudProxyUrl: expected })).not.toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
 
 describe("AXOM Cloud AI client", () => {
   it("sends the session token, never a model key, and returns the result", async () => {
@@ -13,6 +81,7 @@ describe("AXOM Cloud AI client", () => {
     await expect(provider.completeJson({ system: "s", prompt: "p", maxTokens: 300, task: "cards" })).resolves.toEqual({ cards: [1] });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token", apikey: "sb_publishable_x" });
+    expect(init.redirect).toBe("error");
     expect(JSON.parse(String(init.body))).toMatchObject({ prompt: "p", system: "s", maxTokens: 300, tier: "fast", task: "cards" });
     expect(String(init.body)).not.toMatch(/sk-ant|x-api-key/);
     expect(cloudAiRemaining()).toBe(41);
