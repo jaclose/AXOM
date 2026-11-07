@@ -928,7 +928,14 @@ function JournalWritingPage({
     void requestDurableTransition(() => {
       if (reducedMotion) { onClose(); return; }
       setDeskClosing(true);
-      deskCloseTimerRef.current = window.setTimeout(onClose, 900);
+      deskCloseTimerRef.current = window.setTimeout(() => {
+        deskCloseTimerRef.current = null;
+        // A delayed input can arrive while the book settles. The first save
+        // gate predates that edit, so recheck before removing the page.
+        void requestDurableTransition(onClose).then((closed) => {
+          if (!closed && mountedRef.current) setDeskClosing(false);
+        });
+      }, 900);
     });
   }, [addingImage, deskClosing, requestDurableTransition, reducedMotion, onClose]);
 
