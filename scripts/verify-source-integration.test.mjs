@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitFile, validateSourceManifest, verifySourceIntegration, verifyCompleteSourceIntegration, listGitChanges, isGitAncestor } from "./verify-source-integration.mjs";
+import { readGitFile, validateSourceManifest, verifySourceIntegration, verifyCompleteSourceIntegration, listGitChanges, isGitAncestor, listGitTreePaths } from "./verify-source-integration.mjs";
 const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
 const manifest = (paths = ["web/src/course.ts"]) => ({
   version: 1, integratedSha: A, sources: [{ sourceSha: B, paths }],
@@ -145,6 +145,7 @@ test("v2 verifies complete two-source Git ranges including deletion and rejects 
     listChanges: (a, b) => listGitChanges(a, b, cwd),
     isAncestor: (a, b) => isGitAncestor(a, b, cwd),
     readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+    listTreePaths: sha => listGitTreePaths(sha, cwd),
   };
   assert.deepEqual(listGitChanges(base, sourceOne, cwd).map(x => x.status), ["M", "D"]);
   const report = verifyCompleteSourceIntegration(input, adapters);
@@ -182,8 +183,17 @@ test("v2 rejects conflicting source ranges, Windows-unsafe paths, type changes a
   const input = { version: 2, integrationBaseSha: A, integratedSha: C, sources: [{ baseSha: A, sourceSha: B }] };
   const adapters = { isAncestor: () => true,
     listChanges: () => [{ status: "A", path: "docs/proof.ts" }],
-    readFile: () => ({ mode: "100644", blob: B }) };
+    readFile: () => ({ mode: "100644", blob: B }),
+    listTreePaths: () => ["docs/proof.ts"] };
   assert.equal(verifyCompleteSourceIntegration(input, adapters).verifiedFiles, 1);
+  assert.equal(verifyCompleteSourceIntegration(input, adapters).verifiedTreePaths, 1);
+  assert.throws(() => verifyCompleteSourceIntegration(input, { ...adapters, listTreePaths: undefined }), /requires Git diff/);
+  assert.throws(() => verifyCompleteSourceIntegration(input, { ...adapters, listTreePaths: () => null }), /tree path inventory/);
+  assert.throws(() => verifyCompleteSourceIntegration(input, { ...adapters, listTreePaths: () => ["docs/proof.ts", "docs/Proof.ts"] }), /Case-insensitive/);
+  assert.throws(() => verifyCompleteSourceIntegration(input, { ...adapters, listTreePaths: () => ["docs/proof.ts", "Docs/old.md"] }), /Case-insensitive/);
+  // Pre-existing collisions in an unrelated directory are not attributed to changed sources.
+  assert.equal(verifyCompleteSourceIntegration(input, { ...adapters,
+    listTreePaths: () => ["docs/proof.ts", "Legacy/a.md", "legacy/b.md"] }).verifiedFiles, 1);
   assert.throws(() => verifyCompleteSourceIntegration({ ...input, sources: [...input.sources, ...input.sources] }, adapters), /Conflicting source range/);
   assert.throws(() => verifyCompleteSourceIntegration({ ...input, sources: [{ sourceSha: B }] }, adapters), /baseSha/);
   assert.throws(() => verifyCompleteSourceIntegration({ ...input, integrationBaseSha: "main" }, adapters), /pinned/);

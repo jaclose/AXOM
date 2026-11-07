@@ -99,14 +99,46 @@ export function readGitFile(sha, path, cwd = process.cwd(), allowMissing = false
  * of trusting caller-supplied file lists. The specified commit ranges remain a
  * separate release-owner assertion; this never proves PR review or deployment.
  */
-export function verifyCompleteSourceIntegration(manifest, { listChanges, isAncestor, readFile } = {}) {
+/**
+ * Check changed paths (including ancestor directories) against the entire
+ * integrated tree, so an unchanged inherited file cannot silently collide
+ * with a new filename on Windows and case-insensitive macOS.
+ * Unrelated pre-existing collisions do not falsely block this change.
+ */
+export function assertPortableTouchedTree(changes, treePaths) {
+  if (!(changes instanceof Map) || !Array.isArray(treePaths)) {
+    throw new Error("Missing or invalid integrated Git tree path inventory.");
+  }
+  const touched = new Set();
+  for (const { path } of changes.values()) {
+    const components = path.split("/");
+    for (let i = 1; i <= components.length; i++) touched.add(components.slice(0, i).join("/").toLowerCase());
+  }
+  const seen = new Map();
+  for (const path of treePaths) {
+    if (typeof path !== "string" || !path || path.includes("\0")) throw new Error("Invalid tracked Git tree path.");
+    const components = path.split("/");
+    for (let i = 1; i <= components.length; i++) {
+      const prefix = components.slice(0, i).join("/");
+      const folded = prefix.toLowerCase();
+      const previous = seen.get(folded);
+      if (previous !== undefined && previous !== prefix && touched.has(folded)) {
+        throw new Error("Case-insensitive integrated tree collision touching changed source: " + previous + " <> " + prefix);
+      }
+      if (previous === undefined) seen.set(folded, prefix);
+    }
+  }
+  return treePaths.length;
+}
+
+export function verifyCompleteSourceIntegration(manifest, { listChanges, isAncestor, readFile, listTreePaths } = {}) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || manifest.version !== 2) {
     throw new Error("Expected complete source-integration manifest version 2.");
   }
   const integrationBaseSha = validSha(manifest.integrationBaseSha, "integrationBaseSha");
   const integratedSha = validSha(manifest.integratedSha, "integratedSha");
   if (!Array.isArray(manifest.sources) || !manifest.sources.length) throw new Error("Missing pinned source ranges.");
-  if (![listChanges, isAncestor, readFile].every(x => typeof x === "function")) {
+  if (![listChanges, isAncestor, readFile, listTreePaths].every(x => typeof x === "function")) {
     throw new Error("Complete verification requires Git diff, ancestry and file resolvers.");
   }
   if (!isAncestor(integrationBaseSha, integratedSha)) throw new Error("Integration base is not an ancestor of integration commit.");
@@ -144,6 +176,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
   }
   const integrated = addChanges(listChanges(integrationBaseSha, integratedSha), "integration");
   if (integrated.size !== wanted.size) throw new Error("Incomplete source inventory or unexpected integrated files: expected " + wanted.size + ", integrated " + integrated.size);
+  const verifiedTreePaths = assertPortableTouchedTree(integrated, listTreePaths(integratedSha));
   for (const [folded, expected] of wanted) {
     const actual = integrated.get(folded);
     if (!actual || expected.path !== actual.path || expected.status !== actual.status) {
@@ -170,7 +203,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
   }
   return { version: 2, integratedSha, integrationBaseSha, sourceRanges, verifiedFiles: files.length,
     verifiedSources: sourceRanges.length, deletedFiles: files.filter(x => x.deleted).length,
-    completeForDeclaredRanges: true, files };
+    completeForDeclaredRanges: true, verifiedTreePaths, files };
 }
 
 /** Binary-safe NUL-delimited Git diff. No rename detection; rename = D + A. */
@@ -187,6 +220,20 @@ export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
     result.push({ status: parts[index], path: parts[index + 1] });
   }
   return result;
+}
+
+/** Enumerate local immutable Git tree paths with NUL-delimited binary-safe names. */
+export function listGitTreePaths(sha, cwd = process.cwd()) {
+  validSha(sha, "integrated tree SHA");
+  const kind = execFileSync("git", ["cat-file", "-t", sha],
+    { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  if (kind !== "commit") throw new Error("Expected pinned Git commit object for tree path inventory.");
+  const output = execFileSync("git", ["ls-tree", "-r", "-z", "--name-only", "--full-tree", sha],
+    { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+  if (!output) return [];
+  const paths = output.split("\0");
+  if (paths.pop() !== "") throw new Error("Invalid NUL-delimited full Git tree path inventory.");
+  return paths;
 }
 
 /** Do not interpret a successful blob comparison as source inclusion. */
@@ -211,6 +258,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         readFile: (sha, path) => readGitFile(sha, path, process.cwd(), true),
         listChanges: (a, b) => listGitChanges(a, b),
         isAncestor: (a, b) => isGitAncestor(a, b),
+        listTreePaths: sha => listGitTreePaths(sha),
       })
       : verifySourceIntegration(manifest, (sha, path) => readGitFile(sha, path));
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
