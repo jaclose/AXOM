@@ -622,6 +622,36 @@ describe("pushing AXOM cards to Anki", () => {
     expect(h.fake.actionsCalled("deleteNotes")).toEqual([]);
   });
 
+  it("holds malformed queue containers and sticky quarantines rather than losing the remaining intent", async () => {
+    const h = harness();
+    const raw = {
+      ...emptyLinkState(),
+      pendingRetirements: null,
+      pendingSuspends: { axomId: "a", noteId: "not-a-note", cardIds: [1001] },
+    };
+    const restored = normalizeLinkState(JSON.parse(JSON.stringify(raw)));
+    expect(restored.pendingRetirements).toHaveLength(1);
+    expect(restored.pendingRetirements![0]).toHaveProperty("quarantinedReceipt", null);
+    expect(restored.pendingSuspends).toHaveLength(1);
+    expect(restored.pendingSuspends[0].quarantinedReceipt).toEqual(raw.pendingSuspends);
+    const report = await h.run([], { state: restored });
+    expect(report).toMatchObject({ pending: 2, added: 0, replaced: 0, deletedSuspended: 0 });
+    expect(report.error).toMatch(/corrupt.*receipt/i);
+    expect(h.fake.log).toHaveLength(0);
+    const resaved = normalizeLinkState(JSON.parse(JSON.stringify(h.state)));
+    expect(resaved.pendingRetirements![0]).toHaveProperty("quarantinedReceipt", null);
+    expect(resaved.pendingSuspends[0].quarantinedReceipt).toEqual(raw.pendingSuspends);
+
+    const sticky = normalizeLinkState({
+      ...emptyLinkState(),
+      pendingSuspends: [{ axomId: "a", noteId: 22, cardIds: [1001], at: "", quarantinedReceipt: { noteId: "22" } }],
+    });
+    expect(sticky.pendingSuspends[0].quarantinedReceipt).toEqual({ noteId: "22" });
+    expect((await h.run([], { state: sticky })).error).toMatch(/corrupt.*receipt/i);
+    expect(h.fake.log).toHaveLength(0);
+    expect(normalizeLinkState(emptyLinkState()).pendingRetirements).toEqual([]);
+  });
+
   it("keeps only the incomplete receipt when a multi-note replacement stops midway", async () => {
     const fake = new FakeAnkiConnect();
     const realFetch = createFakeFetch(fake);
