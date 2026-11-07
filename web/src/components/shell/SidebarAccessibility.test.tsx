@@ -194,6 +194,7 @@ describe("sidebar module status", () => {
   it("keeps status assignments and accessible presentation metadata centralized", () => {
     expect(getNavModuleStatus("questions")).toBe("new");
     expect(getNavModuleStatus("methods")).toBe("new");
+    expect(getNavModuleStatus("studio")).toBe("new");
     expect(getNavModuleStatus("daily-word")).toBe("new");
     expect(getNavModuleStatus("doctordle")).toBeUndefined();
     expect(getNavModuleStatus("daily-games")).toBe("new");
@@ -208,6 +209,7 @@ describe("sidebar module status", () => {
     expect(getNavModuleStatus("dashboard")).toBeUndefined();
     expect(getNavAnnouncementId("questions")).toBe("question-bank-entry-v1");
     expect(getNavAnnouncementId("methods")).toBe("study-methods-library-v1");
+    expect(getNavAnnouncementId("studio")).toBe("study-studio-v1");
     expect(getNavAnnouncementId("daily-word")).toBe("daily-word-launch-v1");
     expect(getNavAnnouncementId("doctordle")).toBeUndefined();
     expect(MODULE_STATUS_META["under-construction"]).toEqual({
@@ -241,7 +243,7 @@ describe("sidebar module status", () => {
 
   it("keeps status treatments visible for hidden modules in customize mode", () => {
     useStore.setState((state) => ({
-      profile: { ...state.profile, hiddenNav: ["methods"] },
+      profile: { ...state.profile, hiddenNav: ["studio"] },
     }));
     render(
       <Sidebar
@@ -253,10 +255,10 @@ describe("sidebar module status", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Study Methods, New" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Study Studio, New" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Customize" }));
 
-    const hiddenModule = screen.getByRole("button", { name: "Study Methods, New" });
+    const hiddenModule = screen.getByRole("button", { name: "Study Studio, New" });
     expect(hiddenModule.classList.contains("off")).toBe(true);
     expect(hiddenModule.getAttribute("aria-pressed")).toBe("false");
     expect(hiddenModule.querySelector(".nav-status")?.textContent).toBe("NEW");
@@ -279,12 +281,12 @@ describe("sidebar module status", () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.dismissedAnnouncements) ?? "[]")).toEqual([
       "question-bank-entry-v1",
     ]);
-    expect(screen.getByRole("button", { name: "Study Methods, New" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Study Studio, New" })).toBeTruthy();
 
     unmount();
     render(<Sidebar {...props} active="dashboard" />);
     expect(screen.getByRole("button", { name: "Question Bank" }).querySelector(".nav-status")).toBeNull();
-    expect(screen.getByRole("button", { name: "Study Methods, New" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Study Studio, New" })).toBeTruthy();
   });
 
   it("dismisses a persistent game route and never dismisses WIP or BUILDING", () => {
