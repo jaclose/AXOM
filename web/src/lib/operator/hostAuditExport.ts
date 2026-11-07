@@ -14,7 +14,13 @@ export function filterHostAudit(audit: readonly OperatorAudit[], query: string):
 function cell(raw: unknown): string {
   const value = String(raw ?? "");
   // CSV quotes do not neutralize spreadsheet formula evaluation.
-  const safe = /^[\s\u0000-\u001f]*[=+\-@]/u.test(value) ? `'${value}` : value;
+  let firstVisible = 0;
+  while (firstVisible < value.length) {
+    const code = value.charCodeAt(firstVisible);
+    if (code > 0x20 && code !== 0xfeff) break;
+    firstVisible++;
+  }
+  const safe = "=+-@".includes(value[firstVisible] ?? "") ? `'${value}` : value;
   return /[",\r\n]/u.test(safe) ? `"${safe.replace(/"/gu, '""')}"` : safe;
 }
 
