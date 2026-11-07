@@ -210,4 +210,55 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("does not transmit stale or revoked source-review evidence to the AI provider", async () => {
+    const source = question({
+      citation: "Textbook page 12",
+      extraction: { confidence: "high", reviewed: true, answerEvidence: "Printed key A" },
+    });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const button = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+
+    // An external reimport revoked the answer check while the dialog stayed open.
+    // No private question should be transmitted to the model after revocation.
+    mocks.workspace.questions = [{ ...source, extraction: { ...source.extraction!, reviewed: false }, needsReview: true }];
+    fireEvent.click(button);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("discards an in-flight proposal and stops the batch if the Question Set changed", async () => {
+    const first = question();
+    const second = question({ id: "q-2", stem: "Which layer lines the arterial lumen?" });
+    const pair = { ...set, questionIds: [first.id, second.id] };
+    mocks.workspace.questions = [first, second];
+    mocks.workspace.questionSets = [pair];
+    let resolveAI!: (value: unknown) => void;
+    mocks.completeJson.mockImplementationOnce(() => new Promise(resolve => { resolveAI = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={pair} questions={[first, second]} autoDraft onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.completeJson).toHaveBeenCalledOnce());
+
+    // The first request was already in flight. A second question must not be
+    // sent after membership changed, and the first returned draft is discarded.
+    mocks.workspace.questionSets = [{ ...pair, questionIds: [first.id] }];
+    await act(async () => {
+      resolveAI({
+        explanation: "The tunica media has multiple smooth muscle layers that regulate arterial resistance and caliber.",
+        choiceRationales: {
+          A: "Tunica media contains smooth muscle.",
+          B: "Tunica intima is the endothelial lining.",
+        },
+        keywords: ["vascular smooth muscle"],
+      });
+    });
+    expect(await screen.findByText(/changed during AI drafting/i)).toBeTruthy();
+    expect(screen.queryByText(/AI draft.*to inspect/)).toBeNull();
+    expect(mocks.completeJson).toHaveBeenCalledTimes(1);
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
 });

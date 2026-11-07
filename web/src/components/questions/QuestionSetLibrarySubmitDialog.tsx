@@ -19,6 +19,30 @@ import "../../styles/question-set-library.css";
 
 const AI_EXPLANATION_PREFIX = "AXOM AI-assisted explanation (verify against source): ";
 
+/** A reviewed key may be revoked or its containing set refiled while the
+ * publisher remains open. Check before transmitting private question text to
+ * any AI provider, not only when persisting the generated draft afterward. */
+function sameDraftReviewSet(opened: QuestionSet, live: QuestionSet | undefined): boolean {
+  return Boolean(live
+    && live.title === opened.title && live.kind === opened.kind
+    && JSON.stringify(live.questionIds) === JSON.stringify(opened.questionIds)
+    && JSON.stringify(live.sourceDocumentIds) === JSON.stringify(opened.sourceDocumentIds)
+    && JSON.stringify(live.tags) === JSON.stringify(opened.tags)
+    && live.createdAt === opened.createdAt
+    && live.parentSetId === opened.parentSetId
+    && JSON.stringify(live.scope ?? null) === JSON.stringify(opened.scope ?? null));
+}
+
+function currentDraftInput(openedSet: QuestionSet, openedQuestion: QuestionRecord): QuestionRecord | null {
+  const workspace = useStore.getState();
+  const liveSet = (workspace.questionSets ?? []).find(item => item.id === openedSet.id);
+  if (!sameDraftReviewSet(openedSet, liveSet) || !openedSet.questionIds.includes(openedQuestion.id)) return null;
+  const liveQuestion = (workspace.questions ?? []).find(item => item.id === openedQuestion.id);
+  return liveQuestion && eligibleForExplanationDraft(liveQuestion)
+    && questionExplanationFingerprint(liveQuestion) === questionExplanationFingerprint(openedQuestion)
+    ? liveQuestion : null;
+}
+
 export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDraft = false }: {
   set: QuestionSet;
   questions: readonly QuestionRecord[];
@@ -113,10 +137,22 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       // trigger an uncontrolled upload of an entire private Question Bank.
       const batch = draftable.slice(0, 12);
       for (const question of batch) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
+        const liveInput = currentDraftInput(set, question);
+        if (!liveInput) {
+          setDrafts([]);
+          setGenerationError("The Question Set or answer evidence changed before AI drafting. Reopen it before sending question content.");
+          return;
+        }
         try {
-          const draft = await draftQuestionExplanation(provider, question, controller.signal);
+          const draft = await draftQuestionExplanation(provider, liveInput, controller.signal);
           if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
+          const stillCurrent = currentDraftInput(set, question);
+          if (!stillCurrent || questionExplanationFingerprint(stillCurrent) !== draft.sourceFingerprint) {
+            setDrafts([]);
+            setGenerationError("The Question Set or answer evidence changed during AI drafting. Discarded outdated proposals; reopen the set.");
+            return;
+          }
           next.push(draft);
           setDrafts(previous => previous.some(item => item.questionId === draft.questionId)
             ? previous : [...previous, draft]);
@@ -135,7 +171,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (generationAbort.current === controller) generationAbort.current = null;
       setGenerating(false);
     }
-  }, [provider, accountId, set.id, statusIdentity, generating, draftable]);
+  }, [provider, accountId, set, statusIdentity, generating, draftable]);
 
   useEffect(() => {
     if (!autoDraft || checking || !accountId || statusIdentity !== `${accountId}:${set.id}`
@@ -156,10 +192,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // needs checking. An import, refile or removal can change membership and
     // ownership context without touching any question's updatedAt.
     const liveSet = (bank.questionSets ?? []).find(item => item.id === set.id);
-    if (!liveSet || liveSet.title !== set.title || liveSet.kind !== set.kind
-      || JSON.stringify(liveSet.questionIds) !== JSON.stringify(set.questionIds)
-      || JSON.stringify(liveSet.sourceDocumentIds) !== JSON.stringify(set.sourceDocumentIds)
-      || JSON.stringify(liveSet.tags) !== JSON.stringify(set.tags)) {
+    if (!sameDraftReviewSet(set, liveSet)) {
       setGenerationError("The Question Set changed during explanation review. Reopen it before saving drafts.");
       return;
     }
