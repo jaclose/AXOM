@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FIRST_RUN_WINDOW_MS } from "./passiveFirstRun";
+import { useAccount } from "../account/accountStore";
 import {
   PASSIVE_ATLAS_SESSION_KEY, PASSIVE_ATLAS_CHOICE_KEY,
   confirmAtlasCompanion, disableAtlasCompanion, dismissPassiveAtlas,
@@ -15,6 +16,7 @@ const accountB = "22222222-2222-4222-8222-222222222222";
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  useAccount.setState({ phase: "signed-out", user: null });
   vi.restoreAllMocks();
 });
 
@@ -24,6 +26,17 @@ describe("first-run Atlas local-only privacy boundary", () => {
     notePassiveAtlasAction("visit-questions", t + 1000);
     expect(sessionStorage.getItem(PASSIVE_ATLAS_SESSION_KEY)).toBeNull();
     expect(readPassiveAtlasProposal(t + 1000).status).toBe("off");
+  });
+
+  it("rejects a guest observation after a reload into a different account", () => {
+    startPassiveAtlasOnboarding({ consent: true, changedFields: ["tools"], tools: ["questions"] }, t);
+    expect(readPassiveAtlasSession(t)).not.toBeNull();
+    useAccount.setState({ phase: "signed-in", user: {
+      id: accountA, email: "first@example.com", displayName: "First", emailConfirmed: true,
+    } });
+    expect(readPassiveAtlasSession(t + 100)).toBeNull();
+    expect(sessionStorage.getItem(PASSIVE_ATLAS_SESSION_KEY)).toBeNull();
+    expect(readPassiveAtlasProposal(t + 100).status).toBe("off");
   });
 
   it("discards unaccepted first-run observations when the active account changes", () => {
