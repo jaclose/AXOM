@@ -110,7 +110,10 @@ export function ProductivityPage() {
     setManualQuantityKind(template.quantity);
     setManualMinutes("");
     setManualQuantity("");
-    setManualTrackerId("");
+    const chosenTrackerId = template.label === "Exercise" ? "tracker-gym"
+      : template.label === "Study" || template.label === "Questions" || template.label === "Anki" ? "tracker-study" : "";
+    setManualTrackerId(s.productivityTrackers.some((tracker) => !tracker.archived && tracker.id === chosenTrackerId)
+      ? chosenTrackerId : "");
     setLastSelfReport(false);
   }
 
