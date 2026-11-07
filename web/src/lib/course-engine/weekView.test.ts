@@ -102,6 +102,75 @@ describe("the course by week", () => {
   });
 
 
+  it("binds a legacy week to the only matching course rather than crediting unrelated attempts", () => {
+    const tracker = [row({ path: "Term 2/NB2/Week 3", passes: 1 })];
+    const answers = [
+      question({ id: "core", module: "NB2", week: 3, courseId: "core", status: "correct",
+        attempts: [{ at: "2026-11-07T00:00:00Z", status: "correct" }] }),
+      question({ id: "foreign", module: "NB2", week: 3, courseId: "other", status: "incorrect",
+        attempts: [{ at: "2026-11-07T00:00:00Z", status: "incorrect" }] }),
+      question({ id: "unowned", module: "NB2", week: 3 }),
+    ];
+    const before = JSON.stringify([tracker, answers]);
+    const [module] = buildModuleWeeks(tracker, answers, undefined, {
+      terms: [{ id: "term2", name: "Term 2" }],
+      courses: [
+        { id: "core", termId: "term2", code: "BPM 501", name: "Core", files: 0,
+          modules: [{ id: "nb2", name: "NB2" }] },
+        { id: "other", termId: "term2", code: "ELECTIVE", name: "Other", files: 0,
+          modules: [{ id: "ftm", name: "FTM 1" }] },
+      ],
+    });
+    expect(module).toMatchObject({ term: "Term 2", courseId: "core", done: 1, total: 1 });
+    expect(module.weeks[0]).toMatchObject({
+      questionScopeAmbiguous: undefined,
+      questions: { total: 1, attempted: 1, firstTimeCorrect: 1, questionIds: ["core"] },
+    });
+    expect(JSON.stringify([tracker, answers])).toBe(before);
+  });
+
+  it("holds a legacy week's question counts when two courses in one term own its module", () => {
+    const tracker = [row({ path: "Term 2/NB2/Week 3", passes: 1 })];
+    const answers = [
+      question({ id: "core", module: "NB2", week: 3, courseId: "core" }),
+      question({ id: "elective", module: "NB2", week: 3, courseId: "elective" }),
+    ];
+    const [module] = buildModuleWeeks(tracker, answers, undefined, {
+      terms: [{ id: "term2", name: "Term 2" }],
+      courses: [
+        { id: "core", termId: "term2", code: "BPM 501", name: "Core", files: 0,
+          modules: [{ id: "nb2", name: "NB2" }] },
+        { id: "elective", termId: "term2", code: "ELECTIVE", name: "Elective", files: 0,
+          modules: [{ id: "nb2-alt", name: "NB Block 2" }] },
+      ],
+    });
+    expect(module).toMatchObject({ courseId: undefined, done: 1, total: 1 });
+    expect(module.weeks[0]).toMatchObject({
+      questionScopeAmbiguous: true,
+      questions: { total: 0, attempted: 0, questionIds: [] },
+    });
+  });
+
+  it("does not credit an explicit-course tracker week without verified course ownership", () => {
+    const tracker = [row({ path: "Term 2/BPM 501/NB2/Week 3" })];
+    const answers = [
+      question({ id: "core", module: "NB2", week: 3, courseId: "core" }),
+      question({ id: "elective", module: "NB2", week: 3, courseId: "elective" }),
+    ];
+    const [unverified] = buildModuleWeeks(tracker, answers);
+    expect(unverified.weeks[0]).toMatchObject({
+      questionScopeAmbiguous: true,
+      questions: { total: 0, attempted: 0, questionIds: [] },
+    });
+    const [verified] = buildModuleWeeks(tracker, answers, undefined, {
+      terms: [{ id: "term2", name: "Term 2" }],
+      courses: [{ id: "core", termId: "term2", code: "BPM 501", name: "Core", files: 0,
+        modules: [{ id: "nb2", name: "NB2" }] }],
+    });
+    expect(verified).toMatchObject({ courseId: "core" });
+    expect(verified.weeks[0].questions.questionIds).toEqual(["core"]);
+  });
+
   it("does not report held primary-source attempts as eligible week progress", () => {
     const rows = [row({ path: "Term 2/BPM 501/NB2/Week 3" })];
     const at = "2026-11-06T00:00:00Z";
