@@ -5,9 +5,9 @@ const base = { userKey: "3c48cf9a-b93d-4de5-8d2a-f5af7efc213a" };
 const ids = AXOM_CORRESPONDENTS.map(item => item.id);
 const slugs = AXOM_CORRESPONDENTS.map(item => item.localPart);
 
-describe("AXOM Correspondents V2", () => {
-  it("keeps exactly 40 distinct, recognizable pseudonyms with safe email local-parts", () => {
-    expect(AXOM_CORRESPONDENTS).toHaveLength(40);
+describe("AXOM Correspondents V3 · Curated 25", () => {
+  it("keeps exactly 25 distinct, recognizable pseudonyms with safe email local-parts", () => {
+    expect(AXOM_CORRESPONDENTS).toHaveLength(25);
     expect(new Set(ids).size).toBe(25);
     expect(new Set(slugs).size).toBe(25);
     for (const item of AXOM_CORRESPONDENTS) {
@@ -17,11 +17,11 @@ describe("AXOM Correspondents V2", () => {
     }
   });
 
-  it("places each of the 40 companions in exactly one of eight five-member orders", () => {
-    expect(Object.keys(CORRESPONDENT_ORDERS)).toHaveLength(8);
+  it("places each of the 25 companions in exactly one of five five-member orders", () => {
+    expect(Object.keys(CORRESPONDENT_ORDERS)).toHaveLength(5);
     const listed = Object.values(CORRESPONDENT_ORDERS).flat();
-    expect(listed).toHaveLength(40);
-    expect(new Set(listed).size).toBe(40);
+    expect(listed).toHaveLength(25);
+    expect(new Set(listed).size).toBe(25);
     expect(new Set(listed)).toEqual(new Set(ids));
     for (const row of Object.values(CORRESPONDENT_ORDERS)) expect(row).toHaveLength(5);
   });
@@ -91,7 +91,7 @@ describe("AXOM Correspondents V2", () => {
     expect(axomIntro).toBeGreaterThan(0);
     expect(atlasIntro).toBeGreaterThan(axomIntro);
     expect(nameReveal).toBeGreaterThan(atlasIntro);
-    expect(email.text).toContain("forty fictional academic companions");
+    expect(email.text).toContain("twenty-five fictional academic companions");
     expect(email.text).toContain("questions");
     expect(email.text).toContain("change or turn off");
     expect(email.html).not.toMatch(/your color revealed|analyzed your journal|you chose this correspondent/i);
@@ -121,8 +121,8 @@ describe("AXOM Correspondents V2", () => {
     expect(sender).toEqual({ from: expect.stringContaining("<" + match.localPart + "@axom.info>"), replyTo: "team@axom.info" });
   });
 
-  it("includes all eight orders and the fifteen new academic companions", () => {
-    const expected = ["orrery", "eidolon", "rook", "thren", "virelai", "tessera", "zephyr", "halcyon", "thistle", "calyx", "aureline", "helion", "caelum", "solara", "noctis"];
+  it("includes all five curated orders and a diverse academic roster", () => {
+    const expected = ["orrery", "eidolon", "rook", "tessera", "zephyr", "halcyon", "thistle", "calyx", "juniper", "mosaic", "ember", "fathom", "kestrel", "harbor", "vellum"];
     for (const id of expected) expect(ids).toContain(id);
   });
 
