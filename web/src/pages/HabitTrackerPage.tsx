@@ -188,6 +188,8 @@ function HabitTargetsSummary() {
 
 function HabitRow({ habit }: { habit: Habit }) {
   const entries = useStore((s) => s.habitEntries);
+  const logs = useStore((s) => s.logs);
+  const setHabitSlot = useStore((s) => s.setHabitSlot);
   const checkHabit = useStore((s) => s.checkHabit);
   const clearHabitCheck = useStore((s) => s.clearHabitCheck);
   const updateHabit = useStore((s) => s.updateHabit);
@@ -204,10 +206,12 @@ function HabitRow({ habit }: { habit: Habit }) {
 
   const today = todayKey();
   const myEntries = useMemo(() => entries.filter((e) => e.habitId === habit.id), [entries, habit.id]);
-  const streak = currentStreak(habit, myEntries, today);
+  const streak = currentStreak(habit, myEntries, today, logs);
   const todayStatus = statusOn(habit, myEntries, today);
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addLocalDays(today, -i)), [today]);
-  const week = weekStats(habit, myEntries, weekDates);
+  const week = weekStats(habit, myEntries, weekDates, logs);
+  const cadence = habit.type === "weekly" ? weeklyHabitSummary(habit, myEntries, today, logs) : undefined;
+  const named = habit.type === "slots" ? namedSlotProgress(habit, myEntries.find((e) => e.date === today)) : undefined;
   const cells = useMemo(() => heatmapCells(habit, myEntries, 35, today), [habit, myEntries, today]);
   const targeted = HABIT_TYPE_META[habit.type].needsTarget;
 
@@ -298,11 +302,11 @@ function HabitRow({ habit }: { habit: Habit }) {
       </div>
 
       <div className="habit-meta-row">
-        <span>This week: <b>{week.adherence}%</b> adherence</span>
+        <span>This week: <b>{week.adherence}%</b> {habit.type === "weekly" ? "of minimum" : "adherence"}</span>
         <span>{week.done} done · {week.partial} partial · {week.skipped} skipped · {week.missed} missed</span>
         {habit.type === "scheduled" && habit.schedule?.length ? <span>Scheduled {scheduleLabel(habit.schedule)}</span> : null}
       </div>
-      {!habit.archived && <div className="habit-recovery">{recoveryMessage(habit, myEntries, today)}</div>}
+      {!habit.archived && <div className="habit-recovery">{recoveryMessage(habit, myEntries, today, logs)}</div>}
 
       {editing && <HabitEditor habit={habit} onClose={() => setEditing(false)} />}
     </div>
