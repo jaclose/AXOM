@@ -150,6 +150,29 @@ describe("Question Set draft explanation review", () => {
     expect(await screen.findByText(/questions changed/)).toBeTruthy();
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
   });
+  it("refuses saving AI explanations after a silent replacement of reviewed answer evidence", async () => {
+    const source = question({
+      citation: "Authoritative text, page 4",
+      extraction: { confidence: "high", reviewed: true, answerEvidence: "Marked answer A" },
+    });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    // The mapped answer remains marked reviewed, and no updatedAt is bumped.
+    // The old fingerprint checked neither source citation nor answer evidence,
+    // so this stale proposal previously appeared safe to save.
+    mocks.workspace.questions = [{ ...source, citation: "Replacement source, page 9", extraction: {
+      ...source.extraction!, answerEvidence: "Different original key annotation",
+    } }];
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/questions changed/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("rejects a previously reviewed question if its live answer becomes held before submission", async () => {
     const source = question({ explanation: "The tunica media is the arterial smooth muscle layer, important for contraction and resistance." });
     mocks.workspace.questions = [source];
