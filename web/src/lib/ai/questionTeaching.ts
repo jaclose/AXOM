@@ -23,11 +23,13 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
   return JSON.stringify([
     question.id, question.updatedAt, question.stem, question.options,
     question.correctKey, question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
-    question.source, question.sourceFile ?? null, question.sourceDocumentId ?? null,
-    question.sourcePage ?? null, question.questionNumber ?? null,
+    question.source, question.createdAt, question.sourceFile ?? null,
+    question.sourceDocumentId ?? null, question.sourcePage ?? null, question.questionNumber ?? null,
+    question.courseId ?? null, question.module ?? null, question.week ?? null,
+    question.bank ?? null, question.setId ?? null, question.tags,
     question.extraction ?? null, question.citation ?? null, question.ai ?? null,
-    question.system ?? null, question.topic ?? null,
-    question.category ?? null, question.subcategory ?? null,
+    question.system ?? null, question.topic ?? null, question.objective ?? null,
+    question.category ?? null, question.subcategory ?? null, question.taxonomy ?? null,
   ]);
 }
 

@@ -6,13 +6,42 @@ import { createQuestionSetShare, type SharedQuestionSetSnapshot } from "./questi
 
 const CHANGED = "This Question Set or its source review changed while publishing. Reopen the set and reconfirm the current answers and sharing rights.";
 
+/** Shared set-identity gate for AI drafting, private draft saves and public
+ * submission. Membership alone is insufficient: the same saved IDs may be
+ * refiled to another course, reimported from a different share, or recreated
+ * under a reused local ID while a publisher dialog remains open.
+ *
+ * Not a server authorization check; the signed-in owner, rights attestation,
+ * reviewed-answer evidence and academic approval remain independent gates.
+ */
+export function sameCommunitySetReviewRevision(opened: QuestionSet, live: QuestionSet | undefined): boolean {
+  return Boolean(live
+    && live.id === opened.id
+    && live.title === opened.title && live.kind === opened.kind
+    && live.createdAt === opened.createdAt
+    // Parser warnings and AI-generated set status are review provenance, even
+    // though the privacy-stripped public snapshot does not carry them.
+    && live.aiEnhanced === opened.aiEnhanced
+    && JSON.stringify(live.parserWarnings) === JSON.stringify(opened.parserWarnings)
+    && JSON.stringify(live.questionIds) === JSON.stringify(opened.questionIds)
+    && JSON.stringify(live.sourceDocumentIds) === JSON.stringify(opened.sourceDocumentIds)
+    && JSON.stringify(live.tags) === JSON.stringify(opened.tags)
+    && live.parentSetId === opened.parentSetId
+    && JSON.stringify(live.scope ?? null) === JSON.stringify(opened.scope ?? null)
+    && JSON.stringify(live.importProvenance ?? null) === JSON.stringify(opened.importProvenance ?? null)
+    && JSON.stringify(live.filterSnapshot ?? null) === JSON.stringify(opened.filterSnapshot ?? null)
+    && live.ordering === opened.ordering && live.seed === opened.seed);
+}
+
 function sourceReceipt(question: QuestionRecord): string {
   // Public snapshot v1 intentionally excludes the private source review. Compare
   // that evidence separately so a revoked source check cannot be published using
   // the answers-confirmed checkbox from an earlier revision.
   return JSON.stringify([
-    question.updatedAt, question.source, question.sourceDocumentId,
+    question.updatedAt, question.createdAt, question.source, question.sourceDocumentId,
     question.sourcePage, question.questionNumber, question.sourceFile,
+    question.courseId, question.module, question.week, question.bank, question.setId,
+    question.objective, question.taxonomy,
     question.extraction, question.needsReview, question.ai,
   ]);
 }
@@ -34,11 +63,7 @@ export function prepareCurrentCommunityQuestionSetSubmission(input: {
 }): SharedQuestionSetSnapshot {
   const { openedSet, openedQuestions, liveSets, liveQuestions, now = new Date().toISOString() } = input;
   const liveSet = liveSets.find(candidate => candidate.id === openedSet.id);
-  if (!liveSet
-    || liveSet.title !== openedSet.title || liveSet.kind !== openedSet.kind
-    || JSON.stringify(liveSet.tags) !== JSON.stringify(openedSet.tags)
-    || JSON.stringify(liveSet.questionIds) !== JSON.stringify(openedSet.questionIds)
-    || JSON.stringify(liveSet.sourceDocumentIds) !== JSON.stringify(openedSet.sourceDocumentIds)
+  if (!liveSet || !sameCommunitySetReviewRevision(openedSet, liveSet)
     || openedSet.questionIds.length === 0
     || new Set(openedSet.questionIds).size !== openedSet.questionIds.length) throw new Error(CHANGED);
 

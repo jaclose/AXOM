@@ -87,6 +87,13 @@ describe("review-gated explanation drafting", () => {
     expect(questionExplanationFingerprint({ ...original, citation: "Unverified replacement citation" })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, sourceDocumentId: "source-pdf-2" })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, sourcePage: 4 })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, courseId: "reassigned-private-course" })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, module: "private-module", week: 6 })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, setId: "different-source-set" })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, bank: "restricted-institution-bank" })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, createdAt: "2026-11-07T13:00:00.000Z" })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, tags: ["private"] })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, objective: "New learning objective" })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, extraction: { ...original.extraction!, reviewed: false } })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, extraction: {
       ...original.extraction!, answerEvidence: "Conflicting answer marker, page 3",

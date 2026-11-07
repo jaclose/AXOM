@@ -8,7 +8,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
-import { prepareCurrentCommunityQuestionSetSubmission } from "../../lib/sharing/communitySetPublicationGuard";
+import { prepareCurrentCommunityQuestionSetSubmission, sameCommunitySetReviewRevision } from "../../lib/sharing/communitySetPublicationGuard";
 import {
   listMyQuestionSetSubmissions, submitQuestionSetToLibrary, withdrawQuestionSetSubmission,
   type LibrarySubmission,
@@ -22,21 +22,10 @@ const AI_EXPLANATION_PREFIX = "AXOM AI-assisted explanation (verify against sour
 /** A reviewed key may be revoked or its containing set refiled while the
  * publisher remains open. Check before transmitting private question text to
  * any AI provider, not only when persisting the generated draft afterward. */
-function sameDraftReviewSet(opened: QuestionSet, live: QuestionSet | undefined): boolean {
-  return Boolean(live
-    && live.title === opened.title && live.kind === opened.kind
-    && JSON.stringify(live.questionIds) === JSON.stringify(opened.questionIds)
-    && JSON.stringify(live.sourceDocumentIds) === JSON.stringify(opened.sourceDocumentIds)
-    && JSON.stringify(live.tags) === JSON.stringify(opened.tags)
-    && live.createdAt === opened.createdAt
-    && live.parentSetId === opened.parentSetId
-    && JSON.stringify(live.scope ?? null) === JSON.stringify(opened.scope ?? null));
-}
-
 function currentDraftInput(openedSet: QuestionSet, openedQuestion: QuestionRecord): QuestionRecord | null {
   const workspace = useStore.getState();
   const liveSet = (workspace.questionSets ?? []).find(item => item.id === openedSet.id);
-  if (!sameDraftReviewSet(openedSet, liveSet) || !openedSet.questionIds.includes(openedQuestion.id)) return null;
+  if (!sameCommunitySetReviewRevision(openedSet, liveSet) || !openedSet.questionIds.includes(openedQuestion.id)) return null;
   const liveQuestion = (workspace.questions ?? []).find(item => item.id === openedQuestion.id);
   return liveQuestion && eligibleForExplanationDraft(liveQuestion)
     && questionExplanationFingerprint(liveQuestion) === questionExplanationFingerprint(openedQuestion)
@@ -192,7 +181,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // needs checking. An import, refile or removal can change membership and
     // ownership context without touching any question's updatedAt.
     const liveSet = (bank.questionSets ?? []).find(item => item.id === set.id);
-    if (!sameDraftReviewSet(set, liveSet)) {
+    if (!sameCommunitySetReviewRevision(set, liveSet)) {
       setGenerationError("The Question Set changed during explanation review. Reopen it before saving drafts.");
       return;
     }
