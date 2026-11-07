@@ -25,6 +25,7 @@ import {
 } from "../../lib/setupPlan";
 import { SGU_CURRICULUM } from "../../lib/curricula";
 import { otherWorkspaceUrl } from "../../lib/otherWorkspace";
+import { startPassiveAtlasOnboarding } from "../../lib/communications/passiveFirstRunClient";
 import "../../styles/setup.css";
 
 const PATH_ICONS: Record<SetupPath, LucideIcon> = {
@@ -45,6 +46,8 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
   const effectiveMode: OnboardingMode = mode ?? (profile.onboarded ? "rerun" : "first-run");
   const [choices, setChoices] = useState<SetupChoices>(() => readSetupDraft(defaultChoices(useStore.getState().profile), effectiveMode));
   const [direction, setDirection] = useState<"forward" | "back">("forward");
+  const [observeAtlas, setObserveAtlas] = useState(false);
+  const editedStudyPreferences = useRef<Set<"tools" | "questionTiming">>(new Set());
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstStepRender = useRef(true);
   const titleId = useId();
@@ -58,7 +61,11 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
     headingRef.current?.focus({ preventScroll: true });
   }, [choices.step]);
 
-  const update = (patch: Partial<SetupChoices>) => setChoices((current) => ({ ...current, ...patch }));
+  const update = (patch: Partial<SetupChoices>) => {
+    if (Object.hasOwn(patch, "tools")) editedStudyPreferences.current.add("tools");
+    if (Object.hasOwn(patch, "questionTiming")) editedStudyPreferences.current.add("questionTiming");
+    setChoices((current) => ({ ...current, ...patch }));
+  };
   const go = (step: number) => {
     setDirection(step > choices.step ? "forward" : "back");
     update({ step: Math.max(0, Math.min(STEPS.length - 1, step)) });
@@ -66,6 +73,14 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
 
   function finish() {
     applySetup(choices, effectiveMode);
+    if (effectiveMode === "first-run") {
+      // Consent only: a six-minute on-device summary begins after setup. No
+      // raw clicks, scroll coordinates, text, Journal or account data is copied.
+      startPassiveAtlasOnboarding({
+        consent: observeAtlas, changedFields: [...editedStudyPreferences.current],
+        tools: choices.tools, questionTiming: choices.questionTiming,
+      });
+    }
     clearSetupDraft();
     onComplete?.("dashboard");
   }
@@ -109,7 +124,7 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
             <section key={choices.step} className="setup-screen" data-dir={direction}>
               {choices.step === 0 && <YouStep choices={choices} update={update} titleId={titleId} headingRef={headingRef} rerun={effectiveMode === "rerun"} otherWorkspace={otherWorkspace} />}
               {choices.step === 1 && <StudyStep choices={choices} update={update} titleId={titleId} headingRef={headingRef} />}
-              {choices.step === 2 && <YoursStep titleId={titleId} headingRef={headingRef} />}
+              {choices.step === 2 && <YoursStep titleId={titleId} headingRef={headingRef} firstRun={effectiveMode === "first-run"} observeAtlas={observeAtlas} setObserveAtlas={setObserveAtlas} />}
             </section>
           </div>
         </div>
@@ -272,7 +287,7 @@ const THEMES: Array<{ value: ThemePreference; label: string; icon: LucideIcon }>
   { value: "system", label: "System", icon: Monitor },
 ];
 
-function YoursStep({ titleId, headingRef }: { titleId: string; headingRef: StepProps["headingRef"] }) {
+function YoursStep({ titleId, headingRef, firstRun, observeAtlas, setObserveAtlas }: { titleId: string; headingRef: StepProps["headingRef"]; firstRun: boolean; observeAtlas: boolean; setObserveAtlas: (value: boolean) => void }) {
   const theme = useThemePreference();
   const [permission, setPermission] = useState<NotifyPermission>("default");
   useEffect(() => { void notificationPermission().then(setPermission); }, []);
@@ -321,6 +336,19 @@ function YoursStep({ titleId, headingRef }: { titleId: string; headingRef: StepP
             <span />
           </button>
         </div>
+        {firstRun && <div className="setup-notify">
+          <Compass size={ICON_SIZE.emphasis} strokeWidth={1.5} aria-hidden="true" />
+          <span>
+            <b>Suggest an Atlas companion as I explore</b>
+            <small>Optional. AXOM will use your edited study choices and a few meaningful actions during your first six minutes. Only limited counts stay in this tab; no raw clicks, journal text or browsing history is sent anywhere. You choose whether to keep the result.</small>
+          </span>
+          <button type="button" role="switch" aria-checked={observeAtlas}
+            aria-label="Allow on-device first-run Atlas suggestions"
+            className={`setup-switch ${observeAtlas ? "on" : ""}`}
+            onClick={() => setObserveAtlas(!observeAtlas)}>
+            <span />
+          </button>
+        </div>}
       </div>
     </>
   );

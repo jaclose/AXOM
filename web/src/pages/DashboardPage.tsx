@@ -66,6 +66,8 @@ import { DashboardNotificationCenter } from "../components/dashboard/DashboardNo
 import { useAccount } from "../lib/account/accountStore";
 import { deviceId } from "../lib/sync/syncMetadata";
 import { BRAND } from "../lib/brand";
+import { notePassiveAtlasAction } from "../lib/communications/passiveFirstRunClient";
+import { AtlasFirstRunCard } from "../components/dashboard/AtlasFirstRunCard";
 
 const FIXED_DASHBOARD_SURFACES = new Set<DashboardWidgetId>(["welcome", "commandBrief"]);
 const CURRENT_DASHBOARD_ID_SET = new Set<string>(CURRENT_DASHBOARD_WIDGET_IDS);
@@ -99,6 +101,7 @@ export function DashboardPage() {
   )) as DashboardWidgetId[];
 
   function saveLayout(nextValue: DashboardLayoutPreferences) {
+    notePassiveAtlasAction("dashboard-customize");
     const next = normalizeDashboardLayoutPreferences(nextValue) ?? nextValue;
     s.updateProfile({ dashboardLayout: next });
   }
@@ -185,6 +188,7 @@ export function DashboardPage() {
       {!hiddenWidgets.has("commandBrief") && <UpNext readiness={readiness} onHide={hideUpNext} />}
 
       <StandupPrompt />
+      <AtlasFirstRunCard />
       <DoctordleReminder />
 
       <div className="dashboard-edit-toolbar">
