@@ -1454,6 +1454,9 @@ function JournalFeedback({ onClose }: { onClose: () => void }) {
 function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; draftKey: string }) {
   const user = useAccount((state) => state.user);
   const [draft, setDraft] = useState(() => readJournalFeedbackDraft(draftKey));
+  // Opening or remounting the dialog must never write a stale snapshot back
+  // over a newer draft another tab saved between our read and first effect.
+  const initialDraftRef = useRef(draft);
   const [sending, setSending] = useState(false);
   const [sentId, setSentId] = useState("");
   const [error, setError] = useState("");
@@ -1461,6 +1464,9 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   const submittedDraftRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Persist only this editor's actual changes; a mount is not an edit.
+    // The identity guard also survives React StrictMode effect replays.
+    if (!sentId && draft === initialDraftRef.current) return;
     try {
       if (sentId) {
         // Another tab may have saved newer writing while this request was pending.

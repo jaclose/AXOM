@@ -478,6 +478,55 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("does not clobber a newer local feedback draft merely by opening or reopening the dialog", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-mount";
+    const account = { id: "journal-feedback-stale-account", email: "stale@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const originalDraft = { rating: 3, liked: "Older saved feedback.", wantMore: "", missing: "", painPoints: "", comment: "" };
+    const newerDraft = JSON.stringify({ ...originalDraft, liked: "Newer feedback saved in another tab." });
+    window.localStorage.setItem(draftKey, JSON.stringify(originalDraft));
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+
+    // Model the independent tab writing after the initial storage read, before
+    // React commits the initial persistence effect (which previously clobbered it).
+    const nativeGetItem = window.Storage.prototype.getItem;
+    const nativeSetItem = window.Storage.prototype.setItem;
+    let interleaved = false;
+    const readSpy = vi.spyOn(window.Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+      const before = nativeGetItem.call(this, key);
+      if (!interleaved && this === window.localStorage && key === draftKey) {
+        interleaved = true;
+        nativeSetItem.call(this, key, newerDraft);
+      }
+      return before;
+    });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      expect(interleaved).toBe(true);
+      expect(liked().value).toBe(originalDraft.liked);
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(liked().value).toBe("Newer feedback saved in another tab.");
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+
+      fireEvent.change(liked(), { target: { value: "A deliberate new edit." } });
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked).toBe("A deliberate new edit.");
+    } finally {
+      readSpy.mockRestore();
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
   it("opens feedback from the notification route without sending private content", () => {
     window.history.replaceState(null, "", "#journal?feedback=1");
     render(<JournalPage />);
