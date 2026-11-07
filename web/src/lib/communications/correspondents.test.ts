@@ -27,7 +27,7 @@ describe("AXOM Correspondents V3 · Curated 25", () => {
   });
 
   it("never treats color as a measure of personality or changes an academic preference match", () => {
-    const sample = { ...base, academicHouse: "KEEPERS" as const, declaredStyles: ["writing", "reflection"] };
+    const sample = { ...base, academicHouse: "ALCHEMISTS" as const, declaredStyles: ["writing", "reflection"] as const };
     const warm = matchCorrespondent({ ...sample, selectedAccent: "#DC6C39" });
     const cold = matchCorrespondent({ ...sample, selectedAccent: "#3475CF" });
     expect(warm.id).toBe(cold.id);
