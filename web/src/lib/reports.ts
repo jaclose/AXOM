@@ -164,7 +164,7 @@ export function buildCanonicalReportSummary(state: NoctyriumState, range: number
   const dailySuccess = percent(successfulDates.length, scoredResults.length);
   const mastery = percent(completedTracker.length, state.tracker.length);
   const hasSelectedRequirements = state.profile.dailySuccess
-    ? state.profile.dailySuccess.requirements.some((requirement) => requirement.enabled)
+    ? state.profile.dailySuccess.requirements.some((requirement) => requirement.enabled && requirement.schedule.kind !== "times-per-week")
     : true;
 
   return {
