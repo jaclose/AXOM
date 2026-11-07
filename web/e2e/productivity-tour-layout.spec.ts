@@ -123,12 +123,18 @@ test("Productivity primary panels stay usable across themes and narrow screens",
       await expect(page.getByRole("heading", { name: "Log an activity" })).toBeVisible();
       const bounds = await page.locator(".productivity-primary-grid").evaluate((grid) => {
         const [log, focus] = Array.from(grid.children).map((element) => element.getBoundingClientRect());
-        return { logHeight: log.height, focusHeight: focus.height, logTop: log.top, focusTop: focus.top, scroll: grid.scrollWidth, width: grid.clientWidth };
+        const focusStack = grid.querySelector<HTMLElement>("#productivity-focus");
+        if (!focusStack) throw new Error("Focus stack is missing");
+        const previousHeight = focusStack.style.height;
+        focusStack.style.height = "auto";
+        const naturalFocusHeight = focusStack.getBoundingClientRect().height;
+        focusStack.style.height = previousHeight;
+        return { logTop: log.top, focusTop: focus.top, focusHeight: focus.height, naturalFocusHeight, scroll: grid.scrollWidth, width: grid.clientWidth };
       });
       expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
       if (width === 1440) {
         expect(Math.abs(bounds.logTop - bounds.focusTop)).toBeLessThan(2);
-        expect(Math.abs(bounds.logHeight - bounds.focusHeight)).toBeLessThan(2);
+        expect(Math.abs(bounds.focusHeight - bounds.naturalFocusHeight)).toBeLessThan(3); // The timer card cannot be stretched to the logger's height.
       } else expect(bounds.focusTop).toBeGreaterThan(bounds.logTop);
       const progress = await page.locator("#productivity-log .daily-progress-vessel").evaluate((vessel) => {
         const outer = vessel.getBoundingClientRect();
@@ -150,6 +156,13 @@ test("Productivity primary panels stay usable across themes and narrow screens",
         expect(field.right).toBeLessThanOrEqual(1);
         expect(field.width).toBeGreaterThan(40);
       }
+      await expect(page.locator("#productivity-focus .study-streak-monitor")).toBeVisible();
+      await expect(page.locator("#productivity-log .study-streak-monitor")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Add a goal" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Use Questions template" })).toBeVisible();
+      const focusMeter = page.getByRole("progressbar", { name: "Focus session progress" });
+      await expect(focusMeter).toBeVisible();
+      await expect(focusMeter).toHaveAttribute("aria-valuenow", /^(0|[1-9]\d?|100)$/);
       const fields = await page.locator(".productivity-primary-grid .pomo-target-box").evaluate((box) => {
         const outer = box.getBoundingClientRect();
         return Array.from(box.querySelectorAll("input, select")).map((field) => {
@@ -220,5 +233,52 @@ test("expanded Productivity target settings and custom form stay inside the Log 
     await card.screenshot({ path: testInfo.outputPath(`target-settings-${width}.png`) });
     await custom.evaluate((element) => element.scrollIntoView({ block: "center" }));
     await custom.screenshot({ path: testInfo.outputPath(`target-custom-${width}.png`) });
+  }
+});
+
+test("Quick self-report goals remain usable without overflow on desktop and phones", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await page.goto("/#productivity", { waitUntil: "networkidle" });
+  await completeOnboarding(page);
+  await page.evaluate(() => { window.location.hash = "productivity"; });
+
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const name = `Review anatomy ${width}`;
+    await page.getByRole("button", { name: "Add a goal" }).click();
+    await page.getByLabel("Goal type").selectOption("custom");
+    await page.getByLabel("Goal name").fill(name);
+    await page.getByLabel("Goal amount").fill("2");
+    await page.getByLabel("How progress is recorded").selectOption("activity");
+    await page.locator("#quick-goal-form").screenshot({ path: testInfo.outputPath(`quick-goal-create-${width}.png`) });
+
+    const bounds = await page.locator("#quick-goal-form").evaluate((element) => {
+      const panel = element.closest("#productivity-log")!.getBoundingClientRect();
+      return Array.from(element.querySelectorAll<HTMLElement>("input, select, button"))
+        .filter((control) => control.getClientRects().length > 0)
+        .map((control) => {
+          const rect = control.getBoundingClientRect();
+          return { left: rect.left - panel.left, right: rect.right - panel.right, width: rect.width };
+        });
+    });
+    for (const control of bounds) {
+      expect(control.left).toBeGreaterThanOrEqual(0);
+      expect(control.right).toBeLessThanOrEqual(1);
+      expect(control.width).toBeGreaterThan(40);
+    }
+
+    await page.getByRole("button", { name: "Save goal" }).click();
+    await expect(page.getByRole("button", { name: `Use ${name} in self-report` })).toBeVisible();
+    if (width <= 390) {
+      const textWidth = await page.locator(".quick-goal-row").filter({ hasText: name })
+        .locator(".quick-goal-copy").evaluate((element) => element.getBoundingClientRect().width);
+      expect(textWidth).toBeGreaterThan(160); // A full goal name must not wrap character by character.
+    }
+    await page.getByRole("button", { name: `Use ${name} in self-report` }).click();
+    await expect(page.getByLabel("What did you do?")).toHaveValue(name);
+    await page.getByRole("button", { name: "Log", exact: true }).click();
+    await expect(page.getByText("Activity added. Your save status appears above.")).toBeVisible();
+    await page.locator("#productivity-log .quick-goals").screenshot({ path: testInfo.outputPath(`quick-goal-progress-${width}.png`) });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
 });

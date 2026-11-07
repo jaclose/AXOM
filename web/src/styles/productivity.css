@@ -5,16 +5,27 @@
 .productivity-next p, .productivity-save { margin: 0; color: var(--text-70); }
 .productivity-eyebrow { color: var(--gold); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .1em; }
 .productivity-save { text-align: right; font-size: var(--fs-xs); margin: 8px 0 14px; }
-.productivity-primary-grid, .surface-scroll .productivity-analytics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); align-items: stretch; gap: 16px; }
-.productivity-primary-grid > *, .surface-scroll .productivity-analytics > * { min-width: 0; height: 100%; }
-.productivity-primary-grid > div > .pomodoro { height: 100%; }
-.productivity-primary-grid .fast-activity-logger, .productivity-primary-grid .today-targets { grid-template-columns: minmax(0, 1fr); }
-.productivity-primary-grid .fast-activity-logger > * { min-width: 0; grid-column: auto; }
-.productivity-primary-grid .fast-activity-logger > .gbtn { grid-column: auto; justify-self: start; }
-.productivity-primary-grid .fast-activity-measures { grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+/* This view should occupy its available canvas, not inherit the generic 1180px page cap. */
+.page:has(> .productivity-primary-grid) { inline-size: 100%; max-width: none; }
+.productivity-primary-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: start; gap: clamp(14px, 1.4vw, 20px); }
+.productivity-primary-grid > * { min-width: 0; }
+.surface-scroll .productivity-analytics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); align-items: stretch; gap: 16px; }
+.surface-scroll .productivity-analytics > * { min-width: 0; height: 100%; }
+.productivity-primary-grid > div > .pomodoro { height: auto; }
+.productivity-focus-stack { display: flex; flex-direction: column; gap: 14px; }
+.productivity-focus-stack > .pomodoro { width: 100%; }
+.productivity-focus-stack > .study-streak-monitor { margin-top: 0; }
+.productivity-primary-grid .fast-activity-logger { grid-template-columns: minmax(0, 1fr) auto; gap: 12px 10px; align-items: end; }
+.productivity-primary-grid .today-targets { grid-template-columns: minmax(0, 1fr); }
+.productivity-primary-grid .fast-activity-logger > * { min-width: 0; }
+.productivity-primary-grid .fast-activity-field,
+.productivity-primary-grid .fast-activity-measures { grid-column: 1 / -1; }
+.productivity-primary-grid .fast-activity-note { grid-column: 1; }
+.productivity-primary-grid .fast-activity-logger > .gbtn { grid-column: 2; justify-self: end; min-width: 96px; }
+.productivity-primary-grid .fast-activity-measures { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 12px; padding: 12px; }
 .productivity-primary-grid .fast-field.quantity input { flex: 1; width: 0; }
 .productivity-primary-grid .fast-field.quantity select { flex: 0 0 118px; }
-.productivity-primary-grid .daily-progress-vessel { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+.productivity-primary-grid .daily-progress-vessel { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 16px; }
 .productivity-primary-grid .pomo-target-box { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
 .productivity-primary-grid .pomo-target-box > label { min-width: 0; }
 .productivity-primary-grid .pomo-target-box .field { width: 100%; min-width: 0; }
@@ -38,7 +49,8 @@
 #productivity-log .daily-custom-grid > .gbtn { justify-self: start; }
 #productivity-log .daily-requirements-editor summary { flex-wrap: wrap; overflow-wrap: anywhere; }
 #productivity-log .daily-requirements-editor summary > svg { flex: none; }
-@media (max-width: 880px) { .productivity-primary-grid, .surface-scroll .productivity-analytics { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1199px) { .productivity-primary-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 880px) { .surface-scroll .productivity-analytics { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {
   .productivity-next { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 12px 16px; padding: 16px; }
   .productivity-next img { width: 42px; height: 42px; }
@@ -48,3 +60,185 @@
 .productivity-evidence small { display: block; color: var(--text-50); }
 :root[data-theme="light"] .productivity-intel,
 :root[data-theme="light"] .month-intel { background: var(--glass-card-fill); }
+
+
+/* Productivity: one aligned reading system, without forced equal-height cards. */
+.productivity-report-context { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 5px 14px; margin: 20px 0 10px; }
+.productivity-report-context > span { display: inline-flex; align-items: center; gap: 7px; color: var(--text-80); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.productivity-report-context > span svg { color: var(--gold); }
+.productivity-report-context > small { color: var(--text-50); font-size: var(--fs-tiny); line-height: var(--leading-normal); }
+.productivity-primary-grid .today-targets { gap: 10px; padding-top: 12px; border-top: 1px solid var(--hairline-soft); }
+.productivity-primary-grid .activity-shortcuts { gap: 12px; }
+.productivity-primary-grid .activity-shortcut-group { min-width: 0; }
+.productivity-primary-grid .activity-shortcut { max-width: 100%; }
+.productivity-primary-grid .activity-shortcut > button:first-child { min-width: 0; }
+.productivity-primary-grid .activity-shortcut b,
+.productivity-primary-grid .activity-shortcut small { overflow-wrap: anywhere; }
+
+/* Separate source-based daily credit from the live focus clock. */
+.productivity-primary-grid .daily-progress-track { height: 36px; }
+.productivity-primary-grid .daily-progress-fill { transition: width .48s cubic-bezier(.22, 1, .36, 1); }
+.daily-progress-threshold { position: absolute; z-index: 2; inset-block: 5px; left: 80%; border-left: 1px dashed var(--gold); pointer-events: none; opacity: .9; }
+.daily-progress-threshold-label { margin: 4px 3px 0; text-align: right; color: var(--text-50); font-size: var(--fs-micro); letter-spacing: .01em; }
+.productivity-primary-grid .daily-progress-peek { margin-top: 5px; }
+
+/* The timer is a measured pulse: dynamic feedback without an empty stretched card. */
+.productivity-primary-grid .pomodoro:not(.compact) .pomo-body { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; margin-top: 12px; }
+.productivity-primary-grid .pomodoro:not(.compact) .pomo-dial { justify-self: center; }
+.productivity-primary-grid .pomodoro:not(.compact) .pomo-controls { min-width: 0; gap: 12px; }
+.pomo-dial .pomo-ring-progress { transition: stroke-dashoffset .4s linear; }
+.pomo-live-progress { min-width: 0; padding: 13px 14px 11px; border-radius: var(--radius-md); border: 1px solid var(--hairline); background: var(--surface-1); }
+.pomo-live-progress-head,
+.pomo-live-progress-foot { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.pomo-live-progress-head { margin-bottom: 10px; }
+.pomo-live-progress-head > span { color: var(--text-70); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.pomo-live-progress-head > strong { color: var(--text); font: var(--fw-bold) var(--fs-sm)/var(--leading-none) var(--font-mono); font-variant-numeric: tabular-nums; }
+.pomo-live-progress-head small { color: var(--text-50); font-size: var(--fs-tiny); font-weight: var(--fw-medium); }
+.pomo-live-track { width: 100%; height: 11px; border-radius: var(--radius-pill); background: var(--surface-2); border: 1px solid var(--hairline); overflow: hidden; }
+.pomo-live-fill { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 74%, var(--surface-2)), var(--gold)); transition: width .38s linear; }
+.phase-break .pomo-live-fill { background: var(--green); }
+.pomo-live-progress-foot { margin-top: 8px; color: var(--text-45); font-size: var(--fs-micro); }
+.pomo-log-truth { margin: 0; padding-top: 10px; border-top: 1px solid var(--hairline-soft); color: var(--text-50); font-size: var(--fs-tiny); line-height: var(--leading-normal); }
+.productivity-primary-grid .pomodoro .pomo-target-box { margin-top: 2px; }
+.productivity-primary-grid .pomodoro .pomo-actions { gap: 8px; }
+
+/* On the middle widths, use the freed space beside the clock for settings. */
+@media (min-width: 720px) and (max-width: 1199px) {
+  .productivity-primary-grid .pomodoro:not(.compact) .pomo-body { grid-template-columns: minmax(190px, .65fr) minmax(0, 1fr); column-gap: 22px; }
+  .productivity-primary-grid .pomodoro:not(.compact) .pomo-dial { grid-area: 1 / 1; }
+  .productivity-primary-grid .pomodoro:not(.compact) .pomo-live-progress { grid-area: 2 / 1; }
+  .productivity-primary-grid .pomodoro:not(.compact) .pomo-controls { grid-area: 1 / 2 / span 2 / 3; }
+}
+@media (max-width: 560px) {
+  .productivity-primary-grid .fast-activity-logger { grid-template-columns: minmax(0, 1fr); }
+  .productivity-primary-grid .fast-activity-measures { grid-template-columns: minmax(0, 1fr); }
+  .productivity-primary-grid .fast-activity-field,
+  .productivity-primary-grid .fast-activity-measures,
+  .productivity-primary-grid .fast-activity-note,
+  .productivity-primary-grid .fast-activity-logger > .gbtn { grid-column: 1; }
+  .productivity-primary-grid .fast-activity-logger > .gbtn { justify-self: stretch; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pomo-dial .pomo-ring-progress, .pomo-live-fill, .productivity-primary-grid .daily-progress-fill { transition: none !important; }
+  .productivity-primary-grid .pomodoro.running .pomo-dial { animation: none !important; }
+  .daily-progress-fill.changed::after { animation: none !important; }
+}
+
+
+/* V2: the learner can report activity before scanning the day's metrics. */
+.productivity-primary-grid #productivity-log > .panel-head { margin-bottom: 5px; }
+.productivity-primary-grid .productivity-report-context { margin-top: 14px; }
+.productivity-primary-grid .fast-activity-logger { margin-top: 8px; }
+.productivity-primary-grid .self-report-templates { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.self-report-templates > button {
+  min-height: 34px; min-width: 68px; padding: 7px 11px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-pill);
+  background: var(--surface-1); color: var(--text-70);
+  font: var(--fw-medium) var(--fs-xs)/1.2 var(--font-ui); cursor: pointer;
+}
+.self-report-templates > button:hover,
+.self-report-templates > button.on { border-color: var(--gold-line); color: var(--text); background: var(--gold-soft); }
+.self-report-templates > button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#productivity-log .productivity-save { margin: 5px 2px 5px; text-align: left; font-size: var(--fs-tiny); }
+.self-report-confirmation { margin: 8px 0 0; color: var(--text-70); font-size: var(--fs-xs); }
+.productivity-primary-grid #productivity-log > .daily-progress-vessel { margin-top: 20px; }
+.productivity-primary-grid .daily-progress-vessel { margin-top: 18px; margin-bottom: 4px; }
+.productivity-primary-grid .today-targets { padding-top: 14px; margin-top: 14px; }
+.productivity-primary-grid .today-targets > div:first-child { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.productivity-primary-grid .today-targets > div:first-child p { max-width: 38ch; }
+.productivity-next { padding: 12px 16px; }
+.productivity-next img { width: 38px; height: 38px; }
+
+/* Quick goals are a foreground control. Advanced matching and scheduling stay in the existing editor. */
+.quick-goals { min-width: 0; display: grid; gap: 10px; }
+.quick-goals-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
+.quick-goals-head > div { min-width: 0; flex: 1; }
+.quick-goals-head h4 { margin: 0; color: var(--text); font: var(--fw-semibold) var(--fs-sm)/var(--leading-normal) var(--font-display); }
+.quick-goals-head p { margin: 2px 0 0; color: var(--text-50); font-size: var(--fs-tiny); line-height: var(--leading-normal); }
+.quick-goals-head > .gbtn { flex: none; }
+.quick-goals-list { display: grid; gap: 7px; }
+.quick-goal-entry { min-width: 0; }
+.quick-goal-edit-trigger {
+  flex: none; min-height: 36px; padding: 6px 9px; border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline); background: transparent; color: var(--text-60);
+  font-size: var(--fs-xs); cursor: pointer;
+}
+.quick-goal-edit-trigger:hover,
+.quick-goal-edit-trigger[aria-expanded="true"] { color: var(--text); border-color: var(--gold-line); }
+.quick-goal-edit-trigger:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.quick-goal-edit-form {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px; padding: 12px; margin-top: -1px;
+  border: 1px solid var(--hairline); border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--surface-1);
+}
+.quick-goal-edit-form > label { display: grid; gap: 5px; min-width: 0; }
+.quick-goal-edit-form label > span { font-size: var(--fs-tiny); color: var(--text-60); }
+.quick-goal-edit-form .field { width: 100%; min-width: 0; }
+.quick-goal-edit-form .quick-goal-guide,
+.quick-goal-edit-form .quick-goal-error,
+.quick-goal-edit-form .quick-goal-actions { grid-column: 1 / -1; }
+
+.quick-goal-row {
+  display: flex; align-items: center; gap: 9px; justify-content: space-between;
+  padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md);
+  background: var(--surface-1); min-width: 0;
+}
+.quick-goal-copy { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.quick-goal-copy b { color: var(--text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.quick-goal-copy > span { color: var(--text-60); font-size: var(--fs-tiny); }
+.quick-goal-track { width: 100%; max-width: 240px; height: 5px; border-radius: var(--radius-pill); background: var(--hairline); overflow: hidden; }
+.quick-goal-track > i { display: block; height: 100%; border-radius: inherit; background: var(--gold); transition: width .3s ease-out; }
+.quick-goal-origin { max-width: 134px; color: var(--text-45); font-size: var(--fs-micro); line-height: 1.3; text-align: right; }
+.quick-goal-adjust { display: flex; gap: 4px; }
+.quick-goal-adjust button { display: grid; place-items: center; width: 35px; height: 35px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); border: 1px solid var(--hairline); font-size: var(--fs-lg); }
+.quick-goal-adjust button:disabled { opacity: .35; cursor: not-allowed; }
+.quick-goal-adjust button:hover:not(:disabled) { border-color: var(--gold-line); }
+.quick-goals-empty,
+.quick-goal-overflow { margin: 0; padding: 7px 0; color: var(--text-50); font-size: var(--fs-xs); }
+.quick-goal-form {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px; align-items: end; padding: 13px;
+  border: 1px solid var(--gold-line); border-radius: var(--radius-md); background: var(--surface-1);
+}
+.quick-goal-form > label { min-width: 0; display: grid; gap: 5px; }
+.quick-goal-form label > span { color: var(--text-60); font-size: var(--fs-tiny); font-weight: var(--fw-semibold); }
+.quick-goal-form .field { width: 100%; min-width: 0; min-height: 38px; }
+.quick-goal-form .quick-goal-name,
+.quick-goal-form .quick-goal-guide,
+.quick-goal-form .quick-goal-error,
+.quick-goal-form .quick-goal-actions { grid-column: 1 / -1; }
+.quick-goal-guide { margin: 0; color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }
+.quick-goal-error { margin: 0; color: var(--red); font-size: var(--fs-xs); }
+.quick-goal-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.quick-goal-actions > .gbtn { min-height: 38px; }
+.productivity-primary-grid .daily-requirements-editor { border-top: 1px solid var(--hairline-soft); padding-top: 5px; }
+.productivity-primary-grid .daily-requirements-editor > summary { min-height: 38px; color: var(--text-60); }
+
+@media (max-width: 560px) {
+  .productivity-primary-grid .productivity-report-context { margin: 10px 0 6px; }
+  .self-report-templates > button { flex: 1 1 auto; }
+  .quick-goals-head > .gbtn { min-height: 40px; }
+  .quick-goal-form { grid-template-columns: minmax(0, 1fr); padding: 11px; }
+  .quick-goal-form > label,
+  .quick-goal-form .quick-goal-name,
+  .quick-goal-form .quick-goal-guide,
+  .quick-goal-form .quick-goal-error,
+  .quick-goal-form .quick-goal-actions { grid-column: 1; }
+  .quick-goal-row { flex-wrap: wrap; align-items: center; }
+  /* Preserve the full goal name before secondary provenance/actions on narrow screens. */
+  .quick-goal-row > .quick-goal-copy { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+  .quick-goal-row > .quick-goal-origin { flex: 1 1 120px; max-width: none; min-width: 0; text-align: left; }
+  .quick-goal-row > .quick-goal-edit-trigger { margin-left: auto; }
+  .quick-goal-edit-form { grid-template-columns: minmax(0, 1fr); }
+  .quick-goal-edit-form > label,
+  .quick-goal-edit-form .quick-goal-guide,
+  .quick-goal-edit-form .quick-goal-error,
+  .quick-goal-edit-form .quick-goal-actions { grid-column: 1; }
+  .quick-goal-row > .gbtn { min-height: 40px; }
+  .quick-goal-origin { max-width: 100%; }
+  .productivity-next { gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quick-goal-track > i { transition: none; }
+}

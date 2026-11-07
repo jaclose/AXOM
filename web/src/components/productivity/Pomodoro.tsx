@@ -136,7 +136,7 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
     <GlassCard pad className={`pomodoro ${compact ? "compact" : ""} ${pomo.running ? "running" : ""} phase-${pomo.phase}`} data-tour="pomodoro">
       <PanelHeader
         title="Pomodoro"
-        sub={compact ? (pomo.targetLabel ?? "Focus sprints that auto-log minutes") : "Focus sprints that auto-log their minutes to today when finished"}
+        sub={compact ? (pomo.targetLabel ?? "Focus and break timer") : "A live session clock. Activity credit follows your auto-log setting."}
         action={
           <span className={`pomo-phase-pill ${pomo.phase}`}>
             {isFocus ? <Flame size={ICON_SIZE.body} /> : <Coffee size={ICON_SIZE.body} />} {isFocus ? "Focus" : "Break"}
@@ -147,13 +147,13 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
       <div className="pomo-body">
         <div className="pomo-dial" style={{ width: dim, height: dim }}>
           <svg width={dim} height={dim} viewBox={`0 0 ${dim} ${dim}`}>
-            <circle cx={dim / 2} cy={dim / 2} r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="9" />
+            <circle cx={dim / 2} cy={dim / 2} r={radius} fill="none" stroke="var(--hairline)" strokeWidth="9" />
             <circle
               cx={dim / 2} cy={dim / 2} r={radius} fill="none" stroke={accent} strokeWidth="9" strokeLinecap="round"
               strokeDasharray={circumference}
               strokeDashoffset={circumference * (1 - pct / 100)}
               transform={`rotate(-90 ${dim / 2} ${dim / 2})`}
-              style={{ transition: "stroke-dashoffset 1s linear" }}
+              className="pomo-ring-progress"
             />
           </svg>
           <div className="pomo-clock">
@@ -161,6 +161,30 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
             <span className="pomo-sub">{isFocus ? "until break" : "until focus"}</span>
           </div>
         </div>
+
+        {!compact && (
+          <div className="pomo-live-progress">
+            <div className="pomo-live-progress-head">
+              <span>{isFocus ? "Focus elapsed" : "Break elapsed"}</span>
+              <strong>{Math.round(pct)}% <small>{formatClock(pomo.secondsLeft)} left</small></strong>
+            </div>
+            <div
+              className="pomo-live-track"
+              role="progressbar"
+              aria-label={`${isFocus ? "Focus" : "Break"} session progress`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(pct)}
+              aria-valuetext={`${Math.floor(Math.max(0, elapsed) / 60)} of ${total / 60} minutes elapsed`}
+            >
+              <span className="pomo-live-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="pomo-live-progress-foot">
+              <span>{pomo.running ? "Running" : elapsed > 0 ? "Paused" : "Ready"}</span>
+              <span>Targets update only after time is recorded</span>
+            </div>
+          </div>
+        )}
 
         <div className="pomo-controls">
           <div className="pomo-presets">
@@ -304,6 +328,13 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
               </label>
             )}
           </div>
+          {!compact && (
+            <p className="pomo-log-truth" role="note">
+              {pomo.autoLog
+                ? "Auto-log is on. Whole-minute focus time is recorded on finish, skip, reset, or preset change."
+                : "Auto-log is off. Timer time will not enter your activity history."}
+            </p>
+          )}
         </div>
       </div>
     </GlassCard>
