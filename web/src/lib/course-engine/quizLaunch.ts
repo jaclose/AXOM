@@ -26,6 +26,22 @@ export function courseQuizSelection(bank: QuestionBankBook, week?: number): Cour
     setIds: [...new Set(collections.flatMap(entry => entry.setId ? [entry.setId] : []))] };
 }
 
+/** A stored session is either absent, resumable or held for non-destructive recovery.
+ * Legacy single-key snapshots and this tab's per-run mirror have the same guard.
+ * Full resume validity is checked by ExamRunner; this preflight must never
+ * interpret an existing malformed record as permission to start a new run. */
+function savedQuizPresence(raw: string | null): "none" | "active" | "corrupt" {
+  if (raw === null) return "none";
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { return "corrupt"; }
+  if (value === null) return "none"; // Preserve the historical explicit null sentinel.
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "corrupt";
+  const poolIds = (value as { poolIds?: unknown }).poolIds;
+  if (!Array.isArray(poolIds) || !poolIds.length
+    || poolIds.some(id => typeof id !== "string" || !id.trim())) return "corrupt";
+  return "active";
+}
+
 export function launchCourseQuiz(selection: CourseQuizLaunch): void {
   if (!selection.questionIds.length) throw new Error("No reviewed questions are available in this selection yet.");
   if (selection.questionIds.length > MAX_COURSE_QUIZ_QUESTIONS
@@ -39,16 +55,19 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
     || selection.setIds.some(id => typeof id !== "string" || !id.trim())) {
     throw new Error("The course practice selection is invalid or exceeds its supported question limit.");
   }
-  // A damaged saved session is not permission to replace it with a new quiz.
-  // Keep the original bytes available for recovery instead of surfacing a raw
-  // JSON parser error or clearing the learner's unfinished work.
-  let active: { poolIds?: unknown[] } | null;
-  try {
-    active = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { poolIds?: unknown[] } | null;
-  } catch {
+  // A legacy mirror may be absent when a modern run was saved only under its
+  // per-tab run key (e.g. a quota failure during legacy-mirror persistence).
+  const legacyPresence = savedQuizPresence(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
+  const tabRunId = sessionStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run-id`);
+  const scopedPresence = tabRunId
+    ? savedQuizPresence(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:${tabRunId}`))
+    : "none";
+  if (legacyPresence === "corrupt" || scopedPresence === "corrupt") {
     throw new Error("Your saved Question Bank session cannot be read. Open Question Bank to recover it before starting a new quiz.");
   }
-  if (active?.poolIds?.length) throw new Error("Resume or finish your current quiz in Question Bank before starting another.");
+  if (legacyPresence === "active" || scopedPresence === "active") {
+    throw new Error("Resume or finish your current quiz in Question Bank before starting another.");
+  }
   sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(selection));
   const alreadyInQuestionBank = location.hash === "#questions";
   location.hash = "questions";

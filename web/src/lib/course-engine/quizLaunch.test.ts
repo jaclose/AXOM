@@ -120,6 +120,36 @@ describe("course to canonical quiz handoff", () => {
     expect(readCourseQuizLaunch([questions[0]])?.questionIds).toEqual(["one"]);
   });
 
+  it("holds parseable but malformed saved quiz snapshots without changing stored bytes", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    const startHash = location.hash;
+    for (const raw of ["{}", "[]", "0", '"unreadable"', '{"poolIds":[]}', '{"poolIds":"one"}', '{"poolIds":[1]}']) {
+      localStorage.setItem(STORAGE_KEYS.quizActiveSession, raw);
+      expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+      expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBe(raw);
+      expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+      expect(location.hash).toBe(startHash);
+    }
+  });
+
+  it("protects a tab-scoped unfinished quiz when the legacy mirror is missing", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    const startHash = location.hash;
+    const key = `${STORAGE_KEYS.quizActiveSession}:run:run-42`;
+    sessionStorage.setItem(`${STORAGE_KEYS.quizActiveSession}:run-id`, "run-42");
+    const recoverable = JSON.stringify({ mode: "tutor", poolIds: ["one"], answers: [], filters: {}, startedAt: "2026-11-06T23:00:00.000Z" });
+    localStorage.setItem(key, recoverable);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+    expect(() => launchCourseQuiz(selection)).toThrow(/Resume or finish/);
+    expect(localStorage.getItem(key)).toBe(recoverable);
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+    expect(location.hash).toBe(startHash);
+    localStorage.setItem(key, "{}");
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(localStorage.getItem(key)).toBe("{}");
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+  });
+
   it("does not overwrite an unreadable saved quiz or navigate away from recovery", () => {
     const currentHash = location.hash;
     localStorage.setItem(STORAGE_KEYS.quizActiveSession, "{damaged session");
