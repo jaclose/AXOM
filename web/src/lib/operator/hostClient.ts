@@ -194,7 +194,7 @@ export async function loadOperatorDashboard(accountId: string): Promise<Operator
     client.rpc("axom_operator_review_queue"),
     client.rpc("axom_operator_reports"),
     role === "owner" || role === "admin" ? client.rpc("axom_operator_accounts", { query_text: "" }) : Promise.resolve({ data: [], error: null }),
-    role === "owner" ? client.from("axom_operator_audit").select("id,actor_id,action,target_id,metadata,created_at").order("created_at", { ascending: false }).limit(30)
+    role === "owner" ? client.from("axom_operator_audit").select("id,actor_id,action,target_id,metadata,created_at").order("created_at", { ascending: false }).order("id", { ascending: false }).limit(30)
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (overview.error || queue.error || reports.error || accounts.error || audit.error
