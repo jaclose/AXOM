@@ -231,6 +231,23 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["parser-warning review status", { ...set, parserWarnings: ["Unresolved source extraction warning"] }],
+    ["AI-enhancement status", { ...set, aiEnhanced: true }],
+  ])("refuses AI transmission after silent %s change", async (_reason, changedSet) => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    mocks.workspace.questionSets = [changedSet];
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("never sends a silently refiled question to the AI provider", async () => {
     const source = question({ courseId: "approved-course", module: "M1" });
     mocks.workspace.questions = [source];
