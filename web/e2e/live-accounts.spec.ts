@@ -5,6 +5,7 @@ import {
   assertUnusedEmail,
   dedicatedLiveProjectUrl,
   matchesRunOwnedUser,
+  permitsSupabaseRequest,
   signupResponseUserId,
 } from "../src/lib/liveAccountSafety";
 
@@ -45,14 +46,21 @@ type DevWindow = Window & {
 };
 
 test.describe.configure({ mode: "serial" });
+// Network routing must remain observable; service workers can bypass Playwright routes.
+test.use({ serviceWorkers: "block" });
 test.skip(!live, "Destructive live account test is opt-in: set AXOM_LIVE_ACCOUNTS=1.");
 
 let admin: SupabaseClient;
+let dedicatedOrigin = "";
 let userId: string | undefined;
 
 test.beforeAll(async () => {
   // Validate the explicit test project BEFORE constructing an admin client.
   const dedicatedUrl = dedicatedLiveProjectUrl(url, testProjectRef);
+  if (process.env.AXOM_E2E_BASE_URL) {
+    throw new Error("Destructive account tests require AXOM's local dev server, not an external/reused hosted URL.");
+  }
+  dedicatedOrigin = dedicatedUrl;
   if (!secret) throw new Error("SUPABASE_SECRET_KEY is required for opted-in live-account acceptance.");
   admin = createClient(dedicatedUrl, secret, { auth: { persistSession: false, autoRefreshToken: false } });
   // The provider can paginate its user list. Never assume page one proves an address is unused.
@@ -98,12 +106,24 @@ async function taskTitles(page: Page) {
 }
 
 async function secondDevice(browser: Browser) {
-  const context = await browser.newContext();
-  return { context, page: await context.newPage() };
+  const context = await browser.newContext({ serviceWorkers: "block" });
+  const page = await context.newPage();
+  await isolateSupabaseRequests(page);
+  return { context, page };
+}
+
+async function isolateSupabaseRequests(page: Page) {
+  await page.context().route("**/*", (route) => {
+    if (!permitsSupabaseRequest(route.request().url(), dedicatedOrigin)) {
+      return route.abort("blockedbyclient");
+    }
+    return route.continue();
+  });
 }
 
 test("create with email and password, sign in, protect, merge, restore, devices, delete", async ({ page, browser }) => {
   page.on("dialog", (dialog) => void dialog.accept());
+  await isolateSupabaseRequests(page);
   await openWorkspace(page, "From device A");
   await openAccount(page);
 
