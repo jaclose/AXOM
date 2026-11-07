@@ -239,3 +239,49 @@ test("double storage failure reports unsaved, retains previously verified worksp
     return (await v.localVaultStorage.getItem(STORAGE_KEYS.persistedState)) === value;
   }, original)).toBe(true);
 });
+
+test("offline writer survives reconnect, a newly opened tab, and another reload", async ({ context }) => {
+  const first = await probe(context);
+  const prior = snapshot("online-checkpoint");
+  const offline = snapshot("offline-newest", "🪶Δ".repeat(100_000));
+
+  await first.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    await vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+  }, prior);
+
+  // Warm the real storage module before disconnecting; no Vite network request
+  // should be necessary to save the already-open offline workspace.
+  await first.evaluate(async () => { await import("/src/lib/localVault.ts"); });
+  await context.setOffline(true);
+  try {
+    const readBack = await first.evaluate(async (value) => {
+      const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+      const vault = await import("/src/lib/localVault.ts");
+      const checkpoint = vault.getVaultWriteCheckpoint();
+      await vault.localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+      await vault.flushLocalVaultWrites();
+      vault.assertVaultWritesSince(checkpoint);
+      return (await vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)) === value;
+    }, offline);
+    expect(readBack).toBe(true);
+  } finally {
+    await context.setOffline(false);
+  }
+
+  const second = await context.newPage();
+  await second.goto(probePath);
+  const read = () => second.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  });
+  expect(await read()).toBe(offline);
+  await second.reload();
+  expect(await read()).toBe(offline);
+});
