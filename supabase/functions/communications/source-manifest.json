@@ -15,7 +15,7 @@
     "web/src/lib/communications/server/service.ts": "4f0445c27da7d83cbb337d7e5aa7a1785e662cff1de03f81660b998fe4bffa27",
     "web/src/lib/communications/snapshot.ts": "256864b7340135a748f3e51744311f6d5fa1692bd0f3b783584c998720f5d86d",
     "web/src/lib/dailyRollover.ts": "6e6aed982c6943dba78be291a6c6d6379dfad78ef86c597368847b5dfcd7966a",
-    "web/src/lib/dailySuccess.ts": "8218feb41af26e262b72a99c73b1d55911c0e119cfa27021c2947d02397f5252",
+    "web/src/lib/dailySuccess.ts": "dffb2fad836190617f6d67abe10785ed54418ba3078ec16b68dfdef36926dd12",
     "web/src/lib/examPlan.ts": "f0654c2fd381e5edbf591da23c1060043a56f8ceef47e2631c5ff0a9a0a2fdf2",
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
@@ -24,15 +24,15 @@
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
     "web/src/lib/questionAttachments.ts": "ae016c1450aba37bb17fec3e31a640f0e8ba0b705d436094a2a8939fd29847d9",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
-    "web/src/lib/reports.ts": "6b7521623409395c794c18bfedca8e2391dd08b1d16a156f2ed09048da8aa498",
+    "web/src/lib/reports.ts": "b9f7f84033b2766c861ecf3358b0e011d6e818173f550765980de3923b28694a",
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
-    "web/src/lib/targetContributions.ts": "301704eb40288568396fd10702ca7d30ab47d3a4628e5b61508b53285a6009e7",
+    "web/src/lib/targetContributions.ts": "70138259ecd8354426a473630cba3b46db55192a3a40035f8f30e8665d81b41a",
     "web/src/lib/tracker.ts": "ffc762dc996085a485a95bcef0ac00b54b16a70e0f8822513b184f836c972922",
     "web/src/lib/vaultActivity.ts": "f9bb47fd0accb27db1b1413444c31a666a48d44e2f2aa0f3900bdce43f66fa47"
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "6febc24061ed33d723ed4ec5a743401d8724cf28a0ac96baf2247fcbf1619fde"
+    "sha256": "952efe2e498faf74a6abce5d10cbd863b4e3aa6ef2950796f639e14f19ccbfac"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",
