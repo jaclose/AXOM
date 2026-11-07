@@ -47,6 +47,43 @@ describe("tracker stats", () => {
   });
 });
 
+describe("unlinked self-report attribution", () => {
+  it("does not treat gym, prayer or unclassified named minutes as academic study", () => {
+    const seed = makeSeed();
+    useStore.setState({ ...seed, logs: [] });
+    for (const label of ["Gym", "Fajr", "Private journal"]) {
+      useStore.getState().logActivity({ label, minutes: 30 });
+      expect(useStore.getState().logs[0]).toMatchObject({ type: label, academic: false });
+    }
+    useStore.getState().logActivity({ label: "Focused study", minutes: 30, trackerId: "tracker-study" });
+    expect(useStore.getState().logs[0]).toMatchObject({ academic: true, trackerId: "tracker-study" });
+  });
+});
+
+describe("named occurrence store receipts", () => {
+  it("upserts one event per named slot and does not create an academic time log", () => {
+    const seed = makeSeed();
+    useStore.setState({ ...seed, logs: [], habits: [], habitEntries: [] });
+    const store = useStore.getState();
+    const id = store.addHabit({
+      name: "Prayers", type: "slots", category: "Personal", includeInReports: false,
+      occurrenceSlots: [{ id: "fajr", label: "Fajr" }, { id: "dhuhr", label: "Dhuhr" }],
+    });
+    const today = useStore.getState().activeDayKey;
+    useStore.getState().setHabitSlot(id, today, "fajr", "done");
+    const first = useStore.getState().habitEntries[0];
+    expect(first).toMatchObject({ status: "partial", value: 1 });
+    expect(first.slotCheckIns).toHaveLength(1);
+    useStore.getState().setHabitSlot(id, today, "fajr", "done");
+    expect(useStore.getState().habitEntries[0].slotCheckIns).toHaveLength(1);
+    useStore.getState().setHabitSlot(id, today, "dhuhr", "done");
+    expect(useStore.getState().habitEntries[0]).toMatchObject({ status: "done", value: 2 });
+    useStore.getState().setHabitSlot(id, today, "fajr", undefined);
+    expect(useStore.getState().habitEntries[0]).toMatchObject({ status: "partial", value: 1 });
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+});
+
 describe("tracker store wiring", () => {
   beforeEach(() => {
     const seed = makeSeed();
