@@ -212,8 +212,12 @@ export function scopeProgress(
     counted.add(question.id);
     progress.total += 1;
     progress.questionIds.push(question.id);
-    // Corrupt historical containers are not evidence of an attempted answer.
-    const first = Array.isArray(question.attempts) ? question.attempts[0] : undefined;
+    // A flag, unseen placeholder or malformed historical entry is not an
+    // answered question. Find the first scored answer without rewriting history.
+    const first = Array.isArray(question.attempts)
+      ? question.attempts.find((attempt) => attempt?.status === "correct"
+        || attempt?.status === "incorrect" || attempt?.status === "guessed")
+      : undefined;
     if (!first) continue;
     progress.attempted += 1;
     if (first.status === "correct") progress.firstTimeCorrect += 1;
