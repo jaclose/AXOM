@@ -55,6 +55,8 @@ test("immersive Orb uses actual pixel density within the 8K budget", async ({ pa
   await completeSetup(page, "Immersive Orb", { ifVisible: true });
   const later = page.getByRole("button", { name: "Review later", exact: true });
   if (await later.count()) await later.click();
+  await page.goto("/#soundscapes", { waitUntil: "networkidle" });
+  await expect(page.locator(".soundscapes-page")).toBeVisible();
   const skip = page.getByRole("button", { name: "Skip for now", exact: true });
   if (await skip.count()) await skip.click();
   await page.getByRole("button", { name: "Full screen", exact: true }).click();
