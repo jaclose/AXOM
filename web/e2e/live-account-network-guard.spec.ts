@@ -63,3 +63,55 @@ test("live-account route blocks cross-origin redirects and custom backends in Ch
     await stop(blocked);
   }
 });
+
+
+test("destructive-account isolation prevents every browser WebSocket upgrade", async ({ browser }) => {
+  let foreignUpgrades = 0;
+  let localUpgrades = 0;
+  const foreign = createServer((_request, response) => {
+    response.writeHead(200).end("Foreign endpoint");
+  });
+  foreign.on("upgrade", (_request, socket) => {
+    foreignUpgrades += 1;
+    socket.destroy();
+  });
+  const app = createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html" }).end("<h1>Allowed app</h1>");
+  });
+  app.on("upgrade", (_request, socket) => {
+    localUpgrades += 1;
+    socket.destroy();
+  });
+  let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
+  try {
+    const foreignOrigin = await listen(foreign);
+    const appOrigin = await listen(app);
+    context = await browser.newContext({ serviceWorkers: "block" });
+    // Install the network boundary before any page or app scripts exist.
+    await isolateLiveAccountNetwork(context, dedicatedOrigin, appOrigin);
+    const page = await context.newPage();
+    await page.goto(appOrigin + "/");
+    await expect(page.getByRole("heading", { name: "Allowed app" })).toBeVisible();
+
+    const probe = (url: string) => page.evaluate((endpoint) => new Promise<string>((resolve) => {
+      const socket = new WebSocket(endpoint);
+      const timer = window.setTimeout(() => {
+        socket.close();
+        resolve("timeout");
+      }, 2500);
+      socket.addEventListener("close", () => { clearTimeout(timer); resolve("closed"); }, { once: true });
+      socket.addEventListener("error", () => { clearTimeout(timer); resolve("error"); }, { once: true });
+    }), url);
+
+    // Both an ordinarily permitted local HMR endpoint and a forbidden project
+    // must have ZERO remote handshakes. No Realtime connection is needed here.
+    expect(await probe(appOrigin.replace("http:", "ws:") + "/socket")).not.toBe("timeout");
+    expect(await probe(foreignOrigin.replace("http:", "ws:") + "/socket")).not.toBe("timeout");
+    expect(localUpgrades).toBe(0);
+    expect(foreignUpgrades).toBe(0);
+  } finally {
+    await context?.close();
+    await stop(app);
+    await stop(foreign);
+  }
+});

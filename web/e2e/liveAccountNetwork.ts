@@ -6,12 +6,21 @@ import { permitsLiveAccountRequest } from "../src/lib/liveAccountSafety";
  * re-enter route handlers for redirects, so it cannot enforce an origin guard.
  * Fetch one approved hop without following redirects, and never fulfill 3xx.
  * This also blocks custom backends and disallowed origins in either browser.
+ * Browser WebSockets are unconditionally disabled for these destructive tests.
  */
 export async function isolateLiveAccountNetwork(
   context: BrowserContext,
   dedicatedOrigin: string,
   appOrigin: string,
 ): Promise<void> {
+  // Destructive auth tests do not require browser Realtime or dev-server HMR.
+  // Block every WebSocket before opening any page. Even an initially allowlisted
+  // server could redirect an upgraded connection to a foreign origin, which
+  // route.fetch({ maxRedirects: 0 }) cannot inspect for WebSocket traffic.
+  // Never call connectToServer(): this route must make ZERO network handshakes.
+  await context.routeWebSocket(/.*/, async (socket) => {
+    await socket.close({ code: 1008, reason: "WebSocket disabled in live-account isolation" });
+  });
   await context.route("**/*", async (route) => {
     if (!permitsLiveAccountRequest(route.request().url(), dedicatedOrigin, appOrigin)) {
       await route.abort("blockedbyclient");
