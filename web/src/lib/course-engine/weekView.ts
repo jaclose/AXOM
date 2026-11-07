@@ -77,24 +77,12 @@ export function buildModuleWeeks(
     modules.set(key, entry);
   }
 
-  const termsByModule = new Map<string, Set<string>>();
-  for (const module of modules.values()) {
-    const key = canonicalModuleKey(module.module);
-    const terms = termsByModule.get(key) ?? new Set<string>();
-    terms.add(`${(module.term ?? "").toLowerCase()}|${(module.course ?? "").toLowerCase()}`);
-    termsByModule.set(key, terms);
-  }
-
   return [...modules.values()].map(({ byWeek, paths, ...module }) => {
-    // A course-specific tracker path must not consume unowned/other-course
-    // attempts. A supplied catalog that cannot uniquely resolve the course
-    // also cannot justify week mastery. Legacy module-only/no-catalog reads
-    // retain their previous fallback unless multiple tracker owners collide.
-    const ambiguous = !module.courseId && (
-      (termsByModule.get(canonicalModuleKey(module.module))?.size ?? 0) > 1
-      || module.course !== undefined
-      || context !== undefined
-    );
+    // An attempt may count toward a week only when its unique course owner
+    // is proven by the supplied curriculum catalog. Even a lone legacy
+    // Term/Module/Week path is not ownership evidence without that catalog.
+    // Keep tracker activity passes independent of this question-only hold.
+    const ambiguous = !module.courseId;
     const weeks = [...byWeek.entries()].sort(([left], [right]) => left - right).map(([week, items]): WeekSummary => {
       const groups = new Map<CourseActivity | "other", { total: number; done: number }>();
       for (const item of items) {
