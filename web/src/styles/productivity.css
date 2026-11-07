@@ -156,6 +156,28 @@
 .quick-goals-head p { margin: 2px 0 0; color: var(--text-50); font-size: var(--fs-tiny); line-height: var(--leading-normal); }
 .quick-goals-head > .gbtn { flex: none; }
 .quick-goals-list { display: grid; gap: 7px; }
+.quick-goal-entry { min-width: 0; }
+.quick-goal-edit-trigger {
+  flex: none; min-height: 36px; padding: 6px 9px; border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline); background: transparent; color: var(--text-60);
+  font-size: var(--fs-xs); cursor: pointer;
+}
+.quick-goal-edit-trigger:hover,
+.quick-goal-edit-trigger[aria-expanded="true"] { color: var(--text); border-color: var(--gold-line); }
+.quick-goal-edit-trigger:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.quick-goal-edit-form {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px; padding: 12px; margin-top: -1px;
+  border: 1px solid var(--hairline); border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--surface-1);
+}
+.quick-goal-edit-form > label { display: grid; gap: 5px; min-width: 0; }
+.quick-goal-edit-form label > span { font-size: var(--fs-tiny); color: var(--text-60); }
+.quick-goal-edit-form .field { width: 100%; min-width: 0; }
+.quick-goal-edit-form .quick-goal-guide,
+.quick-goal-edit-form .quick-goal-error,
+.quick-goal-edit-form .quick-goal-actions { grid-column: 1 / -1; }
+
 .quick-goal-row {
   display: flex; align-items: center; gap: 9px; justify-content: space-between;
   padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md);
@@ -203,6 +225,11 @@
   .quick-goal-form .quick-goal-error,
   .quick-goal-form .quick-goal-actions { grid-column: 1; }
   .quick-goal-row { flex-wrap: wrap; }
+  .quick-goal-edit-form { grid-template-columns: minmax(0, 1fr); }
+  .quick-goal-edit-form > label,
+  .quick-goal-edit-form .quick-goal-guide,
+  .quick-goal-edit-form .quick-goal-error,
+  .quick-goal-edit-form .quick-goal-actions { grid-column: 1; }
   .quick-goal-row > .gbtn { min-height: 40px; }
   .quick-goal-origin { max-width: 100%; }
   .productivity-next { gap: 10px; }
