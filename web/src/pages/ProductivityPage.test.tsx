@@ -53,6 +53,19 @@ describe("ProductivityPage daily console", () => {
     expect(screen.getByText("Activity added. Your save status appears above.")).toBeTruthy();
   });
 
+  it("prefills the exact self-report label for a linked goal without logging prematurely", () => {
+    const state = makeSeed();
+    state.profile.dailySuccess = { version: 1, configuredAt: state.activeDayKey, requirements: [makeDailyRequirement({
+      id: "review-goal", label: "Renal review", target: 2, unit: "times",
+      source: { kind: "activity-alias" }, aliases: ["Renal question practice"], trackingStartsAt: state.activeDayKey,
+    }, state.activeDayKey)] };
+    useStore.setState(state);
+    render(<ProductivityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Use Renal review in self-report" }));
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Renal question practice");
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+
   it("accepts a named completion without inventing minutes or cards", () => {
     render(<ProductivityPage />);
     fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Prayer" } });
