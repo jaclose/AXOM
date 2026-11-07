@@ -243,6 +243,7 @@ export function ProductivityPage() {
         {isActive && <StudyStreakMonitor state={s} result={dailyProgress} />}
       </div>
       </div>
+      <ActivityLog logs={isActive ? logs : logs.filter((log) => log.dayKey === viewKey)} activeDayKey={s.activeDayKey} />
       {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
       {isActive && <TrackerManager />}
 
@@ -286,7 +287,6 @@ export function ProductivityPage() {
         </GlassCard>
       </div>}
 
-      <ActivityLog logs={isActive ? logs : logs.filter((log) => log.dayKey === viewKey)} activeDayKey={s.activeDayKey} />
       {moduleTourOpen && (
         <ModuleTour name="Productivity" route="productivity" steps={PRODUCTIVITY_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />
       )}
