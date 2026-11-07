@@ -362,7 +362,7 @@ describe("Import Center persistence invariant", () => {
 
   it("preserves a settled duplicate warning while an unrelated import is awaiting its durable write", async () => {
     const user = userEvent.setup();
-    const durableRaw = "1. Already saved question?\\nA. Alpha\\nB. Beta\\nAnswer: B\\nExplanation: Verified before another import.";
+    const durableRaw = "1. Already saved question?\nA. Alpha\nB. Beta\nAnswer: B\nExplanation: Verified before another import.";
     const durableSeed = {
       drafts: parseQuestionBlocks(durableRaw), rawText: durableRaw, title: "Durable question source",
       fileName: "durable-questions.txt", fileType: "text", checksum: "durable-questions-checksum",
@@ -382,6 +382,7 @@ describe("Import Center persistence invariant", () => {
     let rejectWrite!: (reason?: unknown) => void;
     const blockedWrite = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
     let blockNextWrite = true;
+    let writeReleased = false;
     useStore.persist.setOptions({
       storage: {
         getItem: (name) => storage.getItem(name),
@@ -397,7 +398,7 @@ describe("Import Center persistence invariant", () => {
     });
 
     try {
-      const pendingRaw = "1. Unrelated uncommitted question?\\nA. One\\nB. Two\\nAnswer: B";
+      const pendingRaw = "1. Unrelated uncommitted question?\nA. One\nB. Two\nAnswer: B";
       const pending = render(<ImportPanel seed={{
         drafts: parseQuestionBlocks(pendingRaw), rawText: pendingRaw, title: "Unrelated pending source",
         fileName: "pending-other.txt", fileType: "text", checksum: "pending-other-checksum",
@@ -418,6 +419,7 @@ describe("Import Center persistence invariant", () => {
       expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
       expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
 
+      writeReleased = true;
       rejectWrite(new Error("Reject unrelated tentative import"));
       await waitFor(() => {
         expect(hasReviewedImportInFlight()).toBe(false);
@@ -426,7 +428,7 @@ describe("Import Center persistence invariant", () => {
         expect(useStore.getState().questionSets.filter((set) => set.title === "Durable question source")).toHaveLength(1);
       });
     } finally {
-      if (blockNextWrite) rejectWrite(new Error("Cleanup unused pending write"));
+      if (!writeReleased && !blockNextWrite) rejectWrite(new Error("Cleanup pending write"));
       useStore.persist.setOptions({ storage });
     }
   });
