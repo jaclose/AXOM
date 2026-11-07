@@ -252,6 +252,41 @@ const comparableQuestion = (question: ReviewedQuestionInput | QuestionRecord) =>
 });
 
 const inFlightReviewedImports = new Map<string, Promise<ReviewedImportPersistenceResult>>();
+const inFlightReviewedImportPlans = new Map<string, ReviewedImportPersistencePlan>();
+
+/**
+ * Keep previously committed academic records visible while another import is
+ * pending. A global "any import in flight" test cannot distinguish settled
+ * duplicates from tentative records and permanently hides duplicate warnings
+ * in ImportPanel's one-time seed calculation.
+ *
+ * Exclude only records named by incomplete reviewed-import plans. Updating an
+ * existing source document is also tentative, so withhold that document until
+ * its write succeeds or rolls back. This is a read-only projection; it never
+ * alters Zustand, original IDs or stored records.
+ */
+export function settledReviewedImportSnapshot(library: {
+  questions: readonly QuestionRecord[];
+  questionSets: readonly QuestionSet[];
+  documents: readonly SourceDocument[];
+}) {
+  if (inFlightReviewedImportPlans.size === 0) return library;
+  const pendingQuestions = new Set<string>();
+  const pendingSets = new Set<string>();
+  const pendingDocuments = new Set<string>();
+  for (const plan of inFlightReviewedImportPlans.values()) {
+    for (const question of plan.questions) pendingQuestions.add(question.id);
+    if (plan.questionSet) pendingSets.add(plan.questionSet.id);
+    const document = plan.documentWrite;
+    if (document) pendingDocuments.add(document.kind === "create" ? document.document.id : document.id);
+  }
+  return {
+    questions: library.questions.filter((question) => !pendingQuestions.has(question.id)),
+    questionSets: library.questionSets.filter((set) => !pendingSets.has(set.id)),
+    documents: library.documents.filter((document) => !pendingDocuments.has(document.id)),
+  };
+}
+
 type AtomicReviewedImportCommit = NonNullable<QuestionImportPersistence["commitReviewedImport"]>;
 const reviewedImportCommitQueues = new WeakMap<AtomicReviewedImportCommit, Promise<void>>();
 
@@ -349,12 +384,14 @@ export async function persistReviewedImportOnce(
   // synchronous subscriber. This prevents that state from masquerading as a
   // previously completed equivalent import.
   inFlightReviewedImports.set(fingerprint, pending);
+  inFlightReviewedImportPlans.set(fingerprint, plan);
   void persistReviewedImportInOrder(persistence, plan).then(resolvePending, rejectPending);
   try {
     return { result: await pending, joined: false };
   } finally {
     if (inFlightReviewedImports.get(fingerprint) === pending) {
       inFlightReviewedImports.delete(fingerprint);
+      inFlightReviewedImportPlans.delete(fingerprint);
     }
   }
 }
