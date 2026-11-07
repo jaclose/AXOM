@@ -274,6 +274,28 @@ describe("verified primary-source progress attribution", () => {
     assert.equal(JSON.stringify([a, b]), before);
   });
 
+  it("holds a malformed later attempt in a duplicate without crashing the week overview", () => {
+    // Older stored JSON accepts an attempts array without validating each
+    // member; a corrupt later member must not throw while checking duplicates.
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const first = { at: "2026-11-06T00:00:00Z", status: "correct" as const };
+    const malformedAttempts = [first, null] as unknown as QuestionRecord["attempts"];
+    const corrupt = question("shared", { setId: "primary", ...filing,
+      status: "correct", attempts: malformedAttempts });
+    const valid = question("shared", { setId: "primary", ...filing,
+      status: "correct", attempts: [first, { at: "2026-11-06T01:00:00Z", status: "correct" }] });
+    const before = JSON.stringify([corrupt, valid]);
+    for (const records of [[corrupt, valid], [valid, corrupt]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+    assert.equal(JSON.stringify([corrupt, valid]), before);
+  });
+
   it("counts equivalent cloned records once without holding legitimate source evidence", () => {
     const filing = { module: "NB2", week: 3, courseId: "core" };
     const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
