@@ -131,7 +131,8 @@ export function buildTargetContributionLedger(input: TargetContributionInput): T
     // Weekly habit goals may also be linked to one existing tracker. Prefer
     // the explicit habit/day receipt when present; otherwise use exactly one
     // observed tracker entry for this day. Never sum both for a day quota.
-    const owner = input.habits.find((habit) => habit.id === requirement.source.habitId);
+    const habitId = requirement.source.habitId;
+    const owner = input.habits.find((habit) => habit.id === habitId);
     if (!entry && owner?.type === "weekly" && owner.linkedTrackerId) {
       const source = logs.find((log) => log.trackerId === owner.linkedTrackerId
         && (log.minutes > 0 || (log.quantity ?? 0) > 0 || log.cards > 0));
