@@ -54,7 +54,7 @@ describe("Living Atlas passive first-run evidence, not personality surveillance"
     session = capturePassiveFirstRun(session, "visit-reports", 1_075_000);
     session = capturePassiveFirstRun(session, "explore-content", 1_085_000);
     const result = proposePassiveAtlas(session, 1_130_000);
-    expect(result.status).toBe("insufficient");
+    expect(result.status).toBe("observing");
     expect(result.suggestion).toBeUndefined();
   });
 
