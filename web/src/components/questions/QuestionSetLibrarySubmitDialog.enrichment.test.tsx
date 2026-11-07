@@ -28,7 +28,7 @@ vi.mock("../../lib/ai", () => ({
   }),
 }));
 vi.mock("../../lib/store", () => ({
-  useStore: { getState: () => ({ questions: mocks.workspace.questions, updateQuestion: mocks.updateQuestion }) },
+  useStore: { getState: () => ({ questions: mocks.workspace.questions, questionSets: mocks.workspace.questionSets, updateQuestion: mocks.updateQuestion }) },
 }));
 vi.mock("../../lib/sharing/questionSetLibrary", () => ({
   listMyQuestionSetSubmissions: (...args: unknown[]) => mocks.submissions(...args),
