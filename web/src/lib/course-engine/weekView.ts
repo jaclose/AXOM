@@ -22,7 +22,7 @@ export interface WeekSummary {
   byActivity: Array<{ activity: CourseActivity | "other"; total: number; done: number }>;
   /** What was answered of the questions filed under this module and week. */
   questions: ScopeProgress;
-  /** More than one term has this module code; question ownership is unresolved. */
+  /** Course ownership is unresolved (missing, duplicate or unverifiable); question progress is held. */
   questionScopeAmbiguous?: boolean;
   missed: number;
 }
