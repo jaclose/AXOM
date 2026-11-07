@@ -4,6 +4,7 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { weekStartKey } from "./goalCadence";
 import { normalizeNavOrder, upgradeNavLayout } from "./navLayout";
 import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
@@ -788,7 +789,31 @@ export const useStore = create<Store>()(
       },
       updateHabit: (id, patch) =>
         set((s) => ({
-          habits: (s.habits ?? []).map((h) => (h.id === id ? { ...h, ...patch, updatedAt: now() } : h)),
+          habits: (s.habits ?? []).map((habit) => {
+            if (habit.id !== id) return habit;
+            let updated: Habit = { ...habit, ...patch, updatedAt: now() };
+            const cadenceChanged = habit.type === "weekly" && (
+              Object.hasOwn(patch, "weeklyMinimum") || Object.hasOwn(patch, "weeklyTarget")
+              || Object.hasOwn(patch, "weeklyPreferred") || Object.hasOwn(patch, "linkedTrackerId")
+            );
+            if (cadenceChanged) {
+              const clamp = (value: number) => Math.max(1, Math.min(7, Math.round(Number(value) || 1)));
+              const oldMinimum = clamp(habit.weeklyMinimum ?? habit.weeklyTarget ?? 3);
+              const oldPreferred = Math.max(oldMinimum, clamp(habit.weeklyPreferred ?? oldMinimum));
+              const minimum = clamp(updated.weeklyMinimum ?? updated.weeklyTarget ?? oldMinimum);
+              const preferred = Math.max(minimum, clamp(updated.weeklyPreferred ?? minimum));
+              const currentWeek = weekStartKey(s.activeDayKey);
+              const firstWeek = weekStartKey((habit.trackingStartsAt ?? habit.createdAt).slice(0, 10) || s.activeDayKey);
+              const existing = habit.weeklyRevisions?.length ? habit.weeklyRevisions : [{
+                effectiveWeek: firstWeek, minimum: oldMinimum, preferred: oldPreferred, linkedTrackerId: habit.linkedTrackerId,
+              }];
+              const revisions = [...existing.filter((rule) => rule.effectiveWeek !== currentWeek), {
+                effectiveWeek: currentWeek, minimum, preferred, linkedTrackerId: updated.linkedTrackerId,
+              }].sort((a,b) => a.effectiveWeek.localeCompare(b.effectiveWeek)).slice(-104);
+              updated = { ...updated, weeklyTarget: minimum, weeklyMinimum: minimum, weeklyPreferred: preferred, weeklyRevisions: revisions };
+            }
+            return updated;
+          }),
         })),
       removeHabit: (id) =>
         set((s) => ({
