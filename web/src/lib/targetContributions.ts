@@ -417,6 +417,8 @@ function latestCloseout(closeouts: DailyCloseout[], dayKey: string): DailyCloseo
 }
 
 function habitValue(entry: HabitEntry): number {
+  // Slot-based check-ins retain one authoritative receipt per named occurrence.
+  if (entry.slotCheckIns) return entry.slotCheckIns.filter((slot) => slot.status === "done").length;
   if (entry.status === "done") return positive(entry.value) || 1;
   if (entry.status === "partial") return positive(entry.value) || 0.5;
   return 0;
