@@ -231,6 +231,21 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("never sends a silently refiled question to the AI provider", async () => {
+    const source = question({ courseId: "approved-course", module: "M1" });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    // No timestamp change is needed to reproduce the original stale-context gap.
+    mocks.workspace.questions = [{ ...source, courseId: "restricted-course" }];
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("does not transmit stale or revoked source-review evidence to the AI provider", async () => {
     const source = question({
       citation: "Textbook page 12",
