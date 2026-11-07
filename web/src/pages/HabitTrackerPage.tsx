@@ -11,6 +11,8 @@ import {
   statusOn, newHabitDefaults, todayKey,
 } from "../lib/habits";
 import { addLocalDays } from "../lib/dailyRollover";
+import { namedSlotProgress, PRAYER_OCCURRENCE_SLOTS, weeklyHabitSummary } from "../lib/goalCadence";
+import "../styles/goal-cadence.css";
 import type { Habit, HabitCheckStatus, HabitType } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
 import { linkHabitToTargets, linkedRequirement, unlinkHabitFromTargets } from "../lib/habitTargets";
@@ -72,17 +74,40 @@ export function HabitTrackerPage() {
   );
 }
 
-const HABIT_TYPES: HabitType[] = ["binary", "duration", "count", "avoidance", "weekly", "scheduled", "recovery", "milestone"];
+const HABIT_TYPES: HabitType[] = ["binary", "duration", "count", "avoidance", "weekly", "slots", "scheduled", "recovery", "milestone"];
 
 function HabitCreate() {
   const addHabit = useStore((s) => s.addHabit);
   const [name, setName] = useState("");
   const [type, setType] = useState<HabitType>("binary");
   const [countInTargets, setCountInTargets] = useState(true);
+  const [weeklyMinimum, setWeeklyMinimum] = useState(4);
+  const [weeklyPreferred, setWeeklyPreferred] = useState(5);
+  const [slotNames, setSlotNames] = useState("Fajr, Dhuhr, Asr, Maghrib, Isha");
+  const [linkedTrackerId, setLinkedTrackerId] = useState("");
+  const [includeInReports, setIncludeInReports] = useState(true);
+  const trackers = useStore((s) => s.productivityTrackers);
 
   function add() {
     if (!name.trim()) return;
-    const id = addHabit(newHabitDefaults(name, type));
+    const base = newHabitDefaults(name, type);
+    const slots = slotNames.split(",").map((item) => item.trim().replace(/\s+/g, " "))
+      .filter(Boolean).slice(0, 12).map((label, index) => ({
+        id: String(index) + "-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-"), label,
+      }));
+    if (type === "slots" && !slots.length) return;
+    const id = addHabit({
+      ...base,
+      ...(type === "weekly" ? {
+        target: 1, weeklyTarget: weeklyMinimum, weeklyMinimum,
+        weeklyPreferred: Math.max(weeklyMinimum, weeklyPreferred),
+        linkedTrackerId: linkedTrackerId || undefined, unit: "visit", category: "Wellness",
+      } : {}),
+      ...(type === "slots" ? {
+        target: slots.length, occurrenceSlots: slots, unit: "occurrences", category: "Personal",
+      } : {}),
+      includeInReports,
+    });
     if (countInTargets && type !== "avoidance" && type !== "milestone") {
       const state = useStore.getState();
       const habit = state.habits.find((candidate) => candidate.id === id);
@@ -90,6 +115,8 @@ function HabitCreate() {
     }
     setName("");
     setType("binary");
+    setLinkedTrackerId("");
+    setCountInTargets(true);
   }
 
   return (
@@ -98,7 +125,7 @@ function HabitCreate() {
       <div className="row wrap gap8">
         <input className="field grow" placeholder="e.g. Morning sunlight, 20 min of cardio, no doomscrolling"
           value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
-        <select className="field" value={type} onChange={(e) => setType(e.target.value as HabitType)} style={{ width: 190 }} aria-label="Habit type">
+        <select className="field" value={type} onChange={(e) => { const next = e.target.value as HabitType; setType(next); setCountInTargets(next !== "weekly" && next !== "slots"); setIncludeInReports(next !== "slots"); }} style={{ width: 190 }} aria-label="Habit type">
           {HABIT_TYPES.map((t) => <option key={t} value={t}>{HABIT_TYPE_META[t].label}</option>)}
         </select>
         <GButton variant="primary" onClick={add}><Plus size={ICON_SIZE.body} /> Add</GButton>
