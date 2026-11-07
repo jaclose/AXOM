@@ -28,14 +28,19 @@ export function validateSourceManifest(manifest) {
   }
   const integratedSha = validSha(manifest.integratedSha, "integratedSha");
   if (!Array.isArray(manifest.sources) || !manifest.sources.length) throw new Error("Missing source revisions.");
-  const seen = new Set(), entries = [];
+  const seen = new Map(), entries = [];
   for (const source of manifest.sources) {
     const sourceSha = validSha(source?.sourceSha, "sourceSha");
     if (!Array.isArray(source.paths) || !source.paths.length) throw new Error("Missing source file paths.");
     for (const raw of source.paths) {
       const path = validPath(raw);
-      if (seen.has(path)) throw new Error("Duplicate source-file ownership: " + path);
-      seen.add(path);
+      // Git tracks case-sensitive paths even if macOS/Windows checkouts cannot.
+      // A source manifest must be reproducible across supported native targets.
+      const folded = path.toLowerCase();
+      if (seen.has(folded)) {
+        throw new Error("Duplicate or case-insensitive source-file ownership: " + path + " conflicts with " + seen.get(folded));
+      }
+      seen.set(folded, path);
       entries.push({ sourceSha, path });
     }
   }

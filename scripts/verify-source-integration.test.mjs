@@ -43,6 +43,11 @@ test("rejects invalid manifests, conflicting ownership, symlinks and missing blo
   const dup = manifest();
   dup.sources.push({ sourceSha: C, paths: ["web/src/course.ts"] });
   assert.throws(() => validateSourceManifest(dup), /Duplicate/);
+  // A Linux tree can store two distinct names which collide on macOS/Windows.
+  assert.throws(() => validateSourceManifest(manifest(["web/Guide.ts", "web/guide.ts"])), /case-insensitive/);
+  const acrossSources = manifest(["docs/Owner.ts"]);
+  acrossSources.sources.push({ sourceSha: C, paths: ["docs/owner.ts"] });
+  assert.throws(() => validateSourceManifest(acrossSources), /case-insensitive/);
   assert.throws(() => verifySourceIntegration(manifest(), () => null), /Unable to verify/);
   assert.throws(() => verifySourceIntegration(manifest(), () => ({ blob: C, mode: "120000" })), /nonregular/);
 });
@@ -74,7 +79,11 @@ test("checks real Git commit objects and fails closed on a changed integrated fi
   writeFileSync(join(cwd, "docs", "proof.txt"), "changed source\n");
   git("add", "--", "docs/proof.txt");
   commit("modified integration");
-  assert.throws(() => verifySourceIntegration({ ...input, integratedSha: git("rev-parse", "HEAD") },
+  const modifiedSha = git("rev-parse", "HEAD");
+  assert.throws(() => verifySourceIntegration({ ...input, integratedSha: modifiedSha },
     (sha, file) => readGitFile(sha, file, cwd)), /differs from exact pinned/);
+  writeFileSync(path, JSON.stringify({ ...input, integratedSha: modifiedSha }));
+  assert.throws(() => execFileSync(process.execPath, [cli, path], { cwd, encoding: "utf8" }),
+    error => error.status === 1 && /differs from exact pinned source file/.test(error.stderr), "CLI must fail closed with nonzero exit status");
   assert.throws(() => readGitFile(sourceSha, "docs/missing.txt", cwd), /Expected exactly one/);
 });
