@@ -19,7 +19,7 @@ describe("recurring cadence goals", () => {
     useStore.getState().updateProfile({ experimentalFlags: { habits: true } });
     render(<HabitTrackerPage />);
     fireEvent.click(screen.getByRole("button", { name: "Gym · 4–5 days/week" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     const gym = useStore.getState().habits.find((habit) => habit.name === "Gym");
     expect(gym).toMatchObject({ type: "weekly", weeklyMinimum: 4, weeklyPreferred: 5, includeInReports: true });
     expect(screen.getByText(/minimum days/i)).toBeTruthy();
@@ -29,7 +29,7 @@ describe("recurring cadence goals", () => {
     useStore.getState().updateProfile({ experimentalFlags: { habits: true } });
     render(<HabitTrackerPage />);
     fireEvent.click(screen.getByRole("button", { name: "Five named daily prayers" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     const prayer = useStore.getState().habits.find((habit) => habit.name === "Daily prayers")!;
     expect(prayer).toMatchObject({ type: "slots", includeInReports: false });
     expect(prayer.occurrenceSlots?.map((slot) => slot.label)).toEqual(["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]);
