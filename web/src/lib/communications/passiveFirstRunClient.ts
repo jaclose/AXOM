@@ -1,4 +1,5 @@
 import { AXOM_CORRESPONDENTS, type CorrespondentId } from "./correspondents";
+import { useAccount } from "../account/accountStore";
 import {
   beginPassiveFirstRun, capturePassiveFirstRun, proposePassiveAtlas, restorePassiveFirstRun,
   serializePassiveFirstRun, type PassiveAction, type PassiveProposal, type StartPassiveOptions,
@@ -6,6 +7,7 @@ import {
 
 // The observation lasts for a single tab's initial workspace visit, never a hidden analytics stream.
 export const PASSIVE_ATLAS_SESSION_KEY = "axom.atlas.first-run-session.v1";
+const PASSIVE_ATLAS_SCOPE_KEY = "axom.atlas.first-run-owner-scope.v1";
 export const PASSIVE_ATLAS_CHOICE_KEY = "axom.atlas.confirmed-choice.v1";
 export const ATLAS_COMPANION_CHANGED_EVENT = "axom:atlas-companion-changed";
 export type AtlasSavedDashboardPriority = "question-bank" | "course-tracker";
@@ -22,20 +24,37 @@ function sessionStore(): Storage | null {
 function localStore(): Storage | null {
   try { return typeof window !== "undefined" ? window.localStorage : null; } catch { return null; }
 }
+/** An ephemeral session binding, separate from the observation aggregate. Never sent to a provider. */
+function currentObservationScope(): string {
+  const id = useAccount.getState().user?.id;
+  return id ? "account:" + id.toLowerCase() : "guest";
+}
+function clearObservation(storage: Storage | null): void {
+  try { storage?.removeItem(PASSIVE_ATLAS_SESSION_KEY); storage?.removeItem(PASSIVE_ATLAS_SCOPE_KEY); } catch { /* unavailable */ }
+}
 export function startPassiveAtlasOnboarding(input: Omit<StartPassiveOptions, "now">, now = Date.now()): void {
   const storage = sessionStore();
   if (!storage) return;
   const session = beginPassiveFirstRun({ ...input, now });
   try {
-    if (session) storage.setItem(PASSIVE_ATLAS_SESSION_KEY, serializePassiveFirstRun(session));
-    else storage.removeItem(PASSIVE_ATLAS_SESSION_KEY);
-  } catch { /* Browser may deny storage. Never fall back to cloud telemetry. */ }
+    if (session) {
+      storage.setItem(PASSIVE_ATLAS_SCOPE_KEY, currentObservationScope());
+      storage.setItem(PASSIVE_ATLAS_SESSION_KEY, serializePassiveFirstRun(session));
+    } else clearObservation(storage);
+  } catch { clearObservation(storage); /* Browser may deny storage. Never fall back to cloud telemetry. */ }
 }
 export function readPassiveAtlasSession(now = Date.now()) {
   try {
     const stored = sessionStore();
-    const session = restorePassiveFirstRun(stored?.getItem(PASSIVE_ATLAS_SESSION_KEY) ?? "");
-    if (session && now > session.expiresAt + 9 * 60_000) { stored?.removeItem(PASSIVE_ATLAS_SESSION_KEY); return null; }
+    if (!stored) return null;
+    const raw = stored.getItem(PASSIVE_ATLAS_SESSION_KEY);
+    if (!raw) { clearObservation(stored); return null; }
+    // A guest observation must never be reused after signup, including on reload.
+    if (stored.getItem(PASSIVE_ATLAS_SCOPE_KEY) !== currentObservationScope()) {
+      clearObservation(stored); return null;
+    }
+    const session = restorePassiveFirstRun(raw);
+    if (!session || now > session.expiresAt + 9 * 60_000) { clearObservation(stored); return null; }
     return session;
   } catch { return null; }
 }
@@ -63,7 +82,7 @@ export function discardAtlasObservationOnAccountChange(previousAccountId: string
 }
 
 export function dismissPassiveAtlas(): void {
-  try { sessionStore()?.removeItem(PASSIVE_ATLAS_SESSION_KEY); } catch { /* no-op */ }
+  clearObservation(sessionStore());
 }
 /** A voluntary, stored *proposal*; no dashboard change was applied by storing this. */
 export function readConfirmedAtlasPriority(accountId?: string | null): AtlasSavedDashboardPriority | null {
