@@ -114,7 +114,7 @@ describe("forward Host privacy and audit hardening", () => {
     ];
     for (let i = 0; i < ids.length; i++) {
       await db.query("insert into public.axom_operator_audit(id,actor_id,action,metadata,created_at) values($1,$2,'audit.test','{}'::jsonb,$3)",
-        [ids[i], OWNER, `2026-11-07T0${i + 1}:00:00Z`]);
+        [ids[i], OWNER, `2099-11-07T0${i + 1}:00:00Z`]);
     }
     const first = await as<{ id: string; created_at: string }>(OWNER,
       "select id,created_at from public.axom_operator_audit_page(2)");
