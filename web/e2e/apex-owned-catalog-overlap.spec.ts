@@ -35,6 +35,7 @@ for (const width of [390, 1440]) {
     // Register after the normal authenticated fixture so only this catalog RPC
     // is overridden. The rest of the app still executes its real fetch path.
     await page.route("https://academic-publish.invalid/rest/v1/rpc/academic_catalog", async route => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
       const input = route.request().postDataJSON() as { after_id?: string | null };
       const after = input.after_id ?? null;
       requests.push(after);
