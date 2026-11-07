@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
-import { isolateLiveAccountNetwork, permitsLiveAccountWebSocket } from "./liveAccountNetwork";
+import { isolateLiveAccountNetwork } from "./liveAccountNetwork";
 
 const testRef = "abcdefghijklmnopqrst";
 const dedicatedOrigin = `https://${testRef}.supabase.co`;
@@ -66,86 +65,53 @@ test("live-account route blocks cross-origin redirects and custom backends in Ch
 });
 
 
-test("WebSocket egress allows only the dedicated Supabase or local application origin", () => {
-  const app = "http://127.0.0.1:5187";
-  expect(permitsLiveAccountWebSocket("ws://127.0.0.1:5187/socket", dedicatedOrigin, app)).toBe(true);
-  expect(permitsLiveAccountWebSocket(`wss://${testRef}.supabase.co/realtime/v1/websocket`, dedicatedOrigin, app)).toBe(true);
-  expect(permitsLiveAccountWebSocket(`wss://${testRef}.storage.supabase.co/upload`, dedicatedOrigin, app)).toBe(true);
-  expect(permitsLiveAccountWebSocket("ws://127.0.0.1:5188/socket", dedicatedOrigin, app)).toBe(false);
-  expect(permitsLiveAccountWebSocket("wss://other-project.supabase.co/socket", dedicatedOrigin, app)).toBe(false);
-  expect(permitsLiveAccountWebSocket(`ws://${testRef}.supabase.co/socket`, dedicatedOrigin, app)).toBe(false);
-  expect(permitsLiveAccountWebSocket("wss://127.0.0.1:5187/socket", dedicatedOrigin, app)).toBe(false);
-  expect(permitsLiveAccountWebSocket("https://127.0.0.1:5187/socket", dedicatedOrigin, app)).toBe(false);
-  expect(permitsLiveAccountWebSocket("not-a-url", dedicatedOrigin, app)).toBe(false);
-});
-
-test("live-account guard blocks foreign WebSocket handshakes in real Chromium", async ({ browser }) => {
-  let forbiddenUpgrades = 0;
-  let approvedUpgrades = 0;
-  const forbidden = createServer((_request, response) => {
-    response.writeHead(200).end("Forbidden endpoint");
+test("destructive-account isolation prevents every browser WebSocket upgrade", async ({ browser }) => {
+  let foreignUpgrades = 0;
+  let localUpgrades = 0;
+  const foreign = createServer((_request, response) => {
+    response.writeHead(200).end("Foreign endpoint");
   });
-  forbidden.on("upgrade", (_request, socket) => {
-    forbiddenUpgrades += 1;
+  foreign.on("upgrade", (_request, socket) => {
+    foreignUpgrades += 1;
     socket.destroy();
   });
   const app = createServer((_request, response) => {
-    response.writeHead(200, { "Content-Type": "text/html" }).end("<h1>App</h1>");
+    response.writeHead(200, { "Content-Type": "text/html" }).end("<h1>Allowed app</h1>");
   });
-  app.on("upgrade", (request, socket) => {
-    approvedUpgrades += 1;
-    const key = request.headers["sec-websocket-key"];
-    if (typeof key !== "string") {
-      socket.destroy();
-      return;
-    }
-    const accept = createHash("sha1")
-      .update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
-      .digest("base64");
-    socket.write(
-      "HTTP/1.1 101 Switching Protocols\\r\\n"
-      + "Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n"
-      + `Sec-WebSocket-Accept: ${accept}\\r\\n\\r\\n`,
-    );
-    socket.on("data", () => socket.destroy());
-    socket.setTimeout(2500, () => socket.destroy());
+  app.on("upgrade", (_request, socket) => {
+    localUpgrades += 1;
+    socket.destroy();
   });
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
-    const forbiddenOrigin = await listen(forbidden);
+    const foreignOrigin = await listen(foreign);
     const appOrigin = await listen(app);
     context = await browser.newContext({ serviceWorkers: "block" });
-    // Intercept before the first page exists; both contexts in the live test use this helper.
+    // Install the network boundary before any page or app scripts exist.
     await isolateLiveAccountNetwork(context, dedicatedOrigin, appOrigin);
     const page = await context.newPage();
     await page.goto(appOrigin + "/");
-    const open = (endpoint: string) => page.evaluate((url) =>
-      new Promise<string>((resolve) => {
-        const socket = new WebSocket(url);
-        let settled = false;
-        const timer = window.setTimeout(() => {
-          socket.close();
-          finish("timeout");
-        }, 2500);
-        function finish(value: string) {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          resolve(value);
-        }
-        socket.addEventListener("open", () => { finish("open"); socket.close(); }, { once: true });
-        socket.addEventListener("close", () => finish("closed"), { once: true });
-        socket.addEventListener("error", () => finish("error"), { once: true });
-      }), endpoint);
+    await expect(page.getByRole("heading", { name: "Allowed app" })).toBeVisible();
 
-    expect(await open(appOrigin.replace("http:", "ws:") + "/socket")).toBe("open");
-    expect(approvedUpgrades).toBe(1);
-    expect(await open(forbiddenOrigin.replace("http:", "ws:") + "/socket")).not.toBe("open");
-    // An error/close is insufficient: the forbidden socket server must see zero handshakes.
-    expect(forbiddenUpgrades).toBe(0);
+    const probe = (url: string) => page.evaluate((endpoint) => new Promise<string>((resolve) => {
+      const socket = new WebSocket(endpoint);
+      const timer = window.setTimeout(() => {
+        socket.close();
+        resolve("timeout");
+      }, 2500);
+      socket.addEventListener("close", () => { clearTimeout(timer); resolve("closed"); }, { once: true });
+      socket.addEventListener("error", () => { clearTimeout(timer); resolve("error"); }, { once: true });
+    }), url);
+
+    // Both an ordinarily permitted local HMR endpoint and a forbidden project
+    // must have ZERO remote handshakes. No Realtime connection is needed here.
+    expect(await probe(appOrigin.replace("http:", "ws:") + "/socket")).not.toBe("timeout");
+    expect(await probe(foreignOrigin.replace("http:", "ws:") + "/socket")).not.toBe("timeout");
+    expect(localUpgrades).toBe(0);
+    expect(foreignUpgrades).toBe(0);
   } finally {
     await context?.close();
     await stop(app);
-    await stop(forbidden);
+    await stop(foreign);
   }
 });
