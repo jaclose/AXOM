@@ -100,11 +100,11 @@ export function ProductivityPage() {
       quantityLabel: quantity ? manualQuantityKind : undefined,
       note: manualNote || undefined,
     });
-    setManualType(""); setManualMinutes(""); setManualQuantity(""); setManualNote("");
+    setManualType(""); setManualMinutes(""); setManualQuantity(""); setManualNote(""); setManualTrackerId("");
     setLastSelfReport(true);
   }
 
-  function useSelfReportTemplate(template: typeof SELF_REPORT_TEMPLATES[number]) {
+  function applySelfReportTemplate(template: typeof SELF_REPORT_TEMPLATES[number]) {
     setManualType(template.activity);
     setManualQuantityKind(template.quantity);
     setManualMinutes("");
@@ -168,7 +168,7 @@ export function ProductivityPage() {
           <>
             <div className="productivity-report-context">
               <span><Activity size={ICON_SIZE.body} aria-hidden="true" /> Self-report</span>
-              <small>These entries are reported by you. Focus time is recorded separately when auto-log is on.</small>
+              <small>Self-reported time counts as activity. Avoid logging minutes already covered by an auto-logged focus session.</small>
             </div>
             <form className="fast-activity-logger" aria-label="Log self-reported activity" onSubmit={(event) => { event.preventDefault(); logManual(); }}>
               <ActivityLabelInput value={manualType} onChange={(value) => { setManualType(value); setLastSelfReport(false); }} />
@@ -176,7 +176,7 @@ export function ProductivityPage() {
                 {SELF_REPORT_TEMPLATES.map((template) => (
                   <button type="button" key={template.label} aria-label={`Use ${template.label} template`}
                     className={manualType === template.activity ? "on" : ""}
-                    onClick={() => useSelfReportTemplate(template)}>{template.label}</button>
+                    onClick={() => applySelfReportTemplate(template)}>{template.label}</button>
                 ))}
               </div>
               <div className="fast-activity-measures" aria-label="Optional activity measurements">
