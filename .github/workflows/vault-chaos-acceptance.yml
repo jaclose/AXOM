@@ -1,0 +1,39 @@
+name: AXOM Vault Chaos Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "web/e2e/local-vault-persistence-chaos.spec.ts"
+      - "web/e2e/local-save-account-journey.spec.ts"
+      - ".github/workflows/vault-chaos-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-chaos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: node scripts/toolchain.mjs
+      - run: npm --prefix web ci
+      - run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Real Chromium account UI, large-vault and quota chaos, three repeats
+        run: npm --prefix web run test:e2e -- e2e/local-vault-persistence-chaos.spec.ts e2e/local-save-account-journey.spec.ts --workers=1 --repeat-each=3
+      - name: Preserve synthetic browser failure evidence only
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vault-chaos-browser-${{ github.run_id }}
+          path: web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
