@@ -122,9 +122,9 @@ describe("the course by week", () => {
       ],
     });
     expect(module).toMatchObject({ term: "Term 2", courseId: "core", done: 1, total: 1 });
-    expect(module.weeks[0]).toMatchObject({
-      questionScopeAmbiguous: undefined,
-      questions: { total: 1, attempted: 1, firstTimeCorrect: 1, questionIds: ["core"] },
+    expect(module.weeks[0].questionScopeAmbiguous).toBeUndefined();
+    expect(module.weeks[0].questions).toMatchObject({
+      total: 1, attempted: 1, firstTimeCorrect: 1, questionIds: ["core"],
     });
     expect(JSON.stringify([tracker, answers])).toBe(before);
   });
