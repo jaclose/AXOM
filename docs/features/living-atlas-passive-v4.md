@@ -21,6 +21,34 @@ There is no reliable way to infer stable personality, clinical ability, motivati
 7. Accepting a character saves **only** the confirmed ID in local device storage under a verified account ID scope, or under the guest-device scope while signed out. No raw event data follows the account.
 8. AXOM configuration suggestions are preview-only. They must not change grades, answer keys, study targets, community sharing, marketing preferences or persistent dashboard preferences without a separate action and undo.
 
+## Practical utility: one working academic guide and an approved dashboard change
+
+The companion now has a concrete study-lens action that leads to an existing AXOM tool, not simply a mascot greeting:
+
+| Order | Guide action | Existing route |
+| --- | --- | --- |
+| Architects | Locate the relevant curriculum structure and source-backed objective | Course Tracker |
+| Investigators | Test a discrimination using reviewed Question Bank evidence | Question Bank |
+| Alchemists | Connect two mechanisms, then retrieve the explanation | Study Methods |
+| Wayfinders | Convert an academic decision into one actionable task | Tasks |
+| Wardens | Establish sustainable focus without equating logged time to mastery | Productivity |
+
+These actions are static, original suggestions keyed to the **user-confirmed** companion ID. They do not use inferred grades, psychology, journal passages, raw QBank items or external AI calls.
+
+The learner may also approve a **minimal dashboard adaptation** when the observation supported a clear Question Bank / Course Tracker priority. The proposed change only reorders an already-visible widget to the first eligible dashboard position; it preserves pinned surfaces, explicitly hidden widgets, sizes, fields, user-defined preferences, academic progress and targets. It never unhides a widget a learner deliberately hid. The Dashboard card displays the precise change before "Apply" and offers same-session "Undo". Undo refuses to overwrite a subsequent manual edit. No new study metric or inferred mastery score is created.
+
+AXOM Settings > Personalization > Atlas companion now provides independent manual selection among all 25, explicit disable, an explanation of local-only limitations, and an action to discard the temporary observation. A manually chosen character is authoritative and never overridden by new observations. An account switch discards the unaccepted session aggregate; confirmed identities remain isolated to the account scope.
+
+The source modules are:
+- web/src/lib/communications/atlasRecommendations.ts, pure five-order study lenses and reversible dashboard planning;
+- web/src/components/dashboard/AtlasFirstRunCard.tsx, accessible review, explicit layout application and guarded Undo;
+- web/src/components/shell/AtlasPreferencesSettings.tsx and SettingsModal.tsx, learner-owned controls;
+- web/src/components/questions/ExamRunner.tsx, recording a practice start only after media checks and actual launch;
+- web/src/components/questions/SourceTeaching.tsx, counting only explicit source-page reveal;
+- web/src/components/shell/AccountSyncWatcher.tsx, invalidation on account changes.
+
+No method claims that a source-review click, timer usage or preferred dashboard indicates intelligence, clinical competence or a stable personality. These are narrowly observed interaction preferences.
+
 ## Evidence and restrictions
 
 | Signal | Strength | Interpretation |
@@ -43,7 +71,7 @@ No single navigation action, palette choice or scroll can produce a personality 
 - Source: web/src/lib/communications/passiveFirstRun.ts, a deterministic pure scoring engine with explicit allowlist, bounded counters and evidence sufficiency.
 - Browser adapter: web/src/lib/communications/passiveFirstRunClient.ts, using sessionStorage. The observation window is six minutes; unaccepted summaries are removed after an additional short review grace period.
 - Setup opt-in: web/src/components/setup/SetupFlow.tsx.
-- User actions: SideBar navigation, actual dashboard widget changes, QBank practice launch, and a single coarse scroll milestone per eligible content section.
+- User actions: sidebar navigation, actual dashboard edits, **media-validated QBank block starts**, explicit SourceTeaching page reveals, and one coarse scroll milestone per eligible content section. Opening a practice setup screen does not count as practicing.
 - Optional dashboard review: web/src/components/dashboard/AtlasFirstRunCard.tsx.
 - Provisional account scope: the accepted choice is stored locally under its user's ID. **No cloud syncing is claimed; first-run guest setup and later account creation require a separate explicit handoff and owner-scoped server contract.**
 - No SDK-based analytics export or network call is made by this feature. The broader AXOM application may have unrelated legitimate network activity.
@@ -62,7 +90,7 @@ The optional questionnaire should be used to elicit **stated preferences**, not 
 - No raw interaction event object, URL, scroll pixel, account email or journal content may enter the summary.
 - Bound each event count to two and stop the observer at the six-minute limit; expire the session.
 - Exclude programmatic navigation, tutorial auto-advances and saved/restored exam sessions from meaningful action counts.
-- Cross-account isolation and deletion / disable controls must work across sign-in, sign-out, refresh and device changes.
+- Cross-account isolation and deletion / disable controls must work across sign-in, sign-out, refresh and device changes. The unaccepted observation is discarded on account identity transitions; confirmed choices never migrate automatically between account scopes.
 - Test insufficient evidence, adversarial payloads, fairness across keyboard/touch/screen-reader interfaces, and empty new accounts.
 - Full browser acceptance at 320/390/1440 widths, dark/light, plus keyboard and reduced-motion checks.
 - Track suggestion adoption only with optional, aggregate and separately consented product metrics. Never instrument a covert personality classifier.
