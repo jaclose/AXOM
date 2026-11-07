@@ -132,19 +132,35 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     try {
       for (const [index, course] of targets.entries()) {
         if (abort.signal.aborted) break;
+        scope.assertCurrent();
         setProgress(`Checking explanations in ${label(course.id)} · ${index + 1} of ${targets.length}`);
+        let receipt: ExplanationReviewReceipt;
         try {
-          const receipt = await inspectStoredRevisionExplanations(course.id, course.current_revision_id, accountId);
-          await scope.assertCurrent();
-          missing += receipt.missingExplanations;
-          setAudits(current => ({ ...current, [course.id]: { receipt } }));
+          receipt = await inspectStoredRevisionExplanations(course.id, course.current_revision_id, accountId);
         } catch (cause) {
+          // A failed source read may be recorded for this account. An identity
+          // change is not a source read error and must abort the entire audit.
+          scope.assertCurrent();
+          if (abort.signal.aborted) break;
           unreadable += 1;
           setAudits(current => ({ ...current, [course.id]: { error: cause instanceof Error ? cause.message : "Readback failed." } }));
+          continue;
         }
+        // Account A may switch to B and back while a source read is in flight.
+        // Never count or publish that stale receipt to the review controls.
+        scope.assertCurrent();
+        if (abort.signal.aborted) break;
+        missing += receipt.missingExplanations;
+        setAudits(current => ({ ...current, [course.id]: { receipt } }));
       }
+      scope.assertCurrent();
       setProgress(abort.signal.aborted ? "Explanation check stopped. No approvals were made."
         : `Explanation readback complete: ${plural(missing, "ready question")} without an explanation${unreadable ? `; ${plural(unreadable, "course")} could not be read` : ""}. Review each rationale against its source before attesting.`);
+    } catch (cause) {
+      // Partial receipts from a stale account cannot authorize bulk review.
+      setAudits({});
+      setChecked(false);
+      setError(cause instanceof Error ? cause.message : "Explanation checking stopped. Refresh your courses before approving.");
     } finally { scope.dispose(); finish(abort); }
   }
 
