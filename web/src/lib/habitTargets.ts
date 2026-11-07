@@ -17,7 +17,7 @@ export function linkedRequirement(config: DailySuccessConfig | undefined, habitI
 }
 
 export function habitSchedule(habit: Habit): DailySuccessSchedule {
-  if (habit.type === "weekly") return { kind: "times-per-week", times: Math.max(1, habit.weeklyTarget ?? 3) };
+  if (habit.type === "weekly") return { kind: "times-per-week", times: Math.max(1, habit.weeklyMinimum ?? habit.weeklyTarget ?? 3), weekStartsOn: 1 };
   if (habit.type === "scheduled" && habit.schedule?.length) return { kind: "weekdays", weekdays: [...habit.schedule] };
   return { kind: "daily" };
 }
@@ -34,13 +34,14 @@ export function linkHabitToTargets(config: DailySuccessConfig | undefined, habit
         : requirement),
     };
   }
-  const target = habit.type === "count" || habit.type === "duration" ? Math.max(1, habit.target ?? 1) : 1;
+  const target = habit.type === "slots" ? Math.max(1, habit.occurrenceSlots?.length ?? 1)
+    : habit.type === "count" || habit.type === "duration" ? Math.max(1, habit.target ?? 1) : 1;
   const requirement = makeDailyRequirement({
     id: habitTargetId(habit.id),
     label: habit.name,
     source: { kind: "habit", habitId: habit.id },
     target,
-    unit: habit.type === "count" || habit.type === "duration" ? habit.unit?.trim() || "times" : "check-in",
+    unit: habit.type === "slots" ? "occurrences" : habit.type === "count" || habit.type === "duration" ? habit.unit?.trim() || "times" : "check-in",
     schedule: habitSchedule(habit),
     trackingStartsAt: today,
   }, today);
