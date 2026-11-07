@@ -11,6 +11,7 @@ import { ActivityLabelInput } from "../components/productivity/ActivityLabelInpu
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
 import { StudyStreakMonitor } from "../components/productivity/StudyStreakMonitor";
 import { DailyRequirementsEditor } from "../components/productivity/DailyRequirementsEditor";
+import { CadenceGoals } from "../components/productivity/CadenceGoals";
 import { TrackerManager } from "../components/productivity/TrackerManager";
 import { useInView } from "../lib/useInView";
 import { gotoJournalDay } from "../lib/uiStore";
@@ -243,6 +244,7 @@ export function ProductivityPage() {
         {isActive && <StudyStreakMonitor state={s} result={dailyProgress} />}
       </div>
       </div>
+      {isActive && <CadenceGoals />}
       <ActivityLog logs={isActive ? logs : logs.filter((log) => log.dayKey === viewKey)} activeDayKey={s.activeDayKey} />
       {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
       {isActive && <TrackerManager />}
