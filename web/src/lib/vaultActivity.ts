@@ -14,9 +14,33 @@ export interface VaultWriteRecord {
   target: VaultWriteTarget;
   version: typeof WORKSPACE_WRITE_MARKER_VERSION;
   scope: "workspace";
+  /** Supabase account UUID when a signed-in learner wrote this workspace. */
+  accountId?: string;
 }
 
 export const VAULT_WRITE_EVENT = "axom:vault-write";
+/** Account identity is kept out of the workspace and injected by accountStore. */
+let vaultAccountId: string | null = null;
+export function readVaultAccountIdentity(): string | null { return vaultAccountId; }
+/**
+ * Switching accounts changes which local save receipt is trustworthy, not the
+ * actual device workspace. Never erase local saves merely for an auth switch.
+ */
+export function setVaultAccountIdentity(accountId: string | null): void {
+  const next = typeof accountId === "string" && accountId.trim() ? accountId : null;
+  if (vaultAccountId === next) return;
+  vaultAccountId = next;
+  lastWrite = null;
+  lastPersistedAt = 0;
+  memoryOnlyConfirmedWrite = false;
+  lastObservedMarkerRaw = undefined;
+  // Preserve a failed-removal invalidation across A → B → A switches. The
+  // old marker must never be revived merely because the account changed.
+  failingSince = null;
+  if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+  }
+}
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
 let lastPersistedAt = 0;
@@ -91,7 +115,12 @@ function listenForCrossTabInvalidation(): void {
  * saves are best-effort, so without this the only sign was a "Saved at" time
  * in Settings that had quietly stopped moving.
  */
-export function markVaultWriteFailure(now: Date = new Date()): void {
+export function markVaultWriteFailure(
+  now: Date = new Date(),
+  writeAccountId: string | null = vaultAccountId,
+): void {
+  // A failed queued A write after switching to B is still an A operation.
+  if (writeAccountId !== vaultAccountId) return;
   failingSince ??= now.toISOString();
   if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_FAILURE_EVENT));
@@ -103,12 +132,25 @@ export function readVaultWriteFailure(): string | null {
   return failingSince;
 }
 
-export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date()): void {
+export function markVaultWrite(
+  target: VaultWriteTarget,
+  now: Date = new Date(),
+  writeAccountId: string | null = vaultAccountId,
+): void {
+  // An async save queued under A must never be acknowledged under B.
+  // Clearing only the status marker fails closed without removing workspace bytes.
+  if (writeAccountId !== vaultAccountId) {
+    invalidateVaultWrite();
+    return;
+  }
   // PR #128 only calls this after the persisted workspace key actually landed.
   listenForCrossTabInvalidation();
   statusInvalidated = false;
   invalidatedMarkerValue = null;
-  lastWrite = { at: now.toISOString(), target, version: WORKSPACE_WRITE_MARKER_VERSION, scope: "workspace" };
+  lastWrite = {
+    at: now.toISOString(), target, version: WORKSPACE_WRITE_MARKER_VERSION, scope: "workspace",
+    ...(vaultAccountId ? { accountId: vaultAccountId } : {}),
+  };
   failingSince = null;
   // Keep the tiny localStorage marker current without hammering it on every
   // keystroke: at most once per second.
@@ -187,13 +229,16 @@ function readStoredWorkspaceMarker(raw: string | null): VaultWriteRecord | null 
       marker.scope !== "workspace" ||
       typeof marker.at !== "string" ||
       !Number.isFinite(Date.parse(marker.at)) ||
-      (marker.target !== "indexeddb" && marker.target !== "local-fallback")
+      (marker.target !== "indexeddb" && marker.target !== "local-fallback") ||
+      // Legacy unscoped v2 markers cannot confirm a signed-in account's save.
+      (vaultAccountId ? marker.accountId !== vaultAccountId : marker.accountId !== undefined)
     ) return null;
     return {
       at: marker.at,
       target: marker.target,
       version: WORKSPACE_WRITE_MARKER_VERSION,
       scope: "workspace",
+      ...(vaultAccountId ? { accountId: vaultAccountId } : {}),
     };
   } catch {
     return null;
