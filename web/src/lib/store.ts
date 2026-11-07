@@ -256,6 +256,7 @@ interface Actions {
   updateHabit: (id: string, patch: Partial<Habit>) => void;
   removeHabit: (id: string) => void;
   checkHabit: (habitId: string, date: string, status: HabitCheckStatus, value?: number, note?: string) => void;
+  setHabitSlot: (habitId: string, date: string, slotId: string, status?: "done" | "skipped") => void;
   clearHabitCheck: (habitId: string, date: string) => void;
 
   // board prep
@@ -630,7 +631,9 @@ export const useStore = create<Store>()(
             trackerId: tracker?.id,
             unitType: tracker?.unitType ?? "minutes",
             quantity: tracker?.unitType === "count" ? nextCards : nextMinutes,
-            academic: tracker ? tracker.contributesToAcademicStudy : true,
+            // Unclassified reports are observations, not proof of academic work.
+            // Explicit tracker selection is the only academic attribution path.
+            academic: tracker ? tracker.contributesToAcademicStudy : false,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
@@ -792,9 +795,41 @@ export const useStore = create<Store>()(
           habits: (s.habits ?? []).filter((h) => h.id !== id),
           habitEntries: (s.habitEntries ?? []).filter((e) => e.habitId !== id),
         })),
+      // A single habit/day receipt owns all named occurrence states.
+      // Repeating a check is idempotent. Clearing one slot does not affect its siblings.
+      setHabitSlot: (habitId, date, slotId, status) =>
+        set((s) => {
+          const habit = (s.habits ?? []).find((item) => item.id === habitId && item.type === "slots" && !item.archived);
+          if (!habit?.occurrenceSlots?.some((slot) => slot.id === slotId) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) return {};
+          const entries = s.habitEntries ?? [];
+          const old = entries.find((item) => item.habitId === habitId && item.date === date);
+          const previous = old?.slotCheckIns ?? [];
+          const existing = previous.find((check) => check.slotId === slotId);
+          if (existing?.status === status || (!existing && !status)) return {};
+          const updated = status
+            ? [...previous.filter((check) => check.slotId !== slotId), {
+                id: existing?.id ?? uid(), slotId, status, at: now(),
+              }]
+            : previous.filter((check) => check.slotId !== slotId);
+          const validSlots = new Set(habit.occurrenceSlots.map((slot) => slot.id));
+          const checks = updated.filter((check) => validSlots.has(check.slotId));
+          const done = checks.filter((check) => check.status === "done").length;
+          const overall: HabitCheckStatus = done === validSlots.size
+            ? "done" : done > 0 ? "partial" : "skipped";
+          if (!checks.length && !old?.note) {
+            return { habitEntries: entries.filter((entry) => entry !== old) };
+          }
+          const receipt: HabitEntry = old
+            ? { ...old, status: overall, value: done, slotCheckIns: checks }
+            : { id: uid(), habitId, date, status: overall, value: done, slotCheckIns: checks, createdAt: now() };
+          return { habitEntries: old ? entries.map((entry) => entry === old ? receipt : entry) : [receipt, ...entries] };
+        }),
+
       // Upsert one check per habit per local date (idempotent — prevents dupes).
       checkHabit: (habitId, date, status, value, note) =>
         set((s) => {
+          // Aggregate writes cannot erase or conflict with named-slot evidence.
+          if (s.habits.some((habit) => habit.id === habitId && habit.type === "slots")) return {};
           const entries = s.habitEntries ?? [];
           const existing = entries.find((e) => e.habitId === habitId && e.date === date);
           if (existing) {
