@@ -1,0 +1,172 @@
+/* Workspace consolidation: real actions lead, visual material stays quiet.
+   Use AXOM's existing product tokens, never a restyled logo or invented palette. */
+.axom-workspace {
+  width: 100%;
+  max-width: 1460px;
+  min-width: 0;
+  margin-inline: auto;
+  padding-bottom: 36px;
+  display: grid;
+  align-content: start;
+  gap: clamp(12px, 1.5vw, 20px);
+}
+.axom-workspace-hero {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  justify-content: space-between;
+  padding: clamp(22px, 3vw, 40px);
+  border: 1px solid var(--glass-card-border);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(122deg, var(--surface-2), var(--surface-1));
+}
+.axom-workspace-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--gold);
+  opacity: .85;
+}
+.axom-workspace-eyebrow {
+  display: block;
+  color: var(--gold);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-caps);
+  margin-bottom: 14px;
+}
+.axom-workspace-hero h1 {
+  margin: 0;
+  font: var(--fw-medium) clamp(28px, 3.2vw, 46px)/1.11 var(--font-display);
+  color: var(--text);
+  letter-spacing: var(--tracking-tighter);
+  text-wrap: balance;
+}
+.axom-workspace-hero p {
+  max-width: 69ch;
+  margin: 15px 0 0;
+  color: var(--text-70);
+  font-size: var(--fs-base);
+  line-height: 1.65;
+}
+.axom-workspace-hero-symbol {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: clamp(76px, 10vw, 124px);
+  aspect-ratio: 1;
+  border: 1px solid var(--gold-line);
+  border-radius: var(--radius-lg);
+  color: var(--gold);
+  background: var(--gold-soft);
+  opacity: .75;
+}
+.axom-workspace-indicators {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(165px, .88fr);
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.axom-workspace-indicators > * {
+  min-width: 0;
+  padding: 17px clamp(14px, 1.8vw, 23px);
+  display: grid;
+  gap: 5px;
+  align-content: center;
+}
+.axom-workspace-indicators > * + * { border-left: 1px solid var(--hairline); }
+.axom-workspace-indicators span:not(.axom-workspace-evidence) {
+  font-size: var(--fs-tiny);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-caps);
+  color: var(--text-70);
+}
+.axom-workspace-indicators strong {
+  font: var(--fw-medium) 26px/1.2 var(--font-display);
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.axom-workspace-indicators strong.axom-workspace-date,
+.axom-workspace-indicators strong.axom-workspace-word { font-size: clamp(14px, 1.4vw, 19px); }
+.axom-workspace-indicators small { font-size: var(--fs-xs); color: var(--text-70); line-height: 1.4; }
+.axom-workspace-evidence {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--gold);
+  text-decoration: none;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+a.axom-workspace-evidence:hover { background: var(--gold-soft); }
+.axom-workspace-explainer { color: var(--text-70); }
+.axom-workspace-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.axom-workspace-nav button {
+  display: flex;
+  flex: 1 1 160px;
+  gap: 11px;
+  align-items: center;
+  text-align: left;
+  min-width: 0;
+  min-height: 64px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 11px 16px;
+  background: transparent;
+  color: var(--text-70);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color .17s ease, background-color .17s ease, color .17s ease;
+}
+.axom-workspace-nav button > svg { flex: none; }
+.axom-workspace-nav button > span { display: grid; gap: 4px; min-width: 0; }
+.axom-workspace-nav button b { color: inherit; font-size: var(--fs-sm); }
+.axom-workspace-nav button small { color: var(--text-70); font-size: var(--fs-xs); }
+.axom-workspace-nav button[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
+}
+.axom-workspace-nav button[aria-pressed="true"] > svg { color: var(--gold); }
+.axom-workspace-nav button:not([aria-pressed="true"]):hover { border-color: var(--hairline); background: var(--surface-2); color: var(--text); }
+.axom-workspace-nav button:focus-visible,
+.axom-workspace-evidence:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.axom-workspace-content { display: grid; gap: 16px; min-width: 0; }
+.axom-workspace-content > * { min-width: 0; }
+@media (max-width: 1020px) {
+  .axom-workspace-indicators { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .axom-workspace-indicators > :nth-child(3) { border-left: 0; border-top: 1px solid var(--hairline); }
+  .axom-workspace-indicators > :nth-child(4) { border-top: 1px solid var(--hairline); }
+}
+@media (max-width: 580px) {
+  .axom-workspace-hero { padding: 20px; }
+  .axom-workspace-hero-symbol { display: none; }
+  .axom-workspace-hero h1 { font-size: 29px; }
+  .axom-workspace-indicators { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .axom-workspace-indicators > * { padding: 14px; }
+  .axom-workspace-nav { gap: 4px; }
+  .axom-workspace-nav button { flex-basis: 125px; min-height: 56px; padding: 10px 12px; }
+  .axom-workspace-nav button small { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .axom-workspace-nav button { transition: none; }
+}
