@@ -30,6 +30,7 @@ import { ReportInsightCard, type ReportCardInsight } from "../components/reports
 import { ICON_SIZE } from "../lib/iconSize";
 import { EnergyFocusPanel, useEnergyInputs } from "../components/energy/EnergyInsights";
 import { TrackerReport } from "../components/reports/TrackerReport";
+import { HabitReportPanel } from "../components/reports/HabitReportPanel";
 import { todaysCapacity } from "../lib/energyInsights";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 
@@ -325,6 +326,8 @@ export function ReportsPage() {
           <ReportInsightCard icon={<ListChecks size={ICON_SIZE.emphasis} />} metric={openTaskMetric} />
         </div>
       </section>
+
+      <HabitReportPanel />
 
       <section className="report-section" aria-labelledby="report-energy-title" data-module-tour="reports-rhythm">
         <div className="report-section-heading"><div><span>Energy &amp; focus</span><h2 id="report-energy-title">Your rhythm</h2></div><p>When you are sharpest, how much today can hold, and what seems to help, from your own check-ins, sessions and questions.</p></div>
