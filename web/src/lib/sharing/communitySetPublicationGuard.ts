@@ -19,6 +19,10 @@ export function sameCommunitySetReviewRevision(opened: QuestionSet, live: Questi
     && live.id === opened.id
     && live.title === opened.title && live.kind === opened.kind
     && live.createdAt === opened.createdAt
+    // Parser warnings and AI-generated set status are review provenance, even
+    // though the privacy-stripped public snapshot does not carry them.
+    && live.aiEnhanced === opened.aiEnhanced
+    && JSON.stringify(live.parserWarnings) === JSON.stringify(opened.parserWarnings)
     && JSON.stringify(live.questionIds) === JSON.stringify(opened.questionIds)
     && JSON.stringify(live.sourceDocumentIds) === JSON.stringify(opened.sourceDocumentIds)
     && JSON.stringify(live.tags) === JSON.stringify(opened.tags)
