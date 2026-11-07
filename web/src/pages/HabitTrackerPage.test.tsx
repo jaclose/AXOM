@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { HabitTrackerPage } from "./HabitTrackerPage";
 import { useStore } from "../lib/store";
 
@@ -12,6 +12,33 @@ beforeEach(() => {
     habits: [],
     habitEntries: [],
   }));
+});
+
+describe("recurring cadence goals", () => {
+  it("creates a rest-aware gym goal with a four-day minimum and five-day preference", () => {
+    useStore.getState().updateProfile({ experimentalFlags: { habits: true } });
+    render(<HabitTrackerPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Gym · 4–5 days/week" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
+    const gym = useStore.getState().habits.find((habit) => habit.name === "Gym");
+    expect(gym).toMatchObject({ type: "weekly", weeklyMinimum: 4, weeklyPreferred: 5, includeInReports: true });
+    expect(screen.getByText(/minimum days/i)).toBeTruthy();
+  });
+
+  it("records five named prayer slots without generating activity logs or duplicate check-ins", () => {
+    useStore.getState().updateProfile({ experimentalFlags: { habits: true } });
+    render(<HabitTrackerPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Five named daily prayers" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
+    const prayer = useStore.getState().habits.find((habit) => habit.name === "Daily prayers")!;
+    expect(prayer).toMatchObject({ type: "slots", includeInReports: false });
+    expect(prayer.occurrenceSlots?.map((slot) => slot.label)).toEqual(["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]);
+    fireEvent.click(screen.getByRole("button", { name: "Complete Fajr" }));
+    expect(useStore.getState().habitEntries[0]?.slotCheckIns).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Undo Fajr" }));
+    expect(useStore.getState().habitEntries).toHaveLength(0);
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
 });
 
 describe("HabitTrackerPage (render smoke)", () => {

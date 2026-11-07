@@ -67,7 +67,10 @@ export function evaluateDailySuccess(
     : legacyRequirements(state);
   const mode = configured ? "configured" : "legacy";
   const results = requirements.map((requirement) => evaluateRequirement(requirement, state, dayKey, today));
-  const eligible = results.filter((result) => result.eligible && result.status !== "unavailable");
+  // Weekly quotas are evaluated at their own Mon–Sun cadence. Never let a
+  // planned rest day dilute a daily streak, score, or AXOM Credit.
+  const eligible = results.filter((result) => result.eligible && result.status !== "unavailable"
+    && result.requirement.schedule.kind !== "times-per-week");
   const totalWeight = eligible.reduce((sum, result) => sum + normalizeWeight(result.requirement.weight), 0);
   const progress = eligible.length && totalWeight > 0
     ? Math.round((eligible.reduce((sum, result) => sum + result.ratio * normalizeWeight(result.requirement.weight), 0) / totalWeight) * 100)

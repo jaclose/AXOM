@@ -22,6 +22,20 @@ afterEach(() => {
 });
 
 describe("ProductivityPage daily console", () => {
+  it("creates recurring gym and prayer goals from the same Habit record rather than duplicate activity logs", () => {
+    render(<ProductivityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Gym: 4 minimum, 5 preferred" }));
+    const gym = useStore.getState().habits.find((habit) => habit.name === "Gym");
+    expect(gym).toMatchObject({ type: "weekly", weeklyMinimum: 4, weeklyPreferred: 5, includeInReports: true });
+    fireEvent.click(screen.getByRole("button", { name: "Five named daily prayers" }));
+    const prayer = useStore.getState().habits.find((habit) => habit.name === "Daily prayers");
+    expect(prayer).toMatchObject({ type: "slots", includeInReports: false });
+    fireEvent.click(screen.getByRole("button", { name: "Complete Fajr" }));
+    const receipt = useStore.getState().habitEntries.find((entry) => entry.habitId === prayer?.id);
+    expect(receipt?.slotCheckIns).toHaveLength(1);
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+
   it("starts neutral and logs a practice-question quantity through the fast path", () => {
     render(<ProductivityPage />);
     expect(screen.getByText("No targets selected")).toBeTruthy();

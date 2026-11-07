@@ -54,6 +54,22 @@ function log(partial: Partial<StudyLog>): StudyLog {
   };
 }
 
+describe("mixed daily and weekly cadence boundaries", () => {
+  it("never lowers a daily academic score because a flexible weekly gym quota is still open", () => {
+    const dailyStudy = requirement({ id: "study", source: { kind: "study-minutes" }, target: 60 });
+    const gym = requirement({
+      id: "gym", label: "Gym", source: { kind: "habit", habitId: "gym1" },
+      target: 1, unit: "visit", schedule: { kind: "times-per-week", times: 4, weekStartsOn: 1 },
+      trackingStartsAt: "2026-07-06",
+    });
+    const snapshot = state([dailyStudy, gym], [log({ minutes: 60 })]);
+    snapshot.habits = [{ id: "gym1", name: "Gym", type: "weekly", weeklyTarget: 4,
+      createdAt: "2026-07-06T12:00:00.000Z", updatedAt: "2026-07-06T12:00:00.000Z" }];
+    expect(evaluateDailySuccess(snapshot)).toMatchObject({ eligibleCount: 1, progress: 100, status: "met" });
+    expect(evaluateDailySuccess(state([gym])).eligibleCount).toBe(0);
+  });
+});
+
 describe("daily success", () => {
   it("keeps a configured day neutral when no requirement is selected", () => {
     const result = evaluateDailySuccess(state([]));

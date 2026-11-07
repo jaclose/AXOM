@@ -1,0 +1,47 @@
+/* AXOM goals: one shared cadence surface. Use product tokens and quiet hierarchy. */
+.goal-preset-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 10px; }
+.goal-preset-choices > button { padding: 9px 13px; min-height: 38px; border-radius: var(--radius-md); border: 1px solid var(--hairline); background: var(--surface-1); color: var(--text-70); font: 500 var(--fs-xs)/1.3 var(--font-ui); cursor: pointer; }
+.goal-preset-choices > button:hover { border-color: var(--gold-line); color: var(--text); }
+.goal-preset-choices > button:focus-visible, .habit-named-slot button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.goal-cadence-config { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,170px),1fr)); gap: 10px; margin-top: 12px; }
+.goal-cadence-config label, .goal-cadence-slots-label { display: grid; gap: 5px; color: var(--text-60); font-size: var(--fs-xs); }
+.goal-cadence-config .field, .goal-cadence-slots-label .field { min-height: 38px; min-width: 0; width: 100%; }
+.goal-cadence-slots-label { margin-top: 12px; }
+.habit-named-slots, .habit-weekly-cadence { padding: 14px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-1); }
+.habit-named-slots > p, .habit-weekly-cadence > p { margin: 0 0 12px; font-size: var(--fs-sm); color: var(--text-70); }
+.habit-named-slots > small, .habit-weekly-cadence > small { display: block; margin-top: 11px; color: var(--text-50); font-size: var(--fs-xs); line-height: 1.5; }
+.habit-named-slot-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,118px),1fr)); gap: 8px; }
+.habit-named-slot { display: grid; gap: 4px; min-width: 0; }
+.habit-named-slot > button:first-child { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 8px; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--radius-md); color: var(--text); font-weight: 600; cursor: pointer; }
+.habit-named-slot > button.is-done { border-color: var(--gold-line); background: var(--gold-soft); color: var(--text); }
+.habit-named-slot > .habit-slot-skip { min-height: 30px; padding: 5px; background: transparent; border: 0; color: var(--text-50); font-size: var(--fs-xs); cursor: pointer; }
+.habit-named-slot > .habit-slot-skip:hover { color: var(--text); }
+.habit-weekly-meter { height: 8px; max-width: 490px; margin-bottom: 12px; background: var(--surface-2); border-radius: var(--radius-pill); overflow: hidden; }
+.habit-weekly-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--gold); transition: width .3s ease-out; }
+.habit-weekly-cadence > .gbtn { min-height: 40px; }
+.goal-cadence-panel { display: grid; gap: 12px; }
+.goal-cadence-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px 15px; }
+.goal-cadence-head h3 { margin: 0; font: 600 var(--fs-lg)/1.25 var(--font-display); color: var(--text); }
+.goal-cadence-head p { margin: 3px 0 0; color: var(--text-60); font-size: var(--fs-xs); }
+.goal-cadence-list { display: grid; gap: 10px; }
+.goal-cadence-card { min-width: 0; border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 12px; background: var(--surface-1); }
+.goal-cadence-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 11px; }
+.goal-cadence-card-head b { color: var(--text); font-size: var(--fs-sm); }
+.goal-cadence-card-head small { color: var(--text-50); font-size: var(--fs-xs); }
+.goal-cadence-card-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+.goal-cadence-card-foot small { color: var(--text-50); font-size: var(--fs-xs); }
+.goal-cadence-card .habit-named-slots, .goal-cadence-card .habit-weekly-cadence { padding: 0; border: 0; background: transparent; }
+.goal-cadence-empty { color: var(--text-50); font-size: var(--fs-xs); margin: 0; }
+.goal-cadence-reports { display: grid; gap: 8px; margin-top: 16px; }
+.goal-cadence-report-row { display: grid; gap: 5px; padding: 11px 0; border-top: 1px solid var(--hairline-soft); }
+.goal-cadence-report-row > div { display: flex; align-items: baseline; gap: 7px 15px; flex-wrap: wrap; justify-content: space-between; }
+.goal-cadence-report-row strong { color: var(--text); font-size: var(--fs-sm); }
+.goal-cadence-report-row span, .goal-cadence-report-row small { color: var(--text-60); font-size: var(--fs-xs); }
+@media (max-width: 560px) {
+ .habit-named-slot-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .goal-preset-choices > button { flex: 1 1 160px; }
+ .goal-cadence-config { grid-template-columns: minmax(0,1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+ .habit-weekly-meter > span { transition: none; }
+}

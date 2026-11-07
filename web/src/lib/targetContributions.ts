@@ -128,6 +128,23 @@ export function buildTargetContributionLedger(input: TargetContributionInput): T
 
   if (requirement.source.kind === "habit") {
     const entry = latestHabitEntry(input.habitEntries, requirement.source.habitId, dayKey);
+    // Weekly habit goals may also be linked to one existing tracker. Prefer
+    // the explicit habit/day receipt when present; otherwise use exactly one
+    // observed tracker entry for this day. Never sum both for a day quota.
+    const habitId = requirement.source.habitId;
+    const owner = input.habits.find((habit) => habit.id === habitId);
+    if (!entry && owner?.type === "weekly" && owner.linkedTrackerId) {
+      const source = logs.find((log) => log.trackerId === owner.linkedTrackerId
+        && (log.minutes > 0 || (log.quantity ?? 0) > 0 || log.cards > 0));
+      if (source) {
+        put(rows, contribution({
+          requirement, dayKey, unit, event: "activity", eventId: source.id,
+          sourceRecord: "study-log", sourceRecordId: source.id,
+          value: 1, matchedBy: "linked", confidence: 1,
+          dedupeKey: requirement.id + ":habit-tracker:" + dayKey,
+        }));
+      }
+    }
     if (entry) {
       const value = habitValue(entry);
       put(rows, contribution({
@@ -417,6 +434,8 @@ function latestCloseout(closeouts: DailyCloseout[], dayKey: string): DailyCloseo
 }
 
 function habitValue(entry: HabitEntry): number {
+  // Slot-based check-ins retain one authoritative receipt per named occurrence.
+  if (entry.slotCheckIns) return entry.slotCheckIns.filter((slot) => slot.status === "done").length;
   if (entry.status === "done") return positive(entry.value) || 1;
   if (entry.status === "partial") return positive(entry.value) || 0.5;
   return 0;

@@ -4,6 +4,7 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { weekStartKey } from "./goalCadence";
 import { normalizeNavOrder, upgradeNavLayout } from "./navLayout";
 import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
@@ -256,6 +257,7 @@ interface Actions {
   updateHabit: (id: string, patch: Partial<Habit>) => void;
   removeHabit: (id: string) => void;
   checkHabit: (habitId: string, date: string, status: HabitCheckStatus, value?: number, note?: string) => void;
+  setHabitSlot: (habitId: string, date: string, slotId: string, status?: "done" | "skipped") => void;
   clearHabitCheck: (habitId: string, date: string) => void;
 
   // board prep
@@ -630,6 +632,8 @@ export const useStore = create<Store>()(
             trackerId: tracker?.id,
             unitType: tracker?.unitType ?? "minutes",
             quantity: tracker?.unitType === "count" ? nextCards : nextMinutes,
+            // A deliberate study log remains study even if an imported tracker
+            // cannot be resolved, unlike the generic activity reporter.
             academic: tracker ? tracker.contributesToAcademicStudy : true,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
@@ -666,7 +670,8 @@ export const useStore = create<Store>()(
             quantity: semanticQuantity,
             quantityKind: kind,
             quantityLabel: quantityLabel?.trim().slice(0, 40) || undefined,
-            academic: tracker ? tracker.contributesToAcademicStudy : true,
+            // Generic self-report is not academic evidence without explicit attribution.
+            academic: tracker ? tracker.contributesToAcademicStudy : false,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
@@ -785,16 +790,72 @@ export const useStore = create<Store>()(
       },
       updateHabit: (id, patch) =>
         set((s) => ({
-          habits: (s.habits ?? []).map((h) => (h.id === id ? { ...h, ...patch, updatedAt: now() } : h)),
+          habits: (s.habits ?? []).map((habit) => {
+            if (habit.id !== id) return habit;
+            let updated: Habit = { ...habit, ...patch, updatedAt: now() };
+            const cadenceChanged = habit.type === "weekly" && (
+              Object.hasOwn(patch, "weeklyMinimum") || Object.hasOwn(patch, "weeklyTarget")
+              || Object.hasOwn(patch, "weeklyPreferred") || Object.hasOwn(patch, "linkedTrackerId")
+            );
+            if (cadenceChanged) {
+              const clamp = (value: number) => Math.max(1, Math.min(7, Math.round(Number(value) || 1)));
+              const oldMinimum = clamp(habit.weeklyMinimum ?? habit.weeklyTarget ?? 3);
+              const oldPreferred = Math.max(oldMinimum, clamp(habit.weeklyPreferred ?? oldMinimum));
+              const minimum = clamp(updated.weeklyMinimum ?? updated.weeklyTarget ?? oldMinimum);
+              const preferred = Math.max(minimum, clamp(updated.weeklyPreferred ?? minimum));
+              const currentWeek = weekStartKey(s.activeDayKey);
+              const firstWeek = weekStartKey((habit.trackingStartsAt ?? habit.createdAt).slice(0, 10) || s.activeDayKey);
+              const existing = habit.weeklyRevisions?.length ? habit.weeklyRevisions : [{
+                effectiveWeek: firstWeek, minimum: oldMinimum, preferred: oldPreferred, linkedTrackerId: habit.linkedTrackerId,
+              }];
+              const revisions = [...existing.filter((rule) => rule.effectiveWeek !== currentWeek), {
+                effectiveWeek: currentWeek, minimum, preferred, linkedTrackerId: updated.linkedTrackerId,
+              }].sort((a,b) => a.effectiveWeek.localeCompare(b.effectiveWeek)).slice(-104);
+              updated = { ...updated, weeklyTarget: minimum, weeklyMinimum: minimum, weeklyPreferred: preferred, weeklyRevisions: revisions };
+            }
+            return updated;
+          }),
         })),
       removeHabit: (id) =>
         set((s) => ({
           habits: (s.habits ?? []).filter((h) => h.id !== id),
           habitEntries: (s.habitEntries ?? []).filter((e) => e.habitId !== id),
         })),
+      // A single habit/day receipt owns all named occurrence states.
+      // Repeating a check is idempotent. Clearing one slot does not affect its siblings.
+      setHabitSlot: (habitId, date, slotId, status) =>
+        set((s) => {
+          const habit = (s.habits ?? []).find((item) => item.id === habitId && item.type === "slots" && !item.archived);
+          if (!habit?.occurrenceSlots?.some((slot) => slot.id === slotId) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return {};
+          const entries = s.habitEntries ?? [];
+          const old = entries.find((item) => item.habitId === habitId && item.date === date);
+          const previous = old?.slotCheckIns ?? [];
+          const existing = previous.find((check) => check.slotId === slotId);
+          if (existing?.status === status || (!existing && !status)) return {};
+          const updated = status
+            ? [...previous.filter((check) => check.slotId !== slotId), {
+                id: existing?.id ?? uid(), slotId, status, at: now(),
+              }]
+            : previous.filter((check) => check.slotId !== slotId);
+          const validSlots = new Set(habit.occurrenceSlots.map((slot) => slot.id));
+          const checks = updated.filter((check) => validSlots.has(check.slotId));
+          const done = checks.filter((check) => check.status === "done").length;
+          const overall: HabitCheckStatus = done === validSlots.size
+            ? "done" : done > 0 ? "partial" : "skipped";
+          if (!checks.length && !old?.note) {
+            return { habitEntries: entries.filter((entry) => entry !== old) };
+          }
+          const receipt: HabitEntry = old
+            ? { ...old, status: overall, value: done, slotCheckIns: checks }
+            : { id: uid(), habitId, date, status: overall, value: done, slotCheckIns: checks, createdAt: now() };
+          return { habitEntries: old ? entries.map((entry) => entry === old ? receipt : entry) : [receipt, ...entries] };
+        }),
+
       // Upsert one check per habit per local date (idempotent — prevents dupes).
       checkHabit: (habitId, date, status, value, note) =>
         set((s) => {
+          // Aggregate writes cannot erase or conflict with named-slot evidence.
+          if (s.habits.some((habit) => habit.id === habitId && habit.type === "slots")) return {};
           const entries = s.habitEntries ?? [];
           const existing = entries.find((e) => e.habitId === habitId && e.date === date);
           if (existing) {

@@ -47,6 +47,62 @@ describe("tracker stats", () => {
   });
 });
 
+describe("unlinked self-report attribution", () => {
+  it("does not treat gym, prayer or unclassified named minutes as academic study", () => {
+    const seed = makeSeed();
+    useStore.setState({ ...seed, logs: [] });
+    for (const label of ["Gym", "Fajr", "Private journal"]) {
+      useStore.getState().logActivity({ label, minutes: 30 });
+      expect(useStore.getState().logs[0]).toMatchObject({ type: label, academic: false });
+    }
+    useStore.getState().logActivity({ label: "Focused study", minutes: 30, trackerId: "tracker-study" });
+    expect(useStore.getState().logs[0]).toMatchObject({ academic: true, trackerId: "tracker-study" });
+  });
+});
+
+describe("effective-dated weekly goal revisions", () => {
+  it("preserves the old weekly target before a later edit, rather than rewriting history", () => {
+    const seed = makeSeed();
+    const oldHabit = {
+      id: "gym-habit", name: "Gym", type: "weekly" as const,
+      weeklyMinimum: 4, weeklyPreferred: 5, weeklyTarget: 4,
+      trackingStartsAt: "2026-10-26",
+      createdAt: "2026-10-26T10:00:00.000Z", updatedAt: "2026-10-26T10:00:00.000Z",
+    };
+    useStore.setState({ ...seed, activeDayKey: "2026-11-07", habits: [oldHabit], habitEntries: [] });
+    useStore.getState().updateHabit("gym-habit", { weeklyMinimum: 3, weeklyPreferred: 4 });
+    const revisions = useStore.getState().habits[0].weeklyRevisions;
+    expect(revisions).toEqual([
+      { effectiveWeek: "2026-10-26", minimum: 4, preferred: 5, linkedTrackerId: undefined },
+      { effectiveWeek: "2026-11-02", minimum: 3, preferred: 4, linkedTrackerId: undefined },
+    ]);
+  });
+});
+
+describe("named occurrence store receipts", () => {
+  it("upserts one event per named slot and does not create an academic time log", () => {
+    const seed = makeSeed();
+    useStore.setState({ ...seed, logs: [], habits: [], habitEntries: [] });
+    const store = useStore.getState();
+    const id = store.addHabit({
+      name: "Prayers", type: "slots", category: "Personal", includeInReports: false,
+      occurrenceSlots: [{ id: "fajr", label: "Fajr" }, { id: "dhuhr", label: "Dhuhr" }],
+    });
+    const today = useStore.getState().activeDayKey;
+    useStore.getState().setHabitSlot(id, today, "fajr", "done");
+    const first = useStore.getState().habitEntries[0];
+    expect(first).toMatchObject({ status: "partial", value: 1 });
+    expect(first.slotCheckIns).toHaveLength(1);
+    useStore.getState().setHabitSlot(id, today, "fajr", "done");
+    expect(useStore.getState().habitEntries[0].slotCheckIns).toHaveLength(1);
+    useStore.getState().setHabitSlot(id, today, "dhuhr", "done");
+    expect(useStore.getState().habitEntries[0]).toMatchObject({ status: "done", value: 2 });
+    useStore.getState().setHabitSlot(id, today, "fajr", undefined);
+    expect(useStore.getState().habitEntries[0]).toMatchObject({ status: "partial", value: 1 });
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+});
+
 describe("tracker store wiring", () => {
   beforeEach(() => {
     const seed = makeSeed();

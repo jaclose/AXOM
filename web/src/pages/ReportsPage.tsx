@@ -30,6 +30,7 @@ import { ReportInsightCard, type ReportCardInsight } from "../components/reports
 import { ICON_SIZE } from "../lib/iconSize";
 import { EnergyFocusPanel, useEnergyInputs } from "../components/energy/EnergyInsights";
 import { TrackerReport } from "../components/reports/TrackerReport";
+import { CadenceGoalReport } from "../components/reports/CadenceGoalReport";
 import { todaysCapacity } from "../lib/energyInsights";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 
@@ -422,6 +423,7 @@ export function ReportsPage() {
         <div className="report-section-heading"><div><span>Your variables</span><h2 id="report-trackers-title">Trackers</h2></div><p>Everything you chose to follow, against your own goals and limits.</p></div>
         <GlassCard pad className="report-trackers-card">
           <TrackerReport />
+          <CadenceGoalReport />
         </GlassCard>
       </section>
 
