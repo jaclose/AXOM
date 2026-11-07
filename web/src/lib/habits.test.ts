@@ -98,6 +98,27 @@ describe("currentStreak", () => {
   });
 });
 
+describe("flexible weekly cadence", () => {
+  it("does not break a successful weekly gym streak on rest days", () => {
+    const gym = habit({ type: "weekly", trackingStartsAt: "2026-06-08", weeklyMinimum: 4, weeklyPreferred: 5, weeklyTarget: 4 });
+    const entries = [
+      "2026-06-08", "2026-06-10", "2026-06-12", "2026-06-13",
+      "2026-06-15", "2026-06-17", "2026-06-19", "2026-06-20",
+    ].map(day => entry(day,"done"));
+    expect(currentStreak(gym, entries, "2026-06-21")).toBe(2);
+    expect(currentStreak(gym, entries, "2026-06-25")).toBe(2); // Current week pending, not failed.
+  });
+
+  it("measures weekly adherence against the quota, not seven mandatory days", () => {
+    const gym = habit({ type: "weekly", trackingStartsAt: "2026-06-22", weeklyMinimum: 4, weeklyPreferred: 5, weeklyTarget: 4 });
+    const dates = Array.from({ length: 7 }, (_, i) => addLocalDays("2026-06-22", i));
+    const entries = ["2026-06-22", "2026-06-24", "2026-06-26", "2026-06-27"].map(day => entry(day, "done"));
+    const result = weekStats(gym, entries, dates);
+    expect(result.adherence).toBe(100);
+    expect(result.missed).toBe(0);
+  });
+});
+
 describe("weekStats", () => {
   it("computes adherence with partial at half and skips excluded", () => {
     const dates = Array.from({ length: 7 }, (_, i) => addLocalDays(TODAY, -i));
