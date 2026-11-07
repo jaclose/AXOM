@@ -172,10 +172,10 @@ function HabitCreate() {
 /** One line summarizing how habits feed the Productivity targets today. */
 function HabitTargetsSummary() {
   const state = useStore();
-  const linked = (state.profile.dailySuccess?.requirements ?? []).filter((requirement) => requirement.source.kind === "habit" && requirement.enabled);
+  const linked = (state.profile.dailySuccess?.requirements ?? []).filter((requirement) => requirement.source.kind === "habit" && requirement.enabled && requirement.schedule.kind !== "times-per-week");
   if (!linked.length) return null;
   const result = evaluateDailySuccess(state);
-  const habitResults = result.requirements.filter((item) => item.requirement.source.kind === "habit" && item.eligible);
+  const habitResults = result.requirements.filter((item) => item.requirement.source.kind === "habit" && item.eligible && item.requirement.schedule.kind !== "times-per-week");
   const met = habitResults.filter((item) => item.status === "met").length;
   return (
     <div className="habit-targets-summary">
@@ -242,11 +242,11 @@ function HabitRow({ habit }: { habit: Habit }) {
               type="button"
               className={`habit-target-chip ${inTargets ? "on" : ""}`}
               aria-pressed={inTargets}
-              title={inTargets ? "Counts toward Today’s targets on Productivity. Click to stop counting it." : "Add this habit to Today’s targets on Productivity"}
+              title={habit.type === "weekly" ? "Weekly goals remain separate from daily scoring." : inTargets ? "Counts toward Today’s targets on Productivity. Click to stop counting it." : "Add this habit to Today’s targets on Productivity"}
               onClick={toggleTarget}
             >
               {inTargets ? <Check size={ICON_SIZE.microInline} aria-hidden="true" /> : <Target size={ICON_SIZE.microInline} aria-hidden="true" />}
-              {inTargets ? "In daily targets" : "Add to daily targets"}
+              {habit.type === "weekly" ? inTargets ? "Linked weekly goal" : "Link weekly goal" : inTargets ? "In daily targets" : "Add to daily targets"}
             </button>
           )}
         </div>
