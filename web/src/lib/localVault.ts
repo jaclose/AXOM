@@ -991,12 +991,25 @@ export const localVaultStorage: StateStorage = {
  * read-back; best-effort Zustand persistence alone is not an acknowledgement.
  */
 export async function saveAndVerifyLocalWorkspace(serializeCurrent: () => string): Promise<void> {
+  const initialAccountId = readVaultAccountIdentity();
+  const initialAccountEpoch = readVaultAccountEpoch();
+  const requireSameSession = () => {
+    // Identity equality alone is unsafe: A → B → A creates a new session.
+    if (readVaultAccountEpoch() !== initialAccountEpoch || readVaultAccountIdentity() !== initialAccountId) {
+      throw new Error("AXOM account changed during workspace save verification. Keep AXOM open and verify the current account's workspace again.");
+    }
+  };
   await flushLocalVaultWrites();
+  requireSameSession();
   const value = serializeCurrent();
+  requireSameSession();
   const checkpoint = getVaultWriteCheckpoint();
   await localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+  requireSameSession();
   assertVaultWrite(checkpoint + 1);
-  if (await localVaultStorage.getItem(STORAGE_KEYS.persistedState) !== value) {
+  const persistedValue = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  requireSameSession();
+  if (persistedValue !== value) {
     throw new Error("The saved workspace did not match the current copy. Keep AXOM open, export a backup, and retry after checking other tabs.");
   }
   // A newer workspace write can fail while the read-back is pending. Byte
@@ -1004,6 +1017,7 @@ export async function saveAndVerifyLocalWorkspace(serializeCurrent: () => string
   if (readVaultWriteFailure()) {
     throw new Error("The local vault reported another failed workspace save. Keep AXOM open and export a backup.");
   }
+  requireSameSession();
 }
 
 /** Schedule an explicit verified-backup replacement after earlier writes. */

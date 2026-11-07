@@ -832,8 +832,29 @@ describe("queued workspace writes retain their initiating account session", () =
       expect(readLastVaultWrite()).toBeNull();
 
       await localVaultStorage.setItem(key, newWorkspace);
-      expect(await localVaultStorage.getItem(key)).toBe(newWorkspace);
+      expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+      expect(readVaultWriteFailure()).toBeNull();
       expect(readLastVaultWrite()).toMatchObject({ accountId: "account-a", version: 4 });
+      expect(await localVaultStorage.getItem(key)).toBe(newWorkspace);
+    } finally {
+      setVaultAccountIdentity(null);
+    }
+  });
+});
+
+describe("manual save verification account boundary", () => {
+  it("fails closed before writing when serialization switches A → B → A", async () => {
+    const value = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "unchanged" }, version: 34 });
+    setVaultAccountIdentity("account-a");
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      await expect(saveAndVerifyLocalWorkspace(() => {
+        setVaultAccountIdentity("account-b");
+        setVaultAccountIdentity("account-a");
+        return value;
+      })).rejects.toThrow(/account changed during workspace save verification/);
+      expect(getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
     } finally {
       setVaultAccountIdentity(null);
     }
