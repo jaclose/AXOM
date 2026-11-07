@@ -43,10 +43,7 @@ import { readSetupDraftMode } from "./lib/setupPlan";
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
 
 import { DashboardPage } from "./pages/DashboardPage";
-import { ResourcesPage } from "./pages/ResourcesPage";
 import { StepPage } from "./pages/StepPage";
-import { ProductivityPage } from "./pages/ProductivityPage";
-import { TasksPage } from "./pages/TasksPage";
 import {
   JournalPage,
   type JournalTransitionGuard,
@@ -63,7 +60,6 @@ const DevDesignPreview = import.meta.env.DEV
 const LazyDailyWordPage = lazy(() => import("./pages/DailyWordPage").then((module) => ({ default: module.DailyWordPage })));
 const LazyDoctordlePage = lazy(() => import("./pages/DoctordlePage").then((module) => ({ default: module.DoctordlePage })));
 const LazyDailyGamesPage = lazy(() => import("./pages/OptionalDailyGamesPage").then((module) => ({ default: module.OptionalDailyGamesPage })));
-const LazyBuildingPage = lazy(() => import("./pages/BuildingPage").then((module) => ({ default: module.BuildingPage })));
 const LazySharedQuestionSetPage = lazy(() => import("./pages/SharedQuestionSetPage").then((module) => ({ default: module.SharedQuestionSetPage })));
 const LazyCoursesPage = lazy(() => import("./pages/CoursesPage").then((module) => ({ default: module.CoursesPage })));
 const LazyCourseTrackerPage = lazy(() => import("./pages/CourseTrackerPage").then((module) => ({ default: module.CourseTrackerPage })));
@@ -72,10 +68,10 @@ const LazyApplicationCheckerPage = lazy(() => import("./pages/ApplicationChecker
 // Less frequent routes load on demand to keep the always-loaded shell small.
 const LazyAnkiLabPage = lazy(() => import("./pages/AnkiLabPage").then((module) => ({ default: module.AnkiLabPage })));
 const LazyReportsPage = lazy(() => import("./pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
-const LazyHabitTrackerPage = lazy(() => import("./pages/HabitTrackerPage").then((module) => ({ default: module.HabitTrackerPage })));
+const LazyDailyWorkspacePage = lazy(() => import("./pages/DailyWorkspacePage").then((module) => ({ default: module.DailyWorkspacePage })));
+const LazyStudyStudioPage = lazy(() => import("./pages/StudyStudioPage").then((module) => ({ default: module.StudyStudioPage })));
+const LazyLibraryWorkspacePage = lazy(() => import("./pages/LibraryWorkspacePage").then((module) => ({ default: module.LibraryWorkspacePage })));
 const LazyIntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then((module) => ({ default: module.IntegrationsPage })));
-const LazyPromptLibraryPage = lazy(() => import("./pages/PromptLibraryPage").then((module) => ({ default: module.PromptLibraryPage })));
-const LazyHubFoldersPage = lazy(() => import("./pages/HubFoldersPage").then((module) => ({ default: module.HubFoldersPage })));
 const LazyHelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
 const LazyAboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
 const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then((module) => ({ default: module.LeaderboardsPage })));
@@ -83,10 +79,8 @@ const LazyCommunityPage = lazy(() => import("./pages/CommunityPage").then((modul
 const LazyHostPage = lazy(() => import("./pages/HostPage").then((module) => ({ default: module.HostPage })));
 const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
 const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage").then((module) => ({ default: module.ActivityHistoryPage })));
-const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then((module) => ({ default: module.StudyMethodsPage })));
 const LazySoundscapesPage = lazy(() => import("./pages/SoundscapesPage").then((module) => ({ default: module.SoundscapesPage })));
 const LazyCommunitiesPage = lazy(() => import("./pages/CommunitiesPage").then((module) => ({ default: module.CommunitiesPage })));
-const LazyPatchNotesPage = lazy(() => import("./pages/PatchNotesPage").then((module) => ({ default: module.PatchNotesPage })));
 const LazyBodySimulatorPage = lazy(() => import("./pages/BodySimulatorPage").then((module) => ({ default: module.BodySimulatorPage })));
 
 const LazyCommunicationsPage = lazy(() => import("./pages/CommunicationsPage").then(m => ({ default: m.CommunicationsPage })));
@@ -106,12 +100,14 @@ const PAGES: Record<string, () => JSX.Element> = {
   tracker: () => <LazyCourseTrackerPage />,
   questions: () => <LazyQuestionWorkspacePage />,
   communities: () => <LazyCommunitiesPage />,
-  "patch-notes": () => <LazyPatchNotesPage />,
+  "patch-notes": () => <LazyAboutPage initialTab="updates" />,
   simulations: () => <LazyBodySimulatorPage />,
-  methods: () => <LazyStudyMethodsPage />,
+  studio: () => <LazyStudyStudioPage />,
+  methods: () => <LazyStudyStudioPage initialTab="methods" />,
   soundscapes: () => <LazySoundscapesPage />,
   anki: () => <LazyAnkiLabPage />,
-  resources: ResourcesPage,
+  library: () => <LazyLibraryWorkspacePage />,
+  resources: () => <LazyLibraryWorkspacePage initialTab="sources" />,
   step: () => <StepPage initialLane="step1" />,
   step2: () => <StepPage initialLane="step2" />,
   dedicated: () => <StepPage initialLane="dedicated" />,
@@ -124,13 +120,13 @@ const PAGES: Record<string, () => JSX.Element> = {
   "premed-log": () => <LazyPremedExperienceLogPage />,
   activity: () => <LazyActivityHistoryPage />,
   reports: () => <LazyReportsPage />,
-  productivity: ProductivityPage,
-  tasks: TasksPage,
-  habits: () => <LazyHabitTrackerPage />,
+  productivity: () => <LazyDailyWorkspacePage />,
+  tasks: () => <LazyDailyWorkspacePage initialTab="tasks" />,
+  habits: () => <LazyDailyWorkspacePage initialTab="habits" />,
   journal: JournalPage,
   integrations: () => <LazyIntegrationsPage />,
-  prompts: () => <LazyPromptLibraryPage />,
-  folders: () => <LazyHubFoldersPage />,
+  prompts: () => <LazyStudyStudioPage initialTab="prompts" />,
+  folders: () => <LazyLibraryWorkspacePage initialTab="folders" />,
   about: () => <LazyAboutPage />,
   help: () => <LazyHelpPage />,
   appchecker: () => <LazyApplicationCheckerPage />,
@@ -140,7 +136,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   "daily-games": () => <LazyDailyGamesPage />,
   "daily-word": () => <LazyDailyWordPage />,
   doctordle: () => <LazyDoctordlePage />,
-  building: () => <LazyBuildingPage />,
+  building: () => <LazyAboutPage initialTab="building" />,
   "shared-set": () => <LazySharedQuestionSetPage />,
 };
 
