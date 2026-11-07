@@ -1444,6 +1444,50 @@ function journalFeedbackFingerprint(draft: JournalExperienceFeedbackInput | stri
   return `${value.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
 }
 
+// A component-local ref cannot prevent a second submission after its modal
+// unmounts. Keep only owner-scoped fingerprints and promise/receipt metadata in
+// memory for this tab, never the written feedback or notebook contents.
+// This does not provide server-side exactly-once delivery after reload or an
+// ambiguous network error; a backend idempotency key is a separate release gate.
+interface JournalFeedbackTabSubmission {
+  fingerprint: string;
+  pending: Promise<string> | null;
+  receipt: string | null;
+}
+const journalFeedbackTabSubmissions = new Map<string, JournalFeedbackTabSubmission>();
+
+function submitJournalFeedbackOncePerTab(
+  draftKey: string, accountId: string, draft: JournalExperienceFeedbackInput,
+): Promise<string> {
+  const fingerprint = journalFeedbackFingerprint(draft);
+  const prior = journalFeedbackTabSubmissions.get(draftKey);
+  if (prior?.fingerprint === fingerprint) {
+    // Reopened dialog, same saved text: join the original pending request or
+    // reuse its receipt rather than inserting a duplicate feedback row.
+    return prior.pending ?? Promise.resolve(prior.receipt!);
+  }
+  if (prior?.pending) {
+    return Promise.reject(new Error("Feedback is already being sent in this tab. Try again after it finishes."));
+  }
+
+  const pending = submitJournalFeedback(accountId, draft);
+  const entry: JournalFeedbackTabSubmission = { fingerprint, pending, receipt: null };
+  journalFeedbackTabSubmissions.set(draftKey, entry);
+  // Do not retain the Promise, which closes over submitted text, after it settles.
+  void pending.then((receipt) => {
+    if (journalFeedbackTabSubmissions.get(draftKey) === entry) {
+      entry.receipt = receipt;
+      entry.pending = null;
+    }
+  }, () => {
+    // Failed requests may be retried explicitly. A lost success response is
+    // still ambiguous without server idempotency and remains REVIEW_REQUIRED.
+    if (journalFeedbackTabSubmissions.get(draftKey) === entry)
+      journalFeedbackTabSubmissions.delete(draftKey);
+  });
+  return pending;
+}
+
 function journalFeedbackRevision(): string {
   const bytes = new Uint8Array(16);
   window.crypto.getRandomValues(bytes);
@@ -1604,7 +1648,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         : journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(initialDraftRef.current)
           ? `legacy:${journalFeedbackFingerprint(persistedRawRef.current!)}` : null;
     try {
-      setSentId(await submitJournalFeedback(user.id, draft));
+      setSentId(await submitJournalFeedbackOncePerTab(draftKey, user.id, draft));
     } catch (cause) {
       // Only a failed request may be retried; a receipt seals this dialog.
       submissionPendingRef.current = false;
