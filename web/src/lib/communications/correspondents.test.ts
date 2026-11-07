@@ -87,7 +87,7 @@ describe("AXOM Correspondents V2", () => {
     const email = renderCorrespondentIntroduction(match, { displayName: "Alex", useCase: "welcome" });
     const axomIntro = email.html.indexOf("Welcome to AXOM");
     const atlasIntro = email.html.indexOf("The Living Atlas");
-    const nameReveal = email.html.indexOf("Juniper");
+    const nameReveal = email.html.indexOf("Meet Juniper", atlasIntro);
     expect(axomIntro).toBeGreaterThan(0);
     expect(atlasIntro).toBeGreaterThan(axomIntro);
     expect(nameReveal).toBeGreaterThan(atlasIntro);
