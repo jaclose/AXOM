@@ -225,7 +225,11 @@
   .quick-goal-form .quick-goal-guide,
   .quick-goal-form .quick-goal-error,
   .quick-goal-form .quick-goal-actions { grid-column: 1; }
-  .quick-goal-row { flex-wrap: wrap; }
+  .quick-goal-row { flex-wrap: wrap; align-items: center; }
+  /* Preserve the full goal name before secondary provenance/actions on narrow screens. */
+  .quick-goal-row > .quick-goal-copy { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+  .quick-goal-row > .quick-goal-origin { flex: 1 1 120px; max-width: none; min-width: 0; text-align: left; }
+  .quick-goal-row > .quick-goal-edit-trigger { margin-left: auto; }
   .quick-goal-edit-form { grid-template-columns: minmax(0, 1fr); }
   .quick-goal-edit-form > label,
   .quick-goal-edit-form .quick-goal-guide,
