@@ -12,8 +12,8 @@ vi.mock("./StudyMethodsPage", () => ({ StudyMethodsPage: () => <div>Method recom
 vi.mock("./PromptLibraryPage", () => ({ PromptLibraryPage: () => <div>Prompt collection</div> }));
 vi.mock("./ResourcesPage", () => ({ ResourcesPage: () => <div>Source catalog</div> }));
 vi.mock("./HubFoldersPage", () => ({ HubFoldersPage: () => <div>Folder shortcuts</div> }));
-vi.mock("../lib/store", () => ({
-  useStore: () => ({
+vi.mock("../lib/store", () => {
+  const state = {
     activeDayKey: "2026-11-07",
     tasks: [{ id: "t1", done: false, archived: false, due: "2026-11-06" }],
     habits: [{ id: "h1", archived: false }],
@@ -21,8 +21,9 @@ vi.mock("../lib/store", () => ({
     resources: [{ id: "r1" }],
     folders: [{ id: "f1", archived: false }],
     profile: { experimentalFlags: { habits: true } },
-  }),
-}));
+  };
+  return { useStore: (selector?: (snapshot: typeof state) => unknown) => selector ? selector(state) : state };
+});
 
 afterEach(cleanup);
 
