@@ -360,6 +360,77 @@ describe("Import Center persistence invariant", () => {
     expect(state.documents).toHaveLength(0);
   });
 
+  it("preserves a settled duplicate warning while an unrelated import is awaiting its durable write", async () => {
+    const user = userEvent.setup();
+    const durableRaw = "1. Already saved question?\\nA. Alpha\\nB. Beta\\nAnswer: B\\nExplanation: Verified before another import.";
+    const durableSeed = {
+      drafts: parseQuestionBlocks(durableRaw), rawText: durableRaw, title: "Durable question source",
+      fileName: "durable-questions.txt", fileType: "text", checksum: "durable-questions-checksum",
+    };
+    const saved = render(<ImportPanel seed={durableSeed} />);
+    await user.click(screen.getByRole("button", { name: "Questions" }));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => {
+      expect(useStore.getState().questions.filter((question) => question.bank === "Durable question source")).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull();
+      expect(hasReviewedImportInFlight()).toBe(false);
+    });
+    saved.unmount();
+
+    const storage = useStore.persist.getOptions().storage;
+    if (!storage) throw new Error("Persisted storage is required for this test.");
+    let rejectWrite!: (reason?: unknown) => void;
+    const blockedWrite = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+    let blockNextWrite = true;
+    useStore.persist.setOptions({
+      storage: {
+        getItem: (name) => storage.getItem(name),
+        removeItem: (name) => storage.removeItem(name),
+        setItem: (name, value) => {
+          if (blockNextWrite) {
+            blockNextWrite = false;
+            return blockedWrite;
+          }
+          return storage.setItem(name, value);
+        },
+      },
+    });
+
+    try {
+      const pendingRaw = "1. Unrelated uncommitted question?\\nA. One\\nB. Two\\nAnswer: B";
+      const pending = render(<ImportPanel seed={{
+        drafts: parseQuestionBlocks(pendingRaw), rawText: pendingRaw, title: "Unrelated pending source",
+        fileName: "pending-other.txt", fileType: "text", checksum: "pending-other-checksum",
+      }} />);
+      await user.click(screen.getByRole("button", { name: "Questions" }));
+      await user.click(screen.getByRole("button", { name: "Finalize import" }));
+      await waitFor(() => {
+        expect(blockNextWrite).toBe(false);
+        expect(hasReviewedImportInFlight()).toBe(true);
+        expect(useStore.getState().questions.filter((question) => question.bank === "Unrelated pending source")).toHaveLength(1);
+      });
+      pending.unmount();
+
+      render(<ImportPanel seed={durableSeed} />);
+      await user.click(screen.getByRole("button", { name: "Questions" }));
+      // The pending question is not durable, but it must not erase evidence
+      // that a different question was successfully imported before it.
+      expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+
+      rejectWrite(new Error("Reject unrelated tentative import"));
+      await waitFor(() => {
+        expect(hasReviewedImportInFlight()).toBe(false);
+        expect(useStore.getState().questions.filter((question) => question.bank === "Durable question source")).toHaveLength(1);
+        expect(useStore.getState().questions.filter((question) => question.bank === "Unrelated pending source")).toHaveLength(0);
+        expect(useStore.getState().questionSets.filter((set) => set.title === "Durable question source")).toHaveLength(1);
+      });
+    } finally {
+      if (blockNextWrite) rejectWrite(new Error("Cleanup unused pending write"));
+      useStore.persist.setOptions({ storage });
+    }
+  });
+
   it("joins a tentative real-store import on remount and does not report success when durability fails", async () => {
     const user = userEvent.setup();
     const storage = useStore.persist.getOptions().storage;
