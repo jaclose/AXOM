@@ -422,6 +422,62 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("retains a newer draft from another tab after a feedback receipt, but clears an unchanged submitted draft", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-concurrent-draft";
+    const account = { id: "journal-feedback-concurrent-account", email: "concurrent@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const resolveRequests: Array<(receipt: string) => void> = [];
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(
+      () => new Promise<string>((resolve) => { resolveRequests.push(resolve); }),
+    );
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), {
+        target: { value: "The original submitted note." },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(resolveRequests).toHaveLength(1);
+      expect(submit).toHaveBeenNthCalledWith(1, account.id, expect.objectContaining({
+        rating: 4, liked: "The original submitted note.",
+      }));
+
+      // A second tab writes a newer, unsent local draft while the RPC is pending.
+      const newerDraft = JSON.stringify({
+        ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"),
+        liked: "Another tab wrote this after the first submission.",
+      });
+      window.localStorage.setItem(draftKey, newerDraft);
+      await act(async () => { resolveRequests[0]("first-receipt"); await Promise.resolve(); });
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("Another tab wrote this after the first submission.");
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(resolveRequests).toHaveLength(2);
+      expect(submit).toHaveBeenNthCalledWith(2, account.id, expect.objectContaining({
+        liked: "Another tab wrote this after the first submission.",
+      }));
+      await act(async () => { resolveRequests[1]("second-receipt"); await Promise.resolve(); });
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(window.localStorage.getItem(draftKey)).toBeNull();
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
   it("opens feedback from the notification route without sending private content", () => {
     window.history.replaceState(null, "", "#journal?feedback=1");
     render(<JournalPage />);

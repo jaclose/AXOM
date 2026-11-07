@@ -1458,11 +1458,16 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   const [sentId, setSentId] = useState("");
   const [error, setError] = useState("");
   const [storageError, setStorageError] = useState("");
+  const submittedDraftRef = useRef<string | null>(null);
 
   useEffect(() => {
     try {
-      if (sentId) window.localStorage.removeItem(draftKey);
-      else window.localStorage.setItem(draftKey, JSON.stringify(draft));
+      if (sentId) {
+        // Another tab may have saved newer writing while this request was pending.
+        // Retire only the exact draft that received a successful receipt.
+        if (window.localStorage.getItem(draftKey) === submittedDraftRef.current)
+          window.localStorage.removeItem(draftKey);
+      } else window.localStorage.setItem(draftKey, JSON.stringify(draft));
       setStorageError("");
     } catch {
       setStorageError("This browser could not keep a local draft. Download it before closing.");
@@ -1474,6 +1479,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     if (draft.rating < 1) { setError("Choose a rating before sending."); return; }
     setSending(true);
     setError("");
+    submittedDraftRef.current = JSON.stringify(draft);
     try {
       setSentId(await submitJournalFeedback(user.id, draft));
     } catch (cause) {
