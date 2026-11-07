@@ -219,6 +219,7 @@ export interface Habit {
   weeklyTarget?: number; // legacy flexible weekly minimum
   weeklyMinimum?: number; // minimum distinct days to satisfy an ISO Mon–Sun week
   weeklyPreferred?: number; // optional preferred distinct-day target, >= minimum
+  weeklyRevisions?: Array<{ effectiveWeek: string; minimum: number; preferred: number; linkedTrackerId?: ID }>; // effective Mon–Sun rule history
   linkedTrackerId?: ID; // one authoritative tracker log can satisfy this habit without a duplicate check
   occurrenceSlots?: Array<{ id: string; label: string }>; // independently addressed subdaily checks
   includeInReports?: boolean; // private reporting is opt-in; never public by this flag
