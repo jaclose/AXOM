@@ -38,6 +38,15 @@ test("soundscape fullscreen shows the existing focus timer until it is reset", a
   expect(bounds!.x).toBeGreaterThanOrEqual(0);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1441);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(901);
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(timer).toBeVisible();
+    const mobile = await timer.boundingBox();
+    expect(mobile).not.toBeNull();
+    expect(mobile!.x).toBeGreaterThanOrEqual(0);
+    expect(mobile!.x + mobile!.width).toBeLessThanOrEqual(width + 1);
+    expect(mobile!.y + mobile!.height).toBeLessThanOrEqual(845);
+  }
 
   await timer.getByRole("button", { name: "Pause timer" }).click();
   await expect(timer).toContainText("Paused");
@@ -90,7 +99,7 @@ test("soundscape stop timer is shown in fullscreen even without a Pomodoro", asy
     useSoundscape.getState().setStopAfter(5);
   });
   await page.getByRole("button", { name: "Full screen", exact: true }).click();
-  const timer = page.getByRole("group", { name: "Focus timer" });
+  const timer = page.getByRole("group", { name: "Audio stop timer" });
   await expect(timer).toBeVisible();
   await expect(timer).toContainText("AUDIO STOP");
   await expect(timer).toContainText("Soundscape playback will stop");
