@@ -48,7 +48,7 @@ export function SoundscapeImmersiveTimer() {
     }
   };
   return (
-    <div className="soundscape-immersive-timer" role="group" aria-label="Focus timer">
+    <div className="soundscape-immersive-timer" role="group" aria-label={soundOnly ? "Audio stop timer" : "Focus timer"}>
       <div className="soundscape-immersive-timer-top">
         <span className="soundscape-immersive-timer-eyebrow">AXOM <span aria-hidden="true">/</span> {phase}</span>
         <span className={"soundscape-immersive-timer-status " + (running ? "running" : "paused")}>
