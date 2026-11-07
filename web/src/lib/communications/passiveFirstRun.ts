@@ -68,7 +68,8 @@ export function capturePassiveFirstRun(session: PassiveSession | null, action: u
   if (!session || typeof action !== "string" || !ACTION_SET.has(action) || !Number.isFinite(now)) return session;
   if (now < session.startedAt || now >= session.expiresAt) return session;
   const id = action as PassiveAction;
-  return { ...session, counts: { ...session.counts, [id]: Math.min(2, session.counts[id] + 1) } };
+  if (session.counts[id] >= 2) return session;
+  return { ...session, counts: { ...session.counts, [id]: session.counts[id] + 1 } };
 }
 
 export function serializePassiveFirstRun(session: PassiveSession): string {
@@ -169,7 +170,7 @@ export function proposePassiveAtlas(session: PassiveSession | null, now: number)
     + Number(session.counts["review-source"] > 0);
   const elapsed = now - session.startedAt;
   const ready = strong >= 2 && events.length >= 2 && elapsed >= 60_000;
-  if (!ready) return { ...base, status: elapsed >= FIRST_RUN_WINDOW_MS ? "insufficient" : "observing" };
+  if (!ready) return { ...base, status: elapsed >= FIRST_RUN_WINDOW_MS || (elapsed >= 60_000 && events.length === 0 && session.changedFields.length === 0) ? "insufficient" : "observing" };
   const top = rank(session).slice(0, 3);
   const first = AXOM_CORRESPONDENTS.find(card => card.id === top[0]?.id);
   if (!first) return { ...base, status: "insufficient" };
