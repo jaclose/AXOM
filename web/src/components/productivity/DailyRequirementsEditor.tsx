@@ -361,7 +361,7 @@ export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (
         </header>
         {shown.filter((requirement) => requirement.enabled).length > 0 ? (
           <div className="quick-goals-list">
-            {shown.filter((requirement) => requirement.enabled).slice(0, 4).map((requirement) => {
+            {shown.filter((requirement) => requirement.enabled).slice(-4).reverse().map((requirement) => {
               const progress = resultById.get(requirement.id);
               const current = progress?.current ?? 0;
               const manual = requirement.source.kind === "manual" && !requirement.aliases?.length;
