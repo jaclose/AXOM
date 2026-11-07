@@ -8,7 +8,9 @@ export function canvasPixelRatio(width: number, height: number, deviceRatio: num
   const w = Number.isFinite(width) && width > 0 ? width : 1;
   const h = Number.isFinite(height) && height > 0 ? height : 1;
   const native = Number.isFinite(deviceRatio) && deviceRatio > 0 ? deviceRatio : 1;
-  const requested = Math.min(native, immersive ? 3 : 1.25);
+  // Pixel-count and dimension caps provide the safety bound; a fixed DPR 3
+  // ceiling would silently downscale a true 8K Retina display at DPR 4.
+  const requested = immersive ? native : Math.min(native, 1.25);
   if (!immersive) return requested;
   return Math.min(requested, 7680 / Math.max(w, h), Math.sqrt(MAX_IMMERSIVE_CANVAS_PIXELS / (w * h)));
 }
