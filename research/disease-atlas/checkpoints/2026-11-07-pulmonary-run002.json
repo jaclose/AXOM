@@ -1,0 +1,406 @@
+{
+  "title": "AXOM Disease & Pathology Atlas V2 checkpoint",
+  "timestamp": "2026-11-07",
+  "build": "Run002",
+  "branch": "docs/disease-atlas-v2-run002-20261107",
+  "parent": "Run001 (16 deep renal profiles; 132 legacy short profiles; 12 source-linked photos)",
+  "added_chapter": "Respiratory - ILD & Occupational",
+  "metrics": {
+    "legacy_short": 132,
+    "deep_renal": 16,
+    "added_deep_pulmonary": 14,
+    "distinct_internal_names": 162,
+    "external_ontology_denominator": null,
+    "external_ontology_coverage": null,
+    "cumulative_individually_reviewed_online_image_file_pages": 26,
+    "added_image_file_pages": 14,
+    "actual_photo_bytes_embedded_docx": 0,
+    "actual_photo_bytes_embedded_pdf": 0,
+    "rendered_pdf_pages": 69,
+    "new_source_ledger_entries": 18,
+    "total_source_ledger_entries": 35
+  },
+  "diseases": [
+    {
+      "id": "AXOM-PUL-001",
+      "name": "Cryptogenic organizing pneumonia (COP)",
+      "pathology_and_diagnostic_discriminator": "Intra-alveolar fibroblastic Masson bodies, preserved architecture; secondary organizing pneumonia must be excluded.",
+      "treatment_summary": "Corticosteroids for selected symptomatic cases; recognize relapse and steroid risks.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-002",
+      "name": "Nonspecific interstitial pneumonia (NSIP) pattern / idiopathic NSIP",
+      "pathology_and_diagnostic_discriminator": "Temporally uniform cellular or fibrotic septal disease versus heterogeneous UIP; etiologic CTD/drug evaluation.",
+      "treatment_summary": "Treat underlying CTD/trigger; immunomodulation for selected inflammatory disease, nintedanib if progressive fibrosis criteria.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-003",
+      "name": "Hypersensitivity pneumonitis (HP)",
+      "pathology_and_diagnostic_discriminator": "Antigen-linked airway-centered lymphocytic inflammation ± poorly formed granulomas; fibrotic and nonfibrotic subtypes.",
+      "treatment_summary": "Identify/avoid antigen; selective immunosuppression; antifibrotic for progressive fibrotic phenotype as appropriate.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-004",
+      "name": "Pulmonary alveolar proteinosis (PAP)",
+      "pathology_and_diagnostic_discriminator": "Surfactant-rich PAS-positive airspace filling from impaired GM-CSF macrophage signaling; autoimmune vs secondary/hereditary.",
+      "treatment_summary": "Expert-center whole lung lavage and inhaled GM-CSF for symptomatic autoimmune PAP; treat cause of secondary PAP.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-005",
+      "name": "Lymphangioleiomyomatosis (LAM)",
+      "pathology_and_diagnostic_discriminator": "TSC1/TSC2 mTORC1 activation, diffuse round thin-wall cysts, LAM cells HMB-45/SMA positive; VEGF-D supportive.",
+      "treatment_summary": "Sirolimus for abnormal/declining function; pneumothorax pleural management; transplant for advanced cases.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-006",
+      "name": "Pulmonary Langerhans cell histiocytosis (PLCH)",
+      "pathology_and_diagnostic_discriminator": "Smoking-associated CD1a/langerin positive MAPK-pathway myeloid neoplasm; nodules plus upper-zone irregular cysts.",
+      "treatment_summary": "Smoking cessation; specialist targetable pathway therapy only in selected progressive molecularly defined settings.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-007",
+      "name": "Respiratory bronchiolitis-associated interstitial lung disease (RB-ILD)",
+      "pathology_and_diagnostic_discriminator": "Smoker pigmented macrophages primarily bronchiolocentric with clinical-radiographic impairment, not incidental smoker macrophages.",
+      "treatment_summary": "Smoking cessation, follow-up lung function; no established routine anti-inflammatory drug.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-008",
+      "name": "Alveolar macrophage pneumonia (AMP; formerly desquamative interstitial pneumonia)",
+      "pathology_and_diagnostic_discriminator": "2025 ERS/ATS term AMP replaces inaccurate DIP name; diffuse alveolar pigment macrophages versus RB-ILD centrilobular pattern.",
+      "treatment_summary": "Remove exposure and stop smoking; selected glucocorticoids supported by weak evidence.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-009",
+      "name": "Silicosis",
+      "pathology_and_diagnostic_discriminator": "Respirable silica → macrophage injury, collagenous whorled nodules; upper-lung/eggshell nodes sometimes; TB risk.",
+      "treatment_summary": "Avoid further dust, treat complications/oxygen; no established cure.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-010",
+      "name": "Asbestosis",
+      "pathology_and_diagnostic_discriminator": "Long-latency basal subpleural pulmonary fibrosis with ferruginous bodies; pleural plaques do not alone diagnose asbestosis.",
+      "treatment_summary": "Exposure cessation, preventive and supportive respiratory care; monitor cancer risks.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-011",
+      "name": "Coal workers' pneumoconiosis (CWP)",
+      "pathology_and_diagnostic_discriminator": "Coal dust macrophage macules, with silica coexposure; advanced progressive massive fibrosis.",
+      "treatment_summary": "Dust control, surveillance and symptom-oriented care; no cure.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-012",
+      "name": "Acute eosinophilic pneumonia (AEP)",
+      "pathology_and_diagnostic_discriminator": "Acute febrile hypoxemic airspace disease with BAL eosinophils often ≥25%; initial blood eosinophils may be normal.",
+      "treatment_summary": "Remove trigger, oxygen/ICU when severe, glucocorticoids after infectious evaluation.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-013",
+      "name": "Chronic eosinophilic pneumonia (CEP)",
+      "pathology_and_diagnostic_discriminator": "Weeks-to-months peripheral opacities with eosinophilia and asthma association; frequent steroid-responsive relapses.",
+      "treatment_summary": "Glucocorticoids, investigation for secondary causes, specialist steroid-sparing approaches as required.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    },
+    {
+      "id": "AXOM-PUL-014",
+      "name": "Constrictive bronchiolitis / bronchiolitis obliterans",
+      "pathology_and_diagnostic_discriminator": "Concentric bronchiolar wall fibrosis narrowing small airways, air-trapping and fixed obstruction; NOT COP Masson bodies.",
+      "treatment_summary": "Remove toxin/treat transplant or GVHD context; irreversible disease often requires supportive/transplant care.",
+      "external_ontology_ids": null,
+      "source_data": "Detailed 15-field authored profile is in Run002 downloadable DOCX and source ZIP; full binary not durably archived in Library"
+    }
+  ],
+  "sources": [
+    {
+      "key": "ERS-CLASS25",
+      "title": "2025/2026 ERS/ATS interstitial pneumonia classification",
+      "url": "https://doi.org/10.1183/13993003.00158-2025"
+    },
+    {
+      "key": "ERS-COP06",
+      "title": "ERS review of cryptogenic organizing pneumonia",
+      "url": "https://publications.ersnet.org/content/erj/28/2/422"
+    },
+    {
+      "key": "ATS-IPF22",
+      "title": "ATS/ERS/JRS/ALAT 2022 IPF/PPF guideline",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9851481/"
+    },
+    {
+      "key": "ATS-HP20",
+      "title": "ATS/JRS/ALAT 2020 HP diagnosis guideline",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7397797/"
+    },
+    {
+      "key": "ERS-PAP24",
+      "title": "ERS 2024 pulmonary alveolar proteinosis guideline",
+      "url": "https://publications.ersnet.org/content/erj/64/5/2400725"
+    },
+    {
+      "key": "ATS-LAM16",
+      "title": "ATS/JRS LAM guideline",
+      "url": "https://doi.org/10.1164/rccm.201607-1384ST"
+    },
+    {
+      "key": "SRILD24",
+      "title": "2024 smoking-related ILD review",
+      "url": "https://doi.org/10.1177/14799731241291538"
+    },
+    {
+      "key": "PLCH-CASE25",
+      "title": "2025 BRAF V600E PLCH case report; not established broad standard of care",
+      "url": "https://doi.org/10.1002/rcr2.70339"
+    },
+    {
+      "key": "CDC-SIL25",
+      "title": "NIOSH 2025 silicosis surveillance",
+      "url": "https://www.cdc.gov/niosh/surveillance/respiratorydisease/silicosis-reporting.html"
+    },
+    {
+      "key": "CDC-PNEU26",
+      "title": "CDC NIOSH pneumoconioses 2026",
+      "url": "https://www.cdc.gov/niosh/pneumoconioses/about/index.html"
+    },
+    {
+      "key": "OSHA-SIL",
+      "title": "OSHA crystalline silica health effects",
+      "url": "https://www.osha.gov/silica-crystalline/health-effects"
+    },
+    {
+      "key": "ATSDR-ASB",
+      "title": "ATSDR asbestos lung disease",
+      "url": "https://archive.cdc.gov/www_atsdr_cdc_gov/csem/asbestos/respiratory_conditions_associated_with_asbestos.html"
+    },
+    {
+      "key": "CDC-ASB",
+      "title": "CDC NIOSH asbestos",
+      "url": "https://www.cdc.gov/niosh/topics/asbestos/"
+    },
+    {
+      "key": "CDC-CWP26",
+      "title": "CDC NIOSH 2026 coal workers pneumoconiosis",
+      "url": "https://www.cdc.gov/niosh/mining/topics/black-lung.html"
+    },
+    {
+      "key": "AEP-REVIEW13",
+      "title": "Acute eosinophilic pneumonia review",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3591538/"
+    },
+    {
+      "key": "EOS-REVIEW13",
+      "title": "Eosinophilic pneumonias review",
+      "url": "https://journals.asm.org/doi/10.1128/cmr.00025-12"
+    },
+    {
+      "key": "CEP-CASE24",
+      "title": "2024 chronic eosinophilic pneumonia case report",
+      "url": "https://doi.org/10.1080/24745332.2024.2362245"
+    },
+    {
+      "key": "BO-REVIEW18",
+      "title": "Constrictive bronchiolitis pathology review",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC2117245/"
+    }
+  ],
+  "image_source_pages": [
+    {
+      "image_id": "PUL-IMG-001",
+      "disease_id": "AXOM-PUL-001",
+      "file": "Organizing pneumonia - Masson body (6984890881).jpg",
+      "creator": "Yale Rosen",
+      "license": "CC BY-SA 2.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Organizing_pneumonia_-_Masson_body_(6984890881).jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-002",
+      "disease_id": "AXOM-PUL-001",
+      "file": "Masson body - high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Masson_body_-_high_mag.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-003",
+      "disease_id": "AXOM-PUL-003",
+      "file": "Histology of chronic hypersensitivity pneumonitis.jpg",
+      "creator": "Mutleysmith",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Histology_of_chronic_hypersensitivity_pneumonitis.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-004",
+      "disease_id": "AXOM-PUL-003",
+      "file": "Chronic hypersensitivity pneumonitis - histology.jpg",
+      "creator": "Mutleysmith",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Chronic_hypersensitivity_pneumonitis_-_histology.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-005",
+      "disease_id": "AXOM-PUL-004",
+      "file": "Pulmonary alveolar proteinosis - intermed mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Pulmonary_alveolar_proteinosis_-_intermed_mag.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-006",
+      "disease_id": "AXOM-PUL-004",
+      "file": "Pulmonary alveolar proteinosis - high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Pulmonary_alveolar_proteinosis_-_high_mag.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-007",
+      "disease_id": "AXOM-PUL-006",
+      "file": "Pulmonary Langerhans cell histiocytosis -- low mag.jpg",
+      "creator": "Librepath",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Pulmonary_Langerhans_cell_histiocytosis_--_low_mag.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-008",
+      "disease_id": "AXOM-PUL-006",
+      "file": "Pulmonary Langerhans cell histiocytosis -- intermed mag.jpg",
+      "creator": "Librepath",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Pulmonary_Langerhans_cell_histiocytosis_--_intermed_mag.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-009",
+      "disease_id": "AXOM-PUL-006",
+      "file": "Pulmonary Langerhans cell histiocytosis -- very high mag.jpg",
+      "creator": "Librepath",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Pulmonary_Langerhans_cell_histiocytosis_--_very_high_mag.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-010",
+      "disease_id": "AXOM-PUL-008",
+      "file": "Desquamative interstitial pneumonia CT.jpg",
+      "creator": "Sabrina Bressieux-Degueldre",
+      "license": "CC BY 4.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Desquamative_interstitial_pneumonia_CT.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-011",
+      "disease_id": "AXOM-PUL-009",
+      "file": "Silicosis - Silicotic nodule (7462025912).jpg",
+      "creator": "Yale Rosen",
+      "license": "CC BY-SA 2.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Silicosis_-_Silicotic_nodule_(7462025912).jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-012",
+      "disease_id": "AXOM-PUL-010",
+      "file": "Ferruginous body.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Ferruginous_body.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-013",
+      "disease_id": "AXOM-PUL-010",
+      "file": "Asbestosis high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Asbestosis_high_mag.jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    },
+    {
+      "image_id": "PUL-IMG-014",
+      "disease_id": "AXOM-PUL-011",
+      "file": "Coal workers pneumoconiosis - Anthracosilicosis (4866521799).jpg",
+      "creator": "Yale Rosen",
+      "license": "CC BY-SA 2.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Coal_workers_pneumoconiosis_-_Anthracosilicosis_(4866521799).jpg",
+      "embedded": false,
+      "rights": "Individual Commons page checked; attribution and applicable share-alike required",
+      "altered": false
+    }
+  ],
+  "qa": {
+    "duplicate_internal_ids": 0,
+    "duplicate_internal_display_names": 0,
+    "source_reference_keys_resolved": true,
+    "new_photo_bytes_embedded": 0,
+    "rendered_and_visually_inspected": true,
+    "peer_reviewed": false,
+    "external_ontology_mapped": false
+  },
+  "artifact_files": [
+    "AXOM_Disease_Atlas_V2_Run002_Source_Package.zip",
+    "AXOM_Disease_Pathology_Atlas_V2_Run002.docx",
+    "AXOM_Disease_Pathology_Atlas_V2_Run002.pdf",
+    "AXOM_Pulmonary_Pathology_Online_Gallery_Run002.html"
+  ],
+  "limitations": [
+    "ChatGPT persistent Library upload denied with AccessDeny.",
+    "Runtime cannot fetch Wikimedia photo binaries; genuine source photographs only remote HTML with cited file pages.",
+    "This checkpoint preserves structured summary and provenance, not the full DOCX/PDF binary. Full content delivered separately as conversation files."
+  ],
+  "next": "Acquire MONDO/ICD-11/Orphanet snapshot and reconcile 162 local names; continue new chapter, persist binary in writable storage when available, add genuine image bytes only with rights check."
+}
