@@ -323,7 +323,7 @@ describe("Journal notebook foundation", () => {
 
       act(() => { useStore.setState({ profile: { ...originalProfile, userId: ownerB } }); });
       expect(liked().value).toBe("");
-      expect(window.localStorage.getItem(keyB)).not.toContain("Only A should read");
+      expect(window.localStorage.getItem(keyB)).toBeNull();
       fireEvent.change(liked(), { target: { value: "B owns a different feedback draft." } });
       expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B owns a different feedback draft.");
 
@@ -359,7 +359,7 @@ describe("Journal notebook foundation", () => {
 
       act(() => { useAccount.setState({ user: accountB }); });
       expect(liked().value).toBe("");
-      expect(window.localStorage.getItem(keyB)).not.toContain("A's private feedback.");
+      expect(window.localStorage.getItem(keyB)).toBeNull();
       fireEvent.change(liked(), { target: { value: "B's private feedback." } });
       expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B's private feedback.");
 
