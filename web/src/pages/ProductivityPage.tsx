@@ -42,6 +42,14 @@ const QUANTITY_META: Record<ManualQuantityType, { label: string; placeholder: st
   count: { label: "Count", placeholder: "1" },
 };
 
+const SELF_REPORT_TEMPLATES: ReadonlyArray<{ label: string; activity: string; quantity: ManualQuantityType }> = [
+  { label: "Study", activity: "Study", quantity: "count" },
+  { label: "Questions", activity: "Question Bank", quantity: "questions" },
+  { label: "Anki", activity: "Anki review", quantity: "cards" },
+  { label: "Reading", activity: "Reading", quantity: "pages" },
+  { label: "Exercise", activity: "Exercise", quantity: "count" },
+];
+
 export function ProductivityPage() {
   const s = useStore();
   const saveStatus = useProductivitySaveStatus();
@@ -54,6 +62,7 @@ export function ProductivityPage() {
   const [manualQuantityKind, setManualQuantityKind] = useState<ManualQuantityType>("count");
   const [manualNote, setManualNote] = useState("");
   const [manualTrackerId, setManualTrackerId] = useState("");
+  const [lastSelfReport, setLastSelfReport] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const strip = useInView<HTMLDivElement>();
 
@@ -79,8 +88,8 @@ export function ProductivityPage() {
   const patternDays = new Set(logs.filter((log) => log.dayKey <= s.activeDayKey).map((log) => log.dayKey)).size;
 
   function logManual() {
-    const minutes = Number(manualMinutes) || 0;
-    const quantity = Number(manualQuantity) || 0;
+    const minutes = Math.max(0, Number(manualMinutes) || 0);
+    const quantity = Math.max(0, Number(manualQuantity) || 0);
     if (!manualType.trim()) return;
     s.logActivity({
       label: manualType,
@@ -92,9 +101,20 @@ export function ProductivityPage() {
       note: manualNote || undefined,
     });
     setManualType(""); setManualMinutes(""); setManualQuantity(""); setManualNote("");
+    setLastSelfReport(true);
+  }
+
+  function useSelfReportTemplate(template: typeof SELF_REPORT_TEMPLATES[number]) {
+    setManualType(template.activity);
+    setManualQuantityKind(template.quantity);
+    setManualMinutes("");
+    setManualQuantity("");
+    setManualTrackerId("");
+    setLastSelfReport(false);
   }
 
   function fillShortcut(shortcut: ActivityShortcut) {
+    setLastSelfReport(false);
     setManualType(shortcut.label);
     setManualTrackerId(shortcut.trackerId ?? "");
     setManualMinutes(shortcut.minutes ? String(shortcut.minutes) : "");
@@ -115,7 +135,6 @@ export function ProductivityPage() {
 
   return (
     <>
-      {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
       <ProductivitySaveStatus status={saveStatus} />
       <div className="productivity-primary-grid">
       <GlassCard pad id="productivity-log" data-tour="log" data-module-tour="productivity-log">
@@ -130,8 +149,6 @@ export function ProductivityPage() {
               <GButton size="sm" onClick={() => setModuleTourOpen(true)} aria-label="Open Productivity help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton>
             </div>
           ) : <div className="row wrap gap6"><GButton size="sm" onClick={() => setPickedDay(null)}>Back to today</GButton><GButton size="sm" onClick={() => setModuleTourOpen(true)} aria-label="Open Productivity help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton></div>} />
-        <DailyProgressVessel result={dailyProgress} dayLabel={isActive ? "Today" : "Selected day"} />
-
         {isActive ? (
           <>
             <div className="productivity-report-context">
@@ -139,7 +156,14 @@ export function ProductivityPage() {
               <small>These entries are reported by you. Focus time is recorded separately when auto-log is on.</small>
             </div>
             <div className="fast-activity-logger">
-              <ActivityLabelInput value={manualType} onChange={setManualType} />
+              <ActivityLabelInput value={manualType} onChange={(value) => { setManualType(value); setLastSelfReport(false); }} />
+              <div className="self-report-templates" aria-label="Quick self-report templates">
+                {SELF_REPORT_TEMPLATES.map((template) => (
+                  <button type="button" key={template.label} aria-label={`Use ${template.label} template`}
+                    className={manualType === template.activity ? "on" : ""}
+                    onClick={() => useSelfReportTemplate(template)}>{template.label}</button>
+                ))}
+              </div>
               <div className="fast-activity-measures" aria-label="Optional activity measurements">
                 <label className="fast-field"><span>How long? (optional)</span><div><input className="field" aria-label="How long in minutes?" type="number" min="0" placeholder="30" value={manualMinutes} onChange={(event) => setManualMinutes(event.target.value)} /><small>min</small></div></label>
                 <div className="fast-field quantity"><span>Quantity (optional)</span><div>
@@ -156,6 +180,9 @@ export function ProductivityPage() {
               <label className="fast-field fast-activity-note"><span>Note (optional)</span><input className="field" aria-label="Note (optional)" placeholder="Add context if it will help later" value={manualNote} onChange={(event) => setManualNote(event.target.value)} /></label>
               <GButton variant="primary" onClick={logManual} disabled={!manualType.trim()}><Plus size={ICON_SIZE.body} /> Log</GButton>
             </div>
+            {lastSelfReport && <p className="self-report-confirmation" role="status">
+              Activity added. Your save status appears above.
+            </p>}
             <details className="activity-category-disclosure">
               <summary>Category and contribution (optional)</summary>
               <label><span>Use existing category</span><select className="field" aria-label="Productivity category" value={manualTrackerId} onChange={(event) => setManualTrackerId(event.target.value)}>
@@ -170,19 +197,23 @@ export function ProductivityPage() {
                 {frequent.length > 0 && <ShortcutGroup title="Frequent" items={frequent} onFill={fillShortcut} onHide={hideShortcut} />}
               </div>
             )}
+            <DailyProgressVessel result={dailyProgress} dayLabel="Today" />
             <section id="productivity-targets" className="today-targets" aria-labelledby="today-targets-title" data-module-tour="productivity-targets">
               <div>
                 <h3 id="today-targets-title">What makes today successful</h3>
-                <p>These are optional signals you chose. AXOM only scores the ones scheduled for today.</p>
+                <p>Set one goal in seconds. Change the detailed rules only when you need them.</p>
               </div>
               <DailyRequirementsEditor />
             </section>
           </>
         ) : (
-          <div className="historical-log-lock">
+          <>
+            <DailyProgressVessel result={dailyProgress} dayLabel="Selected day" />
+            <div className="historical-log-lock">
             <History size={ICON_SIZE.emphasis} aria-hidden="true" />
             <span><b>History is read-only.</b><small>Return to today before logging so an old view cannot change the current day.</small></span>
-          </div>
+            </div>
+          </>
         )}
         <div className="productivity-evidence">{evidence.cardReviews} in-app card reviews · {evidence.trackerPasses} recorded tracker passes <small>Separate records, dated in your current local time zone. No time or mastery inferred.</small></div>
         <div className="console-totals" aria-label="Viewed day totals">
@@ -197,6 +228,7 @@ export function ProductivityPage() {
         {isActive && <StudyStreakMonitor state={s} result={dailyProgress} />}
       </div>
       </div>
+      {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
       {isActive && <TrackerManager />}
 
       {patternDays >= 3 && <div className="productivity-analytics" data-module-tour="productivity-trends">
