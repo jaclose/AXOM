@@ -31,7 +31,7 @@ test("live-account route blocks cross-origin redirects and custom backends in Ch
   });
   let blockedOrigin = "";
   const app = createServer((request, response) => {
-    allowedHits += 1;
+    if (request.url === "/" || request.url === "/handoff") allowedHits += 1;
     if (request.url === "/handoff") {
       response.writeHead(307, { Location: `${blockedOrigin}/unauthorized` });
       response.end();
