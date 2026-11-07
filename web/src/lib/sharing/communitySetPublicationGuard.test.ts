@@ -70,6 +70,26 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(() => publish({ liveQuestion: null })).toThrow(/changed while publishing/);
   });
 
+  it.each([
+    ["course filing", { ...set, scope: { courseId: "different-private-course", module: "M1" } }],
+    ["parent lineage", { ...set, parentSetId: "new-parent" }],
+    ["same-ID replacement", { ...set, createdAt: "2026-11-07T12:00:00.000Z" }],
+    ["imported origin", { ...set, importProvenance: {
+      version: 1 as const, shareId: "other-import", contentDigest: "a".repeat(64),
+    } }],
+    ["filter provenance", { ...set, filterSnapshot: { courseId: "different-private-course" } }],
+    ["seeded order", { ...set, ordering: "random" as const, seed: "different-seed" }],
+  ])("refuses publishing after %s changed without any question timestamp update", (_label, liveSet) => {
+    expect(() => publish({ liveSet })).toThrow(/changed while publishing/);
+  });
+
+  it("accepts an unchanged scope and imported origin after a legitimate review", () => {
+    const original: QuestionSet = { ...set, scope: { courseId: "approved-course" },
+      importProvenance: { version: 1, shareId: "source-share", contentDigest: "b".repeat(64) } };
+    const snapshot = publish({ openedSet: original, liveSet: { ...original } });
+    expect(snapshot.questions).toHaveLength(1);
+  });
+
   it("never publishes newly held, unexplained or media-dependent questions", () => {
     expect(() => publish({ liveQuestion: { ...question, needsReview: true } })).toThrow(/changed while publishing/);
     expect(() => publish({ liveQuestion: { ...question, explanation: "" } })).toThrow(/changed while publishing/);
