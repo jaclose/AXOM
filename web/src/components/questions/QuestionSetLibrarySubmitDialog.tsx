@@ -250,12 +250,26 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   }
 
   async function withdraw() {
-    if (!accountId || !submission || busy || !window.confirm(
-      "Withdraw this Question Set from the shared library? Already imported copies stay with other learners.")) return;
+    // An account switch can happen while a submission is displayed or even
+    // during the native confirmation prompt. Never act on another account's
+    // cached submission (the server's RLS is still the final authority).
+    if (!accountId || statusIdentity !== `${accountId}:${set.id}`
+      || useAccount.getState().user?.id !== accountId || !submission
+      || submission.sourceId !== set.id || checking || busy || generating
+      || !window.confirm(
+        "Withdraw this Question Set from the shared library? Already imported copies stay with other learners.")) return;
+    if (useAccount.getState().user?.id !== accountId) return;
+
+    const withdrawingId = submission.id;
     setBusy(true); setError(""); setMessage("");
     try {
-      await withdrawQuestionSetSubmission(accountId, submission.id);
-      await refresh();
+      await withdrawQuestionSetSubmission(accountId, withdrawingId);
+      const remaining = await refresh();
+      // An RPC returning without error does not establish that the record was
+      // removed. Do not show a false success while the same submission remains.
+      if (remaining?.id === withdrawingId) {
+        throw new Error("Withdrawal could not be confirmed. The submission is still listed; check its status before retrying.");
+      }
       setMessage("The submission was withdrawn from the library.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Withdrawal could not be confirmed."); }
     finally { setBusy(false); }
@@ -308,7 +322,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       </details>}
       {!accountId && <p role="status">Sign in through Account to submit a set.</p>}
       {checking && <p role="status">Checking your existing submission…</p>}
-      {submission && <div className="qsl-submission-status">
+      {submission && statusIdentity === `${accountId}:${set.id}` && useAccount.getState().user?.id === accountId && <div className="qsl-submission-status">
         <Tag tone={submission.status === "approved" ? "gold" : submission.status === "rejected" ? "orange" : "neutral"}>{submission.status}</Tag>
         <p>{submission.status === "approved" ? "This set is searchable now." : submission.status === "pending"
           ? "This set is waiting for academic review." : "This set needs a revision before it can be listed."}</p>
