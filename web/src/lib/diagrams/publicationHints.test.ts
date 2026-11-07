@@ -32,6 +32,17 @@ describe("medical visual planning for published Question Sets", () => {
     expect(result.keywords).toContain("brachial plexus");
   });
 
+  it("identifies explicit gross pathology specimens without claiming an image", () => {
+    const result = planMedicalVisual({
+      stem: "Examine the cut surface of this resected specimen.",
+      topic: "Gross specimen", tags: [],
+    });
+    expect(result.kind).toBe("gross-pathology-specimen");
+    expect(result.keywords).toContain("gross specimen");
+    expect(result.assetId).toBeNull();
+    expect(result.requiresMedicalReview).toBe(true);
+  });
+
   it("does not infer a diagnosis or illustration from vague symptoms", () => {
     const result = planMedicalVisual({ stem: "A patient has cough and fever.", tags: [] });
     expect(result.kind).toBe("none");
