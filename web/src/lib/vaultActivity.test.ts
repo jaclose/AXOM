@@ -679,3 +679,36 @@ describe("account session epoch for delayed writes", () => {
     expect(vault.readLastVaultWrite()?.accountId).toBe("account-a");
   });
 });
+
+describe("real queued IndexedDB write status across A-B-A", () => {
+  it("keeps stale write durable but suppresses its receipt, then restores fresh A receipt", async () => {
+    const { indexedDB: fakeIndexedDb, IDBKeyRange } = await import("fake-indexeddb");
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const key = STORAGE_KEYS.persistedState;
+    const oldWorkspace = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "old session" }, version: 34 });
+    const newWorkspace = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "current session" }, version: 34 });
+    const vault = await import("./vaultActivity");
+    const local = await import("./localVault");
+    try {
+      vault.setVaultAccountIdentity("account-a");
+      const pending = local.localVaultStorage.setItem(key, oldWorkspace);
+      vault.setVaultAccountIdentity("account-b");
+      vault.setVaultAccountIdentity("account-a");
+      await pending;
+      expect(await local.localVaultStorage.getItem(key)).toBe(oldWorkspace);
+      expect(vault.readLastVaultWrite()).toBeNull();
+      expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+      await local.localVaultStorage.setItem(key, newWorkspace);
+      expect(vault.readVaultWriteFailure()).toBeNull();
+      expect(vault.readLastVaultWrite()).toMatchObject({ accountId: "account-a", version: 4, target: "indexeddb" });
+      expect(window.localStorage.getItem(markerKey)).not.toBeNull();
+      expect(await local.localVaultStorage.getItem(key)).toBe(newWorkspace);
+      expect(vault.readLastVaultWrite()).toMatchObject({ accountId: "account-a", version: 4 });
+    } finally {
+      vault.setVaultAccountIdentity(null);
+      vi.unstubAllGlobals();
+    }
+  });
+});
