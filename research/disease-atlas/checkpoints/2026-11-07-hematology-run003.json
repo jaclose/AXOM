@@ -1,0 +1,197 @@
+{
+  "title": "AXOM Disease and Pathology Atlas V2 - Build003",
+  "date": "2026-11-07",
+  "branch": "docs/disease-atlas-v2-run003-20261107",
+  "parent_branch": "docs/disease-atlas-v2-run002-20261107",
+  "parent_entries": 162,
+  "added_entries": 18,
+  "total_entries": 180,
+  "legacy_short": 132,
+  "detailed_renal": 16,
+  "detailed_pulmonary": 14,
+  "detailed_hematology": 18,
+  "cumulative_detailed": 48,
+  "pdf_pages": 90,
+  "total_source_ledger_records": 63,
+  "image_associations_total": 37,
+  "new_image_associations": 11,
+  "unique_source_image_file_pages": 36,
+  "original_photographs_embedded_docx_pdf": 0,
+  "ontology_denominator": null,
+  "ontology_coverage_percent": null,
+  "ontology_note": "Do not infer from internal entry count. Official MONDO/ICD-11/Orphanet baseline not locally available. Importer exists only in full source package and its synthetic fixture is not a real ontology.",
+  "clinical_note": "Educational source-reviewed summaries, not medical peer-reviewed. Some sources are discovery portals. Specialty expert review required.",
+  "image_note": "Individual Wikimedia original file-page metadata and licensing reviewed. Original bytes could not be retrieved; online gallery is remote-source linked. No generated pathological imagery.",
+  "durable_material": "This JSON is a condensed recovery checkpoint only. Complete detailed disease JSON, registry and provenance CSV, source citations, building script, DOCX/PDF and HTML gallery are in the Run003 downloadable source package, whose Library upload was denied.",
+  "package_filename": "AXOM_Disease_Atlas_V2_Run003_Source_Package.zip",
+  "package_sha256": "aa4a957fdf91a34ee6357b4a56dac8f9136a1a19944ec7fc84fb1df95edd183d",
+  "qa": {
+    "duplicated_internal_ids": 0,
+    "duplicated_names": 0,
+    "unresolved_local_source_keys": 0,
+    "render_complete": true,
+    "zero_short_blank_pages": true,
+    "specialist_peer_review": false
+  },
+  "disease_profiles": [
+    {
+      "id": "AXOM-HEM-001",
+      "name": "Hereditary spherocytosis",
+      "pathogenesis": "RBC membrane-cytoskeleton failure; splenic extravascular hemolysis",
+      "diagnostic_discriminator": "Spherocytes, DAT-negative, EMA flow/ektacytometry",
+      "treatment_overview": "Supportive/folate; selective splenectomy with vaccine risk planning",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-002",
+      "name": "Warm autoimmune hemolytic anemia",
+      "pathogenesis": "IgG-mediated RBC phagocytosis at physiologic temperature",
+      "diagnostic_discriminator": "Hemolysis, spherocytes, usually DAT IgG positive",
+      "treatment_overview": "Steroids; rituximab/targeted alternatives for relapse",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-003",
+      "name": "Cold agglutinin disease",
+      "pathogenesis": "IgM-triggered classical complement activation and C3-mediated hemolysis",
+      "diagnostic_discriminator": "Cold-associated acrocyanosis, C3-positive DAT, elevated cold agglutinin titer",
+      "treatment_overview": "Avoid cold, treat underlying clone if needed, selected complement inhibition",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-004",
+      "name": "Paroxysmal nocturnal hemoglobinuria",
+      "pathogenesis": "Somatic PIGA mutation, loss of CD55/CD59, alternative-complement hemolysis",
+      "diagnostic_discriminator": "FLAER/flow deficient GPI-linked proteins; hemoglobinuria/thrombosis",
+      "treatment_overview": "Complement inhibitors for qualifying patients; meningococcal vaccination/prophylaxis",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-005",
+      "name": "Acquired severe aplastic anemia",
+      "pathogenesis": "Immune T-cell-mediated hematopoietic stem-cell failure",
+      "diagnostic_discriminator": "Pancytopenia with hypocellular marrow; exclude clonal/nutritional causes",
+      "treatment_overview": "HLA-matched transplant where suitable or ATG/cyclosporine/eltrombopag",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-006",
+      "name": "Primary immune thrombocytopenia",
+      "pathogenesis": "Autoimmune platelet destruction and impaired production",
+      "diagnostic_discriminator": "Isolated thrombocytopenia; diagnosis of exclusion; no defining marrow lesion",
+      "treatment_overview": "Corticosteroid-based initial care when indicated; TPO-RA/rituximab and other agents",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-007",
+      "name": "Immune-mediated thrombotic thrombocytopenic purpura",
+      "pathogenesis": "Anti-ADAMTS13 autoantibodies cause ultra-large VWF multimer microthrombi",
+      "diagnostic_discriminator": "MAHA/schistocytes, thrombocytopenia, severe ADAMTS13 deficiency",
+      "treatment_overview": "Emergency plasma exchange, immunosuppression, often caplacizumab per guidelines",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-008",
+      "name": "Congenital thrombotic thrombocytopenic purpura",
+      "pathogenesis": "Biallelic ADAMTS13 deficiency",
+      "diagnostic_discriminator": "Recurrent congenital TMA, severe ADAMTS13 deficiency without inhibitory antibody",
+      "treatment_overview": "ADAMTS13 replacement using plasma or recombinant product as available",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-009",
+      "name": "Complement-mediated hemolytic uremic syndrome",
+      "pathogenesis": "Alternative complement dysregulation causing endothelial TMA",
+      "diagnostic_discriminator": "MAHA/thrombocytopenia with kidney injury; exclude STEC-HUS and TTP",
+      "treatment_overview": "Prompt specialist assessment and complement inhibition for selected cases",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-010",
+      "name": "von Willebrand disease",
+      "pathogenesis": "Deficient or dysfunctional VWF impairs platelet adhesion and FVIII stabilization",
+      "diagnostic_discriminator": "Mucocutaneous bleeding, VWF antigen/activity and FVIII testing",
+      "treatment_overview": "Tranexamic acid, desmopressin for responsive types, VWF concentrates when needed",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-011",
+      "name": "Hemophilia A",
+      "pathogenesis": "Inherited FVIII dysfunction impairing intrinsic tenase",
+      "diagnostic_discriminator": "Deep-tissue or joint bleeding; low FVIII, isolated aPTT sometimes prolonged",
+      "treatment_overview": "FVIII prophylaxis or nonfactor approaches; inhibitor-aware care",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-012",
+      "name": "Hemophilia B",
+      "pathogenesis": "Inherited FIX deficiency impairing intrinsic tenase",
+      "diagnostic_discriminator": "Joint and muscle hemorrhage; low FIX activity",
+      "treatment_overview": "FIX replacement/prophylaxis and individualized emerging therapies",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-013",
+      "name": "Glanzmann thrombasthenia",
+      "pathogenesis": "ITGA2B/ITGB3 defect impairs GPIIb/IIIa platelet aggregation",
+      "diagnostic_discriminator": "Normal platelet count with impaired aggregation except ristocetin response",
+      "treatment_overview": "Local hemostasis, antifibrinolytics, selected platelets/rFVIIa",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-014",
+      "name": "Bernard–Soulier syndrome",
+      "pathogenesis": "Platelet GPIb-IX-V defect impairs VWF-mediated adhesion",
+      "diagnostic_discriminator": "Macrothrombocytopenia, absent ristocetin agglutination not rescued by plasma",
+      "treatment_overview": "Supportive hemostasis; platelet therapy for severe bleeding",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-015",
+      "name": "Polycythemia vera",
+      "pathogenesis": "JAK2-driven clonal erythrocytosis",
+      "diagnostic_discriminator": "Elevated Hct/RBC mass, JAK2, low EPO, panmyelosis on marrow",
+      "treatment_overview": "Risk-adapted phlebotomy, low-dose aspirin if suitable, cytoreduction for high-risk",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-016",
+      "name": "Essential thrombocythemia",
+      "pathogenesis": "Clonal JAK2/CALR/MPL megakaryocytic proliferation",
+      "diagnostic_discriminator": "Sustained platelets, enlarged hyperlobulated megakaryocytes; exclude pre-PMF",
+      "treatment_overview": "Risk-adapted antithrombotic and cytoreductive strategies",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-017",
+      "name": "Primary myelofibrosis",
+      "pathogenesis": "Clonal inflammatory megakaryocytic disease promotes reticulin/collagen fibrosis",
+      "diagnostic_discriminator": "Leukoerythroblastosis, teardrop RBC, dry tap/fibrosis; pre-PMF vs overt",
+      "treatment_overview": "Symptom-directed JAK inhibitors, anemia/spleen treatment, selected allo-HSCT",
+      "external_ontology_ids": null
+    },
+    {
+      "id": "AXOM-HEM-018",
+      "name": "Myelodysplastic neoplasms",
+      "pathogenesis": "Clonal ineffective dysplastic hematopoiesis with leukemia risk",
+      "diagnostic_discriminator": "Persistent cytopenias, multilineage dysplasia, marrow/blast/molecular classification",
+      "treatment_overview": "Risk-adapted supportive/transfusion, hypomethylators, lenalidomide for del5q and transplant",
+      "external_ontology_ids": null
+    }
+  ],
+  "guideline_sources": [
+    "https://ashpublications.org/bloodadvances/",
+    "https://www.isth.org/",
+    "https://b-s-h.org.uk/guidelines",
+    "https://www1.wfh.org/publications/files/pdf-1863.pdf",
+    "https://www.cancer.gov/types/myeloproliferative",
+    "https://www.onkopedia-guidelines.info/"
+  ],
+  "next_actions": [
+    "Import full MONDO OBO and reconcile all named concept candidates, then Orphanet and ICD-11",
+    "Append new verified specialist disease entries without repeating AXOM IDs",
+    "Acquire actual licensed pathology binaries and embed with figure-specific provenance",
+    "Peer-review treatments against dated current guidance before public/clinical use",
+    "Persist full binary document to writeable durable destination when access is granted"
+  ]
+}
