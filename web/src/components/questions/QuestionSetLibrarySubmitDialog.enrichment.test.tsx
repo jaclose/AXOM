@@ -150,6 +150,26 @@ describe("Question Set draft explanation review", () => {
     expect(await screen.findByText(/questions changed/)).toBeTruthy();
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
   });
+  it("refuses saving AI explanations when original source evidence is revoked without updating the question timestamp", async () => {
+    const source = question({
+      citation: "Authoritative text, page 4",
+      extraction: { confidence: "high", reviewed: true, answerEvidence: "Marked answer A" },
+    });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    mocks.workspace.questions = [{ ...source, extraction: {
+      ...source.extraction!, reviewed: false,
+    } }];
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/questions changed/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("rejects a previously reviewed question if its live answer becomes held before submission", async () => {
     const source = question({ explanation: "The tunica media is the arterial smooth muscle layer, important for contraction and resistance." });
     mocks.workspace.questions = [source];
