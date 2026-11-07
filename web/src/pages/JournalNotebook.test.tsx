@@ -160,6 +160,29 @@ describe("Journal notebook foundation", () => {
     expect(entry?.freeWriting).toBe(text);
   });
 
+  it("keeps the writing page open when keyboard focus reopens it during desk close", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Put book down" }));
+    expect(screen.getByRole("region", { name: "Write at your desk" }).className).toContain("is-closing");
+
+    // Pointer events on the closing book are disabled in CSS, but a focused
+    // button remains keyboard-activatable during the 900ms animation.
+    const reopen = screen.getByRole("button", { name: "Write full page" });
+    reopen.focus();
+    fireEvent.click(reopen);
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Continue writing after reopening." } });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1100); });
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
+      .toBe("Continue writing after reopening.");
+  });
+
   it("offers an explicit put-down and closes when the surrounding desk is clicked", async () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
