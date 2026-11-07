@@ -7,12 +7,14 @@ import { STORAGE_KEYS } from "./brand";
  * Legacy unscoped markers are not evidence of a workspace save.
  */
 export type VaultWriteTarget = "indexeddb" | "local-fallback";
-/** v2 prevents old auxiliary cache writes from impersonating workspace saves. */
-const WORKSPACE_WRITE_MARKER_VERSION = 2 as const;
+/** v3 isolates account-scoped receipts from older v2 clients that ignore accountId. */
+const WORKSPACE_WRITE_MARKER_VERSION = 3 as const;
+/** Historical v2 receipts are readable only for signed-out, local-only use. */
+const LEGACY_LOCAL_WRITE_MARKER_VERSION = 2 as const;
 export interface VaultWriteRecord {
   at: string;
   target: VaultWriteTarget;
-  version: typeof WORKSPACE_WRITE_MARKER_VERSION;
+  version: typeof WORKSPACE_WRITE_MARKER_VERSION | typeof LEGACY_LOCAL_WRITE_MARKER_VERSION;
   scope: "workspace";
   /** Supabase account UUID when a signed-in learner wrote this workspace. */
   accountId?: string;
@@ -225,18 +227,20 @@ function readStoredWorkspaceMarker(raw: string | null): VaultWriteRecord | null 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const marker = parsed as Record<string, unknown>;
     if (
-      marker.version !== WORKSPACE_WRITE_MARKER_VERSION ||
+      (marker.version !== WORKSPACE_WRITE_MARKER_VERSION &&
+        !(vaultAccountId === null && marker.version === LEGACY_LOCAL_WRITE_MARKER_VERSION && marker.accountId === undefined)) ||
       marker.scope !== "workspace" ||
       typeof marker.at !== "string" ||
       !Number.isFinite(Date.parse(marker.at)) ||
       (marker.target !== "indexeddb" && marker.target !== "local-fallback") ||
-      // Legacy unscoped v2 markers cannot confirm a signed-in account's save.
+      // A signed-in account requires a v3 receipt with the exact account identity.
+      // Historical unscoped v2 receipts are never trusted while signed in.
       (vaultAccountId ? marker.accountId !== vaultAccountId : marker.accountId !== undefined)
     ) return null;
     return {
       at: marker.at,
       target: marker.target,
-      version: WORKSPACE_WRITE_MARKER_VERSION,
+      version: marker.version as VaultWriteRecord["version"],
       scope: "workspace",
       ...(vaultAccountId ? { accountId: vaultAccountId } : {}),
     };
