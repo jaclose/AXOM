@@ -48,6 +48,7 @@ beforeAll(async () => {
     "20261101191000_operator_console.sql",
     "20261102160000_operator_privacy_audit_hardening.sql",
     "20261104120000_operator_accounts_email_text.sql",
+    "20261107190000_operator_audit_cursor.sql",
   ]) {
     await db.exec(readFileSync(new URL(`../../../../supabase/migrations/${name}`, import.meta.url), "utf8"));
   }
@@ -103,6 +104,30 @@ describe("forward Host privacy and audit hardening", () => {
     expect(overview.value.academic_review_pending).toBe(1);
     expect(overview.value.academic_approved).toBe(0);
     await expect(as(MODERATOR, "select * from public.academic_collections")).rejects.toThrow(/permission denied/);
+  });
+
+  it("pages owner audit records deterministically without leaking them to other roles", async () => {
+    const ids = [
+      "aaaabbbb-1111-4111-8111-aaaaaaaaaaaa",
+      "aaaabbbb-2222-4222-8222-bbbbbbbbbbbb",
+      "aaaabbbb-3333-4333-8333-cccccccccccc",
+    ];
+    for (let i = 0; i < ids.length; i++) {
+      await db.query("insert into public.axom_operator_audit(id,actor_id,action,metadata,created_at) values($1,$2,'audit.test','{}'::jsonb,$3)",
+        [ids[i], OWNER, `2026-11-07T0${i + 1}:00:00Z`]);
+    }
+    const first = await as<{ id: string; created_at: string }>(OWNER,
+      "select id,created_at from public.axom_operator_audit_page(2)");
+    expect(first.map((row) => row.id)).toEqual([ids[2], ids[1]]);
+    const older = await as<{ id: string }>(OWNER,
+      "select id from public.axom_operator_audit_page(2,$1,$2)", [first[1].created_at, first[1].id]);
+    expect(older.map((row) => row.id)).toContain(ids[0]);
+    expect(older.some((row) => first.some((newer) => newer.id === row.id))).toBe(false);
+    await expect(as(LEARNER, "select * from public.axom_operator_audit_page(30)")).rejects.toThrow(/owner/i);
+    await expect(as(MODERATOR, "select * from public.axom_operator_audit_page(30)")).rejects.toThrow(/owner/i);
+    await expect(as(null, "select * from public.axom_operator_audit_page(30)")).rejects.toThrow(/permission denied/);
+    await expect(as(OWNER, "select * from public.axom_operator_audit_page(0)")).rejects.toThrow(/page size/i);
+    await expect(as(OWNER, "select * from public.axom_operator_audit_page(2,$1,null)", [first[1].created_at])).rejects.toThrow(/cursor/i);
   });
 
   it("does not expose private posts to moderation and records a reason for decisions", async () => {
