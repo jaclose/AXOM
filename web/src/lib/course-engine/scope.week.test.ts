@@ -242,6 +242,60 @@ describe("verified primary-source progress attribution", () => {
     }
   });
 
+  it("holds duplicate originals whose later answer histories conflict despite equal first and current states", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const first = { at: "2026-11-06T00:00:00Z", status: "correct" as const };
+    const incorrect = { at: "2026-11-06T01:00:00Z", status: "incorrect" as const };
+    const correct = { at: "2026-11-06T01:00:00Z", status: "correct" as const };
+    const a = question("shared", { setId: "primary", ...filing,
+      attempts: [first, incorrect], status: "incorrect" });
+    const b = question("shared", { setId: "primary", ...filing,
+      attempts: [first, correct, incorrect], status: "incorrect" });
+    const before = JSON.stringify([a, b]);
+    for (const records of [[a, b], [b, a]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.deepEqual(progress, {
+        total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0,
+        questionIds: [], sourceReviewHeld: 1,
+      });
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+    // Timestamps are not an answer-history conflict: identical ordered
+    // statuses can be replayed from another device without double credit.
+    const replay = question("shared", { setId: "primary", ...filing,
+      attempts: [
+        { at: "2026-11-07T00:00:00Z", status: "correct" },
+        { at: "2026-11-07T01:00:00Z", status: "incorrect" },
+      ], status: "incorrect" });
+    assert.equal(scopeProgress([a, replay], filing, sets).total, 1);
+    assert.equal(scopeProgress([replay, a], filing, sets).sourceReviewHeld, undefined);
+    assert.equal(JSON.stringify([a, b]), before);
+  });
+
+  it("holds a malformed later attempt in a duplicate without crashing the week overview", () => {
+    // Older stored JSON accepts an attempts array without validating each
+    // member; a corrupt later member must not throw while checking duplicates.
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const first = { at: "2026-11-06T00:00:00Z", status: "correct" as const };
+    const malformedAttempts = [first, null] as unknown as QuestionRecord["attempts"];
+    const corrupt = question("shared", { setId: "primary", ...filing,
+      status: "correct", attempts: malformedAttempts });
+    const valid = question("shared", { setId: "primary", ...filing,
+      status: "correct", attempts: [first, { at: "2026-11-06T01:00:00Z", status: "correct" }] });
+    const before = JSON.stringify([corrupt, valid]);
+    for (const records of [[corrupt, valid], [valid, corrupt]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+    assert.equal(JSON.stringify([corrupt, valid]), before);
+  });
+
   it("counts equivalent cloned records once without holding legitimate source evidence", () => {
     const filing = { module: "NB2", week: 3, courseId: "core" };
     const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);

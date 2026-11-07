@@ -154,7 +154,10 @@ export function conflictingDuplicateIds(
     question.stem ?? null, question.options ?? null, question.content ?? null,
     question.questionNumber ?? null, question.sourcePage ?? null,
     own.courseId ?? null, canonicalModuleKey(own.module ?? ""), own.week ?? null,
-    question.status, question.attempts[0]?.status ?? null, question.attempts.length > 0,
+    // A duplicated original with different retake outcomes must be held even
+    // when both copies have the same first answer and current status.
+    // Ignore attempt timestamps: device-local replays can legitimately differ.
+    question.status, question.attempts.map((attempt) => attempt?.status ?? null),
   ]);
   for (const question of questions) {
     const first = firstById.get(question.id);
