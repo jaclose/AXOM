@@ -653,6 +653,13 @@
 }
 .soundscape-immersive-timer-toggle:hover { background: rgba(var(--accent-rgb), 0.32); transform: scale(1.045); }
 .soundscape-immersive-timer-toggle:focus-visible { outline: 3px solid rgb(var(--accent-rgb)); outline-offset: 4px; }
+
+.soundscape-immersive-stop {
+  margin: 12px 0 0;
+  color: rgba(241, 237, 228, 0.73);
+  font: 500 clamp(12px, 1vw, 17px) / 1.4 var(--font-ui);
+  letter-spacing: 0.025em;
+}
 .soundscape-immersive-timer-track {
   height: 3px; margin-top: clamp(16px, 1.5vw, 28px);
   overflow: hidden; border-radius: 99px;
