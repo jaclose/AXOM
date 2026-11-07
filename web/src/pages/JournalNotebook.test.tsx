@@ -536,6 +536,40 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("keeps unreadable feedback bytes recoverable rather than replacing them with an empty draft", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-unreadable-draft";
+    const account = { id: "journal-feedback-unreadable-account", email: "unreadable@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const unreadableBytes = '{"rating":4,"liked":"A private draft to recover",';
+    window.localStorage.setItem(draftKey, unreadableBytes);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+      expect(within(dialog).getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
+      expect(within(dialog).getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+      expect((within(dialog).getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+      const liked = within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement;
+      expect(liked.readOnly).toBe(true);
+      expect(window.localStorage.getItem(draftKey)).toBe(unreadableBytes);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
+      expect(window.localStorage.getItem(draftKey)).toBe(unreadableBytes);
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
   it("does not overwrite a newer feedback draft from another tab after an old editor types", () => {
     const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const previousProfile = useStore.getState().profile;
