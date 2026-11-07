@@ -1517,6 +1517,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   const [draft, setDraft] = useState(loaded.draft);
   const persistedRevisionRef = useRef(loaded.revision);
   const persistedRawRef = useRef(loaded.raw);
+  const persistedDraftRef = useRef(loaded.draft);
   const [conflicted, setConflicted] = useState(loaded.unreadable);
   // Opening or remounting the dialog must never write a stale snapshot back
   // over a newer draft another tab saved between our read and first effect.
@@ -1540,8 +1541,13 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     try {
       if (sentId) {
         // An acknowledgement cannot erase another tab's newer or concurrent edit.
-        if (submittedReceiptRef.current)
-          window.localStorage.setItem(`${draftKey}:submitted`, submittedReceiptRef.current);
+        if (!submittedReceiptRef.current) {
+          // An explicit network receipt does not mean the latest text was
+          // retained locally. Keep the in-memory copy exportable until close.
+          setStorageError("Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing.");
+          return;
+        }
+        window.localStorage.setItem(`${draftKey}:submitted`, submittedReceiptRef.current);
       } else {
         // Do not overwrite a newer draft loaded by another tab since this
         // editor opened. Keep these in-memory edits available for export.
@@ -1557,6 +1563,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         window.localStorage.setItem(draftKey, serialized);
         persistedRawRef.current = serialized;
         persistedRevisionRef.current = revision;
+        persistedDraftRef.current = draft;
       }
       setStorageError("");
     } catch {
@@ -1571,13 +1578,15 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     if (draft.rating < 1) { setError("Choose a rating before sending."); return; }
     setSending(true);
     setError("");
-    submittedReceiptRef.current = persistedRevisionRef.current
-      ? `${persistedRevisionRef.current}:${journalFeedbackFingerprint(draft)}`
-      : persistedRawRef.current !== null
-        && journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(initialDraftRef.current)
-        // If an edit failed to persist, the original raw bytes were not sent.
-        // Do not acknowledge and hide the still-recoverable older draft.
-        ? `legacy:${journalFeedbackFingerprint(persistedRawRef.current)}` : null;
+    // The network receives the in-memory draft. A failed local write must
+    // not acknowledge an older revision as though it contained that draft.
+    const submittedContentWasSaved = persistedRawRef.current !== null
+      && journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(persistedDraftRef.current);
+    submittedReceiptRef.current = !submittedContentWasSaved ? null
+      : persistedRevisionRef.current
+        ? `${persistedRevisionRef.current}:${journalFeedbackFingerprint(draft)}`
+        : journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(initialDraftRef.current)
+          ? `legacy:${journalFeedbackFingerprint(persistedRawRef.current!)}` : null;
     try {
       setSentId(await submitJournalFeedback(user.id, draft));
     } catch (cause) {
@@ -1588,9 +1597,10 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
   }
 
   return (
-    <Modal title="How is the journal feeling?" onClose={onClose} className="journal-feedback-modal" footer={sentId ? (
+    <Modal title="How is the journal feeling?" onClose={onClose} className="journal-feedback-modal" footer={sentId ? (<>
+      <GButton onClick={() => downloadBlob("axom-journal-feedback-submitted.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download submitted copy</GButton>
       <GButton variant="primary" onClick={onClose}>Close</GButton>
-    ) : <>
+    </>) : <>
       {loaded.unreadable && loaded.raw !== null
         ? <GButton onClick={() => downloadBlob("axom-journal-feedback-unreadable.txt", new Blob([loaded.raw ?? ""], { type: "text/plain" }))}><Download size={ICON_SIZE.body} /> Download saved copy</GButton>
         : <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>}
@@ -1598,7 +1608,7 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
       <GButton variant="primary" disabled={!user || sending || conflicted} onClick={() => { void send(); }}>{sending ? "Sending…" : "Send feedback"}</GButton>
     </>}>
       {sentId ? (
-        <div className="journal-feedback-success" role="status"><CheckCircle2 size={ICON_SIZE.emphasis} /><b>Feedback received.</b><span>Thank you for helping shape the journal. Receipt {sentId.slice(0, 8)}.</span><span>Your saved local copy remains on this device to protect changes made in other tabs.</span>{storageError && <p role="alert">{storageError}</p>}</div>
+        <div className="journal-feedback-success" role="status"><CheckCircle2 size={ICON_SIZE.emphasis} /><b>Feedback received.</b><span>Thank you for helping shape the journal. Receipt {sentId.slice(0, 8)}.</span><span>{storageError ? "Keep an exported copy if you want to retain these answers." : "Your saved local copy remains on this device to protect changes made in other tabs."}</span>{storageError && <p role="alert">{storageError}</p>}</div>
       ) : <>
         <p className="sub">Tell us about the journal experience only. AXOM does not attach your entries, images, or study records. Sending happens only when you press Send feedback.</p>
         <fieldset className="journal-rating-fieldset">
