@@ -72,6 +72,11 @@ export function verifySourceIntegration(manifest, readFile) {
 export function readGitFile(sha, path, cwd = process.cwd()) {
   validSha(sha, "Git revision");
   validPath(path);
+  // A tree object can have the same blobs while not being the reviewed commit.
+  // Prove each claimed revision is an actual commit object, not just 40 hex digits.
+  const kind = execFileSync("git", ["cat-file", "-t", sha],
+    { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  if (kind !== "commit") throw new Error("Expected pinned commit object: " + sha);
   const output = execFileSync("git", ["ls-tree", "-r", "--full-tree", sha, "--", path],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trimEnd();
   const rows = output ? output.split("\n") : [];

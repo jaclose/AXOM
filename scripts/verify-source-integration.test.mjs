@@ -58,6 +58,8 @@ test("checks real Git commit objects and fails closed on a changed integrated fi
   git("add", "--", "docs");
   commit("pinned source");
   const sourceSha = git("rev-parse", "HEAD");
+  const sourceTreeSha = git("rev-parse", sourceSha + "^{tree}");
+  assert.throws(() => readGitFile(sourceTreeSha, "docs/proof.txt", cwd), /Expected pinned commit object/);
   writeFileSync(join(cwd, "docs", "other.txt"), "second\n");
   git("add", "--", "docs/other.txt");
   commit("integration");
