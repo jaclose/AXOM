@@ -11,7 +11,7 @@ import { GButton, Tag } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 
 const STANDARD: Array<{
-  kind: DailySuccessSource["kind"];
+  kind: Exclude<QuickGoalKind, "custom">;
   label: string;
   target: number;
   unit: string;
