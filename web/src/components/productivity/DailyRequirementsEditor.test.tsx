@@ -87,6 +87,14 @@ describe("Quick goal creation and check-off", () => {
     expect(currentRequirement().manualContributions?.at(-1)?.value).toBe(0);
   });
 
+  it("edits a goal directly and starts the changed target today", () => {
+    render(<DailyRequirementsEditor />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Focused study goal" }));
+    fireEvent.change(screen.getByLabelText("Change goal amount"), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update goal" }));
+    expect(currentRequirement()).toMatchObject({ target: 90, trackingStartsAt: today });
+  });
+
   it("does not offer duplicate standard goals in the quick form", () => {
     render(<DailyRequirementsEditor />);
     fireEvent.click(screen.getByRole("button", { name: "Add a goal" }));
