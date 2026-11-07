@@ -1461,6 +1461,19 @@ function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
     if (!value || typeof value !== "object" || Array.isArray(value))
       return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true };
     const record = value as Record<string, unknown>;
+    // Preserve any unsupported or future-version draft verbatim rather than
+    // converting its unknown/private fields into an editable lossy snapshot.
+    const textLimits: Record<string, number> = { liked: 1000, wantMore: 1000, missing: 1000, painPoints: 1000, comment: 2000 };
+    const allowedFields = ["rating", ...Object.keys(textLimits), "__axomRevision"];
+    const invalidRating = "rating" in record
+      && (!Number.isInteger(record.rating) || Number(record.rating) < 0 || Number(record.rating) > 5);
+    const invalidRevision = "__axomRevision" in record
+      && (typeof record.__axomRevision !== "string" || !/^[a-f0-9]{32}$/.test(record.__axomRevision));
+    const invalidText = Object.entries(textLimits).some(([field, max]) =>
+      field in record && (typeof record[field] !== "string" || (record[field] as string).length > max));
+    if (Object.keys(record).some((field) => !allowedFields.includes(field))
+      || invalidRating || invalidRevision || invalidText)
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true };
     const draft: JournalExperienceFeedbackInput = {
       rating: Number.isInteger(record.rating) && Number(record.rating) >= 1 && Number(record.rating) <= 5 ? Number(record.rating) : 0,
       liked: typeof record.liked === "string" ? record.liked.slice(0, 1000) : "",

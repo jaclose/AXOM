@@ -536,6 +536,80 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("preserves unsupported valid-JSON feedback during editing attempts and reopening", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-unsupported-schema";
+    const account = { id: "journal-feedback-unsupported-account", email: "unsupported@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const examples = [
+      { rating: "4", liked: { private: "Keep nested writing" }, comment: "Keep me", futureVersion: 9 },
+      { rating: 4, liked: "Current draft", futureVersion: 2 },
+      { rating: 4, liked: "x".repeat(1001), comment: "Oversized content must survive" },
+      { rating: 4, liked: "Keep revision metadata", __axomRevision: "invalid-revision" },
+      { rating: 4, liked: null, comment: "Wrong-typed field" },
+    ];
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      for (const example of examples) {
+        const raw = JSON.stringify(example);
+        window.localStorage.setItem(draftKey, raw);
+        render(<JournalPage />);
+        fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+        const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+        expect(within(dialog).getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
+        expect(within(dialog).getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+        expect((within(dialog).getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+        const liked = within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement;
+        expect(liked.readOnly).toBe(true);
+        fireEvent.change(liked, { target: { value: "Attempted edit must not erase original bytes" } });
+        expect(window.localStorage.getItem(draftKey)).toBe(raw);
+        fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
+        fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+        expect(screen.getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+        expect(window.localStorage.getItem(draftKey)).toBe(raw);
+        cleanup();
+      }
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("keeps known-field legacy partial feedback editable without a schema migration", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-valid-legacy-partial";
+    const account = { id: "journal-feedback-legacy-account", email: "legacy@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const legacyDraft = JSON.stringify({ rating: 4, liked: "Original legacy text" });
+    window.localStorage.setItem(draftKey, legacyDraft);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+      expect(within(dialog).queryByRole("alert")).toBeNull();
+      expect((within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Original legacy text");
+      expect(window.localStorage.getItem(draftKey)).toBe(legacyDraft);
+      fireEvent.change(within(dialog).getByLabelText("What do you like?"), { target: { value: "Original legacy text, continued" } });
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}")).toMatchObject({
+        rating: 4, liked: "Original legacy text, continued",
+      });
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
   it("keeps unreadable feedback bytes recoverable rather than replacing them with an empty draft", () => {
     const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const previousProfile = useStore.getState().profile;
