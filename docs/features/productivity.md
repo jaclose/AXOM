@@ -58,6 +58,41 @@ review of provenance. Focus elapsed time and daily weighted-target progress
 are different measurements; neither is a mastery claim. Current and historical
 views preserve separate evidence and the historical view is read-only.
 
+## AXOM V3 recurring personal goals (draft)
+
+Personal rhythms share existing Habit receipts, tracker logs, and target
+projections; they do **not** create a second event or grant synthetic minutes.
+The `goalCadence.ts` selectors provide two recurrence forms:
+
+- **Flexible weekly:** one distinct local training day is counted once, whether
+  reported through Habit Tracker or explicitly linked tracker activity. Minimum
+  and preferred thresholds are separate; rest days are not missed days. Weeks
+  begin Monday. Partial initial weeks are capped to available local days.
+  Completed-week thresholds are effective-dated in `Habit.weeklyRevisions`
+  when updated, so prior weeks retain their original contract.
+- **Named daily occurrences:** a single `HabitEntry` per local date stores
+  separate `slotCheckIns` keyed by stable slot IDs. `setHabitSlot` upserts
+  or clears only the selected occurrence and is idempotent. Unreported does not
+  mean missed. The prayer template supplies five labels only, never predicted
+  times, externally inferred completions, or spiritual judgments.
+
+`Productivity/CadenceGoals.tsx` and `HabitTrackerPage.tsx` operate on the
+same Habit and HabitEntry IDs. `Reports/CadenceGoalReport.tsx` is a read-only
+projection and includes only habits explicitly marked `includeInReports`.
+Sensitive named personal routines default to private and absent from Reports;
+that checkbox does not authorize community sharing or external sync.
+
+Daily academic scoring and the 80% streak/credit denominator intentionally
+exclude unfinished `times-per-week` requirements; weekly results appear in
+their cadence-specific view. The generic self-report form does not classify
+an unlinked entry as academic study; an explicitly selected academic tracker
+or the deliberate `logStudy` path provides that attribution.
+
+Existing `HabitEntry` and `StudyLog` history is preserved; V3 fields are
+additive. Cross-device reconciliation of simultaneous edits, rollback through
+older clients, and authenticated cloud acceptance remain distinct release
+requirements, not properties proved by component tests.
+
 ## Study streak and credits
 
 The Productivity streak uses the same `evaluateDailySuccess(...).progress` percentage
