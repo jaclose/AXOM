@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BarChart3, CircleAlert, Crown, Download, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import {
-  loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, useAccountIdentity,
-  type OperatorAccount, type OperatorDashboard,
+  loadOperatorAuditPage, loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, useAccountIdentity,
+  type OperatorAccount, type OperatorAudit, type OperatorDashboard,
 } from "../lib/operator/hostClient";
 import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { auditCsv, filterHostAudit } from "../lib/operator/hostAuditExport";
@@ -43,9 +43,19 @@ function HostAccountPage() {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [reportReasons, setReportReasons] = useState<Record<string, string>>({});
   const [auditQuery, setAuditQuery] = useState("");
+  const [olderAudit, setOlderAudit] = useState<OperatorAudit[]>([]);
+  const [auditHasMore, setAuditHasMore] = useState<boolean | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const auditGeneration = useRef(0);
   useEffect(() => {
     let alive = true;
     setDashboard(undefined);
+    auditGeneration.current++;
+    setOlderAudit([]);
+    setAuditHasMore(null);
+    setAuditError("");
+    setAuditLoading(false);
     if (!userId) { setLoading(false); return; }
     setLoading(true); setError("");
     void loadOperatorDashboard(userId).then(value => { if (alive) setDashboard(value); })
@@ -67,7 +77,28 @@ function HostAccountPage() {
   const attentionCount = (dashboard?.overview?.academic_review_pending ?? 0) + (dashboard?.overview?.reports_pending ?? 0);
   const canManageAccounts = owner || role === "admin";
   const normalizedSearch = search.trim();
-  const visibleAudit = filterHostAudit(dashboard?.audit ?? [], auditQuery);
+  const loadedAudit = [...(dashboard?.audit ?? []), ...olderAudit];
+  const visibleAudit = filterHostAudit(loadedAudit, auditQuery);
+  const canLoadOlderAudit = owner && dashboard?.audit.length === 30 && auditHasMore !== false;
+  async function loadOlderAudit() {
+    const last = loadedAudit[loadedAudit.length - 1];
+    if (!owner || !userId || !dashboard || !last || !canLoadOlderAudit || auditLoading) return;
+    const generation = auditGeneration.current;
+    setAuditLoading(true); setAuditError("");
+    try {
+      const next = await loadOperatorAuditPage(userId, { id: last.id, createdAt: last.created_at }, 30);
+      if (generation !== auditGeneration.current) return;
+      setOlderAudit((current) => {
+        const seen = new Set([...dashboard.audit, ...current].map((item) => item.id));
+        return [...current, ...next.audit.filter((item) => !seen.has(item.id))];
+      });
+      setAuditHasMore(next.hasMore);
+    } catch (reason) {
+      if (generation === auditGeneration.current) setAuditError(reason instanceof Error ? reason.message : "Older audit history could not load.");
+    } finally {
+      if (generation === auditGeneration.current) setAuditLoading(false);
+    }
+  }
   function jumpToHostSection(id: string) {
     document.getElementById(id)?.scrollIntoView({
       behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
@@ -285,7 +316,9 @@ function HostAccountPage() {
             </label>
             <GButton size="sm" disabled={visibleAudit.length === 0} onClick={exportAudit}><Download size={15} aria-hidden="true" /> Export visible CSV</GButton>
           </div>
-          <p className="sub" role="status">Showing {visibleAudit.length} of {dashboard.audit.length} recently fetched events (maximum 30). This is not a complete audit history.</p>
+          <p className="sub" role="status">{olderAudit.length
+            ? `Showing ${visibleAudit.length} of ${loadedAudit.length} loaded events. This is a partial audit history.`
+            : `Showing ${visibleAudit.length} of ${dashboard.audit.length} recently fetched events (maximum 30). This is not a complete audit history.`}</p>
           {dashboard.audit.length === 0 && <p className="sub">No privileged changes yet.</p>}
           {dashboard.audit.length > 0 && visibleAudit.length === 0 && <p className="sub">No recent events match this filter.</p>}
           {visibleAudit.map(item => <div className="host-audit" key={item.id}>
@@ -293,6 +326,11 @@ function HostAccountPage() {
             <small>Actor: {item.actor_id?.slice(0,8) ?? "Deleted account"} · Target: {item.target_id?.slice(0,8) ?? "none"}</small>
             {typeof item.metadata.reason === "string" && <p className="sub">{item.metadata.reason}</p>}
           </div>)}
+          {auditError && <p className="host-warning" role="alert">{auditError}</p>}
+          {canLoadOlderAudit && <GButton size="sm" disabled={auditLoading} onClick={() => void loadOlderAudit()}>
+            {auditLoading ? "Loading older actions…" : "Load older actions"}
+          </GButton>}
+          {auditHasMore === false && <p className="sub">No older audit receipts remain in this server query.</p>}
         </GlassCard>}
       </aside>
     </div>}
