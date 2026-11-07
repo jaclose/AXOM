@@ -7,7 +7,7 @@
 import type { Habit, HabitEntry, HabitCheckStatus, HabitType } from "./types";
 import { isoDate } from "./scoring";
 import { addLocalDays, localDateKey } from "./dailyRollover";
-import { namedSlotProgress, weeklyHabitSummary, weekStartKey } from "./goalCadence";
+import { namedSlotProgress, weeklyHabitSummary } from "./goalCadence";
 import type { StudyLog } from "./types";
 
 export const HABIT_TYPE_META: Record<HabitType, { label: string; hint: string; needsTarget: boolean }> = {
