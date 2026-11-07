@@ -1,12 +1,10 @@
 import { useEffect, useRef } from "react";
 import type { SoundscapeVisual as VisualKind } from "../../lib/soundscapes/presets";
 import { soundscapeAnalyser } from "../../lib/soundscapes/store";
+import { canvasPixelRatio } from "../../lib/soundscapes/canvasQuality";
 import { useReducedMotion } from "../../lib/motion";
 import { VISUAL_RENDERERS, type VisualColors } from "./visuals";
 import { rgbChannels, shaderRenderer } from "./shaders";
-
-/** GPU visuals render at up to this device-pixel ratio and are scaled up smoothly. */
-const SHADER_MAX_RATIO = 1.25;
 
 function paletteColors(): VisualColors {
   const style = getComputedStyle(document.documentElement);
@@ -23,7 +21,7 @@ function paletteColors(): VisualColors {
  * `animate` is true; reduced motion draws one still frame. Colors follow the
  * active palette (re-read when the theme or palette changes).
  */
-export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, reactive = false, className = "", label }: {
+export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, reactive = false, immersive = false, className = "", label }: {
   visual: VisualKind;
   /** A second scene blended on top (screen), e.g. rain over the lattice. */
   overlay?: VisualKind;
@@ -31,6 +29,8 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
   animate: boolean;
   /** Follow the live audio level (only for the preset that is playing). */
   reactive?: boolean;
+  /** Native display pixels, up to 8K UHD, in fullscreen only. */
+  immersive?: boolean;
   className?: string;
   label?: string;
 }) {
@@ -51,8 +51,8 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
     const draw = VISUAL_RENDERERS[visual];
 
     const resize = () => {
-      const ratio = Math.min(2, window.devicePixelRatio || 1);
       const { width, height } = canvas.getBoundingClientRect();
+      const ratio = canvasPixelRatio(width, height, window.devicePixelRatio || 1, immersive);
       canvas.width = Math.max(1, Math.round(width * ratio));
       canvas.height = Math.max(1, Math.round(height * ratio));
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -73,7 +73,7 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
         level += (target - level) * 0.04;
       }
       const t = (now - started) / 1000;
-      const ratio = Math.min(SHADER_MAX_RATIO, window.devicePixelRatio || 1);
+      const ratio = canvasPixelRatio(width, height, window.devicePixelRatio || 1, immersive);
       context.save();
       context.setTransform(1, 0, 0, 1, 0, 0);
       const drawn = shaderRenderer.draw(visual, Math.max(1, Math.round(width * ratio)), Math.max(1, Math.round(height * ratio)), {
@@ -93,7 +93,7 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
           time: t + 7, level, accent: rgbChannels(colors.accent), cool: rgbChannels(colors.cool), hi: rgbChannels(colors.hi),
         }, context);
         if (!overlaid) {
-          const scale = Math.min(2, window.devicePixelRatio || 1);
+          const scale = ratio;
           context.setTransform(scale, 0, 0, scale, 0, 0);
           VISUAL_RENDERERS[overlay]({ ctx: context, width, height, t: t + 7, level, colors });
         }
@@ -137,7 +137,7 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
       window.removeEventListener("axom:palette-change", onPalette);
       window.removeEventListener("axom:theme-change", onPalette);
     };
-  }, [visual, overlay, overlayMix, animate, reactive, reduced]);
+  }, [visual, overlay, overlayMix, animate, reactive, immersive, reduced]);
 
   return <canvas ref={canvasRef} className={`soundscape-visual ${className}`} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true} />;
 }
