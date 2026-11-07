@@ -800,7 +800,7 @@ export const useStore = create<Store>()(
       setHabitSlot: (habitId, date, slotId, status) =>
         set((s) => {
           const habit = (s.habits ?? []).find((item) => item.id === habitId && item.type === "slots" && !item.archived);
-          if (!habit?.occurrenceSlots?.some((slot) => slot.id === slotId) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) return {};
+          if (!habit?.occurrenceSlots?.some((slot) => slot.id === slotId) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return {};
           const entries = s.habitEntries ?? [];
           const old = entries.find((item) => item.habitId === habitId && item.date === date);
           const previous = old?.slotCheckIns ?? [];
