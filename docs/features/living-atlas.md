@@ -1,18 +1,18 @@
-# AXOM Living Atlas: Forty Academic Companions
+# AXOM Living Atlas: 25 Academic Companions
 
 Status: **design prototype, not production onboarding, email automation or a shipped companion system**.
 
 ## Purpose and visual contract
 
 The Living Atlas assigns a recognizable, optional fictional academic companion
-to an individual learner. Its 40 curated identities belong to eight orders:
-Architects (structure), Seekers (inquiry), Sentinels (discrimination), Keepers
-(memory and reflection), Alchemists (creative synthesis), Wayfinders
-(adaptation), Wardens (sustainable effort), and Luminaries (purpose and
-leadership). Each order has five **unique** characters, not generic skins.
+to an individual learner. Its 25 active identities belong to five orders:
+Architects (structure), Investigators (reasoning and evidence), Alchemists
+(creative synthesis), Wayfinders (adaptation and action), and Wardens
+(sustainable effort). Each order has five distinct companions.
 
-The proposed visual and storytelling reference is the 54-page *AXOM: The Forty - Companions
-of the Living Atlas* character bible, which still awaits owner review and approval. Character
+The forty-character creative bible remains a historical source. The active V3
+selection is curated to twenty-five IDs; fifteen retired characters remain in
+an archival registry for compatibility and must never be silently reassigned. Character
 names, canonical IDs, silhouettes, pronunciation, taxonomy, myths, academic
 strengths and limitations, strengths, rituals, movement, and image-generation
 prompts should be imported from a **versioned, reviewed record** before
@@ -24,13 +24,22 @@ Graphite, Bone and restrained Gold; selected personal accents are not alternate
 logo colors. Email and product interfaces use actual source assets and
 accessible, independent typography.
 
-## Selection model: eight orders and forty identities
+## V3 assessment source and proposal boundary
+
+- The active identity catalog is 25 in web/src/lib/communications/correspondents.ts.
+- New original 30-item questionnaire and six academic preference axes, scoring, 25 centroids, and non-operative AXOM suggestions are in web/src/lib/communications/learningPreferences25.ts.
+- Every axis has five questions, including reversed items. An early reading requires at least three per axis, or eighteen in total.
+- The fit index is a weighted scaled distance, not a psychological probability, academic ability prediction or percentile.
+- Companion selection and any layout changes require explicit learner approval. The companion is voluntary and user-owned.
+- This branch does not enable production Resend, Supabase migrations, marketing subscription, or Journal analysis.
+
+## Selection model: five orders and twenty-five identities
 
 Selection is a preference match for a *fictional guide*, never a measured
 personality classification or prediction of clinical skill. The user can
 choose an identity or decline the feature.
 
-The V2 proof-of-concept deliberately scores only:
+The historical V2 studio matched only:
 - explicitly selected academic order (strong evidence for a preference);
 - directly declared study methods, e.g. visual, mechanism, planning, writing;
 - self-chosen pace and preferred encouragement/challenge style;
