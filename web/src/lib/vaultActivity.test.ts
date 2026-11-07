@@ -222,6 +222,32 @@ describe("optional marker storage quota boundaries", () => {
     },
   );
 
+  it("rejects stale prior metadata when a newer quota-only write has no channel, then permits immediate recovery", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
+    Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: undefined });
+    const previous = { at: "2026-11-06T19:59:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(previous));
+    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    const nativeSet = Storage.prototype.setItem;
+    const reject = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+      if (key === markerKey) throw new Error("simulated metadata-only quota");
+      return nativeSet.call(this, key, value);
+    });
+    try {
+      markVaultWrite("indexeddb", new Date(savedAt));
+      expect(readLastVaultWrite()).toBeNull();
+      expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual(previous);
+    } finally {
+      reject.mockRestore();
+      if (descriptor) Object.defineProperty(window, "BroadcastChannel", descriptor);
+      else Reflect.deleteProperty(window, "BroadcastChannel");
+    }
+    // The next successful marker write should work even within the old 1s throttle.
+    markVaultWrite("indexeddb", new Date(Date.parse(savedAt) + 100));
+    expect(readLastVaultWrite()?.at).toBe("2026-11-06T20:00:00.100Z");
+    expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null").at).toBe("2026-11-06T20:00:00.100Z");
+  });
+
 });
 
 describe("independent-review save-marker regressions", () => {

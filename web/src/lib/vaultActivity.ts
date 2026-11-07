@@ -92,7 +92,15 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
       // AND cross-tab invalidation we cannot trust an unqualified green badge.
       // Fail closed on status only; never remove or repeat the workspace write.
       memoryOnlyConfirmedWrite = statusChannel !== null;
-      if (!memoryOnlyConfirmedWrite) lastWrite = null;
+      if (!memoryOnlyConfirmedWrite) {
+        lastWrite = null;
+        // Reject an earlier valid marker: it describes an older workspace,
+        // not the quota-only write that just completed. Do not throttle the
+        // next confirmed write's attempt to restore persistent evidence.
+        lastPersistedAt = 0;
+        statusInvalidated = true;
+        invalidatedMarkerValue = rawStoredMarker();
+      }
     }
   }
   if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
