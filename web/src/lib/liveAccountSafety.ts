@@ -29,6 +29,17 @@ export function dedicatedLiveProjectUrl(rawUrl: string | undefined, expectedRef:
   return parsed.origin;
 }
 
+/** Disallow network calls from a reused dev server aimed at a different Supabase project. */
+export function permitsSupabaseRequest(requestUrl: string, dedicatedOrigin: string): boolean {
+  try {
+    const requested = new URL(requestUrl);
+    if (requested.hostname.endsWith(".supabase.co")) return requested.origin === dedicatedOrigin;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function assertUnusedEmail(
   email: string,
   fetchPage: (page: number, perPage: number) => Promise<{
