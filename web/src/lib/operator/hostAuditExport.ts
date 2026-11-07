@@ -20,7 +20,8 @@ function cell(raw: unknown): string {
     if (code > 0x20 && code !== 0xfeff) break;
     firstVisible++;
   }
-  const safe = "=+-@".includes(value[firstVisible] ?? "") ? `'${value}` : value;
+  const leading = value[firstVisible];
+  const safe = leading !== undefined && "=+-@".includes(leading) ? `'${value}` : value;
   return /[",\r\n]/u.test(safe) ? `"${safe.replace(/"/gu, '""')}"` : safe;
 }
 
