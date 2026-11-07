@@ -150,7 +150,6 @@ export function ProductivityPage() {
 
   return (
     <>
-      <ProductivitySaveStatus status={saveStatus} />
       <div className="productivity-primary-grid">
       <GlassCard pad id="productivity-log" data-tour="log" data-module-tour="productivity-log">
         <PanelHeader
@@ -195,6 +194,7 @@ export function ProductivityPage() {
               <label className="fast-field fast-activity-note"><span>Note (optional)</span><input className="field" aria-label="Note (optional)" placeholder="Add context if it will help later" value={manualNote} onChange={(event) => setManualNote(event.target.value)} /></label>
               <GButton variant="primary" type="submit" disabled={!manualType.trim()}><Plus size={ICON_SIZE.body} /> Log</GButton>
             </form>
+            <ProductivitySaveStatus status={saveStatus} />
             {lastSelfReport && <p className="self-report-confirmation" role="status">
               Activity added. Your save status appears above.
             </p>}
