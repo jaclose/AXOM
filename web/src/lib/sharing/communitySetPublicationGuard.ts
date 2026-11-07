@@ -34,8 +34,10 @@ function sourceReceipt(question: QuestionRecord): string {
   // that evidence separately so a revoked source check cannot be published using
   // the answers-confirmed checkbox from an earlier revision.
   return JSON.stringify([
-    question.updatedAt, question.source, question.sourceDocumentId,
+    question.updatedAt, question.createdAt, question.source, question.sourceDocumentId,
     question.sourcePage, question.questionNumber, question.sourceFile,
+    question.courseId, question.module, question.week, question.bank, question.setId,
+    question.objective, question.taxonomy,
     question.extraction, question.needsReview, question.ai,
   ]);
 }
