@@ -35,6 +35,9 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
   label?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Keep one timeline as fullscreen changes canvas resolution and restarts
+  // the drawing effect. Reinitializing the shader clock makes the scene jump.
+  const startedRef = useRef(performance.now() - 12_000);
   const reduced = useReducedMotion();
 
   useEffect(() => {
@@ -47,7 +50,7 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
     let level = 0;
     let samples = new Uint8Array(0);
     let lastPaint = 0;
-    const started = performance.now() - 12_000;
+    const started = startedRef.current;
     const draw = VISUAL_RENDERERS[visual];
 
     const resize = () => {
