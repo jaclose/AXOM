@@ -132,6 +132,18 @@ describe("course to canonical quiz handoff", () => {
     }
   });
 
+  it("fails closed with recovery guidance when saved storage access is blocked", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
+    const currentHash = location.hash;
+    vi.stubGlobal("localStorage", { getItem: () => { throw new Error("storage denied"); } });
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBeNull();
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("storage denied"); } });
+    expect(() => launchCourseQuiz(selection)).toThrow(/saved Question Bank session cannot be read/);
+    expect(location.hash).toBe(currentHash);
+  });
+
   it("protects a tab-scoped unfinished quiz when the legacy mirror is missing", () => {
     const selection = { term: "Term 1", module: "SAMPLE", questionIds: ["one"], setIds: [] };
     const startHash = location.hash;

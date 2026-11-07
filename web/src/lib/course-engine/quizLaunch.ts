@@ -57,11 +57,18 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
   }
   // A legacy mirror may be absent when a modern run was saved only under its
   // per-tab run key (e.g. a quota failure during legacy-mirror persistence).
-  const legacyPresence = savedQuizPresence(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
-  const tabRunId = sessionStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run-id`);
-  const scopedPresence = tabRunId
-    ? savedQuizPresence(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:${tabRunId}`))
-    : "none";
+  let legacyPresence: ReturnType<typeof savedQuizPresence>;
+  let scopedPresence: ReturnType<typeof savedQuizPresence> = "none";
+  try {
+    legacyPresence = savedQuizPresence(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
+    const tabRunId = sessionStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run-id`);
+    if (tabRunId) {
+      scopedPresence = savedQuizPresence(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:${tabRunId}`));
+    }
+  } catch {
+    // An unavailable storage API is not evidence that an unfinished run ended.
+    throw new Error("Your saved Question Bank session cannot be read. Open Question Bank to recover it before starting a new quiz.");
+  }
   if (legacyPresence === "corrupt" || scopedPresence === "corrupt") {
     throw new Error("Your saved Question Bank session cannot be read. Open Question Bank to recover it before starting a new quiz.");
   }
