@@ -27,7 +27,10 @@ function sameDraftReviewSet(opened: QuestionSet, live: QuestionSet | undefined):
     && live.title === opened.title && live.kind === opened.kind
     && JSON.stringify(live.questionIds) === JSON.stringify(opened.questionIds)
     && JSON.stringify(live.sourceDocumentIds) === JSON.stringify(opened.sourceDocumentIds)
-    && JSON.stringify(live.tags) === JSON.stringify(opened.tags));
+    && JSON.stringify(live.tags) === JSON.stringify(opened.tags)
+    && live.createdAt === opened.createdAt
+    && live.parentSetId === opened.parentSetId
+    && JSON.stringify(live.scope ?? null) === JSON.stringify(opened.scope ?? null));
 }
 
 function currentDraftInput(openedSet: QuestionSet, openedQuestion: QuestionRecord): QuestionRecord | null {
