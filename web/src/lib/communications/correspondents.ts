@@ -91,8 +91,8 @@ export function matchCorrespondent(input: CorrespondentInput): CorrespondentMatc
   if (!hasEvidence) return { ...starter(AXOM_CORRESPONDENTS[seed % AXOM_CORRESPONDENTS.length]), accent: accent ?? "#C8A96A" };
   let selected: Card | undefined;
   let highest = -Infinity;
-  const paceByOrder: Record<CorrespondentOrder, string> = { ARCHITECTS:"steady", SEEKERS:"deep", SENTINELS:"focused", KEEPERS:"deep", ALCHEMISTS:"bursts", WAYFINDERS:"flexible", WARDENS:"steady", LUMINARIES:"focused" };
-  const supportByOrder: Record<CorrespondentOrder, string> = { ARCHITECTS:"challenge", SEEKERS:"neutral", SENTINELS:"challenge", KEEPERS:"encourage", ALCHEMISTS:"challenge", WAYFINDERS:"neutral", WARDENS:"encourage", LUMINARIES:"encourage" };
+  const paceByOrder: Record<CorrespondentOrder, string> = { ARCHITECTS:"steady", INVESTIGATORS:"deep", ALCHEMISTS:"bursts", WAYFINDERS:"flexible", WARDENS:"steady" };
+  const supportByOrder: Record<CorrespondentOrder, string> = { ARCHITECTS:"challenge", INVESTIGATORS:"challenge", ALCHEMISTS:"neutral", WAYFINDERS:"neutral", WARDENS:"encourage" };
   for (const card of AXOM_CORRESPONDENTS) {
     const overlap = (tag: string) => (card.tags as readonly string[]).includes(tag);
     const order = orderOf(card.id);
