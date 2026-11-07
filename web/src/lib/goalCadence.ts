@@ -2,7 +2,7 @@
  * Cadence projections for personal goals. Reads authoritative activity and
  * habit receipts; never writes a second completion record or infers effort.
  */
-import { addLocalDays, localDateAtNoon } from "./dailyRollover";
+import { addLocalDays, localDateAtNoon, localDateKey } from "./dailyRollover";
 import type { Habit, HabitEntry, StudyLog } from "./types";
 
 const clampWeekly = (value: unknown, fallback: number) =>
@@ -16,8 +16,8 @@ export function weekStartKey(date: string, weekStartsOn: 0 | 1 = 1): string {
 function startKey(habit: Habit): string {
   const explicit = habit.trackingStartsAt?.slice(0, 10);
   if (explicit && /^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
-  const created = habit.createdAt?.slice(0, 10);
-  return created && /^\d{4}-\d{2}-\d{2}$/.test(created) ? created : "9999-12-31";
+  const createdAt = habit.createdAt ? new Date(habit.createdAt) : undefined;
+  return createdAt && Number.isFinite(createdAt.getTime()) ? localDateKey(createdAt) : "9999-12-31";
 }
 
 export interface WeeklyGoalSummary {
@@ -121,7 +121,8 @@ export function namedSlotProgress(habit: Habit, entry?: HabitEntry): NamedSlotSu
   }
   const slots = defined.map(slot => ({
     id: slot.id, label: slot.label,
-    status: (latest.get(slot.id)?.status ?? "unreported") as NamedSlotStatus,
+    status: (latest.get(slot.id)?.status === "done" || latest.get(slot.id)?.status === "skipped"
+      ? latest.get(slot.id)!.status : "unreported") as NamedSlotStatus,
     sourceId: latest.get(slot.id)?.id,
   }));
   const completed = slots.filter(slot => slot.status === "done").length;
