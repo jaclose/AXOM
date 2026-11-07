@@ -326,6 +326,48 @@ describe("verified primary-source progress attribution", () => {
     assert.equal(JSON.stringify([corrupt, valid]), before);
   });
 
+  it("holds conflicting duplicates with malformed top-level attempt histories without throwing", () => {
+    // Imported/legacy JSON may contain a null, missing or non-array attempts
+    // container. Do not count disputed same-ID progress or change stored rows.
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const valid = question("shared", { setId: "primary", ...filing,
+      status: "correct", attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct", answerKey: "A" }] });
+    for (const malformed of [null, undefined, "broken-history", { 0: { status: "correct" } }]) {
+      const broken = question("shared", { setId: "primary", ...filing,
+        status: "correct", attempts: malformed as unknown as QuestionRecord["attempts"] });
+      const before = JSON.stringify([valid, broken]);
+      for (const records of [[valid, broken], [broken, valid]]) {
+        assert.deepEqual(scopeProgress(records, filing, sets), {
+          total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0,
+          questionIds: [], sourceReviewHeld: 1,
+        });
+        assert.deepEqual(groupQuestionsByScope(records, sets)
+          .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+      }
+      assert.equal(JSON.stringify([valid, broken]), before);
+    }
+  });
+
+  it("does not grant attempted or mastery progress for a lone malformed attempts container", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["alone"] }]]);
+    for (const malformed of [null, undefined, "broken-history", { 0: { status: "correct" } }]) {
+      const broken = question("alone", { setId: "primary", ...filing, status: "correct",
+        attempts: malformed as unknown as QuestionRecord["attempts"] });
+      const before = JSON.stringify(broken);
+      assert.deepEqual(scopeProgress([broken], filing, sets), {
+        total: 1, attempted: 0, firstTimeCorrect: 0, missed: 0, questionIds: ["alone"],
+      });
+      assert.equal(JSON.stringify(broken), before);
+    }
+    const valid = question("alone", { setId: "primary", ...filing,
+      status: "correct", attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct" }] });
+    assert.deepEqual(scopeProgress([valid], filing, sets), {
+      total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0, questionIds: ["alone"],
+    });
+  });
+
   it("counts equivalent cloned records once without holding legitimate source evidence", () => {
     const filing = { module: "NB2", week: 3, courseId: "core" };
     const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
