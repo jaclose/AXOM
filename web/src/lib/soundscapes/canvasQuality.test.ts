@@ -5,6 +5,7 @@ describe("Soundscapes canvas resolution", () => {
   it("renders native 8K UHD pixels on an 8K display, without supersampling beyond 8K", () => {
     expect(canvasPixelRatio(7680, 4320, 1, true)).toBe(1);
     expect(canvasPixelRatio(3840, 2160, 2, true)).toBe(2);
+    expect(canvasPixelRatio(1920, 1080, 4, true)).toBe(4); // Retina 8K physical output
     expect(canvasPixelRatio(7680, 4320, 2, true)).toBe(1);
   });
 
