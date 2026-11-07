@@ -1,11 +1,11 @@
 import type { Browser, Page } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { isolateLiveAccountNetwork } from "./liveAccountNetwork";
 import {
   assertUnusedEmail,
   dedicatedLiveProjectUrl,
   matchesRunOwnedUser,
-  permitsSupabaseRequest,
   signupResponseUserId,
 } from "../src/lib/liveAccountSafety";
 
@@ -113,12 +113,8 @@ async function secondDevice(browser: Browser) {
 }
 
 async function isolateSupabaseRequests(page: Page) {
-  await page.context().route("**/*", (route) => {
-    if (!permitsSupabaseRequest(route.request().url(), dedicatedOrigin)) {
-      return route.abort("blockedbyclient");
-    }
-    return route.continue();
-  });
+  // Use the same allowlist for both browser contexts, including redirects.
+  await isolateLiveAccountNetwork(page.context(), dedicatedOrigin, "http://127.0.0.1:5187");
 }
 
 test("create with email and password, sign in, protect, merge, restore, devices, delete", async ({ page, browser }) => {
@@ -133,7 +129,8 @@ test("create with email and password, sign in, protect, merge, restore, devices,
   // Capture the ID from THIS browser's signup request. Never recover it by email lookup.
   const signupReply = page.waitForResponse((response) => {
     try {
-      return new URL(response.url()).pathname === "/auth/v1/signup"
+      const signupUrl = new URL(response.url());
+      return signupUrl.origin === dedicatedOrigin && signupUrl.pathname === "/auth/v1/signup"
         && response.request().method() === "POST";
     } catch {
       return false;
