@@ -34,6 +34,34 @@ function rawStoredMarker(): string | null {
   try { return window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt); }
   catch { return null; }
 }
+/**
+ * Browser-frozen tabs can miss BroadcastChannel invalidations. A quota-only
+ * successful workspace write has no persistent status receipt to reconcile on
+ * resume, so never carry its optimistic badge across a visibility/freeze edge.
+ * Do not touch the persisted workspace or its valid on-disk marker.
+ */
+let lifecycleMonitoringInstalled = false;
+function retireUnverifiableMemoryReceipt(): void {
+  if (!memoryOnlyConfirmedWrite) return;
+  invalidatedMarkerValue = rawStoredMarker();
+  statusInvalidated = true;
+  memoryOnlyConfirmedWrite = false;
+  lastWrite = null;
+  lastPersistedAt = 0;
+  window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+}
+function watchMemoryReceiptLifecycle(): void {
+  if (lifecycleMonitoringInstalled || typeof window === "undefined") return;
+  lifecycleMonitoringInstalled = true;
+  window.addEventListener("pagehide", retireUnverifiableMemoryReceipt);
+  window.addEventListener("pageshow", (event: PageTransitionEvent) => {
+    if (event.persisted) retireUnverifiableMemoryReceipt();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") retireUnverifiableMemoryReceipt();
+  });
+}
+
 function listenForCrossTabInvalidation(): void {
   if (statusChannel || typeof window === "undefined" || typeof window.BroadcastChannel !== "function") return;
   try {
@@ -91,7 +119,11 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
       // IndexedDB may have saved the bytes, but without a persistent marker
       // AND cross-tab invalidation we cannot trust an unqualified green badge.
       // Fail closed on status only; never remove or repeat the workspace write.
-      memoryOnlyConfirmedWrite = statusChannel !== null;
+      // A backgrounded tab cannot establish that invalidations are received.
+      // If it is still foregrounded, monitor lifecycle transitions so a
+      // suspended/BFCache tab does not revive an unverifiable in-memory badge.
+      memoryOnlyConfirmedWrite = statusChannel !== null && document.visibilityState === "visible";
+      if (memoryOnlyConfirmedWrite) watchMemoryReceiptLifecycle();
       if (!memoryOnlyConfirmedWrite) {
         lastWrite = null;
         // Reject an earlier valid marker: it describes an older workspace,
