@@ -422,6 +422,80 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("stops a stale feedback editor from sending another tab's superseded draft", () => {
+    const originalAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const originalProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-send";
+    const account = { id: "journal-feedback-stale-account", email: "stale@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("should-not-send");
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...originalProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Older unsent note." } });
+      const newer = JSON.stringify({ ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"), liked: "A second tab saved newer feedback." });
+      window.localStorage.setItem(draftKey, newer);
+
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toContain("Another tab changed this feedback draft");
+      expect((screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Older unsent note.");
+      expect(screen.getByRole("button", { name: "Download draft" })).toBeTruthy();
+      expect(window.localStorage.getItem(draftKey)).toBe(newer);
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("A second tab saved newer feedback.");
+    } finally {
+      cleanup();
+      useAccount.setState(originalAccount);
+      useStore.setState({ profile: originalProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
+  it("blocks feedback submission when stored-draft verification becomes unreadable", () => {
+    const originalAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const originalProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-read";
+    const account = { id: "journal-feedback-read-account", email: "read@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("should-not-send");
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...originalProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Keep my in-memory answers." } });
+      const nativeGet = Storage.prototype.getItem;
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key) {
+        if (this === window.localStorage && key === draftKey) throw new Error("Browser storage unavailable");
+        return nativeGet.call(this, key);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toContain("could not check the saved feedback draft");
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Keep my in-memory answers.");
+      expect(screen.getByRole("button", { name: "Download draft" })).toBeTruthy();
+      expect(screen.queryByText("Feedback received.")).toBeNull();
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(originalAccount);
+      useStore.setState({ profile: originalProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
   it("retains newer feedback and acknowledges only the submitted revision", async () => {
     const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const previousProfile = useStore.getState().profile;
