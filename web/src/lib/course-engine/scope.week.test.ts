@@ -274,6 +274,36 @@ describe("verified primary-source progress attribution", () => {
     assert.equal(JSON.stringify([a, b]), before);
   });
 
+  it("holds duplicate same-status retakes with different chosen answer keys", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
+    const original = question("shared", { setId: "primary", ...filing,
+      correctKey: "C", status: "incorrect",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "incorrect", answerKey: "A" }],
+    });
+    const disputed = question("shared", { setId: "primary", ...filing,
+      correctKey: "C", status: "incorrect",
+      attempts: [{ at: "2026-11-06T00:00:00Z", status: "incorrect", answerKey: "B" }],
+    });
+    const before = JSON.stringify([original, disputed]);
+    for (const records of [[original, disputed], [disputed, original]]) {
+      const progress = scopeProgress(records, filing, sets);
+      assert.deepEqual(progress, {
+        total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0,
+        questionIds: [], sourceReviewHeld: 1,
+      });
+      assert.deepEqual(groupQuestionsByScope(records, sets)
+        .find(group => group.key === "unassigned")?.questionIds, ["shared"]);
+    }
+    const equivalentReplay = question("shared", { setId: "primary", ...filing,
+      correctKey: "C", status: "incorrect",
+      attempts: [{ at: "2026-11-07T01:00:00Z", status: "incorrect", answerKey: "A" }],
+    });
+    assert.equal(scopeProgress([original, equivalentReplay], filing, sets).total, 1);
+    assert.equal(scopeProgress([equivalentReplay, original], filing, sets).sourceReviewHeld, undefined);
+    assert.equal(JSON.stringify([original, disputed]), before);
+  });
+
   it("holds a malformed later attempt in a duplicate without crashing the week overview", () => {
     // Older stored JSON accepts an attempts array without validating each
     // member; a corrupt later member must not throw while checking duplicates.

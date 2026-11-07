@@ -156,8 +156,11 @@ export function conflictingDuplicateIds(
     own.courseId ?? null, canonicalModuleKey(own.module ?? ""), own.week ?? null,
     // A duplicated original with different retake outcomes must be held even
     // when both copies have the same first answer and current status.
+    // Also compare the selected key: two wrong choices can have equal status.
     // Ignore attempt timestamps: device-local replays can legitimately differ.
-    question.status, question.attempts.map((attempt) => attempt?.status ?? null),
+    question.status, question.attempts.map((attempt) => [
+      attempt?.status ?? null, attempt?.answerKey ?? null,
+    ]),
   ]);
   for (const question of questions) {
     const first = firstById.get(question.id);
