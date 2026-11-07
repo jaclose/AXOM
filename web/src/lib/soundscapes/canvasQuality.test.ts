@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canvasPixelRatio } from "./canvasQuality";
+import { canvasPixelRatio, shouldReleaseImmersiveCanvas } from "./canvasQuality";
 
 describe("Soundscapes canvas resolution", () => {
   it("renders native 8K UHD pixels on an 8K display, without supersampling beyond 8K", () => {
@@ -12,6 +12,13 @@ describe("Soundscapes canvas resolution", () => {
     expect(canvasPixelRatio(1440, 900, 2, false)).toBe(1.25);
     expect(canvasPixelRatio(1920, 1080, 2, true)).toBe(2);
     expect(canvasPixelRatio(1440, 900, 1, true)).toBe(1);
+  });
+
+  it("keeps the shared high-resolution WebGL backing while immersive, but releases it on exit", () => {
+    expect(shouldReleaseImmersiveCanvas(7680, 4320, 1280, 720, true)).toBe(false);
+    expect(shouldReleaseImmersiveCanvas(7680, 4320, 1280, 720, false)).toBe(true);
+    expect(shouldReleaseImmersiveCanvas(1920, 1080, 1280, 720, false)).toBe(false);
+    expect(shouldReleaseImmersiveCanvas(7680, 4320, 7000, 3900, false)).toBe(false);
   });
 
   it("clamps excessive pixel density, invalid sizes, and portrait displays", () => {
