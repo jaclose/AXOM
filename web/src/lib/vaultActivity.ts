@@ -43,6 +43,12 @@ export function readVaultAccountEpoch(): number { return vaultAccountEpoch; }
 export function setVaultAccountIdentity(accountId: string | null): void {
   const next = typeof accountId === "string" && accountId.trim() ? accountId : null;
   if (vaultAccountId === next) return;
+  // A completed receipt from the account being left is historical, not
+  // evidence that the returning session's current workspace was verified.
+  // Retire metadata before changing identity; never touch workspace bytes.
+  // Initial null → signed-in hydration retains an account-matching receipt,
+  // pending the separate durable workspace-revision acceptance gate.
+  if (vaultAccountId !== null && typeof window !== "undefined") invalidateVaultWrite();
   vaultAccountId = next;
   vaultAccountEpoch += 1;
   lastWrite = null;
