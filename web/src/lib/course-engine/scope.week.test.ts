@@ -368,6 +368,57 @@ describe("verified primary-source progress attribution", () => {
     });
   });
 
+  it("does not count non-answer or corrupt first-attempt entries as answered progress", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["candidate"] }]]);
+    for (const first of [
+      null, "malformed", {}, { status: "unseen" }, { status: "in-progress" },
+      { status: "flagged" }, { status: "needs-review" }, { status: "unknown" },
+    ]) {
+      const record = question("candidate", {
+        setId: "primary", ...filing, status: "incorrect",
+        attempts: [first] as unknown as QuestionRecord["attempts"],
+      });
+      const before = JSON.stringify(record);
+      assert.deepEqual(scopeProgress([record], filing, sets), {
+        total: 1, attempted: 0, firstTimeCorrect: 0, missed: 0,
+        questionIds: ["candidate"],
+      });
+      assert.equal(JSON.stringify(record), before);
+    }
+  });
+
+  it("finds the first actual answer after a non-answer prelude without crediting corrupt entries", () => {
+    const filing = { module: "NB2", week: 3, courseId: "core" };
+    const sets = new Map([["primary", { scope: filing, questionIds: ["candidate"] }]]);
+    for (const [scoredStatus, questionStatus, firstTimeCorrect, missed] of [
+      ["correct", "correct", 1, 0],
+      ["incorrect", "incorrect", 0, 1],
+      ["guessed", "guessed", 0, 0],
+    ] as const) {
+      const record = question("candidate", {
+        setId: "primary", ...filing, status: questionStatus,
+        attempts: [
+          null, { status: "flagged" }, "malformed",
+          { at: "2026-11-07T18:00:00Z", status: scoredStatus },
+        ] as unknown as QuestionRecord["attempts"],
+      });
+      const before = JSON.stringify(record);
+      assert.deepEqual(scopeProgress([record], filing, sets), {
+        total: 1, attempted: 1, firstTimeCorrect, missed,
+        questionIds: ["candidate"],
+      });
+      assert.equal(JSON.stringify(record), before);
+    }
+    // Legacy completed answers without a timestamp or selected-key field
+    // still provide scored evidence and must not lose progress.
+    const legacy = question("candidate", {
+      setId: "primary", ...filing, status: "correct",
+      attempts: [{ status: "correct" }] as QuestionRecord["attempts"],
+    });
+    assert.equal(scopeProgress([legacy], filing, sets).firstTimeCorrect, 1);
+  });
+
   it("counts equivalent cloned records once without holding legitimate source evidence", () => {
     const filing = { module: "NB2", week: 3, courseId: "core" };
     const sets = new Map([["primary", { scope: filing, questionIds: ["shared"] }]]);
