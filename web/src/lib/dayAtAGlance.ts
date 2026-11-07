@@ -623,7 +623,7 @@ function selectUnfinished(input: {
     if (input.dayKey > input.today) continue;
     // A flexible week cannot be overdue on a Tuesday or a rest day. Its
     // cadence belongs in recurring-goal views, not today's unfinished queue.
-    if (requirement.schedule.kind === "times-per-week") continue;
+    if (input.state.profile.dailySuccess?.requirements.some((target) => target.id === requirement.id && target.schedule.kind === "times-per-week")) continue;
     if (!requirement.eligible || ["met", "not-eligible", "unavailable"].includes(requirement.status)) continue;
     const sourceIds = uniqueStrings([requirement.id, ...requirement.sourceRecordIds]);
     const provenance = [
