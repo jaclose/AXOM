@@ -10,6 +10,7 @@ import type { JournalImageAttachment } from "../lib/journalNotebook";
 import * as journalNotebook from "../lib/journalNotebook";
 import { normalizeStudyStreaks, studyCreditsBalance } from "../lib/studyStreaks";
 import * as localVault from "../lib/localVault";
+import * as journalFeedback from "../lib/journalFeedback";
 import { useAccount } from "../lib/account/accountStore";
 import { JournalPage } from "./JournalPage";
 import { useSoundscape } from "../lib/soundscapes/store";
@@ -302,6 +303,777 @@ describe("Journal notebook foundation", () => {
     const deskWriting = screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement;
     expect(deskWriting.value).toBe("The line stays with me.");
     expect(document.activeElement).toBe(deskWriting);
+  });
+
+  it("isolates an open feedback draft when the local workspace owner changes", () => {
+    const originalProfile = useStore.getState().profile;
+    const ownerA = "journal-feedback-local-a";
+    const ownerB = "journal-feedback-local-b";
+    const keyA = `axom-journal-feedback-draft:${ownerA}`;
+    const keyB = `axom-journal-feedback-draft:${ownerB}`;
+    window.localStorage.removeItem(keyA);
+    window.localStorage.removeItem(keyB);
+    useStore.setState({ profile: { ...originalProfile, userId: ownerA } });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      fireEvent.change(liked(), { target: { value: "Only A should read this private feedback." } });
+      expect(JSON.parse(window.localStorage.getItem(keyA) ?? "{}").liked).toBe("Only A should read this private feedback.");
+
+      act(() => { useStore.setState({ profile: { ...originalProfile, userId: ownerB } }); });
+      expect(liked().value).toBe("");
+      expect(window.localStorage.getItem(keyB)).toBeNull();
+      fireEvent.change(liked(), { target: { value: "B owns a different feedback draft." } });
+      expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B owns a different feedback draft.");
+
+      act(() => { useStore.setState({ profile: { ...originalProfile, userId: ownerA } }); });
+      expect(liked().value).toBe("Only A should read this private feedback.");
+      expect(window.localStorage.getItem(keyA)).not.toContain("B owns a different");
+    } finally {
+      cleanup();
+      useStore.setState({ profile: originalProfile });
+      window.localStorage.removeItem(keyA);
+      window.localStorage.removeItem(keyB);
+    }
+  });
+
+  it("partitions feedback drafts for two signed-in accounts on the same workspace", () => {
+    const previous = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const workspaceId = "journal-feedback-shared-workspace";
+    const previousProfile = useStore.getState().profile;
+    const accountA = { id: "feedback-account-a", email: "a@example.test", displayName: "A", emailConfirmed: true };
+    const accountB = { id: "feedback-account-b", email: "b@example.test", displayName: "B", emailConfirmed: true };
+    const keyA = `axom-journal-feedback-draft:${workspaceId}:account:${accountA.id}`;
+    const keyB = `axom-journal-feedback-draft:${workspaceId}:account:${accountB.id}`;
+    window.localStorage.removeItem(keyA);
+    window.localStorage.removeItem(keyB);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: accountA, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      fireEvent.change(liked(), { target: { value: "A's private feedback." } });
+      expect(JSON.parse(window.localStorage.getItem(keyA) ?? "{}").liked).toBe("A's private feedback.");
+
+      act(() => { useAccount.setState({ user: accountB }); });
+      expect(liked().value).toBe("");
+      expect(window.localStorage.getItem(keyB)).toBeNull();
+      fireEvent.change(liked(), { target: { value: "B's private feedback." } });
+      expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B's private feedback.");
+
+      act(() => { useAccount.setState({ user: accountA }); });
+      expect(liked().value).toBe("A's private feedback.");
+      expect(window.localStorage.getItem(keyA)).not.toContain("B's private feedback.");
+    } finally {
+      cleanup();
+      useAccount.setState(previous);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(keyA);
+      window.localStorage.removeItem(keyB);
+    }
+  });
+
+  it("keeps feedback drafts editable after a failed send but locks fields while sending", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-pending-send";
+    const account = { id: "journal-feedback-pending-account", email: "pending@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    let rejectRequest!: (reason: Error) => void;
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(() => (
+      new Promise<string>((_resolve, reject) => { rejectRequest = reject; })
+    ));
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      fireEvent.change(liked(), { target: { value: "A note that must not disappear." } });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+
+      expect(submit).toHaveBeenCalledWith(account.id, expect.objectContaining({
+        rating: 4, liked: "A note that must not disappear.",
+      }));
+      expect(liked().readOnly).toBe(true);
+      expect((screen.getByRole("button", { name: "5 out of 5" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+        .toBe("A note that must not disappear.");
+
+      await act(async () => { rejectRequest(new Error("Submission interrupted")); await Promise.resolve(); });
+      await waitFor(() => expect(liked().readOnly).toBe(false));
+      expect((screen.getByRole("button", { name: "5 out of 5" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByRole("alert").textContent).toContain("Submission interrupted");
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+        .toBe("A note that must not disappear.");
+      fireEvent.change(liked(), { target: { value: "New changes after the failed request." } });
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+        .toBe("New changes after the failed request.");
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
+  it("allows only one in-flight feedback request per dialog and retries after failure", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-inflight-once";
+    const account = { id: "journal-feedback-inflight-account", email: "inflight@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const failures: Array<(error: Error) => void> = [];
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(
+      () => new Promise<string>((_resolve, reject) => { failures.push(reject); }),
+    );
+    window.localStorage.removeItem(draftKey);
+    window.localStorage.removeItem(`${draftKey}:submitted`);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(within(dialog).getByLabelText("What do you like?"), { target: { value: "Send this once." } });
+
+      // Two same-turn activations happen before React can commit disabled=true.
+      const sendButton = within(dialog).getByRole("button", { name: "Send feedback" });
+      act(() => {
+        sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(failures).toHaveLength(1);
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked).toBe("Send this once.");
+
+      await act(async () => { failures[0](new Error("Temporary failure")); await Promise.resolve(); });
+      expect(within(dialog).getByRole("alert").textContent).toContain("Temporary failure");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Send feedback" }));
+      expect(submit).toHaveBeenCalledTimes(2);
+      expect(failures).toHaveLength(2);
+      await act(async () => { failures[1](new Error("Retry refused")); await Promise.resolve(); });
+      expect((within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Send this once.");
+      expect(window.localStorage.getItem(draftKey)).toContain("Send this once.");
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("coalesces a pending feedback send across closing and reopening the modal", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-remount-pending";
+    const account = { id: "journal-feedback-remount-account", email: "remount@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    let resolveRequest!: (receipt: string) => void;
+    const response = new Promise<string>((resolve) => { resolveRequest = resolve; });
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(() => response);
+    window.localStorage.removeItem(draftKey);
+    window.localStorage.removeItem(`${draftKey}:submitted`);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Keep one pending request after remount." } });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+
+      // The parent unmounts the first dialog while the server request is still pending.
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      expect(screen.queryByRole("dialog", { name: "How is the journal feeling?" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("Keep one pending request after remount.");
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).toHaveBeenCalledTimes(1);
+
+      await act(async () => { resolveRequest("550e8400-e29b-41d4-a716-446655440000"); await response; });
+      expect(await screen.findByText("Feedback received.")).toBeTruthy();
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem(`${draftKey}:submitted`)).toBeTruthy();
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("stops a stale feedback editor from sending another tab's superseded draft", () => {
+    const originalAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const originalProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-send";
+    const account = { id: "journal-feedback-stale-account", email: "stale@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("should-not-send");
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...originalProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Older unsent note." } });
+      const newer = JSON.stringify({ ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"), liked: "A second tab saved newer feedback." });
+      window.localStorage.setItem(draftKey, newer);
+
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toContain("Another tab changed this feedback draft");
+      expect((screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Older unsent note.");
+      expect(screen.getByRole("button", { name: "Download draft" })).toBeTruthy();
+      expect(window.localStorage.getItem(draftKey)).toBe(newer);
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("A second tab saved newer feedback.");
+    } finally {
+      cleanup();
+      useAccount.setState(originalAccount);
+      useStore.setState({ profile: originalProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
+  it("blocks feedback submission when stored-draft verification becomes unreadable", () => {
+    const originalAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const originalProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-read";
+    const account = { id: "journal-feedback-read-account", email: "read@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("should-not-send");
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...originalProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Keep my in-memory answers." } });
+      const nativeGet = Storage.prototype.getItem;
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key) {
+        if (this === window.localStorage && key === draftKey) throw new Error("Browser storage unavailable");
+        return nativeGet.call(this, key);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(submit).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toContain("could not check the saved feedback draft");
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Keep my in-memory answers.");
+      expect(screen.getByRole("button", { name: "Download draft" })).toBeTruthy();
+      expect(screen.queryByText("Feedback received.")).toBeNull();
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(originalAccount);
+      useStore.setState({ profile: originalProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
+  it("retains newer feedback and acknowledges only the submitted revision", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-concurrent-draft";
+    const account = { id: "journal-feedback-concurrent-account", email: "concurrent@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const resolveRequests: Array<(receipt: string) => void> = [];
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(
+      () => new Promise<string>((resolve) => { resolveRequests.push(resolve); }),
+    );
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), {
+        target: { value: "The original submitted note." },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(resolveRequests).toHaveLength(1);
+      expect(submit).toHaveBeenNthCalledWith(1, account.id, expect.objectContaining({
+        rating: 4, liked: "The original submitted note.",
+      }));
+
+      // A second tab writes a newer, unsent local draft while the RPC is pending.
+      const newerDraft = JSON.stringify({
+        ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"),
+        liked: "Another tab wrote this after the first submission.",
+      });
+      window.localStorage.setItem(draftKey, newerDraft);
+      await act(async () => { resolveRequests[0]("first-receipt"); await Promise.resolve(); });
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("Another tab wrote this after the first submission.");
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      expect(resolveRequests).toHaveLength(2);
+      expect(submit).toHaveBeenNthCalledWith(2, account.id, expect.objectContaining({
+        liked: "Another tab wrote this after the first submission.",
+      }));
+      await act(async () => { resolveRequests[1]("second-receipt"); await Promise.resolve(); });
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+      expect(window.localStorage.getItem(`${draftKey}:submitted`)).toBeTruthy();
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+    }
+  });
+
+  it("never deletes another tab's draft written during successful receipt", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-receipt-race";
+    const account = { id: "receipt-race-account", email: "race@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const receiptKey = `${draftKey}:submitted`;
+    let resolveRequest!: (receipt: string) => void;
+    vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(
+      () => new Promise<string>((resolve) => { resolveRequest = resolve; }),
+    );
+    window.localStorage.removeItem(draftKey);
+    window.localStorage.removeItem(receiptKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const nativeSet = Storage.prototype.setItem;
+    let injected = false;
+    let competingDraft = "";
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Sent first tab draft." } });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      const removed = vi.spyOn(Storage.prototype, "removeItem");
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+        if (this === window.localStorage && key === receiptKey && !injected) {
+          injected = true;
+          competingDraft = JSON.stringify({
+            ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"),
+            liked: "Second tab wrote during receipt.",
+          });
+          nativeSet.call(this, draftKey, competingDraft);
+        }
+        nativeSet.call(this, key, value);
+      });
+      await act(async () => { resolveRequest("race-receipt"); await Promise.resolve(); });
+      expect(injected).toBe(true);
+      expect(removed).not.toHaveBeenCalledWith(draftKey);
+      expect(window.localStorage.getItem(draftKey)).toBe(competingDraft);
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("Second tab wrote during receipt.");
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(receiptKey);
+    }
+  });
+
+  it("preserves unsupported valid-JSON feedback during editing attempts and reopening", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-unsupported-schema";
+    const account = { id: "journal-feedback-unsupported-account", email: "unsupported@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const examples = [
+      { rating: "4", liked: { private: "Keep nested writing" }, comment: "Keep me", futureVersion: 9 },
+      { rating: 4, liked: "Current draft", futureVersion: 2 },
+      { rating: 4, liked: "x".repeat(1001), comment: "Oversized content must survive" },
+      { rating: 4, liked: "Keep revision metadata", __axomRevision: "invalid-revision" },
+      { rating: 4, liked: null, comment: "Wrong-typed field" },
+    ];
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      for (const example of examples) {
+        const raw = JSON.stringify(example);
+        window.localStorage.setItem(draftKey, raw);
+        render(<JournalPage />);
+        fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+        const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+        expect(within(dialog).getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
+        expect(within(dialog).getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+        expect((within(dialog).getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+        const liked = within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement;
+        expect(liked.readOnly).toBe(true);
+        fireEvent.change(liked, { target: { value: "Attempted edit must not erase original bytes" } });
+        expect(window.localStorage.getItem(draftKey)).toBe(raw);
+        fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
+        fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+        expect(screen.getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+        expect(window.localStorage.getItem(draftKey)).toBe(raw);
+        cleanup();
+      }
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("acknowledges an unchanged legacy feedback draft without deleting later tab edits", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-legacy-ack";
+    const account = { id: "journal-legacy-receipt-account", email: "legacy-ack@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const receiptKey = `${draftKey}:submitted`;
+    const original = JSON.stringify({ rating: 4, liked: "Already sent legacy text" });
+    const newer = JSON.stringify({ rating: 4, liked: "A newer unsent legacy draft" });
+    window.localStorage.setItem(draftKey, original);
+    window.localStorage.removeItem(receiptKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("legacy-receipt");
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Already sent legacy text");
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Feedback received."));
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledWith(account.id, expect.objectContaining({ rating: 4, liked: "Already sent legacy text" }));
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+      expect(window.localStorage.getItem(receiptKey)).toBeTruthy();
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      // A newer, independently written legacy draft is never hidden by an old receipt.
+      window.localStorage.setItem(draftKey, newer);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("A newer unsent legacy draft");
+      expect(window.localStorage.getItem(draftKey)).toBe(newer);
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(receiptKey);
+    }
+  });
+
+  it("retries an unchanged feedback draft after local storage becomes writable", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-storage-retry";
+    const account = { id: "journal-feedback-retry-account", email: "retry@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    window.localStorage.removeItem(draftKey);
+    window.localStorage.removeItem(`${draftKey}:submitted`);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const nativeSet = Storage.prototype.setItem;
+    let blocked = true;
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (this === window.localStorage && key === draftKey && blocked) throw new Error("Storage quota exceeded");
+      nativeSet.call(this, key, value);
+    });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), {
+        target: { value: "Retain this text when storage becomes available." },
+      });
+      expect(window.localStorage.getItem(draftKey)).toBeNull();
+      expect(screen.getByRole("alert").textContent).toMatch(/could not keep a local draft/i);
+
+      blocked = false;
+      fireEvent.click(screen.getByRole("button", { name: "Retry draft save" }));
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+        .toBe("Retain this text when storage becomes available.");
+      expect(screen.queryByRole("button", { name: "Retry draft save" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("Retain this text when storage becomes available.");
+    } finally {
+      cleanup();
+      setItem.mockRestore();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("warns and offers a download if sent feedback was not saved locally", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-unsaved-submit";
+    const account = { id: "unsaved-submit-account", email: "unsaved@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const receiptKey = `${draftKey}:submitted`;
+    const original = JSON.stringify({ rating: 4, liked: "Older locally saved text", __axomRevision: "a".repeat(32) });
+    const latest = "New answers not saved due to quota";
+    window.localStorage.setItem(draftKey, original);
+    window.localStorage.removeItem(receiptKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("unsaved-receipt");
+    const nativeSet = Storage.prototype.setItem;
+    try {
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+        if (this === window.localStorage && key === draftKey) throw new Error("Storage quota exceeded");
+        nativeSet.call(this, key, value);
+      });
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: latest } });
+      expect(screen.getByRole("alert").textContent).toMatch(/could not keep a local draft/i);
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Feedback received."));
+      expect(submit).toHaveBeenCalledWith(account.id, expect.objectContaining({ liked: latest }));
+      expect(screen.getByRole("alert").textContent).toMatch(/not saved in this browser/i);
+      expect(screen.getByRole("button", { name: "Download submitted copy" })).toBeTruthy();
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+      expect(window.localStorage.getItem(receiptKey)).toBeNull();
+
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Older locally saved text");
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(receiptKey);
+    }
+  });
+
+  it("keeps legacy saved bytes visible if edited feedback was sent after a storage failure", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-legacy-ack-storage-failure";
+    const account = { id: "legacy-ack-storage-account", email: "storage-ack@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const receiptKey = `${draftKey}:submitted`;
+    const saved = JSON.stringify({ rating: 4, liked: "Recoverable old legacy text" });
+    const changed = "New text submitted only from memory";
+    window.localStorage.setItem(draftKey, saved);
+    window.localStorage.removeItem(receiptKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("storage-error-receipt");
+    const nativeSet = Storage.prototype.setItem;
+    try {
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+        if (this === window.localStorage && key === draftKey) throw new Error("Storage quota exceeded");
+        nativeSet.call(this, key, value);
+      });
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: changed } });
+      expect(screen.getByRole("alert").textContent).toMatch(/could not keep a local draft/i);
+      expect(window.localStorage.getItem(draftKey)).toBe(saved);
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Feedback received."));
+      expect(submit).toHaveBeenCalledWith(account.id, expect.objectContaining({ liked: changed }));
+      expect(window.localStorage.getItem(draftKey)).toBe(saved);
+      expect(window.localStorage.getItem(receiptKey)).toBeNull();
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Recoverable old legacy text");
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(receiptKey);
+    }
+  });
+
+  it("keeps known-field legacy partial feedback editable without a schema migration", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-valid-legacy-partial";
+    const account = { id: "journal-feedback-legacy-account", email: "legacy@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const legacyDraft = JSON.stringify({ rating: 4, liked: "Original legacy text" });
+    window.localStorage.setItem(draftKey, legacyDraft);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+      expect(within(dialog).queryByRole("alert")).toBeNull();
+      expect((within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Original legacy text");
+      expect(window.localStorage.getItem(draftKey)).toBe(legacyDraft);
+      fireEvent.change(within(dialog).getByLabelText("What do you like?"), { target: { value: "Original legacy text, continued" } });
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}")).toMatchObject({
+        rating: 4, liked: "Original legacy text, continued",
+      });
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("keeps unreadable feedback bytes recoverable rather than replacing them with an empty draft", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-unreadable-draft";
+    const account = { id: "journal-feedback-unreadable-account", email: "unreadable@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const unreadableBytes = '{"rating":4,"liked":"A private draft to recover",';
+    window.localStorage.setItem(draftKey, unreadableBytes);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
+      expect(within(dialog).getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
+      expect(within(dialog).getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+      expect((within(dialog).getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+      const liked = within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement;
+      expect(liked.readOnly).toBe(true);
+      expect(window.localStorage.getItem(draftKey)).toBe(unreadableBytes);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
+      expect(window.localStorage.getItem(draftKey)).toBe(unreadableBytes);
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("does not overwrite a newer feedback draft from another tab after an old editor types", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-edit";
+    const account = { id: "journal-feedback-stale-edit-account", email: "stale-edit@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const oldDraft = { rating: 3, liked: "Original private feedback.", wantMore: "", missing: "", painPoints: "", comment: "" };
+    const newerDraft = JSON.stringify({ ...oldDraft, liked: "Newer changes from a second tab.", __axomRevision: "a".repeat(32) });
+    window.localStorage.setItem(draftKey, JSON.stringify(oldDraft));
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      expect(liked().value).toBe(oldDraft.liked);
+
+      // A different tab updates the shared key after this editor has read it.
+      window.localStorage.setItem(draftKey, newerDraft);
+      fireEvent.change(liked(), { target: { value: "My unsaved continuation." } });
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+      expect(liked().value).toBe("My unsaved continuation.");
+      expect(screen.getByRole("alert").textContent).toMatch(/another tab changed this feedback draft/i);
+      expect(screen.getByRole("button", { name: "Download draft" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(liked().value).toBe("Newer changes from a second tab.");
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(`${draftKey}:submitted`);
+    }
+  });
+
+  it("does not clobber a newer local feedback draft merely by opening or reopening the dialog", () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-stale-mount";
+    const account = { id: "journal-feedback-stale-account", email: "stale@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const originalDraft = { rating: 3, liked: "Older saved feedback.", wantMore: "", missing: "", painPoints: "", comment: "" };
+    const newerDraft = JSON.stringify({ ...originalDraft, liked: "Newer feedback saved in another tab." });
+    window.localStorage.setItem(draftKey, JSON.stringify(originalDraft));
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+
+    // Model the independent tab writing after the initial storage read, before
+    // React commits the initial persistence effect (which previously clobbered it).
+    const nativeGetItem = window.Storage.prototype.getItem;
+    const nativeSetItem = window.Storage.prototype.setItem;
+    let interleaved = false;
+    const readSpy = vi.spyOn(window.Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+      const before = nativeGetItem.call(this, key);
+      if (!interleaved && this === window.localStorage && key === draftKey) {
+        interleaved = true;
+        nativeSetItem.call(this, key, newerDraft);
+      }
+      return before;
+    });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      expect(interleaved).toBe(true);
+      expect(liked().value).toBe(originalDraft.liked);
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(liked().value).toBe("Newer feedback saved in another tab.");
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+
+      fireEvent.change(liked(), { target: { value: "A deliberate new edit." } });
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked).toBe("A deliberate new edit.");
+    } finally {
+      readSpy.mockRestore();
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+    }
   });
 
   it("opens feedback from the notification route without sending private content", () => {
