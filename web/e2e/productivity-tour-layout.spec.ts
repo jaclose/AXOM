@@ -236,7 +236,7 @@ test("expanded Productivity target settings and custom form stay inside the Log 
   }
 });
 
-test("Quick self-report goals remain usable without overflow on desktop and phones", async ({ page }) => {
+test("Quick self-report goals remain usable without overflow on desktop and phones", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await page.goto("/#productivity", { waitUntil: "networkidle" });
   await completeOnboarding(page);
@@ -250,6 +250,7 @@ test("Quick self-report goals remain usable without overflow on desktop and phon
     await page.getByLabel("Goal name").fill(name);
     await page.getByLabel("Goal amount").fill("2");
     await page.getByLabel("How progress is recorded").selectOption("activity");
+    await page.locator("#productivity-log .quick-goals").screenshot({ path: testInfo.outputPath(`quick-goal-create-${width}.png`) });
 
     const bounds = await page.locator("#quick-goal-form").evaluate((element) => {
       const panel = element.closest("#productivity-log")!.getBoundingClientRect();
@@ -272,6 +273,7 @@ test("Quick self-report goals remain usable without overflow on desktop and phon
     await expect(page.getByLabel("What did you do?")).toHaveValue(name);
     await page.getByRole("button", { name: "Log", exact: true }).click();
     await expect(page.getByText("Activity added. Your save status appears above.")).toBeVisible();
+    await page.locator("#productivity-log .quick-goals").screenshot({ path: testInfo.outputPath(`quick-goal-progress-${width}.png`) });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
 });
