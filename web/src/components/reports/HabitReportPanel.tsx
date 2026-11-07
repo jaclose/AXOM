@@ -21,7 +21,9 @@ export function HabitReportPanel() {
     stats: weekStats(habit, entries, days),
     current: statusOn(habit, entries, state.activeDayKey),
   })) : [];
-  const counts = summaries.reduce((total, { stats }) => ({
+  // Weekly targets and one-time milestones are not seven daily obligations.
+  const dailySummaries = summaries.filter(({ habit }) => habit.type !== "weekly" && habit.type !== "milestone");
+  const counts = dailySummaries.reduce((total, { stats }) => ({
     expected: total.expected + stats.scheduledDays,
     recorded: total.recorded + stats.done + stats.partial + stats.skipped + stats.missed,
   }), { expected: 0, recorded: 0 });
@@ -36,7 +38,7 @@ export function HabitReportPanel() {
         <div>
           <span className="habit-report-eyebrow"><CalendarCheck2 size={15} aria-hidden="true" /> AXOM / ROUTINE EVIDENCE</span>
           <strong>{enabled && activeHabits.length ? `${counts.recorded} / ${counts.expected}` : "No active signal"}</strong>
-          <small>{enabled && activeHabits.length ? "Scheduled check-ins with a recorded status" : "Optional self-reporting"}</small>
+          <small>{enabled && activeHabits.length ? "Scheduled daily check-ins with a recorded status" : "Optional self-reporting"}</small>
         </div>
         <a className="habit-report-link" href="#habits">{enabled ? "Review habits" : "Configure habits"} <ArrowUpRight size={15} aria-hidden="true" /></a>
       </div>
@@ -48,20 +50,20 @@ export function HabitReportPanel() {
                 <div key={habit.id} className="habit-report-row" role="listitem">
                   <div className="habit-report-name">
                     <b>{habit.name}</b>
-                    <small>Today: {current === "none" ? "No record" : current}</small>
+                    <small>{habit.type === "weekly" ? `Flexible weekly goal: ${habit.weeklyTarget ?? "not specified"} sessions` : habit.type === "milestone" ? "One-time milestone" : `Today: ${current === "none" ? "No record" : current}`}</small>
                   </div>
                   <div className="habit-report-metrics">
                     <span>{stats.done} done</span>
                     {stats.partial > 0 && <span>{stats.partial} partial</span>}
                     <span>{stats.skipped} skipped</span>
-                    <span>{Math.max(0, stats.scheduledDays - stats.done - stats.partial - stats.skipped - stats.missed)} unrecorded</span>
+                    {habit.type !== "weekly" && habit.type !== "milestone" && <span>{Math.max(0, stats.scheduledDays - stats.done - stats.partial - stats.skipped - stats.missed)} unrecorded</span>}
                   </div>
                 </div>
               ))}
             </div>
             {summaries.length > 6 && <p className="habit-report-foot">Showing six of {summaries.length} active routines. Open the Daily workspace for the full ledger.</p>}
           </>}
-      <p className="habit-report-foot">An intentional skip is recorded separately from a missed or unrecorded day. Historical check-ins are never inferred.</p>
+      <p className="habit-report-foot">An intentional skip differs from a missed or unrecorded day. Flexible weekly goals and one-time milestones do not count as daily obligations. Historical check-ins are never inferred.</p>
     </GlassCard>
   </section>;
 }
