@@ -642,6 +642,7 @@ function JournalWritingPage({
   const saveTimerRef = useRef<number | null>(null);
   const settleTimerRef = useRef<number | null>(null);
   const deskCloseTimerRef = useRef<number | null>(null);
+  const deskCloseEpochRef = useRef(0);
   const returnToDeskWritingRef = useRef(false);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const inlineHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -713,6 +714,15 @@ function JournalWritingPage({
   }
 
   function openFullPage() {
+    // Invalidate a pending asynchronous close even after its timer has fired.
+    deskCloseEpochRef.current += 1;
+    // A keyboard-focused Write full page control can still activate while the
+    // inline book is closing. Do not let its stale timer unmount the reopened page.
+    if (deskCloseTimerRef.current !== null) {
+      window.clearTimeout(deskCloseTimerRef.current);
+      deskCloseTimerRef.current = null;
+    }
+    setDeskClosing(false);
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
@@ -925,15 +935,20 @@ function JournalWritingPage({
 
   const putBookDown = useCallback(() => {
     if (addingImage || deskClosing) return;
+    const closeEpoch = deskCloseEpochRef.current;
     void requestDurableTransition(() => {
+      if (deskCloseEpochRef.current !== closeEpoch) return;
       if (reducedMotion) { onClose(); return; }
       setDeskClosing(true);
       deskCloseTimerRef.current = window.setTimeout(() => {
         deskCloseTimerRef.current = null;
+        if (deskCloseEpochRef.current !== closeEpoch) return;
         // A delayed input can arrive while the book settles. The first save
         // gate predates that edit, so recheck before removing the page.
-        void requestDurableTransition(onClose).then((closed) => {
-          if (!closed && mountedRef.current) setDeskClosing(false);
+        void requestDurableTransition(() => {
+          if (deskCloseEpochRef.current === closeEpoch) onClose();
+        }).then((closed) => {
+          if (!closed && mountedRef.current && deskCloseEpochRef.current === closeEpoch) setDeskClosing(false);
         });
       }, 900);
     });
