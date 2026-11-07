@@ -669,6 +669,53 @@ describe("Journal notebook foundation", () => {
     }
   });
 
+  it("warns and offers a download if sent feedback was not saved locally", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-unsaved-submit";
+    const account = { id: "unsaved-submit-account", email: "unsaved@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    const receiptKey = `${draftKey}:submitted`;
+    const original = JSON.stringify({ rating: 4, liked: "Older locally saved text", __axomRevision: "a".repeat(32) });
+    const latest = "New answers not saved due to quota";
+    window.localStorage.setItem(draftKey, original);
+    window.localStorage.removeItem(receiptKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("unsaved-receipt");
+    const nativeSet = Storage.prototype.setItem;
+    try {
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+        if (this === window.localStorage && key === draftKey) throw new Error("Storage quota exceeded");
+        nativeSet.call(this, key, value);
+      });
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: latest } });
+      expect(screen.getByRole("alert").textContent).toMatch(/could not keep a local draft/i);
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Feedback received."));
+      expect(submit).toHaveBeenCalledWith(account.id, expect.objectContaining({ liked: latest }));
+      expect(screen.getByRole("alert").textContent).toMatch(/not saved in this browser/i);
+      expect(screen.getByRole("button", { name: "Download submitted copy" })).toBeTruthy();
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
+      expect(window.localStorage.getItem(receiptKey)).toBeNull();
+
+      fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Older locally saved text");
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
+      window.localStorage.removeItem(receiptKey);
+    }
+  });
+
   it("keeps legacy saved bytes visible if edited feedback was sent after a storage failure", async () => {
     const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
     const previousProfile = useStore.getState().profile;
