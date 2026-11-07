@@ -7,13 +7,16 @@
 import type { Habit, HabitEntry, HabitCheckStatus, HabitType } from "./types";
 import { isoDate } from "./scoring";
 import { addLocalDays, localDateKey } from "./dailyRollover";
+import { namedSlotProgress, weeklyHabitSummary, weekStartKey } from "./goalCadence";
+import type { StudyLog } from "./types";
 
 export const HABIT_TYPE_META: Record<HabitType, { label: string; hint: string; needsTarget: boolean }> = {
   binary: { label: "Yes / No", hint: "Did it or didn't.", needsTarget: false },
   duration: { label: "Duration", hint: "Minutes toward a daily target.", needsTarget: true },
   count: { label: "Count", hint: "Reps/units toward a daily target.", needsTarget: true },
   avoidance: { label: "Avoidance", hint: "Success = you avoided it today.", needsTarget: false },
-  weekly: { label: "Flexible weekly", hint: "N times per week, any days.", needsTarget: true },
+  weekly: { label: "Flexible weekly", hint: "A minimum and preferred number of distinct days, with rest days.", needsTarget: false },
+  slots: { label: "Named daily", hint: "Mark individually named occurrences. Unreported is not a failure.", needsTarget: false },
   scheduled: { label: "Scheduled days", hint: "Specific weekdays only.", needsTarget: false },
   recovery: { label: "Recovery", hint: "Gentle restart — never punishes a miss.", needsTarget: false },
   milestone: { label: "Milestone", hint: "A cumulative one-time goal.", needsTarget: true },
@@ -88,7 +91,23 @@ export function statusOn(habit: Habit, entries: HabitEntry[], date: string): Hab
  * habit only existed for part of it). Recovery habits never break. Avoidance
  * habits count "done" (avoided) days.
  */
-export function currentStreak(habit: Habit, entries: HabitEntry[], today: string = localDateKey()): number {
+export function currentStreak(habit: Habit, entries: HabitEntry[], today: string = localDateKey(), logs: StudyLog[] = []): number {
+  if (habit.type === "weekly") {
+    let end = today;
+    let streak = 0;
+    for (let i = 0; i < 104; i++) {
+      const week = weeklyHabitSummary(habit, entries, end, logs);
+      if (!week.minimum) break;
+      if (!week.metMinimum) {
+        if (i > 0) break;
+        end = addLocalDays(week.weekStart, -1); // Ongoing week is pending, never missed on a rest day.
+        continue;
+      }
+      streak++;
+      end = addLocalDays(week.weekStart, -1);
+    }
+    return streak;
+  }
   const start = trackingStartKey(habit, entries, today);
   const recovery = habit.type === "recovery";
   let streak = 0;
@@ -133,7 +152,16 @@ export interface HabitWeekStats {
 }
 
 /** Aggregate a habit's status across a set of local dates (e.g. the last 7 days). */
-export function weekStats(habit: Habit, entries: HabitEntry[], dates: string[]): HabitWeekStats {
+export function weekStats(habit: Habit, entries: HabitEntry[], dates: string[], logs: StudyLog[] = []): HabitWeekStats {
+  if (habit.type === "weekly") {
+    const end = [...dates].sort().at(-1) ?? localDateKey();
+    const goal = weeklyHabitSummary(habit, entries, end, logs);
+    return {
+      done: goal.completedDays, partial: 0, skipped: 0, missed: 0,
+      scheduledDays: goal.minimum,
+      adherence: goal.minimum ? Math.min(100, Math.round(goal.completedDays / goal.minimum * 100)) : 0,
+    };
+  }
   const start = trackingStartKey(habit, entries);
   let done = 0, partial = 0, skipped = 0, missed = 0, scheduledDays = 0;
   for (const date of dates) {
@@ -186,7 +214,17 @@ export function heatmapCells(habit: Habit, entries: HabitEntry[], days = 35, tod
 }
 
 /** A short, non-punitive nudge based on the last few days. Never shames a miss. */
-export function recoveryMessage(habit: Habit, entries: HabitEntry[], today: string = localDateKey()): string {
+export function recoveryMessage(habit: Habit, entries: HabitEntry[], today: string = localDateKey(), logs: StudyLog[] = []): string {
+  if (habit.type === "weekly") {
+    const week = weeklyHabitSummary(habit, entries, today, logs);
+    return week.metPreferred ? "Preferred weekly rhythm reached." : week.metMinimum
+      ? "Weekly minimum reached. Further sessions are optional."
+      : `${week.completedDays} of ${week.minimum} distinct days recorded this week. Rest days are part of the plan.`;
+  }
+  if (habit.type === "slots") {
+    const progress = namedSlotProgress(habit, entryFor(entries, habit.id, today));
+    return `${progress.completed} of ${progress.total} reported complete. Unreported occurrences stay unconfirmed.`;
+  }
   const streak = currentStreak(habit, entries, today);
   const start = trackingStartKey(habit, entries, today);
   const yesterday = addLocalDays(today, -1);
@@ -215,9 +253,11 @@ export function newHabitDefaults(name: string, type: HabitType): Omit<Habit, "id
   return {
     name: name.trim(),
     type,
-    target: HABIT_TYPE_META[type].needsTarget ? (type === "duration" ? 20 : type === "weekly" ? 3 : 1) : undefined,
+    target: type === "weekly" ? 1 : HABIT_TYPE_META[type].needsTarget ? (type === "duration" ? 20 : 1) : undefined,
     unit: type === "duration" ? "min" : type === "count" ? "reps" : undefined,
     weeklyTarget: type === "weekly" ? 3 : undefined,
+    weeklyMinimum: type === "weekly" ? 3 : undefined,
+    weeklyPreferred: type === "weekly" ? 3 : undefined,
     schedule: undefined,
     quietMode: false,
   };
