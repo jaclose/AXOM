@@ -41,6 +41,18 @@ describe("ProductivityPage daily console", () => {
     });
   });
 
+  it("uses a quick self-report category without inventing time or questions", () => {
+    render(<ProductivityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Use Questions template" }));
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Question Bank");
+    fireEvent.change(screen.getByLabelText("Questions"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Log" }));
+    expect(useStore.getState().logs[0]).toMatchObject({
+      type: "Question Bank", minutes: 0, quantity: 12, quantityKind: "questions",
+    });
+    expect(screen.getByText("Activity added. Your save status appears above.")).toBeTruthy();
+  });
+
   it("accepts a named completion without inventing minutes or cards", () => {
     render(<ProductivityPage />);
     fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Prayer" } });
