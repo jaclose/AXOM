@@ -508,3 +508,97 @@ test("real browser back/forward navigation retains durable workspace and retires
     return (await vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)) === value;
   }, workspace)).toBe(true);
 });
+
+
+/**
+ * Quota can strike after the unscoped workspace/owner pointer are durable but
+ * before the redundant owner-scoped localStorage mirror fits. The primary
+ * fallback plus its matching marker are enough to recover; the failed mirror
+ * must not strand the newer workspace behind an older IndexedDB snapshot.
+ * Real Chromium storage, synthetic learner only; no production account.
+ */
+test("quota on secondary profile mirror still restores the verified primary fallback in a fresh tab", async ({ context }) => {
+  const originalTab = await probe(context);
+  const original = snapshot("prior-indexeddb", "original safe work");
+  const newer = snapshot("partial-mirror-newer", "🧪newer work".repeat(10_000));
+
+  await originalTab.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const key = STORAGE_KEYS.persistedState;
+    await vault.localVaultStorage.getItem(key);
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(key, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+  }, original);
+
+  const partiallySaved = await originalTab.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const key = STORAGE_KEYS.persistedState;
+    const scopedKey = `${key}:user:synthetic-vault-chaos`;
+    const markerKey = `${key}:fallback-newer`;
+    const nativeSetItem = Storage.prototype.setItem;
+    const oldIndexedDb = Object.getOwnPropertyDescriptor(window, "indexedDB");
+    let scopedQuotaFailures = 0;
+    Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    Storage.prototype.setItem = function (name: string, data: string) {
+      if (name === scopedKey) {
+        scopedQuotaFailures += 1;
+        throw new DOMException("Synthetic scoped mirror quota", "QuotaExceededError");
+      }
+      return nativeSetItem.call(this, name, data);
+    };
+    try {
+      const checkpoint = vault.getVaultWriteCheckpoint();
+      await vault.localVaultStorage.setItem(key, value);
+      await vault.flushLocalVaultWrites();
+      vault.assertVaultWritesSince(checkpoint);
+      return {
+        scopedQuotaFailures,
+        primaryIsNewer: localStorage.getItem(key) === value,
+        hasMarker: localStorage.getItem(markerKey) !== null,
+        activeOwner: localStorage.getItem(`${key}:active-user`),
+        readBackIsNewer: (await vault.localVaultStorage.getItem(key)) === value,
+      };
+    } finally {
+      Storage.prototype.setItem = nativeSetItem;
+      if (oldIndexedDb) Object.defineProperty(window, "indexedDB", oldIndexedDb);
+      else Reflect.deleteProperty(window, "indexedDB");
+    }
+  }, newer);
+  expect(partiallySaved).toEqual({
+    scopedQuotaFailures: 1,
+    primaryIsNewer: true,
+    hasMarker: true,
+    activeOwner: "synthetic-vault-chaos",
+    readBackIsNewer: true,
+  });
+
+  // Independent module state on the same browser profile must promote the
+  // newer primary fallback instead of silently resurrecting the older IDB.
+  const freshTab = await context.newPage();
+  await freshTab.goto(probePath);
+  expect(await freshTab.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(newer);
+
+  await freshTab.reload();
+  expect(await freshTab.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(newer);
+
+  // Last readback proves the original owner tab cannot resurrect its stale
+  // IndexedDB view; it must hydrate the promoted workspace after reload.
+  await originalTab.reload();
+  expect(await originalTab.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(newer);
+});
