@@ -52,6 +52,16 @@ export function readPassiveAtlasProposal(now = Date.now()): PassiveProposal {
   const session = readPassiveAtlasSession(now);
   return proposePassiveAtlas(session, now);
 }
+/**
+ * Account transitions invalidate unaccepted observations. The two IDs are
+ * compared only in memory; neither is serialized into the observation.
+ */
+export function discardAtlasObservationOnAccountChange(previousAccountId: string | null, nextAccountId: string | null): boolean {
+  if (previousAccountId === nextAccountId) return false;
+  dismissPassiveAtlas();
+  return true;
+}
+
 export function dismissPassiveAtlas(): void {
   try { sessionStore()?.removeItem(PASSIVE_ATLAS_SESSION_KEY); } catch { /* no-op */ }
 }
