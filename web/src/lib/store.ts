@@ -632,9 +632,9 @@ export const useStore = create<Store>()(
             trackerId: tracker?.id,
             unitType: tracker?.unitType ?? "minutes",
             quantity: tracker?.unitType === "count" ? nextCards : nextMinutes,
-            // Unclassified reports are observations, not proof of academic work.
-            // Explicit tracker selection is the only academic attribution path.
-            academic: tracker ? tracker.contributesToAcademicStudy : false,
+            // A deliberate study log remains study even if an imported tracker
+            // cannot be resolved, unlike the generic activity reporter.
+            academic: tracker ? tracker.contributesToAcademicStudy : true,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
@@ -670,7 +670,8 @@ export const useStore = create<Store>()(
             quantity: semanticQuantity,
             quantityKind: kind,
             quantityLabel: quantityLabel?.trim().slice(0, 40) || undefined,
-            academic: tracker ? tracker.contributesToAcademicStudy : true,
+            // Generic self-report is not academic evidence without explicit attribution.
+            academic: tracker ? tracker.contributesToAcademicStudy : false,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
