@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitFile, validateSourceManifest, verifySourceIntegration } from "./verify-source-integration.mjs";
+import { readGitFile, validateSourceManifest, verifySourceIntegration, verifyCompleteSourceIntegration, listGitChanges, isGitAncestor } from "./verify-source-integration.mjs";
 const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
 const manifest = (paths = ["web/src/course.ts"]) => ({
   version: 1, integratedSha: A, sources: [{ sourceSha: B, paths }],
@@ -109,4 +109,95 @@ test("checks real Git commit objects and fails closed on a changed integrated fi
   assert.throws(() => execFileSync(process.execPath, [cli, path], { cwd, encoding: "utf8" }),
     error => error.status === 1 && /differs from exact pinned source file/.test(error.stderr), "CLI must fail closed with nonzero exit status");
   assert.throws(() => readGitFile(sourceSha, "docs/missing.txt", cwd), /Expected exactly one/);
+});
+
+
+test("v2 verifies complete two-source Git ranges including deletion and rejects missing or unexpected changes", t => {
+  const cwd = mkdtempSync(join(tmpdir(), "axom-strict-source-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const write = (path, value) => writeFileSync(join(cwd, path), value);
+  git("init", "-q");
+  git("config", "user.name", "AXOM Test Fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  write("docs/common.txt", "base\n");
+  write("docs/delete.txt", "remove\n");
+  git("add", "-A"); git("commit", "-qm", "release base");
+  const base = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "source-one");
+  write("docs/common.txt", "source one\n");
+  unlinkSync(join(cwd, "docs/delete.txt"));
+  git("add", "-A"); git("commit", "-qm", "source one");
+  const sourceOne = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "source-two", base);
+  write("docs/new.txt", "source two\n");
+  git("add", "-A"); git("commit", "-qm", "source two");
+  const sourceTwo = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "release", base);
+  git("merge", "--no-ff", "-qm", "merge first", sourceOne);
+  git("merge", "--no-ff", "-qm", "merge second", sourceTwo);
+  const integratedSha = git("rev-parse", "HEAD");
+  const input = { version: 2, integrationBaseSha: base, integratedSha, sources: [
+    { baseSha: base, sourceSha: sourceOne }, { baseSha: base, sourceSha: sourceTwo },
+  ] };
+  const adapters = {
+    listChanges: (a, b) => listGitChanges(a, b, cwd),
+    isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+    readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+  };
+  assert.deepEqual(listGitChanges(base, sourceOne, cwd).map(x => x.status), ["M", "D"]);
+  const report = verifyCompleteSourceIntegration(input, adapters);
+  assert.equal(report.completeForDeclaredRanges, true);
+  assert.equal(report.verifiedFiles, 3);
+  assert.equal(report.deletedFiles, 1);
+  // Old v1 silently passes the omitted second source's files.
+  assert.equal(verifySourceIntegration({
+    version: 1, integratedSha, sources: [{ sourceSha: sourceOne, paths: ["docs/common.txt"] }],
+  }, (sha, path) => readGitFile(sha, path, cwd)).verifiedFiles, 1);
+  assert.throws(() => verifyCompleteSourceIntegration({ ...input, sources: [input.sources[0]] }, adapters), /Incomplete source inventory/);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, sources: [{ ...input.sources[0], paths: ["docs/common.txt"] }],
+  }, adapters), /caller-selected paths/);
+  write("docs/extra.txt", "unclaimed integration change\n");
+  git("add", "-A"); git("commit", "-qm", "unexpected file");
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, integratedSha: git("rev-parse", "HEAD"),
+  }, adapters), /Incomplete source inventory/);
+  git("checkout", "-qb", "parallel", base);
+  write("docs/common.txt", "source one\n");
+  git("add", "-A"); git("commit", "-qm", "copied bytes without source ancestry");
+  const parallel = git("rev-parse", "HEAD");
+  assert.equal(readGitFile(parallel, "docs/common.txt", cwd).blob, readGitFile(sourceOne, "docs/common.txt", cwd).blob);
+  assert.throws(() => verifyCompleteSourceIntegration({ ...input, integratedSha: parallel }, adapters), /not an ancestor/);
+  const cli = fileURLToPath(new URL("./verify-source-integration.mjs", import.meta.url));
+  const manifestPath = join(cwd, "manifest.json");
+  writeFileSync(manifestPath, JSON.stringify(input));
+  const cliResult = JSON.parse(execFileSync(process.execPath, [cli, manifestPath], { cwd, encoding: "utf8" }));
+  assert.equal(cliResult.verifiedFiles, 3);
+  assert.equal(cliResult.deletedFiles, 1);
+});
+test("v2 rejects conflicting source ranges, Windows-unsafe paths, type changes and caller-managed omissions", () => {
+  const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
+  const input = { version: 2, integrationBaseSha: A, integratedSha: C, sources: [{ baseSha: A, sourceSha: B }] };
+  const adapters = { isAncestor: () => true,
+    listChanges: () => [{ status: "A", path: "docs/proof.ts" }],
+    readFile: () => ({ mode: "100644", blob: B }) };
+  assert.equal(verifyCompleteSourceIntegration(input, adapters).verifiedFiles, 1);
+  assert.throws(() => verifyCompleteSourceIntegration({ ...input, sources: [...input.sources, ...input.sources] }, adapters), /Conflicting source range/);
+  assert.throws(() => verifyCompleteSourceIntegration({ ...input, sources: [{ sourceSha: B }] }, adapters), /baseSha/);
+  assert.throws(() => verifyCompleteSourceIntegration({ ...input, integrationBaseSha: "main" }, adapters), /pinned/);
+  assert.throws(() => verifyCompleteSourceIntegration({ ...input, version: 1 }, adapters), /version 2/);
+  assert.throws(() => verifyCompleteSourceIntegration(input, {
+    ...adapters, listChanges: () => [{ status: "A", path: "docs/CON.txt" }],
+  }), /Unsafe/);
+  assert.throws(() => verifyCompleteSourceIntegration(input, {
+    ...adapters, listChanges: () => [{ status: "R100", path: "docs/new.txt" }],
+  }), /Unsupported Git change status/);
+  assert.throws(() => verifyCompleteSourceIntegration(input, {
+    ...adapters, listChanges: () => [{ status: "D", path: "docs/proof.ts" }],
+  }), /Deleted source file reappeared/);
+  assert.throws(() => verifyCompleteSourceIntegration(input, {
+    ...adapters, readFile: () => ({ mode: "120000", blob: B }),
+  }), /nonregular/);
 });
