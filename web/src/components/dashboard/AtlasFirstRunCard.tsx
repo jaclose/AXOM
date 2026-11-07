@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Compass, ShieldCheck } from "lucide-react";
 import { GlassCard, GButton } from "../ui/primitives";
+import { useAccount } from "../../lib/account/accountStore";
 import { AXOM_CORRESPONDENTS, type CorrespondentId } from "../../lib/communications/correspondents";
 import {
   confirmAtlasCompanion, disableAtlasCompanion, dismissPassiveAtlas,
@@ -14,8 +15,9 @@ import type { PassiveProposal } from "../../lib/communications/passiveFirstRun";
  * dashboard configuration is silently rewritten.
  */
 export function AtlasFirstRunCard() {
+  const accountId = useAccount(state => state.user?.id) ?? null;
   const [preview, setPreview] = useState<PassiveProposal>(() => readPassiveAtlasProposal());
-  const [confirmed, setConfirmed] = useState<CorrespondentId | null>(() => readConfirmedAtlasCompanion());
+  const [confirmed, setConfirmed] = useState<CorrespondentId | null>(() => readConfirmedAtlasCompanion(accountId));
   const [hasSession, setHasSession] = useState(() => Boolean(readPassiveAtlasSession()));
   const [choice, setChoice] = useState<CorrespondentId | "">("");
   const [showDetails, setShowDetails] = useState(false);
@@ -26,11 +28,12 @@ export function AtlasFirstRunCard() {
       if (document.hidden) return;
       setPreview(readPassiveAtlasProposal());
       setHasSession(Boolean(readPassiveAtlasSession()));
-      setConfirmed(readConfirmedAtlasCompanion());
+      setConfirmed(readConfirmedAtlasCompanion(accountId));
     };
+    check();
     const id = window.setInterval(check, 12000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [accountId]);
 
   if (!hasSession && !confirmed) return null;
   const confirmedCard = AXOM_CORRESPONDENTS.find(c => c.id === confirmed);
@@ -43,7 +46,7 @@ export function AtlasFirstRunCard() {
           <p style={{ color: "var(--text-60)", margin: 0 }}>{confirmedCard.description}</p>
           <p style={{ color: "var(--text-50)", fontSize: 12, marginTop: 6 }}>Saved on this device. Account synchronization is not yet enabled.</p>
         </div>
-        <GButton size="sm" onClick={() => { disableAtlasCompanion(); setConfirmed(null); setHasSession(false); }}>
+        <GButton size="sm" onClick={() => { disableAtlasCompanion(accountId); setConfirmed(null); setHasSession(false); }}>
           Turn off companion
         </GButton>
       </div>
@@ -93,7 +96,7 @@ export function AtlasFirstRunCard() {
     </p>}
     <div className="row wrap gap8" style={{ marginTop: 18 }}>
       <GButton variant="primary" disabled={!canChoose}
-        onClick={() => { if (chosenCard && confirmAtlasCompanion(chosenCard.id)) { setConfirmed(chosenCard.id); setHasSession(false); } }}>
+        onClick={() => { if (chosenCard && confirmAtlasCompanion(chosenCard.id, Date.now(), accountId)) { setConfirmed(chosenCard.id); setHasSession(false); } }}>
         {preview.status === "ready" ? "Keep this companion" : "Use selected companion"}
       </GButton>
       <GButton onClick={() => setShowAll(x => !x)}>{showAll ? "Close choices" : "Choose a different one"}</GButton>
