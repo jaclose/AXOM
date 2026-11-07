@@ -5,6 +5,38 @@
 // ===========================================================================
 import type { AIProvider, AiAvailability, AiJsonRequest } from "./types";
 
+/**
+ * A signed-in Cloud AI request carries the user's bearer token and source text.
+ * A persisted device preference is NOT an authority to change its destination.
+ * Permit only this build's exact Supabase ai-proxy endpoint. The local Supabase
+ * emulator is supported solely in development builds.
+ */
+export function trustedCloudAiEndpoint(
+  configuredProjectUrl: string | undefined,
+  persistedOverride?: string,
+  allowLocalDev = false,
+): string | null {
+  if (!configuredProjectUrl) return null;
+  try {
+    const project = new URL(configuredProjectUrl);
+    if (project.username || project.password || project.search || project.hash || project.pathname !== "/") return null;
+    const hosted = project.protocol === "https:"
+      && /^[a-z0-9]{20}\.supabase\.co$/.test(project.hostname) && project.port === "";
+    const localDev = allowLocalDev && project.protocol === "http:"
+      && (project.hostname === "localhost" || project.hostname === "127.0.0.1");
+    if (!hosted && !localDev) return null;
+
+    const expected = new URL("/functions/v1/ai-proxy", project).href;
+    if (!persistedOverride) return expected;
+    if (persistedOverride !== persistedOverride.trim()) return null;
+    const requested = new URL(persistedOverride);
+    if (requested.username || requested.password || requested.search || requested.hash) return null;
+    return requested.href === expected ? expected : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface CloudProviderOptions {
   endpoint: string;
   /** Resolves the current session's access token (null when signed out). */
@@ -41,6 +73,8 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
       if (!token) throw new Error("Sign in to your AXOM account to use Cloud AI.");
       const response = await doFetch(options.endpoint, {
         method: "POST",
+        // Never forward a signed-in learner token or source text on HTTP 3xx.
+        redirect: "error",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,

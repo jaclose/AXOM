@@ -8,7 +8,7 @@ import type { AIProvider, CardGenerationStyle, GeneratedCardDraft, GeneratedQues
 import { loadAiSettings, type AiSettings } from "./settings";
 import { createOllamaProvider, detectOllama } from "./ollama";
 import { createMockProvider } from "./mock";
-import { createCloudProvider } from "./cloud";
+import { createCloudProvider, trustedCloudAiEndpoint } from "./cloud";
 import { cloudConfigured, loadSupabase } from "../account/supabase";
 import { validateGeneratedCards, validateGeneratedQuestions } from "./schemas";
 
@@ -31,8 +31,11 @@ export function resolveActiveProvider(settings: AiSettings = loadAiSettings()): 
   // Cloud mode = AXOM Cloud AI: Claude through the ai-proxy Edge Function,
   // authorized by the signed-in account. No client-side key path exists.
   if (settings.mode === "cloud" && cloudConfigured()) {
+    const endpoint = cloudEndpoint(settings);
+    // A saved arbitrary Cloud endpoint must never receive JWTs or study text.
+    if (!endpoint) return null;
     return createCloudProvider({
-      endpoint: cloudEndpoint(settings),
+      endpoint,
       apiKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY,
       getAccessToken: async () => {
         const client = await loadSupabase();
@@ -44,8 +47,8 @@ export function resolveActiveProvider(settings: AiSettings = loadAiSettings()): 
   return null;
 }
 
-export function cloudEndpoint(settings: AiSettings = loadAiSettings()): string {
-  return settings.cloudProxyUrl || `${String(import.meta.env.VITE_SUPABASE_URL ?? "").replace(/\/$/, "")}/functions/v1/ai-proxy`;
+export function cloudEndpoint(settings: AiSettings = loadAiSettings()): string | null {
+  return trustedCloudAiEndpoint(import.meta.env.VITE_SUPABASE_URL, settings.cloudProxyUrl, import.meta.env.DEV);
 }
 
 /** Probe the configured provider; used by settings UI and feature gates. */
