@@ -863,18 +863,22 @@ function JournalWritingPage({
       // A later image selection may have joined while an earlier read was
       // pending. Drain the entire read chain before persisting or navigating.
       while (attachmentReadRef.current) await attachmentReadRef.current;
-      // A failed read must not count as a completed attachment operation.
-      // Keep the warning on this page until the writer explicitly dismisses it
-      // or chooses another image. React state may not have committed yet.
-      if (!mountedRef.current || attachmentErrorRef.current) return false;
+      if (!mountedRef.current) return false;
       if (!dirtyRef.current) {
+        // A failed image read is not a successful page turn, even when the
+        // rest of the page is already stored.
+        if (attachmentErrorRef.current) return false;
         transition();
         return true;
       }
       while (mountedRef.current) {
+        // Still persist valid writing/images after an image failed, but do not
+        // navigate away and hide its warning. The save receipt is for the
+        // accepted page content, never the rejected image.
         const result = await persist();
         if (result === "superseded") continue;
         if (result === "failed" || result === "aborted" || !mountedRef.current) return false;
+        if (attachmentErrorRef.current) return false;
         transition();
         return true;
       }
