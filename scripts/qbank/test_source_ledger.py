@@ -301,8 +301,11 @@ class SourceLedgerTests(unittest.TestCase):
 
     def test_native_questions_file_must_be_contained_and_not_linked(self):
         # Real file contents are synthetic. Never interpret an outside questions file as a reviewed native bank.
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("fd-relative no-follow package open is unavailable; production fails closed")
         with tempfile.TemporaryDirectory() as temp:
-            import os
             base = pathlib.Path(temp)
             root, package = base / "authorized", base / "authorized" / "bank"
             package.mkdir(parents=True)
@@ -331,9 +334,6 @@ class SourceLedgerTests(unittest.TestCase):
                         self.assertEqual(copied_row["extraction_status"], "native_package_structurally_checked")
                         self.assertFalse(packages[0]["backend_verified"])
 
-                if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
-                    self.skipTest("secure fd-relative no-follow package opening unavailable")
-
                 # With old Path.is_file()/read_text(), all three references are read as valid banks.
                 escapes = ["../../outside.json", str(outside), "questions-link.json",
                            "linked-parent/outside.json"]
@@ -354,8 +354,11 @@ class SourceLedgerTests(unittest.TestCase):
                 ledger.ROOTS = old_roots
 
     def test_native_manifest_link_and_assets_directory_cannot_escape(self):
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("fd-relative no-follow package open is unavailable; production fails closed")
         with tempfile.TemporaryDirectory() as temp:
-            import os
             base = pathlib.Path(temp)
             root, package = base / "authorized", base / "authorized" / "bank"
             package.mkdir(parents=True)
@@ -374,8 +377,6 @@ class SourceLedgerTests(unittest.TestCase):
                 for directory in ("../../outside", "assets"):
                     with self.subTest(assetsDirectory=directory):
                         if directory == "assets":
-                            if not hasattr(os, "O_NOFOLLOW"):
-                                self.skipTest("secure no-follow path opening unavailable")
                             (package / "assets").symlink_to(outside, target_is_directory=True)
                         manifest.write_text(json.dumps({"schemaVersion": 1, "bank": {"id": "demo"},
                             "questionsFile": "questions.json", "assetsDirectory": directory}))
