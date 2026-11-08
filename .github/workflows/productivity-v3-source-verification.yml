@@ -5,7 +5,7 @@ on:
       - codex/productivity-v3-cross-feature-20261108
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -29,6 +29,36 @@ jobs:
           node scripts/build-communications.mjs
           node scripts/render-communications-auth.mjs
           node --test scripts/render-welcome-draft.test.mjs
+      - name: Commit verified generated Communications assets to V3 branch
+        if: github.repository == 'jaclose/AXOM' && github.ref_name == 'codex/productivity-v3-cross-feature-20261108'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BRANCH="codex/productivity-v3-cross-feature-20261108"
+          git diff --exit-code -- supabase/templates/communications/*.html
+          if git diff --quiet -- supabase/functions/communications/service.js supabase/functions/communications/source-manifest.json; then
+            echo "Generated files already match committed sources"
+            exit 0
+          fi
+          current="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          test "$current" = "$SOURCE_SHA" || { echo "Branch changed; refusing stale commit"; exit 1; }
+          git config user.name "axom-v3-integrity-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- supabase/functions/communications/service.js supabase/functions/communications/source-manifest.json
+          git commit -m "build(communications): regenerate source-provenance bundle for V3 recurrence"
+          cat > "$RUNNER_TEMP/axom-askpass.sh" <<'SH'
+          #!/usr/bin/env sh
+          case "$1" in
+            *Username*) printf 'x-access-token\n' ;;
+            *Password*) printf '%s\n' "$GH_TOKEN" ;;
+          esac
+          SH
+          chmod 700 "$RUNNER_TEMP/axom-askpass.sh"
+          trap 'rm -f "$RUNNER_TEMP/axom-askpass.sh"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/axom-askpass.sh" GIT_TERMINAL_PROMPT=0 \
+            git push origin "HEAD:refs/heads/$BRANCH"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: axom-v3-communications-generated
