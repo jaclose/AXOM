@@ -10,9 +10,17 @@ import type { QuestionSet } from "../../lib/library";
 const mock = vi.hoisted(() => ({
   search: vi.fn(), preview: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
 }));
-vi.mock("../../lib/account/accountStore", () => ({
-  useAccount: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "account-1" } }),
-}));
+vi.mock("../../lib/account/accountStore", () => {
+  const accountState = { user: { id: "account-1" } };
+  return {
+    // Mirror Zustand's selector plus imperative session read. The publishing
+    // dialog must assert both views of the same account during operations.
+    useAccount: Object.assign(
+      (selector: (state: typeof accountState) => unknown) => selector(accountState),
+      { getState: () => accountState },
+    ),
+  };
+});
 vi.mock("../../lib/sharing/questionSetLibrary", () => ({
   searchQuestionSetLibrary: mock.search,
   loadQuestionSetLibraryPreview: mock.preview,
