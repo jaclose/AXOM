@@ -1,6 +1,10 @@
 ---
-tags: [axom/engineering, axom/operations, axom/agents]
-authority: proposed-until-merged
+tags:
+  - axom/engineering
+  - axom/operations
+  - axom/agents
+authority: canonical
+lifecycle: proposed-until-merged
 owner: AXOM engineering coordination; release authority AXOM FORGE
 updated: 2026-11-06
 review_trigger: changed-architecture-or-build-contract
