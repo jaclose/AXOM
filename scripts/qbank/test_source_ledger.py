@@ -70,7 +70,7 @@ class SourceLedgerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
             p=pathlib.Path(root)/"Bank.txt"
             p.write_text("Question 1: What?\nA. Yes\nAnswer: A\n\nQuestion 2: Why?\nA. Yes\nAnswer: B\n")
-            data=ledger.inspect_txt_question_metadata(p)
+            data=ledger.inspect_txt_question_metadata(p, pathlib.Path(root))
             self.assertEqual(data["detected_question_headings"],2)
             self.assertEqual(data["answer_lines"],2)
             self.assertTrue(data["heading_numbers_contiguous"])
@@ -458,6 +458,107 @@ class SourceLedgerTests(unittest.TestCase):
                 self.assertTrue(notes)
             finally:
                 ledger.ROOTS = prior_roots
+
+    def test_postscan_text_probe_rejects_swapped_outside_symlink(self):
+        # Source scanning and later text extraction must share a no-follow boundary.
+        import os
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root, out = base / "authorized", base / "reports"
+            root.mkdir()
+            out.mkdir()
+            source = root / "PQ 1.txt"
+            source.write_text("Question 1: authorized synthetic question\\n")
+            outside = base / "outside.txt"
+            outside.write_text("Question 1: OTHER\\nQuestion 2: OTHER\\n")
+            old_roots, old_out = ledger.ROOTS, ledger.OUT
+            try:
+                ledger.ROOTS, ledger.OUT = [("synthetic_sources", root)], out
+                rows, _ = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+                self.assertEqual(len(rows), 1)
+                source.unlink()
+                try:
+                    source.symlink_to(outside)
+                except (OSError, NotImplementedError):
+                    self.skipTest("filesystem lacks symlinks")
+                ledger.inspect_text_files(rows)
+                self.assertNotIn("detected_question_headings", rows[0])
+                self.assertEqual(rows[0].get("scan_error"), "OSError")
+                self.assertNotEqual(rows[0].get("review_status"), "tagged_source_answers_present_not_source_verified")
+            finally:
+                ledger.ROOTS, ledger.OUT = old_roots, old_out
+
+    def test_postscan_template_parser_rejects_swapped_outside_symlink(self):
+        # Do not copy unauthorized template titles into the Course Tracker work queue.
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root, out = base / "authorized_templates", base / "reports"
+            root.mkdir()
+            out.mkdir()
+            source = root / "01_FTM1_Lectures_DLA.txt"
+            source.write_text("Authorized lesson [Lecture]\\n")
+            outside = base / "outside.txt"
+            outside.write_text("Unapproved external lesson [Lecture]\\n")
+            old_roots, old_out = ledger.ROOTS, ledger.OUT
+            try:
+                ledger.ROOTS, ledger.OUT = [("baseline_templates", root)], out
+                rows, _ = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["document_type"], "tracker_template")
+                self.assertEqual([a["title"] for a in ledger.parse_templates(rows)],
+                                 ["Authorized lesson"])
+                source.unlink()
+                try:
+                    source.symlink_to(outside)
+                except (OSError, NotImplementedError):
+                    self.skipTest("filesystem lacks symlinks")
+                new_rows = [dict(rows[0])]
+                activities = ledger.parse_templates(new_rows)
+                self.assertEqual(activities, [])
+                self.assertEqual(new_rows[0].get("review_status"), "source_read_unavailable")
+                self.assertNotEqual(new_rows[0].get("extraction_status"),
+                                    "tracker_template_activities_parsed")
+            finally:
+                ledger.ROOTS, ledger.OUT = old_roots, old_out
+
+    def test_postscan_pdf_probe_never_invokes_pdftotext_on_swapped_symlink(self):
+        # Even a partial PDF probe must read the root-contained descriptor, not a path.
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root, out = base / "authorized", base / "reports"
+            root.mkdir()
+            out.mkdir()
+            source = root / "PQ sample.pdf"
+            source.write_bytes(b"%PDF-1.4\\nsynthetic permitted bytes")
+            outside = base / "outside.pdf"
+            outside.write_bytes(b"%PDF-1.4\\nsynthetic outside bytes")
+            old_roots, old_out = ledger.ROOTS, ledger.OUT
+            try:
+                ledger.ROOTS, ledger.OUT = [("synthetic_sources", root)], out
+                rows, _ = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+                self.assertEqual(len(rows), 1)
+                with patch.object(ledger.subprocess, "run") as runner:
+                    def check_safe_pdf(command, **kwargs):
+                        self.assertEqual(command[-2:], ["-", "-"])
+                        self.assertTrue(kwargs["stdin"].read().startswith(b"%PDF-1.4"))
+                        return ledger.subprocess.CompletedProcess(command, 0,
+                            stdout=b"Question 1. Synthetic example")
+                    runner.side_effect = check_safe_pdf
+                    self.assertEqual(ledger.inspect_pdf_sample(rows, 1), 1)
+                    self.assertEqual(runner.call_count, 1)
+                source.unlink()
+                try:
+                    source.symlink_to(outside)
+                except (OSError, NotImplementedError):
+                    self.skipTest("filesystem lacks symlinks")
+                with patch.object(ledger.subprocess, "run") as runner:
+                    self.assertEqual(ledger.inspect_pdf_sample(rows, 1), 1)
+                    runner.assert_not_called()
+                    self.assertEqual(rows[0]["pdf_probe_status"],
+                                     "probe_unavailable_or_timed_out")
+            finally:
+                ledger.ROOTS, ledger.OUT = old_roots, old_out
 
     def test_existing_templates_still_parse_547(self):
         if not (ledger.HOME / "Developer/AXOM/AXOM Templates Completed").is_dir():
