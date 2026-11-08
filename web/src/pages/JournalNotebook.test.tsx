@@ -1471,6 +1471,80 @@ describe("Journal notebook foundation", () => {
       .toBe("Draft text must never complete silently.");
   });
 
+  it("locks image selection while Done waits for a vault receipt instead of silently discarding a late file", async () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "image-picker-done-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      notebookStatus: "draft" as const,
+      attachments: [],
+    };
+    useStore.setState((state) => ({ journal: [...state.journal, original] }));
+    let finishFlush!: () => void;
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFlush = resolve; }))
+      .mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    const read = vi.spyOn(journalNotebook, "readJournalImage").mockResolvedValue(localImage);
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Complete only the accepted text." } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Done for today" }));
+    await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+    const picker = screen.getByLabelText("Choose a journal image") as HTMLInputElement;
+    expect(screen.getByRole("button", { name: "Add image" }).hasAttribute("disabled")).toBe(true);
+    expect(picker.disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Finish saving this page before adding an image.");
+
+    // Even a synthetic queued change event cannot bypass the native disabled picker.
+    fireEvent.change(picker, { target: { files: [new File(["late"], "late.png", { type: "image/png" })] } });
+    expect(read).not.toHaveBeenCalled();
+    await act(async () => { finishFlush(); await Promise.resolve(); });
+    await waitFor(() => expect(useStore.getState().journal.find((entry) => entry.id === original.id)?.notebookStatus).toBe("complete"));
+    expect(useStore.getState().journal.find((entry) => entry.id === original.id)).toMatchObject({
+      freeWriting: "Complete only the accepted text.",
+      attachments: [],
+    });
+  });
+
+  it("unlocks the image picker after a failed page-turn flush and retains the original page ID", async () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "image-picker-retry-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      notebookStatus: "draft" as const,
+      attachments: [],
+    };
+    useStore.setState((state) => ({ journal: [...state.journal, original] }));
+    vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockRejectedValueOnce(new Error("Simulated quota failure"))
+      .mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    const read = vi.spyOn(journalNotebook, "readJournalImage").mockResolvedValue(localImage);
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Keep this page on failure." } });
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+
+    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
+    const picker = screen.getByLabelText("Choose a journal image") as HTMLInputElement;
+    expect(picker.disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Add image" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.change(picker, { target: { files: [new File(["now"], "recovery.png", { type: "image/png" })] } });
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByAltText(localImage.name)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(useStore.getState().journal.find((entry) => entry.id === original.id)).toMatchObject({
+      notebookStatus: "draft",
+      freeWriting: "Keep this page on failure.",
+      attachments: [localImage],
+    }));
+  });
+
   it("does not rewrite an unchanged historical page during navigation", async () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites");
     render(<JournalPage />);
