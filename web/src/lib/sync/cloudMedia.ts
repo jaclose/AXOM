@@ -43,7 +43,9 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
           || (prior.checksum && checksum && prior.checksum !== checksum)) {
           throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
         }
-        if (!prior.checksum && checksum) refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum });
+        // Keep the last referencing question for cloud-cache reconstruction,
+        // while retaining a source checksum declared by any earlier reference.
+        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum: checksum ?? prior.checksum });
       } else {
         refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum });
       }
@@ -135,7 +137,20 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         await assertCurrent();
         // A matching size/timestamp is not proof of unchanged bytes. Check
         // the device original even when reusing a previously protected index.
+        const known = prior.get(blobKey);
+        const knownAcademic = known ? academicByHash.get(known.hash) : undefined;
         const record = await getQuestionAttachmentBlob(blobKey);
+        if (!record && known
+          && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
+          && (checksum === undefined || checksum === known.hash)
+          && (!known.academic || knownAcademic)) {
+          // Cache eviction does not invalidate an already protected immutable
+          // original. This may recover the last verified original, but must
+          // never certify changed metadata or a different source checksum.
+          ordered[index] = { ...(knownAcademic ? { academic: knownAcademic } : {}), blobKey,
+            hash: known.hash, byteSize: known.byteSize, updatedAt: attachment.updatedAt };
+          continue;
+        }
         if (!record || record.blob.size !== attachment.byteSize) throw new SyncPushError(
           { kind: "rejected", rejection: "missing-image", status: 0 },
           "Some question images are missing on this device. Restore a complete backup before protecting this version.",
@@ -149,7 +164,6 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           throw new Error("A source image no longer matches its declared checksum. Restore the original before protecting this version.");
         }
         const academic = academicByHash.get(hash);
-        const known = prior.get(blobKey);
         // A former academic-only reference is not proof that a private
         // workspace-media object exists after its academic binding disappears.
         const safeReuse = known && known.hash === hash
