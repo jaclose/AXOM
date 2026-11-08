@@ -876,6 +876,156 @@ class SourceLedgerTests(unittest.TestCase):
             finally:
                 ledger.ROOTS, ledger.OUT = old_roots, old_out
 
+
+    def test_postscan_pdf_pair_correspondence_uses_secure_source_descriptors(self):
+        # The first-question comparison is only an unverified hint. A swapped
+        # source may not reach pdftotext, even if the inventory once saw it.
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root = base / "authorized_pdf_pairs"
+            root.mkdir()
+            original, answered = root / "questions.pdf", root / "answers.pdf"
+            original.write_bytes(b"%PDF-1.4 synthetic permitted question bytes")
+            answered.write_bytes(b"%PDF-1.4 synthetic permitted answer bytes")
+            outside = base / "outside.pdf"
+            outside.write_bytes(b"%PDF-1.4 synthetic private bytes")
+            rows = [
+                dict(source_id="original", source_sha256=hashlib.sha256(original.read_bytes()).hexdigest(), original_path=str(original),
+                     root_label="pair_root"),
+                dict(source_id="answered", source_sha256=hashlib.sha256(answered.read_bytes()).hexdigest(), original_path=str(answered),
+                     root_label="pair_root"),
+            ]
+            pair = dict(questions_only_id="original", answered_id="answered",
+                        original_file=str(original), answered_file=str(answered))
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("pair_root", root)]
+
+                def fake_pdftotext(command, **kwargs):
+                    self.assertEqual(command[-2:], ["-", "-"])
+                    self.assertTrue(kwargs["input"].startswith(b"%PDF-1.4"))
+                    return enriched.subprocess.CompletedProcess(command, 0, stdout=(
+                        b"Question 1. A synthetic clinical question describes multiple measured "
+                        b"variables and asks the learner to choose the mechanism supported "
+                        b"by a complete set of observations and physiological evidence."
+                    ))
+
+                with patch.object(enriched.subprocess, "run", side_effect=fake_pdftotext) as run:
+                    result = enriched.enrich_pairs(rows, [dict(pair)],
+                                                   ledger.open_scanned_source_file)
+                    self.assertEqual(run.call_count, 2)
+                    self.assertEqual(result[0]["text_evidence"],
+                                     "first_question_correspondence_supported")
+                    self.assertFalse(result[0]["answer_attribution_permitted"])
+
+                # Same lexical path and a regular file are insufficient:
+                # correspondence must match the recorded source revision.
+                original.write_bytes(b"%PDF-1.4 replaced regular file after source hashing")
+                with patch.object(enriched.subprocess, "run", side_effect=fake_pdftotext) as run:
+                    revised = enriched.enrich_pairs(rows, [dict(pair)],
+                                                    ledger.open_scanned_source_file)
+                    self.assertEqual(run.call_count, 1)
+                    self.assertEqual(revised[0]["text_evidence"],
+                                     "text_insufficient_unverified")
+                    self.assertFalse(revised[0]["answer_attribution_permitted"])
+                original.unlink()
+                try:
+                    original.symlink_to(outside)
+                except (OSError, NotImplementedError):
+                    self.skipTest("filesystem lacks symlinks")
+                with patch.object(enriched.subprocess, "run", side_effect=fake_pdftotext) as run:
+                    result = enriched.enrich_pairs(rows, [dict(pair)],
+                                                   ledger.open_scanned_source_file)
+                    self.assertEqual(run.call_count, 1)
+                    self.assertEqual(result[0]["text_evidence"],
+                                     "text_insufficient_unverified")
+                    self.assertFalse(result[0]["answer_attribution_permitted"])
+            finally:
+                ledger.ROOTS = old_roots
+
+    def test_postscan_txt_fingerprints_reject_swapped_symlink_and_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root = base / "authorized_txt_stems"
+            root.mkdir()
+            source = root / "questions.txt"
+            source.write_text(
+                "Question 1: An entirely synthetic patient scenario asks how "
+                "a measured physiological variable would change under a controlled intervention.\n"
+                "A. One possible mechanism\nB. Another possible mechanism\n"
+            )
+            outside = base / "outside.txt"
+            outside.write_text(
+                "Question 1: This is unapproved text in an unrelated directory "
+                "that must never be indexed into source fingerprints.\nA. An option\n"
+            )
+            row = dict(source_id="txt-original", source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+                       original_path=str(source), root_label="stem_root",
+                       file_extension=".txt", detected_question_headings=1)
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("stem_root", root)]
+                positive = enriched.raw_text_stem_fingerprints(
+                    [row], ledger.open_scanned_source_file)
+                self.assertEqual(len(positive["source_statistics"]), 1)
+                self.assertEqual(positive["distinct_stem_hint_count"], 1)
+                # Without a scoped opener, do not silently use Path.read_text().
+                fallback = enriched.raw_text_stem_fingerprints([row])
+                self.assertEqual(fallback["source_statistics"], [])
+                self.assertEqual(fallback["distinct_stem_hint_count"], 0)
+                # Changed in-place content must not be associated with
+                # the previously scanned source SHA, even without a symlink.
+                source.write_text(
+                    "Question 1: A replaced source contains entirely new clinical observations "
+                    "whose wording must not inherit the original fingerprint evidence.\\n"
+                    "A. An option\\n"
+                )
+                revised = enriched.raw_text_stem_fingerprints(
+                    [row], ledger.open_scanned_source_file)
+                self.assertEqual(revised["distinct_stem_hint_count"], 0)
+                self.assertEqual(revised["source_statistics"], [])
+                source.unlink()
+                try:
+                    source.symlink_to(outside)
+                except (OSError, NotImplementedError):
+                    self.skipTest("filesystem lacks symlinks")
+                held = enriched.raw_text_stem_fingerprints(
+                    [row], ledger.open_scanned_source_file)
+                self.assertEqual(held["source_statistics"], [])
+                self.assertEqual(held["distinct_stem_hint_count"], 0)
+                self.assertEqual(held["repeated_stem_hashes"], [])
+            finally:
+                ledger.ROOTS = old_roots
+
+    def test_pdf_pair_source_id_mismatch_cannot_override_authorized_path(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root = base / "authorized"
+            root.mkdir()
+            first, second = root / "first.pdf", root / "second.pdf"
+            first.write_bytes(b"%PDF-1.4 synthetic first")
+            second.write_bytes(b"%PDF-1.4 synthetic second")
+            rows = [dict(source_id="a", source_sha256=digest("a"), original_path=str(first),
+                         root_label="pair_root"),
+                    dict(source_id="b", source_sha256=digest("b"), original_path=str(second),
+                         root_label="pair_root")]
+            tampered = dict(questions_only_id="a", answered_id="b",
+                            original_file=str(base / "outside.pdf"), answered_file=str(second))
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("pair_root", root)]
+                with patch.object(enriched.subprocess, "run") as run:
+                    result = enriched.enrich_pairs(rows, [tampered],
+                                                   ledger.open_scanned_source_file)
+                    run.assert_not_called()
+                    self.assertEqual(result[0]["text_evidence"],
+                                     "text_insufficient_unverified")
+                    self.assertFalse(result[0]["answer_attribution_permitted"])
+            finally:
+                ledger.ROOTS = old_roots
+
     def test_existing_templates_still_parse_547(self):
         if not (ledger.HOME / "Developer/AXOM/AXOM Templates Completed").is_dir():
             self.skipTest("real source root unavailable")
