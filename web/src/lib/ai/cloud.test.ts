@@ -77,7 +77,7 @@ describe("Cloud AI credential destination", () => {
 describe("AXOM Cloud AI client", () => {
   it("sends the session token, never a model key, and returns the result", async () => {
     const fetchImpl = vi.fn(() => reply(200, { result: { cards: [1] }, remaining: 41 }));
-    const provider = createCloudProvider({ endpoint: "https://x.supabase.co/functions/v1/ai-proxy", apiKey: "sb_publishable_x", getAccessToken: async () => "jwt-token", isRequestAllowed: () => true, fetchImpl });
+    const provider = createCloudProvider({ endpoint: "https://x.supabase.co/functions/v1/ai-proxy", apiKey: "sb_publishable_x", getAccessToken: async () => "jwt-token", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "jwt-token" }), isRequestAllowed: () => true, fetchImpl });
     await expect(provider.completeJson({ system: "s", prompt: "p", maxTokens: 300, task: "cards" })).resolves.toEqual({ cards: [1] });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token", apikey: "sb_publishable_x" });
@@ -89,13 +89,13 @@ describe("AXOM Cloud AI client", () => {
   });
 
   it("explains signed-out, quota and model-refusal states", async () => {
-    const signedOut = createCloudProvider({ endpoint: "e", getAccessToken: async () => null, isRequestAllowed: () => true, fetchImpl: vi.fn() });
+    const signedOut = createCloudProvider({ endpoint: "e", getAccessToken: async () => null, getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn() });
     await expect(signedOut.completeJson({ prompt: "p" })).rejects.toThrow(/Sign in/);
     await expect(signedOut.available()).resolves.toMatchObject({ ok: false });
-    const quota = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(429, { error: "Today's Cloud AI allowance (60 requests) is used up." })) });
+    const quota = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(429, { error: "Today's Cloud AI allowance (60 requests) is used up." })) });
     await expect(quota.completeJson({ prompt: "p" })).rejects.toThrow(/allowance/);
     expect(cloudAiRemaining()).toBe(0);
-    const refusal = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(200, { result: { error: "Source text is empty." } })) });
+    const refusal = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(200, { result: { error: "Source text is empty." } })) });
     await expect(refusal.completeJson({ prompt: "p" })).rejects.toThrow("Source text is empty.");
   });
 });
@@ -106,7 +106,7 @@ describe("cached Cloud AI provider request-time consent", () => {
     let allowed = true;
     const getAccessToken = vi.fn(async () => "private-jwt");
     const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
-    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, fetchImpl, isRequestAllowed: () => allowed });
+    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }), fetchImpl, isRequestAllowed: () => allowed });
     allowed = false;
     await expect(provider.available()).resolves.toMatchObject({ ok: false });
     await expect(provider.completeJson({ prompt: "private study material" })).rejects.toThrow(/Cloud AI is off/);
@@ -119,7 +119,7 @@ describe("cached Cloud AI provider request-time consent", () => {
     let releaseToken!: (token: string | null) => void;
     const getAccessToken = vi.fn(() => new Promise<string | null>((resolve) => { releaseToken = resolve; }));
     const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
-    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, fetchImpl, isRequestAllowed: () => allowed });
+    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }), fetchImpl, isRequestAllowed: () => allowed });
     const request = provider.completeJson({ prompt: "sensitive question text" });
     expect(getAccessToken).toHaveBeenCalledTimes(1);
     allowed = false; // Another tab confirmed Off while the auth promise was pending.
@@ -133,7 +133,7 @@ describe("cached Cloud AI provider request-time consent", () => {
     let releaseReply!: (response: Response) => void;
     const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { releaseReply = resolve; }));
     const provider = createCloudProvider({
-      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }),
       fetchImpl, isRequestAllowed: () => allowed,
     });
     const request = provider.completeJson({ prompt: "sensitive question text" });
@@ -158,7 +158,7 @@ describe("cached Cloud AI provider request-time consent", () => {
       }),
     }));
     const provider = createCloudProvider({
-      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }),
       isRequestAllowed: () => allowed,
       fetchImpl: fetchSpy as unknown as typeof fetch,
     });
@@ -173,7 +173,7 @@ describe("cached Cloud AI provider request-time consent", () => {
   it("fails closed when consent verification itself throws", async () => {
     const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
     const provider = createCloudProvider({
-      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }),
       fetchImpl, isRequestAllowed: () => { throw new Error("storage denied"); },
     });
     await expect(provider.completeJson({ prompt: "no egress" })).rejects.toThrow(/Cloud AI is off/);
@@ -202,6 +202,98 @@ describe("cached Cloud AI provider request-time consent", () => {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("Cloud AI account/session epoch isolation", () => {
+  const accountA = { userId: "account-a", accessToken: "token-a" };
+  const accountB = { userId: "account-b", accessToken: "token-b" };
+
+  for (const returnedToken of ["token-a", "token-b"]) {
+    it(`never posts account A study text after an A-to-B switch while auth returns ${returnedToken}`, async () => {
+      let current = accountA;
+      let finishAuth!: (token: string) => void;
+      const getAccessToken = vi.fn(() => new Promise<string>((resolve) => { finishAuth = resolve; }));
+      const fetchImpl = vi.fn(() => reply(200, { result: { text: "must not send" } }));
+      const options = {
+        endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+        getAuthSnapshot: () => current, getAccessToken, fetchImpl,
+      };
+      const provider = createCloudProvider(options);
+      const request = provider.completeJson({ prompt: "account A private study note" });
+      expect(getAccessToken).toHaveBeenCalledTimes(1);
+      current = accountB;
+      finishAuth(returnedToken);
+      await expect(request).rejects.toThrow(/account.*changed|session.*changed/i);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+  }
+
+  it("blocks sign-out and same-account token rotation before posting", async () => {
+    for (const after of [null, { userId: "account-a", accessToken: "refreshed-token" }]) {
+      let current: typeof accountA | null = accountA;
+      let finishAuth!: (token: string) => void;
+      const getAccessToken = () => new Promise<string>((resolve) => { finishAuth = resolve; });
+      const fetchImpl = vi.fn(() => reply(200, { result: { text: "must not send" } }));
+      const options = {
+        endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+        getAuthSnapshot: () => current, getAccessToken, fetchImpl,
+      };
+      const request = createCloudProvider(options).completeJson({ prompt: "account A study text" });
+      current = after;
+      finishAuth("token-a");
+      await expect(request).rejects.toThrow(/account.*changed|session.*changed/i);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not reuse an account A provider after switching accounts before its first action", async () => {
+    let storedAccount = accountA;
+    const boundAccountId = storedAccount.userId;
+    const fetchImpl = vi.fn(() => reply(200, { result: { text: "must not send" } }));
+    const getAccessToken = vi.fn(async () => "token-b");
+    const options = {
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAuthSnapshot: () => storedAccount.userId === boundAccountId ? storedAccount : null,
+      getAccessToken, fetchImpl,
+    };
+    const cachedProvider = createCloudProvider(options);
+    storedAccount = accountB;
+    await expect(cachedProvider.completeJson({ prompt: "stale component text" })).rejects.toThrow(/account.*changed|session.*changed|Sign in/i);
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("drops an already-sent reply and its quota update after an identity switch during JSON parsing", async () => {
+    let current = accountA;
+    let finishParsing!: (value: unknown) => void;
+    let parsingStarted!: () => void;
+    const parsing = new Promise<void>((resolve) => { parsingStarted = resolve; });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: () => new Promise<unknown>((resolve) => { finishParsing = resolve; parsingStarted(); }),
+    }));
+    const options = {
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAuthSnapshot: () => current, getAccessToken: async () => "token-a",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    };
+    const request = createCloudProvider(options).completeJson({ prompt: "account A text" });
+    await parsing;
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // Already transmitted; cannot retract.
+    current = accountB;
+    finishParsing({ result: { text: "stale" }, remaining: 8 });
+    await expect(request).rejects.toThrow(/account.*changed|session.*changed/i);
+  });
+
+  it("keeps a legitimate same-account, unchanged-token Cloud request operational", async () => {
+    const fetchImpl = vi.fn(() => reply(200, { result: { text: "safe" } }));
+    const options = {
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAuthSnapshot: () => accountA, getAccessToken: async () => "token-a", fetchImpl,
+    };
+    await expect(createCloudProvider(options).completeJson({ prompt: "source text" })).resolves.toEqual({ text: "safe" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

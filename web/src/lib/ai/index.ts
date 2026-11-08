@@ -9,7 +9,7 @@ import { loadAiSettings, type AiSettings } from "./settings";
 import { createOllamaProvider, detectOllama } from "./ollama";
 import { createMockProvider } from "./mock";
 import { createCloudProvider, trustedCloudAiEndpoint } from "./cloud";
-import { cloudConfigured, loadSupabase } from "../account/supabase";
+import { cloudConfigured, loadSupabase, readStoredSession } from "../account/supabase";
 import { validateGeneratedCards, validateGeneratedQuestions } from "./schemas";
 
 export { detectOllama } from "./ollama";
@@ -34,8 +34,17 @@ export function resolveActiveProvider(settings: AiSettings = loadAiSettings()): 
     const endpoint = cloudEndpoint(settings);
     // A saved arbitrary Cloud endpoint must never receive JWTs or study text.
     if (!endpoint) return null;
+    // A memoized provider belongs to the account that created it. Never allow
+    // an account B session to activate account A's cached component/provider.
+    const boundAccountId = readStoredSession()?.user.id ?? null;
     return createCloudProvider({
       endpoint,
+      getAuthSnapshot: () => {
+        const current = readStoredSession();
+        return boundAccountId && current?.user.id === boundAccountId && current.access_token
+          ? { userId: boundAccountId, accessToken: current.access_token }
+          : null;
+      },
       // A component may cache this provider after another tab turns AI Off.
       // Always consult the current device preference at the moment of use.
       isRequestAllowed: () => cloudRequestIsCurrentlyAllowed(endpoint),
