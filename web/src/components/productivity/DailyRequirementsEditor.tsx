@@ -46,6 +46,7 @@ export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (
   const [quickRecording, setQuickRecording] = useState<"manual" | "activity">("manual");
   const [quickSchedule, setQuickSchedule] = useState<DailySuccessSchedule>({ kind: "daily" });
   const [quickError, setQuickError] = useState("");
+  const [quickReport, setQuickReport] = useState(false);
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("1");
   const [editSchedule, setEditSchedule] = useState<DailySuccessSchedule>({ kind: "daily" });
@@ -107,6 +108,7 @@ export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (
     setQuickUnit("times");
     setQuickRecording("manual");
     setQuickSchedule({ kind: "daily" });
+    setQuickReport(false);
     setQuickError("");
     setQuickOpen(true);
   }
@@ -168,6 +170,8 @@ export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (
         target: quickKind === "daily-slots" ? quickSchedule.kind === "daily-slots" ? quickSchedule.slots.length : amount : amount,
         unit,
         schedule: quickSchedule,
+        lane: quickKind === "daily-slots" || quickKind === "weekly-range" ? "personal" : "academic",
+        showInReports: quickReport,
         trackingStartsAt: today,
       }, today)]);
     }
@@ -550,6 +554,12 @@ export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (
                 value={quickSchedule.times} onChange={(event) => setQuickSchedule({
                   kind: "times-per-week", times: Math.max(1, Math.min(7, Math.round(Number(event.target.value) || 1))), weekStartsOn: 1,
                 })} /></label>
+            )}
+            {(quickKind === "weekly-range" || quickKind === "daily-slots") && (
+              <label className="quick-goal-report-opt">
+                <input type="checkbox" checked={quickReport} onChange={(event) => setQuickReport(event.target.checked)}/>
+                <span>Include this goal in my private Reports</span>
+              </label>
             )}
             <p className="quick-goal-guide">{quickKind === "custom" && quickRecording === "activity"
               ? "Activities with this exact name will update the goal when you log them. Time or quantity follows the unit you chose."
