@@ -26,6 +26,17 @@ begin
     raise exception 'Question Set snapshot contains invalid scalar types' using errcode='22023';
   end if;
 
+  -- The submission RPC strips unapproved fields before persistence, but a
+  -- service-role snapshot replacement must also fail closed. Otherwise a
+  -- future importer could expose private workspace or source-media metadata.
+  if exists (select 1 from pg_catalog.jsonb_object_keys(new.snapshot_payload) k
+      where k not in (
+        'shareFormatVersion','title','tags','orderedQuestionIds','questions',
+        'createdAt','copyrightNotice'
+      )) then
+    raise exception 'Question Set snapshot contains private or unsupported fields' using errcode='22023';
+  end if;
+
   -- Tags include future AXOM visual-intent labels; neither nested objects nor
   -- numeric values may be laundered into public text by maintenance writes.
   if pg_catalog.jsonb_typeof(new.snapshot_payload->'tags') is distinct from 'array' then
@@ -56,6 +67,14 @@ begin
       or pg_catalog.jsonb_typeof(v_question->'tags') is distinct from 'array' then
       raise exception 'Question Set question or answer key has invalid scalar types' using errcode='22023';
     end if;
+    if exists (select 1 from pg_catalog.jsonb_object_keys(v_question) k
+        where k not in (
+          'id','stem','options','correctKey','correctAnswerText','explanation',
+          'choiceRationales','system','topic','objective','category',
+          'subcategory','tags','citation'
+        )) then
+      raise exception 'Question Set question contains private or unsupported fields' using errcode='22023';
+    end if;
     if pg_catalog.jsonb_array_length(v_question->'tags') > 100 then
       raise exception 'Question Set question tags contain invalid scalar types' using errcode='22023';
     end if;
@@ -73,6 +92,10 @@ begin
         or pg_catalog.jsonb_typeof(v_option->'key') is distinct from 'string'
         or pg_catalog.jsonb_typeof(v_option->'text') is distinct from 'string' then
         raise exception 'Question Set answer choices must contain string keys and text' using errcode='22023';
+      end if;
+      if exists (select 1 from pg_catalog.jsonb_object_keys(v_option) k
+          where k not in ('key','text')) then
+        raise exception 'Question Set choice contains private or unsupported fields' using errcode='22023';
       end if;
     end loop;
     for v_tag in select value from pg_catalog.jsonb_array_elements(v_question->'tags') loop

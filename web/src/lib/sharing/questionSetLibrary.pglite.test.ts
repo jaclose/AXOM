@@ -281,6 +281,30 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(readback.value.review_revision).toBe(1);
   });
 
+  it("rejects private fields at every snapshot nesting level on privileged replacement", async () => {
+    const id = await submit(OWNER, "privileged-private-field-guard");
+    const variants: Array<[string, (value: Snapshot) => void]> = [
+      ["root workspace notes", value => { value.workspaceNotes = { content: "private synthetic note" }; }],
+      ["question attempts", value => { value.questions[0].attempts = [{ answer: "A", userId: OWNER }]; }],
+      ["option source media path", value => {
+        (value.questions[0].options as Array<Record<string, unknown>>)[0].sourceFile = "private-source.pdf";
+      }],
+    ];
+    for (const [label, mutate] of variants) {
+      const altered = snapshot();
+      mutate(altered);
+      await expect(db.query(
+        "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(altered), id],
+      ), label).rejects.toThrow(/private or unsupported fields/i);
+    }
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload).toEqual(snapshot());
+    expect(readback.value.review_revision).toBe(1);
+  });
+
   it("retains valid text-only visual intent and reviewed teaching rationales through moderation", async () => {
     const source = snapshot();
     source.tags = ["visual:intent:histology"];
