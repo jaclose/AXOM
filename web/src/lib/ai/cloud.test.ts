@@ -205,6 +205,98 @@ describe("cached Cloud AI provider request-time consent", () => {
   });
 });
 
+describe("Cloud AI account/session epoch isolation", () => {
+  const accountA = { userId: "account-a", accessToken: "token-a" };
+  const accountB = { userId: "account-b", accessToken: "token-b" };
+
+  for (const returnedToken of ["token-a", "token-b"]) {
+    it(`never posts account A study text after an A-to-B switch while auth returns ${returnedToken}`, async () => {
+      let current = accountA;
+      let finishAuth!: (token: string) => void;
+      const getAccessToken = vi.fn(() => new Promise<string>((resolve) => { finishAuth = resolve; }));
+      const fetchImpl = vi.fn(() => reply(200, { result: { text: "must not send" } }));
+      const options = {
+        endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+        getAuthSnapshot: () => current, getAccessToken, fetchImpl,
+      };
+      const provider = createCloudProvider(options);
+      const request = provider.completeJson({ prompt: "account A private study note" });
+      expect(getAccessToken).toHaveBeenCalledTimes(1);
+      current = accountB;
+      finishAuth(returnedToken);
+      await expect(request).rejects.toThrow(/account.*changed|session.*changed/i);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+  }
+
+  it("blocks sign-out and same-account token rotation before posting", async () => {
+    for (const after of [null, { userId: "account-a", accessToken: "refreshed-token" }]) {
+      let current: typeof accountA | null = accountA;
+      let finishAuth!: (token: string) => void;
+      const getAccessToken = () => new Promise<string>((resolve) => { finishAuth = resolve; });
+      const fetchImpl = vi.fn(() => reply(200, { result: { text: "must not send" } }));
+      const options = {
+        endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+        getAuthSnapshot: () => current, getAccessToken, fetchImpl,
+      };
+      const request = createCloudProvider(options).completeJson({ prompt: "account A study text" });
+      current = after;
+      finishAuth("token-a");
+      await expect(request).rejects.toThrow(/account.*changed|session.*changed/i);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not reuse an account A provider after switching accounts before its first action", async () => {
+    let storedAccount = accountA;
+    const boundAccountId = storedAccount.userId;
+    const fetchImpl = vi.fn(() => reply(200, { result: { text: "must not send" } }));
+    const getAccessToken = vi.fn(async () => "token-b");
+    const options = {
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAuthSnapshot: () => storedAccount.userId === boundAccountId ? storedAccount : null,
+      getAccessToken, fetchImpl,
+    };
+    const cachedProvider = createCloudProvider(options);
+    storedAccount = accountB;
+    await expect(cachedProvider.completeJson({ prompt: "stale component text" })).rejects.toThrow(/account.*changed|session.*changed|Sign in/i);
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("drops an already-sent reply and its quota update after an identity switch during JSON parsing", async () => {
+    let current = accountA;
+    let finishParsing!: (value: unknown) => void;
+    let parsingStarted!: () => void;
+    const parsing = new Promise<void>((resolve) => { parsingStarted = resolve; });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: () => new Promise<unknown>((resolve) => { finishParsing = resolve; parsingStarted(); }),
+    }));
+    const options = {
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAuthSnapshot: () => current, getAccessToken: async () => "token-a",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    };
+    const request = createCloudProvider(options).completeJson({ prompt: "account A text" });
+    await parsing;
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // Already transmitted; cannot retract.
+    current = accountB;
+    finishParsing({ result: { text: "stale" }, remaining: 8 });
+    await expect(request).rejects.toThrow(/account.*changed|session.*changed/i);
+  });
+
+  it("keeps a legitimate same-account, unchanged-token Cloud request operational", async () => {
+    const fetchImpl = vi.fn(() => reply(200, { result: { text: "safe" } }));
+    const options = {
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAuthSnapshot: () => accountA, getAccessToken: async () => "token-a", fetchImpl,
+    };
+    await expect(createCloudProvider(options).completeJson({ prompt: "source text" })).resolves.toEqual({ text: "safe" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("ai-proxy core", () => {
   it("fails closed on missing, malformed, unavailable or denied quota policy", () => {
     for (const value of [null, undefined, "59", {}, [], NaN, Infinity, -2, 0.5, 1000]) {
