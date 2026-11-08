@@ -1331,10 +1331,19 @@ function JournalWritingPage({
                           {draft[kind].length > 0 && (
                             <button type="button" className="journal-reflection-remove"
                               aria-label={`Remove ${kind === "wins" ? "keep" : "release"} ${index + 1}`}
-                              onClick={() => setDraft((current) => ({
-                                ...current,
-                                [kind]: current[kind].filter((_, itemIndex) => itemIndex !== index),
-                              }))}>Remove</button>
+                              onClick={(event) => {
+                                // Index-keyed rows can reuse this button for the next private note.
+                                // Move focus to an editor that survives the removal before updating.
+                                const row = event.currentTarget.closest(".journal-reflection-row");
+                                const focusRow = index === 0 ? row : row?.previousElementSibling;
+                                const editor = focusRow?.querySelector<HTMLInputElement>("input");
+                                if (editor) editor.focus();
+                                else event.currentTarget.blur();
+                                setDraft((current) => ({
+                                  ...current,
+                                  [kind]: current[kind].filter((_, itemIndex) => itemIndex !== index),
+                                }));
+                              }}>Remove</button>
                           )}
                         </div>
                       ))}

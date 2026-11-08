@@ -1324,6 +1324,91 @@ describe("Journal notebook foundation", () => {
     expect(markdown).not.toContain("Sensitive release to remove");
   });
 
+  it("moves keyboard focus off a removed reflection so held Enter cannot delete another private note", async () => {
+    const originalId = "keyboard-private-reflections";
+    useStore.setState((state) => ({
+      journal: [...state.journal, {
+        id: originalId,
+        date: `${TODAY_KEY}T12:00:00`,
+        today: "Keep only the reflection deliberately removed.",
+        tomorrow: "",
+        blockers: "",
+        energy: "Medium",
+        rating: "Useful",
+        wins: ["Keep A", "Keep B", "Keep C", "Keep D"],
+        losses: ["Release A", "Release B"],
+      }],
+    }));
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    const createObjectURL = vi.fn((_blob: Blob) => "blob:reflection-keyboard-export");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.click(screen.getByText("Keep something. Release something."));
+
+    const removeMiddle = screen.getByRole("button", { name: "Remove keep 2" });
+    removeMiddle.focus();
+    fireEvent.keyDown(removeMiddle, { key: "Enter", code: "Enter" });
+    fireEvent.click(removeMiddle);
+    fireEvent.keyUp(document.activeElement ?? removeMiddle, { key: "Enter", code: "Enter" });
+
+    // React must not recycle the focused Remove button for the next item.
+    expect(document.activeElement).toBe(screen.getByDisplayValue("Keep A"));
+    const repeatTarget = document.activeElement as HTMLElement;
+    fireEvent.keyDown(repeatTarget, { key: "Enter", code: "Enter", repeat: true });
+    if (repeatTarget instanceof HTMLButtonElement) fireEvent.click(repeatTarget);
+    fireEvent.keyUp(repeatTarget, { key: "Enter", code: "Enter" });
+    expect(screen.queryByDisplayValue("Keep B")).toBeNull();
+    expect(screen.getByDisplayValue("Keep C")).toBeTruthy();
+    expect(screen.getByDisplayValue("Keep D")).toBeTruthy();
+
+    const removeLast = screen.getByRole("button", { name: "Remove keep 3" });
+    removeLast.focus();
+    fireEvent.click(removeLast);
+    expect(document.activeElement).toBe(screen.getByDisplayValue("Keep C"));
+
+    const removeFirst = screen.getByRole("button", { name: "Remove release 1" });
+    removeFirst.focus();
+    fireEvent.click(removeFirst);
+    expect(document.activeElement).toBe(screen.getByDisplayValue("Release B"));
+    const removeOnly = screen.getByRole("button", { name: "Remove release 1" });
+    removeOnly.focus();
+    fireEvent.click(removeOnly);
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "A loose thread" }));
+    expect(screen.queryByRole("button", { name: "Remove release 1" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+    await waitFor(() => expect(useStore.getState().journal.find((entry) => entry.id === originalId)).toMatchObject({
+      wins: ["Keep A", "Keep C"],
+      losses: [],
+      notebookStatus: "draft",
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+    expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next journal page" }));
+    expect(await screen.findByDisplayValue("Keep C")).toBeTruthy();
+    expect(screen.queryByDisplayValue("Keep B")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Export page" }));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const exportedBlob = createObjectURL.mock.calls[0][0];
+    const markdown = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(exportedBlob);
+    });
+    expect(markdown).toContain("Keep A");
+    expect(markdown).toContain("Keep C");
+    expect(markdown).not.toContain("Keep B");
+    expect(markdown).not.toContain("Keep D");
+    expect(markdown).not.toContain("Release A");
+    expect(markdown).not.toContain("Release B");
+  });
+
   it("opens the premium notebook and turns pages with buttons without losing text", async () => {
     // This component test has no hydrated IndexedDB subscriber. Persistence
     // semantics are exercised below and in localVault.test; here the durable
