@@ -525,6 +525,7 @@ describe("Import Center persistence invariant", () => {
     let settleFirst!: (value?: void) => void;
     let rejectFirst!: (reason?: unknown) => void;
     let blockFirst = true;
+    let firstWriteForwarded = 0;
     const blocked = new Promise<void>((resolve, reject) => { settleFirst = resolve; rejectFirst = reject; });
     useStore.persist.setOptions({
       storage: {
@@ -533,7 +534,14 @@ describe("Import Center persistence invariant", () => {
         setItem: (name, value) => {
           if (blockFirst) {
             blockFirst = false;
-            return blocked;
+            // A successful release must actually persist the intercepted
+            // payload. Merely resolving the gate skips the vault write and
+            // makes assertVaultWrite correctly reject the synthetic import.
+            // Rejecting the gate must never forward its tentative payload.
+            return blocked.then(() => {
+              firstWriteForwarded += 1;
+              return storage.setItem(name, value);
+            });
           }
           return storage.setItem(name, value);
         },
@@ -569,6 +577,7 @@ describe("Import Center persistence invariant", () => {
       else settleFirst();
 
       const [a, b] = await Promise.all([pendingA, pendingB]);
+      expect(firstWriteForwarded).toBe(firstFails ? 0 : 1);
       expect(a.result.ok).toBe(!firstFails);
       expect(b.result.ok).toBe(true);
       const finalState = useStore.getState();
