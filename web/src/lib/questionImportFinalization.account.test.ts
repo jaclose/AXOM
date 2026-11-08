@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAccount } from "./account/accountStore";
 import {
+  isReviewedImportInFlight,
   persistReviewedImportOnce,
   type QuestionImportPersistence,
   type ReviewedImportPersistencePlan,
@@ -75,6 +76,9 @@ describe("reviewed-import account-epoch isolation", () => {
     signIn("account-a");
     const a = persistReviewedImportOnce(sameReviewedFingerprint, persistence(commit), importPlan("a-question"));
     signIn("account-b");
+    // The shared local workspace may still expose A\x27s tentative state.
+    // No caller may mistake that state for a settled equivalent set.
+    expect(isReviewedImportInFlight(sameReviewedFingerprint)).toBe(true);
     const b = persistReviewedImportOnce(sameReviewedFingerprint, persistence(commit), importPlan("b-question"));
     expect(commit).toHaveBeenCalledTimes(1);
     gate.release();
