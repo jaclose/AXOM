@@ -396,3 +396,48 @@ test("v2 accepts reviewed older-base modification restored over an advanced-main
       : listGitChanges(a, b, cwd),
   }), /changed-path inventory differs/);
 });
+
+
+test("pinned Git object and ancestry readbacks ignore untrusted local replace refs", t => {
+  // Git replace rewrites ordinary ls-tree, diff and ancestry interpretations
+  // without changing the 40-character commit SHA or final checked-out bytes.
+  // The release attestation MUST use immutable original objects, not aliases.
+  const cwd = mkdtempSync(join(tmpdir(), "axom-replace-provenance-"));
+  t.after(() => rmSync(cwd, { force: true, recursive: true }));
+  const git = (...args) => execFileSync("git", args, {
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  git("init", "-q");
+  git("config", "user.name", "AXOM replacement fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  writeFileSync(join(cwd, "docs", "proof.txt"), "approved base\n");
+  git("add", "-A");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  writeFileSync(join(cwd, "docs", "proof.txt"), "subsequent changed bytes\n");
+  writeFileSync(join(cwd, "docs", "extra.txt"), "newly added file\n");
+  git("add", "-A");
+  git("commit", "-qm", "pinned modified source");
+  const source = git("rev-parse", "HEAD");
+  const trueBlob = git("--no-replace-objects", "rev-parse", source + ":docs/proof.txt");
+  assert.notEqual(trueBlob, git("--no-replace-objects", "rev-parse", base + ":docs/proof.txt"));
+  assert.deepEqual(listGitChanges(base, source, cwd).map(({ status, path }) => [status, path]), [
+    ["A", "docs/extra.txt"], ["M", "docs/proof.txt"],
+  ]);
+  // Malicious or forgotten local replace ref causes ordinary Git to lie about
+  // source's tree, changes and parent chain, despite identical requested SHA.
+  git("replace", source, base);
+  assert.equal(git("ls-tree", "-r", source, "--", "docs/proof.txt")
+    .includes(git("rev-parse", base + ":docs/proof.txt")), true);
+  assert.equal(git("diff", "--no-renames", "--name-only", base, source), "");
+  assert.equal(readGitFile(source, "docs/proof.txt", cwd)?.blob, trueBlob,
+    "never accept the replaced older blob under the pinned source SHA");
+  assert.deepEqual(listGitChanges(base, source, cwd).map(({ status, path }) => [status, path]), [
+    ["A", "docs/extra.txt"], ["M", "docs/proof.txt"],
+  ]);
+  assert.deepEqual(listGitTreePaths(source, cwd), ["docs/extra.txt", "docs/proof.txt"]);
+  assert.equal(isGitAncestor(base, source, cwd), true,
+    "Git replace must not rewrite the pinned commit ancestry");
+  assert.equal(isGitAncestor(source, base, cwd), false);
+});
