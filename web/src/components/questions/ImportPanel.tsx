@@ -441,10 +441,10 @@ export function ImportPanel({
     }
 
     finalizingRef.current = true;
-    if (!prepared.equivalent) {
-      setFinalizing(true);
-      setStep("finalize");
-    }
+    // Equivalent imports can still repair originals and figures asynchronously.
+    // Keep the learner informed and prevent a second click until the receipt.
+    setFinalizing(true);
+    setStep("finalize");
     const saved = await saveReviewedImport(prepared, s, imageFiles);
     if (!saved.ok) {
       if (!mountedRef.current) return;
