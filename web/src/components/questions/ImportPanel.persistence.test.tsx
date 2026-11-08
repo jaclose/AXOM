@@ -198,6 +198,8 @@ describe("Import Center persistence invariant", () => {
     await user.click(screen.getByRole("button", { name: "Finalize import" }));
     await waitFor(() => expect(settle).toHaveLength(1));
     expect(saved).toHaveBeenCalledTimes(1);
+    // Pending equivalent source repairs must show truthful busy feedback.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Finalizing…" })).toHaveProperty("disabled", true));
     expect(toast).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Import already finalized" }));
 
     settle[0]({ ok: false, message: "The account changed while importing questions.", rollbackFailures: [] });
