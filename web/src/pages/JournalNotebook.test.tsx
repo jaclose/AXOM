@@ -1382,6 +1382,8 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("Image read failed");
     expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("Do not lose this draft.");
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY))?.freeWriting)
+      .toBe("Do not lose this draft.");
     expect(screen.getByRole("button", { name: "Dismiss image warning" })).toBeTruthy();
     expect(screen.queryByText("Saved to this workspace")).toBeNull();
   });
@@ -1416,6 +1418,8 @@ describe("Journal notebook foundation", () => {
     });
     expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("Second image rejected");
+    expect(useStore.getState().journal.find((entry) => entry.id === "journal-stable-today-id"))
+      .toMatchObject({ freeWriting: "Keep A. B failed.", attachments: [firstImage] });
     expect(screen.getByRole("button", { name: "Dismiss image warning" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss image warning" }));
     fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
