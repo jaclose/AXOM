@@ -162,8 +162,10 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     }
     const baseSha = validSha(source.baseSha, "source baseSha");
     const sourceSha = validSha(source.sourceSha, "sourceSha");
-    if (!isAncestor(baseSha, sourceSha) || !isAncestor(integrationBaseSha, sourceSha)
-      || !isAncestor(sourceSha, integratedSha)) {
+    // A reviewed source may fork from an older main; its tip need not descend
+    // from this newer integration base. Both lineages must independently be
+    // ancestors of the final integrated commit (checked above and below).
+    if (!isAncestor(baseSha, sourceSha) || !isAncestor(sourceSha, integratedSha)) {
       throw new Error("Pinned source/base is not an ancestor of its source or the integration commit: " + sourceSha);
     }
     const changes = addChanges(listChanges(baseSha, sourceSha), "source " + sourceSha);
