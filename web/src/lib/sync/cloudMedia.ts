@@ -27,11 +27,15 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
   const refs = new Map<string, Reference>();
   for (const question of [...state.questions, ...privateReviewMedia(state.documents)]) {
     const content = "content" in question ? question.content : undefined;
-    // A manually authored original belongs to the learner even if a course
-    // happens to contain identical bytes. SHA-256 cannot establish provenance.
-    const privateOriginal = "source" in question && question.source === "manual";
+    // The question's source is not the provenance of an attachment: an
+    // imported question can acquire a new learner-authored note image.
+    const manualQuestion = "source" in question && question.source === "manual";
     for (const attachment of question.attachments ?? []) {
       const declared = content?.assets.find(asset => asset.id === attachment.assetId)?.checksum;
+      // Only a source-identified, checksum-backed attachment may consider a
+      // shared academic binding on first protection. Unknown/legacy originals
+      // and images added to imported questions retain private recovery rights.
+      const privateOriginal = manualQuestion || !declared;
       const checksum = declared?.replace(/^sha256:/, "");
       if (checksum !== undefined && !/^[a-f0-9]{64}$/.test(checksum)) {
         throw new Error("A source image has an invalid declared checksum. The workspace has not been marked protected.");
