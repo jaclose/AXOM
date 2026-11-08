@@ -206,6 +206,50 @@ describe("Community Question Set Library", () => {
     expect(mock.observers.size).toBe(0);
   });
 
+  it("sends only one like RPC for rapid clicks before React commits the disabled state", async () => {
+    let resolveLike!: (value: unknown) => void;
+    mock.like.mockImplementationOnce(() => new Promise(resolve => { resolveLike = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    const button = screen.getByRole("button", { name: "Like Synthetic practice" });
+    // Both handlers run in a single React batch against the previous render.
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    expect(mock.like).toHaveBeenCalledTimes(1);
+    expect(mock.like).toHaveBeenCalledWith("account-1", summary.id, true);
+    await act(async () => { resolveLike(undefined); });
+    expect(screen.getByRole("button", { name: "Unlike Synthetic practice" }).getAttribute("aria-pressed")).toBe("true");
+    expect(mock.observers.size).toBe(0);
+  });
+
+  it("releases a revoked like reservation for a new account session without trusting the old completion", async () => {
+    let resolveOld!: (value: unknown) => void;
+    let resolveNew!: (value: unknown) => void;
+    mock.like.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveNew = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Like Synthetic practice" }));
+    expect(mock.like).toHaveBeenCalledTimes(1);
+    // The A → B → A transition may occur before React sees account B.
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Like Synthetic practice" }));
+    expect(mock.like).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveOld(undefined); });
+    expect(screen.getByRole("button", { name: "Like Synthetic practice" }).getAttribute("aria-pressed")).toBe("false");
+    await act(async () => { resolveNew(undefined); });
+    expect(screen.getByRole("button", { name: "Unlike Synthetic practice" }).getAttribute("aria-pressed")).toBe("true");
+    expect(mock.observers.size).toBe(0);
+  });
+
   it("does not credit a delayed like after leaving and returning to the same account", async () => {
     let resolveLike!: (value: unknown) => void;
     mock.like.mockImplementationOnce(() => new Promise(resolve => { resolveLike = resolve; }));
