@@ -1769,6 +1769,38 @@ describe("Journal notebook foundation", () => {
     expect(removeDocumentListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
   });
 
+  it("flushes a pending image after page hide without waiting for a background autosave timer", async () => {
+    vi.useFakeTimers();
+    let finishImage!: (attachment: JournalImageAttachment) => void;
+    vi.spyOn(journalNotebook, "readJournalImage")
+      .mockReturnValue(new Promise((resolve) => { finishImage = resolve; }));
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Text should save before the image reader finishes." },
+    });
+    fireEvent.change(screen.getByLabelText("Choose a journal image"), {
+      target: { files: [new File(["axom"], "study-desk.png", { type: "image/png" })] },
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+      await Promise.resolve();
+    });
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ freeWriting: "Text should save before the image reader finishes." });
+
+    // No 420 ms autosave advancement: background tabs may throttle that timer.
+    await act(async () => { finishImage(localImage); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY))?.attachments)
+      .toEqual([localImage]);
+  });
+
   it("finishes Done only after a late edit has also been durably saved", async () => {
     let finishFirst!: () => void;
     let finishLatest!: () => void;
