@@ -1240,7 +1240,7 @@ describe("Journal notebook foundation", () => {
     fireEvent.click(screen.getByText("Keep something. Release something."));
     fireEvent.change(screen.getByDisplayValue("First thing kept"), { target: { value: "Edited first keepsake" } });
     fireEvent.change(screen.getByDisplayValue("First loose thread"), { target: { value: "Edited first release" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
 
     await waitFor(() => expect(screen.getByText("Saved to this workspace")).toBeTruthy());
     expect(useStore.getState().journal.find((item) => item.id === originalId)).toMatchObject({
