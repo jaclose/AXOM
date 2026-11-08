@@ -1360,6 +1360,70 @@ describe("Journal notebook foundation", () => {
       .toEqual([firstImage, laterImage]);
   });
 
+  it("keeps the writing page and image-read alert open when a queued page turn follows a failed image", async () => {
+    let failImage!: (reason: Error) => void;
+    vi.spyOn(journalNotebook, "readJournalImage").mockReturnValue(
+      new Promise((_resolve, reject) => { failImage = reject; }),
+    );
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Do not lose this draft." } });
+
+    fireEvent.change(screen.getByLabelText("Choose a journal image"), {
+      target: { files: [new File(["broken"], "broken.png", { type: "image/png" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+    await act(async () => {
+      failImage(new Error("Image read failed"));
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    });
+
+    expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Image read failed");
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("Do not lose this draft.");
+    expect(screen.getByRole("button", { name: "Dismiss image warning" })).toBeTruthy();
+    expect(screen.queryByText("Saved to this workspace")).toBeNull();
+  });
+
+  it("holds the page after image A succeeds and queued B fails, until the failure is acknowledged", async () => {
+    const original = { ...useStore.getState().journal[0], id: "journal-stable-today-id",
+      date: `${TODAY_KEY}T12:00:00`, today: "Preserve my original ID.", attachments: [] };
+    useStore.setState((s) => ({ journal: [...s.journal, original] }));
+    let finishFirst!: (attachment: JournalImageAttachment) => void;
+    let failSecond!: (reason: Error) => void;
+    const first = new Promise<JournalImageAttachment>((resolve) => { finishFirst = resolve; });
+    const second = new Promise<JournalImageAttachment>((_resolve, reject) => { failSecond = reject; });
+    vi.spyOn(journalNotebook, "readJournalImage")
+      .mockReturnValueOnce(first).mockReturnValueOnce(second);
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Keep A. B failed." } });
+
+    const input = screen.getByLabelText("Choose a journal image");
+    fireEvent.change(input, { target: { files: [new File(["a"], "first.png", { type: "image/png" })] } });
+    fireEvent.change(input, { target: { files: [new File(["b"], "second.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+
+    const firstImage = { ...localImage, id: "first-success", name: "first.png" };
+    await act(async () => { finishFirst(firstImage); await Promise.resolve(); });
+    await act(async () => {
+      failSecond(new Error("Second image rejected"));
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    });
+    expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Second image rejected");
+    expect(screen.getByRole("button", { name: "Dismiss image warning" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss image warning" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+    expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
+    expect(useStore.getState().journal.find((entry) => entry.id === "journal-stable-today-id"))
+      .toMatchObject({ freeWriting: "Keep A. B failed.", attachments: [firstImage] });
+  });
+
   it("does not rewrite an unchanged historical page during navigation", async () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites");
     render(<JournalPage />);
