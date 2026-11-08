@@ -638,6 +638,8 @@ function JournalWritingPage({
   const mountedRef = useRef(true);
   const transitionPendingRef = useRef(false);
   const lifecyclePersistPendingRef = useRef(false);
+  const lifecyclePersistVersionRef = useRef<number | null>(null);
+  const lifecycleTextQueueRef = useRef<Promise<JournalPersistResult> | null>(null);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const attachmentReadRef = useRef<Promise<void> | null>(null);
   const attachmentErrorRef = useRef("");
@@ -895,33 +897,54 @@ function JournalWritingPage({
     }
   }, [cancelScheduledSave, persist]);
 
+  const requestLifecycleTextSave = useCallback(() => {
+    if (!mountedRef.current || !dirtyRef.current) return;
+    const version = draftVersionRef.current;
+    if (lifecyclePersistVersionRef.current === version) return;
+    lifecyclePersistVersionRef.current = version;
+
+    // Start the first snapshot synchronously on pagehide. If that write is
+    // still settling, serialize later versions rather than allowing an older
+    // IndexedDB flush to overtake a newer page.
+    const writeLatest = (): Promise<JournalPersistResult> | JournalPersistResult =>
+      mountedRef.current && dirtyRef.current ? persistNow() : "no-change";
+    const previous = lifecycleTextQueueRef.current;
+    const attempt: Promise<JournalPersistResult> = previous
+      ? previous.then(writeLatest, writeLatest)
+      : persistNow();
+    lifecycleTextQueueRef.current = attempt;
+    void attempt.then((result) => {
+      // A failed write must be eligible for retry on the next lifecycle event,
+      // even if the writer did not type another character.
+      if ((result === "failed" || result === "aborted")
+        && lifecyclePersistVersionRef.current === version) lifecyclePersistVersionRef.current = null;
+    }).catch(() => {
+      if (lifecyclePersistVersionRef.current === version) lifecyclePersistVersionRef.current = null;
+    }).finally(() => {
+      if (lifecycleTextQueueRef.current === attempt) lifecycleTextQueueRef.current = null;
+    });
+  }, [persistNow]);
+
   const persistBeforePageExit = useCallback(() => {
     const pendingImage = attachmentReadRef.current;
-    if ((!dirtyRef.current && !pendingImage) || lifecyclePersistPendingRef.current) return;
+    if (!dirtyRef.current && !pendingImage) return;
     cancelScheduledSave();
+    // The image waiter is deduplicated separately: it must never suppress a
+    // fresh text version on a second pagehide or hidden-visibility event.
+    requestLifecycleTextSave();
+    if (!pendingImage || lifecyclePersistPendingRef.current) return;
     lifecyclePersistPendingRef.current = true;
-    void (async () => {
-      try {
-        // Never delay a dirty text save on a FileReader. A tab may close while
-        // its image is still loading, and teardown cannot await IndexedDB.
-        if (dirtyRef.current) await persistNow();
-        if (pendingImage) {
-          await pendingImage;
-          // A hidden tab may stay mounted but throttle its ordinary 420 ms
-          // autosave. Flush an image accepted after the first snapshot now.
-          if (mountedRef.current && dirtyRef.current) {
-            cancelScheduledSave();
-            await persistNow();
-          }
-        }
-      } finally {
-        lifecyclePersistPendingRef.current = false;
+    void pendingImage.then(() => {
+      if (mountedRef.current && dirtyRef.current) {
+        cancelScheduledSave();
+        requestLifecycleTextSave();
       }
-    })().catch(() => {
-      // The save/read paths surface their own errors; browser teardown does
-      // not provide a recoverable asynchronous completion guarantee.
+    }).catch(() => {
+      // The image reader reports its own failure; accepted text remains saved.
+    }).finally(() => {
+      lifecyclePersistPendingRef.current = false;
     });
-  }, [cancelScheduledSave, persistNow]);
+  }, [cancelScheduledSave, requestLifecycleTextSave]);
 
   function setDraft(update: (current: JournalDraft) => JournalDraft) {
     const next = update(draftRef.current);
