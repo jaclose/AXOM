@@ -11,6 +11,15 @@ const PATH = /^[A-Za-z0-9._/-]+$/;
 // Windows reserves device basenames even when followed by extensions.
 const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 const MODES = new Set(["100644", "100755"]);
+// A release attestor must not hydrate absent Git objects, even through earlier
+// commit/tree/diff/ancestry reads. Use one fail-closed environment for ALL Git
+// subprocesses rather than guarding only the final blob existence check.
+function readOnlyGit(args, options = {}) {
+  return execFileSync("git", args, {
+    ...options,
+    env: { ...process.env, ...options.env, GIT_NO_LAZY_FETCH: "1" },
+  });
+}
 function validSha(value, label) {
   if (typeof value !== "string" || !SHA.test(value)) throw new Error(label + " must be a pinned 40-character lowercase commit SHA.");
   return value;
@@ -83,10 +92,10 @@ export function readGitFile(sha, path, cwd = process.cwd(), allowMissing = false
   validPath(path);
   // A tree object can have the same blobs while not being the reviewed commit.
   // Prove each claimed revision is an actual commit object, not just 40 hex digits.
-  const kind = execFileSync("git", ["--no-replace-objects", "cat-file", "-t", sha],
+  const kind = readOnlyGit( ["--no-replace-objects", "cat-file", "-t", sha],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   if (kind !== "commit") throw new Error("Expected pinned commit object: " + sha);
-  const output = execFileSync("git", ["--no-replace-objects", "ls-tree", "-r", "--full-tree", sha, "--", path],
+  const output = readOnlyGit( ["--no-replace-objects", "ls-tree", "-r", "--full-tree", sha, "--", path],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trimEnd();
   const rows = output ? output.split("\n") : [];
   if (allowMissing && rows.length === 0) return null;
@@ -99,8 +108,8 @@ export function readGitFile(sha, path, cwd = process.cwd(), allowMissing = false
   // Disable lazy promisor fetching: this verifier must remain read-only and
   // must not silently contact a remote to populate missing objects.
   try {
-    execFileSync("git", ["--no-replace-objects", "cat-file", "-e", file.blob + "^{blob}"],
-      { cwd, env: { ...process.env, GIT_NO_LAZY_FETCH: "1" }, stdio: "ignore" });
+    readOnlyGit( ["--no-replace-objects", "cat-file", "-e", file.blob + "^{blob}"],
+      { cwd, stdio: "ignore" });
   } catch {
     throw new Error("Missing or unreadable pinned Git blob object: " + path);
   }
@@ -416,7 +425,7 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
 export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
   validSha(baseSha, "diff baseSha");
   validSha(headSha, "diff headSha");
-  const raw = execFileSync("git", ["--no-replace-objects", "diff", "--no-ext-diff", "--no-renames", "--ignore-submodules=none", "--name-status", "-z", baseSha, headSha, "--"],
+  const raw = readOnlyGit( ["--no-replace-objects", "diff", "--no-ext-diff", "--no-renames", "--ignore-submodules=none", "--name-status", "-z", baseSha, headSha, "--"],
     { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   if (!raw) return [];
   const parts = raw.split("\0");
@@ -435,7 +444,7 @@ export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
  * mutable history override. Worktree paths are resolved through Git itself.
  */
 function assertNoGitGrafts(cwd = process.cwd()) {
-  const graftPath = execFileSync("git",
+  const graftPath = readOnlyGit(
     ["--no-replace-objects", "rev-parse", "--git-path", "info/grafts"],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   if (!graftPath) throw new Error("Cannot locate Git graft file for release ancestry.");
@@ -459,7 +468,7 @@ export function listGitHistoryChanges(baseSha, headSha, cwd = process.cwd()) {
   assertNoGitGrafts(cwd);
   validSha(baseSha, "history baseSha");
   validSha(headSha, "history headSha");
-  const raw = execFileSync("git", [
+  const raw = readOnlyGit( [
     "--no-replace-objects", "rev-list", "--parents", "--topo-order", headSha, "^" + baseSha,
   ], { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -478,10 +487,10 @@ export function listGitHistoryChanges(baseSha, headSha, cwd = process.cwd()) {
 /** Enumerate local immutable Git tree paths with NUL-delimited binary-safe names. */
 export function listGitTreePaths(sha, cwd = process.cwd()) {
   validSha(sha, "integrated tree SHA");
-  const kind = execFileSync("git", ["--no-replace-objects", "cat-file", "-t", sha],
+  const kind = readOnlyGit( ["--no-replace-objects", "cat-file", "-t", sha],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   if (kind !== "commit") throw new Error("Expected pinned Git commit object for tree path inventory.");
-  const output = execFileSync("git", ["--no-replace-objects", "ls-tree", "-r", "-z", "--name-only", "--full-tree", sha],
+  const output = readOnlyGit( ["--no-replace-objects", "ls-tree", "-r", "-z", "--name-only", "--full-tree", sha],
     { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   if (!output) return [];
   const paths = output.split("\0");
@@ -495,7 +504,7 @@ export function isGitAncestor(baseSha, headSha, cwd = process.cwd()) {
   validSha(baseSha, "ancestor baseSha");
   validSha(headSha, "ancestor headSha");
   try {
-    execFileSync("git", ["--no-replace-objects", "merge-base", "--is-ancestor", baseSha, headSha], { cwd, stdio: "ignore" });
+    readOnlyGit( ["--no-replace-objects", "merge-base", "--is-ancestor", baseSha, headSha], { cwd, stdio: "ignore" });
     return true;
   } catch (cause) {
     if (cause.status === 1) return false;
