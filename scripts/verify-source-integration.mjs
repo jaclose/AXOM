@@ -2,7 +2,7 @@
 // Read-only, exact-source Git tree verification for coordinated AXOM releases.
 // CLI: node scripts/verify-source-integration.mjs manifest.json
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -400,11 +400,32 @@ export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
 
 
 /**
+ * Git's deprecated info/grafts rewrites rev-list and merge-base ancestry even
+ * under --no-replace-objects. Never attest pinned commits against that local
+ * mutable history override. Worktree paths are resolved through Git itself.
+ */
+function assertNoGitGrafts(cwd = process.cwd()) {
+  const graftPath = execFileSync("git",
+    ["--no-replace-objects", "rev-parse", "--git-path", "info/grafts"],
+    { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  if (!graftPath) throw new Error("Cannot locate Git graft file for release ancestry.");
+  try {
+    const graft = statSync(resolve(cwd, graftPath));
+    if (!graft.isFile() || graft.size !== 0) {
+      throw new Error("Refusing release ancestry from repository with Git graft file.");
+    }
+  } catch (cause) {
+    if (cause?.code !== "ENOENT") throw cause;
+  }
+}
+
+/**
  * List every newly reachable commit and its first-parent changed-file paths.
  * In contrast to base..tip net diffs, temporary add/remove blobs remain visible.
  * No local refs/replace, shell, checkout, fetch or write is allowed.
  */
 export function listGitHistoryChanges(baseSha, headSha, cwd = process.cwd()) {
+  assertNoGitGrafts(cwd);
   validSha(baseSha, "history baseSha");
   validSha(headSha, "history headSha");
   const raw = execFileSync("git", [
@@ -439,6 +460,7 @@ export function listGitTreePaths(sha, cwd = process.cwd()) {
 
 /** Do not interpret a successful blob comparison as source inclusion. */
 export function isGitAncestor(baseSha, headSha, cwd = process.cwd()) {
+  assertNoGitGrafts(cwd);
   validSha(baseSha, "ancestor baseSha");
   validSha(headSha, "ancestor headSha");
   try {
