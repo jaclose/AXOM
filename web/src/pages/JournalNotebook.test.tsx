@@ -2350,4 +2350,59 @@ describe("Journal notebook foundation", () => {
     expect(within(summary).getByRole("button", { name: "Show Energy and readiness" })).toBeTruthy();
     expect(screen.getByText(/Every visible line is included in your page automatically/)).toBeTruthy();
   });
+
+  it("does not reuse another workspace's open private Journal draft or entry ID after a workspace switch", async () => {
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    const ownerA = "journal-private-workspace-A";
+    const ownerB = "journal-private-workspace-B";
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "journal-owner-A-original-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      freeWriting: "Only workspace A may see this private text.",
+    };
+    act(() => {
+      useStore.setState((state) => ({
+        profile: { ...state.profile, userId: ownerA },
+        journal: [original],
+      }));
+    });
+    render(<JournalPage />);
+    openTodayInFullPage();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
+      .toBe("Only workspace A may see this private text.");
+
+    // Model an account recovery / workspace rehydration in the same route and
+    // on the same day. A new owner must not inherit a mounted editor's refs.
+    act(() => {
+      useStore.setState((state) => ({
+        profile: { ...state.profile, userId: ownerB },
+        journal: [],
+      }));
+    });
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("");
+    expect(useStore.getState().journal).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Only workspace B wrote this entry." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(screen.getByText("Saved to this workspace")).toBeTruthy());
+    const savedB = useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY));
+    expect(savedB).toMatchObject({ freeWriting: "Only workspace B wrote this entry.", notebookStatus: "draft" });
+    expect(savedB?.id).not.toBe(original.id);
+    expect(savedB?.freeWriting).not.toContain("workspace A");
+
+    act(() => {
+      useStore.setState((state) => ({
+        profile: { ...state.profile, userId: ownerA },
+        journal: [original],
+      }));
+    });
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
+      .toBe("Only workspace A may see this private text.");
+    expect(useStore.getState().journal).toEqual([original]);
+  });
+
 });
