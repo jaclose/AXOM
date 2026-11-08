@@ -188,6 +188,41 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertIn("questions_secure_recheck_unavailable", linked_parent["issues"])
             self.assertIsNone(linked_parent.get("questions_sha256"))
 
+    def test_native_inventory_sha_mismatch_never_becomes_canonical_ready(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            pkg_dir = root / "native"
+            pkg_dir.mkdir()
+            qpath = pkg_dir / "questions.json"
+            old = b'{"bankId":"demo","questions":[{"id":"old","stem":"old","choices":["A"]}]}'
+            new = b'{"bankId":"demo","questions":[{"id":"new","stem":"new","choices":["A"]}]}'
+            qpath.write_bytes(new)
+            manifest = pkg_dir / "manifest.json"
+            manifest.write_text(json.dumps({"schemaVersion": 1,
+                "bank": {"id": "demo", "title": "Synthetic"},
+                "questionsFile": "questions.json", "source": {"filename": "missing.pdf"}}))
+            rows = [
+                {"document_type": "native_manifest", "root_label": "test_native",
+                 "original_path": str(manifest), "review_status": "unexamined"},
+                {"document_type": "native_questions", "root_label": "test_native",
+                 "original_path": str(qpath), "source_sha256": hashlib.sha256(old).hexdigest()}
+            ]
+            previous_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("test_native", root)]
+                packages, _, _ = ledger.inspect_packages(rows)
+            finally:
+                ledger.ROOTS = previous_roots
+            self.assertEqual(len(packages), 1)
+            self.assertEqual(packages[0]["inspected_questions_sha256"],
+                             hashlib.sha256(new).hexdigest())
+            self.assertIn("questions_differ_from_inventory_sha", packages[0]["issues"])
+            unique = enriched.canonical_packages(packages, ledger.verify_native_package_questions_sha)
+            self.assertEqual(unique[0]["canonical_status"], "source_snapshot_review_required")
+            self.assertNotIn("questions_sha256", unique[0])
+            self.assertEqual(ledger.prepare_queue(rows, packages)[0]["status"],
+                             "requires_package_review")
+
     def test_dispositions_account_for_unique_sha(self):
         rows=[dict(source_sha256=digest("source"),original_path="/s.pdf",document_type="pq",priority=1,
                    extracted_status="queued",detected_question_headings=3),
