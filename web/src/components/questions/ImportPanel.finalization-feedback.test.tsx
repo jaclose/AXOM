@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { awaitReviewedImportReceipt } from "./ImportPanel";
 import type { SavedReviewedImport } from "../../lib/questionImportSave";
