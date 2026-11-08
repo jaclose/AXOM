@@ -13,6 +13,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 import unicodedata
@@ -372,6 +373,67 @@ def process_duplicates(rows):
             for r in group: r["duplicate_group"] = "sha256:" + digest
     return {digest: [r["source_id"] for r in group] for digest, group in groups.items() if len(group) > 1}
 
+def open_native_package_file(root, package_dir, relative_file):
+    """Open a regular file through its configured source root without following package links.
+
+    All post-root components are opened relative to held directory descriptors.
+    Fail closed if secure no-follow, directory-relative opens are unavailable.
+    This is a private inventory read, never a publication/rights approval.
+    """
+    if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+            and os.open in os.supports_dir_fd):
+        raise ValueError("secure_native_package_open_unavailable")
+    if not isinstance(relative_file, str) or not relative_file or "\\x00" in relative_file:
+        raise ValueError("unsafe_native_package_path")
+    file_path = pathlib.PurePosixPath(relative_file)
+    windows_path = pathlib.PureWindowsPath(relative_file)
+    if (file_path.is_absolute() or windows_path.drive or windows_path.is_absolute()
+            or "\\\\" in relative_file or ".." in file_path.parts
+            or not file_path.parts or file_path.name in {".", ".."}):
+        raise ValueError("unsafe_native_package_path")
+    try:
+        package_parts = pathlib.Path(package_dir).relative_to(root).parts
+    except ValueError as error:
+        raise ValueError("native_package_outside_source_root") from error
+    if ".." in package_parts:
+        raise ValueError("native_package_outside_source_root")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in (*package_parts, *file_path.parts[:-1]):
+            if component == ".":
+                continue
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        fd = os.open(file_path.parts[-1], file_flags, dir_fd=directory_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise ValueError("unsafe_native_package_file_type")
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+    finally:
+        os.close(directory_fd)
+
+
+def read_native_package_json(root, package_dir, relative_file):
+    fd = open_native_package_file(root, package_dir, relative_file)
+    with os.fdopen(fd, "r", encoding="utf-8") as stream:
+        return json.load(stream)
+
+
+def native_package_file_exists(root, package_dir, relative_file):
+    try:
+        fd = open_native_package_file(root, package_dir, relative_file)
+    except (ValueError, OSError):
+        return False
+    os.close(fd)
+    return True
+
+
 def inspect_packages(rows):
     lookup = {r["original_path"]: r for r in rows}
     packages, fingerprints, notes = [], collections.defaultdict(list), []
@@ -380,21 +442,28 @@ def inspect_packages(rows):
         path = pathlib.Path(r["original_path"])
         issues = []
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            root = next((directory for label, directory in ROOTS if label == r["root_label"]), None)
+            if root is None:
+                raise ValueError("unknown_native_package_source_root")
+            data = read_native_package_json(root, path.parent, path.name)
             if not isinstance(data, dict) or data.get("schemaVersion") != 1:
                 raise ValueError("unsupported_native_manifest_schema")
-            qpath = path.parent / str(data.get("questionsFile") or "questions.json")
-            if not qpath.is_file(): raise ValueError("missing_questions_json")
-            qdata = json.loads(qpath.read_text(encoding="utf-8"))
-            questions = qdata.get("questions", []) if isinstance(qdata, dict) else []
+            questions_file = data.get("questionsFile") or "questions.json"
+            qdata = read_native_package_json(root, path.parent, questions_file)
+            qpath = path.parent / questions_file
+            if not isinstance(qdata, dict):
+                raise ValueError("invalid_native_questions_json")
+            questions = qdata.get("questions", [])
             if not isinstance(questions, list) or not questions: raise ValueError("missing_or_empty_questions_array")
             bank = data.get("bank") or {}
             if qdata.get("bankId") != bank.get("id"): issues.append("bank_id_mismatch")
             src = data.get("source") or {}
             src_name = pathlib.Path(str(src.get("filename") or "")).name
             src_path = path.parent / "source" / src_name
-            if not src_path.is_file(): src_path = path.parent / src_name
-            src_exists = src_path.is_file()
+            if not native_package_file_exists(root, path.parent, "source/" + src_name):
+                src_path = path.parent / src_name
+            src_exists = native_package_file_exists(root, path.parent, src_name) if (
+                src_path.parent == path.parent) else True
             declared_src_sha = set()
             all_assets = set()
             asset_expected_checksums = {}
@@ -432,11 +501,14 @@ def inspect_packages(rows):
                 if source_record["source_sha256"] not in declared_src_sha: issues.append("source_checksum_mismatch")
             if not src_exists and not declared_src_sha: issues.append("missing_source_and_source_checksum")
             missing_assets = []
-            for a in all_assets:
-                p = path.parent / str(data.get("assetsDirectory") or "assets") / a
-                if pathlib.PurePath(a).is_absolute() or ".." in pathlib.PurePath(a).parts or not p.is_file():
+            asset_directory = data.get("assetsDirectory") or "assets"
+            for a in sorted(all_assets):
+                if (not isinstance(asset_directory, str) or not isinstance(a, str)
+                        or not native_package_file_exists(root, path.parent, asset_directory + "/" + a)):
                     missing_assets.append(a)
-                elif a in asset_expected_checksums:
+                    continue
+                p = path.parent / asset_directory / a
+                if a in asset_expected_checksums:
                     file_record = lookup.get(str(p))
                     actual = file_record.get("source_sha256") if file_record else None
                     if not actual: issues.append("asset_hash_not_verified:" + a)
