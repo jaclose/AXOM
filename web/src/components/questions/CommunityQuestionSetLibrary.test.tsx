@@ -402,8 +402,56 @@ describe("Community Question Set Library", () => {
     expect(imported.snapshot.questions[0].correctKey).toBe("B");
     expect(imported.identity).toEqual({ shareId: summary.id, contentDigest: "a".repeat(64) });
     expect(authorizedDuringCommit).toBe(true);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Already in my AXOM" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Already in my AXOM" }).hasAttribute("disabled")).toBe(true));
     expect(imported.accountGuard.isCurrentAccount("account-1")).toBe(false);
+  });
+
+  it("does not acknowledge failed vault persistence and rechecks approval before retry", async () => {
+    mock.commit.mockResolvedValueOnce({ ok: false, message: "Synthetic vault is unavailable" })
+      .mockResolvedValueOnce({ ok: true, message: "Saved" });
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    expect(await screen.findByText("Synthetic vault is unavailable")).toBeTruthy();
+    expect(mock.commit).toHaveBeenCalledOnce();
+    const first = mock.commit.mock.calls[0][0];
+    expect(first.snapshot.questions[0].correctKey).toBe("B");
+    await waitFor(() => expect(first.accountGuard.isCurrentAccount("account-1")).toBe(false));
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Already in my AXOM" }).hasAttribute("disabled")).toBe(true));
+    // Opening the original preview plus one independent live approval check
+    // for each attempt; a failed vault write never grants a reusable permit.
+    expect(mock.preview).toHaveBeenCalledTimes(3);
+    expect(mock.commit.mock.calls[1][0].identity).toEqual({
+      shareId: summary.id, contentDigest: "a".repeat(64),
+    });
+    expect(mock.commit.mock.calls[1][0].snapshot.questions[0].correctKey).toBe("B");
+    expect(mock.commit.mock.calls[1][0].accountGuard.isCurrentAccount("account-1")).toBe(false);
+  });
+
+  it("rejects a listing changed to pending after an approved preview", async () => {
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
+    }).mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "pending",
+    });
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    expect(await screen.findByText(/reviewed Question Set changed/)).toBeTruthy();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(mock.observers.size).toBe(0);
   });
 
   it("refuses to import a withdrawn listing after the preview was loaded", async () => {
