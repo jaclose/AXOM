@@ -3,9 +3,9 @@ import { useStore } from "../../lib/store";
 import { recurringGoalSummaries } from "../../lib/recurringGoalReports";
 
 /** Read-only projections: no report writes or extra completion records. */
-export function RecurringGoalReport() {
+export function RecurringGoalReport({ includeUnshared = false }: { includeUnshared?: boolean } = {}) {
   const state = useStore();
-  const rows = useMemo(() => recurringGoalSummaries(state), [state]);
+  const rows = useMemo(() => recurringGoalSummaries(state, state.activeDayKey, includeUnshared), [state, includeUnshared]);
   if (!rows.length) return <p className="sub">Flexible weekly goals and named daily check-ins appear here once you create them in Productivity.</p>;
   return (
     <section aria-label="Personal recurring goals">
