@@ -52,8 +52,9 @@ export function CommunityQuestionSetLibrary() {
   // React may not have committed the disabled state when a second click runs.
   // Reserve the mutation synchronously, and release it only for its own request.
   const likingOperation = useRef<symbol | null>(null);
-  // Preview requests may overlap before React commits `opening`. Only the
-  // newest explicit selection may open a preview; closing also revokes it.
+  // Preview requests may overlap before React commits `opening`. Keep the
+  // selected preview's auth observer alive after loading: a completed preview
+  // must also be revoked by an A → B → A session round trip before import.
   const previewRequest = useRef<{ token: symbol; stop: () => void } | null>(null);
   function cancelPendingPreview() {
     previewRequest.current?.stop();
@@ -128,6 +129,7 @@ export function CommunityQuestionSetLibrary() {
     const isCurrent = () => previewRequest.current?.token === operation && session.current();
     setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setOpening(true); setImported(false);
+    let accepted = false;
     try {
       const result = await loadQuestionSetLibraryPreview(openedBy, id);
       // Both the account session and the selected request must remain current.
@@ -139,12 +141,15 @@ export function CommunityQuestionSetLibrary() {
         const provenance = readSharedQuestionImportProvenance(set);
         return provenance?.shareId === result.id && provenance.contentDigest === result.contentDigest;
       }));
+      // Keep the observer until the accepted preview is closed, replaced,
+      // revoked, or unmounted. Account-ID equality is not session authority.
+      accepted = true;
     } catch (cause) {
       if (isCurrent())
         setPreviewError(cause instanceof Error ? cause.message : "This set could not be opened.");
     } finally {
       if (previewRequest.current?.token === operation) {
-        cancelPendingPreview();
+        if (!accepted) cancelPendingPreview();
         if (session.current()) setOpening(false);
       } else {
         session.stop();
