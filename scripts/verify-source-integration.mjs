@@ -132,15 +132,15 @@ export function assertPortableTouchedTree(changes, treePaths) {
   return treePaths.length;
 }
 
-export function verifyCompleteSourceIntegration(manifest, { listChanges, isAncestor, readFile, listTreePaths } = {}) {
+export function verifyCompleteSourceIntegration(manifest, { listChanges, isAncestor, readFile, listTreePaths, listHistoryChanges } = {}) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || manifest.version !== 2) {
     throw new Error("Expected complete source-integration manifest version 2.");
   }
   const integrationBaseSha = validSha(manifest.integrationBaseSha, "integrationBaseSha");
   const integratedSha = validSha(manifest.integratedSha, "integratedSha");
   if (!Array.isArray(manifest.sources) || !manifest.sources.length) throw new Error("Missing pinned source ranges.");
-  if (![listChanges, isAncestor, readFile, listTreePaths].every(x => typeof x === "function")) {
-    throw new Error("Complete verification requires Git diff, ancestry and file resolvers.");
+  if (![listChanges, isAncestor, readFile, listTreePaths, listHistoryChanges].every(x => typeof x === "function")) {
+    throw new Error("Complete verification requires Git diff, ancestry, tree, file and history resolvers.");
   }
   if (!isAncestor(integrationBaseSha, integratedSha)) throw new Error("Integration base is not an ancestor of integration commit.");
   const wanted = new Map(), files = [];
@@ -228,9 +228,91 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     }
     files.push({ ...expected, integratedStatus: actual?.status ?? "UNCHANGED", mode: original.mode, blob: original.blob });
   }
+  const history = assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted }, { listHistoryChanges, readFile });
   return { version: 2, integratedSha, integrationBaseSha, sourceRanges, verifiedFiles: files.length,
     verifiedSources: sourceRanges.length, deletedFiles: files.filter(x => x.deleted).length,
-    alreadyPresentInBase, completeForDeclaredRanges: true, verifiedTreePaths, files };
+    alreadyPresentInBase, completeForDeclaredRanges: true, verifiedTreePaths, ...history, files };
+}
+
+
+/**
+ * History proof complements net-diff/file parity: an intermediate Git commit
+ * can still expose a file after that file is removed from the final tree.
+ * Review scope is explicit source base..tip commits, plus merge-only carriers.
+ */
+export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted }, { listHistoryChanges, readFile }) {
+  const sourceCommits = new Set();
+  let sourceHistoryCommits = 0, integrationHistoryCommits = 0, extraMergeCommits = 0, verifiedHistoryEvents = 0;
+  const inspect = (base, tip, label) => {
+    const commits = listHistoryChanges(base, tip);
+    if (!Array.isArray(commits) || commits.length > 4096) throw new Error("Missing or excessive Git history inventory for " + label);
+    const seen = new Set();
+    for (const commit of commits) {
+      const sha = validSha(commit?.sha, "history commit SHA");
+      if (seen.has(sha)) throw new Error("Duplicate Git history commit: " + sha);
+      seen.add(sha);
+      if (!Array.isArray(commit.parents) || !commit.parents.length || !Array.isArray(commit.changes)) {
+        throw new Error("Malformed Git commit parents/changes: " + sha);
+      }
+      for (const parent of commit.parents) validSha(parent, "history parent SHA");
+      const paths = new Set();
+      for (const change of commit.changes) {
+        const path = validPath(change?.path);
+        if (!["A", "M", "D", "T"].includes(change?.status)) throw new Error("Invalid Git history status for " + path);
+        const folded = path.toLowerCase();
+        if (paths.has(folded)) throw new Error("Case-colliding paths in Git history: " + path);
+        paths.add(folded);
+        verifiedHistoryEvents++;
+      }
+    }
+    if (base !== tip && !seen.has(tip)) throw new Error("Incomplete Git history inventory for " + label);
+    return commits;
+  };
+  for (const { baseSha, sourceSha } of sourceRanges) {
+    for (const commit of inspect(baseSha, sourceSha, "source " + sourceSha)) {
+      if (sourceCommits.has(commit.sha)) throw new Error("Overlapping source commit ownership: " + commit.sha);
+      sourceCommits.add(commit.sha);
+      sourceHistoryCommits++;
+      for (const change of commit.changes) {
+        const approved = wanted.get(change.path.toLowerCase());
+        if (!approved || approved.path !== change.path || approved.sourceSha !== sourceSha) {
+          throw new Error("Unreviewed transient source history path: " + change.path + " at " + commit.sha);
+        }
+      }
+    }
+  }
+  for (const commit of inspect(integrationBaseSha, integratedSha, "integration")) {
+    integrationHistoryCommits++;
+    const sourceOwned = sourceCommits.has(commit.sha);
+    if (!sourceOwned && commit.parents.length < 2) {
+      throw new Error("Unclaimed non-merge release history commit: " + commit.sha);
+    }
+    if (!sourceOwned) extraMergeCommits++;
+    for (const change of commit.changes) {
+      const approved = wanted.get(change.path.toLowerCase());
+      if (!approved || approved.path !== change.path) {
+        throw new Error("Unreviewed transient integration history path: " + change.path + " at " + commit.sha);
+      }
+      if (!sourceOwned) {
+        let atMerge, sourceTip, baseState;
+        try {
+          atMerge = readFile(commit.sha, change.path);
+          sourceTip = readFile(approved.sourceSha, change.path);
+          baseState = readFile(integrationBaseSha, change.path);
+        } catch (cause) {
+          throw new Error("Missing intermediate merge source Git object: " + change.path + ": " + String(cause));
+        }
+        const equivalent = (a, b) => (a === null && b === null)
+          || (a !== null && b !== null && a?.blob === b?.blob && a?.mode === b?.mode
+            && ["100644", "100755"].includes(a?.mode));
+        if (!equivalent(atMerge, sourceTip) && !equivalent(atMerge, baseState)) {
+          throw new Error("Unreviewed intermediate merge blob or mode: " + change.path + " at " + commit.sha);
+        }
+      }
+    }
+  }
+  return { sourceHistoryCommits, integrationHistoryCommits, extraMergeCommits, verifiedHistoryEvents,
+    commitHistoryAttested: true };
 }
 
 /** Binary-safe NUL-delimited Git diff. No rename detection; rename = D + A. */
@@ -247,6 +329,31 @@ export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
     result.push({ status: parts[index], path: parts[index + 1] });
   }
   return result;
+}
+
+
+/**
+ * List every newly reachable commit and its first-parent changed-file paths.
+ * In contrast to base..tip net diffs, temporary add/remove blobs remain visible.
+ * No local refs/replace, shell, checkout, fetch or write is allowed.
+ */
+export function listGitHistoryChanges(baseSha, headSha, cwd = process.cwd()) {
+  validSha(baseSha, "history baseSha");
+  validSha(headSha, "history headSha");
+  const raw = execFileSync("git", [
+    "--no-replace-objects", "rev-list", "--parents", "--topo-order", headSha, "^" + baseSha,
+  ], { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"] }).trim();
+  if (!raw) return [];
+  const rows = raw.split("\n");
+  if (rows.length > 4096) throw new Error("Excessive Git history: " + rows.length);
+  return rows.map(row => {
+    const [sha, ...parents] = row.split(" ");
+    validSha(sha, "history commit");
+    for (const parent of parents) validSha(parent, "history parent");
+    if (!parents.length) throw new Error("Unexpected root commit in release history: " + sha);
+    return { sha, parents, changes: listGitChanges(parents[0], sha, cwd) };
+  });
 }
 
 /** Enumerate local immutable Git tree paths with NUL-delimited binary-safe names. */
@@ -286,6 +393,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         listChanges: (a, b) => listGitChanges(a, b),
         isAncestor: (a, b) => isGitAncestor(a, b),
         listTreePaths: sha => listGitTreePaths(sha),
+        listHistoryChanges: (base, head) => listGitHistoryChanges(base, head),
       })
       : verifySourceIntegration(manifest, (sha, path) => readGitFile(sha, path));
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");

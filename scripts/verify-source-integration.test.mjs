@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitFile, validateSourceManifest, verifySourceIntegration, verifyCompleteSourceIntegration, listGitChanges, isGitAncestor, listGitTreePaths } from "./verify-source-integration.mjs";
+import { readGitFile, validateSourceManifest, verifySourceIntegration, verifyCompleteSourceIntegration, listGitChanges, isGitAncestor, listGitTreePaths, listGitHistoryChanges } from "./verify-source-integration.mjs";
 const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
 const manifest = (paths = ["web/src/course.ts"]) => ({
   version: 1, integratedSha: A, sources: [{ sourceSha: B, paths }],
@@ -146,6 +146,7 @@ test("v2 verifies complete two-source Git ranges including deletion and rejects 
     isAncestor: (a, b) => isGitAncestor(a, b, cwd),
     readFile: (sha, path) => readGitFile(sha, path, cwd, true),
     listTreePaths: sha => listGitTreePaths(sha, cwd),
+    listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
   };
   assert.deepEqual(listGitChanges(base, sourceOne, cwd).map(x => x.status), ["M", "D"]);
   const report = verifyCompleteSourceIntegration(input, adapters);
@@ -184,7 +185,9 @@ test("v2 rejects conflicting source ranges, Windows-unsafe paths, type changes a
   const adapters = { isAncestor: () => true,
     listChanges: () => [{ status: "A", path: "docs/proof.ts" }],
     readFile: () => ({ mode: "100644", blob: B }),
-    listTreePaths: () => ["docs/proof.ts"] };
+    listTreePaths: () => ["docs/proof.ts"],
+    listHistoryChanges: (_base, tip) => [{ sha: tip, parents: tip === C ? [A, B] : [A],
+      changes: [{ status: "A", path: "docs/proof.ts" }] }] };
   assert.equal(verifyCompleteSourceIntegration(input, adapters).verifiedFiles, 1);
   assert.equal(verifyCompleteSourceIntegration(input, adapters).verifiedTreePaths, 1);
   assert.throws(() => verifyCompleteSourceIntegration(input, { ...adapters, listTreePaths: undefined }), /requires Git diff/);
@@ -244,6 +247,7 @@ test("v2 rejects integrated Git paths colliding with unchanged inherited file an
         { cwd, encoding: "utf8" });
       return output ? output.split("\0").slice(0, -1) : [];
     },
+    listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
   };
   assert.deepEqual(listGitChanges(baseSha, headSha, cwd).map(c => c.path).sort(),
     ["docs/fresh.ts", "docs/guide.ts"]);
@@ -300,6 +304,7 @@ test("v2 attests two older divergent source branches merged into an advanced int
     isAncestor: (a, b) => isGitAncestor(a, b, cwd),
     readFile: (sha, path) => readGitFile(sha, path, cwd, true),
     listTreePaths: sha => listGitTreePaths(sha, cwd),
+    listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
   };
   assert.deepEqual(listGitChanges(integrationBaseSha, integratedSha, cwd)
     .map(change => [change.status, change.path]), [
@@ -374,6 +379,7 @@ test("v2 accepts reviewed older-base modification restored over an advanced-main
     isAncestor: (a, b) => isGitAncestor(a, b, cwd),
     readFile: (sha, path) => readGitFile(sha, path, cwd, true),
     listTreePaths: sha => listGitTreePaths(sha, cwd),
+    listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
   };
   // RED before correction: rejects this valid fully sourced two-parent merge
   // solely because the source status is M while the integrated status is A.
@@ -486,6 +492,7 @@ test("v2 accepts pinned source changes already identically present in advanced i
     isAncestor: (a, b) => isGitAncestor(a, b, cwd),
     readFile: (sha, path) => readGitFile(sha, path, cwd, true),
     listTreePaths: sha => listGitTreePaths(sha, cwd),
+    listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
   };
   // RED on prior verifier: expected two changed files, integrated zero,
   // despite the literal source tip being an ancestor of this merge commit.
@@ -567,6 +574,7 @@ test("v2 rejects reachable transient unreviewed commits even when final approved
     isAncestor: (a, b) => isGitAncestor(a, b, cwd),
     readFile: (sha, path) => readGitFile(sha, path, cwd, true),
     listTreePaths: sha => listGitTreePaths(sha, cwd),
+    listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
     listHistoryChanges: history,
   };
   const clean = verifyCompleteSourceIntegration(reportInput(cleanMergeSha), adapters);
