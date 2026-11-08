@@ -59,7 +59,8 @@ describe("searchable Question Set client boundary", () => {
   it("allows an awaiting-review snapshot only through the moderation preview reader", async () => {
     const value = snapshot();
     const rpc = vi.fn().mockResolvedValue({ data: {
-      id: entryId, title: value.title, question_count: 1, status: "pending", snapshot_payload: value,
+      id: entryId, title: value.title, question_count: 1, status: "pending",
+      snapshot_payload: value, review_revision: 1,
     }, error: null });
     service(rpc);
     const reviewed = await loadPendingQuestionSetReviewPreview(accountId, entryId);
@@ -138,7 +139,7 @@ describe("searchable Question Set client boundary", () => {
   it("refuses a replaced answer key after the pending set was inspected", async () => {
     const original = snapshot();
     const reviewed = { id: entryId, snapshot: original,
-      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
     const changed = snapshot();
     changed.questions[0].correctKey = "B";
     changed.questions[0].correctAnswerText = "Second";
@@ -155,7 +156,7 @@ describe("searchable Question Set client boundary", () => {
   it.each(["approved", "rejected"])("refuses a %s status transition before moderation decision", async status => {
     const original = snapshot();
     const reviewed = { id: entryId, snapshot: original,
-      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
     const rpc = vi.fn().mockResolvedValue({ data: {
       id: entryId, title: original.title, question_count: 1, status, snapshot_payload: original,
     }, error: null });
@@ -168,7 +169,7 @@ describe("searchable Question Set client boundary", () => {
   it("rejects a tampered review receipt without touching the server", async () => {
     const original = snapshot();
     const reviewed = { id: entryId, snapshot: original,
-      contentDigest: "a".repeat(64), status: "pending" as const };
+      contentDigest: "a".repeat(64), status: "pending" as const, reviewRevision: 1 };
     const rpc = vi.fn();
     service(rpc);
     await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked the source key"))
@@ -179,7 +180,7 @@ describe("searchable Question Set client boundary", () => {
   it("rejects an account-epoch change between fresh inspection and decision", async () => {
     const original = snapshot();
     const reviewed = { id: entryId, snapshot: original,
-      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
     const rpc = vi.fn().mockResolvedValue({ data: {
       id: entryId, title: original.title, question_count: 1, status: "pending", snapshot_payload: original,
     }, error: null });
@@ -191,10 +192,24 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects the same snapshot after its protected review revision advances", async () => {
+    const original = snapshot();
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending",
+      snapshot_payload: original, review_revision: 2,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked the source key"))
+      .rejects.toThrow(/changed since inspection/);
+    expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+  });
+
   it("submits an unchanged pending revision using the source-reviewed decision only", async () => {
     const original = snapshot();
     const reviewed = { id: entryId, snapshot: original,
-      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
     const rpc = vi.fn()
       .mockResolvedValueOnce({ data: {
         id: entryId, title: original.title, question_count: 1, status: "pending", snapshot_payload: original,
@@ -205,6 +220,8 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).toHaveBeenNthCalledWith(1, "get_question_set_library", { p_id: entryId });
     expect(rpc).toHaveBeenNthCalledWith(2, "review_question_set_library", {
       p_id: entryId, p_approved: true, p_reason: "Checked the source key",
+      p_expected_snapshot: original,
+      p_expected_revision: 1,
     });
   });
 

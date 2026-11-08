@@ -28,6 +28,8 @@ export interface LibraryQuestionSetPreview {
   snapshot: SharedQuestionSetSnapshot;
   contentDigest: string;
   status: LibrarySubmission["status"];
+  /** Protected server row revision, required for an academic decision. */
+  reviewRevision?: number;
 }
 
 /** Explicit publisher assertions; this service must not invent consent. */
@@ -103,12 +105,15 @@ async function loadQuestionSetPreviewForStatus(
       throw new Error(requiredStatus === "approved"
         ? "This Question Set is unavailable. It may have been withdrawn."
         : "This submission is no longer awaiting academic review.");
+    if (requiredStatus === "pending" && (!count(data.review_revision) || data.review_revision < 1))
+      throw new Error("The pending review revision is missing. Refresh the review queue.");
     validateShare(data.snapshot_payload);
     const snapshot = data.snapshot_payload;
     if (data.title !== snapshot.title || data.question_count !== snapshot.questions.length)
       throw new Error("This Question Set differs from its protected listing.");
     return { id, snapshot, contentDigest: await sharedQuestionSetDigest(snapshot),
-      status: requiredStatus };
+      status: requiredStatus,
+      reviewRevision: requiredStatus === "pending" ? data.review_revision as number : undefined };
   });
 }
 
@@ -182,12 +187,13 @@ export async function listPendingQuestionSets(accountId: string): Promise<Librar
  * Recheck the exact pending snapshot a reviewer inspected before submitting a
  * decision. Review evidence must not silently authorize a replaced answer key
  * or a withdrawn/resubmitted revision. The SQL RPC still owns reviewer/RLS
- * authorization; this is a client-side stale-review gate, not an atomic lock.
+ * authorization; SQL also enforces the inspected revision atomically.
  */
 export async function reviewQuestionSetSubmission(
   accountId: string, reviewed: LibraryQuestionSetPreview, approved: boolean, reason: string,
 ): Promise<void> {
   if (!reviewed || !uuid(reviewed.id) || reviewed.status !== "pending"
+    || !count(reviewed.reviewRevision) || reviewed.reviewRevision < 1
     || !/^[a-f0-9]{64}$/.test(reviewed.contentDigest))
     throw new Error("Reopen the pending Question Set before reviewing it.");
   if (reason.trim().length < 8 || reason.trim().length > 500)
@@ -209,11 +215,16 @@ export async function reviewQuestionSetSubmission(
     throw new Error("This submission is no longer awaiting academic review. Reopen the queue.");
   validateShare(data.snapshot_payload);
   if (data.title !== data.snapshot_payload.title || data.question_count !== data.snapshot_payload.questions.length
+    || data.review_revision !== reviewed.reviewRevision
     || await sharedQuestionSetDigest(data.snapshot_payload) !== reviewed.contentDigest)
     throw new Error("The pending Question Set changed since inspection. Reopen and review the current answers.");
   await operation.assertCurrent();
   const decision = await operation.client.rpc("review_question_set_library", {
     p_id: reviewed.id, p_approved: approved, p_reason: reason.trim(),
+    // PostgreSQL compares this jsonb against the stored pending snapshot
+    // inside the UPDATE, closing the read-then-decide revision race.
+    p_expected_snapshot: reviewed.snapshot,
+    p_expected_revision: reviewed.reviewRevision,
   });
   await operation.assertCurrent();
   if (decision.error) throw new Error(decision.error.message);
