@@ -2415,4 +2415,41 @@ describe("Journal notebook foundation", () => {
     expect(useStore.getState().journal).toEqual([original]);
   });
 
+
+  it("keeps an unsaved writing draft when only the profile display name changes, then retries after storage failure", async () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "journal-rename-original-entry",
+      date: `${TODAY_KEY}T12:00:00`,
+      freeWriting: "Previously confirmed writing.",
+    };
+    useStore.setState({ journal: [original] });
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    const checkWrite = vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => {
+      throw new Error("Simulated storage rejection");
+    });
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+
+    render(<JournalPage />);
+    openTodayInFullPage();
+    const latest = "Private sentence typed before a display-name correction.";
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: latest } });
+    const oldId = useStore.getState().profile.userId;
+    act(() => { useStore.getState().updateProfile({ name: "Journal Display Name Changed" }); });
+    expect(useStore.getState().profile.userId).not.toBe(oldId);
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe(latest);
+    expect(useStore.getState().journal.find((entry) => entry.id === original.id)?.freeWriting)
+      .toBe("Previously confirmed writing.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe(latest);
+    checkWrite.mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByText("Saved to this workspace")).toBeTruthy());
+    expect(useStore.getState().journal.find((entry) => entry.id === original.id))
+      .toMatchObject({ freeWriting: latest, notebookStatus: "draft" });
+    expect(useStore.getState().journal.filter((entry) => entry.date.startsWith(TODAY_KEY))).toHaveLength(1);
+  });
+
 });
