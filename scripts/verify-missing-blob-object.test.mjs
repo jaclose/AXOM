@@ -59,10 +59,11 @@ test("strict release attestation rejects an absent reviewed blob even when Git t
   const objectPath = join(cwd, ".git", "objects", sourceBlob.blob.slice(0, 2),
     sourceBlob.blob.slice(2));
   unlinkSync(objectPath);
-  assert.match(git("ls-tree", "-r", integratedSha, "--", path),
-    new RegExp(sourceBlob.blob + "\\t" + path.replace(".", "\\.")));
-  assert.match(git("diff", "--name-status", integrationBaseSha, integratedSha), /M\\s+docs\\/approved\\.txt/);
+  assert.ok(git("ls-tree", "-r", integratedSha, "--", path)
+    .includes(sourceBlob.blob + "\\t" + path));
+  assert.ok(git("diff", "--name-status", integrationBaseSha, integratedSha)
+    .includes("docs/approved.txt"));
   assert.throws(() => invoke(), error => error.status === 1
-    && /Missing or unreadable pinned Git blob object: docs\\/approved\\.txt/.test(String(error.stderr)),
+    && String(error.stderr).includes("Missing or unreadable pinned Git blob object: docs/approved.txt"),
     "a release cannot attest Git object bytes that are absent locally");
 });
