@@ -248,8 +248,12 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         if (known?.academic && known.hash === hash && !knownAcademic) {
           throw new Error("The original academic image binding is no longer available. Cloud protection remains pending.");
         }
-        const academic = known?.academic && known.hash === hash
-          ? knownAcademic : academicByHash.get(hash) ?? undefined;
+        // A protected private original must remain private even if a newly
+        // installed academic revision later advertises identical bytes.
+        // Hash identity never transfers storage ownership or restore rights.
+        const academic = known && known.hash === hash
+          ? (known.academic ? knownAcademic : undefined)
+          : academicByHash.get(hash) ?? undefined;
         // A former academic-only reference is not proof that a private
         // workspace-media object exists after its academic binding disappears.
         const safeReuse = known && known.hash === hash
