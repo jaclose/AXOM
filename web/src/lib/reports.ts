@@ -164,7 +164,7 @@ export function buildCanonicalReportSummary(state: NoctyriumState, range: number
   const dailySuccess = percent(successfulDates.length, scoredResults.length);
   const mastery = percent(completedTracker.length, state.tracker.length);
   const hasSelectedRequirements = state.profile.dailySuccess
-    ? state.profile.dailySuccess.requirements.some((requirement) => requirement.enabled)
+    ? state.profile.dailySuccess.requirements.some((requirement) => requirement.enabled && requirement.lane !== "personal" && requirement.schedule.kind !== "weekly-range" && requirement.schedule.kind !== "times-per-week")
     : true;
 
   return {
@@ -200,7 +200,7 @@ export function buildCanonicalReportSummary(state: NoctyriumState, range: number
         denominator: scoredResults.length,
         period: scoredPeriod,
         sourceLabel: "Daily-success requirements and their linked records",
-        sourceRecordIds: unique(scoredResults.flatMap((result) => result.requirements.flatMap((item) => item.sourceRecordIds))),
+        sourceRecordIds: unique(scoredResults.flatMap((result) => result.requirements.filter((item) => item.requirement.lane !== "personal" && item.requirement.schedule.kind !== "weekly-range" && item.requirement.schedule.kind !== "times-per-week").flatMap((item) => item.sourceRecordIds))),
         calculation: "Counts consecutive eligible days whose selected requirements were met; today awaiting activity does not break it.",
         interpretation: streak ? "The current eligible rhythm is intact." : "A streak starts only after a selected requirement is met.",
         action: "Review today's remaining requirements",
@@ -234,7 +234,7 @@ export function buildCanonicalReportSummary(state: NoctyriumState, range: number
         denominator: scoredResults.length,
         period: scoredPeriod,
         sourceLabel: "Configured daily-success selector",
-        sourceRecordIds: unique(scoredResults.flatMap((result) => result.requirements.flatMap((item) => item.sourceRecordIds))),
+        sourceRecordIds: unique(scoredResults.flatMap((result) => result.requirements.filter((item) => item.requirement.lane !== "personal" && item.requirement.schedule.kind !== "weekly-range" && item.requirement.schedule.kind !== "times-per-week").flatMap((item) => item.sourceRecordIds))),
         calculation: scoredResults.length
           ? `${successfulDates.length} successful eligible days ÷ ${scoredResults.length} scored eligible days.`
           : hasSelectedRequirements
