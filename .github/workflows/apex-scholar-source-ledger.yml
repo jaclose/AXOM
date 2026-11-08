@@ -1,0 +1,50 @@
+name: APEX Scholar Source Integrity
+
+on:
+  pull_request:
+    paths:
+      - "scripts/qbank/source-ledger.py"
+      - "scripts/qbank/source_ledger_enrich.py"
+      - "scripts/qbank/test_source_ledger.py"
+      - ".github/workflows/apex-scholar-source-ledger.yml"
+  push:
+    branches: [main, "integration/**"]
+    paths:
+      - "scripts/qbank/source-ledger.py"
+      - "scripts/qbank/source_ledger_enrich.py"
+      - "scripts/qbank/test_source_ledger.py"
+      - ".github/workflows/apex-scholar-source-ledger.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apex-scholar-source-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-integrity:
+    name: Python source-ledger security and provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate (no persisted credentials)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Record exact candidate and supported Python capabilities
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          python3 --version
+          python3 - <<'PY'
+          import os
+          assert hasattr(os, "O_NOFOLLOW"), "source symlink test would be skipped"
+          assert hasattr(os, "O_DIRECTORY"), "directory no-follow test would be skipped"
+          assert os.open in os.supports_dir_fd, "fd-relative test would be skipped"
+          PY
+      - name: Compile scanner and synthetic regressions
+        run: python3 -m compileall -q scripts/qbank/source-ledger.py scripts/qbank/source_ledger_enrich.py scripts/qbank/test_source_ledger.py
+      - name: Execute all source-ledger regression tests
+        run: python3 scripts/qbank/test_source_ledger.py -v
