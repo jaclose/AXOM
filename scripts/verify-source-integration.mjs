@@ -181,7 +181,12 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
   const verifiedTreePaths = assertPortableTouchedTree(integrated, listTreePaths(integratedSha));
   for (const [folded, expected] of wanted) {
     const actual = integrated.get(folded);
-    if (!actual || expected.path !== actual.path || expected.status !== actual.status) {
+    // Git status is relative to each branch's *different* base. A reviewed
+    // modification may be an addition when newer main independently deleted
+    // the old file. Match path and final bytes/mode, but never translate a
+    // deletion into a surviving file (or vice versa).
+    if (!actual || expected.path !== actual.path
+      || (expected.status === "D") !== (actual.status === "D")) {
       throw new Error("Source/integration changed-path inventory differs: " + expected.path);
     }
     let original, final;
@@ -193,7 +198,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     }
     if (expected.status === "D") {
       if (original !== null || final !== null) throw new Error("Deleted source file reappeared: " + expected.path);
-      files.push({ ...expected, deleted: true });
+      files.push({ ...expected, integratedStatus: actual.status, deleted: true });
       continue;
     }
     original = regularFile(original, "source " + expected.path);
@@ -201,7 +206,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     if (original.blob !== final.blob || original.mode !== final.mode) {
       throw new Error("Integrated file differs from pinned source contents or mode: " + expected.path);
     }
-    files.push({ ...expected, mode: original.mode, blob: original.blob });
+    files.push({ ...expected, integratedStatus: actual.status, mode: original.mode, blob: original.blob });
   }
   return { version: 2, integratedSha, integrationBaseSha, sourceRanges, verifiedFiles: files.length,
     verifiedSources: sourceRanges.length, deletedFiles: files.filter(x => x.deleted).length,

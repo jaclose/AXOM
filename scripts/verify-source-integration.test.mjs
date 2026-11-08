@@ -380,6 +380,8 @@ test("v2 accepts reviewed older-base modification restored over an advanced-main
   const report = verifyCompleteSourceIntegration(manifest, adapters);
   assert.equal(report.completeForDeclaredRanges, true);
   assert.equal(report.verifiedFiles, 1);
+  assert.equal(report.files[0].status, "M");
+  assert.equal(report.files[0].integratedStatus, "A");
   assert.equal(report.files[0].blob, readGitFile(sourceSha, "docs/resurrected.txt", cwd).blob);
 
   // Still fail closed if final bytes diverge or deletion intent is mismatched.
