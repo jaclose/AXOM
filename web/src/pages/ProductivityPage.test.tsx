@@ -45,7 +45,7 @@ describe("ProductivityPage daily console", () => {
     render(<ProductivityPage />);
     fireEvent.click(screen.getByRole("button",{name:"Use Exercise template"}));
     fireEvent.change(screen.getByLabelText("How long in minutes?"),{target:{value:"60"}});
-    fireEvent.click(screen.getByRole("button",{name:"Log",exact:true}));
+    fireEvent.click(screen.getByRole("button",{name:"Log"}));
     expect(useStore.getState().logs[0]).toMatchObject({type:"Exercise",minutes:60,academic:false,productive:true});
   });
 
