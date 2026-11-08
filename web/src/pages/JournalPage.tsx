@@ -831,6 +831,9 @@ function JournalWritingPage({
     } catch (cause) {
       if (draftVersion === draftVersionRef.current) {
         dirtyRef.current = true;
+        // A later ordinary Save can fail after pagehide saved this same version.
+        // Invalidate that lifecycle receipt so a new pagehide can retry it.
+        if (lifecyclePersistVersionRef.current === draftVersion) lifecyclePersistVersionRef.current = null;
         if (mountedRef.current) {
           setSaveState("failed");
           setSaveError(localVault.isVaultConflictError(cause)
