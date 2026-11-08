@@ -327,10 +327,24 @@ function persistReviewedImportInOrder(
   const commit = persistence.commitReviewedImport;
   if (!commit) return persistReviewedImport(persistence, plan);
 
+  // A later reviewed import may have been prepared while an earlier import's
+  // source-document backlinks were optimistic and not yet durably saved.
+  // Never replay that absolute link snapshot into the atomic store commit.
+  // The canonical commitReviewedImport action links its own questionSet from
+  // sourceDocumentIds against the current document after prior commits settle.
+  // Keep fallback CRUD adapters unchanged: they do not rebuild these links.
+  const write = plan.documentWrite;
+  let atomicPlan = plan;
+  if (write?.kind === "update" && "linkedQuestionSetIds" in write.patch) {
+    const patch = { ...write.patch };
+    delete patch.linkedQuestionSetIds;
+    atomicPlan = { ...plan, documentWrite: { ...write, patch } };
+  }
+
   const preceding = reviewedImportCommitQueues.get(commit);
   const pending = preceding
-    ? preceding.then(() => persistReviewedImport(persistence, plan))
-    : persistReviewedImport(persistence, plan);
+    ? preceding.then(() => persistReviewedImport(persistence, atomicPlan))
+    : persistReviewedImport(persistence, atomicPlan);
   const tail = pending.then(
     () => undefined,
     () => undefined,
