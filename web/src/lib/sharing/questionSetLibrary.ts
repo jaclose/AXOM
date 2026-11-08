@@ -30,6 +30,12 @@ export interface LibraryQuestionSetPreview {
   status: LibrarySubmission["status"];
 }
 
+/** Explicit publisher assertions; this service must not invent consent. */
+export interface CommunityPublicationAttestations {
+  rightsConfirmed: boolean;
+  answersConfirmed: boolean;
+}
+
 const uuid = (value: unknown): value is string => typeof value === "string"
   && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -126,7 +132,12 @@ export async function listMyQuestionSetSubmissions(accountId: string): Promise<L
 }
 
 export async function submitQuestionSetToLibrary(accountId: string, sourceId: string,
-  snapshot: SharedQuestionSetSnapshot, credit: string): Promise<string> {
+  snapshot: SharedQuestionSetSnapshot, credit: string,
+  attestations: CommunityPublicationAttestations): Promise<string> {
+  // A valid answer key is not evidence of redistribution rights or human
+  // source review. Reject direct callers that omit either explicit assertion.
+  if (attestations?.rightsConfirmed !== true || attestations?.answersConfirmed !== true)
+    throw new Error("Confirm redistribution rights and source-reviewed answers before submitting.");
   if (!sourceId.trim() || sourceId !== sourceId.trim() || sourceId.length > 200 || credit.length > 80)
     throw new Error("Check the Question Set identity and public credit.");
   validateShare(snapshot);
@@ -135,7 +146,7 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   return withAccount(accountId, async client => {
     const { data, error } = await client.rpc("submit_question_set_library", {
       p_source_id: sourceId, p_snapshot: snapshot, p_credit: credit.trim(),
-      p_rights_confirmed: true, p_answers_confirmed: true,
+      p_rights_confirmed: attestations.rightsConfirmed, p_answers_confirmed: attestations.answersConfirmed,
     });
     if (error || !uuid(data)) throw new Error(error?.message ?? "The submission could not be confirmed.");
     return data;

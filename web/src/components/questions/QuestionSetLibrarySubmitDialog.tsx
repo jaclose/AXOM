@@ -263,7 +263,9 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         openedSet: set, openedQuestions: questions,
         liveSets: live.questionSets ?? [], liveQuestions: live.questions ?? [],
       });
-      const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit);
+      const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit, {
+        rightsConfirmed: rights, answersConfirmed: answers,
+      });
       // Account-operation RPCs also assert the current session. Avoid an old
       // account's follow-up query/confirmation if it changed while awaiting.
       if (useAccount.getState().user?.id !== accountId) return;
