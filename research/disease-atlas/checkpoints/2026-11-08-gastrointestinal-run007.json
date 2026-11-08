@@ -1,0 +1,272 @@
+{
+  "schema": "AXOM Disease Atlas checkpoint V2",
+  "release": "Build007",
+  "date": "2026-11-08",
+  "inherits_branch": "docs/disease-atlas-v2-run006-20261108",
+  "chapter": "Gastrointestinal / esophageal, gastric, small bowel, colonic and hereditary GI disorders",
+  "metrics": {
+    "previous_internal_entries": 246,
+    "new_profiles": 18,
+    "current_internal_entries": 264,
+    "legacy_short_entries": 132,
+    "detailed_profiles": 132,
+    "source_records_total": 141,
+    "new_source_records": 21,
+    "image_associations_total": 94,
+    "new_authentic_image_source_pages": 16,
+    "distinct_image_source_pages": 93,
+    "embedded_original_photographs": 0,
+    "pdf_pages": 192,
+    "automated_QA_pass": 28,
+    "automated_QA_fail": 0
+  },
+  "sha256_full_package": "d0b9325f58d23cc99c54628d9bb17a191b4c65c132621876254e5fde49b4accf",
+  "medical_profiles_condensed": [
+    {
+      "axom_id": "AXOM-GI-001",
+      "name": "Eosinophilic esophagitis",
+      "medical_summary": "Atopy, solid-food dysphagia/impaction; >=15 eos/hpf on multiple biopsies; PPI, swallowed steroids, elimination diet, selected dupilumab, dilation with anti-inflammatory care.",
+      "primary_source_id": "GI-EOE25"
+    },
+    {
+      "axom_id": "AXOM-GI-002",
+      "name": "Achalasia",
+      "medical_summary": "Degeneration of inhibitory esophageal myenteric neurons; dysphagia to solids and liquids; Chicago-classified manometry; POEM, pneumatic dilation or Heller myotomy.",
+      "primary_source_id": "GI-ACH20"
+    },
+    {
+      "axom_id": "AXOM-GI-003",
+      "name": "Zenker diverticulum",
+      "medical_summary": "Pharyngoesophageal pulsion pseudodiverticulum from cricopharyngeal dysfunction; regurgitation of old food, aspiration; endoscopic or surgical septotomy.",
+      "primary_source_id": "GI-ZEN20"
+    },
+    {
+      "axom_id": "AXOM-GI-004",
+      "name": "Boerhaave syndrome",
+      "medical_summary": "Full-thickness esophageal rupture after emesis; CT water-soluble contrast, urgent antibiotics/resuscitation/drainage and expert-directed repair or endoscopic closure.",
+      "primary_source_id": "GI-PERF19"
+    },
+    {
+      "axom_id": "AXOM-GI-005",
+      "name": "Autoimmune metaplastic atrophic gastritis",
+      "medical_summary": "Parietal-cell autoimmune body/fundus gland destruction; gastrin elevation, iron/B12 deficiency, intestinal metaplasia, type 1 gastric NET risk; replenish deficits, risk-stratified surveillance.",
+      "primary_source_id": "GI-AGA-AG21"
+    },
+    {
+      "axom_id": "AXOM-GI-006",
+      "name": "Gastric intestinal metaplasia",
+      "medical_summary": "Replacement of gastric epithelium by intestinal phenotype, variable precancer risk; H pylori eradication and MAPS III risk-based surveillance according to extent and comorbidity.",
+      "primary_source_id": "GI-MAPS25"
+    },
+    {
+      "axom_id": "AXOM-GI-007",
+      "name": "Ménétrier disease",
+      "medical_summary": "Hypertrophic foveolar epithelium, gland atrophy and protein-losing gastropathy with giant rugal folds; supportive therapy, causative infections when present, selected cetuximab or surgery.",
+      "primary_source_id": "GI-MEN10"
+    },
+    {
+      "axom_id": "AXOM-GI-008",
+      "name": "Zollinger–Ellison syndrome",
+      "medical_summary": "Gastrinoma causing inappropriate gastric hyperacidity/refractory ulcers, secretory diarrhea; differentiate PPI-induced hypergastrinemia; PPI and tumour-directed therapy.",
+      "primary_source_id": "GI-ZES-NCBI"
+    },
+    {
+      "axom_id": "AXOM-GI-009",
+      "name": "Lymphocytic microscopic colitis",
+      "medical_summary": "Chronic watery nonbloody diarrhea with normal endoscopic appearance; >=20 intraepithelial lymphocytes per 100 surface epithelial cells; budesonide when indicated.",
+      "primary_source_id": "GI-MICRO21"
+    },
+    {
+      "axom_id": "AXOM-GI-010",
+      "name": "Collagenous microscopic colitis",
+      "medical_summary": "Watery nonbloody diarrhea; thickened subepithelial collagen table (>10 micrometers) and inflammation; budesonide, remove implicated medications where appropriate.",
+      "primary_source_id": "GI-MICRO21"
+    },
+    {
+      "axom_id": "AXOM-GI-011",
+      "name": "Clostridioides difficile colitis",
+      "medical_summary": "Antibiotic-associated toxin-mediated colitis, possible volcano lesions/pseudomembranes; symptomatic testing, fidaxomicin or oral vancomycin depending on context, urgent care for fulminant disease.",
+      "primary_source_id": "GI-CDI21"
+    },
+    {
+      "axom_id": "AXOM-GI-012",
+      "name": "Ischemic colitis",
+      "medical_summary": "Colonic perfusion injury usually at vulnerable watershed segments; acute pain then hematochezia, CT/endoscopic findings; supportive care or surgery for necrosis/peritonitis.",
+      "primary_source_id": "GI-ISC15"
+    },
+    {
+      "axom_id": "AXOM-GI-013",
+      "name": "Whipple disease",
+      "medical_summary": "Tropheryma whipplei systemic infection; malabsorption, arthritis, PAS-positive macrophages, PCR confirmation; extended CNS-penetrant antimicrobial regimen based on expert guidance.",
+      "primary_source_id": "GI-WHIP-NCBI"
+    },
+    {
+      "axom_id": "AXOM-GI-014",
+      "name": "Small intestinal bacterial overgrowth",
+      "medical_summary": "Small-bowel microbial overgrowth often secondary to motility/anatomic disease; selected breath testing, underlying-cause correction, selective antibiotics, nutritional support.",
+      "primary_source_id": "GI-SIBO20"
+    },
+    {
+      "axom_id": "AXOM-GI-015",
+      "name": "Hirschsprung disease",
+      "medical_summary": "Congenital distal aganglionosis, absent RAIR with rectal biopsy confirmation; enterocolitis may be life-threatening; surgical pull-through.",
+      "primary_source_id": "GI-HIRS-NIDDK"
+    },
+    {
+      "axom_id": "AXOM-GI-016",
+      "name": "Familial adenomatous polyposis",
+      "medical_summary": "Pathogenic APC/Wnt dysregulation with hundreds-thousands of colorectal adenomas; germline confirmation and surveillance, preventive colectomy according to risk, upper GI surveillance.",
+      "primary_source_id": "GI-FAP26"
+    },
+    {
+      "axom_id": "AXOM-GI-017",
+      "name": "Lynch syndrome",
+      "medical_summary": "Hereditary mismatch-repair gene pathogenic variant causing colorectal/endometrial and other cancer predisposition; tumour IHC/MSI screens but germline testing confirms; risk-based surveillance and prevention.",
+      "primary_source_id": "GI-LYNCH26"
+    },
+    {
+      "axom_id": "AXOM-GI-018",
+      "name": "Chronic intestinal pseudo-obstruction",
+      "medical_summary": "Severe gut propulsion failure without a mechanical lesion; image/endoscopic exclusion of fixed blockage, assess myopathic, neuropathic and systemic etiologies; nutrition and specialized motility care.",
+      "primary_source_id": "GI-CIPO-NCBI"
+    }
+  ],
+  "new_images": [
+    {
+      "image_id": "GI-IMG-001",
+      "disease_id": "AXOM-GI-001",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Eosinophilic_oesophagitis.jpg",
+      "license": "CC BY-SA 3.0",
+      "creator": "Mattopaedia",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-002",
+      "disease_id": "AXOM-GI-001",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Eosinophilic_esophagitis%2C_very_high_mag.1.jpg",
+      "license": "CC BY-SA 4.0",
+      "creator": "CoRus13",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-003",
+      "disease_id": "AXOM-GI-002",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Acha.JPG",
+      "license": "CC BY 2.0",
+      "creator": "Farnoosh Farrokhi and Michael F. Vaezi",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-004",
+      "disease_id": "AXOM-GI-005",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Autoimmune_gastritis.jpg",
+      "license": "CC BY 4.0",
+      "creator": "Stefanie Kulnigg-Dabsch",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-005",
+      "disease_id": "AXOM-GI-006",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Gastric_intestinal_metaplasia.jpg",
+      "license": "CC BY-SA 3.0",
+      "creator": "Nephron",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-006",
+      "disease_id": "AXOM-GI-009",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Histopathology_of_lymphocytic_colitis.jpg",
+      "license": "CC0 1.0",
+      "creator": "Mikael Häggström",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-007",
+      "disease_id": "AXOM-GI-009",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Histopathology_of_lymphocytic_colitis%2C_high_magnification.png",
+      "license": "CC0 1.0",
+      "creator": "Mikael Häggström",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-008",
+      "disease_id": "AXOM-GI-010",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Histopathology_of_collagenous_colitis.jpg",
+      "license": "CC0 1.0",
+      "creator": "Mikael Häggström",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-009",
+      "disease_id": "AXOM-GI-011",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Pseudomembranous_Colitis_(H%26E)_(7414583144).jpg",
+      "license": "CC BY 2.0",
+      "creator": "Ed Uthman",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-010",
+      "disease_id": "AXOM-GI-011",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Pseudomembranous_Colitis%2C_Colectomy_(Gross)_(7410584264).jpg",
+      "license": "CC BY 2.0",
+      "creator": "Ed Uthman",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-011",
+      "disease_id": "AXOM-GI-013",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Whipple_disease.jpg",
+      "license": "CC BY 3.0",
+      "creator": "Mrwick1",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-012",
+      "disease_id": "AXOM-GI-013",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Whipple_pas+.jpg",
+      "license": "CC BY 3.0",
+      "creator": "Mrwick1",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-013",
+      "disease_id": "AXOM-GI-013",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Whipples_Disease%2C_PAS_(6881958719).jpg",
+      "license": "CC BY 2.0",
+      "creator": "Ed Uthman",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-014",
+      "disease_id": "AXOM-GI-015",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Hirschsprung_acetylcholine.jpg",
+      "license": "CC BY-SA 3.0",
+      "creator": "Marvin 101",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-015",
+      "disease_id": "AXOM-GI-016",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Familial_adenomatous_polyposis.jpg",
+      "license": "CC BY-SA 3.0",
+      "creator": "Dr. Roshan Nasimudeen",
+      "embedded_in_docx_pdf": false
+    },
+    {
+      "image_id": "GI-IMG-016",
+      "disease_id": "AXOM-GI-016",
+      "original_file_page": "https://commons.wikimedia.org/wiki/File:Familial_Adenomatous_Polyposes_Colon_-1.jpg",
+      "license": "CC BY-SA 3.0",
+      "creator": "Department of Pathology, Calicut Medical College",
+      "embedded_in_docx_pdf": false
+    }
+  ],
+  "limitations": {
+    "complete_machine_readable_manuscript": "Full source ZIP attached in Build007 conversation; unavailable for persistent Library upload due access-denied. This GitHub checkpoint contains complete new ID list and condensed findings, not full text.",
+    "ontology_baseline": "Official MONDO/ICD-11/Orphanet has not been imported and coverage rate is unmeasured.",
+    "image_download": "Source image pages linked; original binaries not embedded.",
+    "quality": "Educational summary, not independently peer-reviewed or a validated clinical treatment guide."
+  },
+  "recovery": "Use Run006 package and append Build007 GI profiles from Build007 full source ZIP, matching these 18 AXOM IDs. Preserve file-specific source and licensing metadata; do not silently backfill unknown ontology IDs.",
+  "policy": "Independent research branch only. Never merge/deploy as production without AXOM FORGE review."
+}
