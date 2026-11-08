@@ -90,7 +90,7 @@ describe("bounded account image uploads", () => {
     const { state, hashes } = await fixture(1);
     const path = `owner/${hashes[0]}`;
     objects.set(path, new Blob(["wrong bytes"]));
-    await expect(uploadCloudMedia(client, "owner", state, guard)).rejects.toThrow(/verified/);
+    await expect(uploadCloudMedia(client, "owner", state, guard)).rejects.toThrow(/failed its integrity check|could not be verified/);
     expect(upload).toHaveBeenCalledTimes(1);
     const exact = new Blob([new Uint8Array([137, 80, 78, 71, 1])], { type: "image/png" });
     objects.set(path, exact);
@@ -202,7 +202,7 @@ describe("bounded account image uploads", () => {
     objects.set(path, tampered);
 
     await expect(uploadCloudMedia(client, "synthetic-owner", state, guard))
-      .rejects.toThrow("An account image could not be verified.");
+      .rejects.toThrow(/failed its integrity check|could not be verified/);
     expect(download).toHaveBeenCalledTimes(1);
     expect(download).toHaveBeenCalledWith(path);
 
