@@ -21,7 +21,10 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
   // not merely the visible stem/choices/key. The receipt remains device-local;
   // no source evidence or private identifiers are sent with the public snapshot.
   return JSON.stringify([
-    question.id, question.updatedAt, question.stem, question.options,
+    // Rich source blocks and teaching fact-check receipts can change without
+    // updating legacy stem/options or the question timestamp. Such revisions
+    // invalidate any previously prepared private AI explanation.
+    question.id, question.updatedAt, question.stem, question.options, question.content ?? null,
     question.correctKey, question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
     question.source, question.createdAt, question.sourceFile ?? null,
     question.sourceDocumentId ?? null, question.sourcePage ?? null, question.questionNumber ?? null,
