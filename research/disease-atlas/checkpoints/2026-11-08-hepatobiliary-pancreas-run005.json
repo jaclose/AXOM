@@ -1,0 +1,202 @@
+{
+  "title": "AXOM Disease & Pathology Atlas Build 005 — recovery checkpoint",
+  "date": "2026-11-08",
+  "status": "unmerged research checkpoint",
+  "inherits": {
+    "build004_internal_entries": 200,
+    "build004_detailed": 68
+  },
+  "new_chapter": "Hepatobiliary & pancreatic pathology",
+  "new_profile_count": 22,
+  "internal_entries_total": 222,
+  "detailed_profiles_total": 90,
+  "evidence_sources_total": 97,
+  "online_image_associations_total": 67,
+  "new_original_image_pages": 15,
+  "distinct_image_source_pages": "see full package manifest",
+  "photos_embedded_in_docx_pdf": 0,
+  "unresolved": {
+    "ontology_denominator": "MONDO/ICD11/Orphanet unimported; coverage undefined",
+    "original_photo_download": "Original pathology files not accessible in document environment; HTML galleries link to original online images",
+    "clinical_peer_review": "not completed",
+    "library_upload": "attempted, denied"
+  },
+  "artifacts": {
+    "source_package_name": "AXOM_Disease_Atlas_V2_Run005_Source_Package.zip",
+    "zip_sha256": "f39d8dc5cb68c581f3c0b395905e9a91d6d3c2f21a25f8fe04c9775e1fe92383",
+    "docx_sha256": "cbb66f6d85538135dbe56179c7d22e97a11a4a810dc3208c40356e8309c19cbb",
+    "pdf_sha256": "a2fe87fc2442fe880be300427dc8a801c19a03c09026ac68cfa0a9f648e23d23",
+    "checkpoint_full_json_sha256": "08c95af55efc7b9cc1ca0ae6beec56746ce1a14555f88099c09906e5ddb7f57e",
+    "pdf_pages": 143
+  },
+  "quality": {
+    "passed_assertions": 20,
+    "duplicate_names": 0,
+    "duplicate_ids": 0,
+    "unresolved_source_refs": 0,
+    "a11y_high_medium_low": [
+      0,
+      0,
+      0
+    ],
+    "zip_integrity": "pass"
+  },
+  "profile_summaries": [
+    {
+      "id": "AXOM-HP-001",
+      "name": "Autoimmune hepatitis",
+      "mechanism": "immune interface hepatitis with plasma cells",
+      "recognition": "biopsy/IgG/autoantibodies and exclusion of mimics",
+      "management": "corticosteroids with azathioprine or mycophenolate per individualized specialist approach"
+    },
+    {
+      "id": "AXOM-HP-002",
+      "name": "Primary biliary cholangitis (PBC)",
+      "mechanism": "autoimmune small intrahepatic bile duct destruction",
+      "recognition": "persistent ALP-predominant cholestasis, AMA or PBC-specific ANA",
+      "management": "UDCA first-line; seladelpar permitted in selected jurisdictions; obeticholic acid withdrawn U.S. 2025"
+    },
+    {
+      "id": "AXOM-HP-003",
+      "name": "Primary sclerosing cholangitis (PSC)",
+      "mechanism": "fibrosing cholangitis with multifocal strictures",
+      "recognition": "MRCP multifocal strictures; exclude secondary disease",
+      "management": "endoscopic management of significant obstruction, complications, surveillance; transplant selected end-stage cases"
+    },
+    {
+      "id": "AXOM-HP-004",
+      "name": "Wilson disease, hepatic phenotype",
+      "mechanism": "ATP7B copper transport defect",
+      "recognition": "24-hour urine copper, ceruloplasmin, ocular/genetic/biopsy clues combined",
+      "management": "chelation or zinc with specialized lifelong monitoring; transplant for acute liver failure"
+    },
+    {
+      "id": "AXOM-HP-005",
+      "name": "HFE-related hereditary hemochromatosis",
+      "mechanism": "HFE-linked systemic iron accumulation",
+      "recognition": "transferrin saturation, ferritin, HFE genotype; stage fibrosis",
+      "management": "therapeutic phlebotomy with iron monitoring"
+    },
+    {
+      "id": "AXOM-HP-006",
+      "name": "Alpha-1 antitrypsin deficiency–associated liver disease",
+      "mechanism": "misfolded A1AT protein retention in hepatocytes",
+      "recognition": "PAS-D positive globules, low serum A1AT with phenotype/genotype",
+      "management": "manage complications; transplantation for advanced hepatic disease"
+    },
+    {
+      "id": "AXOM-HP-007",
+      "name": "Budd–Chiari syndrome",
+      "mechanism": "hepatic venous outflow obstruction",
+      "recognition": "Doppler/CT/MRI and thrombophilia evaluation",
+      "management": "anticoagulation and graded decompression/TIPS/transplant indications"
+    },
+    {
+      "id": "AXOM-HP-008",
+      "name": "Portal vein thrombosis, nonmalignant",
+      "mechanism": "portal inflow thrombosis with varied acuity",
+      "recognition": "Doppler/contrast imaging classify recent vs chronic, percent obstruction",
+      "management": "individualize anticoagulation, especially recent substantial clot, and treat portal hypertension"
+    },
+    {
+      "id": "AXOM-HP-009",
+      "name": "Pyogenic liver abscess",
+      "mechanism": "suppurative intrahepatic infection",
+      "recognition": "imaging, cultures, source control",
+      "management": "culture-directed antibiotics plus drainage where indicated"
+    },
+    {
+      "id": "AXOM-HP-010",
+      "name": "Hepatic cystic echinococcosis",
+      "mechanism": "Echinococcus granulosus cyst with laminated layer",
+      "recognition": "WHO imaging stage CE1–CE5, exposure/serology",
+      "management": "stage/size-dependent observation, albendazole, PAIR, surgery under specialist care"
+    },
+    {
+      "id": "AXOM-HP-011",
+      "name": "Hepatocellular adenoma",
+      "mechanism": "benign hepatocellular tumour with bleeding/transformation risk",
+      "recognition": "MRI characteristics, size and molecular subtype",
+      "management": "stop risk hormones, manage size and sex-specific resection indications"
+    },
+    {
+      "id": "AXOM-HP-012",
+      "name": "Focal nodular hyperplasia (FNH)",
+      "mechanism": "hyperplastic hepatocyte lesion with anomalous arteries",
+      "recognition": "MRI hepatobiliary contrast, central scar; distinguish adenoma",
+      "management": "usually no therapy when confidently diagnosed"
+    },
+    {
+      "id": "AXOM-HP-013",
+      "name": "Cavernous hemangioma of the liver",
+      "mechanism": "benign vascular channels",
+      "recognition": "typical discontinuous peripheral nodular imaging enhancement",
+      "management": "reassurance/observation unless symptomatic complicated"
+    },
+    {
+      "id": "AXOM-HP-014",
+      "name": "Biliary atresia",
+      "mechanism": "progressive obliteration of neonatal extrahepatic ducts",
+      "recognition": "conjugated jaundice with acholic stool; urgent cholangiography evaluation",
+      "management": "early Kasai portoenterostomy with transplant if progression"
+    },
+    {
+      "id": "AXOM-HP-015",
+      "name": "Choledocholithiasis",
+      "mechanism": "obstructing common bile duct stone",
+      "recognition": "bilirubin/ALP, US and EUS/MRCP/ERCP risk stratification",
+      "management": "ERCP for confirmed obstruction/cholangitis, cholecystectomy when appropriate"
+    },
+    {
+      "id": "AXOM-HP-016",
+      "name": "Acute ascending cholangitis",
+      "mechanism": "biliary infection with obstruction",
+      "recognition": "Charcot features may be incomplete; inflammatory/cholestatic tests and obstruction imaging",
+      "management": "antibiotics + urgent/early biliary drainage adjusted to severity"
+    },
+    {
+      "id": "AXOM-HP-017",
+      "name": "IgG4-related sclerosing cholangitis",
+      "mechanism": "IgG4-rich fibroinflammatory biliary disease",
+      "recognition": "serum IgG4 not diagnostic alone; imaging, histology, exclude cholangiocarcinoma",
+      "management": "glucocorticoids or steroid-sparing therapy after excluding malignancy"
+    },
+    {
+      "id": "AXOM-HP-018",
+      "name": "Type 1 autoimmune pancreatitis",
+      "mechanism": "IgG4-related storiform pancreatic inflammation",
+      "recognition": "sausage-like pancreas, duct changes, IgG4/other-organ involvement",
+      "management": "steroids when indicated after exclusion of pancreatic cancer"
+    },
+    {
+      "id": "AXOM-HP-019",
+      "name": "Intraductal papillary mucinous neoplasm (IPMN)",
+      "mechanism": "mucin-producing ductal pancreatic neoplasm",
+      "recognition": "main duct vs branch duct and mural nodule risk",
+      "management": "surveillance or surgery per Kyoto 2024 high-risk features"
+    },
+    {
+      "id": "AXOM-HP-020",
+      "name": "Pancreatic mucinous cystic neoplasm (MCN)",
+      "mechanism": "mucinous epithelial lining plus ovarian-type stroma",
+      "recognition": "usually body/tail in women, lacks ductal communication",
+      "management": "surgical evaluation according to size, symptoms, malignancy risk"
+    },
+    {
+      "id": "AXOM-HP-021",
+      "name": "Pancreatic serous cystadenoma",
+      "mechanism": "glycogen-rich cuboidal epithelial microcysts",
+      "recognition": "honeycomb microcysts, stellate scar, low malignant risk",
+      "management": "no intervention when asymptomatic and secure diagnosis"
+    },
+    {
+      "id": "AXOM-HP-022",
+      "name": "Pancreatic pseudocyst after pancreatitis",
+      "mechanism": "mature inflammatory-walled pancreatic fluid collection without epithelium",
+      "recognition": "post-pancreatitis interval and absence of necrotic debris",
+      "management": "observe uncomplicated; endoscopic or other drainage for symptomatic/infected collections"
+    }
+  ],
+  "evidence_policy": "Detailed sources and 15 image-specific creator/license/source URLs preserved in the complete Run005 ZIP and checkpoint; this GitHub recovery file is deliberately condensed. No synthetic medical images. Not a validated clinical care guide.",
+  "coordination": "NO MERGE; NO PRODUCTION DEPLOYMENT; release gateway owns integration."
+}
