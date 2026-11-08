@@ -129,6 +129,41 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
     }
     await work;
   }
+  // A previous manifest is a receipt, not evidence that its original still
+  // exists. Recheck the account-scoped immutable object only on local cache
+  // misses; dedupe shared hashes within this protection attempt, not across
+  // accounts or revisions. Offline/missing/corrupt objects leave the push pending.
+  const verifiedMissingLocalOriginals = new Map<string, Promise<void>>();
+  async function verifyMissingLocalOriginal(known: CloudMediaReference, academic?: AcademicAssetReference): Promise<void> {
+    const key = `${academic ? "academic" : "private"}:${known.hash}:${known.byteSize}`;
+    let verification = verifiedMissingLocalOriginals.get(key);
+    if (!verification) {
+      verification = (async () => {
+        await assertCurrent();
+        let original: Blob | null = null;
+        if (academic) {
+          original = await downloadAcademicAsset(client, academic);
+        } else {
+          const result = await bucket.download(`${userId}/${known.hash}`);
+          if (result.error) throw new Error("An acknowledged account image could not be verified. Reconnect or restore the original before cloud protection.");
+          original = result.data;
+        }
+        await assertCurrent();
+        if (!original || original.size !== known.byteSize) {
+          throw new Error("An acknowledged account image is missing or has changed. Cloud protection remains pending.");
+        }
+        const bytes = new Uint8Array(await original.arrayBuffer());
+        await assertCurrent();
+        if (await sha256(bytes) !== known.hash) {
+          throw new Error("An acknowledged account image failed its integrity check. Cloud protection remains pending.");
+        }
+        await assertCurrent();
+      })();
+      verifiedMissingLocalOriginals.set(key, verification);
+    }
+    await verification;
+    await assertCurrent();
+  }
   async function worker(): Promise<void> {
     while (cursor < entries.length && !failed) {
       const index = cursor++;
@@ -144,9 +179,10 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
           && (checksum === undefined || checksum === known.hash)
           && (!known.academic || knownAcademic)) {
-          // Cache eviction does not invalidate an already protected immutable
-          // original. This may recover the last verified original, but must
-          // never certify changed metadata or a different source checksum.
+          // A previous index cannot certify a vanished/corrupted remote object
+          // or an index accidentally received from another account. Verify the
+          // actual current account original before reusing its receipt.
+          await verifyMissingLocalOriginal(known, knownAcademic);
           ordered[index] = { ...(knownAcademic ? { academic: knownAcademic } : {}), blobKey,
             hash: known.hash, byteSize: known.byteSize, updatedAt: attachment.updatedAt };
           continue;
