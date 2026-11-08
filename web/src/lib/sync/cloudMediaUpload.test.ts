@@ -72,6 +72,8 @@ describe("bounded account image uploads", () => {
     const manifest = await pending;
     expect(peak).toBe(6);
     expect(upload).toHaveBeenCalledTimes(9);
+    // Each acknowledged immutable original also needs a remote byte receipt.
+    expect(download).toHaveBeenCalledTimes(9);
     expect(manifest.map((entry) => entry.blobKey)).toEqual(keys);
     expect(manifest.map((entry) => entry.hash)).toEqual(hashes);
   });
@@ -90,7 +92,7 @@ describe("bounded account image uploads", () => {
     const { state, hashes } = await fixture(1);
     const path = `owner/${hashes[0]}`;
     objects.set(path, new Blob(["wrong bytes"]));
-    await expect(uploadCloudMedia(client, "owner", state, guard)).rejects.toThrow(/verified/);
+    await expect(uploadCloudMedia(client, "owner", state, guard)).rejects.toThrow(/integrity check/);
     expect(upload).toHaveBeenCalledTimes(1);
     const exact = new Blob([new Uint8Array([137, 80, 78, 71, 1])], { type: "image/png" });
     objects.set(path, exact);
@@ -202,7 +204,7 @@ describe("bounded account image uploads", () => {
     objects.set(path, tampered);
 
     await expect(uploadCloudMedia(client, "synthetic-owner", state, guard))
-      .rejects.toThrow("An account image could not be verified.");
+      .rejects.toThrow(/integrity check/);
     expect(download).toHaveBeenCalledTimes(1);
     expect(download).toHaveBeenCalledWith(path);
 
