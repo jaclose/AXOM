@@ -1,6 +1,10 @@
 ---
-tags: [axom/operations, axom/release, axom/naming]
-authority: proposed-until-merged
+tags:
+  - axom/operations
+  - axom/release
+  - axom/naming
+authority: canonical
+lifecycle: proposed-until-merged
 owner: AXOM FORGE
 updated: 2026-11-06
 review_trigger: material-release-policy-change
