@@ -904,7 +904,7 @@ class SourceLedgerTests(unittest.TestCase):
 
                 def fake_pdftotext(command, **kwargs):
                     self.assertEqual(command[-2:], ["-", "-"])
-                    self.assertTrue(kwargs["stdin"].read().startswith(b"%PDF-1.4"))
+                    self.assertTrue(kwargs["input"].startswith(b"%PDF-1.4"))
                     return enriched.subprocess.CompletedProcess(command, 0, stdout=(
                         b"Question 1. A synthetic clinical question describes multiple measured "
                         b"variables and asks the learner to choose the mechanism supported "
