@@ -42,7 +42,7 @@ import { assignDraftProvenancePages } from "../../lib/questionProvenance";
 import { evaluateImportDraft, evaluateImportDrafts, summarizeImportDrafts } from "../../lib/questionImportTrust";
 import { ALREADY_IMPORTED_RULE, applyPriorImport } from "../../lib/questionImportHistory";
 import { settledReviewedImportSnapshot } from "../../lib/questionImportFinalization";
-import { prepareReviewedImport, saveReviewedImport, type ImportSourceFile } from "../../lib/questionImportSave";
+import { prepareReviewedImport, saveReviewedImport, type ImportSourceFile, type SavedReviewedImport } from "../../lib/questionImportSave";
 import { scopeFromMapping } from "../../lib/massImportCandidate";
 import { courseForScope } from "../../lib/course-engine/questionBank";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -130,6 +130,27 @@ export interface ImportFinalizationResult {
   documentId?: string;
   questionIds: string[];
 }
+
+/**
+ * A previously saved set may still require awaited original/figure repair.
+ * Return the finalization notice only after the actual storage receipt settles.
+ * This pure async boundary is also testable without mocking the whole importer.
+ */
+export async function awaitReviewedImportReceipt(
+  pending: Promise<SavedReviewedImport>,
+  equivalent: boolean,
+): Promise<{ saved: SavedReviewedImport; reusedNotice?: { title: string; body: string; tone: "success" } }> {
+  const saved = await pending;
+  return {
+    saved,
+    ...(saved.ok && saved.reused && equivalent ? { reusedNotice: {
+      title: "Import already finalized",
+      body: "AXOM found the same reviewed questions and reused the existing set instead of creating duplicates.",
+      tone: "success" as const,
+    } } : {}),
+  };
+}
+
 
 /** Re-open a saved source with the deterministic local parser; no provider is required. */
 export function parseStoredDocument(document: SourceDocument): { drafts: ParsedQuestionDraft[]; warnings: string[] } {
@@ -445,7 +466,9 @@ export function ImportPanel({
     // Keep the learner informed and prevent a second click until the receipt.
     setFinalizing(true);
     setStep("finalize");
-    const saved = await saveReviewedImport(prepared, s, imageFiles);
+    const { saved, reusedNotice } = await awaitReviewedImportReceipt(
+      saveReviewedImport(prepared, s, imageFiles), Boolean(prepared.equivalent),
+    );
     if (!saved.ok) {
       if (!mountedRef.current) return;
       finalizingRef.current = false;
@@ -463,15 +486,7 @@ export function ImportPanel({
       return;
     }
     if (saved.reused) {
-      if (prepared.equivalent && mountedRef.current) {
-        // The existing-set receipt may still repair source bytes or images.
-        // Never report finalization until that awaited work confirms success.
-        pushToast({
-          title: "Import already finalized",
-          body: "AXOM found the same reviewed questions and reused the existing set instead of creating duplicates.",
-          tone: "success",
-        });
-      }
+      if (reusedNotice && mountedRef.current) pushToast(reusedNotice);
       finishSuccessfulImport({ setId: saved.setId, documentId: saved.documentId, questionIds: saved.questionIds });
       return;
     }
