@@ -428,11 +428,19 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
         accepted.append(dict(sourceSha256=sha,bankId=bank_id,format="native_package",
                              detected=detected,ready=ready,review=review+unresolved,
                              audit_ref=str(audit_path),cloudVerified=False))
+    # Raw parser receipts must not circumvent a native source-snapshot hold
+    # through the same original-source SHA, even though their audit types differ.
+    blocked_native_source_shas={
+        key[1] for key,pkg in expected.items()
+        if key in ambiguous or held_native_package(pkg)
+    }
     for item in raw:
         if not isinstance(item,dict):
             rejected.append("raw_row_not_object");continue
         raw_sha=item.get("sha256")
         sha=raw_sha.removeprefix("sha256:") if isinstance(raw_sha,str) else None
+        if sha in blocked_native_source_shas:
+            rejected.append("raw_record_native_source_review_hold:" + str(item.get("file")));continue
         detected=item.get("questionsDetected")
         ready=item.get("ready",0)
         review=item.get("needsReview",item.get("review-suggested",0))
