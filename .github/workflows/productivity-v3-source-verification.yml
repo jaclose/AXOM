@@ -37,3 +37,9 @@ jobs:
             supabase/functions/communications/source-manifest.json
             supabase/templates/communications/*.html
           retention-days: 7
+
+  quality:
+    name: AXOM Quality exact-head verification
+    uses: ./.github/workflows/quality.yml
+    permissions:
+      contents: read
