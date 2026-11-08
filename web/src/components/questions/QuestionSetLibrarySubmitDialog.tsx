@@ -46,6 +46,11 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const [busy, setBusy] = useState(false);
   const [rights, setRights] = useState(false);
   const [answers, setAnswers] = useState(false);
+  // Keep the identity of the learner who actually made these attestations.
+  // Account-store changes may render before the reset effect has committed.
+  const [attestationAccount, setAttestationAccount] = useState(accountId);
+  const attestationsForAccount = Boolean(accountId && attestationAccount === accountId
+    && useAccount.getState().user?.id === accountId);
   const [credit, setCredit] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -97,6 +102,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     setRights(false);
     setAnswers(false);
     setCredit("");
+    setAttestationAccount(accountId);
     setError("");
     setMessage("");
     if (!accountId) { setChecking(false); return; }
@@ -238,7 +244,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // The rendered account may lag behind the session store during a switch.
     // Never send another account's saved rights and answer attestations.
     if (!accountId || statusIdentity !== `${accountId}:${set.id}`
-      || useAccount.getState().user?.id !== accountId || !rights || !answers || checking || busy || generating || drafts.length
+      || !attestationsForAccount || !rights || !answers || checking || busy || generating || drafts.length
       || unresolved || withMedia || missingExplanations
       || (submission && submission.status !== "rejected")) return;
     setBusy(true); setError(""); setMessage("");
@@ -358,13 +364,13 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       </div>}
       {(!submission || submission.status === "rejected") && accountId && !checking && <>
         <label className="qsl-field">Public credit (optional)
-          <input className="field" value={credit} maxLength={80} disabled={busy} onChange={event => setCredit(event.target.value)} placeholder="Name to show beside this set" />
+          <input className="field" value={attestationsForAccount ? credit : ""} maxLength={80} disabled={busy || !attestationsForAccount} onChange={event => setCredit(event.target.value)} placeholder="Name to show beside this set" />
         </label>
-        <label className="qsl-check"><input type="checkbox" checked={rights} disabled={busy} onChange={event => setRights(event.target.checked)} />
+        <label className="qsl-check"><input type="checkbox" checked={attestationsForAccount && rights} disabled={busy || !attestationsForAccount} onChange={event => setRights(event.target.checked)} />
           <span>I own this content or have permission to distribute every question, answer and explanation.</span></label>
-        <label className="qsl-check"><input type="checkbox" checked={answers} disabled={busy} onChange={event => setAnswers(event.target.checked)} />
+        <label className="qsl-check"><input type="checkbox" checked={attestationsForAccount && answers} disabled={busy || !attestationsForAccount} onChange={event => setAnswers(event.target.checked)} />
           <span>I checked every answer against its source, verified every explanation, and resolved source-key conflicts.</span></label>
-        <GButton variant="primary" disabled={busy || checking || statusIdentity !== `${accountId}:${set.id}` || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
+        <GButton variant="primary" disabled={busy || checking || statusIdentity !== `${accountId}:${set.id}` || !attestationsForAccount || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
           <ShieldCheck size={16} aria-hidden="true" /> {busy ? "Submitting…" : "Send for review"}
         </GButton>
       </>}
