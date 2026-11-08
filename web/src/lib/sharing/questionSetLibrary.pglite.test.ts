@@ -364,6 +364,52 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(readback.value.snapshot_payload).toEqual(source);
   });
 
+  it("locks approved public evidence against privileged edits without blocking a safety takedown", async () => {
+    const original = snapshot();
+    const id = await submit(OWNER, "approved-evidence-immutability", original);
+    await approve(REVIEWER, id, original);
+    const altered = snapshot();
+    altered.questions[0].correctKey = "A";
+    altered.questions[0].correctAnswerText = "First option";
+    const attempts: Array<[string, string, unknown[]]> = [
+      ["changed reviewed answer", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2", [JSON.stringify(altered), id]],
+      ["changed public title", "update public.question_set_library_entries set title='Tampered title' where id=$1", [id]],
+      ["changed public credit", "update public.question_set_library_entries set credit='Forged credit' where id=$1", [id]],
+      ["changed discovery tags", "update public.question_set_library_entries set tags=array['tampered'] where id=$1", [id]],
+      ["changed question count", "update public.question_set_library_entries set question_count=2 where id=$1", [id]],
+      ["source reassignment", "update public.question_set_library_entries set source_id='different-private-source' where id=$1", [id]],
+      ["owner reassignment", "update public.question_set_library_entries set owner_id=$1 where id=$2", [LEARNER, id]],
+      ["unreviewed pending transition", "update public.question_set_library_entries set status='pending' where id=$1", [id]],
+      ["altered reviewer identity", "update public.question_set_library_entries set reviewed_by=$1 where id=$2", [OWNER, id]],
+      ["altered review note", "update public.question_set_library_entries set review_note='Forged review reason' where id=$1", [id]],
+      ["altered approval time", "update public.question_set_library_entries set approved_at='2025-01-01' where id=$1", [id]],
+    ];
+    for (const [label, sql, params] of attempts) {
+      await expect(db.query(sql, params), label)
+        .rejects.toThrow(/approved question set evidence is immutable/i);
+    }
+    const [beforeTakedown] = await as<{ value: { snapshot_payload: Snapshot; status: string; review_revision: number } }>(
+      LEARNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(beforeTakedown.value).toMatchObject({
+      snapshot_payload: original, status: "approved", review_revision: 2,
+    });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+
+    // The privileged safety-revocation path must remain available and must
+    // remove public discovery without rewriting or republishing reviewed data.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+    await expect(as(LEARNER, "select public.get_question_set_library($1)", [id]))
+      .rejects.toThrow(/unavailable/i);
+    const [afterTakedown] = await as<{ value: { snapshot_payload: Snapshot; status: string; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(afterTakedown.value).toMatchObject({
+      snapshot_payload: original, status: "rejected", review_revision: 3,
+    });
+  });
+
   it("denies new submissions when account deletion is processing", async () => {
     await db.query("insert into public.privacy_requests(user_id,kind,status) values($1,'deletion','processing')", [LEARNER]);
     await expect(submit(LEARNER, "deletion-locked")).rejects.toThrow(/deletion cleanup|unavailable/i);
