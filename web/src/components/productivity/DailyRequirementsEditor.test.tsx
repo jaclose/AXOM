@@ -43,6 +43,39 @@ afterEach(() => {
   cleanup();
 });
 
+describe("Recurrence-aware quick goals", () => {
+  it("creates gym as four minimum, five preferred distinct days per week", () => {
+    const seed = makeSeed(); const today = seed.activeDayKey;
+    seed.profile.dailySuccess = { version: 1, configuredAt: today, requirements: [] };
+    useStore.setState(seed);
+    render(<DailyRequirementsEditor />);
+    fireEvent.click(screen.getByRole("button",{name:"Add a goal"}));
+    fireEvent.change(screen.getByLabelText("Goal type"),{target:{value:"weekly-range"}});
+    fireEvent.click(screen.getByRole("button",{name:"Save goal"}));
+    const goal=useStore.getState().profile.dailySuccess!.requirements[0];
+    expect(goal).toMatchObject({label:"Gym", source:{kind:"activity-alias"}, aliases:["Gym"],
+      schedule:{kind:"weekly-range",minimum:4,preferred:5,weekStartsOn:1}});
+  });
+
+  it("records five distinct named prayer occurrences and toggles one without creating logs", () => {
+    const seed=makeSeed(); const today=seed.activeDayKey;
+    seed.profile.dailySuccess = {version:1,configuredAt:today,requirements:[]};
+    seed.logs=[]; useStore.setState(seed);
+    render(<DailyRequirementsEditor />);
+    fireEvent.click(screen.getByRole("button",{name:"Add a goal"}));
+    fireEvent.change(screen.getByLabelText("Goal type"),{target:{value:"daily-slots"}});
+    fireEvent.click(screen.getByRole("button",{name:"Save goal"}));
+    const fajr=screen.getByRole("button",{name:"Fajr"});
+    fireEvent.click(fajr); expect(fajr.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(fajr); expect(fajr.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByRole("button",{name:"Dhuhr"}));
+    const [goal]=useStore.getState().profile.dailySuccess!.requirements;
+    expect(goal.schedule).toMatchObject({kind:"daily-slots",slots:["Fajr","Dhuhr","Asr","Maghrib","Isha"]});
+    expect(goal.manualContributions?.filter((entry)=>entry.value===1).map((entry)=>entry.slotId)).toEqual(["Dhuhr"]);
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+});
+
 describe("Quick goal creation and check-off", () => {
   it("creates a self-reported activity goal with an exact label and no synthetic log", async () => {
     const state = makeSeed();
