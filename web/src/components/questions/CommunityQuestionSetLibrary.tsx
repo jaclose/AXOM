@@ -52,12 +52,23 @@ export function CommunityQuestionSetLibrary() {
   // React may not have committed the disabled state when a second click runs.
   // Reserve the mutation synchronously, and release it only for its own request.
   const likingOperation = useRef<symbol | null>(null);
+  // Preview requests may overlap before React commits `opening`. Only the
+  // newest explicit selection may open a preview; closing also revokes it.
+  const previewRequest = useRef<{ token: symbol; stop: () => void } | null>(null);
+  function cancelPendingPreview() {
+    previewRequest.current?.stop();
+    previewRequest.current = null;
+  }
 
   useEffect(() => {
+    cancelPendingPreview();
     setSets([]); setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
     setLiking(undefined); setOffset(0);
   }, [accountId]);
+
+  // Never retain an auth subscription for an abandoned preview on unmount.
+  useEffect(() => () => { previewRequest.current?.stop(); previewRequest.current = null; }, []);
 
   useEffect(() => {
     let alive = true;
@@ -100,20 +111,28 @@ export function CommunityQuestionSetLibrary() {
     setRefresh(value => value + 1);
   }
   async function open(id: string) {
-    if (!accountId || opening || useAccount.getState().user?.id !== accountId) return;
+    if (!accountId || useAccount.getState().user?.id !== accountId) return;
+    // A second selection supersedes the first immediately, including in the
+    // same React batch. It must not inherit the previous result or error.
+    cancelPendingPreview();
+    const operation = Symbol("community-preview");
     const openedBy = accountId;
     const session = observeAccountSession(openedBy, () => {
+      if (previewRequest.current?.token !== operation) return;
+      cancelPendingPreview();
       setPreview(undefined); setPreviewAccountId(undefined);
       setPreviewError(""); setOpening(false);
     });
     if (!session.current()) { session.stop(); return; }
+    previewRequest.current = { token: operation, stop: session.stop };
+    const isCurrent = () => previewRequest.current?.token === operation && session.current();
     setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setOpening(true); setImported(false);
     try {
       const result = await loadQuestionSetLibraryPreview(openedBy, id);
-      // A resolved request cannot reopen a prior account's preview after a
-      // session switch. The server already scopes access; also scope the UI.
-      if (!session.current()) return;
+      // Both the account session and the selected request must remain current.
+      // A late first selection or dismissed modal cannot reopen itself.
+      if (!isCurrent()) return;
       setPreviewAccountId(openedBy);
       setPreview(result);
       setImported(useStore.getState().questionSets.some(set => {
@@ -121,11 +140,15 @@ export function CommunityQuestionSetLibrary() {
         return provenance?.shareId === result.id && provenance.contentDigest === result.contentDigest;
       }));
     } catch (cause) {
-      if (session.current())
+      if (isCurrent())
         setPreviewError(cause instanceof Error ? cause.message : "This set could not be opened.");
     } finally {
-      if (session.current()) setOpening(false);
-      session.stop();
+      if (previewRequest.current?.token === operation) {
+        cancelPendingPreview();
+        if (session.current()) setOpening(false);
+      } else {
+        session.stop();
+      }
     }
   }
   async function add() {
@@ -226,7 +249,9 @@ export function CommunityQuestionSetLibrary() {
       {more && <GButton disabled={loading} onClick={() => setOffset(value => value + 24)}>Load more sets</GButton>}
       <p className="sub">Import copies the reviewed listing into your private AXOM. It does not connect your attempts, notes or files to the contributor.</p>
     </>}
-    {(opening || activePreview || previewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => { setPreview(undefined); setPreviewError(""); }}>
+    {(opening || activePreview || previewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => {
+      cancelPendingPreview(); setOpening(false); setPreview(undefined); setPreviewAccountId(undefined); setPreviewError("");
+    }}>
       <div className="qsl-preview stack gap12" aria-busy={opening || importing}>
         {opening && <p role="status">Opening this Question Set…</p>}
         {activePreview && <>
