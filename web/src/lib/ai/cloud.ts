@@ -110,6 +110,9 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
       if (!canSend()) throw new Error(consentError);
       let payload: { result?: unknown; error?: string; remaining?: number } = {};
       try { payload = await response.json(); } catch { /* handled below */ }
+      // Response bodies may be streamed. Revocation during JSON decoding must
+      // also suppress both the returned proposal and stale quota state.
+      if (!canSend()) throw new Error(consentError);
       if (typeof payload.remaining === "number") lastRemaining = payload.remaining;
       if (!response.ok) {
         if (response.status === 429) lastRemaining = 0;

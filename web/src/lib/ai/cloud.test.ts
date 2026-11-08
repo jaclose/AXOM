@@ -145,6 +145,31 @@ describe("cached Cloud AI provider request-time consent", () => {
     await expect(request).rejects.toThrow(/Cloud AI is off/);
   });
 
+  it("discards a response if consent is revoked during asynchronous JSON decoding", async () => {
+    let allowed = true;
+    let finishParsing!: (value: unknown) => void;
+    let parsingStarted!: () => void;
+    const parsing = new Promise<void>((resolve) => { parsingStarted = resolve; });
+    const fetchSpy = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: () => new Promise<unknown>((resolve) => {
+        finishParsing = resolve;
+        parsingStarted();
+      }),
+    }));
+    const provider = createCloudProvider({
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      isRequestAllowed: () => allowed,
+      fetchImpl: fetchSpy as unknown as typeof fetch,
+    });
+    const request = provider.completeJson({ prompt: "sensitive question text" });
+    await parsing;
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // Request already left before opt-out.
+    allowed = false;
+    finishParsing({ result: { text: "obsolete" }, remaining: 12 });
+    await expect(request).rejects.toThrow(/Cloud AI is off/);
+  });
+
   it("fails closed when consent verification itself throws", async () => {
     const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
     const provider = createCloudProvider({
