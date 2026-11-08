@@ -67,7 +67,11 @@ export function evaluateDailySuccess(
     : legacyRequirements(state);
   const mode = configured ? "configured" : "legacy";
   const results = requirements.map((requirement) => evaluateRequirement(requirement, state, dayKey, today));
-  const eligible = results.filter((result) => result.eligible && result.status !== "unavailable");
+  const eligible = results.filter((result) =>
+    result.eligible && result.status !== "unavailable"
+    && result.requirement.lane !== "personal"
+    && result.requirement.schedule.kind !== "times-per-week"
+    && result.requirement.schedule.kind !== "weekly-range");
   const totalWeight = eligible.reduce((sum, result) => sum + normalizeWeight(result.requirement.weight), 0);
   const progress = eligible.length && totalWeight > 0
     ? Math.round((eligible.reduce((sum, result) => sum + result.ratio * normalizeWeight(result.requirement.weight), 0) / totalWeight) * 100)
@@ -322,7 +326,7 @@ function hasSource(source: DailySuccessSource, trackers: ProductivityTracker[], 
 
 export function makeDailyRequirement(
   input: Pick<DailySuccessRequirement, "id" | "label" | "source" | "target" | "unit"> &
-    Partial<Pick<DailySuccessRequirement, "enabled" | "aliases" | "excludedSourceRecordIds" | "includedSourceRecordIds" | "manualContributions" | "weight" | "schedule" | "trackingStartsAt" | "createdAt" | "updatedAt">>,
+    Partial<Pick<DailySuccessRequirement, "enabled" | "lane" | "showInReports" | "aliases" | "excludedSourceRecordIds" | "includedSourceRecordIds" | "manualContributions" | "weight" | "schedule" | "trackingStartsAt" | "createdAt" | "updatedAt">>,
   today: string = localDateKey(),
 ): DailySuccessRequirement {
   const timestamp = new Date().toISOString();
@@ -331,6 +335,8 @@ export function makeDailyRequirement(
     label: input.label.trim() || sourceLabel(input.source),
     source: input.source,
     enabled: input.enabled ?? true,
+    lane: input.lane === "personal" ? "personal" : "academic",
+    showInReports: input.showInReports !== false,
     aliases: normalizeAliases(input.aliases),
     excludedSourceRecordIds: normalizeRecordIds(input.excludedSourceRecordIds),
     includedSourceRecordIds: normalizeRecordIds(input.includedSourceRecordIds),
@@ -365,6 +371,8 @@ export function normalizeDailySuccessConfig(value: unknown): DailySuccessConfig 
         ? candidate.label.trim().slice(0, 120)
         : sourceLabel(source),
       enabled: candidate.enabled !== false,
+      lane: candidate.lane === "personal" ? "personal" : "academic",
+      showInReports: candidate.showInReports !== false,
       source,
       aliases: normalizeAliases(candidate.aliases),
       excludedSourceRecordIds: normalizeRecordIds(candidate.excludedSourceRecordIds),
