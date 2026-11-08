@@ -373,4 +373,79 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+
+  it("refuses publication with the previous account's still-rendered attestations", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+
+    // The actual store changed before the component got its React update.
+    mocks.accountId = "owner-2";
+    fireEvent.click(send);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("clears public credit and both attestations when another account opens the same dialog", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    const view = render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" });
+    const rightsBox = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answersBox = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const creditBox = screen.getByRole("textbox", { name: /Public credit/ }) as HTMLInputElement;
+    fireEvent.click(rightsBox);
+    fireEvent.click(answersBox);
+    fireEvent.change(creditBox, { target: { value: "Previous account's credit" } });
+    await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+
+    mocks.accountId = "owner-2";
+    view.rerender(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledWith("owner-2"));
+    await waitFor(() => {
+      expect(rightsBox.checked).toBe(false);
+      expect(answersBox.checked).toBe(false);
+      expect(creditBox.value).toBe("");
+      expect(send.hasAttribute("disabled")).toBe(true);
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not query or confirm old-account submissions after an in-flight publish switches accounts", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    let resolveSubmission!: (id: string) => void;
+    mocks.submit.mockImplementationOnce(() => new Promise<string>(resolve => { resolveSubmission = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+
+    mocks.accountId = "owner-2";
+    await act(async () => { resolveSubmission("22222222-2222-4222-8222-222222222222"); });
+    expect(mocks.submissions).toHaveBeenCalledTimes(1); // Initial owner-1 lookup only.
+    expect(screen.queryByText(/Submission received/)).toBeNull();
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("does not silently auto-draft private material after the account changes", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    const view = render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+
+    mocks.accountId = "owner-2";
+    view.rerender(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledWith("owner-2"));
+    await waitFor(() => expect(screen.queryByText(/AI draft.*to inspect/)).toBeNull());
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+  });
 });
