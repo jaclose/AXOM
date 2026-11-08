@@ -568,12 +568,16 @@ def inspect_packages(rows):
                     if not actual: issues.append("asset_hash_not_verified:" + a)
                     elif actual != asset_expected_checksums[a]: issues.append("asset_checksum_mismatch:" + a)
             if missing_assets: issues.append("missing_or_unsafe_assets:" + str(len(missing_assets)))
+            qrecord = lookup.get(str(qpath))
+            # A post-scan substitution must not inherit the original source ID.
+            if (qrecord and qrecord.get("source_sha256")
+                    and qrecord["source_sha256"] != inspected_questions_sha256):
+                issues.append("questions_differ_from_inventory_sha")
             native = mapping(str(path), r["root_label"], native=data)
             r.update(native)
             r["extraction_status"] = "native_package_structurally_checked"
             r["prepared_package"] = str(path.parent)
             r["review_status"] = "package_exceptions" if issues else "package_structural_checks_passed_answer_review_separate"
-            qrecord = lookup.get(str(qpath))
             if qrecord:
                 qrecord.update(native)
                 qrecord["prepared_package"] = str(path.parent)
