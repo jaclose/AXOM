@@ -140,16 +140,14 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
       work = (async () => {
         await assertCurrent();
         const { error } = await bucket.upload(`${userId}/${hash}`, blob, { contentType: mimeType, upsert: false, cacheControl: "31536000" });
-        if (error) {
-          if (!('statusCode' in error) || String(error.statusCode) !== "409") throw error;
-          // A duplicate name alone cannot establish that the immutable object has these bytes.
-          const existing = await bucket.download(`${userId}/${hash}`);
-          if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== hash) throw new Error("An account image could not be verified. The workspace has not been marked protected.");
-        }
+        if (error && (!("statusCode" in error) || String(error.statusCode) !== "409")) throw error;
+        // An upload acknowledgment or a 409 conflict is not a recovery receipt:
+        // the current account must be able to read back identical original bytes.
+        // Keep this check within the six-worker pool and shared per-hash attempt.
         await assertCurrent();
-        // The new upload was acknowledged, or a 409 object was byte-verified.
-        // Do not fetch this same original again within the same attempt.
-        verifiedRemoteOriginals.set(`private:${hash}:${blob.size}`, Promise.resolve());
+        await verifyRemoteOriginal({ hash, byteSize: blob.size });
+        await assertCurrent();
+        // Record success only after verifying storage bytes and current identity.
         confirmed.add(hash);
       })().finally(() => inFlight.delete(hash));
       inFlight.set(hash, work);
