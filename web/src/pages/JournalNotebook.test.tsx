@@ -2459,7 +2459,11 @@ describe("Journal notebook foundation", () => {
       id: "journal-auth-A-private-id",
       date: `${TODAY_KEY}T12:00:00`,
       freeWriting: "A saved private entry that must not appear for B.",
+      attachments: [localImage],
     };
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     act(() => {
       useStore.setState({ journal: [original] });
       useStore.getState().updateProfile({ name: "Journal Auth Alpha" });
@@ -2484,6 +2488,11 @@ describe("Journal notebook foundation", () => {
       });
       useStore.getState().updateProfile({ name: "Journal Auth Beta" });
     });
+    // Before B's workspace hydrates, none of A's saved or unsaved material
+    // may be rendered or eligible for B's Save action.
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    expect(screen.queryByText("A saved private entry that must not appear for B.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     act(() => { useStore.setState({ journal: [] }); });
     expect(useStore.getState().journal).toEqual([]);
 
@@ -2491,6 +2500,35 @@ describe("Journal notebook foundation", () => {
       ?? within(screen.getByRole("region", { name: "Write at your desk" })).getByRole("textbox")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
     expect(editor.value).not.toContain("private");
+
+    // B may save a new page. B must never inherit A's entry identity, image,
+    // text or unsaved edits, even when autosave was queued in A.
+    const bText = "Only B may write this new journal page.";
+    fireEvent.change(editor, { target: { value: bText } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(useStore.getState().journal).toHaveLength(1));
+    expect(useStore.getState().journal[0]).toMatchObject({ freeWriting: bText, attachments: [] });
+    expect(useStore.getState().journal[0].id).not.toBe(original.id);
+
+    // Returning to A after its original notebook rehydrates restores the
+    // private unsaved in-tab draft without overwriting A's original entry ID.
+    act(() => {
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-auth-A", email: "alpha@example.invalid", displayName: "Journal Auth Alpha", emailConfirmed: true },
+      });
+      useStore.getState().updateProfile({ name: "Journal Auth Alpha" });
+    });
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    act(() => { useStore.setState({ journal: [original] }); });
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
+      .toBe("An even newer unsaved private sentence for A.");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(useStore.getState().journal[0]?.freeWriting)
+      .toBe("An even newer unsaved private sentence for A."));
+    expect(useStore.getState().journal).toHaveLength(1);
+    expect(useStore.getState().journal[0].id).toBe(original.id);
+    expect(useStore.getState().journal[0].attachments).toEqual([localImage]);
   });
 
 });
