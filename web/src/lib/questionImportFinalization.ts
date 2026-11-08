@@ -228,6 +228,12 @@ const comparableContent = (content: QuestionRecord["content"]) => {
 
 const comparableQuestion = (question: ReviewedQuestionInput | QuestionRecord) => ({
   source: question.source,
+  // Academic course/module/source week are part of a reviewed import identity.
+  // Identical text and answer keys in different filings must not join an
+  // in-flight commit or reuse an existing set from another week/course.
+  courseId: question.courseId,
+  module: question.module,
+  week: question.week,
   stem: question.stem.trim(),
   content: comparableContent(question.content),
   options: question.options.map((option) => ({ key: option.key.trim().toUpperCase(), text: option.text.trim() })),
