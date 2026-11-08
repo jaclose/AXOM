@@ -81,6 +81,24 @@ describe("mixed-cadence recurrence contracts", () => {
     expect(sunday.requirements[0].calculation).toContain("preferred 5");
   });
 
+  it("does not allow a private prayer goal or unfinished weekly goal to alter academic streak credit", () => {
+    const prayer = requirement({
+      id:"prayer",source:{kind:"manual"},lane:"personal",
+      schedule:{kind:"daily-slots",slots:["Fajr","Dhuhr","Asr","Maghrib","Isha"]},
+      target:5,unit:"prayers",showInReports:false,
+    });
+    const gym = requirement({
+      id:"gym",source:{kind:"activity-alias"},lane:"personal",aliases:["Gym"],
+      schedule:{kind:"weekly-range",minimum:4,preferred:5,weekStartsOn:1},
+      target:1,unit:"times",
+    });
+    const focus = requirement({ id:"academic",target:60 });
+    const result=evaluateDailySuccess(state([prayer,gym,focus],[log({minutes:60})]));
+    expect(result.eligibleCount).toBe(1);
+    expect(result.progress).toBe(100);
+    expect(result.requirements.find((r)=>r.requirement.id==="prayer")?.status).toBe("awaiting");
+  });
+
   it("keeps named prayer occurrences distinct when one is toggled repeatedly", () => {
     const prayer = requirement({
       id:"prayer", label:"Prayer", source:{kind:"manual"}, target:5, unit:"prayers",
