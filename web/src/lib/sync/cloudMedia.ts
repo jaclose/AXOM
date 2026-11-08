@@ -128,17 +128,22 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   let cursor = 0;
   let failed = false;
   let failure: unknown;
-  async function ensureUploaded(hash: string, blob: Blob, mimeType: string): Promise<void> {
-    if (confirmed.has(hash)) {
-      // A cached successful upload is historical, not proof that the original
-      // still has the expected bytes at this account-scoped storage path.
-      await verifyRemoteOriginal({ hash, byteSize: blob.size });
+  class MissingPrivateOriginalError extends Error {}
+  async function ensureUploaded(hash: string, blob: Blob, mimeType: string, forceUpload = false): Promise<void> {
+    // Check the in-flight pool before the historical cache: a concurrent 404
+    // repair must never be mistaken for an already verified upload.
+    let work = inFlight.get(hash);
+    if (work) { await work; return; }
+    if (!forceUpload && confirmed.has(hash)) {
+      await verifyOrRepairPrivateOriginal({ hash, byteSize: blob.size }, blob, mimeType);
       return;
     }
-    let work = inFlight.get(hash);
     if (!work) {
       work = (async () => {
         await assertCurrent();
+        // A prior 404 memoizes a failed verification promise for this attempt.
+        // Discard it only when retrying a missing PRIVATE immutable original.
+        if (forceUpload) verifiedRemoteOriginals.delete(`private:${hash}:${blob.size}`);
         const { error } = await bucket.upload(`${userId}/${hash}`, blob, { contentType: mimeType, upsert: false, cacheControl: "31536000" });
         if (error && (!("statusCode" in error) || String(error.statusCode) !== "409")) throw error;
         // An upload acknowledgment or a 409 conflict is not a recovery receipt:
@@ -173,7 +178,15 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           original = await downloadAcademicAsset(client, academic);
         } else {
           const result = await bucket.download(`${userId}/${known.hash}`);
-          if (result.error) throw new Error("An acknowledged account image could not be verified. Reconnect or restore the original before cloud protection.");
+          if (result.error) {
+            // A definite 404 can be safely repaired from the intact local Blob.
+            // 403/RLS, transient network errors and integrity failures MUST
+            // remain fail-closed; do not turn them into a write attempt.
+            if ("statusCode" in result.error && String(result.error.statusCode) === "404") {
+              throw new MissingPrivateOriginalError("This account original is missing from cloud storage.");
+            }
+            throw new Error("An acknowledged account image could not be verified. Reconnect or restore the original before cloud protection.");
+          }
           original = result.data;
         }
         await assertCurrent();
@@ -191,6 +204,22 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
     }
     await verification;
     await assertCurrent();
+  }
+  async function verifyOrRepairPrivateOriginal(
+    known: Pick<CloudMediaReference, "hash" | "byteSize">,
+    blob: Blob,
+    mimeType: string,
+  ): Promise<void> {
+    try {
+      await verifyRemoteOriginal(known);
+    } catch (error) {
+      if (!(error instanceof MissingPrivateOriginalError)) throw error;
+      // A local byte hash was independently computed before arriving here.
+      // Retry only a 404 at this same account's immutable path, never overwrite.
+      await assertCurrent();
+      confirmed.delete(known.hash);
+      await ensureUploaded(known.hash, blob, mimeType, true);
+    }
   }
   async function worker(): Promise<void> {
     while (cursor < totalJobs && !failed) {
@@ -254,7 +283,8 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         if (academic || safeReuse) {
           // A retained local Blob only proves its own bytes. The remote
           // original might have changed since the previous cloud receipt.
-          await verifyRemoteOriginal({ hash, byteSize: record.blob.size }, academic);
+          if (academic) await verifyRemoteOriginal({ hash, byteSize: record.blob.size }, academic);
+          else await verifyOrRepairPrivateOriginal({ hash, byteSize: record.blob.size }, record.blob, attachment.mimeType);
         } else {
           await ensureUploaded(hash, record.blob, attachment.mimeType);
         }
