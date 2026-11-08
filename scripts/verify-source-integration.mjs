@@ -150,7 +150,8 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     throw new Error("requireSourceBlobReceipts must be a boolean.");
   }
   const strictReceipts = manifest.requireSourceBlobReceipts === true;
-  if (strictReceipts !== Array.isArray(manifest.sourceBlobReceipts)) {
+  if ((strictReceipts && !Array.isArray(manifest.sourceBlobReceipts))
+    || (!strictReceipts && Object.hasOwn(manifest, "sourceBlobReceipts"))) {
     throw new Error("Source blob receipts require explicit opt-in and an array.");
   }
   const sourceBlobReceipts = strictReceipts ? new Map() : null;

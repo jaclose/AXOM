@@ -730,6 +730,12 @@ test("v2 opt-in receipts cover every reachable ordinary source-history blob with
   assert.throws(() => verifyCompleteSourceIntegration({
     ...input, requireSourceBlobReceipts: false, sourceBlobReceipts: receipts,
   }, adapters), /[Rr]eceipts.*opt-in/);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, requireSourceBlobReceipts: false, sourceBlobReceipts: null,
+  }, adapters), /[Rr]eceipts.*opt-in/);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, requireSourceBlobReceipts: true, sourceBlobReceipts: null,
+  }, adapters), /[Rr]eceipts.*opt-in/);
   const verified = verifyCompleteSourceIntegration({
     ...input, sourceBlobReceipts: receipts,
   }, adapters);
