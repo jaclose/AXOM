@@ -238,7 +238,7 @@ describe("saveReviewedImport", () => {
       await vi.waitFor(() => expect(attachmentWrite).toHaveBeenCalledOnce());
       publishReviewedImportAccount("account-b");
       releaseImage();
-      await expect(saving).rejects.toThrow(/account changed/i);
+      await expect(saving).resolves.toMatchObject({ ok: false, message: expect.stringMatching(/account changed/i) });
       expect(store.updateQuestion).not.toHaveBeenCalled();
       expect(commits).toHaveLength(1);
     } finally {
