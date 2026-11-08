@@ -125,3 +125,31 @@ describe("new upload must verify actual account-storage bytes before a protected
     expect(download).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * A failed first protection must not poison the per-account confirmed-hash
+ * cache. When storage initially acknowledges without retaining bytes, a later
+ * healthy retry of the SAME original must upload again and verify the bytes.
+ * This models a transient storage fault with an isolated synthetic account.
+ */
+describe("retry after an acknowledged-but-missing first upload", () => {
+  it("leaves protection pending, then retries and certifies only a verified original", async () => {
+    const { state, hash } = await fixture();
+    mode = "missing";
+    await expect(uploadCloudMedia(client, ACCOUNT, state, assertCurrent))
+      .rejects.toThrow();
+    expect(remote.size).toBe(0);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(download).toHaveBeenCalledTimes(1);
+
+    mode = "intact";
+    const recovered = await uploadCloudMedia(client, ACCOUNT, state, assertCurrent);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]).toMatchObject({ hash, byteSize: ORIGINAL.byteLength });
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(download).toHaveBeenCalledTimes(2);
+    const original = remote.get(ACCOUNT + "/" + hash);
+    expect(original).toBeDefined();
+    expect(new Uint8Array(await original!.arrayBuffer())).toEqual(ORIGINAL);
+  });
+});
