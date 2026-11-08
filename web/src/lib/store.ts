@@ -128,21 +128,44 @@ export type SharedQuestionSetImportCommitResult =
     }
   | { ok: false; message: string; rollbackFailures: string[] };
 
+interface SharedQuestionImportAccountGuard {
+  accountId: string;
+  isCurrentAccount(accountId: string): boolean;
+}
+
 const activeSharedQuestionImports = new Map<string, {
   contentDigest: string;
   promise: Promise<SharedQuestionSetImportCommitResult>;
+  /** Sticky session authorization for this specific pending import. */
+  sessionCurrent?: () => boolean;
 }>();
 
 function coordinateSharedQuestionImport(
   identity: SharedQuestionImportIdentity,
   run: () => Promise<SharedQuestionSetImportCommitResult>,
-  accountId?: string,
+  accountGuard?: SharedQuestionImportAccountGuard,
 ): Promise<SharedQuestionSetImportCommitResult> {
   if (typeof identity?.shareId !== "string" || typeof identity?.contentDigest !== "string") return run();
-  // Never share an in-flight import receipt between authenticated accounts.
+  // Do not coalesce receipts between accounts or revoked sessions of the same account.
+  const accountId = accountGuard?.accountId;
   const key = accountId ? `${accountId}:${identity.shareId}` : identity.shareId;
   const active = activeSharedQuestionImports.get(key);
   if (active) {
+    // A → B → A may leave the account ID unchanged at click time. The first
+    // import's session monitor stays revoked, so it must not authorize a
+    // second session's import or supply that session's completion receipt.
+    let previousSessionValid = true;
+    try {
+      if (active.sessionCurrent) previousSessionValid = active.sessionCurrent() === true;
+    } catch {
+      previousSessionValid = false;
+    }
+    if (!previousSessionValid) {
+      // Let the original IndexedDB write settle if it already began. Never
+      // race a new session's vault write against the previous in-flight one.
+      const retry = () => coordinateSharedQuestionImport(identity, run, accountGuard);
+      return active.promise.then(retry, retry);
+    }
     if (active.contentDigest !== identity.contentDigest.toLowerCase()) {
       return Promise.resolve({
         ok: false,
@@ -160,6 +183,9 @@ function coordinateSharedQuestionImport(
   activeSharedQuestionImports.set(key, {
     contentDigest: identity.contentDigest.toLowerCase(),
     promise,
+    sessionCurrent: accountGuard
+      ? () => accountGuard.isCurrentAccount(accountGuard.accountId) === true
+      : undefined,
   });
   return promise;
 }
@@ -306,10 +332,7 @@ interface Actions {
     snapshot: SharedQuestionSetSnapshot;
     identity: SharedQuestionImportIdentity;
     /** Client-side session guard. Server authorization remains authoritative. */
-    accountGuard?: {
-      accountId: string;
-      isCurrentAccount(accountId: string): boolean;
-    };
+    accountGuard?: SharedQuestionImportAccountGuard;
   }) => Promise<SharedQuestionSetImportCommitResult>;
   /** Validate and durably persist one complete reviewed import snapshot. */
   commitReviewedImport: (plan: ReviewedImportPersistencePlan) => Promise<ReviewedImportPersistenceResult>;
@@ -1288,7 +1311,7 @@ export const useStore = create<Store>()(
           reused: plan.reused,
           alreadyImported: false,
         };
-      }, input.accountGuard?.accountId),
+      }, input.accountGuard),
       commitReviewedImport: async (plan) => {
         const current = get();
         const failure = (message: string, rollbackFailures: string[] = []): ReviewedImportPersistenceResult => ({
