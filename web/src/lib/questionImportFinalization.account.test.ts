@@ -8,6 +8,8 @@ import {
   type ReviewedImportPersistenceResult,
 } from "./questionImportFinalization";
 
+const sameReviewedFingerprint = "synthetic:identical-reviewed-source-and-filing";
+
 function signIn(id: string): void {
   publishReviewedImportAccount(id);
 }
@@ -62,7 +64,7 @@ describe("reviewed-import account-epoch isolation", () => {
     signIn("account-a");
     const a = persistReviewedImportOnce(sameReviewedFingerprint, persistence(commit), importPlan("a-question"));
     signIn("account-b");
-    // The shared local workspace may still expose A\x27s tentative state.
+    // The shared local workspace may still expose A's tentative state.
     // No caller may mistake that state for a settled equivalent set.
     expect(isReviewedImportInFlight(sameReviewedFingerprint)).toBe(true);
     const b = persistReviewedImportOnce(sameReviewedFingerprint, persistence(commit), importPlan("b-question"));
