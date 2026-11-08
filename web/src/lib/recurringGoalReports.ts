@@ -22,9 +22,10 @@ function weekStartMonday(dateKey: string): string {
 export function recurringGoalSummaries(
   state: DailySuccessState,
   today = state.activeDayKey,
+  includeUnshared = false,
 ): RecurringGoalSummary[] {
   const goals = state.profile.dailySuccess?.requirements ?? [];
-  return goals.filter((goal) => goal.enabled && goal.showInReports !== false
+  return goals.filter((goal) => goal.enabled && (includeUnshared || goal.showInReports !== false)
     && (goal.schedule.kind === "weekly-range" || goal.schedule.kind === "daily-slots"))
     .map((goal) => {
       if (goal.schedule.kind === "weekly-range") {
