@@ -242,3 +242,7 @@
 @media (prefers-reduced-motion: reduce) {
   .quick-goal-track > i { transition: none; }
 }
+
+/* Explicit academic attribution; nonacademic self-report never implies study minutes. */
+.self-report-academic { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-70); }
+.self-report-academic input { width: 17px; height: 17px; accent-color: var(--gold); }
