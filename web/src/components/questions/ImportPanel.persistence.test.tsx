@@ -484,10 +484,10 @@ describe("Import Center persistence invariant", () => {
     // intentionally reviews only question 1; two independent later reviews
     // are prepared while an earlier vault write is still unsettled.
     const rawText = [
-      "1. Existing source question?\\nA. One\\nB. Two\\nAnswer: B\\nExplanation: First explanation.",
-      "2. Additional A source question?\\nA. Three\\nB. Four\\nAnswer: A\\nExplanation: Second explanation.",
-      "3. Additional B source question?\\nA. Five\\nB. Six\\nAnswer: B\\nExplanation: Third explanation.",
-    ].join("\\n\\n");
+      "1. Existing source question?\nA. One\nB. Two\nAnswer: B\nExplanation: First explanation.",
+      "2. Additional A source question?\nA. Three\nB. Four\nAnswer: A\nExplanation: Second explanation.",
+      "3. Additional B source question?\nA. Five\nB. Six\nAnswer: B\nExplanation: Third explanation.",
+    ].join("\n\n");
     const parsed = parseQuestionBlocks(rawText);
     expect(parsed).toHaveLength(3);
     const seeded = render(<ImportPanel seed={{
