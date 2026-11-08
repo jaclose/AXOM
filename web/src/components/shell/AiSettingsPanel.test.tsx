@@ -133,4 +133,49 @@ describe("Cloud AI legacy destination recovery", () => {
     expect(mocks.saved.cloudProxyUrl).toBe("https://old-untrusted.example/functions/v1/ai-proxy");
     expect(mocks.saved.localModel).toBe("existing-local-model");
   });
+
+  it("does not display Off as saved when browser storage rejects a Cloud opt-out, and can retry", () => {
+    mocks.saved = { mode: "cloud", localEndpoint: "http://localhost:11434" };
+    mocks.saveOk = false;
+    render(<AiSettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /^Off/ }));
+    expect(mocks.saved.mode).toBe("cloud");
+    expect(screen.getByRole("button", { name: /AXOM Cloud AI/ }).className).toContain("on");
+    expect(screen.getByRole("status").textContent).toMatch(/could not save/i);
+    mocks.saveOk = true;
+    fireEvent.click(screen.getByRole("button", { name: /^Off/ }));
+    expect(mocks.saved.mode).toBe("off");
+    expect(screen.getByRole("button", { name: /^Off/ }).className).toContain("on");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("does not falsely select Local or Demo when preference writes fail", () => {
+    mocks.saved = { mode: "off", localEndpoint: "http://localhost:11434" };
+    mocks.saveOk = false;
+    render(<AiSettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /Local \\(Ollama\\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Demo/ }));
+    expect(mocks.saved.mode).toBe("off");
+    expect(screen.getByRole("button", { name: /^Off/ }).className).toContain("on");
+    expect(screen.getByRole("status").textContent).toMatch(/could not save/i);
+  });
+
+  it("does not let a delayed Local probe override Cloud consent or Cloud health", async () => {
+    mocks.saved = { mode: "local", localEndpoint: "http://localhost:11434" };
+    let resolveLocal: ((result: { ok: boolean; detail: string; models: string[] }) => void) | undefined;
+    mocks.detect.mockImplementationOnce(() => new Promise((resolve) => { resolveLocal = resolve; }));
+    render(<AiSettingsPanel />);
+    await waitFor(() => expect(mocks.detect).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: /AXOM Cloud AI/ }));
+    await waitFor(() => expect(screen.getByText("AXOM Cloud AI ready.")).toBeTruthy());
+    const savesAtCloud = mocks.save.mock.calls.length;
+    await act(async () => {
+      resolveLocal?.({ ok: true, detail: "Obsolete local endpoint succeeded.", models: ["wrong-model"] });
+    });
+    expect(mocks.saved.mode).toBe("cloud");
+    expect(mocks.saved.localModel).toBeUndefined();
+    expect(mocks.save.mock.calls.length).toBe(savesAtCloud);
+    expect(screen.getByText("AXOM Cloud AI ready.")).toBeTruthy();
+    expect(screen.queryByText("Obsolete local endpoint succeeded.")).toBeNull();
+  });
 });
