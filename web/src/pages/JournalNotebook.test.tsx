@@ -1448,6 +1448,9 @@ describe("Journal notebook foundation", () => {
     fireEvent.change(screen.getByLabelText("Free writing"), {
       target: { value: "Draft text must never complete silently." },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(useStore.getState().journal.find((entry) => entry.id === original.id))
+      ?.freeWriting).toBe("Draft text must never complete silently."));
     fireEvent.change(screen.getByLabelText("Choose a journal image"), {
       target: { files: [new File(["invalid"], "unreadable.png", { type: "image/png" })] },
     });
