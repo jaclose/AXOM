@@ -260,7 +260,7 @@ const comparableQuestion = (question: ReviewedQuestionInput | QuestionRecord) =>
 
 // The fingerprint is academic content identity, not an authorization boundary.
 // Epoch increments on A -> B -> A as well as sign-out. Reusing an identical
- // payload after an account transition must create a NEW durable transaction.
+// payload after an account transition must create a NEW durable transaction.
 let activeImportAccountId = useAccount.getState().user?.id ?? null;
 let activeImportAccountEpoch = 0;
 useAccount.subscribe((state) => {
@@ -286,6 +286,9 @@ function currentReviewedImportAccountScope() {
 
 const inFlightReviewedImports = new Map<string, Promise<ReviewedImportPersistenceResult>>();
 const inFlightReviewedImportPlans = new Map<string, ReviewedImportPersistencePlan>();
+// Local optimistic-set equivalence is unsafe while any account has this
+// fingerprint pending, even though the durable writer maps are account-bound.
+const pendingFingerprintCounts = new Map<string, number>();
 
 /**
  * Keep previously committed academic records visible while another import is
@@ -335,7 +338,7 @@ const reviewedImportCommitQueues = new WeakMap<AtomicReviewedImportCommit, Promi
  * an import that completed in an earlier interaction.
  */
 export function isReviewedImportInFlight(fingerprint: string): boolean {
-  return inFlightReviewedImports.has(currentReviewedImportAccountScope().key(fingerprint));
+  return (pendingFingerprintCounts.get(fingerprint) ?? 0) > 0;
 }
 
 /**
@@ -459,6 +462,7 @@ export async function persistReviewedImportOnce(
   // previously completed equivalent import.
   inFlightReviewedImports.set(key, pending);
   inFlightReviewedImportPlans.set(key, plan);
+  pendingFingerprintCounts.set(fingerprint, (pendingFingerprintCounts.get(fingerprint) ?? 0) + 1);
   void persistReviewedImportInOrder(guardedPersistence, plan).then(resolvePending, rejectPending);
   try {
     const result = await pending;
@@ -468,6 +472,9 @@ export async function persistReviewedImportOnce(
     if (inFlightReviewedImports.get(key) === pending) {
       inFlightReviewedImports.delete(key);
       inFlightReviewedImportPlans.delete(key);
+      const remaining = (pendingFingerprintCounts.get(fingerprint) ?? 1) - 1;
+      if (remaining > 0) pendingFingerprintCounts.set(fingerprint, remaining);
+      else pendingFingerprintCounts.delete(fingerprint);
     }
   }
 }
