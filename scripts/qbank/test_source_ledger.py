@@ -891,9 +891,9 @@ class SourceLedgerTests(unittest.TestCase):
             outside = base / "outside.pdf"
             outside.write_bytes(b"%PDF-1.4 synthetic private bytes")
             rows = [
-                dict(source_id="original", source_sha256=digest("questions"), original_path=str(original),
+                dict(source_id="original", source_sha256=hashlib.sha256(original.read_bytes()).hexdigest(), original_path=str(original),
                      root_label="pair_root"),
-                dict(source_id="answered", source_sha256=digest("answers"), original_path=str(answered),
+                dict(source_id="answered", source_sha256=hashlib.sha256(answered.read_bytes()).hexdigest(), original_path=str(answered),
                      root_label="pair_root"),
             ]
             pair = dict(questions_only_id="original", answered_id="answered",
@@ -919,6 +919,16 @@ class SourceLedgerTests(unittest.TestCase):
                                      "first_question_correspondence_supported")
                     self.assertFalse(result[0]["answer_attribution_permitted"])
 
+                # Same lexical path and a regular file are insufficient:
+                # correspondence must match the recorded source revision.
+                original.write_bytes(b"%PDF-1.4 replaced regular file after source hashing")
+                with patch.object(enriched.subprocess, "run", side_effect=fake_pdftotext) as run:
+                    revised = enriched.enrich_pairs(rows, [dict(pair)],
+                                                    ledger.open_scanned_source_file)
+                    self.assertEqual(run.call_count, 1)
+                    self.assertEqual(revised[0]["text_evidence"],
+                                     "text_insufficient_unverified")
+                    self.assertFalse(revised[0]["answer_attribution_permitted"])
                 original.unlink()
                 try:
                     original.symlink_to(outside)
@@ -950,7 +960,7 @@ class SourceLedgerTests(unittest.TestCase):
                 "Question 1: This is unapproved text in an unrelated directory "
                 "that must never be indexed into source fingerprints.\nA. An option\n"
             )
-            row = dict(source_id="txt-original", source_sha256=digest("txt"),
+            row = dict(source_id="txt-original", source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                        original_path=str(source), root_label="stem_root",
                        file_extension=".txt", detected_question_headings=1)
             old_roots = ledger.ROOTS
@@ -964,6 +974,17 @@ class SourceLedgerTests(unittest.TestCase):
                 fallback = enriched.raw_text_stem_fingerprints([row])
                 self.assertEqual(fallback["source_statistics"], [])
                 self.assertEqual(fallback["distinct_stem_hint_count"], 0)
+                # Changed in-place content must not be associated with
+                # the previously scanned source SHA, even without a symlink.
+                source.write_text(
+                    "Question 1: A replaced source contains entirely new clinical observations "
+                    "whose wording must not inherit the original fingerprint evidence.\\n"
+                    "A. An option\\n"
+                )
+                revised = enriched.raw_text_stem_fingerprints(
+                    [row], ledger.open_scanned_source_file)
+                self.assertEqual(revised["distinct_stem_hint_count"], 0)
+                self.assertEqual(revised["source_statistics"], [])
                 source.unlink()
                 try:
                     source.symlink_to(outside)
