@@ -342,6 +342,36 @@ class SourceLedgerTests(unittest.TestCase):
                     self.assertEqual(len(result["rejected_audit_rows"]), 1)
                     self.assertEqual(dispositions, before)
 
+    def test_agent2_raw_audit_cannot_override_held_native_source(self):
+        # Raw parser evidence is also historical: it must not reintroduce
+        # ready counts for a native original whose current snapshot is held.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            directory = pathlib.Path(root)
+            sha = digest("revised native original")
+            original = directory / "source.pdf"
+            original.write_bytes(b"revised native original")
+            row = {"source_sha256": sha, "original_path": str(original),
+                   "document_type": "pq", "priority": 1}
+            package = dict(bank_id="native-example", questions=2,
+                           source_path=str(original),
+                           canonical_status="source_snapshot_review_required",
+                           status="requires_package_review",
+                           issues=["questions_changed_after_inspection"])
+            dispositions = enriched.build_lead_dispositions([row], [package])
+            before = json.loads(json.dumps(dispositions))
+            audit_file = directory / "audit.json"
+            audit_file.write_text(json.dumps({"native": [], "raw": [{
+                "sha256": sha, "questionsDetected": 2, "ready": 2,
+                "needsReview": 0, "sourceVerified": True,
+                "cloudVerified": False, "file": "source.pdf",
+            }]}))
+            result = enriched.merge_agent2_assessment(
+                dispositions, [package], [row], audit_file)
+            self.assertEqual(result["assessed_ready_not_installed"], 0)
+            self.assertEqual(result["assessed_source_count"], 0)
+            self.assertEqual(len(result["rejected_audit_rows"]), 1)
+            self.assertEqual(dispositions, before)
+
     def test_source_hash_cache_cannot_mask_equal_size_replacement(self):
         # A restored timestamp must never allow an old content SHA to label new bytes.
         with tempfile.TemporaryDirectory() as temp:
