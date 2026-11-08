@@ -178,10 +178,43 @@ export async function listPendingQuestionSets(accountId: string): Promise<Librar
   });
 }
 
-export async function reviewQuestionSetSubmission(accountId: string, id: string, approved: boolean, reason: string): Promise<void> {
-  if (!uuid(id) || reason.trim().length < 8 || reason.trim().length > 500) throw new Error("Give a review reason of 8 to 500 characters.");
-  return withAccount(accountId, async client => {
-    const { error } = await client.rpc("review_question_set_library", { p_id: id, p_approved: approved, p_reason: reason.trim() });
-    if (error) throw new Error(error.message);
+/**
+ * Recheck the exact pending snapshot a reviewer inspected before submitting a
+ * decision. Review evidence must not silently authorize a replaced answer key
+ * or a withdrawn/resubmitted revision. The SQL RPC still owns reviewer/RLS
+ * authorization; this is a client-side stale-review gate, not an atomic lock.
+ */
+export async function reviewQuestionSetSubmission(
+  accountId: string, reviewed: LibraryQuestionSetPreview, approved: boolean, reason: string,
+): Promise<void> {
+  if (!reviewed || !uuid(reviewed.id) || reviewed.status !== "pending"
+    || !/^[a-f0-9]{64}$/.test(reviewed.contentDigest))
+    throw new Error("Reopen the pending Question Set before reviewing it.");
+  if (reason.trim().length < 8 || reason.trim().length > 500)
+    throw new Error("Give a review reason of 8 to 500 characters.");
+  // Fail closed if the caller supplies an altered preview or a digest from
+  // another snapshot. Neither can stand in for the reviewer-visible revision.
+  if (await sharedQuestionSetDigest(reviewed.snapshot) !== reviewed.contentDigest)
+    throw new Error("The reviewed Question Set changed. Reopen and review it again.");
+
+  // One operation epoch must span *both* the fresh read and the decision,
+  // including an A -> B -> A switch during an asynchronous RPC.
+  const operation = await accountOperationClient();
+  if (operation.userId !== accountId)
+    throw new Error("The signed-in account changed. Reopen the Question Set Library.");
+  await operation.assertCurrent();
+  const { data, error } = await operation.client.rpc("get_question_set_library", { p_id: reviewed.id });
+  await operation.assertCurrent();
+  if (error || !record(data) || data.id !== reviewed.id || data.status !== "pending")
+    throw new Error("This submission is no longer awaiting academic review. Reopen the queue.");
+  validateShare(data.snapshot_payload);
+  if (data.title !== data.snapshot_payload.title || data.question_count !== data.snapshot_payload.questions.length
+    || await sharedQuestionSetDigest(data.snapshot_payload) !== reviewed.contentDigest)
+    throw new Error("The pending Question Set changed since inspection. Reopen and review the current answers.");
+  await operation.assertCurrent();
+  const decision = await operation.client.rpc("review_question_set_library", {
+    p_id: reviewed.id, p_approved: approved, p_reason: reason.trim(),
   });
+  await operation.assertCurrent();
+  if (decision.error) throw new Error(decision.error.message);
 }
