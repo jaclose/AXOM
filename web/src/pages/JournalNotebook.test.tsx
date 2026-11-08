@@ -1801,6 +1801,77 @@ describe("Journal notebook foundation", () => {
       .toEqual([localImage]);
   });
 
+  it("flushes new text on a second page hide while an image is still unread", async () => {
+    vi.useFakeTimers();
+    let finishImage!: (attachment: JournalImageAttachment) => void;
+    vi.spyOn(journalNotebook, "readJournalImage")
+      .mockReturnValue(new Promise((resolve) => { finishImage = resolve; }));
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "First private note" } });
+    fireEvent.change(screen.getByLabelText("Choose a journal image"), {
+      target: { files: [new File(["axom"], "late.png", { type: "image/png" })] },
+    });
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(1);
+    const originalId = useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY))?.id;
+    expect(originalId).toBeTruthy();
+
+    // The image read never settles, but the next text edit has its own lifecycle receipt.
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Second private note" } });
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); await Promise.resolve(); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ id: originalId, freeWriting: "Second private note", notebookStatus: "draft" });
+    expect(screen.getByText("Saved to this workspace")).toBeTruthy();
+
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(2); // Same version cannot be redundantly saved.
+
+    await act(async () => { finishImage(localImage); await Promise.resolve(); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(3);
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ id: originalId, freeWriting: "Second private note", attachments: [localImage] });
+  });
+
+  it("retries a failed lifecycle text save while its image read is still pending", async () => {
+    vi.useFakeTimers();
+    let finishImage!: (attachment: JournalImageAttachment) => void;
+    vi.spyOn(journalNotebook, "readJournalImage")
+      .mockReturnValue(new Promise((resolve) => { finishImage = resolve; }));
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockRejectedValueOnce(new Error("Storage temporarily unavailable"))
+      .mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Keep this even if storage fails" } });
+    fireEvent.change(screen.getByLabelText("Choose a journal image"), {
+      target: { files: [new File(["axom"], "late.png", { type: "image/png" })] },
+    });
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Not saved on this device")).toBeTruthy();
+
+    // Repeated same-version pagehide retries the failed write, not the unfinished FileReader.
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); await Promise.resolve(); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Saved to this workspace")).toBeTruthy();
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY))?.freeWriting)
+      .toBe("Keep this even if storage fails");
+
+    await act(async () => { finishImage(localImage); await Promise.resolve(); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(3);
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY))?.attachments)
+      .toEqual([localImage]);
+  });
+
   it("finishes Done only after a late edit has also been durably saved", async () => {
     let finishFirst!: () => void;
     let finishLatest!: () => void;
