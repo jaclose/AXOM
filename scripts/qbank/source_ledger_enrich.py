@@ -8,6 +8,9 @@ import subprocess
 from difflib import SequenceMatcher
 
 QUESTION_TYPES = {"imcq", "esoft", "pq", "answer_key", "small_group", "case", "review_questions"}
+# Correspondence and approximate stem fingerprints are optional hints, not
+# key or content approvals. Bound memory and reject un-hashed/stale sources.
+MAX_HINT_SOURCE_BYTES = 64 * 1024 * 1024
 
 def _sha(txt):
     return hashlib.sha256(txt.encode("utf-8")).hexdigest()
@@ -18,16 +21,24 @@ def _pdf_first_question(row, secure_open=None):
     Never pass recorded paths to pdftotext; the source may have been replaced
     with a symlink after its hash was inventoried.
     """
-    if secure_open is None:
+    expected_sha = row.get("source_sha256")
+    if (secure_open is None or not isinstance(expected_sha, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None):
         return None
     try:
         fd = secure_open(row)
         with os.fdopen(fd, "rb") as stream:
-            result = subprocess.run(
-                ["pdftotext", "-f", "1", "-l", "3", "-layout", "-", "-"],
-                stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                timeout=10, check=False
-            )
+            source_bytes = stream.read(MAX_HINT_SOURCE_BYTES + 1)
+        # Bind the child process's exact input to the inspected source SHA:
+        # a regular same-path rewrite must not inherit correspondence evidence.
+        if (len(source_bytes) > MAX_HINT_SOURCE_BYTES
+                or hashlib.sha256(source_bytes).hexdigest() != expected_sha):
+            return None
+        result = subprocess.run(
+            ["pdftotext", "-f", "1", "-l", "3", "-layout", "-", "-"],
+            input=source_bytes, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=10, check=False
+        )
         if result.returncode: return None
         txt = result.stdout.decode("utf8", "replace")
         # Drop answer explanations and page furniture; this is a CORRESPONDENCE HINT only.
@@ -519,12 +530,18 @@ def raw_text_stem_fingerprints(rows, secure_open=None):
     for row in rows:
         if row["file_extension"] != ".txt" or row.get("detected_question_headings",0) == 0:continue
         path=pathlib.Path(row["original_path"])
-        if secure_open is None:
+        expected_sha = row.get("source_sha256")
+        if (secure_open is None or not isinstance(expected_sha, str)
+                or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None):
             continue
         try:
             fd = secure_open(row)
-            with os.fdopen(fd, "r", encoding="utf-8-sig", errors="replace") as stream:
-                text = stream.read()
+            with os.fdopen(fd, "rb") as stream:
+                source_bytes = stream.read(MAX_HINT_SOURCE_BYTES + 1)
+            if (len(source_bytes) > MAX_HINT_SOURCE_BYTES
+                    or hashlib.sha256(source_bytes).hexdigest() != expected_sha):
+                continue
+            text = source_bytes.decode("utf-8-sig", errors="replace")
         except (OSError, ValueError):
             continue
         matches=list(header.finditer(text))
