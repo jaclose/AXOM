@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useAccount } from "./account/accountStore";
+import { publishReviewedImportAccount } from "./account/importEpoch";
 import {
   isReviewedImportInFlight,
   persistReviewedImportOnce,
@@ -8,22 +8,8 @@ import {
   type ReviewedImportPersistenceResult,
 } from "./questionImportFinalization";
 
-const originalAccount = {
-  user: useAccount.getState().user,
-  phase: useAccount.getState().phase,
-};
-const sameReviewedFingerprint = "synthetic:identical-reviewed-source-and-filing";
-
 function signIn(id: string): void {
-  useAccount.setState({
-    phase: "signed-in",
-    user: {
-      id,
-      email: id + "@example.invalid",
-      displayName: "Synthetic " + id,
-      emailConfirmed: true,
-    },
-  });
+  publishReviewedImportAccount(id);
 }
 
 function importPlan(id: string): ReviewedImportPersistencePlan {
@@ -62,7 +48,7 @@ function deferred() {
 }
 
 afterEach(() => {
-  useAccount.setState(originalAccount);
+  publishReviewedImportAccount(null);
 });
 
 describe("reviewed-import account-epoch isolation", () => {
