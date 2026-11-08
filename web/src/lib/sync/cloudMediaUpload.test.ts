@@ -321,4 +321,49 @@ describe("bounded account image uploads", () => {
     }
   });
 
+
+  it("never certifies stale image bytes when the local original changes without a metadata timestamp change", async () => {
+    const { state, keys, hashes } = await fixture(1);
+    const owner = "synthetic-byte-drift-owner";
+    const previous = await uploadCloudMedia(client, owner, state, guard);
+    const originalPath = `${owner}/${hashes[0]}`;
+    expect(objects.has(originalPath)).toBe(true);
+
+    // A bad importer, duplicate-write race, or coarse timestamp can replace a
+    // same-size local original without advancing its attachment metadata.
+    // An old protected manifest must not silently certify these new bytes.
+    const attachment = state.questions[0].attachments![0];
+    const revisedBytes = new Uint8Array([137, 80, 78, 71, 99]);
+    const revisedHash = await sha256(revisedBytes);
+    expect(revisedHash).not.toBe(hashes[0]);
+    const originalUpdatedAt = attachment.updatedAt;
+    await putQuestionAttachmentBlob(keys[0], {
+      questionId: "q1", blob: new Blob([revisedBytes], { type: "image/png" }),
+      mimeType: "image/png", byteSize: revisedBytes.byteLength,
+      updatedAt: originalUpdatedAt,
+    });
+    expect(attachment.updatedAt).toBe(originalUpdatedAt);
+    expect(attachment.byteSize).toBe(revisedBytes.byteLength);
+
+    const outcome = await uploadCloudMedia(client, owner, state, guard, previous).then(
+      manifest => ({ status: "acknowledged" as const, manifest }),
+      error => ({ status: "blocked" as const, error }),
+    );
+    // Either refuse protection until the new original is verified or return a
+    // manifest for the new exact hash. Returning the old hash is data loss.
+    if (outcome.status === "acknowledged") {
+      expect(outcome.manifest).toHaveLength(1);
+      expect(outcome.manifest[0].hash).toBe(revisedHash);
+      expect(objects.has(`${owner}/${revisedHash}`)).toBe(true);
+    } else {
+      expect(outcome.error).toBeDefined();
+    }
+    // Regardless of whether a new version can be protected, the previous
+    // immutable original must remain intact for backup/recovery.
+    const recoveredOld = await downloadCloudMediaAsset(client, owner, previous[0]);
+    expect(new Uint8Array(await recoveredOld.arrayBuffer()))
+      .toEqual(new Uint8Array([137, 80, 78, 71, 1]));
+  });
+
+
 });
