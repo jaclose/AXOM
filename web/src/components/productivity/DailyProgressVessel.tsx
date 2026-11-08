@@ -23,7 +23,10 @@ export function DailyProgressVessel({ result, compact = false, dayLabel = "Today
     ? `${displayStatus}. ${result.eligibleCount} eligible target${result.eligibleCount === 1 ? "" : "s"}.`
     : `${result.progress}% complete. ${result.metCount} of ${result.eligibleCount} targets met.`;
   const visible = useMemo(
-    () => result.requirements.filter((item) => item.eligible && item.status !== "not-eligible"),
+    () => result.requirements.filter((item) => item.eligible && item.status !== "not-eligible"
+      && item.requirement.lane !== "personal"
+      && item.requirement.schedule.kind !== "weekly-range"
+      && item.requirement.schedule.kind !== "times-per-week"),
     [result.requirements],
   );
   const totalWeight = visible
