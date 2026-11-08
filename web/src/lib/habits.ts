@@ -89,6 +89,28 @@ export function statusOn(habit: Habit, entries: HabitEntry[], date: string): Hab
  * habits count "done" (avoided) days.
  */
 export function currentStreak(habit: Habit, entries: HabitEntry[], today: string = localDateKey()): number {
+  if (habit.type === "weekly") {
+    const target = Math.max(1, Math.min(7, Math.round(habit.weeklyTarget ?? 3)));
+    const weekOf = (date: string) => {
+      const weekday = new Date(`${date}T12:00:00`).getDay();
+      return addLocalDays(date, -((weekday + 6) % 7));
+    };
+    const started = trackingStartKey(habit, entries, today);
+    const currentWeek = weekOf(today);
+    let cursor = currentWeek;
+    let streak = 0;
+    for (let week = 0; week < 104; week++) {
+      const nextWeek = addLocalDays(cursor, 7);
+      if (nextWeek <= started) break;
+      const doneDays = new Set(entries.filter((item) =>
+        item.habitId === habit.id && item.date >= cursor &&
+        item.date < nextWeek && item.status === "done").map((item) => item.date));
+      if (doneDays.size >= target) streak++;
+      else if (cursor !== currentWeek) break;
+      cursor = addLocalDays(cursor, -7);
+    }
+    return streak;
+  }
   const start = trackingStartKey(habit, entries, today);
   const recovery = habit.type === "recovery";
   let streak = 0;
@@ -134,6 +156,18 @@ export interface HabitWeekStats {
 
 /** Aggregate a habit's status across a set of local dates (e.g. the last 7 days). */
 export function weekStats(habit: Habit, entries: HabitEntry[], dates: string[]): HabitWeekStats {
+  if (habit.type === "weekly") {
+    const start = trackingStartKey(habit, entries);
+    const period = dates.filter((date) => date >= start);
+    const target = Math.max(1, Math.min(7, Math.round(habit.weeklyTarget ?? 3)));
+    const done = new Set(entries.filter((e) => e.habitId === habit.id
+      && e.status === "done" && period.includes(e.date)).map((e) => e.date)).size;
+    const partial = new Set(entries.filter((e) => e.habitId === habit.id
+      && e.status === "partial" && period.includes(e.date)).map((e) => e.date)).size;
+    return { done, partial, skipped: 0, missed: 0,
+      scheduledDays: Math.min(target, period.length),
+      adherence: period.length ? Math.min(100, Math.round((done / Math.min(target, period.length)) * 100)) : 0 };
+  }
   const start = trackingStartKey(habit, entries);
   let done = 0, partial = 0, skipped = 0, missed = 0, scheduledDays = 0;
   for (const date of dates) {
