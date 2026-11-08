@@ -2382,8 +2382,12 @@ describe("Journal notebook foundation", () => {
         journal: [],
       }));
     });
-    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("");
+    // A workspace change remounts the writing page at its inline desk state.
+    // Reopen the page before using the visually accessible Save control.
+    expect((screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value).toBe("");
     expect(useStore.getState().journal).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("");
     fireEvent.change(screen.getByLabelText("Free writing"), {
       target: { value: "Only workspace B wrote this entry." },
     });
@@ -2400,6 +2404,9 @@ describe("Journal notebook foundation", () => {
         journal: [original],
       }));
     });
+    expect((screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value)
+      .toBe("Only workspace A may see this private text.");
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
     expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
       .toBe("Only workspace A may see this private text.");
     expect(useStore.getState().journal).toEqual([original]);
