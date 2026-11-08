@@ -324,3 +324,73 @@ test("v2 attests two older divergent source branches merged into an advanced int
     ...input, integratedSha: copiedSha,
   }, adapters), /not an ancestor/);
 });
+
+
+test("v2 accepts reviewed older-base modification restored over an advanced-main deletion", t => {
+  // A source branch modifies a file (M) from the shared old base. Newer main
+  // independently deletes the file. The two-parent merge deliberately keeps
+  // exactly the reviewed source bytes, which are A relative to newer main.
+  // Matching status letters across divergent bases is not a valid invariant.
+  const cwd = mkdtempSync(join(tmpdir(), "axom-v2-reintroduced-source-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, {
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const write = (path, value) => writeFileSync(join(cwd, path), value);
+  const commit = message => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+  git("init", "-q");
+  git("config", "user.name", "AXOM release regression");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  write("docs/resurrected.txt", "original bytes\n");
+  const oldBase = commit("older shared base");
+  git("checkout", "-qb", "reviewed-source", oldBase);
+  write("docs/resurrected.txt", "approved modified bytes\n");
+  const sourceSha = commit("approved source modifies file");
+  git("checkout", "-qb", "advanced-main", oldBase);
+  git("rm", "-q", "--", "docs/resurrected.txt");
+  const integrationBaseSha = commit("newer main deletes file");
+  let mergeConflict = false;
+  try { git("merge", "--no-ff", "--no-commit", "reviewed-source"); }
+  catch (error) { if (error.status !== 1) throw error; mergeConflict = true; }
+  assert.equal(mergeConflict, true, "fixture must exercise a real modify/delete merge conflict");
+  git("checkout", "reviewed-source", "--", "docs/resurrected.txt");
+  const integratedSha = commit("resolve merge preserving reviewed source file");
+  assert.equal(isGitAncestor(sourceSha, integratedSha, cwd), true);
+  assert.equal(isGitAncestor(integrationBaseSha, integratedSha, cwd), true);
+  assert.equal(isGitAncestor(integrationBaseSha, sourceSha, cwd), false);
+  assert.deepEqual(listGitChanges(oldBase, sourceSha, cwd), [
+    { status: "M", path: "docs/resurrected.txt" },
+  ]);
+  assert.deepEqual(listGitChanges(integrationBaseSha, integratedSha, cwd), [
+    { status: "A", path: "docs/resurrected.txt" },
+  ]);
+  assert.equal(readGitFile(sourceSha, "docs/resurrected.txt", cwd).blob,
+    readGitFile(integratedSha, "docs/resurrected.txt", cwd).blob);
+  const manifest = { version: 2, integrationBaseSha, integratedSha,
+    sources: [{ baseSha: oldBase, sourceSha }] };
+  const adapters = {
+    listChanges: (a, b) => listGitChanges(a, b, cwd),
+    isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+    readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+    listTreePaths: sha => listGitTreePaths(sha, cwd),
+  };
+  // RED before correction: rejects this valid fully sourced two-parent merge
+  // solely because the source status is M while the integrated status is A.
+  const report = verifyCompleteSourceIntegration(manifest, adapters);
+  assert.equal(report.completeForDeclaredRanges, true);
+  assert.equal(report.verifiedFiles, 1);
+  assert.equal(report.files[0].blob, readGitFile(sourceSha, "docs/resurrected.txt", cwd).blob);
+
+  // Still fail closed if final bytes diverge or deletion intent is mismatched.
+  write("docs/resurrected.txt", "unreviewed bytes\n");
+  const changedSha = commit("unreviewed integration modification");
+  assert.throws(() => verifyCompleteSourceIntegration({ ...manifest, integratedSha: changedSha }, adapters),
+    /differs from pinned source contents or mode/);
+  assert.throws(() => verifyCompleteSourceIntegration(manifest, {
+    ...adapters,
+    listChanges: (a, b) => a === integrationBaseSha
+      ? [{ status: "D", path: "docs/resurrected.txt" }]
+      : listGitChanges(a, b, cwd),
+  }), /changed-path inventory differs/);
+});
