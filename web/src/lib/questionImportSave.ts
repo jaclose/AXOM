@@ -346,6 +346,23 @@ export async function saveReviewedImport(
   store: ReviewedImportStore,
   images: readonly File[] = [],
 ): Promise<SavedReviewedImport> {
+  try {
+    return await saveReviewedImportInCurrentAccount(prepared, store, images);
+  } catch (error) {
+    // Import screens require a typed, actionable failure, not an unhandled
+    // rejection after account change. Other unexpected errors still surface.
+    if (error instanceof Error && /^The account changed while importing questions\./.test(error.message)) {
+      return { ok: false, message: error.message, rollbackFailures: [] };
+    }
+    throw error;
+  }
+}
+
+async function saveReviewedImportInCurrentAccount(
+  prepared: PreparedReviewedImport,
+  store: ReviewedImportStore,
+  images: readonly File[],
+): Promise<SavedReviewedImport> {
   // Reused sets bypass persistReviewedImportOnce; bind their durable receipt,
   // original repair and image updates to the same monotonic account epoch.
   const account = currentReviewedImportAccountScope();
