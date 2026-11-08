@@ -627,6 +627,7 @@ function JournalWritingPage({
   const [saveError, setSaveError] = useState("");
   const [attachmentError, setAttachmentError] = useState("");
   const [addingImage, setAddingImage] = useState(false);
+  const [transitionSaving, setTransitionSaving] = useState(false);
   const [editingGlance, setEditingGlance] = useState<JournalGlanceSectionKey | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
   const entryIdRef = useRef(entry?.id ?? "");
@@ -858,6 +859,7 @@ function JournalWritingPage({
   const requestDurableTransition = useCallback<JournalTransitionGuard>(async (transition) => {
     if (transitionPendingRef.current) return false;
     transitionPendingRef.current = true;
+    setTransitionSaving(true);
     cancelScheduledSave();
     try {
       // A later image selection may have joined while an earlier read was
@@ -889,6 +891,7 @@ function JournalWritingPage({
       return false;
     } finally {
       transitionPendingRef.current = false;
+      if (mountedRef.current) setTransitionSaving(false);
     }
   }, [cancelScheduledSave, persist]);
 
@@ -1040,7 +1043,9 @@ function JournalWritingPage({
   async function addAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
+    // A new FileReader cannot join a transition after its vault snapshot began.
+    // The native picker is disabled as well, but guard already-open pickers and synthetic events.
+    if (!file || transitionPendingRef.current) return;
     attachmentErrorRef.current = "";
     setAttachmentError("");
     setAddingImage(true);
@@ -1279,12 +1284,14 @@ function JournalWritingPage({
           <section className="journal-attachments" aria-labelledby="journal-attachments-title">
             <div className="journal-section-head">
               <div><h3 id="journal-attachments-title">Images</h3><span>Optional · saved with this workspace</span></div>
-              <GButton size="sm" onClick={() => fileInputRef.current?.click()} disabled={addingImage}>
+              <GButton size="sm" onClick={() => fileInputRef.current?.click()} disabled={addingImage || transitionSaving}>
                 <ImagePlus size={ICON_SIZE.body} /> {addingImage ? "Adding…" : "Add image"}
               </GButton>
               <input ref={fileInputRef} className="journal-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif"
-                onChange={addAttachment} aria-label="Choose a journal image" />
+                onChange={addAttachment} aria-label="Choose a journal image" disabled={transitionSaving}
+                aria-describedby={transitionSaving ? "journal-image-transition-status" : undefined} />
             </div>
+            {transitionSaving && <p id="journal-image-transition-status" role="status" className="journal-local-note">Finish saving this page before adding an image.</p>}
             <details className="journal-image-storage"><summary>How images are stored</summary><p className="journal-local-note">Images are saved locally first and included in portable exports. Linked account backups may include them when the workspace fits account limits. Maximum 3 MB each and 12 MB per page.</p></details>
             <JournalAccountProtectionWarning />
             {attachmentError && (
