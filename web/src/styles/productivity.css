@@ -258,3 +258,15 @@
 .quick-goal-slots > button[aria-pressed="true"] { color: var(--text); border-color: var(--gold-line); background: var(--gold-soft); }
 .quick-goal-slots > button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @media(max-width:560px) { .quick-goal-slots { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+
+.recurring-goal-report { display: grid; gap: 10px; margin-top: 12px; }
+.recurring-goal-report-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px 16px; align-items: center; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md); }
+.recurring-goal-report-title { display: grid; gap: 3px; min-width: 0; }
+.recurring-goal-report-title b { color: var(--text); font-size: var(--fs-sm); }
+.recurring-goal-report-title small, .recurring-goal-report-evidence { color: var(--text-50); font-size: var(--fs-xs); }
+.recurring-goal-report-pulses { display: flex; gap: 4px; }
+.recurring-goal-report-pulses > span { width: 13px; height: 13px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface-2); }
+.recurring-goal-report-pulses > .is-met { background: var(--gold); }
+.recurring-goal-report-pulses > .is-partial { background: var(--gold-soft); border-color: var(--gold-line); }
+.recurring-goal-report-evidence { grid-column: 1 / -1; }
+@media(max-width:560px) { .recurring-goal-report-row {grid-template-columns: minmax(0,1fr);} }
