@@ -1872,6 +1872,48 @@ describe("Journal notebook foundation", () => {
       .toEqual([localImage]);
   });
 
+  it("retries pagehide after a later same-version manual save fails", async () => {
+    vi.useFakeTimers();
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Storage temporarily unavailable"))
+      .mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Keep the same private entry after storage recovers" },
+    });
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); await Promise.resolve(); });
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Saved to this workspace")).toBeTruthy();
+    const first = useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY));
+    expect(first?.id).toBeTruthy();
+
+    // Re-saving without a text edit reuses the version that pagehide marked
+    // successful. A later failure must invalidate that stale dedup receipt.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(flush).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Not saved on this device")).toBeTruthy();
+
+    // Do not advance the 420ms autosave timer: hidden tabs may throttle it.
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(flush).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("Saved to this workspace")).toBeTruthy();
+    expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ id: first?.id, freeWriting: "Keep the same private entry after storage recovers", notebookStatus: "draft" });
+  });
+
   it("finishes Done only after a late edit has also been durably saved", async () => {
     let finishFirst!: () => void;
     let finishLatest!: () => void;
