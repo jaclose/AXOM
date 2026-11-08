@@ -271,6 +271,77 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertEqual(invalid["assessed_ready_not_installed"],0)
             self.assertEqual(len(invalid["rejected_audit_rows"]),1)
 
+    def test_agent2_audit_cannot_promote_native_source_review_holds(self):
+        # A historical parser receipt cannot erase a newly detected source
+        # substitution, nor promote a structurally incomplete native package.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            directory = pathlib.Path(root)
+            sha = digest("held academic source")
+            original = directory / "source.pdf"
+            original.write_bytes(b"held academic source")
+            audit_file = directory / "audit.json"
+            audit_file.write_text(json.dumps({"native": [{
+                "bankId": "example", "sourceSha256": sha,
+                "questionRecords": 2, "ready": 2, "needsReview": 0,
+                "sourceVerified": True, "cloudVerified": False,
+            }], "raw": []}))
+            rows = [{"source_sha256": sha, "original_path": str(original),
+                     "document_type": "pq", "priority": 1,
+                     "detected_question_headings": 2}]
+            cases = [
+                ("source_snapshot_review_required", "requires_package_review",
+                 ["questions_changed_after_inspection"]),
+                ("canonical_distinct_question_collection", "requires_package_review",
+                 ["missing_or_unsafe_assets:1"]),
+            ]
+            for canonical_status, status, issues in cases:
+                with self.subTest(canonical_status=canonical_status, issues=issues):
+                    pkg = dict(bank_id="example", questions=2, source_path=str(original),
+                               canonical_status=canonical_status, status=status, issues=issues)
+                    dispositions = enriched.build_lead_dispositions(rows, [pkg])
+                    before = json.loads(json.dumps(dispositions))
+                    result = enriched.merge_agent2_assessment(
+                        dispositions, [pkg], rows, audit_file)
+                    self.assertEqual(result["assessed_ready_not_installed"], 0)
+                    self.assertEqual(result["assessed_source_count"], 0)
+                    self.assertEqual(len(result["rejected_audit_rows"]), 1)
+                    self.assertEqual(dispositions, before)
+
+    def test_agent2_audit_rejects_ambiguous_native_source_tuple(self):
+        # Two revisions citing the same source SHA and bank ID must not win
+        # by dictionary insertion order when joining a historical audit.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            directory = pathlib.Path(root)
+            sha = digest("shared pdf source")
+            source = directory / "source.pdf"
+            source.write_bytes(b"shared pdf source")
+            audit_file = directory / "audit.json"
+            audit_file.write_text(json.dumps({"native": [{
+                "bankId": "example", "sourceSha256": sha,
+                "questionRecords": 2, "ready": 1, "needsReview": 1,
+                "sourceVerified": True, "cloudVerified": False,
+            }], "raw": []}))
+            rows = [{"source_sha256": sha, "original_path": str(source),
+                     "document_type": "pq", "priority": 1}]
+            verified = dict(bank_id="example", questions=2, source_path=str(source),
+                            canonical_status="canonical_distinct_question_collection",
+                            status="local_ready_for_agent2_review", issues=[],
+                            package="/synthetic/verified")
+            held = dict(verified, package="/synthetic/held",
+                        canonical_status="source_snapshot_review_required",
+                        status="requires_package_review",
+                        issues=["questions_changed_after_inspection"])
+            for packages in ([held, verified], [verified, held]):
+                with self.subTest(order=[p["package"] for p in packages]):
+                    dispositions = enriched.build_lead_dispositions(rows, packages)
+                    before = json.loads(json.dumps(dispositions))
+                    result = enriched.merge_agent2_assessment(
+                        dispositions, packages, rows, audit_file)
+                    self.assertEqual(result["assessed_ready_not_installed"], 0)
+                    self.assertEqual(result["assessed_source_count"], 0)
+                    self.assertEqual(len(result["rejected_audit_rows"]), 1)
+                    self.assertEqual(dispositions, before)
+
     def test_source_hash_cache_cannot_mask_equal_size_replacement(self):
         # A restored timestamp must never allow an old content SHA to label new bytes.
         with tempfile.TemporaryDirectory() as temp:
