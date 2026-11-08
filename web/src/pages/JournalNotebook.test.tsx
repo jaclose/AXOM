@@ -1586,6 +1586,36 @@ describe("Journal notebook foundation", () => {
     expect(flush).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a failed Done attempt as a draft through an ordinary save retry", async () => {
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockRejectedValueOnce(new Error("Storage temporarily unavailable"))
+      .mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "A private draft before Done" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done for today" }));
+    await waitFor(() => expect(screen.getByText("Not saved on this device")).toBeTruthy());
+    expect(screen.queryByText("Day kept.")).toBeNull();
+
+    // Recovery by ordinary Save is not permission to silently complete the page.
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "A private draft updated after failure" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(screen.getByText("Saved to this workspace")).toBeTruthy());
+    expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ freeWriting: "A private draft updated after failure", notebookStatus: "draft" });
+    expect(screen.queryByText("Day kept.")).toBeNull();
+
+    // A fresh explicit Done, after storage recovers, must still complete once.
+    fireEvent.click(screen.getByRole("button", { name: "Done for today" }));
+    expect(await screen.findByText("Day kept.")).toBeTruthy();
+    expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ freeWriting: "A private draft updated after failure", notebookStatus: "complete" });
+    expect(flush).toHaveBeenCalledTimes(3);
+  });
+
   it("reports Done as saved only after the completed entry is durable", async () => {
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
