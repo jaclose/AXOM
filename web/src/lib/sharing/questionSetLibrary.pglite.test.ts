@@ -251,6 +251,49 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(readback.value.review_revision).toBe(1);
   });
 
+  it("rejects untyped visual tags and distractor rationales even on privileged snapshot replacement", async () => {
+    const id = await submit(OWNER, "typed-teaching-metadata");
+    const variants: Array<[string, (value: Snapshot) => void]> = [
+      ["non-text visual tag", value => { value.tags = ["visual:intent:histology", { embedded: "private" }]; }],
+      ["non-text question tag", value => { value.questions[0].tags = [42]; }],
+      ["rationale map as array", value => { value.questions[0].choiceRationales = ["invalid"]; }],
+      ["numeric distractor rationale", value => { value.questions[0].choiceRationales = { A: 1 }; }],
+      ["null distractor rationale", value => { value.questions[0].choiceRationales = { A: null }; }],
+      ["unmatched distractor rationale", value => { value.questions[0].choiceRationales = { Z: "Unreviewed option" }; }],
+    ];
+    for (const [label, mutate] of variants) {
+      const value = snapshot();
+      mutate(value);
+      await expect(db.query(
+        "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(value), id],
+      ), label).rejects.toThrow(/invalid scalar types/i);
+    }
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload).toEqual(snapshot());
+    expect(readback.value.review_revision).toBe(1);
+  });
+
+  it("retains valid text-only visual intent and reviewed teaching rationales through moderation", async () => {
+    const source = snapshot();
+    source.tags = ["visual:intent:histology"];
+    source.questions[0].tags = ["visual:keyword:synthetic"];
+    source.questions[0].choiceRationales = {
+      A: "Synthetic distractor is not the marked choice.",
+      B: "Synthetic marked choice matches the reviewed key.",
+    };
+    source.questions[0].explanation = "Synthetic fixture rationale, not a clinical explanation.";
+    const id = await submit(OWNER, "typed-teaching-reviewed", source);
+    await approve(REVIEWER, id, source, 1);
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; status: string } }>(
+      LEARNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.status).toBe("approved");
+    expect(readback.value.snapshot_payload).toEqual(source);
+  });
+
   it("denies new submissions when account deletion is processing", async () => {
     await db.query("insert into public.privacy_requests(user_id,kind,status) values($1,'deletion','processing')", [LEARNER]);
     await expect(submit(LEARNER, "deletion-locked")).rejects.toThrow(/deletion cleanup|unavailable/i);
