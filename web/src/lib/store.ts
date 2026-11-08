@@ -136,9 +136,12 @@ const activeSharedQuestionImports = new Map<string, {
 function coordinateSharedQuestionImport(
   identity: SharedQuestionImportIdentity,
   run: () => Promise<SharedQuestionSetImportCommitResult>,
+  accountId?: string,
 ): Promise<SharedQuestionSetImportCommitResult> {
   if (typeof identity?.shareId !== "string" || typeof identity?.contentDigest !== "string") return run();
-  const active = activeSharedQuestionImports.get(identity.shareId);
+  // Never share an in-flight import receipt between authenticated accounts.
+  const key = accountId ? `${accountId}:${identity.shareId}` : identity.shareId;
+  const active = activeSharedQuestionImports.get(key);
   if (active) {
     if (active.contentDigest !== identity.contentDigest.toLowerCase()) {
       return Promise.resolve({
@@ -150,11 +153,11 @@ function coordinateSharedQuestionImport(
     return active.promise;
   }
   const promise = run().finally(() => {
-    if (activeSharedQuestionImports.get(identity.shareId)?.promise === promise) {
-      activeSharedQuestionImports.delete(identity.shareId);
+    if (activeSharedQuestionImports.get(key)?.promise === promise) {
+      activeSharedQuestionImports.delete(key);
     }
   });
-  activeSharedQuestionImports.set(identity.shareId, {
+  activeSharedQuestionImports.set(key, {
     contentDigest: identity.contentDigest.toLowerCase(),
     promise,
   });
@@ -302,6 +305,11 @@ interface Actions {
   commitSharedQuestionSetImport: (input: {
     snapshot: SharedQuestionSetSnapshot;
     identity: SharedQuestionImportIdentity;
+    /** Client-side session guard. Server authorization remains authoritative. */
+    accountGuard?: {
+      accountId: string;
+      isCurrentAccount(accountId: string): boolean;
+    };
   }) => Promise<SharedQuestionSetImportCommitResult>;
   /** Validate and durably persist one complete reviewed import snapshot. */
   commitReviewedImport: (plan: ReviewedImportPersistencePlan) => Promise<ReviewedImportPersistenceResult>;
@@ -1129,6 +1137,18 @@ export const useStore = create<Store>()(
           message,
           rollbackFailures,
         });
+        const accountUnchanged = () => {
+          const guard = input.accountGuard;
+          if (!guard) return true; // Preserve existing bearer-link imports.
+          if (!guard.accountId?.trim() || typeof guard.isCurrentAccount !== "function") return false;
+          try {
+            return guard.isCurrentAccount(guard.accountId) === true;
+          } catch {
+            return false;
+          }
+        };
+        const accountChanged = () => failure("The active account changed before the Question Set could be saved. Reopen the preview.");
+        if (!accountUnchanged()) return accountChanged();
         let verifiedDigest: string;
         try {
           verifiedDigest = await sharedQuestionSetDigest(input.snapshot);
@@ -1139,6 +1159,9 @@ export const useStore = create<Store>()(
           || verifiedDigest !== input.identity.contentDigest.toLowerCase()) {
           return failure("The shared set content digest does not match its protected snapshot.");
         }
+        // Digesting is asynchronous: reject a stale account before generating
+        // or persisting any new learner-owned records.
+        if (!accountUnchanged()) return accountChanged();
 
         const current = get();
         let plan: ReturnType<typeof importSharedQuestionSet>;
@@ -1213,6 +1236,9 @@ export const useStore = create<Store>()(
         const sameValue = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
         const insertedQuestions = new Map(plan.questions.map((question) => [question.id, question]));
         const writeSequence = getVaultWriteCheckpoint() + 1;
+        // This is the final safe cancellation point. Never roll back a write
+        // solely because an account changes after persistence has started.
+        if (!accountUnchanged()) return accountChanged();
         try {
           await set(() => next);
           assertVaultWrite(writeSequence);
@@ -1262,7 +1288,7 @@ export const useStore = create<Store>()(
           reused: plan.reused,
           alreadyImported: false,
         };
-      }),
+      }, input.accountGuard?.accountId),
       commitReviewedImport: async (plan) => {
         const current = get();
         const failure = (message: string, rollbackFailures: string[] = []): ReviewedImportPersistenceResult => ({
