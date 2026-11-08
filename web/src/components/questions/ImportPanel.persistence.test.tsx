@@ -12,6 +12,7 @@ import { parseImport, toPortableState } from "../../lib/backup";
 import { DB_NAME } from "../../lib/localVault";
 import { hasReviewedImportInFlight, persistReviewedImportOnce, settledReviewedImportSnapshot, type ReviewedImportPersistenceResult } from "../../lib/questionImportFinalization";
 import type { SourceDocument } from "../../lib/library";
+import { prepareReviewedImport } from "../../lib/questionImportSave";
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
@@ -472,6 +473,123 @@ describe("Import Center persistence invariant", () => {
     expect(hasReviewedImportInFlight()).toBe(false);
     const after = settledReviewedImportSnapshot({ questions: [], questionSets: [], documents: [tentativeDocument] });
     expect(after.documents).toEqual([tentativeDocument]);
+  });
+
+  it.each([
+    { firstFails: true, expectedAdded: 1 },
+    { firstFails: false, expectedAdded: 2 },
+  ])("rebases queued source links onto durable commits when firstFails=$firstFails", async ({ firstFails, expectedAdded }) => {
+    const user = userEvent.setup();
+    // All three questions belong to one synthetic source. The first import
+    // intentionally reviews only question 1; two independent later reviews
+    // are prepared while an earlier vault write is still unsettled.
+    const rawText = [
+      "1. Existing source question?\\nA. One\\nB. Two\\nAnswer: B\\nExplanation: First explanation.",
+      "2. Additional A source question?\\nA. Three\\nB. Four\\nAnswer: A\\nExplanation: Second explanation.",
+      "3. Additional B source question?\\nA. Five\\nB. Six\\nAnswer: B\\nExplanation: Third explanation.",
+    ].join("\\n\\n");
+    const parsed = parseQuestionBlocks(rawText);
+    expect(parsed).toHaveLength(3);
+    const seeded = render(<ImportPanel seed={{
+      drafts: parsed.slice(0, 1), rawText, title: "Durable existing set",
+      fileName: "shared-review-source.txt", fileType: "text", checksum: "shared-review-source-checksum",
+    }} />);
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => {
+      expect(useStore.getState().questionSets).toHaveLength(1);
+      expect(hasReviewedImportInFlight()).toBe(false);
+    });
+    seeded.unmount();
+
+    const originalDocument = useStore.getState().documents[0];
+    const originalSetId = useStore.getState().questionSets[0].id;
+    expect(originalDocument.linkedQuestionSetIds).toEqual([originalSetId]);
+    const snapshot = () => {
+      const state = useStore.getState();
+      return { questions: state.questions, questionSets: state.questionSets, documents: state.documents };
+    };
+    const prepare = (index: number, setTitle: string) => prepareReviewedImport({
+      drafts: [{ ...parsed[index], source: "imported" as const }],
+      destination: "both",
+      document: {
+        existingDocumentId: originalDocument.id, title: originalDocument.title,
+        fileName: originalDocument.fileName, fileType: originalDocument.fileType,
+        sizeBytes: originalDocument.sizeBytes, rawText: originalDocument.rawText,
+        checksum: originalDocument.checksum,
+      },
+      sourceType: "imported", setTitle, parserWarnings: [],
+    }, snapshot());
+
+    const storage = useStore.persist.getOptions().storage;
+    if (!storage) throw new Error("Persisted storage is required for the queued import regression.");
+    let settleFirst!: (value?: void) => void;
+    let rejectFirst!: (reason?: unknown) => void;
+    let blockFirst = true;
+    const blocked = new Promise<void>((resolve, reject) => { settleFirst = resolve; rejectFirst = reject; });
+    useStore.persist.setOptions({
+      storage: {
+        getItem: (name) => storage.getItem(name),
+        removeItem: (name) => storage.removeItem(name),
+        setItem: (name, value) => {
+          if (blockFirst) {
+            blockFirst = false;
+            return blocked;
+          }
+          return storage.setItem(name, value);
+        },
+      },
+    });
+
+    let released = false;
+    try {
+      const first = prepare(1, "Queued A set");
+      if (!first.ok) throw new Error("Synthetic first reviewed plan was rejected");
+      const aId = first.plan.questionSet?.id;
+      expect(aId).toBeTruthy();
+      const pendingA = persistReviewedImportOnce(first.fingerprint, useStore.getState(), first.plan);
+      await waitFor(() => {
+        expect(blockFirst).toBe(false);
+        expect(useStore.getState().questionSets.some((set) => set.id === aId)).toBe(true);
+        expect(useStore.getState().documents[0].linkedQuestionSetIds).toContain(aId);
+      });
+
+      // This second plan is deliberately built from optimistic Zustand, as
+      // ImportPanel.saveApproved currently does. Its absolute patch includes A.
+      const second = prepare(2, "Queued B set");
+      if (!second.ok) throw new Error("Synthetic second reviewed plan was rejected");
+      const bId = second.plan.questionSet?.id;
+      expect(bId).toBeTruthy();
+      const write = second.plan.documentWrite;
+      if (!write || write.kind !== "update") throw new Error("Expected same-source document update");
+      expect(write.patch.linkedQuestionSetIds).toContain(aId);
+      const pendingB = persistReviewedImportOnce(second.fingerprint, useStore.getState(), second.plan);
+
+      released = true;
+      if (firstFails) rejectFirst(new Error("Synthetic first vault write rejected"));
+      else settleFirst();
+
+      const [a, b] = await Promise.all([pendingA, pendingB]);
+      expect(a.result.ok).toBe(!firstFails);
+      expect(b.result.ok).toBe(true);
+      const finalState = useStore.getState();
+      const finalSource = finalState.documents.find((doc) => doc.id === originalDocument.id);
+      expect(finalSource).toMatchObject({
+        id: originalDocument.id, rawText: originalDocument.rawText,
+        checksum: originalDocument.checksum,
+      });
+      const setIds = new Set(finalState.questionSets.map((set) => set.id));
+      expect(finalSource?.linkedQuestionSetIds).toEqual(expect.arrayContaining([originalSetId, bId]));
+      expect(finalSource?.linkedQuestionSetIds.every((id) => setIds.has(id))).toBe(true);
+      expect(finalSource?.linkedQuestionSetIds.includes(aId!)).toBe(!firstFails);
+      expect(finalState.questionSets.length).toBe(1 + expectedAdded);
+      expect(finalState.questions.length).toBe(1 + expectedAdded);
+      expect(finalState.questionSets.find((set) => set.id === bId)?.sourceDocumentIds).toEqual([originalDocument.id]);
+      expect(finalState.questions.filter((q) => q.setId === bId)).toHaveLength(1);
+      expect(hasReviewedImportInFlight()).toBe(false);
+    } finally {
+      if (!released && !blockFirst) rejectFirst(new Error("Test cleanup of pending first vault write"));
+      useStore.persist.setOptions({ storage });
+    }
   });
 
   it("joins a tentative real-store import on remount and does not report success when durability fails", async () => {
