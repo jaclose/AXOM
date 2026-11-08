@@ -141,7 +141,8 @@ describe("Community Question Set Library", () => {
     act(() => { fireEvent.click(buttons[0]); fireEvent.click(buttons[1]); });
     expect(mock.preview).toHaveBeenCalledTimes(2);
     expect(await screen.findByText("Which second synthetic answer?")).toBeTruthy();
-    await waitFor(() => expect(mock.observers.size).toBe(0));
+    // The accepted preview remains bound to its originating auth session.
+    await waitFor(() => expect(mock.observers.size).toBe(1));
     await act(async () => {
       resolveOld({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
     });
@@ -150,6 +151,33 @@ describe("Community Question Set Library", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
     expect(mock.commit.mock.calls[0][0].identity).toEqual({ shareId: another.id, contentDigest: "b".repeat(64) });
+  });
+
+  it("revokes a fully loaded preview after an A to B to A session round trip", async () => {
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    expect(await screen.findByText("Which synthetic answer is supported?")).toBeTruthy();
+    // The fetch has finished, but its import authorization must not outlive
+    // the session that selected and reviewed this snapshot.
+    await waitFor(() => expect(mock.observers.size).toBe(1));
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.observers.size).toBe(0);
+
+    // A fresh explicit preview is valid for the restored account session.
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    expect(await screen.findByText("Which synthetic answer is supported?")).toBeTruthy();
+    await waitFor(() => expect(mock.observers.size).toBe(1));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(mock.observers.size).toBe(0);
   });
 
   it("does not reopen a dismissed preview when its request settles later", async () => {
