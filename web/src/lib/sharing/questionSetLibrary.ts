@@ -82,21 +82,39 @@ export async function searchQuestionSetLibrary(accountId: string, search = "", o
   });
 }
 
-export async function loadQuestionSetLibraryPreview(accountId: string, id: string): Promise<LibraryQuestionSetPreview> {
+// The shared SQL reader legitimately returns pending entries to an owner or an
+// academic reviewer. Community learners must only see approved content, while
+// the moderation queue must inspect pending content before deciding approval.
+// Keep these distinct entry points so caller permissions cannot accidentally
+// expand what is discoverable/importable.
+async function loadQuestionSetPreviewForStatus(
+  accountId: string, id: string, requiredStatus: "approved" | "pending",
+): Promise<LibraryQuestionSetPreview> {
   if (!uuid(id)) throw new Error("This Question Set link is invalid.");
   return withAccount(accountId, async client => {
     const { data, error } = await client.rpc("get_question_set_library", { p_id: id });
-    // Owners and reviewers may inspect non-public submissions through this RPC.
-    // Community discovery/import must never consume those unapproved snapshots.
-    if (error || !record(data) || data.id !== id || data.status !== "approved")
-      throw new Error("This Question Set is unavailable. It may have been withdrawn.");
+    if (error || !record(data) || data.id !== id || data.status !== requiredStatus)
+      throw new Error(requiredStatus === "approved"
+        ? "This Question Set is unavailable. It may have been withdrawn."
+        : "This submission is no longer awaiting academic review.");
     validateShare(data.snapshot_payload);
     const snapshot = data.snapshot_payload;
     if (data.title !== snapshot.title || data.question_count !== snapshot.questions.length)
       throw new Error("This Question Set differs from its protected listing.");
     return { id, snapshot, contentDigest: await sharedQuestionSetDigest(snapshot),
-      status: data.status as LibrarySubmission["status"] };
+      status: requiredStatus };
   });
+}
+
+/** Public learner discovery/import: never expose pending or rejected snapshots. */
+export function loadQuestionSetLibraryPreview(accountId: string, id: string): Promise<LibraryQuestionSetPreview> {
+  return loadQuestionSetPreviewForStatus(accountId, id, "approved");
+}
+
+/** Moderation only. The queue checks reviewer access; SQL enforces reviewer
+ * authority again at the review mutation, independent of this read. */
+export function loadPendingQuestionSetReviewPreview(accountId: string, id: string): Promise<LibraryQuestionSetPreview> {
+  return loadQuestionSetPreviewForStatus(accountId, id, "pending");
 }
 
 export async function listMyQuestionSetSubmissions(accountId: string): Promise<LibrarySubmission[]> {

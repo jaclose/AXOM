@@ -381,6 +381,14 @@ describe("Community Question Set Library", () => {
   });
 
   it("checks the live approved listing again before importing a previously reviewed preview", async () => {
+    // The account guard is live while the vault commit is invoked, then must
+    // expire when the import operation settles. A completed import must not
+    // leave behind authorization that could be reused later.
+    let authorizedDuringCommit = false;
+    mock.commit.mockImplementationOnce(async (payload: { accountGuard: { isCurrentAccount: (id: string) => boolean } }) => {
+      authorizedDuringCommit = payload.accountGuard.isCurrentAccount("account-1");
+      return { ok: true, message: "Saved" };
+    });
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
     await screen.findByRole("heading", { name: "Synthetic practice" });
@@ -393,7 +401,9 @@ describe("Community Question Set Library", () => {
     const imported = mock.commit.mock.calls[0][0];
     expect(imported.snapshot.questions[0].correctKey).toBe("B");
     expect(imported.identity).toEqual({ shareId: summary.id, contentDigest: "a".repeat(64) });
-    expect(imported.accountGuard.isCurrentAccount("account-1")).toBe(true);
+    expect(authorizedDuringCommit).toBe(true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Already in my AXOM" })).toBeDisabled());
+    expect(imported.accountGuard.isCurrentAccount("account-1")).toBe(false);
   });
 
   it("refuses to import a withdrawn listing after the preview was loaded", async () => {

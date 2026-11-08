@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accountOperationClient } from "../account/supabase";
 import { createQuestionSetShare } from "./questionSetShare";
 import {
-  loadQuestionSetLibraryPreview, searchQuestionSetLibrary, submitQuestionSetToLibrary,
+  loadPendingQuestionSetReviewPreview, loadQuestionSetLibraryPreview, searchQuestionSetLibrary, submitQuestionSetToLibrary,
 } from "./questionSetLibrary";
 
 vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn() }));
@@ -52,6 +52,29 @@ describe("searchable Question Set client boundary", () => {
     service(rpc);
     await expect(loadQuestionSetLibraryPreview(accountId, entryId)).rejects.toThrow(/unavailable|withdrawn/i);
     expect(rpc).toHaveBeenCalledWith("get_question_set_library", { p_id: entryId });
+  });
+
+  it("allows an awaiting-review snapshot only through the moderation preview reader", async () => {
+    const value = snapshot();
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: value.title, question_count: 1, status: "pending", snapshot_payload: value,
+    }, error: null });
+    service(rpc);
+    const reviewed = await loadPendingQuestionSetReviewPreview(accountId, entryId);
+    expect(reviewed).toMatchObject({ id: entryId, status: "pending", snapshot: value });
+    expect(reviewed.contentDigest).toMatch(/^[a-f0-9]{64}$/);
+    await expect(loadQuestionSetLibraryPreview(accountId, entryId)).rejects.toThrow(/unavailable|withdrawn/i);
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["approved", "rejected"])("refuses a %s listing in the pending moderation reader", async status => {
+    const value = snapshot();
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: value.title, question_count: 1, status, snapshot_payload: value,
+    }, error: null });
+    service(rpc);
+    await expect(loadPendingQuestionSetReviewPreview(accountId, entryId))
+      .rejects.toThrow(/no longer awaiting academic review/i);
   });
 
   it("requires a confirmed answer before sending a public submission", async () => {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { BookOpenCheck, RefreshCw } from "lucide-react";
 import { isAcademicReviewer } from "../../lib/academicLibrary/client";
 import {
-  listPendingQuestionSets, loadQuestionSetLibraryPreview, reviewQuestionSetSubmission,
+  listPendingQuestionSets, loadPendingQuestionSetReviewPreview, reviewQuestionSetSubmission,
   type LibraryQuestionSetPreview, type LibrarySubmission,
 } from "../../lib/sharing/questionSetLibrary";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../ui/primitives";
@@ -35,7 +35,7 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
 
   async function open(id: string) {
     setBusy(true); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
-    try { setPreview(await loadQuestionSetLibraryPreview(accountId, id)); }
+    try { setPreview(await loadPendingQuestionSetReviewPreview(accountId, id)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "This submission could not be opened."); }
     finally { setBusy(false); }
   }
