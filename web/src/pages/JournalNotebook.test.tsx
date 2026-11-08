@@ -2387,7 +2387,7 @@ describe("Journal notebook foundation", () => {
     fireEvent.change(screen.getByLabelText("Free writing"), {
       target: { value: "Only workspace B wrote this entry." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByText("Saved to this workspace")).toBeTruthy());
     const savedB = useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY));
     expect(savedB).toMatchObject({ freeWriting: "Only workspace B wrote this entry.", notebookStatus: "draft" });
