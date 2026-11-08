@@ -1217,6 +1217,47 @@ describe("Journal notebook foundation", () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves additional Keep and Release reflections when editing the first line", async () => {
+    const originalId = "multi-reflection-page";
+    useStore.setState((state) => ({
+      journal: [...state.journal, {
+        id: originalId,
+        date: `${TODAY_KEY}T12:00:00`,
+        today: "A page with earlier reflections.",
+        tomorrow: "",
+        blockers: "",
+        energy: "Medium",
+        rating: "Useful",
+        wins: ["First thing kept", "Second thing kept", "Third thing kept"],
+        losses: ["First loose thread", "Second loose thread"],
+      }],
+    }));
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    fireEvent.click(screen.getByText("Keep something. Release something."));
+    fireEvent.change(screen.getByDisplayValue("First thing kept"), { target: { value: "Edited first keepsake" } });
+    fireEvent.change(screen.getByDisplayValue("First loose thread"), { target: { value: "Edited first release" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => expect(screen.getByText("Saved to this workspace")).toBeTruthy());
+    expect(useStore.getState().journal.find((item) => item.id === originalId)).toMatchObject({
+      wins: ["Edited first keepsake", "Second thing kept", "Third thing kept"],
+      losses: ["Edited first release", "Second loose thread"],
+      today: "A page with earlier reflections.",
+      notebookStatus: "draft",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+    expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next journal page" }));
+    expect(await screen.findByDisplayValue("Edited first keepsake")).toBeTruthy();
+    expect(useStore.getState().journal.find((item) => item.id === originalId)?.losses)
+      .toEqual(["Edited first release", "Second loose thread"]);
+  });
+
   it("opens the premium notebook and turns pages with buttons without losing text", async () => {
     // This component test has no hydrated IndexedDB subscriber. Persistence
     // semantics are exercised below and in localVault.test; here the durable
