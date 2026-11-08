@@ -182,7 +182,7 @@ export async function listPendingQuestionSets(accountId: string): Promise<Librar
  * Recheck the exact pending snapshot a reviewer inspected before submitting a
  * decision. Review evidence must not silently authorize a replaced answer key
  * or a withdrawn/resubmitted revision. The SQL RPC still owns reviewer/RLS
- * authorization; this is a client-side stale-review gate, not an atomic lock.
+ * authorization; SQL also enforces the inspected revision atomically.
  */
 export async function reviewQuestionSetSubmission(
   accountId: string, reviewed: LibraryQuestionSetPreview, approved: boolean, reason: string,
@@ -214,6 +214,9 @@ export async function reviewQuestionSetSubmission(
   await operation.assertCurrent();
   const decision = await operation.client.rpc("review_question_set_library", {
     p_id: reviewed.id, p_approved: approved, p_reason: reason.trim(),
+    // PostgreSQL compares this jsonb against the stored pending snapshot
+    // inside the UPDATE, closing the read-then-decide revision race.
+    p_expected_snapshot: reviewed.snapshot,
   });
   await operation.assertCurrent();
   if (decision.error) throw new Error(decision.error.message);
