@@ -284,6 +284,11 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
         throw new Error("Malformed Git commit parents/changes: " + sha);
       }
       for (const parent of commit.parents) validSha(parent, "history parent SHA");
+      // A merge carrier needs distinct ancestry, not duplicated parent headers.
+      // Git plumbing can store a raw commit with repeated parent SHAs.
+      if (new Set(commit.parents).size !== commit.parents.length) {
+        throw new Error("Duplicate Git history parent in commit: " + sha);
+      }
       const paths = new Set();
       for (const change of commit.changes) {
         const path = validPath(change?.path);
