@@ -1326,6 +1326,40 @@ describe("Journal notebook foundation", () => {
       .toEqual([localImage]);
   });
 
+  it("waits for both overlapping image reads before saving a turned page", async () => {
+    let finishFirst!: (attachment: JournalImageAttachment) => void;
+    let finishSecond!: (attachment: JournalImageAttachment) => void;
+    const first = new Promise<JournalImageAttachment>((resolve) => { finishFirst = resolve; });
+    const second = new Promise<JournalImageAttachment>((resolve) => { finishSecond = resolve; });
+    const readImage = vi.spyOn(journalNotebook, "readJournalImage")
+      .mockReturnValueOnce(first).mockReturnValueOnce(second);
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    const input = screen.getByLabelText("Choose a journal image");
+    fireEvent.change(input, { target: { files: [new File(["a"], "first.png", { type: "image/png" })] } });
+    fireEvent.change(input, { target: { files: [new File(["b"], "second.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+
+    const laterImage = { ...localImage, id: "second-image", name: "second.png" };
+    await act(async () => {
+      finishSecond(laterImage);
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    });
+    // Finishing the later read first must not allow navigation to discard the first.
+    expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
+
+    const firstImage = { ...localImage, id: "first-image", name: "first.png" };
+    await act(async () => { finishFirst(firstImage); await Promise.resolve(); });
+    expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
+    expect(readImage).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY))?.attachments)
+      .toEqual([firstImage, laterImage]);
+  });
+
   it("does not rewrite an unchanged historical page during navigation", async () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites");
     render(<JournalPage />);

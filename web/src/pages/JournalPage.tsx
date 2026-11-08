@@ -859,8 +859,9 @@ function JournalWritingPage({
     transitionPendingRef.current = true;
     cancelScheduledSave();
     try {
-      const pendingAttachment = attachmentReadRef.current;
-      if (pendingAttachment) await pendingAttachment;
+      // A later image selection may have joined while an earlier read was
+      // pending. Drain the entire read chain before persisting or navigating.
+      while (attachmentReadRef.current) await attachmentReadRef.current;
       if (!mountedRef.current) return false;
       if (!dirtyRef.current) {
         transition();
@@ -1030,21 +1031,27 @@ function JournalWritingPage({
     if (!file) return;
     setAttachmentError("");
     setAddingImage(true);
+    // Keep each picker read in the same chain. Otherwise a later selection
+    // replaces the pending ref and a page turn can save before an older image
+    // finishes, silently losing it when the writer leaves the page.
+    const previousRead = attachmentReadRef.current;
     const read = (async () => {
       try {
+        if (previousRead) await previousRead;
         const attachment = await readJournalImage(file, draftRef.current.attachments);
         setDraft((current) => ({ ...current, attachments: [...current.attachments, attachment] }));
       } catch (error) {
         setAttachmentError(error instanceof Error ? error.message : "AXOM could not add that image.");
-      } finally {
-        setAddingImage(false);
       }
     })();
     attachmentReadRef.current = read;
     try {
       await read;
     } finally {
-      if (attachmentReadRef.current === read) attachmentReadRef.current = null;
+      if (attachmentReadRef.current === read) {
+        attachmentReadRef.current = null;
+        setAddingImage(false);
+      }
     }
   }
 
