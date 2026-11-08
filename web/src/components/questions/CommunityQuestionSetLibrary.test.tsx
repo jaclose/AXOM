@@ -8,7 +8,7 @@ import type { QuestionRecord } from "../../lib/questions";
 import type { QuestionSet } from "../../lib/library";
 
 const mock = vi.hoisted(() => ({
-  accountId: "account-1", search: vi.fn(), preview: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
+  accountId: "account-1", observers: new Set<(state: { user: { id: string } }) => void>(), search: vi.fn(), preview: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
 }));
 vi.mock("../../lib/account/accountStore", () => {
   const accountState = () => ({ user: { id: mock.accountId } });
@@ -17,7 +17,10 @@ vi.mock("../../lib/account/accountStore", () => {
     // account before rerender reproduces the stale-handler click interval.
     useAccount: Object.assign(
       (selector: (state: ReturnType<typeof accountState>) => unknown) => selector(accountState()),
-      { getState: accountState },
+      { getState: accountState, subscribe: (listener: (state: ReturnType<typeof accountState>) => void) => {
+        mock.observers.add(listener);
+        return () => { mock.observers.delete(listener); };
+      } },
     ),
   };
 });
@@ -47,6 +50,7 @@ const snapshot = {
 beforeEach(() => {
   vi.clearAllMocks();
   mock.accountId = "account-1";
+  mock.observers.clear();
   mock.search.mockResolvedValue([summary]);
   mock.preview.mockResolvedValue({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
   mock.like.mockResolvedValue(undefined);
@@ -106,6 +110,74 @@ describe("Community Question Set Library", () => {
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
     expect(mock.commit).not.toHaveBeenCalled();
+  });
+
+
+  it("revokes in-flight import authorization across an A to B to A account round trip", async () => {
+    let resolveImport!: (value: unknown) => void;
+    mock.commit.mockImplementationOnce(() => new Promise(resolve => { resolveImport = resolve; }));
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    const guard = mock.commit.mock.calls[0][0].accountGuard;
+    expect(guard.isCurrentAccount("account-1")).toBe(true);
+
+    // No React rerender is necessary for Zustand subscribers to see the
+    // intermediate account. Identity equality on its own would miss this.
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    expect(guard.isCurrentAccount("account-1")).toBe(false);
+    expect(screen.queryByRole("button", { name: "Saving…" })).toBeNull();
+    expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
+    await act(async () => { resolveImport({ ok: true, added: 1 }); });
+    expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
+    expect(mock.observers.size).toBe(0);
+  });
+
+  it("discards a delayed preview even when the original account returns", async () => {
+    let resolvePreview!: (value: unknown) => void;
+    mock.preview.mockImplementationOnce(() => new Promise(resolve => { resolvePreview = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await waitFor(() => expect(mock.preview).toHaveBeenCalledOnce());
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    await act(async () => { resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" }); });
+    expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
+    expect(screen.queryByText("Opening this Question Set…")).toBeNull();
+    expect(mock.observers.size).toBe(0);
+  });
+
+  it("does not credit a delayed like after leaving and returning to the same account", async () => {
+    let resolveLike!: (value: unknown) => void;
+    mock.like.mockImplementationOnce(() => new Promise(resolve => { resolveLike = resolve; }));
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Like Synthetic practice" }));
+    await waitFor(() => expect(mock.like).toHaveBeenCalledOnce());
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    await act(async () => { resolveLike(undefined); });
+    expect((await screen.findByRole("button", { name: "Like Synthetic practice" })).getAttribute("aria-pressed")).toBe("false");
+    expect(mock.observers.size).toBe(0);
   });
 
   it("preserves explicit AI explanation and choice-rationale provenance through import", async () => {
