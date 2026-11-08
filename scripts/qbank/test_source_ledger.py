@@ -136,6 +136,46 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertEqual(invalid["assessed_ready_not_installed"],0)
             self.assertEqual(len(invalid["rejected_audit_rows"]),1)
 
+    def test_scanned_lecture_filename_hints_do_not_infer_academic_weeks(self):
+        # Filename tokens are candidate lecture links, not proven week or source rights.
+        filenames = {
+            "Lecture 05 Notes.pdf": [5],
+            "NCRS_Lecture_007_Notes.pdf": [7],
+            "lec-09.pdf": [9],
+            "Lecture_012_and_Lect-13.pdf": [12, 13],
+            "BiologyLecture 17.pdf": [],
+            "IMCQ 20.pdf": [],
+            "Lecture 1234.pdf": [],
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp) / "sources"
+            out = pathlib.Path(temp) / "output"
+            root.mkdir()
+            out.mkdir()
+            for name in filenames:
+                (root / name).write_bytes(b"synthetic filename-only source fixture")
+
+            prior_roots, prior_out = ledger.ROOTS, ledger.OUT
+            try:
+                ledger.ROOTS = [("synthetic_source_root", root)]
+                ledger.OUT = out
+                rows, root_stats = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+            finally:
+                ledger.ROOTS, ledger.OUT = prior_roots, prior_out
+
+            self.assertEqual(root_stats[0]["catalogued"], len(filenames))
+            indexed = {row["original_filename"]: row for row in rows}
+            self.assertEqual(set(indexed), set(filenames))
+            for name, expected in filenames.items():
+                with self.subTest(name=name):
+                    self.assertEqual(indexed[name]["lecture_references"], expected)
+                    self.assertIsNone(indexed[name]["week"])
+                    self.assertIsNone(indexed[name]["week_evidence"])
+                    self.assertEqual(
+                        indexed[name]["sharing_rights"],
+                        "private_use_only_rights_not_asserted",
+                    )
+
     def test_existing_templates_still_parse_547(self):
         if not (ledger.HOME / "Developer/AXOM/AXOM Templates Completed").is_dir():
             self.skipTest("real source root unavailable")
