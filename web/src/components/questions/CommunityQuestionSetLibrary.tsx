@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BookOpen, Download, Heart, RefreshCw, Search } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
@@ -49,6 +49,9 @@ export function CommunityQuestionSetLibrary() {
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
   const [liking, setLiking] = useState<string>();
+  // React may not have committed the disabled state when a second click runs.
+  // Reserve the mutation synchronously, and release it only for its own request.
+  const likingOperation = useRef<symbol | null>(null);
 
   useEffect(() => {
     setSets([]); setPreview(undefined); setPreviewAccountId(undefined);
@@ -159,13 +162,21 @@ export function CommunityQuestionSetLibrary() {
     }
   }
   async function like(set: LibraryQuestionSet) {
-    if (!accountId || useAccount.getState().user?.id !== accountId || liking) return;
+    if (!accountId || useAccount.getState().user?.id !== accountId || liking || likingOperation.current) return;
+    const operation = Symbol("community-like");
+    likingOperation.current = operation;
     const likingAccount = accountId;
     const session = observeAccountSession(likingAccount, () => {
+      // An account change revokes the old mutation without blocking the next
+      // session. A late old completion must not unlock a newer request.
+      if (likingOperation.current === operation) likingOperation.current = null;
       setLiking(undefined); setSets([]); setError("");
       setRefresh(value => value + 1);
     });
-    if (!session.current()) { session.stop(); return; }
+    if (!session.current()) {
+      if (likingOperation.current === operation) likingOperation.current = null;
+      session.stop(); return;
+    }
     setLiking(set.id); setError("");
     try {
       await setQuestionSetLibraryLike(accountId, set.id, !set.liked);
@@ -176,6 +187,7 @@ export function CommunityQuestionSetLibrary() {
       if (session.current())
         setError(cause instanceof Error ? cause.message : "Your like could not be saved.");
     } finally {
+      if (likingOperation.current === operation) likingOperation.current = null;
       if (session.current()) setLiking(undefined);
       session.stop();
     }
