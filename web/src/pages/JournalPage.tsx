@@ -639,6 +639,7 @@ function JournalWritingPage({
   const lifecyclePersistPendingRef = useRef(false);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const attachmentReadRef = useRef<Promise<void> | null>(null);
+  const attachmentErrorRef = useRef("");
   const saveTimerRef = useRef<number | null>(null);
   const settleTimerRef = useRef<number | null>(null);
   const deskCloseTimerRef = useRef<number | null>(null);
@@ -863,14 +864,25 @@ function JournalWritingPage({
       // pending. Drain the entire read chain before persisting or navigating.
       while (attachmentReadRef.current) await attachmentReadRef.current;
       if (!mountedRef.current) return false;
+      // Done may have marked the draft complete before a queued image rejected.
+      // Never write that optimistic status while its failure is unacknowledged.
+      if (attachmentErrorRef.current && draftRef.current.notebookStatus === "complete") return false;
       if (!dirtyRef.current) {
+        // A failed image read is not a successful page turn, even when the
+        // rest of the page is already stored.
+        if (attachmentErrorRef.current) return false;
         transition();
         return true;
       }
       while (mountedRef.current) {
+        if (attachmentErrorRef.current && draftRef.current.notebookStatus === "complete") return false;
+        // Still persist valid writing/images after an image failed, but do not
+        // navigate away and hide its warning. The save receipt is for the
+        // accepted page content, never the rejected image.
         const result = await persist();
         if (result === "superseded") continue;
         if (result === "failed" || result === "aborted" || !mountedRef.current) return false;
+        if (attachmentErrorRef.current) return false;
         transition();
         return true;
       }
@@ -911,7 +923,7 @@ function JournalWritingPage({
     mountedRef.current = true;
     const unregisterTransitionGuard = registerTransitionGuard(requestDurableTransition);
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirtyRef.current && !attachmentReadRef.current) return;
+      if (!dirtyRef.current && !attachmentReadRef.current && !attachmentErrorRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -966,7 +978,7 @@ function JournalWritingPage({
   async function completeToday() {
     // Another page transition, including an earlier Done, already owns this
     // save gate. Never change the completion status behind its back.
-    if (transitionPendingRef.current) return;
+    if (transitionPendingRef.current || attachmentReadRef.current || attachmentErrorRef.current) return;
     cancelScheduledSave();
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) {
@@ -1029,6 +1041,7 @@ function JournalWritingPage({
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    attachmentErrorRef.current = "";
     setAttachmentError("");
     setAddingImage(true);
     // Keep each picker read in the same chain. Otherwise a later selection
@@ -1041,7 +1054,9 @@ function JournalWritingPage({
         const attachment = await readJournalImage(file, draftRef.current.attachments);
         setDraft((current) => ({ ...current, attachments: [...current.attachments, attachment] }));
       } catch (error) {
-        setAttachmentError(error instanceof Error ? error.message : "AXOM could not add that image.");
+        const message = error instanceof Error ? error.message : "AXOM could not add that image.";
+        attachmentErrorRef.current = message;
+        if (mountedRef.current) setAttachmentError(message);
       }
     })();
     attachmentReadRef.current = read;
@@ -1053,6 +1068,11 @@ function JournalWritingPage({
         setAddingImage(false);
       }
     }
+  }
+
+  function dismissAttachmentError() {
+    attachmentErrorRef.current = "";
+    setAttachmentError("");
   }
 
   function exportAttachment(attachment: JournalImageAttachment) {
@@ -1135,7 +1155,13 @@ function JournalWritingPage({
           <div className="journal-inline-leaf journal-inline-leaf-right">
             <span className="journal-inline-overline">Private / local first</span>
             <span className="journal-inline-quote">A record you can return to.</span>
-            <p>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Page saved locally" : saveState === "failed" ? "Your changes need saving" : "Ready when you are"}</p>
+            <p>{attachmentError ? "Image not added" : saveState === "saving" ? "Saving…" : saveState === "saved" ? "Page saved locally" : saveState === "failed" ? "Your changes need saving" : "Ready when you are"}</p>
+            {!zoomed && attachmentError && (
+              <div className="journal-inline-save-error" role="alert">
+                {attachmentError}. The image was not added. Choose another image or dismiss this warning before leaving.
+                <GButton size="sm" onClick={dismissAttachmentError}>Dismiss image warning</GButton>
+              </div>
+            )}
             {saveError && <p className="journal-inline-save-error" role="alert">{saveError}</p>}
             {saveState === "failed" && (
               <GButton size="sm" disabled={addingImage} onClick={() => { void persist(); }}>
@@ -1159,7 +1185,7 @@ function JournalWritingPage({
         </GButton>
         <div className="journal-page-position" aria-live="polite">
           <b>{day === today ? "Today" : prettyDate(`${day}T12:00:00`)}</b>
-          <span>{saveState === "saving" ? "Saving to this workspace…" : saveState === "saved" ? "Saved to this workspace" : saveState === "failed" ? "Not saved on this device" : "Ready to write"}</span>
+          <span>{attachmentError ? "Image not added" : saveState === "saving" ? "Saving to this workspace…" : saveState === "saved" ? "Saved to this workspace" : saveState === "failed" ? "Not saved on this device" : "Ready to write"}</span>
         </div>
         <GButton size="sm" onClick={() => turnPage("next")} disabled={day >= today} aria-label="Next journal page">
           Next <ArrowRight size={ICON_SIZE.body} />
@@ -1261,7 +1287,12 @@ function JournalWritingPage({
             </div>
             <details className="journal-image-storage"><summary>How images are stored</summary><p className="journal-local-note">Images are saved locally first and included in portable exports. Linked account backups may include them when the workspace fits account limits. Maximum 3 MB each and 12 MB per page.</p></details>
             <JournalAccountProtectionWarning />
-            {attachmentError && <div className="journal-attachment-error" role="alert">{attachmentError}</div>}
+            {attachmentError && (
+              <div className="journal-attachment-error" role="alert">
+                <p>{attachmentError}. The image was not added. Choose another image or dismiss this warning before leaving.</p>
+                <GButton size="sm" onClick={dismissAttachmentError}>Dismiss image warning</GButton>
+              </div>
+            )}
             {draft.attachments.length > 0 && (
               <div className="journal-attachment-grid">
                 {draft.attachments.map((attachment) => (
