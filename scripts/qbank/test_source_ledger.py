@@ -234,6 +234,83 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(indexed[digest("source")]["questionCount"],3)
         self.assertEqual(indexed[digest("asset")]["kind"],"asset")
 
+    def test_native_lead_dispositions_fail_closed_before_parser_audit(self):
+        # Upstream dispositions must never advertise structurally held or
+        # ambiguous native sources as prepared, even without an Agent-2 audit.
+        sha = digest("synthetic source")
+        path = "/synthetic/source.pdf"
+        rows = [dict(source_sha256=sha, original_path=path,
+                     document_type="pq", priority=1)]
+        verified = dict(bank_id="demo", source_path=path, questions=3,
+                        canonical_status="canonical_distinct_question_collection",
+                        status="local_ready_for_agent2_review", issues=[],
+                        package="/synthetic/valid")
+        def disposition(packages):
+            items = enriched.build_lead_dispositions(rows, packages)["sources"]
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0]["sha256"], sha)
+            return items[0]
+
+        clean = disposition([verified])
+        self.assertEqual((clean["status"], clean["questionCount"],
+                          clean["readyCount"], clean["reviewCount"]),
+                         ("prepared", 3, 0, 3))
+
+        held = dict(verified, package="/synthetic/held",
+                    status="requires_package_review",
+                    issues=["missing_or_unsafe_assets:1"])
+        for package in (held, dict(verified, issues=["missing_or_unsafe_assets:1"]),
+                        dict(verified, canonical_status=None),
+                        dict(verified, status="unexamined")):
+            with self.subTest(case=package):
+                item = disposition([package])
+                self.assertEqual((item["status"], item["readyCount"],
+                                  item["reviewCount"]), ("review-required", 0, 3))
+                self.assertIn("review", item["reason"].lower())
+
+        for packages in ([verified, held], [held, verified],
+                         [verified, dict(verified, bank_id="another",
+                                         package="/synthetic/another")]):
+            with self.subTest(order=[p["package"] for p in packages]):
+                item = disposition(packages)
+                self.assertEqual(item["status"], "review-required")
+                self.assertEqual(item["readyCount"], 0)
+                self.assertGreaterEqual(item["reviewCount"], 3)
+                self.assertIn("ambiguous", item["reason"].lower())
+
+    def test_parser_audit_never_promotes_distinct_banks_sharing_source_sha(self):
+        # A source SHA is one upstream disposition; two packages against it
+        # require manual reconciliation before per-bank parser counts can join.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            directory = pathlib.Path(root)
+            source = directory / "source.pdf"
+            source.write_bytes(b"shared synthetic PDF")
+            sha = digest("shared synthetic PDF")
+            rows = [dict(source_sha256=sha, original_path=str(source),
+                         document_type="pq", priority=1)]
+            first = dict(bank_id="bank-a", source_path=str(source),
+                         questions=2, canonical_status="canonical_distinct_question_collection",
+                         status="local_ready_for_agent2_review", issues=[],
+                         package="/synthetic/a")
+            second = dict(first, bank_id="bank-b", package="/synthetic/b")
+            audit = directory / "audit.json"
+            audit.write_text(json.dumps({"native": [
+                dict(bankId=bank, sourceSha256=sha, questionRecords=2,
+                     ready=1, needsReview=1, sourceVerified=True,
+                     cloudVerified=False) for bank in ("bank-a", "bank-b")],
+                "raw": [dict(sha256=sha, questionsDetected=2, ready=2,
+                             needsReview=0, sourceVerified=True, cloudVerified=False,
+                             file="source.pdf")]}))
+            for packages in ([first, second], [second, first]):
+                with self.subTest(order=[p["bank_id"] for p in packages]):
+                    result = enriched.build_lead_dispositions(rows, packages)
+                    stats = enriched.merge_agent2_assessment(result, packages, rows, audit)
+                    self.assertEqual(stats["assessed_source_count"], 0)
+                    self.assertEqual(stats["assessed_ready_not_installed"], 0)
+                    self.assertEqual(len(stats["rejected_audit_rows"]), 3)
+                    self.assertEqual(result["sources"][0]["status"], "review-required")
+                    self.assertEqual(result["sources"][0]["readyCount"], 0)
+
     def test_zip_central_directory_safe_index_only(self):
         import zipfile
         with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
