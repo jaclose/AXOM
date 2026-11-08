@@ -542,6 +542,10 @@ export interface DailySuccessRequirement {
   id: ID;
   label: string;
   enabled: boolean;
+  /** Personal commitments never enter academic daily streak or mastery scores. */
+  lane?: "academic" | "personal";
+  /** Optional private Reports projection. Defaults to on for legacy records. */
+  showInReports?: boolean;
   source: DailySuccessSource;
   /**
    * Exact, case-insensitive activity labels that may contribute when a record
