@@ -158,15 +158,18 @@ export interface HabitWeekStats {
 export function weekStats(habit: Habit, entries: HabitEntry[], dates: string[]): HabitWeekStats {
   if (habit.type === "weekly") {
     const start = trackingStartKey(habit, entries);
-    const period = dates.filter((date) => date >= start);
+    const latest = [...dates].sort().at(-1) ?? todayKey();
+    const weekday = new Date(`${latest}T12:00:00`).getDay();
+    const weekStart = addLocalDays(latest, -((weekday + 6) % 7));
+    const period = dates.filter((date) => date >= start && date >= weekStart);
     const target = Math.max(1, Math.min(7, Math.round(habit.weeklyTarget ?? 3)));
     const done = new Set(entries.filter((e) => e.habitId === habit.id
       && e.status === "done" && period.includes(e.date)).map((e) => e.date)).size;
     const partial = new Set(entries.filter((e) => e.habitId === habit.id
       && e.status === "partial" && period.includes(e.date)).map((e) => e.date)).size;
     return { done, partial, skipped: 0, missed: 0,
-      scheduledDays: Math.min(target, period.length),
-      adherence: period.length ? Math.min(100, Math.round((done / Math.min(target, period.length)) * 100)) : 0 };
+      scheduledDays: target,
+      adherence: period.length ? Math.min(100, Math.round((done / target) * 100)) : 0 };
   }
   const start = trackingStartKey(habit, entries);
   let done = 0, partial = 0, skipped = 0, missed = 0, scheduledDays = 0;
