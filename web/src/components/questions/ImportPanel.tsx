@@ -441,13 +441,7 @@ export function ImportPanel({
     }
 
     finalizingRef.current = true;
-    if (prepared.equivalent) {
-      pushToast({
-        title: "Import already finalized",
-        body: "AXOM found the same reviewed questions and reused the existing set instead of creating duplicates.",
-        tone: "success",
-      });
-    } else {
+    if (!prepared.equivalent) {
       setFinalizing(true);
       setStep("finalize");
     }
@@ -469,6 +463,15 @@ export function ImportPanel({
       return;
     }
     if (saved.reused) {
+      if (prepared.equivalent && mountedRef.current) {
+        // The existing-set receipt may still repair source bytes or images.
+        // Never report finalization until that awaited work confirms success.
+        pushToast({
+          title: "Import already finalized",
+          body: "AXOM found the same reviewed questions and reused the existing set instead of creating duplicates.",
+          tone: "success",
+        });
+      }
       finishSuccessfulImport({ setId: saved.setId, documentId: saved.documentId, questionIds: saved.questionIds });
       return;
     }
