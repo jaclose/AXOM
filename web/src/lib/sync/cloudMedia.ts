@@ -90,8 +90,19 @@ export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): C
 export async function uploadCloudMedia(client: SupabaseClient, userId: string, state: NoctyriumState, assertCurrent: () => Promise<void>, previous: CloudMediaReference[] = []): Promise<CloudMediaReference[]> {
   const bucket = client.storage.from(MEDIA_BUCKET);
   const shared = storedAcademicBindings(state).assets;
-  const academicByHash = new Map<string, AcademicAssetReference>();
-  for (const asset of shared) if (!academicByHash.has(asset.sha256)) academicByHash.set(asset.sha256, asset);
+  // A content hash proves byte identity, not ownership of a particular academic
+  // revision. Multiple revision/path bindings can share bytes but differ in RLS.
+  // Ambiguous hashes cannot select an arbitrary academic provenance for new media.
+  const academicByHash = new Map<string, AcademicAssetReference | null>();
+  for (const asset of shared) {
+    if (!academicByHash.has(asset.sha256)) academicByHash.set(asset.sha256, asset);
+    else {
+      const prior = academicByHash.get(asset.sha256);
+      if (prior && (prior.revisionId !== asset.revisionId || prior.path !== asset.path)) academicByHash.set(asset.sha256, null);
+    }
+  }
+  const hasAcademicBinding = (reference: AcademicAssetReference): boolean => shared.some(asset =>
+    asset.revisionId === reference.revisionId && asset.path === reference.path && asset.sha256 === reference.sha256);
   const refs = workspaceMedia(state);
   // Deferred content is a same-account recovery receipt, not a transferable
   // authorization for another learner's stored originals.
@@ -151,7 +162,11 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   // for this protection attempt. Prior manifests and module caches are receipts,
   // never current remote-integrity authority.
   async function verifyRemoteOriginal(known: Pick<CloudMediaReference, "hash" | "byteSize">, academic?: AcademicAssetReference): Promise<void> {
-    const key = `${academic ? "academic" : "private"}:${known.hash}:${known.byteSize}`;
+    // Only private originals may share a hash-only proof. Every academic
+    // revision/path must independently satisfy its current RLS authorization.
+    const key = academic
+      ? JSON.stringify(["academic", academic.revisionId, academic.path, known.hash, known.byteSize])
+      : `private:${known.hash}:${known.byteSize}`;
     let verification = verifiedRemoteOriginals.get(key);
     if (!verification) {
       verification = (async () => {
@@ -198,7 +213,10 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         // A matching size/timestamp is not proof of unchanged bytes. Check
         // the device original even when reusing a previously protected index.
         const known = prior.get(blobKey);
-        const knownAcademic = known ? academicByHash.get(known.hash) : undefined;
+        // Recovery must retain the *same* prior academic binding. Never
+        // substitute the first accessible same-hash revision for another.
+        const knownAcademic = known?.academic && known.academic.sha256 === known.hash
+          && hasAcademicBinding(known.academic) ? known.academic : undefined;
         const record = await getQuestionAttachmentBlob(blobKey);
         if (!record && known
           && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
@@ -224,7 +242,11 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         if (checksum !== undefined && checksum !== hash) {
           throw new Error("A source image no longer matches its declared checksum. Restore the original before protecting this version.");
         }
-        const academic = academicByHash.get(hash);
+        if (known?.academic && known.hash === hash && !knownAcademic) {
+          throw new Error("The original academic image binding is no longer available. Cloud protection remains pending.");
+        }
+        const academic = known?.academic && known.hash === hash
+          ? knownAcademic : academicByHash.get(hash) ?? undefined;
         // A former academic-only reference is not proof that a private
         // workspace-media object exists after its academic binding disappears.
         const safeReuse = known && known.hash === hash
