@@ -135,7 +135,8 @@ for (const [width, scheme] of [[320, "light"], [390, "dark"], [1440, "light"]] a
     await page.goto("/#journal");
 
     const setup = page.getByRole("dialog", { name: "Make this notebook yours" });
-    if (await setup.isVisible()) await setup.getByRole("button", { name: "Skip for now" }).click();
+    await expect(setup).toBeVisible();
+    await setup.getByRole("button", { name: "Skip for now" }).click();
 
     // This is a synthetic local workspace with a pre-existing multi-note entry.
     // No account or remote provider is used. Keep the ID to detect a replacement.
