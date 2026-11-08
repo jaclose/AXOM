@@ -124,6 +124,61 @@ describe("Community Question Set Library", () => {
     await waitFor(() => expect(mock.observers.size).toBe(0));
   });
 
+  it("uses the latest same-batch preview selection despite out-of-order responses", async () => {
+    const another = { ...summary, id: "00000000-0000-4000-8000-000000000022", title: "Second synthetic set" };
+    const nextSnapshot = { ...snapshot, title: another.title, questions: [{
+      ...snapshot.questions[0], id: "shared-question-2", stem: "Which second synthetic answer?",
+    }] };
+    mock.search.mockResolvedValueOnce([summary, another]);
+    let resolveOld!: (value: unknown) => void;
+    mock.preview.mockImplementation((_account: string, id: string) => id === summary.id
+      ? new Promise(resolve => { resolveOld = resolve; })
+      : Promise.resolve({ id: another.id, snapshot: nextSnapshot, contentDigest: "b".repeat(64), status: "approved" }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: another.title });
+    const buttons = screen.getAllByRole("button", { name: "Preview set" });
+    // Two clicks share the prior render's opening=false state.
+    act(() => { fireEvent.click(buttons[0]); fireEvent.click(buttons[1]); });
+    expect(mock.preview).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("Which second synthetic answer?")).toBeTruthy();
+    await waitFor(() => expect(mock.observers.size).toBe(0));
+    await act(async () => {
+      resolveOld({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+    });
+    expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
+    expect(screen.getByText("Which second synthetic answer?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].identity).toEqual({ shareId: another.id, contentDigest: "b".repeat(64) });
+  });
+
+  it("does not reopen a dismissed preview when its request settles later", async () => {
+    let rejectPreview!: (reason: Error) => void;
+    mock.preview.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectPreview = reject; }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    expect(await screen.findByText("Opening this Question Set…")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText("Opening this Question Set…")).toBeNull();
+    await waitFor(() => expect(mock.observers.size).toBe(0));
+    await act(async () => { rejectPreview(new Error("Dismissed preview request failed")); });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText("Dismissed preview request failed")).toBeNull();
+    expect(mock.commit).not.toHaveBeenCalled();
+  });
+
+  it("unsubscribes an unfinished preview when the library unmounts", async () => {
+    mock.preview.mockImplementationOnce(() => new Promise(() => {}));
+    const view = render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await waitFor(() => expect(mock.preview).toHaveBeenCalledOnce());
+    expect(mock.observers.size).toBe(1);
+    view.unmount();
+    expect(mock.observers.size).toBe(0);
+  });
+
   it("refuses stale-account import and like clicks before React rerenders", async () => {
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
