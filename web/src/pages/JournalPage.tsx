@@ -896,11 +896,30 @@ function JournalWritingPage({
   }, [cancelScheduledSave, persist]);
 
   const persistBeforePageExit = useCallback(() => {
-    if (!dirtyRef.current || lifecyclePersistPendingRef.current) return;
+    const pendingImage = attachmentReadRef.current;
+    if ((!dirtyRef.current && !pendingImage) || lifecyclePersistPendingRef.current) return;
     cancelScheduledSave();
     lifecyclePersistPendingRef.current = true;
-    void persistNow().finally(() => {
-      lifecyclePersistPendingRef.current = false;
+    void (async () => {
+      try {
+        // Never delay a dirty text save on a FileReader. A tab may close while
+        // its image is still loading, and teardown cannot await IndexedDB.
+        if (dirtyRef.current) await persistNow();
+        if (pendingImage) {
+          await pendingImage;
+          // A hidden tab may stay mounted but throttle its ordinary 420 ms
+          // autosave. Flush an image accepted after the first snapshot now.
+          if (mountedRef.current && dirtyRef.current) {
+            cancelScheduledSave();
+            await persistNow();
+          }
+        }
+      } finally {
+        lifecyclePersistPendingRef.current = false;
+      }
+    })().catch(() => {
+      // The save/read paths surface their own errors; browser teardown does
+      // not provide a recoverable asynchronous completion guarantee.
     });
   }, [cancelScheduledSave, persistNow]);
 
