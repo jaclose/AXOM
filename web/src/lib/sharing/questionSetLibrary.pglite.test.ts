@@ -260,6 +260,11 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       ["numeric distractor rationale", value => { value.questions[0].choiceRationales = { A: 1 }; }],
       ["null distractor rationale", value => { value.questions[0].choiceRationales = { A: null }; }],
       ["unmatched distractor rationale", value => { value.questions[0].choiceRationales = { Z: "Unreviewed option" }; }],
+      ["oversized visual tag", value => { value.tags = ["visual:keyword:" + "x".repeat(64)]; }],
+      ["blank visual tag", value => { value.tags = [" "]; }],
+      ["oversized question tag", value => { value.questions[0].tags = ["x".repeat(65)]; }],
+      ["oversized distractor rationale", value => { value.questions[0].choiceRationales = { A: "x".repeat(10001) }; }],
+      ["blank distractor rationale", value => { value.questions[0].choiceRationales = { A: " " }; }],
     ];
     for (const [label, mutate] of variants) {
       const value = snapshot();
