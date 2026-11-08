@@ -79,6 +79,51 @@ describe("Community Question Set Library", () => {
     await waitFor(() => expect(mock.like).toHaveBeenCalledWith("account-1", summary.id, true));
   });
 
+  it("revokes delayed search results after an A to B to A account round trip", async () => {
+    let resolveSearch!: (value: typeof summary[]) => void;
+    mock.search.mockImplementationOnce(() => new Promise(resolve => { resolveSearch = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-1", "", 0));
+    expect(screen.getByText("Loading Question Sets…")).toBeTruthy();
+
+    // Zustand may deliver both transitions before React commits a render.
+    // The old listing has account-specific like state and must not reappear.
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    expect(screen.queryByText("Loading Question Sets…")).toBeNull();
+    await act(async () => { resolveSearch([{ ...summary, liked: true }]); });
+    expect(screen.queryByRole("heading", { name: "Synthetic practice" })).toBeNull();
+    expect(mock.observers.size).toBe(0);
+  });
+
+  it("suppresses stale search errors after an account session is revoked", async () => {
+    let rejectSearch!: (reason: Error) => void;
+    mock.search.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSearch = reject; }));
+    render(<CommunityQuestionSetLibrary />);
+    await waitFor(() => expect(mock.search).toHaveBeenCalledOnce());
+
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    await act(async () => { rejectSearch(new Error("Old account's private query failed")); });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Loading Question Sets…")).toBeNull();
+    expect(mock.observers.size).toBe(0);
+  });
+
+  it("releases the search account subscription after a successful page", async () => {
+    render(<CommunityQuestionSetLibrary />);
+    expect(await screen.findByRole("heading", { name: "Synthetic practice" })).toBeTruthy();
+    await waitFor(() => expect(mock.observers.size).toBe(0));
+  });
+
   it("refuses stale-account import and like clicks before React rerenders", async () => {
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
