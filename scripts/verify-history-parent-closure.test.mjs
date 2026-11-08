@@ -22,7 +22,7 @@ function adapters(sourceHistory, integrationHistory) {
       ancestor === descendant
       || (ancestor === BASE && [SOURCE, INTEGRATED, OMITTED].includes(descendant))
       || (ancestor === SOURCE && descendant === INTEGRATED)
-      || (ancestor === OLDER && ancestor === BASE),
+      || (ancestor === OLDER && descendant === BASE),
     readFile: () => ({ mode: "100644", blob: BLOB }),
     listTreePaths: () => [CHANGE.path],
     listHistoryChanges: (_base, tip) => tip === SOURCE ? sourceHistory : integrationHistory,
@@ -53,7 +53,5 @@ test("v2 accepts a complete source/integration parent graph and older-main merge
   // when the ancestry resolver confirms it is reachable from that base.
   const withOldParent = [source([BASE, OLDER])];
   const allowed = adapters(withOldParent, [source([BASE, OLDER]), merge()]);
-  allowed.isAncestor = (a, b) => a === OLDER && b === BASE
-    ? true : adapters(withOldParent, []).isAncestor(a, b);
   assert.equal(verifyCompleteSourceIntegration(manifest, allowed).commitHistoryAttested, true);
 });
