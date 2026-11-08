@@ -1311,8 +1311,35 @@ function JournalWritingPage({
               <details className="journal-keep-release">
                 <summary>Keep something. Release something.</summary>
                 <div className="journal-win-loss-grid">
-                  <label><span>Something to keep</span><input value={draft.wins[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, wins: [event.target.value, ...current.wins.slice(1)] }))} /></label>
-                  <label><span>A loose thread</span><input value={draft.losses[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, losses: [event.target.value, ...current.losses.slice(1)] }))} /></label>
+                  {(["wins", "losses"] as const).map((kind) => (
+                    <div key={kind} className="journal-reflection-column">
+                      {(draft[kind].length ? draft[kind] : [""]).map((value, index) => (
+                        <div key={`${kind}-${index}`} className="journal-reflection-row">
+                          <label>
+                            <span>{kind === "wins"
+                              ? (index === 0 ? "Something to keep" : `Something to keep ${index + 1}`)
+                              : (index === 0 ? "A loose thread" : `A loose thread ${index + 1}`)}</span>
+                            <input value={value} onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setDraft((current) => {
+                                const values = current[kind].length ? [...current[kind]] : [""];
+                                values[index] = nextValue;
+                                return { ...current, [kind]: values };
+                              });
+                            }} />
+                          </label>
+                          {draft[kind].length > 0 && (
+                            <button type="button" className="journal-reflection-remove"
+                              aria-label={`Remove ${kind === "wins" ? "keep" : "release"} ${index + 1}`}
+                              onClick={() => setDraft((current) => ({
+                                ...current,
+                                [kind]: current[kind].filter((_, itemIndex) => itemIndex !== index),
+                              }))}>Remove</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               </details>
             </section>
