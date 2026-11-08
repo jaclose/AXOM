@@ -199,7 +199,7 @@ def mapping(path, root_label, native=None):
     elif root_label == "t2_local": course = "BPM501"
     week = None
     week_evidence = None
-    w = re.search(r"(?i)\bweek\s*0?([1-9]|1[0-9])\b|\bwk\s*0?([1-9]|1[0-9])\b", norm)
+    w = re.search(r"(?i)\bweek\s*0?([1-9]|1[0-9]|20)\b|\bwk\s*0?([1-9]|1[0-9]|20)\b", norm)
     if w: week, week_evidence = int(w.group(1) or w.group(2)), "explicit_path_week"
     elif root_label == "downloads_ncrs_week4": week, week_evidence = 4, "explicit_root_folder_NCRS_Week_4"
     elif root_label == "downloads_goer_week2": week, week_evidence = 2, "explicit_root_folder_GOER_Week_2"
