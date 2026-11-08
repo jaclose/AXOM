@@ -106,11 +106,19 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   const confirmed = confirmedMediaUploads.get(userId) ?? new Set<string>();
   confirmedMediaUploads.set(userId, confirmed);
   const inFlight = new Map<string, Promise<void>>();
+  // Each protection attempt must establish fresh remote-byte authority. Never
+  // use the module-wide confirmed set as evidence for a later revision.
+  const verifiedRemoteOriginals = new Map<string, Promise<void>>();
   let cursor = 0;
   let failed = false;
   let failure: unknown;
   async function ensureUploaded(hash: string, blob: Blob, mimeType: string): Promise<void> {
-    if (confirmed.has(hash)) return;
+    if (confirmed.has(hash)) {
+      // A cached successful upload is historical, not proof that the original
+      // still has the expected bytes at this account-scoped storage path.
+      await verifyRemoteOriginal({ hash, byteSize: blob.size });
+      return;
+    }
     let work = inFlight.get(hash);
     if (!work) {
       work = (async () => {
@@ -123,20 +131,22 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== hash) throw new Error("An account image could not be verified. The workspace has not been marked protected.");
         }
         await assertCurrent();
+        // The new upload was acknowledged, or a 409 object was byte-verified.
+        // Do not fetch this same original again within the same attempt.
+        verifiedRemoteOriginals.set(`private:${hash}:${blob.size}`, Promise.resolve());
         confirmed.add(hash);
       })().finally(() => inFlight.delete(hash));
       inFlight.set(hash, work);
     }
     await work;
   }
-  // A previous manifest is a receipt, not evidence that its original still
-  // exists. Recheck the account-scoped immutable object only on local cache
-  // misses; dedupe shared hashes within this protection attempt, not across
-  // accounts or revisions. Offline/missing/corrupt objects leave the push pending.
-  const verifiedMissingLocalOriginals = new Map<string, Promise<void>>();
-  async function verifyMissingLocalOriginal(known: CloudMediaReference, academic?: AcademicAssetReference): Promise<void> {
+  // Every reused original needs a current account-scoped byte proof, whether
+  // its local cache exists or not. Deduplicate by asset class/hash/size only
+  // for this protection attempt. Prior manifests and module caches are receipts,
+  // never current remote-integrity authority.
+  async function verifyRemoteOriginal(known: Pick<CloudMediaReference, "hash" | "byteSize">, academic?: AcademicAssetReference): Promise<void> {
     const key = `${academic ? "academic" : "private"}:${known.hash}:${known.byteSize}`;
-    let verification = verifiedMissingLocalOriginals.get(key);
+    let verification = verifiedRemoteOriginals.get(key);
     if (!verification) {
       verification = (async () => {
         await assertCurrent();
@@ -159,7 +169,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         }
         await assertCurrent();
       })();
-      verifiedMissingLocalOriginals.set(key, verification);
+      verifiedRemoteOriginals.set(key, verification);
     }
     await verification;
     await assertCurrent();
@@ -182,7 +192,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           // A previous index cannot certify a vanished/corrupted remote object
           // or an index accidentally received from another account. Verify the
           // actual current account original before reusing its receipt.
-          await verifyMissingLocalOriginal(known, knownAcademic);
+          await verifyRemoteOriginal(known, knownAcademic);
           ordered[index] = { ...(knownAcademic ? { academic: knownAcademic } : {}), blobKey,
             hash: known.hash, byteSize: known.byteSize, updatedAt: attachment.updatedAt };
           continue;
@@ -205,7 +215,13 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         const safeReuse = known && known.hash === hash
           && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
           && (!known.academic || academic);
-        if (!safeReuse && !academic) await ensureUploaded(hash, record.blob, attachment.mimeType);
+        if (academic || safeReuse) {
+          // A retained local Blob only proves its own bytes. The remote
+          // original might have changed since the previous cloud receipt.
+          await verifyRemoteOriginal({ hash, byteSize: record.blob.size }, academic);
+        } else {
+          await ensureUploaded(hash, record.blob, attachment.mimeType);
+        }
         ordered[index] = { ...(academic ? { academic } : {}), blobKey, hash, byteSize: record.blob.size, updatedAt: attachment.updatedAt };
       } catch (error) {
         if (!failed) {
