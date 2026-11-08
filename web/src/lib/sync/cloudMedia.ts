@@ -27,7 +27,29 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
   const refs = new Map<string, Reference>();
   for (const question of [...state.questions, ...privateReviewMedia(state.documents)]) {
     const content = "content" in question ? question.content : undefined;
-    for (const attachment of question.attachments ?? []) refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum: content?.assets.find(asset => asset.id === attachment.assetId)?.checksum?.replace(/^sha256:/, "") });
+    for (const attachment of question.attachments ?? []) {
+      const declared = content?.assets.find(asset => asset.id === attachment.assetId)?.checksum;
+      const checksum = declared?.replace(/^sha256:/, "");
+      if (checksum !== undefined && !/^[a-f0-9]{64}$/.test(checksum)) {
+        throw new Error("A source image has an invalid declared checksum. The workspace has not been marked protected.");
+      }
+      const prior = refs.get(attachment.blobKey);
+      if (prior) {
+        // Several questions may share one original, but every reference must
+        // agree on its identity. Do not let Map.set discard conflicting evidence.
+        if (prior.attachment.byteSize !== attachment.byteSize
+          || prior.attachment.updatedAt !== attachment.updatedAt
+          || prior.attachment.mimeType !== attachment.mimeType
+          || (prior.checksum && checksum && prior.checksum !== checksum)) {
+          throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
+        }
+        // Keep the last referencing question for cloud-cache reconstruction,
+        // while retaining a source checksum declared by any earlier reference.
+        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum: checksum ?? prior.checksum });
+      } else {
+        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum });
+      }
+    }
   }
   return refs;
 }
@@ -55,8 +77,10 @@ export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): C
   const manifest = readMediaManifest(value);
   const expected = workspaceMedia(state);
   if (manifest.length !== expected.size || manifest.some((entry) => {
-    const ref = expected.get(entry.blobKey)?.attachment;
-    return !ref || ref.byteSize !== entry.byteSize || ref.updatedAt !== entry.updatedAt;
+    const source = expected.get(entry.blobKey);
+    return !source || source.attachment.byteSize !== entry.byteSize
+      || source.attachment.updatedAt !== entry.updatedAt
+      || (source.checksum !== undefined && source.checksum !== entry.hash);
   })) throw new Error("This protected version has an incomplete image index. Your current workspace is unchanged.");
   return manifest;
 }
@@ -108,16 +132,25 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   async function worker(): Promise<void> {
     while (cursor < entries.length && !failed) {
       const index = cursor++;
-      const [blobKey, { attachment }] = entries[index];
+      const [blobKey, { attachment, checksum }] = entries[index];
       try {
         await assertCurrent();
+        // A matching size/timestamp is not proof of unchanged bytes. Check
+        // the device original even when reusing a previously protected index.
         const known = prior.get(blobKey);
-        if (known && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt) {
-          const academic = academicByHash.get(known.hash);
-          ordered[index] = academic ? { ...known, academic } : known;
+        const knownAcademic = known ? academicByHash.get(known.hash) : undefined;
+        const record = await getQuestionAttachmentBlob(blobKey);
+        if (!record && known
+          && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
+          && (checksum === undefined || checksum === known.hash)
+          && (!known.academic || knownAcademic)) {
+          // Cache eviction does not invalidate an already protected immutable
+          // original. This may recover the last verified original, but must
+          // never certify changed metadata or a different source checksum.
+          ordered[index] = { ...(knownAcademic ? { academic: knownAcademic } : {}), blobKey,
+            hash: known.hash, byteSize: known.byteSize, updatedAt: attachment.updatedAt };
           continue;
         }
-        const record = await getQuestionAttachmentBlob(blobKey);
         if (!record || record.blob.size !== attachment.byteSize) throw new SyncPushError(
           { kind: "rejected", rejection: "missing-image", status: 0 },
           "Some question images are missing on this device. Restore a complete backup before protecting this version.",
@@ -127,8 +160,16 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           "A question image is not supported for account storage.",
         );
         const hash = await sha256(new Uint8Array(await record.blob.arrayBuffer()));
+        if (checksum !== undefined && checksum !== hash) {
+          throw new Error("A source image no longer matches its declared checksum. Restore the original before protecting this version.");
+        }
         const academic = academicByHash.get(hash);
-        if (!academic) await ensureUploaded(hash, record.blob, attachment.mimeType);
+        // A former academic-only reference is not proof that a private
+        // workspace-media object exists after its academic binding disappears.
+        const safeReuse = known && known.hash === hash
+          && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
+          && (!known.academic || academic);
+        if (!safeReuse && !academic) await ensureUploaded(hash, record.blob, attachment.mimeType);
         ordered[index] = { ...(academic ? { academic } : {}), blobKey, hash, byteSize: record.blob.size, updatedAt: attachment.updatedAt };
       } catch (error) {
         if (!failed) {
