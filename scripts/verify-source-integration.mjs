@@ -491,6 +491,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (process.argv.length !== 3) throw new Error("Usage: verify-source-integration.mjs <manifest.json>");
     const manifest = JSON.parse(readFileSync(process.argv[2], "utf8"));
+    // The executable is the release attestation entrypoint, not a permissive
+    // diagnostic adapter. Every reachable ordinary source-history revision must
+    // have its pinned Git blob receipt before a v2 success report is emitted.
+    if (manifest.version === 2 && manifest.requireSourceBlobReceipts !== true) {
+      throw new Error("v2 CLI requires exact source-history blob receipts (requireSourceBlobReceipts=true); caller assertions do not establish independent content approval.");
+    }
     const report = manifest.version === 2
       ? verifyCompleteSourceIntegration(manifest, {
         readFile: (sha, path) => readGitFile(sha, path, process.cwd(), true),

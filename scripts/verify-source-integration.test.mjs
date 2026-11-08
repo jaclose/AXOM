@@ -174,8 +174,17 @@ test("v2 verifies complete two-source Git ranges including deletion and rejects 
   assert.throws(() => verifyCompleteSourceIntegration({ ...input, integratedSha: parallel }, adapters), /not an ancestor/);
   const cli = fileURLToPath(new URL("./verify-source-integration.mjs", import.meta.url));
   const manifestPath = join(cwd, "manifest.json");
-  writeFileSync(manifestPath, JSON.stringify(input));
+  // The release-facing CLI enforces strict receipts even though the exported
+  // v2 API still supports receipt-free synthetic diagnostics.
+  const sourceBlobReceipts = input.sources.flatMap(({ baseSha, sourceSha }) =>
+    listGitHistoryChanges(baseSha, sourceSha, cwd).flatMap(commit =>
+      commit.changes.filter(change => change.status !== "D").map(change => {
+        const { mode, blob } = readGitFile(commit.sha, change.path, cwd, true);
+        return { commitSha: commit.sha, path: change.path, mode, blob };
+      })));
+  writeFileSync(manifestPath, JSON.stringify({ ...input, requireSourceBlobReceipts: true, sourceBlobReceipts }));
   const cliResult = JSON.parse(execFileSync(process.execPath, [cli, manifestPath], { cwd, encoding: "utf8" }));
+  assert.equal(cliResult.sourceBlobReceiptParityVerified, true);
   assert.equal(cliResult.verifiedFiles, 3);
   assert.equal(cliResult.deletedFiles, 1);
 });
