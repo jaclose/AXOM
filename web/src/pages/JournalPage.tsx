@@ -10,6 +10,7 @@ import {
   Trash2, Trophy, X,
 } from "lucide-react";
 import { useStore } from "../lib/store";
+import { userIdFromName } from "../lib/userIdentity";
 import { useUi } from "../lib/uiStore";
 import { useAccount } from "../lib/account/accountStore";
 import * as localVault from "../lib/localVault";
@@ -232,10 +233,31 @@ function JournalDeskLaptop({ today }: { today: string }) {
   );
 }
 
+// A display-name edit changes the legacy name-derived userId, but it is not a
+// workspace replacement. Retain the editor only if the profile changed in
+// exactly those two fields while the notebook data stayed in the same workspace.
+function isNameOnlyJournalRename(previous: Profile, next: Profile, journalUnchanged: boolean): boolean {
+  if (!journalUnchanged || previous.name === next.name || previous.userId === next.userId) return false;
+  if (previous.userId !== userIdFromName(previous.name) || next.userId !== userIdFromName(next.name)) return false;
+  const before = previous as unknown as Record<string, unknown>;
+  const after = next as unknown as Record<string, unknown>;
+  const keys = Object.keys(before);
+  return keys.length === Object.keys(after).length
+    && keys.every((key) => key === "name" || key === "userId" || before[key] === after[key]);
+}
+
 export function JournalPage({ registerAppTransitionGuard }: {
   registerAppTransitionGuard?: RegisterJournalTransitionGuard;
 } = {}) {
   const s = useStore();
+  const writerIdentityRef = useRef({ profile: s.profile, journal: s.journal, epoch: 0 });
+  const previousWriter = writerIdentityRef.current;
+  if (previousWriter.profile.userId !== s.profile.userId
+    && !isNameOnlyJournalRename(previousWriter.profile, s.profile, previousWriter.journal === s.journal)) {
+    previousWriter.epoch += 1;
+  }
+  previousWriter.profile = s.profile;
+  previousWriter.journal = s.journal;
   const journalDay = useUi((state) => state.journalDay);
   const clearJournalDay = useUi((state) => state.clearJournalDay);
   const reducedMotion = useReducedMotion();
@@ -372,7 +394,7 @@ export function JournalPage({ registerAppTransitionGuard }: {
         />
       ) : (
         <JournalWritingPage
-          key={`${s.profile.userId}:${selectedDay}`}
+          key={`${writerIdentityRef.current.epoch}:${selectedDay}`}
           workspaceId={s.profile.userId}
           day={selectedDay}
           today={today}
@@ -863,6 +885,21 @@ function JournalWritingPage({
     window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = null;
   }, []);
+
+  const previousWriterIdRef = useRef(workspaceId);
+  useEffect(() => {
+    if (previousWriterIdRef.current === workspaceId) return;
+    previousWriterIdRef.current = workspaceId;
+    // The writer survived a display-name-only change. Its old debounce timer
+    // captured an obsolete userId and would abort rather than save this draft.
+    // Re-arm it against the new ID without clearing the in-memory writing.
+    if (!dirtyRef.current) return;
+    cancelScheduledSave();
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      void persist();
+    }, 420);
+  }, [workspaceId, persist, cancelScheduledSave]);
 
   const requestDurableTransition = useCallback<JournalTransitionGuard>(async (transition) => {
     if (transitionPendingRef.current) return false;
