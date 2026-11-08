@@ -330,6 +330,37 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertEqual(len(packages), 1)
             self.assertEqual(packages[0]["questions"], 1)
 
+    def test_malformed_native_bank_metadata_is_held_without_crashing_scan(self):
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("secure fd-relative native package opening unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            package = root / "bank"
+            package.mkdir()
+            (package / "questions.json").write_text(json.dumps(
+                {"bankId": "demo", "questions": [{"id": "one", "stem": "Synthetic",
+                "choices": ["A", "B"]}]}))
+            manifest = package / "manifest.json"
+            original_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("synthetic", root)]
+                for field in ("bank", "source"):
+                    with self.subTest(field=field):
+                        native = {"schemaVersion": 1, "bank": {"id": "demo"},
+                            "questionsFile": "questions.json", "source": {}}
+                        native[field] = ["non-object", "invalid"]
+                        manifest.write_text(json.dumps(native))
+                        row = {"document_type": "native_manifest", "original_path": str(manifest),
+                               "root_label": "synthetic"}
+                        packages, _, notes = ledger.inspect_packages([row])
+                        self.assertEqual(packages, [])
+                        self.assertEqual(row["review_status"], "package_invalid")
+                        self.assertTrue(notes)
+            finally:
+                ledger.ROOTS = original_roots
+
     def test_native_questions_file_must_be_contained_and_not_linked(self):
         # Real file contents are synthetic. Never interpret an outside questions file as a reviewed native bank.
         import os
