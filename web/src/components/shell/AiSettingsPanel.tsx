@@ -7,7 +7,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { RefreshCw, ShieldCheck, Cpu, Cloud, FlaskConical, Power } from "lucide-react";
 import {
-  DEFAULT_AI_SETTINGS, checkProviderHealth, detectOllama, loadAiSettings, saveAiSettings,
+  DEFAULT_AI_SETTINGS, checkProviderHealth, cloudEndpoint, detectOllama, loadAiSettings, saveAiSettings,
   type AiSettings,
 } from "../../lib/ai";
 import type { AiAvailability, AiMode } from "../../lib/ai";
@@ -45,13 +45,34 @@ export function AiSettingsPanel() {
   }
 
   useEffect(() => {
-    if (settings.mode === "local") void runProbe();
-    if (settings.mode === "cloud") {
-      setProbing(true);
-      void checkProviderHealth(settings).then((result) => { setProbe(result); setProbing(false); });
+    if (settings.mode === "local") {
+      void runProbe();
+      return;
     }
+    if (settings.mode !== "cloud") return;
+    // A new Cloud destination must be rechecked without requiring mode toggles.
+    // Ignore slower results from a previously rejected destination.
+    let current = true;
+    setProbe(null);
+    setProbing(true);
+    void checkProviderHealth(settings).then(
+      (result) => {
+        if (!current) return;
+        setProbe(result);
+        setProbing(false);
+      },
+      () => {
+        if (!current) return;
+        setProbe({ ok: false, detail: "Cloud AI could not be checked. Try again later." });
+        setProbing(false);
+      },
+    );
+    return () => { current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.mode]);
+  }, [settings.mode, settings.cloudProxyUrl]);
+
+  const blockedLegacyCloudDestination = settings.mode === "cloud"
+    && Boolean(settings.cloudProxyUrl) && cloudEndpoint(settings) === null;
 
   return (
     <div className="stack" style={{ gap: 14 }}>
@@ -114,6 +135,18 @@ export function AiSettingsPanel() {
 
       {settings.mode === "cloud" && (
         <div className="stack" style={{ gap: 10 }}>
+          {blockedLegacyCloudDestination && (
+            <div className="stack gap6" role="alert" aria-label="Cloud AI connection blocked">
+              <span className="sub">
+                A previous Cloud AI address is no longer trusted. AXOM will not send your account token or study text to it.
+              </span>
+              <div className="row">
+                <GhostButton onClick={() => update({ cloudProxyUrl: undefined })}>
+                  Use AXOM's verified server
+                </GhostButton>
+              </div>
+            </div>
+          )}
           <div className="row" style={{ gap: 8 }}>
             <Tag tone={probe?.ok ? "green" : probing ? "neutral" : "orange"}>{probing ? "Checking…" : probe?.ok ? "Ready" : "Not available"}</Tag>
             <span className="sub">{probe?.detail ?? "Checking your account…"}</span>
