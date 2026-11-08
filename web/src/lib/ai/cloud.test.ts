@@ -77,7 +77,7 @@ describe("Cloud AI credential destination", () => {
 describe("AXOM Cloud AI client", () => {
   it("sends the session token, never a model key, and returns the result", async () => {
     const fetchImpl = vi.fn(() => reply(200, { result: { cards: [1] }, remaining: 41 }));
-    const provider = createCloudProvider({ endpoint: "https://x.supabase.co/functions/v1/ai-proxy", apiKey: "sb_publishable_x", getAccessToken: async () => "jwt-token", isRequestAllowed: () => true, fetchImpl });
+    const provider = createCloudProvider({ endpoint: "https://x.supabase.co/functions/v1/ai-proxy", apiKey: "sb_publishable_x", getAccessToken: async () => "jwt-token", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "jwt-token" }), isRequestAllowed: () => true, fetchImpl });
     await expect(provider.completeJson({ system: "s", prompt: "p", maxTokens: 300, task: "cards" })).resolves.toEqual({ cards: [1] });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token", apikey: "sb_publishable_x" });
@@ -89,13 +89,13 @@ describe("AXOM Cloud AI client", () => {
   });
 
   it("explains signed-out, quota and model-refusal states", async () => {
-    const signedOut = createCloudProvider({ endpoint: "e", getAccessToken: async () => null, isRequestAllowed: () => true, fetchImpl: vi.fn() });
+    const signedOut = createCloudProvider({ endpoint: "e", getAccessToken: async () => null, getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn() });
     await expect(signedOut.completeJson({ prompt: "p" })).rejects.toThrow(/Sign in/);
     await expect(signedOut.available()).resolves.toMatchObject({ ok: false });
-    const quota = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(429, { error: "Today's Cloud AI allowance (60 requests) is used up." })) });
+    const quota = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(429, { error: "Today's Cloud AI allowance (60 requests) is used up." })) });
     await expect(quota.completeJson({ prompt: "p" })).rejects.toThrow(/allowance/);
     expect(cloudAiRemaining()).toBe(0);
-    const refusal = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(200, { result: { error: "Source text is empty." } })) });
+    const refusal = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(200, { result: { error: "Source text is empty." } })) });
     await expect(refusal.completeJson({ prompt: "p" })).rejects.toThrow("Source text is empty.");
   });
 });
@@ -106,7 +106,7 @@ describe("cached Cloud AI provider request-time consent", () => {
     let allowed = true;
     const getAccessToken = vi.fn(async () => "private-jwt");
     const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
-    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, fetchImpl, isRequestAllowed: () => allowed });
+    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }), fetchImpl, isRequestAllowed: () => allowed });
     allowed = false;
     await expect(provider.available()).resolves.toMatchObject({ ok: false });
     await expect(provider.completeJson({ prompt: "private study material" })).rejects.toThrow(/Cloud AI is off/);
@@ -119,7 +119,7 @@ describe("cached Cloud AI provider request-time consent", () => {
     let releaseToken!: (token: string | null) => void;
     const getAccessToken = vi.fn(() => new Promise<string | null>((resolve) => { releaseToken = resolve; }));
     const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
-    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, fetchImpl, isRequestAllowed: () => allowed });
+    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }), fetchImpl, isRequestAllowed: () => allowed });
     const request = provider.completeJson({ prompt: "sensitive question text" });
     expect(getAccessToken).toHaveBeenCalledTimes(1);
     allowed = false; // Another tab confirmed Off while the auth promise was pending.
@@ -133,7 +133,7 @@ describe("cached Cloud AI provider request-time consent", () => {
     let releaseReply!: (response: Response) => void;
     const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { releaseReply = resolve; }));
     const provider = createCloudProvider({
-      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }),
       fetchImpl, isRequestAllowed: () => allowed,
     });
     const request = provider.completeJson({ prompt: "sensitive question text" });
@@ -158,7 +158,7 @@ describe("cached Cloud AI provider request-time consent", () => {
       }),
     }));
     const provider = createCloudProvider({
-      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }),
       isRequestAllowed: () => allowed,
       fetchImpl: fetchSpy as unknown as typeof fetch,
     });
@@ -173,7 +173,7 @@ describe("cached Cloud AI provider request-time consent", () => {
   it("fails closed when consent verification itself throws", async () => {
     const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
     const provider = createCloudProvider({
-      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "private-jwt" }),
       fetchImpl, isRequestAllowed: () => { throw new Error("storage denied"); },
     });
     await expect(provider.completeJson({ prompt: "no egress" })).rejects.toThrow(/Cloud AI is off/);
