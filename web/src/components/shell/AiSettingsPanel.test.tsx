@@ -153,7 +153,7 @@ describe("Cloud AI legacy destination recovery", () => {
     mocks.saved = { mode: "off", localEndpoint: "http://localhost:11434" };
     mocks.saveOk = false;
     render(<AiSettingsPanel />);
-    fireEvent.click(screen.getByRole("button", { name: /Local \\(Ollama\\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Local/ }));
     fireEvent.click(screen.getByRole("button", { name: /^Demo/ }));
     expect(mocks.saved.mode).toBe("off");
     expect(screen.getByRole("button", { name: /^Off/ }).className).toContain("on");
