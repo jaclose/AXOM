@@ -2404,7 +2404,10 @@ describe("Journal notebook foundation", () => {
         journal: [original],
       }));
     });
-    expect((screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value)
+    // The restored entry may reopen with a guided lens, whose inline label is
+    // "One line to begin" rather than the open-writing label.
+    const restoredDesk = screen.getByRole("region", { name: "Write at your desk" });
+    expect((within(restoredDesk).getByRole("textbox") as HTMLTextAreaElement).value)
       .toBe("Only workspace A may see this private text.");
     fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
     expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
