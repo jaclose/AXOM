@@ -299,6 +299,37 @@ class SourceLedgerTests(unittest.TestCase):
                         "private_use_only_rights_not_asserted",
                     )
 
+    def test_native_source_roots_with_same_label_remain_isolated(self):
+        # SSD term roots may share one label while pointing at distinct approved folders.
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("fd-relative no-follow package open unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            first, second = base / "Term 4 A", base / "Term 4 B"
+            first.mkdir()
+            second.mkdir()
+            package = second / "bank"
+            package.mkdir()
+            (package / "questions.json").write_text(json.dumps(
+                {"bankId": "source-b", "questions": [{"id": "q", "stem": "control",
+                 "choices": ["A", "B"]}]}))
+            manifest = package / "manifest.json"
+            manifest.write_text(json.dumps({"schemaVersion": 1,
+                "questionsFile": "questions.json", "bank": {"id": "source-b"}}))
+            row = {"document_type": "native_manifest", "original_path": str(manifest),
+                   "root_label": "ssd_term_4"}
+            previous_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("ssd_term_4", first), ("ssd_term_4", second)]
+                packages, _, notes = ledger.inspect_packages([row])
+            finally:
+                ledger.ROOTS = previous_roots
+            self.assertFalse(notes)
+            self.assertEqual(len(packages), 1)
+            self.assertEqual(packages[0]["questions"], 1)
+
     def test_native_questions_file_must_be_contained_and_not_linked(self):
         # Real file contents are synthetic. Never interpret an outside questions file as a reviewed native bank.
         import os
