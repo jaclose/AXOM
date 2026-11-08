@@ -55,6 +55,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const [generationError, setGenerationError] = useState("");
   const generationAbort = useRef<AbortController | null>(null);
   const autoDraftStarted = useRef(false);
+  const autoDraftAccount = useRef(accountId);
+  const autoDraftAccountChanged = useRef(false);
   const provider = useMemo(() => resolveActiveProvider(), []);
   const sourceQuestions = useMemo(() => {
     const byId = new Map(questions.map(question => [question.id, question]));
@@ -90,6 +92,13 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     setChecking(true);
     setSubmission(undefined);
     setStatusIdentity("");
+    // Account-specific publishing attestations must never follow another
+    // learner across a session switch, even when this modal stays mounted.
+    setRights(false);
+    setAnswers(false);
+    setCredit("");
+    setError("");
+    setMessage("");
     if (!accountId) { setChecking(false); return; }
     void listMyQuestionSetSubmissions(accountId).then(owned => {
       if (alive && useAccount.getState().user?.id === accountId) {
@@ -105,7 +114,15 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
 
   useEffect(() => {
     setDrafts([]);
-    autoDraftStarted.current = false;
+    // Auto-drafting is authorized by an explicit publish action for the
+    // account that opened it. Signing out or switching accounts revokes that
+    // one-time permission; manually reopening the review is required.
+    if (autoDraftAccount.current && accountId !== autoDraftAccount.current) {
+      autoDraftAccountChanged.current = true;
+    } else if (!autoDraftAccount.current && accountId) {
+      autoDraftAccount.current = accountId;
+    }
+    autoDraftStarted.current = autoDraftAccountChanged.current;
     setGenerationProgress("");
     setGenerationError("");
     return () => { generationAbort.current?.abort(); };
@@ -218,8 +235,10 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   }
 
   async function submit() {
+    // The rendered account may lag behind the session store during a switch.
+    // Never send another account's saved rights and answer attestations.
     if (!accountId || statusIdentity !== `${accountId}:${set.id}`
-      || !rights || !answers || checking || busy || generating || drafts.length
+      || useAccount.getState().user?.id !== accountId || !rights || !answers || checking || busy || generating || drafts.length
       || unresolved || withMedia || missingExplanations
       || (submission && submission.status !== "rejected")) return;
     setBusy(true); setError(""); setMessage("");
@@ -232,12 +251,16 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         liveSets: live.questionSets ?? [], liveQuestions: live.questions ?? [],
       });
       const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit);
+      // Account-operation RPCs also assert the current session. Avoid an old
+      // account's follow-up query/confirmation if it changed while awaiting.
+      if (useAccount.getState().user?.id !== accountId) return;
       const result = await refresh();
       if (!result || result.id !== id) throw new Error("The submission could not be read back. Check its status before retrying.");
       setMessage(result?.status === "rejected"
         ? "This version was already rejected. Revise the questions before submitting again."
         : "Submission received. It will appear in search after an academic reviewer approves it.");
     } catch (cause) {
+      if (useAccount.getState().user?.id !== accountId) return;
       setError(cause instanceof Error ? cause.message : "The submission could not be confirmed. Your local set is unchanged.");
       try {
         const recovered = await refresh();
@@ -250,14 +273,32 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   }
 
   async function withdraw() {
-    if (!accountId || !submission || busy || !window.confirm(
-      "Withdraw this Question Set from the shared library? Already imported copies stay with other learners.")) return;
+    // An account switch can happen while a submission is displayed or even
+    // during the native confirmation prompt. Never act on another account's
+    // cached submission (the server's RLS is still the final authority).
+    if (!accountId || statusIdentity !== `${accountId}:${set.id}`
+      || useAccount.getState().user?.id !== accountId || !submission
+      || submission.sourceId !== set.id || checking || busy || generating
+      || !window.confirm(
+        "Withdraw this Question Set from the shared library? Already imported copies stay with other learners.")) return;
+    if (useAccount.getState().user?.id !== accountId) return;
+
+    const withdrawingId = submission.id;
     setBusy(true); setError(""); setMessage("");
     try {
-      await withdrawQuestionSetSubmission(accountId, submission.id);
-      await refresh();
+      await withdrawQuestionSetSubmission(accountId, withdrawingId);
+      const remaining = await refresh();
+      // An RPC returning without error does not establish that the record was
+      // removed. Do not show a false success while the same submission remains.
+      if (remaining?.id === withdrawingId) {
+        throw new Error("Withdrawal could not be confirmed. The submission is still listed; check its status before retrying.");
+      }
       setMessage("The submission was withdrawn from the library.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Withdrawal could not be confirmed."); }
+    } catch (cause) {
+      if (useAccount.getState().user?.id === accountId) {
+        setError(cause instanceof Error ? cause.message : "Withdrawal could not be confirmed.");
+      }
+    }
     finally { setBusy(false); }
   }
 
@@ -308,7 +349,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       </details>}
       {!accountId && <p role="status">Sign in through Account to submit a set.</p>}
       {checking && <p role="status">Checking your existing submission…</p>}
-      {submission && <div className="qsl-submission-status">
+      {submission && statusIdentity === `${accountId}:${set.id}` && useAccount.getState().user?.id === accountId && <div className="qsl-submission-status">
         <Tag tone={submission.status === "approved" ? "gold" : submission.status === "rejected" ? "orange" : "neutral"}>{submission.status}</Tag>
         <p>{submission.status === "approved" ? "This set is searchable now." : submission.status === "pending"
           ? "This set is waiting for academic review." : "This set needs a revision before it can be listed."}</p>
