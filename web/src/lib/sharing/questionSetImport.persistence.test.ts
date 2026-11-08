@@ -124,6 +124,51 @@ describe("durable shared-question-set import", () => {
     expect(useStore.getState().questionSets).toHaveLength(1);
   });
 
+  it("does not join a revoked prior session's same-account import receipt", async () => {
+    const share = await input();
+    let firstSessionRevoked = false;
+    const oldSession = vi.fn(() => !firstSessionRevoked);
+    const checkpoint = getVaultWriteCheckpoint();
+    const oldImport = useStore.getState().commitSharedQuestionSetImport({
+      ...share,
+      accountGuard: { accountId: "account-1", isCurrentAccount: oldSession },
+    });
+    // Simulates A → B → A: the ID matches again, but the original operation
+    // lifetime was permanently revoked by the account subscription.
+    firstSessionRevoked = true;
+    const newSession = vi.fn(() => true);
+    const newImport = useStore.getState().commitSharedQuestionSetImport({
+      ...share,
+      accountGuard: { accountId: "account-1", isCurrentAccount: newSession },
+    });
+    const [oldResult, newResult] = await Promise.all([oldImport, newImport]);
+    expect(oldResult).toMatchObject({ ok: false, message: expect.stringMatching(/account changed/i) });
+    expect(newResult).toMatchObject({ ok: true, added: 1, alreadyImported: false });
+    expect(oldSession).toHaveBeenCalledTimes(2);
+    expect(newSession).toHaveBeenCalled();
+    expect(getVaultWriteCheckpoint() - checkpoint).toBe(1);
+    expect(useStore.getState().questionSets).toHaveLength(1);
+  });
+
+  it("does not reuse a same-account import when its prior session guard throws", async () => {
+    const share = await input();
+    const firstSession = vi.fn().mockReturnValueOnce(true)
+      .mockImplementation(() => { throw new Error("session is unavailable"); });
+    const checkpoint = getVaultWriteCheckpoint();
+    const oldImport = useStore.getState().commitSharedQuestionSetImport({
+      ...share,
+      accountGuard: { accountId: "account-1", isCurrentAccount: firstSession },
+    });
+    const newImport = useStore.getState().commitSharedQuestionSetImport({
+      ...share,
+      accountGuard: { accountId: "account-1", isCurrentAccount: () => true },
+    });
+    const [oldResult, newResult] = await Promise.all([oldImport, newImport]);
+    expect(oldResult).toMatchObject({ ok: false, message: expect.stringMatching(/account changed/i) });
+    expect(newResult).toMatchObject({ ok: true, added: 1 });
+    expect(getVaultWriteCheckpoint() - checkpoint).toBe(1);
+  });
+
   it("fails closed when the session guard throws", async () => {
     const share = await input();
     const checkpoint = getVaultWriteCheckpoint();
