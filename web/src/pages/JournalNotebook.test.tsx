@@ -2452,4 +2452,45 @@ describe("Journal notebook foundation", () => {
     expect(useStore.getState().journal.filter((entry) => entry.date.startsWith(TODAY_KEY))).toHaveLength(1);
   });
 
+
+  it("does not expose a signed-out owner's private draft during a staged signed-in account switch", async () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "journal-auth-A-private-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      freeWriting: "A saved private entry that must not appear for B.",
+    };
+    act(() => {
+      useStore.setState({ journal: [original] });
+      useStore.getState().updateProfile({ name: "Journal Auth Alpha" });
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-auth-A", email: "alpha@example.invalid", displayName: "Journal Auth Alpha", emailConfirmed: true },
+      });
+    });
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "An even newer unsaved private sentence for A." },
+    });
+
+    // Auth can change before the replacement workspace has been hydrated.
+    // The legacy profile userId is derived from name. A profile-only rename
+    // followed by the B notebook array must not be treated as A's cosmetic rename.
+    act(() => {
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-auth-B", email: "beta@example.invalid", displayName: "Journal Auth Beta", emailConfirmed: true },
+      });
+      useStore.getState().updateProfile({ name: "Journal Auth Beta" });
+    });
+    act(() => { useStore.setState({ journal: [] }); });
+    expect(useStore.getState().journal).toEqual([]);
+
+    const editor = (screen.queryByLabelText("Free writing")
+      ?? within(screen.getByRole("region", { name: "Write at your desk" })).getByRole("textbox")) as HTMLTextAreaElement;
+    expect(editor.value).toBe("");
+    expect(editor.value).not.toContain("private");
+  });
+
 });
