@@ -977,8 +977,9 @@ function JournalWritingPage({
     setDraftState(next);
     setSaveState("saving");
     setSaveError("");
-    const result = await persist("complete");
-    if (result === "saved") onCompleted(day);
+    // A late edit can supersede the first flush. Keep Done pending until the
+    // latest in-memory draft passes the same exact-write gate as navigation.
+    await requestDurableTransition(() => onCompleted(day));
   }
 
   function handleBookKeyDown(event: KeyboardEvent<HTMLElement>) {
