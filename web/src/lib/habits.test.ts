@@ -69,6 +69,16 @@ describe("entryFor / statusOn", () => {
   });
 });
 
+describe("flexible weekly habit semantics", () => {
+  it("counts completed weeks, not consecutive weekdays, for a gym four-days-per-week habit", () => {
+    const gym = habit({type:"weekly",weeklyTarget:4,trackingStartsAt:"2026-06-08"});
+    const entries = ["2026-06-15","2026-06-17","2026-06-19","2026-06-20"].map(date=>entry(date,"done"));
+    expect(currentStreak(gym,entries,"2026-06-25")).toBe(1);
+    const dates=Array.from({length:7},(_,i)=>addLocalDays("2026-06-21",-i));
+    expect(weekStats(gym,entries,dates).adherence).toBe(100);
+  });
+});
+
 describe("currentStreak", () => {
   it("counts a consecutive done chain", () => {
     expect(currentStreak(habit(), chain(TODAY, ["done", "done", "done"]), TODAY)).toBe(3);
