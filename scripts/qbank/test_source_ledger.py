@@ -185,6 +185,49 @@ class SourceLedgerTests(unittest.TestCase):
             finally:
                 ledger.ROOTS, ledger.OUT = previous_roots, previous_out
 
+    def test_scanner_does_not_follow_source_file_symlinks(self):
+        # A folder traversal with followlinks=False still enumerates symlinked files.
+        import os
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root = base / "authorized_sources"
+            out = base / "output"
+            root.mkdir()
+            out.mkdir()
+            legitimate = root / "PQ ordinary.txt"
+            legitimate.write_bytes(b"Question 1: synthetic authorized source")
+            outside = base / "unapproved_source.txt"
+            outside.write_bytes(b"Question 1: synthetic source outside the authorized root")
+            external_alias = root / "PQ external alias.txt"
+            internal_alias = root / "PQ internal alias.txt"
+            try:
+                external_alias.symlink_to(outside)
+                internal_alias.symlink_to(legitimate)
+            except (OSError, NotImplementedError):
+                self.skipTest("filesystem does not permit file symlinks")
+
+            previous_roots, previous_out = ledger.ROOTS, ledger.OUT
+            try:
+                ledger.ROOTS, ledger.OUT = [("synthetic_source_root", root)], out
+                rows, stats = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+            finally:
+                ledger.ROOTS, ledger.OUT = previous_roots, previous_out
+
+            self.assertEqual([row["original_filename"] for row in rows], [legitimate.name])
+            self.assertEqual(stats[0]["catalogued"], 1)
+            self.assertEqual(stats[0]["skipped"].get("symlinked_file_not_followed"), 2)
+            self.assertEqual(rows[0]["source_sha256"], hashlib.sha256(legitimate.read_bytes()).hexdigest())
+            cache = json.loads((out / "source-hash-cache.json").read_text())
+            self.assertEqual(list(cache), [str(legitimate)])
+            self.assertNotIn(str(external_alias), cache)
+            self.assertNotIn(str(internal_alias), cache)
+
+            # Also refuse a new symlink at hash-open time, closing the scan/open race
+            # on platforms where O_NOFOLLOW is supported.
+            if hasattr(os, "O_NOFOLLOW"):
+                with self.assertRaises(OSError):
+                    ledger.sha256_file(external_alias)
+
     def test_scanner_holds_checksum_if_source_changes_mid_read(self):
         # A digest of partially stale bytes must never become an authoritative revision.
         from unittest.mock import patch
