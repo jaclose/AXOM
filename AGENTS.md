@@ -14,19 +14,13 @@ Start with only **AGENTS + [AI_STATE](docs/AI_STATE.md) + task**. Check
 `git status --short --branch`, `git rev-parse --short HEAD`, and `git worktree list`.
 State describes a dated checkout, never another branch or production.
 
-Before expanding context ask: **QUESTION** (what is unknown?), **NEED** (does it
-affect this task?), **SOURCE** (smallest authority?), **SCOPE** (which section?).
-Search filenames/symbols with `rg` before reading. Use [INDEX](docs/INDEX.md) only
-when location or authority is unclear. Retrieve the relevant doc, source region,
-tests, then necessary contracts. Dependency relevance beats directory proximity.
-Stop retrieving when evidence is sufficient to implement safely; correctness wins.
+Retrieve the smallest source that resolves the task: search filenames and symbols
+with `rg`, then relevant docs/tests. Use [INDEX](docs/INDEX.md) for routing only.
+Correctness wins over context volume.
 
-Do not preload directions, archives, source trees, all branches/worktrees, previous
-sessions or the Obsidian graph. Graph links are optional retrieval routes: normally
-one relevant semantic hop, then reassess. Historical claims are not current behavior.
-Filter logs and large files; do not reread understood material. For noisy commands,
-write output to `/tmp/axom-<task>.log`, inspect the exit code and relevant `rg`/`tail`
-regions. A passing log excerpt cannot hide a failing command.
+Do not preload archives, graphs, branch histories or old sessions; dated claims
+are not current behavior. For noisy commands, log to `/tmp/axom-<task>.log`,
+check exit status, then inspect relevant output. A passing excerpt cannot hide failure.
 
 ## Protect before editing
 
