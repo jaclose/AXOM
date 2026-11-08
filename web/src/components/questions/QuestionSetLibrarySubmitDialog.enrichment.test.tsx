@@ -122,8 +122,37 @@ describe("Question Set draft explanation review", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
     await waitFor(() => expect(mocks.updateQuestion).toHaveBeenCalledWith("q-1", expect.objectContaining({
       explanation: expect.stringContaining("AXOM AI-assisted explanation"),
-      choiceRationales: expect.objectContaining({ B: expect.stringContaining("endothelial") }),
+      choiceRationales: expect.objectContaining({
+        A: expect.stringContaining("AXOM AI-assisted rationale (verify against source): Tunica media"),
+        B: expect.stringContaining("AXOM AI-assisted rationale (verify against source): Tunica intima"),
+      }),
     })));
+    // These are explicitly model-assisted teaching texts, not source-verified
+    // rationales. Do not alter the underlying source question or answer key.
+    expect(source.choiceRationales).toBeUndefined();
+    expect(source.correctKey).toBe("A");
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects AI choice rationales that exceed the share limit once provenance is added", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    mocks.completeJson.mockResolvedValueOnce({
+      explanation: "Tunica media contains concentric smooth muscle layers regulating arterial caliber and vascular resistance.",
+      choiceRationales: {
+        A: "A".repeat(9_990),
+        B: "Tunica intima contains the endothelial lining rather than the vascular smooth muscle.",
+      },
+      keywords: [],
+    });
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ });
+    await waitFor(() => expect(draftButton.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/Finish the explanation and every choice rationale before saving/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
