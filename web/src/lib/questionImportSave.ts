@@ -91,6 +91,9 @@ export type ReviewedImportRefusal =
   | { ok: false; reason: "invalid-question"; errors: string[] };
 
 export interface PreparedReviewedImport {
+  /** Transient origin epoch: an A-prepared reusable set cannot be saved by B
+   * or by a later A session after an A -> B -> A transition. */
+  accountScopeKey: string;
   originalFile?: Blob;
   ok: true;
   fingerprint: string;
@@ -302,6 +305,7 @@ export function prepareReviewedImport(
 
   return {
     ok: true,
+    accountScopeKey: currentReviewedImportAccountScope().key("reviewed-import-preparation"),
     originalFile: document?.originalFile,
     fingerprint,
     plan: { questions: wantsSet ? questions : [], questionSet, documentWrite },
@@ -345,6 +349,13 @@ export async function saveReviewedImport(
   // Reused sets bypass persistReviewedImportOnce; bind their durable receipt,
   // original repair and image updates to the same monotonic account epoch.
   const account = currentReviewedImportAccountScope();
+  if (prepared.accountScopeKey !== account.key("reviewed-import-preparation")) {
+    return {
+      ok: false,
+      message: "The account changed while importing questions. Reopen this import in your current account.",
+      rollbackFailures: [],
+    };
+  }
   const assertCurrent = () => { account.assertCurrent(); store.assertCurrent?.(); };
   assertCurrent();
   const noImages = { attached: 0, missing: 0, problems: [] as string[] };
