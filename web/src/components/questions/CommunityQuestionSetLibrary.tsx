@@ -14,10 +14,15 @@ import "../../styles/question-set-library.css";
 // A user can sign out and return to the same account while an async request is
 // pending. Account-ID equality alone cannot authorize that older operation.
 // Subscribe for the operation lifetime, without coupling QBank to cloud sync.
-function observeAccountSession(accountId: string) {
+function observeAccountSession(accountId: string, onRevoked: () => void) {
   let revoked = useAccount.getState().user?.id !== accountId;
   const unsubscribe = useAccount.subscribe(state => {
-    if (state.user?.id !== accountId) revoked = true;
+    if (!revoked && state.user?.id !== accountId) {
+      revoked = true;
+      // Clear pending UI immediately; a batched A → B → A transition may
+      // never produce the accountId effect's intermediate render.
+      onRevoked();
+    }
   });
   return {
     current: () => !revoked && useAccount.getState().user?.id === accountId,
@@ -74,7 +79,10 @@ export function CommunityQuestionSetLibrary() {
   async function open(id: string) {
     if (!accountId || opening || useAccount.getState().user?.id !== accountId) return;
     const openedBy = accountId;
-    const session = observeAccountSession(openedBy);
+    const session = observeAccountSession(openedBy, () => {
+      setPreview(undefined); setPreviewAccountId(undefined);
+      setPreviewError(""); setOpening(false);
+    });
     if (!session.current()) { session.stop(); return; }
     setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setOpening(true); setImported(false);
@@ -101,7 +109,10 @@ export function CommunityQuestionSetLibrary() {
     if (!preview || !accountId || previewAccountId !== accountId
       || useAccount.getState().user?.id !== accountId || importing || imported) return;
     const importingAccount = accountId;
-    const session = observeAccountSession(importingAccount);
+    const session = observeAccountSession(importingAccount, () => {
+      setImporting(false); setPreview(undefined); setPreviewAccountId(undefined);
+      setPreviewError(""); setImported(false);
+    });
     if (!session.current()) { session.stop(); return; }
     setImporting(true); setPreviewError("");
     try {
@@ -130,7 +141,10 @@ export function CommunityQuestionSetLibrary() {
   async function like(set: LibraryQuestionSet) {
     if (!accountId || useAccount.getState().user?.id !== accountId || liking) return;
     const likingAccount = accountId;
-    const session = observeAccountSession(likingAccount);
+    const session = observeAccountSession(likingAccount, () => {
+      setLiking(undefined); setSets([]); setError("");
+      setRefresh(value => value + 1);
+    });
     if (!session.current()) { session.stop(); return; }
     setLiking(set.id); setError("");
     try {
