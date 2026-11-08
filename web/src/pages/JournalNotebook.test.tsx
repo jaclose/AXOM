@@ -1394,7 +1394,13 @@ describe("Journal notebook foundation", () => {
     expect(screen.queryByDisplayValue("Keep B")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Export page" }));
     expect(createObjectURL).toHaveBeenCalledTimes(1);
-    const markdown = await createObjectURL.mock.calls[0][0].text();
+    const exportedBlob = createObjectURL.mock.calls[0][0];
+    const markdown = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(exportedBlob);
+    });
     expect(markdown).toContain("Keep A");
     expect(markdown).toContain("Keep C");
     expect(markdown).not.toContain("Keep B");
