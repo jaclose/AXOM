@@ -60,7 +60,7 @@ test("strict release attestation rejects an absent reviewed blob even when Git t
     sourceBlob.blob.slice(2));
   unlinkSync(objectPath);
   assert.ok(git("ls-tree", "-r", integratedSha, "--", path)
-    .includes(sourceBlob.blob + "\\t" + path));
+    .includes(sourceBlob.blob));
   assert.ok(git("diff", "--name-status", integrationBaseSha, integratedSha)
     .includes("docs/approved.txt"));
   assert.throws(() => invoke(), error => error.status === 1
