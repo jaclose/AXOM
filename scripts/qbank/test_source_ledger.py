@@ -136,6 +136,86 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertEqual(invalid["assessed_ready_not_installed"],0)
             self.assertEqual(len(invalid["rejected_audit_rows"]),1)
 
+    def test_source_hash_cache_cannot_mask_equal_size_replacement(self):
+        # A restored timestamp must never allow an old content SHA to label new bytes.
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp) / "sources"
+            out = pathlib.Path(temp) / "output"
+            source = root / "DERS" / "Week 20" / "PQ 1.txt"
+            source.parent.mkdir(parents=True)
+            out.mkdir()
+            old_bytes = b"Question 1: A?\\n"
+            new_bytes = b"Question 1: B?\\n"
+            self.assertEqual(len(old_bytes), len(new_bytes))
+            source.write_bytes(old_bytes)
+
+            previous_roots, previous_out = ledger.ROOTS, ledger.OUT
+            try:
+                ledger.ROOTS, ledger.OUT = [("synthetic_source_root", root)], out
+                first, _ = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+                self.assertEqual(len(first), 1)
+                old_sha, old_id = first[0]["source_sha256"], first[0]["source_id"]
+                self.assertEqual(old_sha, hashlib.sha256(old_bytes).hexdigest())
+                prior = source.stat()
+                source.write_bytes(new_bytes)
+                import os
+                os.utime(source, ns=(prior.st_atime_ns, prior.st_mtime_ns))
+                self.assertEqual(source.stat().st_size, prior.st_size)
+                self.assertEqual(source.stat().st_mtime_ns, prior.st_mtime_ns)
+
+                second, _ = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+                self.assertEqual(len(second), 1)
+                new_sha = hashlib.sha256(new_bytes).hexdigest()
+                self.assertEqual(second[0]["source_sha256"], new_sha)
+                self.assertNotEqual(second[0]["source_sha256"], old_sha)
+                self.assertNotEqual(second[0]["source_id"], old_id)
+                self.assertEqual(second[0]["source_revision"], "sha256:" + new_sha)
+                cache = json.loads((out / "source-hash-cache.json").read_text())
+                self.assertEqual(cache[str(source)]["sha256"], new_sha)
+                self.assertEqual(second[0]["week"], 20)
+
+                # A hash read failure must not resurrect an old cached checksum.
+                from unittest.mock import patch
+                with patch.object(ledger, "sha256_file", side_effect=OSError("synthetic read failure")):
+                    failed, _ = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+                self.assertIsNone(failed[0]["source_sha256"])
+                self.assertIsNone(failed[0]["source_revision"])
+                self.assertEqual(failed[0]["unresolved_reason"], "hash_failed:OSError")
+                self.assertNotIn(str(source), json.loads((out / "source-hash-cache.json").read_text()))
+            finally:
+                ledger.ROOTS, ledger.OUT = previous_roots, previous_out
+
+    def test_scanner_holds_checksum_if_source_changes_mid_read(self):
+        # A digest of partially stale bytes must never become an authoritative revision.
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp) / "sources"
+            out = pathlib.Path(temp) / "output"
+            root.mkdir()
+            out.mkdir()
+            source = root / "PQ 1.txt"
+            source.write_bytes(b"Question 1: initial source")
+            actual_hash = ledger.sha256_file
+
+            def mutate_after_digest(path):
+                digest = actual_hash(path)
+                path.write_bytes(b"Question 1: changed while being read")
+                return digest
+
+            prior_roots, prior_out = ledger.ROOTS, ledger.OUT
+            try:
+                ledger.ROOTS, ledger.OUT = [("synthetic_source_root", root)], out
+                with patch.object(ledger, "sha256_file", side_effect=mutate_after_digest):
+                    rows, _ = ledger.load_candidates(ledger.argparse.Namespace(max_hash_mb=1))
+            finally:
+                ledger.ROOTS, ledger.OUT = prior_roots, prior_out
+
+            self.assertEqual(len(rows), 1)
+            self.assertIsNone(rows[0]["source_sha256"])
+            self.assertIsNone(rows[0]["source_revision"])
+            self.assertEqual(rows[0]["unresolved_reason"], "hash_source_changed_during_scan")
+            self.assertNotIn(str(source), json.loads((out / "source-hash-cache.json").read_text()))
+
     def test_scanned_lecture_filename_hints_do_not_infer_academic_weeks(self):
         # Filename tokens are candidate lecture links, not proven week or source rights.
         filenames = {

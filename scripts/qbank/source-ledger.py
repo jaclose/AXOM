@@ -128,11 +128,6 @@ def write_csv(name, rows, fields):
         for item in rows: w.writerow(item)
     temporary.replace(path)
 
-def read_cache():
-    p = OUT / "source-hash-cache.json"
-    try: return json.loads(p.read_text())
-    except (OSError, ValueError): return {}
-
 def classification(path, root_label, physical_path=None):
     lower = path.lower()
     leaf = pathlib.Path(path).name.lower()
@@ -279,7 +274,8 @@ def pdf_hint(path, pages=4):
         return dict(pdf_probe_status="probe_unavailable_or_timed_out")
 
 def load_candidates(args):
-    old = read_cache()
+    # The on-disk hash cache is an output snapshot, never a trusted source of hashes.
+    # Metadata (even size + mtime_ns) cannot prove the bytes have not changed.
     cache = {}
     rows = []
     stats = []
@@ -332,13 +328,19 @@ def load_candidates(args):
                 bound = args.max_hash_mb * 1048576
                 h_key = str(path)
                 if r["priority"] <= 4 and st.st_size <= bound:
-                    remembered = old.get(h_key)
-                    if isinstance(remembered, dict) and remembered.get("size") == st.st_size and remembered.get("mtime_ns") == st.st_mtime_ns:
-                        r["source_sha256"] = remembered.get("sha256")
-                    if not r["source_sha256"]:
-                        try: r["source_sha256"] = sha256_file(path)
-                        except OSError as error: r["unresolved_reason"] = "hash_failed:" + type(error).__name__
-                    if r["source_sha256"]: cache[h_key] = dict(size=st.st_size, mtime_ns=st.st_mtime_ns, sha256=r["source_sha256"])
+                    try:
+                        current_sha = sha256_file(path)
+                        after_hash = path.stat()
+                        # A source changing during the read cannot receive an authoritative revision.
+                        if (st.st_size, st.st_mtime_ns, st.st_ctime_ns) != (
+                                after_hash.st_size, after_hash.st_mtime_ns, after_hash.st_ctime_ns):
+                            r["unresolved_reason"] = "hash_source_changed_during_scan"
+                        else:
+                            r["source_sha256"] = current_sha
+                    except OSError as error:
+                        r["unresolved_reason"] = "hash_failed:" + type(error).__name__
+                    if r["source_sha256"]:
+                        cache[h_key] = dict(size=st.st_size, mtime_ns=st.st_mtime_ns, sha256=r["source_sha256"])
                 else:
                     r["unresolved_reason"] = "oversized_source_needs_staged_review" if st.st_size > bound else "low_priority_reference_hash_deferred"
                 r["source_id"] = digest_text(str(path) + "|" + (r["source_sha256"] or str(st.st_size) + ":" + str(st.st_mtime_ns)))[:24]
