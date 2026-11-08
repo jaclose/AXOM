@@ -252,29 +252,36 @@ def normalized_pair_key(path):
     n = re.sub(r"[^a-z0-9]+", "", n)
     return n
 
-def inspect_txt_question_metadata(path):
-    # Count question headings only. No user-facing answer is inferred.
+def inspect_txt_question_metadata(path, root):
+    # Follow the original configured root, not an untrusted on-disk path alias.
+    # A source changed into a symlink after inventory must remain unreadable.
     try:
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
-        lines = text.splitlines()
+        fd = open_native_package_file(root, path.parent, path.name)
+        with os.fdopen(fd, "r", encoding="utf-8-sig", errors="replace") as stream:
+            lines = stream.read().splitlines()
         numbers = [int(x) for line in lines[:20000] for x in re.findall(r"(?i)^\s*Question\s+(\d{1,4})\s*[:.\-]", line)]
         answers = sum(bool(re.match(r"(?i)^\s*(?:answer|correct answer)\s*:", line)) for line in lines)
         return dict(detected_question_headings=len(numbers), unique_question_numbers=len(set(numbers)),
                     answer_lines=answers, heading_numbers_contiguous=(sorted(numbers) == list(range(1,len(numbers)+1)) if numbers else None),
                     count_basis="labelled_text_headings_not_parser_output")
-    except OSError as error:
+    except (OSError, ValueError) as error:
         return dict(scan_error=type(error).__name__)
 
-def pdf_hint(path, pages=4):
+def pdf_hint(row, pages=4):
+    # pdftotext receives only bytes from an authorized, no-follow descriptor.
+    # Never pass an untrusted source path to the external reader after inventory.
     try:
-        r = subprocess.run(["pdftotext", "-f", "1", "-l", str(pages), "-layout", str(path), "-"],
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=9, check=False)
+        fd = open_scanned_source_file(row)
+        with os.fdopen(fd, "rb") as stream:
+            r = subprocess.run(["pdftotext", "-f", "1", "-l", str(pages), "-layout", "-", "-"],
+                               stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               timeout=9, check=False)
         if r.returncode != 0: return dict(pdf_probe_status="unreadable_or_short_pdf")
         body = r.stdout.decode("utf-8", "replace")
         questions = re.findall(r"(?im)^\s*(?:Question|Q)\s*[#.: -]*\d{1,3}\s*[.:\-)]", body)
         return dict(pdf_probe_status="partial_text_probe", detected_question_headings_first_pages=len(questions),
                     sampled_pages=pages, count_basis="partial_pdf_pages_not_total")
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return dict(pdf_probe_status="probe_unavailable_or_timed_out")
 
 def load_candidates(args):
@@ -434,6 +441,22 @@ def native_package_file_exists(root, package_dir, relative_file):
     return True
 
 
+def source_root_for_row(row):
+    """Choose the actual configured lexical source root, including duplicate-label SSD roots."""
+    path = pathlib.Path(row["original_path"])
+    matching = [root for label, root in ROOTS if label == row["root_label"]
+                and path.is_relative_to(root)]
+    if not matching:
+        raise ValueError("source_outside_configured_root")
+    return max(matching, key=lambda root: len(root.parts))
+
+
+def open_scanned_source_file(row):
+    """Reopen a post-inventory source without following file or directory symlinks."""
+    path = pathlib.Path(row["original_path"])
+    return open_native_package_file(source_root_for_row(row), path.parent, path.name)
+
+
 def inspect_packages(rows):
     lookup = {r["original_path"]: r for r in rows}
     packages, fingerprints, notes = [], collections.defaultdict(list), []
@@ -591,8 +614,15 @@ def inspect_text_files(rows):
     for r in rows:
         if r["file_extension"] != ".txt" or r["document_type"] == "tracker_template": continue
         if r["priority"] > 3: continue
-        meta = inspect_txt_question_metadata(pathlib.Path(r["original_path"]))
+        try:
+            meta = inspect_txt_question_metadata(pathlib.Path(r["original_path"]), source_root_for_row(r))
+        except (OSError, ValueError) as error:
+            meta = dict(scan_error=type(error).__name__)
         r.update(meta)
+        if "scan_error" in meta:
+            r["review_status"] = "source_read_unavailable"
+            r["unresolved_reason"] = "unsafe_or_unreadable_text_source:" + meta["scan_error"]
+            continue
         if meta.get("detected_question_headings", 0):
             if r["document_type"] == "structured_unknown":
                 r["document_type"] = "review_questions"
@@ -616,7 +646,7 @@ def inspect_pdf_sample(rows, max_count):
         sh = r["source_sha256"]
         if sh and sh in checked: continue
         if sh: checked.add(sh)
-        r.update(pdf_hint(pathlib.Path(r["original_path"])))
+        r.update(pdf_hint(r))
         n += 1
     return n
 
@@ -624,8 +654,16 @@ def parse_templates(rows):
     acts = []
     templates = [r for r in rows if r["document_type"] == "tracker_template" and r["root_label"] == "baseline_templates"]
     for r in templates:
-        p = pathlib.Path(r["original_path"])
-        for lineno, text in enumerate(p.read_text(encoding="utf-8-sig").splitlines(), start=1):
+        try:
+            fd = open_scanned_source_file(r)
+            with os.fdopen(fd, "r", encoding="utf-8-sig") as stream:
+                lines = stream.read().splitlines()
+        except (OSError, ValueError, UnicodeError) as error:
+            r["extraction_status"] = "template_source_read_unavailable"
+            r["review_status"] = "source_read_unavailable"
+            r["unresolved_reason"] = "unsafe_or_unreadable_template:" + type(error).__name__
+            continue
+        for lineno, text in enumerate(lines, start=1):
             text = text.strip()
             if not text or text.endswith(":"): continue
             marker = re.search(r"\[([^]]+)\]\s*$", text)
