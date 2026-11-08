@@ -84,7 +84,7 @@ describe("AXOM Cloud AI client", () => {
     expect(init.redirect).toBe("error");
     expect(JSON.parse(String(init.body))).toMatchObject({ prompt: "p", system: "s", maxTokens: 300, tier: "fast", task: "cards" });
     expect(String(init.body)).not.toMatch(/sk-ant|x-api-key/);
-    expect(cloudAiRemaining()).toBe(41);
+    expect(cloudAiRemaining("test-user")).toBe(41);
     await expect(provider.available()).resolves.toMatchObject({ ok: true, detail: expect.stringContaining("41") });
   });
 
@@ -94,12 +94,68 @@ describe("AXOM Cloud AI client", () => {
     await expect(signedOut.available()).resolves.toMatchObject({ ok: false });
     const quota = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(429, { error: "Today's Cloud AI allowance (60 requests) is used up." })) });
     await expect(quota.completeJson({ prompt: "p" })).rejects.toThrow(/allowance/);
-    expect(cloudAiRemaining()).toBe(0);
+    expect(cloudAiRemaining("test-user")).toBe(0);
     const refusal = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", getAuthSnapshot: () => ({ userId: "test-user", accessToken: "t" }), isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(200, { result: { error: "Source text is empty." } })) });
     await expect(refusal.completeJson({ prompt: "p" })).rejects.toThrow("Source text is empty.");
   });
 });
 
+
+describe("Cloud AI allowance account isolation", () => {
+  it("does not show account A's allowance to B, or B's exhausted allowance to A", async () => {
+    const providerA = createCloudProvider({
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAccessToken: async () => "jwt-a",
+      getAuthSnapshot: () => ({ userId: "quota-account-a", accessToken: "jwt-a" }),
+      fetchImpl: vi.fn(() => reply(200, { result: { text: "ok" }, remaining: 41 })),
+    });
+    await expect(providerA.completeJson({ prompt: "A's text" })).resolves.toEqual({ text: "ok" });
+    expect(cloudAiRemaining("quota-account-a")).toBe(41);
+    expect(cloudAiRemaining("quota-account-b")).toBeNull();
+    expect(cloudAiRemaining()).toBeNull(); // Callers must supply an identity.
+    const providerB = createCloudProvider({
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAccessToken: async () => "jwt-b",
+      getAuthSnapshot: () => ({ userId: "quota-account-b", accessToken: "jwt-b" }),
+      fetchImpl: vi.fn(() => reply(429, { error: "Cloud allowance exhausted." })),
+    });
+    await expect(providerB.available()).resolves.toMatchObject({
+      ok: true, detail: "Signed in · Claude via your AXOM account.",
+    });
+    await expect(providerB.completeJson({ prompt: "B's text" })).rejects.toThrow(/allowance exhausted/);
+    expect(cloudAiRemaining("quota-account-b")).toBe(0);
+    expect(cloudAiRemaining("quota-account-a")).toBeNull();
+    await expect(providerA.available()).resolves.toMatchObject({
+      ok: true, detail: "Signed in · Claude via your AXOM account.",
+    });
+  });
+
+  it("never overwrites B's allowance with an already-sent stale A reply", async () => {
+    let currentId = "quota-race-a";
+    let releaseA!: (value: Response) => void;
+    const sentA = vi.fn(() => new Promise<Response>((resolve) => { releaseA = resolve; }));
+    const providerA = createCloudProvider({
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAccessToken: async () => "jwt-a", fetchImpl: sentA,
+      getAuthSnapshot: () => ({ userId: currentId, accessToken: currentId === "quota-race-a" ? "jwt-a" : "jwt-b" }),
+    });
+    const pendingA = providerA.completeJson({ prompt: "A private study text" });
+    await Promise.resolve();
+    expect(sentA).toHaveBeenCalledTimes(1);
+    currentId = "quota-race-b";
+    const providerB = createCloudProvider({
+      endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+      getAccessToken: async () => "jwt-b",
+      getAuthSnapshot: () => ({ userId: "quota-race-b", accessToken: "jwt-b" }),
+      fetchImpl: vi.fn(() => reply(200, { result: { text: "B" }, remaining: 7 })),
+    });
+    await expect(providerB.completeJson({ prompt: "B" })).resolves.toEqual({ text: "B" });
+    releaseA(new Response(JSON.stringify({ result: { text: "obsolete" }, remaining: 99 }), { status: 200 }));
+    await expect(pendingA).rejects.toThrow(/account.*changed|session.*changed/i);
+    expect(cloudAiRemaining("quota-race-b")).toBe(7);
+    expect(cloudAiRemaining("quota-race-a")).toBeNull();
+  });
+});
 
 describe("cached Cloud AI provider request-time consent", () => {
   it("does not resolve a token or dispatch a request after Cloud is turned off", async () => {

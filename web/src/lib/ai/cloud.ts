@@ -61,10 +61,12 @@ export interface CloudJsonRequest extends AiJsonRequest {
   tier?: "fast" | "quality";
 }
 
-/** Last known allowance left today (null until a call reports it). */
-let lastRemaining: number | null = null;
-export function cloudAiRemaining(): number | null {
-  return lastRemaining;
+/** Last known allowance is an account-scoped receipt, never a device-wide value.
+ * A signed-out/unknown caller receives null instead of the prior learner's quota.
+ */
+let lastRemaining: { userId: string; remaining: number } | null = null;
+export function cloudAiRemaining(userId?: string): number | null {
+  return userId && lastRemaining?.userId === userId ? lastRemaining.remaining : null;
 }
 
 export function createCloudProvider(options: CloudProviderOptions): AIProvider & { completeJson(req: CloudJsonRequest): Promise<unknown> } {
@@ -101,8 +103,9 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
       const token = await options.getAccessToken().catch(() => null);
       if (!canSend()) return { ok: false, detail: consentError };
       if (!sameSession(started) || (token && token !== started.accessToken)) return { ok: false, detail: identityError };
+      const remaining = cloudAiRemaining(started.userId);
       return token
-        ? { ok: true, detail: lastRemaining !== null ? `Signed in · ${lastRemaining} Cloud AI requests left today.` : "Signed in · Claude via your AXOM account." }
+        ? { ok: true, detail: remaining !== null ? `Signed in · ${remaining} Cloud AI requests left today.` : "Signed in · Claude via your AXOM account." }
         : { ok: false, detail: "Sign in to your AXOM account to use Cloud AI." };
     },
     async completeJson(req: CloudJsonRequest): Promise<unknown> {
@@ -145,9 +148,11 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
       // also suppress both the returned proposal and stale quota state.
       if (!canSend()) throw new Error(consentError);
       if (!sameSession(started)) throw new Error(identityError);
-      if (typeof payload.remaining === "number") lastRemaining = payload.remaining;
+      if (typeof payload.remaining === "number" && Number.isFinite(payload.remaining) && payload.remaining >= 0) {
+        lastRemaining = { userId: started.userId, remaining: payload.remaining };
+      }
       if (!response.ok) {
-        if (response.status === 429) lastRemaining = 0;
+        if (response.status === 429) lastRemaining = { userId: started.userId, remaining: 0 };
         throw new Error(payload.error || `Cloud AI failed (${response.status}).`);
       }
       if (payload.result === undefined) throw new Error("Cloud AI returned an empty reply.");
