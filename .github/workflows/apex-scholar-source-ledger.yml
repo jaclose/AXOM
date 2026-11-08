@@ -14,6 +14,8 @@ on:
       - "scripts/qbank/source_ledger_enrich.py"
       - "scripts/qbank/test_source_ledger.py"
       - ".github/workflows/apex-scholar-source-ledger.yml"
+  merge_group:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
