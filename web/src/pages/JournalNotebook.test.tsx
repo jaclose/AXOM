@@ -1258,6 +1258,72 @@ describe("Journal notebook foundation", () => {
       .toEqual(["Edited first release", "Second loose thread"]);
   });
 
+  it("exposes and removes retained private reflections before save, reopen, and export", async () => {
+    const originalId = "private-reflections-page";
+    useStore.setState((state) => ({
+      journal: [...state.journal, {
+        id: originalId,
+        date: `${TODAY_KEY}T12:00:00`,
+        today: "Private reflections need explicit controls.",
+        tomorrow: "",
+        blockers: "",
+        energy: "Medium",
+        rating: "Useful",
+        wins: ["First visible keep", "Older private keep", "Sensitive kept note to remove"],
+        losses: ["First visible release", "Sensitive release to remove"],
+      }],
+    }));
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    const createObjectURL = vi.fn((_blob: Blob) => "blob:private-reflections-export");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.click(screen.getByText("Keep something. Release something."));
+
+    // An older private entry must not remain hidden behind the first input.
+    expect(screen.getByDisplayValue("Older private keep")).toBeTruthy();
+    expect(screen.getByDisplayValue("Sensitive kept note to remove")).toBeTruthy();
+    expect(screen.getByDisplayValue("Sensitive release to remove")).toBeTruthy();
+
+    fireEvent.change(screen.getByDisplayValue("First visible keep"), { target: { value: "" } });
+    expect(screen.getByDisplayValue("Older private keep")).toBeTruthy();
+    fireEvent.change(screen.getByDisplayValue("Older private keep"), { target: { value: "Edited older keep" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove keep 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove release 2" }));
+    expect(screen.queryByDisplayValue("Sensitive kept note to remove")).toBeNull();
+    expect(screen.queryByDisplayValue("Sensitive release to remove")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+    await waitFor(() => expect(useStore.getState().journal.find((entry) => entry.id === originalId)).toMatchObject({
+      wins: ["Edited older keep"],
+      losses: ["First visible release"],
+      today: "Private reflections need explicit controls.",
+      notebookStatus: "draft",
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+    expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next journal page" }));
+    expect(await screen.findByDisplayValue("Edited older keep")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Export page" }));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const exportedBlob = createObjectURL.mock.calls[0][0];
+    const markdown = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(exportedBlob);
+    });
+    expect(markdown).toContain("Edited older keep");
+    expect(markdown).toContain("First visible release");
+    expect(markdown).not.toContain("Sensitive kept note to remove");
+    expect(markdown).not.toContain("Sensitive release to remove");
+  });
+
   it("opens the premium notebook and turns pages with buttons without losing text", async () => {
     // This component test has no hydrated IndexedDB subscriber. Persistence
     // semantics are exercised below and in localVault.test; here the durable
