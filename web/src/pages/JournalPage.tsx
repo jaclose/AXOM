@@ -864,6 +864,9 @@ function JournalWritingPage({
       // pending. Drain the entire read chain before persisting or navigating.
       while (attachmentReadRef.current) await attachmentReadRef.current;
       if (!mountedRef.current) return false;
+      // Done may have marked the draft complete before a queued image rejected.
+      // Never write that optimistic status while its failure is unacknowledged.
+      if (attachmentErrorRef.current && draftRef.current.notebookStatus === "complete") return false;
       if (!dirtyRef.current) {
         // A failed image read is not a successful page turn, even when the
         // rest of the page is already stored.
@@ -872,6 +875,7 @@ function JournalWritingPage({
         return true;
       }
       while (mountedRef.current) {
+        if (attachmentErrorRef.current && draftRef.current.notebookStatus === "complete") return false;
         // Still persist valid writing/images after an image failed, but do not
         // navigate away and hide its warning. The save receipt is for the
         // accepted page content, never the rejected image.
@@ -974,7 +978,7 @@ function JournalWritingPage({
   async function completeToday() {
     // Another page transition, including an earlier Done, already owns this
     // save gate. Never change the completion status behind its back.
-    if (transitionPendingRef.current) return;
+    if (transitionPendingRef.current || attachmentReadRef.current || attachmentErrorRef.current) return;
     cancelScheduledSave();
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) {
