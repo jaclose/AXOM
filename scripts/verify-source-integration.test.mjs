@@ -609,3 +609,56 @@ test("v2 rejects reachable transient unreviewed commits even when final approved
     /[Uu]nreviewed.*history|[Uu]nclaimed.*commit|[Tt]ransient/,
   );
 });
+
+
+test("v2 refuses transient symlink and gitlink objects in an otherwise approved source-file history", t => {
+  // Real Git can retain a 120000 symlink or 160000 gitlink in an intermediate
+  // source commit while its reviewed final tree is an ordinary approved file.
+  // Net path diff and final blob/mode checks alone must NOT approve that history.
+  for (const intermediateMode of ["120000", "160000"]) {
+    const cwd = mkdtempSync(join(tmpdir(), "axom-history-intermediate-mode-"));
+    t.after(() => rmSync(cwd, { recursive: true, force: true }));
+    const git = (...args) => execFileSync("git", args, {
+      cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    git("init", "-q");
+    git("config", "user.name", "AXOM History Fixture");
+    git("config", "user.email", "fixture@example.invalid");
+    mkdirSync(join(cwd, "docs"));
+    writeFileSync(join(cwd, "docs", "approved.txt"), "original regular file\n");
+    git("add", "-A"); git("commit", "-qm", "reviewed base");
+    const baseSha = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "source", baseSha);
+    const object = intermediateMode === "120000"
+      ? execFileSync("git", ["hash-object", "-w", "--stdin"], {
+        cwd, input: "../outside-source", encoding: "utf8",
+      }).trim()
+      : baseSha;
+    git("update-index", "--add", "--cacheinfo", intermediateMode + "," + object + ",docs/approved.txt");
+    git("commit", "-qm", "temporary nonregular object");
+    const intermediateSha = git("rev-parse", "HEAD");
+    assert.match(git("ls-tree", intermediateSha, "--", "docs/approved.txt"),
+      new RegExp("^" + intermediateMode + " "));
+    writeFileSync(join(cwd, "docs", "approved.txt"), "final reviewed regular source\n");
+    git("add", "-A"); git("commit", "-qm", "approved final regular content");
+    const sourceSha = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "integration", baseSha);
+    git("merge", "--no-ff", "-qm", "integrate reviewed source", sourceSha);
+    const integratedSha = git("rev-parse", "HEAD");
+    assert.deepEqual(listGitChanges(baseSha, sourceSha, cwd),
+      [{ status: "M", path: "docs/approved.txt" }]);
+    assert.equal(readGitFile(sourceSha, "docs/approved.txt", cwd).mode, "100644");
+    assert.equal(readGitFile(integratedSha, "docs/approved.txt", cwd).mode, "100644");
+    const adapters = {
+      listChanges: (a, b) => listGitChanges(a, b, cwd),
+      isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+      readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+      listTreePaths: sha => listGitTreePaths(sha, cwd),
+      listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
+    };
+    assert.throws(() => verifyCompleteSourceIntegration({
+      version: 2, integrationBaseSha: baseSha, integratedSha,
+      sources: [{ baseSha, sourceSha }],
+    }, adapters), /[Nn]onregular intermediate source Git object|[Ss]ymbolic intermediate source/);
+  }
+});
