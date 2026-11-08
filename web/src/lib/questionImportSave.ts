@@ -9,6 +9,7 @@
 // writes them once (reusing an identical earlier import instead of writing it
 // again) and then attaches the images the questions name.
 // ===========================================================================
+import { currentReviewedImportAccountScope } from "./account/importEpoch";
 import type { QuestionSet, SourceDocument } from "./library";
 import type { ParsedQuestionDraft } from "./questionParse";
 import {
@@ -341,7 +342,11 @@ export async function saveReviewedImport(
   store: ReviewedImportStore,
   images: readonly File[] = [],
 ): Promise<SavedReviewedImport> {
-  store.assertCurrent?.();
+  // Reused sets bypass persistReviewedImportOnce; bind their durable receipt,
+  // original repair and image updates to the same monotonic account epoch.
+  const account = currentReviewedImportAccountScope();
+  const assertCurrent = () => { account.assertCurrent(); store.assertCurrent?.(); };
+  assertCurrent();
   const noImages = { attached: 0, missing: 0, problems: [] as string[] };
   let plan = prepared.plan;
   let originalSource: { status: "local-pending-sync" | "local-only-oversize"; bytes: number; message?: string } | undefined;
@@ -356,7 +361,7 @@ export async function saveReviewedImport(
       const oversized = prepared.originalFile.size > MAX_SOURCE_ORIGINAL_BYTES;
       const originalFile = oversized ? undefined : originalFileIdentity(document, prepared.originalFile);
       await saveSourceOriginal(document, prepared.originalFile);
-      store.assertCurrent?.();
+      assertCurrent();
       originalSource = oversized
         ? { status: "local-only-oversize", bytes: prepared.originalFile.size,
           message: "This original exceeds the 128 MiB account-original limit. Its verified copy stays on this device; keep an offline backup. Questions and source text may still sync separately." }
@@ -367,18 +372,23 @@ export async function saveReviewedImport(
           : { ...write, patch: { ...write.patch, originalFile } } };
         // An exact repeated import also repairs a legacy record's missing original.
         if (prepared.equivalent) {
+          assertCurrent();
           const checkpoint = getVaultWriteCheckpoint();
           await store.updateDocument(document.id, { originalFile });
+          assertCurrent();
           await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
+          assertCurrent();
         }
       }
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : "The original file could not be saved. Keep it and retry.", rollbackFailures: [] };
     }
   }
+  assertCurrent();
   const coordinated = prepared.equivalent
     ? { joined: false, result: { ok: true as const, questionSetId: prepared.equivalent.setId, questionIds: prepared.equivalent.questionIds, documentId: prepared.wantsDoc ? prepared.existingDocumentId : undefined } }
     : await persistReviewedImportOnce(prepared.fingerprint, store, plan);
+  assertCurrent();
   const persisted = coordinated.result;
   if (!persisted.ok) return persisted;
 
@@ -387,6 +397,7 @@ export async function saveReviewedImport(
   const report = { ...noImages, problems: [] as string[] };
   if (persisted.questionSetId && !coordinated.joined && persisted.questionIds.length === prepared.attachmentNames.length) {
     for (const [index, names] of prepared.attachmentNames.entries()) {
+      assertCurrent();
       // Saved ids come back in the order the questions were given.
       const questionId = persisted.questionIds[index];
       if (!names.length || !questionId) continue;
@@ -395,25 +406,29 @@ export async function saveReviewedImport(
       const usable = new Set<string>();
       for (const attachment of existing) {
         if (await getQuestionAttachmentBlob(attachment.blobKey)) usable.add(imageNameKey(attachment.fileName));
+        assertCurrent();
       }
       const needed = names.filter(name => !usable.has(imageNameKey(name)));
-      store.assertCurrent?.();
+      assertCurrent();
       if (!needed.length) continue;
       report.missing += matchNamedImages(needed, images).filter((match) => !match.file).length;
       if (!images.length) continue;
       const content = prepared.plan.questions[index]?.content;
       const result = await attachNamedImages({ names: needed, files: images, questionId, contentAssets: content?.assets });
+      assertCurrent();
       if (content) result.attachments = result.attachments.map((attachment) => {
         const asset = content.assets.find((item) => imageNameKey(item.filename) === imageNameKey(attachment.fileName));
         return asset ? { ...attachment, assetId: asset.id, role: asset.role } : { ...attachment, role: "source_page" };
       });
       if (result.attachments.length) {
         try {
-          store.assertCurrent?.();
+          assertCurrent();
           const checkpoint = getVaultWriteCheckpoint();
           const replaced = new Set(result.attachments.map(attachment => imageNameKey(attachment.fileName)));
           await store.updateQuestion(questionId, { attachments: [...existing.filter(attachment => !replaced.has(imageNameKey(attachment.fileName))), ...result.attachments] });
+          assertCurrent();
           await flushLocalVaultWrites();
+          assertCurrent();
           assertVaultWrite(checkpoint + 1);
           assertVaultWritesSince(checkpoint);
           report.attached += result.attachments.length;
@@ -424,6 +439,8 @@ export async function saveReviewedImport(
           let rollbackConfirmed = false;
           let rollbackProblem = "";
           try {
+            // Never apply stale A attachment rollback to B after a switch.
+            assertCurrent();
             const rollbackCheckpoint = getVaultWriteCheckpoint();
             await store.updateQuestion(questionId, { attachments: priorAttachments });
             await flushLocalVaultWrites();
@@ -448,6 +465,7 @@ export async function saveReviewedImport(
       report.problems.push(...result.problems);
     }
   }
+  assertCurrent();
   return {
     ok: true, reused: Boolean(prepared.equivalent), joined: coordinated.joined,
     setId: persisted.questionSetId,
