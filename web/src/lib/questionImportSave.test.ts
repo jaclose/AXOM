@@ -189,6 +189,40 @@ describe("saveReviewedImport", () => {
     }
   });
 
+  it("does not attach A's figure metadata to B after an awaited image operation", async () => {
+    const withImages = request({ drafts: drafts().map((draft, index) => ({
+      ...draft, attachmentNames: index === 0 ? ["figure.png"] : [],
+    })) });
+    const { store, state, commits } = memoryStore();
+    publishReviewedImportAccount("account-a");
+    try {
+      const first = prepareReviewedImport(withImages, empty, make());
+      if (!first.ok) throw new Error("Expected a reviewed set");
+      expect(await saveReviewedImport(first, store)).toMatchObject({ ok: true });
+      const reused = prepareReviewedImport(withImages, state, make());
+      if (!reused.ok || !reused.equivalent) throw new Error("Expected existing source-linked set");
+      let releaseImage!: () => void;
+      const imageGate = new Promise<void>((resolve) => { releaseImage = resolve; });
+      const attachmentWrite = vi.spyOn(imageImport, "attachNamedImages").mockImplementation(async () => {
+        await imageGate;
+        return { attachments: [{
+          id: "figure-A", blobKey: "unlinked-figure-A", fileName: "figure.png",
+          mimeType: "image/png", byteSize: 7, altText: "", createdAt: "2026-11-08",
+          updatedAt: "2026-11-08", role: "exhibit",
+        }], problems: [] };
+      });
+      const saving = saveReviewedImport(reused, store, [new File(["image"], "figure.png", { type: "image/png" })]);
+      await vi.waitFor(() => expect(attachmentWrite).toHaveBeenCalledOnce());
+      publishReviewedImportAccount("account-b");
+      releaseImage();
+      await expect(saving).rejects.toThrow(/account changed/i);
+      expect(store.updateQuestion).not.toHaveBeenCalled();
+      expect(commits).toHaveLength(1);
+    } finally {
+      publishReviewedImportAccount(null);
+    }
+  });
+
   it("writes the prepared import once, as one commit", async () => {
     const { store, state, commits } = memoryStore();
     const prepared = prepareReviewedImport(request(), empty, make());
