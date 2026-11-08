@@ -396,7 +396,7 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
     independentContentApprovalVerified: false };
 }
 
-/** Binary-safe NUL-delimited Git diff. Ignore ambient submodule filtering:\n * a hidden new gitlink would otherwise bypass the complete-source inventory.\n * No rename detection; rename = D + A. */
+/** Binary-safe NUL-delimited Git diff; force submodule visibility despite local Git config. No rename detection. */
 export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
   validSha(baseSha, "diff baseSha");
   validSha(headSha, "diff headSha");
