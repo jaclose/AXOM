@@ -250,18 +250,42 @@ export function JournalPage({ registerAppTransitionGuard }: {
   registerAppTransitionGuard?: RegisterJournalTransitionGuard;
 } = {}) {
   const s = useStore();
-  const writerIdentityRef = useRef({ profile: s.profile, journal: s.journal, epoch: 0 });
+  // The profile userId is name-derived, not the authenticated account identity.
+  const accountId = useAccount((state) => state.phase === "signed-in" ? state.user?.id ?? null : null);
+  const sessionDraftsRef = useRef(new Map<string, JournalSessionDraft>());
+  const writerIdentityRef = useRef({
+    profile: s.profile, journal: s.journal, accountId, epoch: 0, workspaceEpoch: 0,
+    pendingJournal: null as JournalEntry[] | null,
+  });
   const previousWriter = writerIdentityRef.current;
-  if (previousWriter.profile.userId !== s.profile.userId
+  if (previousWriter.accountId !== accountId) {
+    previousWriter.epoch += 1;
+    // Auth can arrive before the next account's notebook. Do not mount a new
+    // editor or library against the previous account's still-loaded pages.
+    previousWriter.pendingJournal = previousWriter.journal === s.journal ? s.journal : null;
+  } else if (previousWriter.profile.userId !== s.profile.userId
     && !isNameOnlyJournalRename(previousWriter.profile, s.profile, previousWriter.journal === s.journal)) {
     previousWriter.epoch += 1;
+    previousWriter.workspaceEpoch += 1;
+  }
+  if (previousWriter.pendingJournal && previousWriter.pendingJournal !== s.journal) {
+    previousWriter.pendingJournal = null;
   }
   previousWriter.profile = s.profile;
   previousWriter.journal = s.journal;
+  previousWriter.accountId = accountId;
   const journalDay = useUi((state) => state.journalDay);
   const clearJournalDay = useUi((state) => state.clearJournalDay);
   const reducedMotion = useReducedMotion();
   const [selectedDay, setSelectedDay] = useState(s.activeDayKey || dayKey());
+  // Private in-tab recovery only, never shared store, localStorage or cloud.
+  const sessionDraftKey = `${accountId ?? "local"}:${previousWriter.workspaceEpoch}:${selectedDay}`;
+  const preserveSessionDraft = useCallback((snapshot: JournalSessionDraft) => {
+    sessionDraftsRef.current.set(sessionDraftKey, snapshot);
+  }, [sessionDraftKey]);
+  const clearSessionDraft = useCallback(() => {
+    sessionDraftsRef.current.delete(sessionDraftKey);
+  }, [sessionDraftKey]);
   const [open, setOpen] = useState(false);
   const [startZoomed, setStartZoomed] = useState(false);
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null);
@@ -364,6 +388,15 @@ export function JournalPage({ registerAppTransitionGuard }: {
     if (!reducedMotion) window.setTimeout(() => setTurnDirection(null), 440);
   }
 
+  if (previousWriter.pendingJournal) {
+    return (
+      <section className="journal-notebook-page" role="status" aria-live="polite">
+        <h1>Journal paused</h1>
+        <p>Waiting for this account's workspace to load. Unsaved writing remains in this tab.</p>
+      </section>
+    );
+  }
+
   return (
     <div className={`journal-notebook-page${open ? " is-open" : ""}`}>
       <header className="journal-page-header">
@@ -396,6 +429,10 @@ export function JournalPage({ registerAppTransitionGuard }: {
         <JournalWritingPage
           key={`${writerIdentityRef.current.epoch}:${selectedDay}`}
           workspaceId={s.profile.userId}
+          ownerAccountId={accountId}
+          recoveredDraft={sessionDraftsRef.current.get(sessionDraftKey)}
+          onPreserveDraft={preserveSessionDraft}
+          onDraftSaved={clearSessionDraft}
           day={selectedDay}
           today={today}
           preferences={preferences}
@@ -611,10 +648,20 @@ interface JournalDraft {
   notebookStatus: "draft" | "complete";
 }
 
+interface JournalSessionDraft {
+  draft: JournalDraft;
+  entryId: string;
+  entryDate: string;
+}
+
 function JournalWritingPage({
-  workspaceId, day, today, preferences, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
+  workspaceId, ownerAccountId, recoveredDraft, onPreserveDraft, onDraftSaved, day, today, preferences, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
 }: {
   workspaceId: string;
+  ownerAccountId: string | null;
+  recoveredDraft?: JournalSessionDraft;
+  onPreserveDraft: (snapshot: JournalSessionDraft) => void;
+  onDraftSaved: () => void;
   day: string;
   today: string;
   preferences: JournalNotebookPreferences;
@@ -646,18 +693,20 @@ function JournalWritingPage({
   });
   const [promptStep, setPromptStep] = useState(0);
   const [summaryVisible, setSummaryVisible] = useState(false);
-  const [draft, setDraftState] = useState<JournalDraft>(() => draftFromEntry(entry, plan));
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">(entry ? "saved" : "idle");
+  const [draft, setDraftState] = useState<JournalDraft>(() => recoveredDraft?.draft ?? draftFromEntry(entry, plan));
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">(
+    recoveredDraft ? "failed" : entry ? "saved" : "idle",
+  );
   const [saveError, setSaveError] = useState("");
   const [attachmentError, setAttachmentError] = useState("");
   const [addingImage, setAddingImage] = useState(false);
   const [transitionSaving, setTransitionSaving] = useState(false);
   const [editingGlance, setEditingGlance] = useState<JournalGlanceSectionKey | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
-  const entryIdRef = useRef(entry?.id ?? "");
-  const entryDateRef = useRef(entry?.date ?? `${day}T12:00:00`);
+  const entryIdRef = useRef(recoveredDraft?.entryId ?? entry?.id ?? "");
+  const entryDateRef = useRef(recoveredDraft?.entryDate ?? entry?.date ?? `${day}T12:00:00`);
   const draftRef = useRef(draft);
-  const dirtyRef = useRef(false);
+  const dirtyRef = useRef(Boolean(recoveredDraft));
   const draftVersionRef = useRef(0);
   const mountedRef = useRef(true);
   const transitionPendingRef = useRef(false);
@@ -803,8 +852,12 @@ function JournalWritingPage({
   }, [supportSignal, openFullPage]);
 
   const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
-    // A queued save from a previous owner must not write into a rehydrated workspace.
-    if (!mountedRef.current || useStore.getState().profile.userId !== workspaceId) return "aborted";
+    // The authenticated account must match even before React unmounts an old
+    // editor. An editable name-derived profile ID alone is not a privacy gate.
+    const account = useAccount.getState();
+    const liveOwner = account.phase === "signed-in" ? account.user?.id ?? null : null;
+    if (!mountedRef.current || liveOwner !== ownerAccountId
+      || useStore.getState().profile.userId !== workspaceId) return "aborted";
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) return "no-change";
     const draftVersion = draftVersionRef.current;
@@ -835,6 +888,9 @@ function JournalWritingPage({
         : `journal-${Date.now()}`;
       entryIdRef.current = id;
     }
+    if (draftVersion === draftVersionRef.current && dirtyRef.current) {
+      onPreserveDraft({ draft: current, entryId: id, entryDate: entryDateRef.current });
+    }
     const store = useStore.getState();
     const checkpoint = localVault.getVaultWriteCheckpoint();
     if (mountedRef.current) {
@@ -849,7 +905,12 @@ function JournalWritingPage({
       localVault.assertVaultWritesSince(checkpoint);
       if (draftVersion === draftVersionRef.current) {
         dirtyRef.current = false;
-        if (mountedRef.current) setSaveState("saved");
+        if (mountedRef.current) {
+          setSaveState("saved");
+          const accountAfterSave = useAccount.getState();
+          const ownerAfterSave = accountAfterSave.phase === "signed-in" ? accountAfterSave.user?.id ?? null : null;
+          if (ownerAfterSave === ownerAccountId) onDraftSaved();
+        }
         return "saved";
       }
       return "superseded";
@@ -869,7 +930,7 @@ function JournalWritingPage({
       }
       return "superseded";
     }
-  }, [workspaceId]);
+  }, [workspaceId, ownerAccountId, onPreserveDraft, onDraftSaved]);
 
   const persist = useCallback((status?: "draft" | "complete") => {
     const queued = persistQueueRef.current.then(
@@ -995,6 +1056,7 @@ function JournalWritingPage({
     draftRef.current = next;
     draftVersionRef.current += 1;
     dirtyRef.current = true;
+    onPreserveDraft({ draft: next, entryId: entryIdRef.current, entryDate: entryDateRef.current });
     setDraftState(next);
     setSaveState("saving");
     setSaveError("");
@@ -1078,6 +1140,7 @@ function JournalWritingPage({
     draftRef.current = next;
     draftVersionRef.current += 1;
     dirtyRef.current = true;
+    onPreserveDraft({ draft: next, entryId: entryIdRef.current, entryDate: entryDateRef.current });
     setDraftState(next);
     setSaveState("saving");
     setSaveError("");
@@ -1093,6 +1156,7 @@ function JournalWritingPage({
         draftRef.current = restored;
         draftVersionRef.current += 1;
         dirtyRef.current = true;
+        onPreserveDraft({ draft: restored, entryId: entryIdRef.current, entryDate: entryDateRef.current });
         setDraftState(restored);
       }
     }
