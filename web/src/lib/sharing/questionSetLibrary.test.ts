@@ -10,6 +10,7 @@ vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn() }));
 const accountId = "00000000-0000-4000-8000-000000000010";
 const entryId = "00000000-0000-4000-8000-000000000011";
 const now = "2026-11-01T12:00:00.000Z";
+const confirmed = { rightsConfirmed: true, answersConfirmed: true };
 
 function snapshot() {
   return createQuestionSetShare({
@@ -83,8 +84,28 @@ describe("searchable Question Set client boundary", () => {
     delete value.questions[0].correctAnswerText;
     const rpc = vi.fn();
     service(rpc);
-    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, ""))
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
       .rejects.toThrow(/confirmed answer/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { rightsConfirmed: false, answersConfirmed: true },
+    { rightsConfirmed: true, answersConfirmed: false },
+    { rightsConfirmed: false, answersConfirmed: false },
+  ])("refuses incomplete publisher assertions (%o) without a submission RPC", async attestations => {
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", snapshot(), "", attestations))
+      .rejects.toThrow(/redistribution rights and source-reviewed answers/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when an untyped caller omits publisher assertions", async () => {
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", snapshot(), "", undefined as never))
+      .rejects.toThrow(/redistribution rights and source-reviewed answers/);
     expect(rpc).not.toHaveBeenCalled();
   });
 
@@ -93,7 +114,7 @@ describe("searchable Question Set client boundary", () => {
     const assertCurrent = vi.fn().mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("The signed-in account changed."));
     service(rpc, assertCurrent);
-    await expect(submitQuestionSetToLibrary(accountId, "set-1", snapshot(), ""))
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", snapshot(), "", confirmed))
       .rejects.toThrow(/account changed/);
     expect(rpc).toHaveBeenCalledWith("submit_question_set_library", expect.objectContaining({
       p_source_id: "set-1", p_rights_confirmed: true, p_answers_confirmed: true,
