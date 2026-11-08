@@ -33,7 +33,8 @@ export function CommunityQuestionSetLibrary() {
 
   useEffect(() => {
     setSets([]); setPreview(undefined); setPreviewAccountId(undefined);
-    setPreviewError(""); setImported(false); setOpening(false); setOffset(0);
+    setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
+    setLiking(undefined); setOffset(0);
   }, [accountId]);
 
   useEffect(() => {
