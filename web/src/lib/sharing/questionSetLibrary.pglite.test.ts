@@ -71,8 +71,9 @@ async function search(who: string, query = "") {
     "select id,title,likes,liked from public.list_question_set_library($1,0)", [query]);
 }
 
-async function approve(who: string, id: string) {
-  return as(who, "select public.review_question_set_library($1,true,'Checked synthetic source and sharing rights')", [id]);
+async function approve(who: string, id: string, inspected: Snapshot = snapshot()) {
+  return as(who, "select public.review_question_set_library($1,true,'Checked synthetic source and sharing rights',$2::jsonb)",
+    [id, JSON.stringify(inspected)]);
 }
 
 describe("reviewed Question Set Library SQL and RLS", () => {
@@ -108,8 +109,40 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       await expect(as(account, "select owner_id,source_id,review_note,reviewed_by,snapshot_payload from public.question_set_library_entries where id=$1", [id]))
         .rejects.toThrow(/permission denied/i);
     }
-    await expect(as(LEARNER, "select public.review_question_set_library($1,false,'A reason for rejection')", [id]))
+    await expect(as(LEARNER, "select public.review_question_set_library($1,false,'A reason for rejection',$2::jsonb)", [id, JSON.stringify(snapshot())]))
       .rejects.toThrow(/reviewer access required/i);
+  });
+
+  it("rejects a replaced answer under the SQL row lock and keeps the submission pending", async () => {
+    const inspected = snapshot();
+    const id = await submit(OWNER, "atomic-answer-revision", inspected);
+    const revised = snapshot();
+    revised.questions[0].correctKey = "A";
+    revised.questions[0].correctAnswerText = "First option";
+    // Simulate an internal modification between the reviewer's inspection and
+    // decision. Learners cannot directly update this protected table.
+    await db.query("update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+      [JSON.stringify(revised), id]);
+    await expect(approve(REVIEWER, id, inspected)).rejects.toThrow(/changed since inspection/i);
+    const state = await as<{ id: string; status: string }>(OWNER,
+      "select id,status from public.my_question_set_library()");
+    expect(state.find(row => row.id === id)?.status).toBe("pending");
+    await approve(REVIEWER, id, revised);
+    const approved = await search(LEARNER, "Synthetic reviewed");
+    expect(approved.some(row => row.id === id)).toBe(true);
+  });
+
+  it("fails closed for the legacy review signature and invalid inspected evidence", async () => {
+    const id = await submit(OWNER, "reject-legacy-review");
+    await expect(as(REVIEWER,
+      "select public.review_question_set_library($1,true,'Checked the source evidence')", [id]))
+      .rejects.toThrow(/Refresh AXOM/i);
+    await expect(as(REVIEWER,
+      "select public.review_question_set_library($1,true,'Checked the source evidence',$2::jsonb)",
+      [id, JSON.stringify({ title: "invalid" })]))
+      .rejects.toThrow(/Reopen the inspected/i);
+    const pending = await as<{ id: string }>(REVIEWER, "select id from public.pending_question_set_library()");
+    expect(pending.some(row => row.id === id)).toBe(true);
   });
 
   it("keeps likes unique, account-bound and tied to approved content", async () => {
