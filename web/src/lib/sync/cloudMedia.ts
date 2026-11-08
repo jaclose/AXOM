@@ -140,7 +140,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
     if (!verification) {
       verification = (async () => {
         await assertCurrent();
-        let original: Blob | null = null;
+        let original: Blob | null;
         if (academic) {
           original = await downloadAcademicAsset(client, academic);
         } else {
