@@ -303,7 +303,7 @@ function selectTargetCompletion(
   today: string,
 ): DayAtAGlanceTargetCompletion {
   const result = evaluateDailySuccess(state, dayKey, today);
-  const requirements = result.requirements.map((item): DayAtAGlanceTargetResult => ({
+  const requirements = result.requirements.filter((item) => item.requirement.lane !== "personal").map((item): DayAtAGlanceTargetResult => ({
     id: item.requirement.id,
     label: item.requirement.label,
     eligible: item.eligible,
