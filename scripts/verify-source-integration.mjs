@@ -142,6 +142,32 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
   if (![listChanges, isAncestor, readFile, listTreePaths, listHistoryChanges].every(x => typeof x === "function")) {
     throw new Error("Complete verification requires Git diff, ancestry, tree, file and history resolvers.");
   }
+  // An opt-in review inventory binds every nondeletion source-history event
+  // to an exact immutable Git object. The caller's receipts are assertions:
+  // independent content/rights/security approval must be separately established.
+  if (manifest.requireSourceBlobReceipts !== undefined
+    && typeof manifest.requireSourceBlobReceipts !== "boolean") {
+    throw new Error("requireSourceBlobReceipts must be a boolean.");
+  }
+  const strictReceipts = manifest.requireSourceBlobReceipts === true;
+  if (strictReceipts !== Array.isArray(manifest.sourceBlobReceipts)) {
+    throw new Error("Source blob receipts require explicit opt-in and an array.");
+  }
+  const sourceBlobReceipts = strictReceipts ? new Map() : null;
+  if (strictReceipts) {
+    for (const entry of manifest.sourceBlobReceipts) {
+      const commitSha = validSha(entry?.commitSha, "source blob receipt commitSha");
+      const path = validPath(entry?.path);
+      if (!MODES.has(entry?.mode) || typeof entry?.blob !== "string" || !SHA.test(entry.blob)) {
+        throw new Error("Invalid source blob receipt mode or SHA: " + path);
+      }
+      const key = commitSha + "\0" + path;
+      if (sourceBlobReceipts.has(key)) {
+        throw new Error("Duplicate source blob receipt: " + path + " at " + commitSha);
+      }
+      sourceBlobReceipts.set(key, { blob: entry.blob, mode: entry.mode });
+    }
+  }
   if (!isAncestor(integrationBaseSha, integratedSha)) throw new Error("Integration base is not an ancestor of integration commit.");
   const wanted = new Map(), files = [];
   const sourceRanges = [];
@@ -228,7 +254,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     }
     files.push({ ...expected, integratedStatus: actual?.status ?? "UNCHANGED", mode: original.mode, blob: original.blob });
   }
-  const history = assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted }, { listHistoryChanges, readFile });
+  const history = assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted, sourceBlobReceipts }, { listHistoryChanges, readFile });
   return { version: 2, integratedSha, integrationBaseSha, sourceRanges, verifiedFiles: files.length,
     verifiedSources: sourceRanges.length, deletedFiles: files.filter(x => x.deleted).length,
     alreadyPresentInBase, completeForDeclaredRanges: true, verifiedTreePaths, ...history, files };
@@ -240,8 +266,10 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
  * can still expose a file after that file is removed from the final tree.
  * Review scope is explicit source base..tip commits, plus merge-only carriers.
  */
-export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted }, { listHistoryChanges, readFile }) {
+export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted, sourceBlobReceipts = null }, { listHistoryChanges, readFile }) {
   const sourceCommits = new Set();
+  const remainingReceipts = sourceBlobReceipts === null ? null : new Map(sourceBlobReceipts);
+  let sourceBlobReceiptsVerified = 0;
   let sourceHistoryCommits = 0, integrationHistoryCommits = 0, extraMergeCommits = 0, verifiedHistoryEvents = 0;
   const inspect = (base, tip, label) => {
     const commits = listHistoryChanges(base, tip);
@@ -291,11 +319,22 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
         if (change.status === "D") {
           if (historical !== null) throw new Error("Deleted intermediate source Git object still present: " + change.path);
         } else {
+          let actual;
           try {
-            regularFile(historical, "source history " + change.path);
+            actual = regularFile(historical, "source history " + change.path);
           } catch (cause) {
             throw new Error("Nonregular intermediate source Git object: " + change.path
               + " at " + commit.sha + ": " + (cause instanceof Error ? cause.message : String(cause)));
+          }
+          if (remainingReceipts !== null) {
+            const key = commit.sha + "\0" + change.path;
+            const receipt = remainingReceipts.get(key);
+            if (!receipt) throw new Error("Missing source blob receipt: " + change.path + " at " + commit.sha);
+            if (receipt.blob !== actual.blob || receipt.mode !== actual.mode) {
+              throw new Error("Mismatched source blob receipt: " + change.path + " at " + commit.sha);
+            }
+            remainingReceipts.delete(key);
+            sourceBlobReceiptsVerified++;
           }
         }
       }
@@ -331,8 +370,15 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
       }
     }
   }
+  if (remainingReceipts?.size) {
+    const [first] = remainingReceipts.keys();
+    throw new Error("Unexpected source blob receipt outside source-history changes: " + first.replace("\0", " at "));
+  }
   return { sourceHistoryCommits, integrationHistoryCommits, extraMergeCommits, verifiedHistoryEvents,
-    commitHistoryAttested: true };
+    commitHistoryAttested: true,
+    sourceBlobReceiptParityVerified: remainingReceipts !== null,
+    sourceBlobReceiptsVerified,
+    independentContentApprovalVerified: false };
 }
 
 /** Binary-safe NUL-delimited Git diff. No rename detection; rename = D + A. */
