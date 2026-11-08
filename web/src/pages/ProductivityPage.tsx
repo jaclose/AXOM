@@ -62,6 +62,7 @@ export function ProductivityPage() {
   const [manualQuantityKind, setManualQuantityKind] = useState<ManualQuantityType>("count");
   const [manualNote, setManualNote] = useState("");
   const [manualTrackerId, setManualTrackerId] = useState("");
+  const [manualAcademic, setManualAcademic] = useState(false);
   const [lastSelfReport, setLastSelfReport] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const strip = useInView<HTMLDivElement>();
@@ -99,6 +100,7 @@ export function ProductivityPage() {
       quantityKind: quantity ? (manualQuantityKind === "pages" || manualQuantityKind === "repetitions" ? "count" : manualQuantityKind) : undefined,
       quantityLabel: quantity ? manualQuantityKind : undefined,
       note: manualNote || undefined,
+      academic: manualAcademic,
     });
     setManualType(""); setManualMinutes(""); setManualQuantity(""); setManualNote(""); setManualTrackerId("");
     setLastSelfReport(true);
@@ -106,6 +108,7 @@ export function ProductivityPage() {
 
   function applySelfReportTemplate(template: typeof SELF_REPORT_TEMPLATES[number]) {
     setManualType(template.activity);
+    setManualAcademic(["Study", "Questions", "Anki", "Reading"].includes(template.label));
     setManualQuantityKind(template.quantity);
     setManualMinutes("");
     setManualQuantity("");
@@ -133,6 +136,7 @@ export function ProductivityPage() {
         ? unit
         : "count";
     setManualType(label);
+    setManualAcademic(false);
     setManualQuantityKind(quantity);
     setManualMinutes("");
     setManualQuantity("");
@@ -178,6 +182,11 @@ export function ProductivityPage() {
                     onClick={() => applySelfReportTemplate(template)}>{template.label}</button>
                 ))}
               </div>
+              <label className="self-report-academic">
+                <input type="checkbox" checked={manualAcademic}
+                  onChange={(event) => setManualAcademic(event.target.checked)} />
+                <span>Count as academic study</span>
+              </label>
               <div className="fast-activity-measures" aria-label="Optional activity measurements">
                 <label className="fast-field"><span>How long? (optional)</span><div><input className="field" aria-label="How long in minutes?" type="number" min="0" placeholder="30" value={manualMinutes} onChange={(event) => setManualMinutes(event.target.value)} /><small>min</small></div></label>
                 <div className="fast-field quantity"><span>Quantity (optional)</span><div>
