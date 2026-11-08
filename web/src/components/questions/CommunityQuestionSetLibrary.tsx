@@ -89,6 +89,11 @@ export function CommunityQuestionSetLibrary() {
       const result = await useStore.getState().commitSharedQuestionSetImport({
         snapshot: preview.snapshot,
         identity: { shareId: preview.id, contentDigest: preview.contentDigest },
+        // Revalidate the originating account at the vault commit boundary.
+        accountGuard: {
+          accountId: importingAccount,
+          isCurrentAccount: id => useAccount.getState().user?.id === id,
+        },
       });
       // A local import already started cannot be undone here. Never present
       // its completion as an import authorized by a subsequently active account.
