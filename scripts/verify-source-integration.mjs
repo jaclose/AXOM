@@ -178,28 +178,40 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     sourceRanges.push({ baseSha, sourceSha, changedFiles: changes.size });
   }
   const integrated = addChanges(listChanges(integrationBaseSha, integratedSha), "integration");
-  if (integrated.size !== wanted.size) throw new Error("Incomplete source inventory or unexpected integrated files: expected " + wanted.size + ", integrated " + integrated.size);
-  const verifiedTreePaths = assertPortableTouchedTree(integrated, listTreePaths(integratedSha));
+  // A reviewed change may already exist byte-for-byte in newer main, giving
+  // it no net diff in the eventual merge. The integrated delta must still
+  // contain NO unclaimed paths, but its size need not equal source inventory.
+  for (const [folded, change] of integrated) {
+    if (!wanted.has(folded)) {
+      throw new Error("Incomplete source inventory or unexpected integrated files: " + change.path);
+    }
+  }
+  // Include all pinned source paths, even those with zero net integrated diff,
+  // in the case-insensitive full-tree collision safety boundary.
+  const verifiedTreePaths = assertPortableTouchedTree(wanted, listTreePaths(integratedSha));
+  let alreadyPresentInBase = 0;
   for (const [folded, expected] of wanted) {
     const actual = integrated.get(folded);
-    // Git status is relative to each branch's *different* base. A reviewed
-    // modification may be an addition when newer main independently deleted
-    // the old file. Match path and final bytes/mode, but never translate a
-    // deletion into a surviving file (or vice versa).
-    if (!actual || expected.path !== actual.path
-      || (expected.status === "D") !== (actual.status === "D")) {
+    // Git statuses are relative to different bases: A/M/T can legitimately
+    // differ. A deletion must remain deleted. An absent final diff is allowed
+    // only when the advanced integration base already has exact source state.
+    if (actual && (expected.path !== actual.path
+      || (expected.status === "D") !== (actual.status === "D"))) {
       throw new Error("Source/integration changed-path inventory differs: " + expected.path);
     }
-    let original, final;
+    let original, final, base;
     try {
       original = readFile(expected.sourceSha, expected.path);
       final = readFile(integratedSha, expected.path);
+      if (!actual) base = readFile(integrationBaseSha, expected.path);
     } catch (cause) {
       throw new Error("Cannot resolve complete source Git objects for " + expected.path + ": " + (cause instanceof Error ? cause.message : String(cause)));
     }
     if (expected.status === "D") {
       if (original !== null || final !== null) throw new Error("Deleted source file reappeared: " + expected.path);
-      files.push({ ...expected, integratedStatus: actual.status, deleted: true });
+      if (!actual && base !== null) throw new Error("Deleted source file not already absent from integration base: " + expected.path);
+      if (!actual) alreadyPresentInBase++;
+      files.push({ ...expected, integratedStatus: actual?.status ?? "UNCHANGED", deleted: true });
       continue;
     }
     original = regularFile(original, "source " + expected.path);
@@ -207,11 +219,18 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     if (original.blob !== final.blob || original.mode !== final.mode) {
       throw new Error("Integrated file differs from pinned source contents or mode: " + expected.path);
     }
-    files.push({ ...expected, integratedStatus: actual.status, mode: original.mode, blob: original.blob });
+    if (!actual) {
+      base = regularFile(base, "integration base " + expected.path);
+      if (original.blob !== base.blob || original.mode !== base.mode) {
+        throw new Error("Pinned source not already present in integration base: " + expected.path);
+      }
+      alreadyPresentInBase++;
+    }
+    files.push({ ...expected, integratedStatus: actual?.status ?? "UNCHANGED", mode: original.mode, blob: original.blob });
   }
   return { version: 2, integratedSha, integrationBaseSha, sourceRanges, verifiedFiles: files.length,
     verifiedSources: sourceRanges.length, deletedFiles: files.filter(x => x.deleted).length,
-    completeForDeclaredRanges: true, verifiedTreePaths, files };
+    alreadyPresentInBase, completeForDeclaredRanges: true, verifiedTreePaths, files };
 }
 
 /** Binary-safe NUL-delimited Git diff. No rename detection; rename = D + A. */

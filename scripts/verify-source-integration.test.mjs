@@ -495,6 +495,13 @@ test("v2 accepts pinned source changes already identically present in advanced i
   assert.equal(report.deletedFiles, 1);
   assert.equal(report.alreadyPresentInBase, 2);
   assert.equal(report.files.find(x => x.path === "docs/shared.txt")?.integratedStatus, "UNCHANGED");
+  // A falsified unchanged diff must not pass if newer main actually differs
+  // from the reviewed blob or mode, even when the final object appears right.
+  assert.throws(() => verifyCompleteSourceIntegration(input, {
+    ...adapters, readFile: (sha, path) => sha === integrationBaseSha && path === "docs/shared.txt"
+      ? { ...readGitFile(sha, path, cwd, true), mode: "100755" }
+      : readGitFile(sha, path, cwd, true),
+  }), /not already present in integration base/);
 
   // Same bytes without the actual reviewed source ancestry is never enough.
   assert.throws(() => verifyCompleteSourceIntegration({
