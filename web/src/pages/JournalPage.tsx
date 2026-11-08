@@ -372,7 +372,8 @@ export function JournalPage({ registerAppTransitionGuard }: {
         />
       ) : (
         <JournalWritingPage
-          key={selectedDay}
+          key={`${s.profile.userId}:${selectedDay}`}
+          workspaceId={s.profile.userId}
           day={selectedDay}
           today={today}
           preferences={preferences}
@@ -589,8 +590,9 @@ interface JournalDraft {
 }
 
 function JournalWritingPage({
-  day, today, preferences, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
+  workspaceId, day, today, preferences, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
 }: {
+  workspaceId: string;
   day: string;
   today: string;
   preferences: JournalNotebookPreferences;
@@ -779,7 +781,8 @@ function JournalWritingPage({
   }, [supportSignal, openFullPage]);
 
   const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
-    if (!mountedRef.current) return "aborted";
+    // A queued save from a previous owner must not write into a rehydrated workspace.
+    if (!mountedRef.current || useStore.getState().profile.userId !== workspaceId) return "aborted";
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) return "no-change";
     const draftVersion = draftVersionRef.current;
@@ -844,7 +847,7 @@ function JournalWritingPage({
       }
       return "superseded";
     }
-  }, []);
+  }, [workspaceId]);
 
   const persist = useCallback((status?: "draft" | "complete") => {
     const queued = persistQueueRef.current.then(
