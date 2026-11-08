@@ -102,6 +102,55 @@ describe("AXOM Cloud AI client", () => {
 
 
 describe("Cloud AI allowance account isolation", () => {
+  it("expires the same account's previous allowance at midnight UTC", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-08T23:59:59.000Z"));
+      const provider = createCloudProvider({
+        endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+        getAccessToken: async () => "jwt-midnight",
+        getAuthSnapshot: () => ({ userId: "quota-midnight", accessToken: "jwt-midnight" }),
+        fetchImpl: vi.fn(() => reply(200, { result: { text: "ok" }, remaining: 22 })),
+      });
+      await expect(provider.completeJson({ prompt: "last minute" })).resolves.toEqual({ text: "ok" });
+      expect(cloudAiRemaining("quota-midnight")).toBe(22);
+      vi.setSystemTime(new Date("2026-11-09T00:00:01.000Z"));
+      expect(cloudAiRemaining("quota-midnight")).toBeNull();
+      await expect(provider.available()).resolves.toMatchObject({
+        ok: true, detail: "Signed in · Claude via your AXOM account.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not import yesterday's quota from a response delayed beyond UTC midnight", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-08T23:59:59.000Z"));
+      let finishReply!: (response: Response) => void;
+      const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { finishReply = resolve; }));
+      const provider = createCloudProvider({
+        endpoint: "https://example.test/ai", isRequestAllowed: () => true,
+        getAccessToken: async () => "jwt-late",
+        getAuthSnapshot: () => ({ userId: "quota-late", accessToken: "jwt-late" }),
+        fetchImpl,
+      });
+      const pending = provider.completeJson({ prompt: "before reset" });
+      await Promise.resolve();
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(new Date("2026-11-09T00:00:01.000Z"));
+      finishReply(new Response(JSON.stringify({ result: { text: "old" }, remaining: 3 }), { status: 200 }));
+      await expect(pending).resolves.toEqual({ text: "old" });
+      expect(cloudAiRemaining("quota-late")).toBeNull();
+      await expect(provider.available()).resolves.toMatchObject({
+        ok: true, detail: "Signed in · Claude via your AXOM account.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not show account A's allowance to B, or B's exhausted allowance to A", async () => {
     const providerA = createCloudProvider({
       endpoint: "https://example.test/ai", isRequestAllowed: () => true,

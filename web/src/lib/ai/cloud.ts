@@ -64,9 +64,14 @@ export interface CloudJsonRequest extends AiJsonRequest {
 /** Last known allowance is an account-scoped receipt, never a device-wide value.
  * A signed-out/unknown caller receives null instead of the prior learner's quota.
  */
-let lastRemaining: { userId: string; remaining: number } | null = null;
+let lastRemaining: { userId: string; utcDay: string; remaining: number } | null = null;
+function currentUtcQuotaDay(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 export function cloudAiRemaining(userId?: string): number | null {
-  return userId && lastRemaining?.userId === userId ? lastRemaining.remaining : null;
+  return userId && lastRemaining?.userId === userId && lastRemaining.utcDay === currentUtcQuotaDay()
+    ? lastRemaining.remaining
+    : null;
 }
 
 export function createCloudProvider(options: CloudProviderOptions): AIProvider & { completeJson(req: CloudJsonRequest): Promise<unknown> } {
@@ -119,6 +124,9 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
       if (!canSend()) throw new Error(consentError);
       if (!sameSession(started) || (token && token !== started.accessToken)) throw new Error(identityError);
       if (!token) throw new Error("Sign in to your AXOM account to use Cloud AI.");
+      // Daily server allowance resets at 00:00 UTC. Attribute an in-flight
+      // response to its dispatch day, not the day the response happens to land.
+      const requestUtcDay = currentUtcQuotaDay();
       const response = await doFetch(options.endpoint, {
         method: "POST",
         // Never forward a signed-in learner token or source text on HTTP 3xx.
@@ -149,10 +157,10 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
       if (!canSend()) throw new Error(consentError);
       if (!sameSession(started)) throw new Error(identityError);
       if (typeof payload.remaining === "number" && Number.isFinite(payload.remaining) && payload.remaining >= 0) {
-        lastRemaining = { userId: started.userId, remaining: payload.remaining };
+        lastRemaining = { userId: started.userId, utcDay: requestUtcDay, remaining: payload.remaining };
       }
       if (!response.ok) {
-        if (response.status === 429) lastRemaining = { userId: started.userId, remaining: 0 };
+        if (response.status === 429) lastRemaining = { userId: started.userId, utcDay: requestUtcDay, remaining: 0 };
         throw new Error(payload.error || `Cloud AI failed (${response.status}).`);
       }
       if (payload.result === undefined) throw new Error("Cloud AI returned an empty reply.");
