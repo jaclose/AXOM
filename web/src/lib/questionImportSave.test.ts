@@ -189,6 +189,29 @@ describe("saveReviewedImport", () => {
     }
   });
 
+  it.each([false, true])("never reuses a prepared A question set after account changes before save (ABA=%s)", async (returnToA) => {
+    const { store, state, commits } = memoryStore();
+    publishReviewedImportAccount("account-a");
+    try {
+      const first = prepareReviewedImport(request(), empty, make());
+      if (!first.ok) throw new Error("Expected initial prepared import");
+      expect(await saveReviewedImport(first, store)).toMatchObject({ ok: true });
+      expect(commits).toHaveLength(1);
+      const reusePreparedUnderA = prepareReviewedImport(request(), state, make());
+      if (!reusePreparedUnderA.ok || !reusePreparedUnderA.equivalent) {
+        throw new Error("Expected account A's existing source question set");
+      }
+      publishReviewedImportAccount("account-b");
+      if (returnToA) publishReviewedImportAccount("account-a");
+      const result = await saveReviewedImport(reusePreparedUnderA, store);
+      expect(result).toMatchObject({ ok: false, message: expect.stringMatching(/account changed/i) });
+      expect(store.updateQuestion).not.toHaveBeenCalled();
+      expect(commits).toHaveLength(1);
+    } finally {
+      publishReviewedImportAccount(null);
+    }
+  });
+
   it("does not attach A's figure metadata to B after an awaited image operation", async () => {
     const withImages = request({ drafts: drafts().map((draft, index) => ({
       ...draft, attachmentNames: index === 0 ? ["figure.png"] : [],
