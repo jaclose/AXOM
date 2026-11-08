@@ -1602,7 +1602,7 @@ describe("Journal notebook foundation", () => {
 
     // Recovery by ordinary Save is not permission to silently complete the page.
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "A private draft updated after failure" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByText("Saved to this workspace")).toBeTruthy());
     expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
       .toMatchObject({ freeWriting: "A private draft updated after failure", notebookStatus: "draft" });
