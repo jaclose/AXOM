@@ -12,6 +12,9 @@ declare
   v_option jsonb;
   v_member jsonb;
   v_field text;
+  v_tag jsonb;
+  v_rationale_key text;
+  v_rationale jsonb;
 begin
   if pg_catalog.jsonb_typeof(new.snapshot_payload) is distinct from 'object'
     or new.snapshot_payload->'shareFormatVersion' is distinct from '1'::jsonb
@@ -22,6 +25,17 @@ begin
     or pg_catalog.jsonb_typeof(new.snapshot_payload->'questions') is distinct from 'array' then
     raise exception 'Question Set snapshot contains invalid scalar types' using errcode='22023';
   end if;
+
+  -- Tags include future AXOM visual-intent labels; neither nested objects nor
+  -- numeric values may be laundered into public text by maintenance writes.
+  if pg_catalog.jsonb_typeof(new.snapshot_payload->'tags') is distinct from 'array' then
+    raise exception 'Question Set tags contain invalid scalar types' using errcode='22023';
+  end if;
+  for v_tag in select value from pg_catalog.jsonb_array_elements(new.snapshot_payload->'tags') loop
+    if pg_catalog.jsonb_typeof(v_tag) is distinct from 'string' then
+      raise exception 'Question Set tags contain invalid scalar types' using errcode='22023';
+    end if;
+  end loop;
 
   for v_member in select value from pg_catalog.jsonb_array_elements(new.snapshot_payload->'orderedQuestionIds') loop
     if pg_catalog.jsonb_typeof(v_member) is distinct from 'string' then
@@ -34,7 +48,8 @@ begin
       or pg_catalog.jsonb_typeof(v_question->'id') is distinct from 'string'
       or pg_catalog.jsonb_typeof(v_question->'stem') is distinct from 'string'
       or pg_catalog.jsonb_typeof(v_question->'correctKey') is distinct from 'string'
-      or pg_catalog.jsonb_typeof(v_question->'options') is distinct from 'array' then
+      or pg_catalog.jsonb_typeof(v_question->'options') is distinct from 'array'
+      or pg_catalog.jsonb_typeof(v_question->'tags') is distinct from 'array' then
       raise exception 'Question Set question or answer key has invalid scalar types' using errcode='22023';
     end if;
     for v_field in select pg_catalog.unnest(array[
@@ -53,9 +68,33 @@ begin
         raise exception 'Question Set answer choices must contain string keys and text' using errcode='22023';
       end if;
     end loop;
+    for v_tag in select value from pg_catalog.jsonb_array_elements(v_question->'tags') loop
+      if pg_catalog.jsonb_typeof(v_tag) is distinct from 'string' then
+        raise exception 'Question Set question tags contain invalid scalar types' using errcode='22023';
+      end if;
+    end loop;
+    -- AI teaching explanations can contain per-choice rationale maps. Do not
+    -- allow non-text rationale values or unknown distractor keys on any write.
+    if v_question ? 'choiceRationales' then
+      if pg_catalog.jsonb_typeof(v_question->'choiceRationales') is distinct from 'object' then
+        raise exception 'Question Set choice rationales contain invalid scalar types' using errcode='22023';
+      end if;
+      for v_rationale_key, v_rationale in
+        select key, value from pg_catalog.jsonb_each(v_question->'choiceRationales')
+      loop
+        if pg_catalog.jsonb_typeof(v_rationale) is distinct from 'string'
+          or length(v_rationale_key) not between 1 and 16
+          or not exists (
+            select 1 from pg_catalog.jsonb_array_elements(v_question->'options') choice
+            where choice->>'key' = v_rationale_key
+          ) then
+          raise exception 'Question Set choice rationales contain invalid scalar types' using errcode='22023';
+        end if;
+      end loop;
+    end if;
   end loop;
   return new;
-end $$;
+end $;
 
 create trigger question_set_library_snapshot_types
 before insert or update of snapshot_payload on public.question_set_library_entries
