@@ -21,21 +21,16 @@ export interface CloudMediaReference {
   updatedAt: string;
 }
 
-type Reference = { questionId: string; attachment: QuestionImageAttachment; checksum?: string; privateOriginal: boolean };
+type Reference = { questionId: string; attachment: QuestionImageAttachment; checksum?: string };
 export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
   state = contentMetadata(state);
   const refs = new Map<string, Reference>();
   for (const question of [...state.questions, ...privateReviewMedia(state.documents)]) {
     const content = "content" in question ? question.content : undefined;
-    // The question's source is not the provenance of an attachment: an
-    // imported question can acquire a new learner-authored note image.
-    const manualQuestion = "source" in question && question.source === "manual";
     for (const attachment of question.attachments ?? []) {
+      // A source checksum attests image bytes, not academic ownership. It may
+      // not authorize a revocable course binding for a new local attachment.
       const declared = content?.assets.find(asset => asset.id === attachment.assetId)?.checksum;
-      // Only a source-identified, checksum-backed attachment may consider a
-      // shared academic binding on first protection. Unknown/legacy originals
-      // and images added to imported questions retain private recovery rights.
-      const privateOriginal = manualQuestion || !declared;
       const checksum = declared?.replace(/^sha256:/, "");
       if (checksum !== undefined && !/^[a-f0-9]{64}$/.test(checksum)) {
         throw new Error("A source image has an invalid declared checksum. The workspace has not been marked protected.");
@@ -53,9 +48,9 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
         // Keep the last referencing question for cloud-cache reconstruction,
         // while retaining a source checksum declared by any earlier reference.
         refs.set(attachment.blobKey, { questionId: question.id, attachment,
-          checksum: checksum ?? prior.checksum, privateOriginal: prior.privateOriginal || privateOriginal });
+          checksum: checksum ?? prior.checksum });
       } else {
-        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum, privateOriginal });
+        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum });
       }
     }
   }
@@ -98,17 +93,10 @@ export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): C
 export async function uploadCloudMedia(client: SupabaseClient, userId: string, state: NoctyriumState, assertCurrent: () => Promise<void>, previous: CloudMediaReference[] = []): Promise<CloudMediaReference[]> {
   const bucket = client.storage.from(MEDIA_BUCKET);
   const shared = storedAcademicBindings(state).assets;
-  // A content hash proves byte identity, not ownership of a particular academic
-  // revision. Multiple revision/path bindings can share bytes but differ in RLS.
-  // Ambiguous hashes cannot select an arbitrary academic provenance for new media.
-  const academicByHash = new Map<string, AcademicAssetReference | null>();
-  for (const asset of shared) {
-    if (!academicByHash.has(asset.sha256)) academicByHash.set(asset.sha256, asset);
-    else {
-      const prior = academicByHash.get(asset.sha256);
-      if (prior && (prior.revisionId !== asset.revisionId || prior.path !== asset.path)) academicByHash.set(asset.sha256, null);
-    }
-  }
+  // Installed academic assets can validate an EXACT prior revision/path
+  // receipt, but a matching SHA-256 (even from an imported source package) is
+  // not evidence that a new attachment belongs to that course. First protection
+  // without a prior academic receipt must preserve account-private recovery.
   // Avoid an O(media × academic files) scan during large-library recovery.
   const academicBindingKeys = new Set(shared.map(asset =>
     JSON.stringify([asset.revisionId, asset.path, asset.sha256])));
@@ -220,7 +208,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           continue;
         }
         const index = job - deferred.length;
-        const [blobKey, { attachment, checksum, privateOriginal }] = entries[index];
+        const [blobKey, { attachment, checksum }] = entries[index];
         // A matching size/timestamp is not proof of unchanged bytes. Check
         // the device original even when reusing a previously protected index.
         const known = prior.get(blobKey);
@@ -256,12 +244,10 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         if (known?.academic && known.hash === hash && !knownAcademic) {
           throw new Error("The original academic image binding is no longer available. Cloud protection remains pending.");
         }
-        // Keep an exact prior receipt. A *new* manually authored image also
-        // needs private storage: an unrelated course hash is not authority to
-        // make its recoverability depend on that course's revocable RLS.
-        const academic = known && known.hash === hash
-          ? (known.academic ? knownAcademic : undefined)
-          : privateOriginal ? undefined : academicByHash.get(hash) ?? undefined;
+        // Only an exact previously protected academic revision/path receipt
+        // may select academic recovery. Source-image checksum equality alone
+        // cannot rebind first-save personal figures to unrelated course RLS.
+        const academic = known && known.hash === hash ? knownAcademic : undefined;
         // A former academic-only reference is not proof that a private
         // workspace-media object exists after its academic binding disappears.
         const safeReuse = known && known.hash === hash
