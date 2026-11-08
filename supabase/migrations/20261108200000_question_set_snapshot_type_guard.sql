@@ -102,7 +102,7 @@ begin
     end if;
   end loop;
   return new;
-end $;
+end $$;
 
 create trigger question_set_library_snapshot_types
 before insert or update of snapshot_payload on public.question_set_library_entries
