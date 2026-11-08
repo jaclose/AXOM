@@ -963,6 +963,9 @@ function JournalWritingPage({
   }, [zoomed, settling, deskClosing, deskTouched, addingImage, composing, putBookDown]);
 
   async function completeToday() {
+    // Another page transition, including an earlier Done, already owns this
+    // save gate. Never change the completion status behind its back.
+    if (transitionPendingRef.current) return;
     cancelScheduledSave();
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) {
@@ -979,7 +982,19 @@ function JournalWritingPage({
     setSaveError("");
     // A late edit can supersede the first flush. Keep Done pending until the
     // latest in-memory draft passes the same exact-write gate as navigation.
-    await requestDurableTransition(() => onCompleted(day));
+    const completed = await requestDurableTransition(() => onCompleted(day));
+    if (!completed && mountedRef.current && current.notebookStatus !== "complete") {
+      // A failed Done must not turn a later ordinary Save/autosave into a
+      // silent completion. Keep all later writing and its original entry ID.
+      const latest = draftRef.current;
+      if (latest.notebookStatus === "complete") {
+        const restored = { ...latest, notebookStatus: current.notebookStatus };
+        draftRef.current = restored;
+        draftVersionRef.current += 1;
+        dirtyRef.current = true;
+        setDraftState(restored);
+      }
+    }
   }
 
   function handleBookKeyDown(event: KeyboardEvent<HTMLElement>) {
