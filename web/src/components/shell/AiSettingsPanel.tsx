@@ -4,7 +4,7 @@
 // model key lives only on the server) · Demo (labeled mock). Detection is
 // live and honest: nothing claims to work until probed.
 // ===========================================================================
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RefreshCw, ShieldCheck, Cpu, Cloud, FlaskConical, Power } from "lucide-react";
 import {
   DEFAULT_AI_SETTINGS, checkProviderHealth, cloudEndpoint, detectOllama, loadAiSettings, saveAiSettings,
@@ -24,64 +24,88 @@ const MODES: Array<{ id: AiMode; label: string; icon: ReactNode; note: string }>
 
 export function AiSettingsPanel() {
   const [settings, setSettings] = useState<AiSettings>(() => loadAiSettings());
+  const settingsRef = useRef(settings);
+  const probeEpoch = useRef(0);
   const [probe, setProbe] = useState<AiAvailability | null>(null);
   const [probing, setProbing] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
 
-  function useVerifiedCloudServer() {
-    const next = { ...settings, cloudProxyUrl: undefined };
-    // Do not claim recovery when browser storage rejects or silently drops it.
+  function persistVerified(next: AiSettings, error: string): boolean {
+    // A preference is selected only after an exact device readback. Otherwise
+    // other features still see the previous persisted mode on reload.
     if (!saveAiSettings(next)) {
-      setResetError("This device could not save the change. Cloud AI remains blocked. Try again after checking browser storage.");
-      return;
+      setResetError(error);
+      return false;
     }
-    setResetError(null);
+    settingsRef.current = next;
+    probeEpoch.current += 1;
     setSettings(next);
+    setResetError(null);
+    return true;
+  }
+
+  function useVerifiedCloudServer() {
+    const next = { ...settingsRef.current, cloudProxyUrl: undefined };
+    persistVerified(next, "This device could not save the change. Cloud AI remains blocked. Try again after checking browser storage.");
   }
 
   function update(patch: Partial<AiSettings>) {
-    const next = { ...settings, ...patch };
-    setSettings(next);
-    saveAiSettings(next);
+    const next = { ...settingsRef.current, ...patch };
+    persistVerified(next, "This device could not save your AI setting. The previous mode remains selected. Try again after checking browser storage.");
   }
 
-  async function runProbe(endpoint = settings.localEndpoint) {
+  async function runProbe(endpoint = settingsRef.current.localEndpoint) {
+    const epoch = ++probeEpoch.current;
+    setProbe(null);
     setProbing(true);
-    const result = await detectOllama(endpoint);
-    setProbe(result);
-    setProbing(false);
-    // Auto-select the first model when none is chosen yet.
-    if (result.ok && result.models?.length && !settings.localModel) {
-      update({ localModel: result.models[0] });
+    try {
+      const result = await detectOllama(endpoint);
+      if (probeEpoch.current !== epoch || settingsRef.current.mode !== "local"
+        || settingsRef.current.localEndpoint !== endpoint) return;
+      setProbe(result);
+      setProbing(false);
+      // A late result must not restore an old mode or endpoint. Persist only
+      // the model choice against the current, verified device preferences.
+      if (result.ok && result.models?.length && !settingsRef.current.localModel) {
+        update({ localModel: result.models[0] });
+      }
+    } catch {
+      if (probeEpoch.current !== epoch || settingsRef.current.mode !== "local"
+        || settingsRef.current.localEndpoint !== endpoint) return;
+      setProbe({ ok: false, detail: "Local AI could not be checked. Try again." });
+      setProbing(false);
     }
   }
 
   useEffect(() => {
     if (settings.mode === "local") {
-      void runProbe();
-      return;
+      void runProbe(settings.localEndpoint);
+      return () => { probeEpoch.current += 1; };
     }
-    if (settings.mode !== "cloud") return;
-    // A new Cloud destination must be rechecked without requiring mode toggles.
-    // Ignore slower results from a previously rejected destination.
-    let current = true;
+    const epoch = ++probeEpoch.current;
     setProbe(null);
+    if (settings.mode !== "cloud") {
+      setProbing(false);
+      return () => { probeEpoch.current += 1; };
+    }
+    // An obsolete Local or Cloud probe cannot change newer mode selection,
+    // health, or the saved model after a user switches preferences.
     setProbing(true);
     void checkProviderHealth(settings).then(
       (result) => {
-        if (!current) return;
+        if (probeEpoch.current !== epoch) return;
         setProbe(result);
         setProbing(false);
       },
       () => {
-        if (!current) return;
+        if (probeEpoch.current !== epoch) return;
         setProbe({ ok: false, detail: "Cloud AI could not be checked. Try again later." });
         setProbing(false);
       },
     );
-    return () => { current = false; };
+    return () => { probeEpoch.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.mode, settings.cloudProxyUrl]);
+  }, [settings.mode, settings.cloudProxyUrl, settings.localEndpoint]);
 
   const blockedLegacyCloudDestination = settings.mode === "cloud"
     && Boolean(settings.cloudProxyUrl) && cloudEndpoint(settings) === null;
@@ -106,6 +130,7 @@ export function AiSettingsPanel() {
         </div>
         <span className="sub">{MODES.find((m) => m.id === settings.mode)?.note}</span>
       </div>
+      {resetError && <span className="sub" role="status">{resetError}</span>}
 
       {settings.mode === "local" && (
         <div className="stack" style={{ gap: 10 }}>
@@ -157,7 +182,6 @@ export function AiSettingsPanel() {
                   Use AXOM's verified server
                 </GhostButton>
               </div>
-              {resetError && <span className="sub" role="status">{resetError}</span>}
             </div>
           )}
           <div className="row" style={{ gap: 8 }}>
