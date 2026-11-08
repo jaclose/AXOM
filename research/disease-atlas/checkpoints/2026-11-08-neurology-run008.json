@@ -1,0 +1,165 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "release": "V2 Build008",
+  "date": "2026-11-08",
+  "branch": "docs/disease-atlas-v2-run008-20261108",
+  "base": "Build007",
+  "build_status": "completed; educational draft not independently specialist reviewed",
+  "added_chapter": "Neurology / Neuropathology",
+  "totals": {
+    "internal_entries": 280,
+    "foundational_summaries": 132,
+    "expanded_profiles": 148,
+    "new_detailed_profiles": 16,
+    "evidence_source_records": 162,
+    "online_image_associations": 102,
+    "unique_online_source_pages": 101,
+    "new_image_file_pages": 8,
+    "pdf_pages": 212,
+    "embedded_original_photos": 0,
+    "official_ontology_denominator": null,
+    "coverage_99_percent_measured": false
+  },
+  "new_diseases": [
+    [
+      "AXOM-NEU-001",
+      "Aquaporin-4-IgG-positive neuromyelitis optica spectrum disorder",
+      "NEU-NMOSD23;NEU-DGN26"
+    ],
+    [
+      "AXOM-NEU-002",
+      "MOG antibody-associated disease",
+      "NEU-MOG23;NEU-MOGVAL24"
+    ],
+    [
+      "AXOM-NEU-003",
+      "Guillain–Barré syndrome",
+      "NEU-GBS23"
+    ],
+    [
+      "AXOM-NEU-004",
+      "Chronic inflammatory demyelinating polyradiculoneuropathy",
+      "NEU-CIDP21"
+    ],
+    [
+      "AXOM-NEU-005",
+      "Autoimmune myasthenia gravis",
+      "NEU-MG25;NEU-MG20"
+    ],
+    [
+      "AXOM-NEU-006",
+      "Lambert–Eaton myasthenic syndrome",
+      "NEU-LEMS"
+    ],
+    [
+      "AXOM-NEU-007",
+      "Amyotrophic lateral sclerosis",
+      "NEU-ALS24;NEU-ALS-FDA23"
+    ],
+    [
+      "AXOM-NEU-008",
+      "Huntington disease",
+      "NEU-HUNT"
+    ],
+    [
+      "AXOM-NEU-009",
+      "Dementia with Lewy bodies",
+      "NEU-DLB"
+    ],
+    [
+      "AXOM-NEU-010",
+      "Progressive supranuclear palsy",
+      "NEU-PSP17"
+    ],
+    [
+      "AXOM-NEU-011",
+      "Multiple system atrophy",
+      "NEU-MSA22"
+    ],
+    [
+      "AXOM-NEU-012",
+      "Anti-NMDA receptor encephalitis",
+      "NEU-AE-BP"
+    ],
+    [
+      "AXOM-NEU-013",
+      "Progressive multifocal leukoencephalopathy",
+      "NEU-PML26"
+    ],
+    [
+      "AXOM-NEU-014",
+      "Sporadic Creutzfeldt–Jakob disease",
+      "NEU-CJD26"
+    ],
+    [
+      "AXOM-NEU-015",
+      "SMN1-related spinal muscular atrophy",
+      "NEU-SMA-FDA25;NEU-SMA-SAFETY26"
+    ],
+    [
+      "AXOM-NEU-016",
+      "Acute disseminated encephalomyelitis",
+      "NEU-MOG23;NEU-ADEM"
+    ]
+  ],
+  "images": [
+    [
+      "NEU-IMG-001",
+      "Ptosis myasthenia gravis",
+      "CC BY 2.0"
+    ],
+    [
+      "NEU-IMG-002",
+      "Huntington",
+      "CC BY-SA 3.0"
+    ],
+    [
+      "NEU-IMG-003",
+      "Lewy pathology near an Abeta plaque",
+      "CC0 1.0"
+    ],
+    [
+      "NEU-IMG-004",
+      "PSP Tau tufted astrocyte",
+      "CC BY-SA 3.0"
+    ],
+    [
+      "NEU-IMG-005",
+      "MSA aSynuclein",
+      "CC BY-SA 3.0"
+    ],
+    [
+      "NEU-IMG-006",
+      "MSA Gallays Papp Lantos inclusions",
+      "CC BY-SA 3.0"
+    ],
+    [
+      "NEU-IMG-007",
+      "Hot cross bun sign",
+      "CC BY-SA 4.0"
+    ],
+    [
+      "NEU-IMG-008",
+      "Spongiform degeneration in Creutzfeldt-Jakob disease",
+      "CC BY-SA 4.0"
+    ]
+  ],
+  "important_update": "US FDA November 6 2026 alert regarding insertional oncogenesis following Zolgensma: https://www.fda.gov/vaccines-blood-biologics/safety-availability-biologics/fda-investigating-serious-risk-malignancy-linked-zolgensma-gene-therapy",
+  "quality": {
+    "structural_tests_passed": 23,
+    "failed": 0,
+    "document_212_pages": true,
+    "unique_ids": true,
+    "source_refs_resolved": true,
+    "docx_embedded_photos": 0,
+    "reviewer_signoff": false
+  },
+  "package_sha256": "6c8c1a7fdbd00b64c21fcf5e0df4850f7e4b6acae8d7407a169e10b32b1eef47",
+  "persisted_objects": "This checkpoint only. Full DOCX PDF and package were exported to current conversation sandbox, not included in this git commit.",
+  "outstanding": [
+    "Import official MONDO/ICD-11/Orphanet and reconcile identifiers before denominator claim",
+    "Download original licensed image bytes and embed",
+    "Independent specialist verification",
+    "Archive full manuscript and provenance datasets durably"
+  ]
+}
