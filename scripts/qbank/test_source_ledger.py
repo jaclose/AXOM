@@ -299,6 +299,166 @@ class SourceLedgerTests(unittest.TestCase):
                         "private_use_only_rights_not_asserted",
                     )
 
+    def test_native_source_roots_with_same_label_remain_isolated(self):
+        # SSD term roots may share one label while pointing at distinct approved folders.
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("fd-relative no-follow package open unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            first, second = base / "Term 4 A", base / "Term 4 B"
+            first.mkdir()
+            second.mkdir()
+            package = second / "bank"
+            package.mkdir()
+            (package / "questions.json").write_text(json.dumps(
+                {"bankId": "source-b", "questions": [{"id": "q", "stem": "control",
+                 "choices": ["A", "B"]}]}))
+            manifest = package / "manifest.json"
+            manifest.write_text(json.dumps({"schemaVersion": 1,
+                "questionsFile": "questions.json", "bank": {"id": "source-b"}}))
+            row = {"document_type": "native_manifest", "original_path": str(manifest),
+                   "root_label": "ssd_term_4"}
+            previous_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("ssd_term_4", first), ("ssd_term_4", second)]
+                packages, _, notes = ledger.inspect_packages([row])
+            finally:
+                ledger.ROOTS = previous_roots
+            self.assertFalse(notes)
+            self.assertEqual(len(packages), 1)
+            self.assertEqual(packages[0]["questions"], 1)
+
+    def test_malformed_native_bank_metadata_is_held_without_crashing_scan(self):
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("secure fd-relative native package opening unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            package = root / "bank"
+            package.mkdir()
+            (package / "questions.json").write_text(json.dumps(
+                {"bankId": "demo", "questions": [{"id": "one", "stem": "Synthetic",
+                "choices": ["A", "B"]}]}))
+            manifest = package / "manifest.json"
+            original_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("synthetic", root)]
+                for field in ("bank", "source"):
+                    with self.subTest(field=field):
+                        native = {"schemaVersion": 1, "bank": {"id": "demo"},
+                            "questionsFile": "questions.json", "source": {}}
+                        native[field] = ["non-object", "invalid"]
+                        manifest.write_text(json.dumps(native))
+                        row = {"document_type": "native_manifest", "original_path": str(manifest),
+                               "root_label": "synthetic"}
+                        packages, _, notes = ledger.inspect_packages([row])
+                        self.assertEqual(packages, [])
+                        self.assertEqual(row["review_status"], "package_invalid")
+                        self.assertTrue(notes)
+            finally:
+                ledger.ROOTS = original_roots
+
+    def test_native_questions_file_must_be_contained_and_not_linked(self):
+        # Real file contents are synthetic. Never interpret an outside questions file as a reviewed native bank.
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("fd-relative no-follow package open is unavailable; production fails closed")
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root, package = base / "authorized", base / "authorized" / "bank"
+            package.mkdir(parents=True)
+            outside = base / "outside.json"
+            valid_questions = {"bankId": "demo", "questions": [
+                {"id": "q1", "stem": "Synthetic native question", "choices": ["A", "B"], "correctAnswer": "A"}]}
+            outside.write_text(json.dumps(valid_questions))
+            manifest = package / "manifest.json"
+            row = {"document_type": "native_manifest", "original_path": str(manifest),
+                   "root_label": "synthetic_native"}
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("synthetic_native", root)]
+                for name in ("questions.json", "nested/questions.json"):
+                    with self.subTest(valid=name):
+                        target = package / name
+                        target.parent.mkdir(exist_ok=True)
+                        target.write_text(json.dumps(valid_questions))
+                        manifest.write_text(json.dumps({"schemaVersion": 1, "bank": {"id": "demo"},
+                            "questionsFile": name, "source": {}}))
+                        copied_row = dict(row)
+                        packages, _, notes = ledger.inspect_packages([copied_row])
+                        self.assertFalse(notes)
+                        self.assertEqual(len(packages), 1)
+                        self.assertEqual(packages[0]["questions"], 1)
+                        self.assertEqual(copied_row["extraction_status"], "native_package_structurally_checked")
+                        self.assertFalse(packages[0]["backend_verified"])
+
+                # With old Path.is_file()/read_text(), all three references are read as valid banks.
+                escapes = ["../../outside.json", str(outside), "questions-link.json",
+                           "linked-parent/outside.json"]
+                (package / "questions-link.json").symlink_to(outside)
+                (package / "linked-parent").symlink_to(base, target_is_directory=True)
+                for name in escapes:
+                    with self.subTest(rejected=name):
+                        manifest.write_text(json.dumps({"schemaVersion": 1, "bank": {"id": "demo"},
+                            "questionsFile": name, "source": {}}))
+                        copied_row = dict(row)
+                        packages, _, notes = ledger.inspect_packages([copied_row])
+                        self.assertEqual(packages, [])
+                        self.assertEqual(copied_row["review_status"], "package_invalid")
+                        self.assertTrue(notes)
+                        self.assertNotIn("native_package_structurally_checked",
+                                         copied_row.get("extraction_status", ""))
+            finally:
+                ledger.ROOTS = old_roots
+
+    def test_native_manifest_link_and_assets_directory_cannot_escape(self):
+        import os
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                and os.open in os.supports_dir_fd):
+            self.skipTest("fd-relative no-follow package open is unavailable; production fails closed")
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root, package = base / "authorized", base / "authorized" / "bank"
+            package.mkdir(parents=True)
+            outside = base / "outside"
+            outside.mkdir()
+            (outside / "figure.png").write_bytes(b"synthetic external image")
+            source = {"bankId": "demo", "questions": [{"id": "one", "stem": "Synthetic",
+                "choices": ["A", "B"], "assets": [{"filename": "figure.png"}]}]}
+            (package / "questions.json").write_text(json.dumps(source))
+            manifest = package / "manifest.json"
+            row = {"document_type": "native_manifest", "original_path": str(manifest),
+                   "root_label": "synthetic_native"}
+            prior_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("synthetic_native", root)]
+                for directory in ("../../outside", "assets"):
+                    with self.subTest(assetsDirectory=directory):
+                        if directory == "assets":
+                            (package / "assets").symlink_to(outside, target_is_directory=True)
+                        manifest.write_text(json.dumps({"schemaVersion": 1, "bank": {"id": "demo"},
+                            "questionsFile": "questions.json", "assetsDirectory": directory}))
+                        packages, _, notes = ledger.inspect_packages([dict(row)])
+                        self.assertEqual(len(packages), 1)
+                        self.assertFalse(notes)
+                        self.assertEqual(packages[0]["missing_assets"], ["figure.png"])
+                        self.assertTrue(any(str(x).startswith("missing_or_unsafe_assets:")
+                                            for x in packages[0]["issues"]))
+                # A swapped/linked manifest is never a trusted source of native metadata.
+                manifest.unlink()
+                manifest.symlink_to(outside / "manifest.json")
+                (outside / "manifest.json").write_text(json.dumps({"schemaVersion": 1,
+                    "questionsFile": "questions.json", "bank": {"id": "demo"}}))
+                packages, _, notes = ledger.inspect_packages([dict(row)])
+                self.assertEqual(packages, [])
+                self.assertTrue(notes)
+            finally:
+                ledger.ROOTS = prior_roots
+
     def test_existing_templates_still_parse_547(self):
         if not (ledger.HOME / "Developer/AXOM/AXOM Templates Completed").is_dir():
             self.skipTest("real source root unavailable")
