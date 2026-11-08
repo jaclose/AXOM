@@ -396,11 +396,11 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
     independentContentApprovalVerified: false };
 }
 
-/** Binary-safe NUL-delimited Git diff. No rename detection; rename = D + A. */
+/** Binary-safe NUL-delimited Git diff. Ignore ambient submodule filtering:\n * a hidden new gitlink would otherwise bypass the complete-source inventory.\n * No rename detection; rename = D + A. */
 export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
   validSha(baseSha, "diff baseSha");
   validSha(headSha, "diff headSha");
-  const raw = execFileSync("git", ["--no-replace-objects", "diff", "--no-ext-diff", "--no-renames", "--name-status", "-z", baseSha, headSha, "--"],
+  const raw = execFileSync("git", ["--no-replace-objects", "diff", "--no-ext-diff", "--no-renames", "--ignore-submodules=none", "--name-status", "-z", baseSha, headSha, "--"],
     { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   if (!raw) return [];
   const parts = raw.split("\0");
