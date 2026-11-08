@@ -278,6 +278,26 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
         if (!approved || approved.path !== change.path || approved.sourceSha !== sourceSha) {
           throw new Error("Unreviewed transient source history path: " + change.path + " at " + commit.sha);
         }
+        // Every reachable source-history revision is part of the public release
+        // history. A symlink/gitlink must not be hidden by a later regular file
+        // at an otherwise approved path. Deletion events remain permitted.
+        let historical;
+        try {
+          historical = readFile(commit.sha, change.path);
+        } catch (cause) {
+          throw new Error("Nonregular intermediate source Git object: " + change.path
+            + " at " + commit.sha + ": " + (cause instanceof Error ? cause.message : String(cause)));
+        }
+        if (change.status === "D") {
+          if (historical !== null) throw new Error("Deleted intermediate source Git object still present: " + change.path);
+        } else {
+          try {
+            regularFile(historical, "source history " + change.path);
+          } catch (cause) {
+            throw new Error("Nonregular intermediate source Git object: " + change.path
+              + " at " + commit.sha + ": " + (cause instanceof Error ? cause.message : String(cause)));
+          }
+        }
       }
     }
   }
