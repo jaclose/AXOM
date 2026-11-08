@@ -52,6 +52,8 @@ export function CommunityQuestionSetLibrary() {
   // React may not have committed the disabled state when a second click runs.
   // Reserve the mutation synchronously, and release it only for its own request.
   const likingOperation = useRef<symbol | null>(null);
+  // A second same-frame import click cannot reuse an earlier consent or receipt.
+  const importOperation = useRef<symbol | null>(null);
   // Preview requests may overlap before React commits `opening`. Keep the
   // selected preview's auth observer alive after loading: a completed preview
   // must also be revoked by an A → B → A session round trip before import.
@@ -69,7 +71,10 @@ export function CommunityQuestionSetLibrary() {
   }, [accountId]);
 
   // Never retain an auth subscription for an abandoned preview on unmount.
-  useEffect(() => () => { previewRequest.current?.stop(); previewRequest.current = null; }, []);
+  useEffect(() => () => {
+    previewRequest.current?.stop(); previewRequest.current = null;
+    importOperation.current = null;
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -157,35 +162,63 @@ export function CommunityQuestionSetLibrary() {
     }
   }
   async function add() {
-    if (!preview || !accountId || previewAccountId !== accountId
-      || useAccount.getState().user?.id !== accountId || importing || imported) return;
+    if (!preview || preview.status !== "approved" || !accountId || previewAccountId !== accountId
+      || useAccount.getState().user?.id !== accountId || importing || imported || importOperation.current) return;
+    const selected = preview;
+    const selectedToken = previewRequest.current?.token;
+    if (!selectedToken) return;
+    const operation = Symbol("community-import");
+    importOperation.current = operation;
     const importingAccount = accountId;
     const session = observeAccountSession(importingAccount, () => {
+      if (importOperation.current !== operation) return;
+      importOperation.current = null;
       setImporting(false); setPreview(undefined); setPreviewAccountId(undefined);
       setPreviewError(""); setImported(false);
     });
-    if (!session.current()) { session.stop(); return; }
+    const isAuthorized = () => importOperation.current === operation
+      && previewRequest.current?.token === selectedToken && session.current();
+    if (!isAuthorized()) {
+      if (importOperation.current === operation) importOperation.current = null;
+      session.stop(); return;
+    }
     setImporting(true); setPreviewError("");
+    let listingRevalidated = false;
     try {
+      // Preview consent is not a durable publication grant. Recheck approved
+      // visibility and the immutable content digest before the first vault write.
+      const current = await loadQuestionSetLibraryPreview(importingAccount, selected.id);
+      if (!isAuthorized()) return;
+      if (current.status !== "approved" || current.id !== selected.id
+        || current.contentDigest !== selected.contentDigest)
+        throw new Error("This reviewed Question Set changed. Close the preview and reopen the current listing.");
+      listingRevalidated = true;
       const result = await useStore.getState().commitSharedQuestionSetImport({
-        snapshot: preview.snapshot,
-        identity: { shareId: preview.id, contentDigest: preview.contentDigest },
-        // Revalidate the originating account at the vault commit boundary.
+        snapshot: current.snapshot,
+        identity: { shareId: current.id, contentDigest: current.contentDigest },
+        // A superseded preview or revoked account cannot start a vault write.
         accountGuard: {
           accountId: importingAccount,
-          isCurrentAccount: id => id === importingAccount && session.current(),
+          isCurrentAccount: id => id === importingAccount && isAuthorized(),
         },
       });
-      // A local import already started cannot be undone here. Never present
-      // its completion as an import authorized by a subsequently active account.
-      if (!session.current()) return;
+      if (!isAuthorized()) return;
       if (!result.ok) throw new Error(result.message);
       setImported(true);
     } catch (cause) {
-      if (session.current())
+      if (isAuthorized()) {
+        // Failed publication revalidation invalidates the old reviewed copy.
+        // No stale snapshot can be imported merely by retrying the button.
+        if (!listingRevalidated) {
+          setPreview(undefined); setPreviewAccountId(undefined);
+          cancelPendingPreview();
+        }
         setPreviewError(cause instanceof Error ? cause.message : "The set could not be added. Your saved work is unchanged.");
+      }
     } finally {
-      if (session.current()) setImporting(false);
+      const wasLatest = importOperation.current === operation;
+      if (wasLatest) importOperation.current = null;
+      if (wasLatest && session.current()) setImporting(false);
       session.stop();
     }
   }
