@@ -260,7 +260,8 @@ class SourceLedgerTests(unittest.TestCase):
                     status="requires_package_review",
                     issues=["missing_or_unsafe_assets:1"])
         for package in (held, dict(verified, issues=["missing_or_unsafe_assets:1"]),
-                        dict(verified, canonical_status=None)):
+                        dict(verified, canonical_status=None),
+                        dict(verified, status="unexamined")):
             with self.subTest(case=package):
                 item = disposition([package])
                 self.assertEqual((item["status"], item["readyCount"],
@@ -297,14 +298,16 @@ class SourceLedgerTests(unittest.TestCase):
                 dict(bankId=bank, sourceSha256=sha, questionRecords=2,
                      ready=1, needsReview=1, sourceVerified=True,
                      cloudVerified=False) for bank in ("bank-a", "bank-b")],
-                "raw": []}))
+                "raw": [dict(sha256=sha, questionsDetected=2, ready=2,
+                             needsReview=0, sourceVerified=True, cloudVerified=False,
+                             file="source.pdf")]}))
             for packages in ([first, second], [second, first]):
                 with self.subTest(order=[p["bank_id"] for p in packages]):
                     result = enriched.build_lead_dispositions(rows, packages)
                     stats = enriched.merge_agent2_assessment(result, packages, rows, audit)
                     self.assertEqual(stats["assessed_source_count"], 0)
                     self.assertEqual(stats["assessed_ready_not_installed"], 0)
-                    self.assertEqual(len(stats["rejected_audit_rows"]), 2)
+                    self.assertEqual(len(stats["rejected_audit_rows"]), 3)
                     self.assertEqual(result["sources"][0]["status"], "review-required")
                     self.assertEqual(result["sources"][0]["readyCount"], 0)
 
