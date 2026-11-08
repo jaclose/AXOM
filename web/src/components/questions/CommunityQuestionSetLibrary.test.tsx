@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
@@ -8,16 +8,16 @@ import type { QuestionRecord } from "../../lib/questions";
 import type { QuestionSet } from "../../lib/library";
 
 const mock = vi.hoisted(() => ({
-  search: vi.fn(), preview: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
+  accountId: "account-1", search: vi.fn(), preview: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
 }));
 vi.mock("../../lib/account/accountStore", () => {
-  const accountState = { user: { id: "account-1" } };
+  const accountState = () => ({ user: { id: mock.accountId } });
   return {
-    // Mirror Zustand's selector plus imperative session read. The publishing
-    // dialog must assert both views of the same account during operations.
+    // Mirror both Zustand's selector and imperative getState. Updating the
+    // account before rerender reproduces the stale-handler click interval.
     useAccount: Object.assign(
-      (selector: (state: typeof accountState) => unknown) => selector(accountState),
-      { getState: () => accountState },
+      (selector: (state: ReturnType<typeof accountState>) => unknown) => selector(accountState()),
+      { getState: accountState },
     ),
   };
 });
@@ -46,6 +46,7 @@ const snapshot = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mock.accountId = "account-1";
   mock.search.mockResolvedValue([summary]);
   mock.preview.mockResolvedValue({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
   mock.like.mockResolvedValue(undefined);
@@ -72,6 +73,67 @@ describe("Community Question Set Library", () => {
     await user.click(screen.getByRole("button", { name: "Close" }));
     await user.click(screen.getByRole("button", { name: "Like Synthetic practice" }));
     await waitFor(() => expect(mock.like).toHaveBeenCalledWith("account-1", summary.id, true));
+  });
+
+  it("refuses stale-account import and like clicks before React rerenders", async () => {
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    expect(await screen.findByText("Which synthetic answer is supported?")).toBeTruthy();
+
+    // An auth store update can precede rendering the new account's library.
+    mock.accountId = "account-2";
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    fireEvent.click(screen.getByRole("button", { name: "Like Synthetic practice" }));
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.like).not.toHaveBeenCalled();
+  });
+
+  it("discards a previous account's preview response after a session switch", async () => {
+    let resolvePreview!: (value: unknown) => void;
+    mock.preview.mockImplementationOnce(() => new Promise(resolve => { resolvePreview = resolve; }));
+    const view = render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await waitFor(() => expect(mock.preview).toHaveBeenCalledWith("account-1", summary.id));
+
+    mock.accountId = "account-2";
+    view.rerender(<CommunityQuestionSetLibrary />);
+    await act(async () => {
+      resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+    });
+    expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(mock.commit).not.toHaveBeenCalled();
+  });
+
+  it("preserves explicit AI explanation and choice-rationale provenance through import", async () => {
+    const generated = {
+      ...snapshot,
+      questions: [{
+        ...snapshot.questions[0],
+        explanation: "AXOM AI-assisted explanation (verify against source): Sample teaching rationale.",
+        choiceRationales: {
+          A: "AXOM AI-assisted rationale (verify against source): Rejected by supplied evidence.",
+          B: "AXOM AI-assisted rationale (verify against source): Supported by supplied evidence.",
+        },
+      }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: generated, contentDigest: "b".repeat(64), status: "approved",
+    });
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    const payload = mock.commit.mock.calls[0][0];
+    expect(payload.snapshot.questions[0].explanation).toBe(generated.questions[0].explanation);
+    expect(payload.snapshot.questions[0].choiceRationales).toEqual(generated.questions[0].choiceRationales);
+    expect(payload.snapshot.questions[0].correctKey).toBe("B");
   });
 
   it("holds unresolved and media-bearing local questions out of public submission", async () => {
