@@ -255,7 +255,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
     }
     files.push({ ...expected, integratedStatus: actual?.status ?? "UNCHANGED", mode: original.mode, blob: original.blob });
   }
-  const history = assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted, sourceBlobReceipts }, { listHistoryChanges, readFile });
+  const history = assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted, sourceBlobReceipts }, { listHistoryChanges, readFile, isAncestor });
   return { version: 2, integratedSha, integrationBaseSha, sourceRanges, verifiedFiles: files.length,
     verifiedSources: sourceRanges.length, deletedFiles: files.filter(x => x.deleted).length,
     alreadyPresentInBase, completeForDeclaredRanges: true, verifiedTreePaths, ...history, files };
@@ -267,7 +267,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
  * can still expose a file after that file is removed from the final tree.
  * Review scope is explicit source base..tip commits, plus merge-only carriers.
  */
-export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted, sourceBlobReceipts = null }, { listHistoryChanges, readFile }) {
+export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, sourceRanges, wanted, sourceBlobReceipts = null }, { listHistoryChanges, readFile, isAncestor }) {
   const sourceCommits = new Set();
   const remainingReceipts = sourceBlobReceipts === null ? null : new Map(sourceBlobReceipts);
   let sourceBlobReceiptsVerified = 0;
@@ -295,6 +295,20 @@ export function assertReviewedGitHistory({ integrationBaseSha, integratedSha, so
       }
     }
     if (base !== tip && !seen.has(tip)) throw new Error("Incomplete Git history inventory for " + label);
+    // Seeing the tip is not enough: a shortened or faulty resolver can omit
+    // reachable intermediate parents and falsely claim complete provenance.
+    // Parents outside base..tip must already be reachable from the declared
+    // base; source-owned parents are separately validated before integration.
+    for (const commit of commits) {
+      for (const parent of commit.parents) {
+        if (seen.has(parent) || parent === base
+          || (label === "integration" && sourceCommits.has(parent))) continue;
+        if (!isAncestor(parent, base)) {
+          throw new Error("Incomplete Git history inventory: missing unreviewed parent "
+            + parent + " of " + commit.sha + " in " + label);
+        }
+      }
+    }
     return commits;
   };
   for (const { baseSha, sourceSha } of sourceRanges) {
