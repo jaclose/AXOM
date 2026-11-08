@@ -6,7 +6,7 @@ import { sha256 } from "../compressedText";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
 import { makeSeed } from "../seed";
 import type { NoctyriumState } from "../types";
-import { clearCloudMediaUploadCache, uploadCloudMedia } from "./cloudMedia";
+import { clearCloudMediaUploadCache, downloadCloudMediaAsset, uploadCloudMedia } from "./cloudMedia";
 
 /**
  * Independent, synthetic regression lock for #273.
@@ -172,6 +172,41 @@ describe("live-cache academic image revision authority", () => {
     expect(receipt[0].hash).toBe(f.hash);
     expect(f.checked).toHaveLength(0);
     expect(f.privateDownloaded).toEqual([OWNER + "/" + f.hash]);
+    expect(f.privateUploaded).toHaveLength(0);
+  });
+
+
+  it("restores a previously private original after identical-hash academic access is revoked", async () => {
+    const f = await fixture({ includeB: false });
+    // Protected account-private receipt predates the unrelated course asset.
+    // Preserve the private recovery path regardless of subsequent course RLS.
+    const previousPrivate = f.previous.map(({ academic: _academic, ...rest }) => rest);
+    const renewed = await uploadCloudMedia(f.client, OWNER, f.state, assertCurrent, previousPrivate);
+    expect(renewed).toHaveLength(1);
+
+    // The course revision is now unreadable. The account-private original
+    // remains byte-for-byte available and is never modified or replaced.
+    const courseRevoked = {
+      ...f.client,
+      from(table: string) {
+        if (table !== "academic_files") throw Error("Unexpected table " + table);
+        return {
+          select(_fields: string) {
+            const query = {
+              eq(_field: string, _value: string) { return query; },
+              async single() {
+                return { data: null, error: { code: "PGRST116", message: "synthetic academic access revoked" } };
+              },
+            };
+            return query;
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+
+    const restored = await downloadCloudMediaAsset(courseRevoked, OWNER, renewed[0]);
+    expect([...new Uint8Array(await restored.arrayBuffer())]).toEqual([...BYTES]);
+    expect(f.privateDownloaded).toEqual([OWNER + "/" + f.hash, OWNER + "/" + f.hash]);
     expect(f.privateUploaded).toHaveLength(0);
   });
 
