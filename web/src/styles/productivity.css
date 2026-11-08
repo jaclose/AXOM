@@ -246,3 +246,15 @@
 /* Explicit academic attribution; nonacademic self-report never implies study minutes. */
 .self-report-academic { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-70); }
 .self-report-academic input { width: 17px; height: 17px; accent-color: var(--gold); }
+
+/* V3 named occurrences retain stable, individually accessible identity. */
+.quick-goal-slots { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 6px; padding: 9px 4px 12px; }
+.quick-goal-slots > button {
+  min-width: 0; min-height: 42px; padding: 8px 4px;
+  background: var(--surface-1); color: var(--text-70); border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm); font: var(--fw-medium) var(--fs-xs)/1.2 var(--font-ui);
+  overflow-wrap: anywhere; cursor: pointer;
+}
+.quick-goal-slots > button[aria-pressed="true"] { color: var(--text); border-color: var(--gold-line); background: var(--gold-soft); }
+.quick-goal-slots > button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+@media(max-width:560px) { .quick-goal-slots { grid-template-columns: repeat(3,minmax(0,1fr)); } }
