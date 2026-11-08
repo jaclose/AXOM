@@ -86,7 +86,9 @@ export async function loadQuestionSetLibraryPreview(accountId: string, id: strin
   if (!uuid(id)) throw new Error("This Question Set link is invalid.");
   return withAccount(accountId, async client => {
     const { data, error } = await client.rpc("get_question_set_library", { p_id: id });
-    if (error || !record(data) || data.id !== id || !["pending", "approved", "rejected"].includes(String(data.status)))
+    // Owners and reviewers may inspect non-public submissions through this RPC.
+    // Community discovery/import must never consume those unapproved snapshots.
+    if (error || !record(data) || data.id !== id || data.status !== "approved")
       throw new Error("This Question Set is unavailable. It may have been withdrawn.");
     validateShare(data.snapshot_payload);
     const snapshot = data.snapshot_payload;

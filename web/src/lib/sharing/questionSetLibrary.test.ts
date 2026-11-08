@@ -42,6 +42,18 @@ describe("searchable Question Set client boundary", () => {
     await expect(loadQuestionSetLibraryPreview(accountId, entryId)).rejects.toThrow(/field|key|invalid/i);
   });
 
+  it.each(["pending", "rejected"])("rejects %s owner/reviewer RPC payloads from public previews", async status => {
+    // The SQL RPC lets an owner or reviewer inspect their own submissions.
+    // That privilege must never turn a non-approved submission into an import.
+    const value = snapshot();
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: value.title, question_count: 1, status, snapshot_payload: value,
+    }, error: null });
+    service(rpc);
+    await expect(loadQuestionSetLibraryPreview(accountId, entryId)).rejects.toThrow(/unavailable|withdrawn/i);
+    expect(rpc).toHaveBeenCalledWith("get_question_set_library", { p_id: entryId });
+  });
+
   it("requires a confirmed answer before sending a public submission", async () => {
     const value = snapshot();
     delete value.questions[0].correctKey;
