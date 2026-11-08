@@ -38,6 +38,17 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(ledger.classification("09_BPM502_PreMidterm_Lectures_DLA.txt","baseline_templates"),"tracker_template")
         self.assertEqual(ledger.mapping("GOER/Week 2/IMCQ 1.pdf", "downloads_goer_week2")["week"],2)
 
+    def test_explicit_week_20_is_source_hint_not_assessment_number(self):
+        # Source filenames may identify DERS week 20; do not infer a week from IMCQ 20.
+        for path in ("DERS/Week 20/PQ.pdf", "DERS/wk20/PQ.pdf", "DERS/Week 020/PQ.pdf"):
+            with self.subTest(path=path):
+                mapped = ledger.mapping(path, "downloads_med_school")
+                self.assertEqual(mapped["week"], 20)
+                self.assertEqual(mapped["week_evidence"], "explicit_path_week")
+        self.assertEqual(ledger.mapping("DERS/Week 19/PQ.pdf", "downloads_med_school")["week"], 19)
+        self.assertIsNone(ledger.mapping("DERS/IMCQ 20.pdf", "downloads_med_school")["week"])
+        self.assertIsNone(ledger.mapping("DERS/Week 21/PQ.pdf", "downloads_med_school")["week"])
+
     def test_variant_relationship_is_name_not_assumed_truth(self):
         a = ledger.normalized_pair_key("Examsoft Quiz 5 (Without Answers).pdf")
         b = ledger.normalized_pair_key("Examsoft Quiz 5 (With Answers).pdf")
