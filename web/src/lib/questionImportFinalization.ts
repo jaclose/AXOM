@@ -1,3 +1,4 @@
+import { currentReviewedImportAccountScope } from "./account/importEpoch";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import type { QuestionSet, SourceDocument } from "./library";
 import { assertVaultWritesSince, getVaultWriteCheckpoint } from "./localVault";
@@ -259,6 +260,9 @@ const comparableQuestion = (question: ReviewedQuestionInput | QuestionRecord) =>
 
 const inFlightReviewedImports = new Map<string, Promise<ReviewedImportPersistenceResult>>();
 const inFlightReviewedImportPlans = new Map<string, ReviewedImportPersistencePlan>();
+// Local optimistic-set equivalence is unsafe while any account has this
+// fingerprint pending, even though the durable writer maps are account-bound.
+const pendingFingerprintCounts = new Map<string, number>();
 
 /**
  * Keep previously committed academic records visible while another import is
@@ -308,7 +312,7 @@ const reviewedImportCommitQueues = new WeakMap<AtomicReviewedImportCommit, Promi
  * an import that completed in an earlier interaction.
  */
 export function isReviewedImportInFlight(fingerprint: string): boolean {
-  return inFlightReviewedImports.has(fingerprint);
+  return (pendingFingerprintCounts.get(fingerprint) ?? 0) > 0;
 }
 
 /**
@@ -397,8 +401,29 @@ export async function persistReviewedImportOnce(
   persistence: QuestionImportPersistence,
   plan: ReviewedImportPersistencePlan,
 ): Promise<CoordinatedReviewedImportResult> {
-  const existing = inFlightReviewedImports.get(fingerprint);
-  if (existing) return { result: await existing, joined: true };
+  const scope = currentReviewedImportAccountScope();
+  scope.assertCurrent();
+  persistence.assertCurrent?.();
+  const key = scope.key(fingerprint);
+  const existing = inFlightReviewedImports.get(key);
+  if (existing) {
+    const result = await existing;
+    // A joined caller must not receive the prior caller's IDs after sign-out
+    // or a transition to another (or back to the original) account.
+    scope.assertCurrent();
+    persistence.assertCurrent?.();
+    return { result, joined: true };
+  }
+
+  // Queued work may begin after an account switch. Preserve the original
+  // persistence methods but prevent the old operation from starting writes.
+  const guardedPersistence: QuestionImportPersistence = {
+    ...persistence,
+    assertCurrent: () => {
+      scope.assertCurrent();
+      persistence.assertCurrent?.();
+    },
+  };
 
   let resolvePending!: (result: ReviewedImportPersistenceResult) => void;
   let rejectPending!: (reason?: unknown) => void;
@@ -409,15 +434,21 @@ export async function persistReviewedImportOnce(
   // Publish the guard before the store action can expose tentative state to a
   // synchronous subscriber. This prevents that state from masquerading as a
   // previously completed equivalent import.
-  inFlightReviewedImports.set(fingerprint, pending);
-  inFlightReviewedImportPlans.set(fingerprint, plan);
-  void persistReviewedImportInOrder(persistence, plan).then(resolvePending, rejectPending);
+  inFlightReviewedImports.set(key, pending);
+  inFlightReviewedImportPlans.set(key, plan);
+  pendingFingerprintCounts.set(fingerprint, (pendingFingerprintCounts.get(fingerprint) ?? 0) + 1);
+  void persistReviewedImportInOrder(guardedPersistence, plan).then(resolvePending, rejectPending);
   try {
-    return { result: await pending, joined: false };
+    const result = await pending;
+    guardedPersistence.assertCurrent?.();
+    return { result, joined: false };
   } finally {
-    if (inFlightReviewedImports.get(fingerprint) === pending) {
-      inFlightReviewedImports.delete(fingerprint);
-      inFlightReviewedImportPlans.delete(fingerprint);
+    if (inFlightReviewedImports.get(key) === pending) {
+      inFlightReviewedImports.delete(key);
+      inFlightReviewedImportPlans.delete(key);
+      const remaining = (pendingFingerprintCounts.get(fingerprint) ?? 1) - 1;
+      if (remaining > 0) pendingFingerprintCounts.set(fingerprint, remaining);
+      else pendingFingerprintCounts.delete(fingerprint);
     }
   }
 }
