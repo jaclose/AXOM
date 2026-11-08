@@ -18,6 +18,7 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 import "../../styles/question-set-library.css";
 
 const AI_EXPLANATION_PREFIX = "AXOM AI-assisted explanation (verify against source): ";
+const AI_RATIONALE_PREFIX = "AXOM AI-assisted rationale (verify against source): ";
 
 /** A reviewed key may be revoked or its containing set refiled while the
  * publisher remains open. Check before transmitting private question text to
@@ -222,7 +223,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       const keys = question?.options.map(option => option.key) ?? [];
       if (draft.explanation.trim().length < 40 || draft.explanation.trim().length + AI_EXPLANATION_PREFIX.length > 30_000
         || keys.some(key => (draft.choiceRationales[key] ?? "").trim().length < 10
-          || draft.choiceRationales[key].length > 10_000)) {
+          || draft.choiceRationales[key].trim().length + AI_RATIONALE_PREFIX.length > 10_000)) {
         setGenerationError("Finish the explanation and every choice rationale before saving.");
         return;
       }
@@ -231,7 +232,10 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       bank.updateQuestion(draft.questionId, {
         // Do not silently masquerade AI-authored teaching prose as a source rationale.
         explanation: `${AI_EXPLANATION_PREFIX}${draft.explanation.trim()}`,
-        choiceRationales: draft.choiceRationales,
+        // Choice-by-choice teaching text is model-assisted too. Keep its
+        // provenance explicit after private save and downstream shared import.
+        choiceRationales: Object.fromEntries(Object.entries(draft.choiceRationales)
+          .map(([key, rationale]) => [key, `${AI_RATIONALE_PREFIX}${rationale.trim()}`])),
       });
     }
     setDrafts([]);
