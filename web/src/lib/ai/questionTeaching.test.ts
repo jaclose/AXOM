@@ -100,6 +100,29 @@ describe("review-gated explanation drafting", () => {
     } })).not.toBe(fingerprint);
   });
 
+  it("invalidates an AI draft when rich source evidence changes without updating legacy text or timestamps", () => {
+    const rich: NonNullable<QuestionRecord["content"]> = {
+      id: "source-q-1",
+      source: { filename: "vascular-source.pdf", page: 3 },
+      stem: [{ type: "text", text: "Which layer contains arterial smooth muscle?" }],
+      choices: [
+        { id: "a", label: "A", blocks: [{ type: "text", text: "Tunica media" }] },
+        { id: "b", label: "B", blocks: [{ type: "text", text: "Tunica intima" }] },
+      ],
+      assets: [],
+      provenance: { method: "pdf-import", sourceChecksum: `sha256:${"a".repeat(64)}` },
+    };
+    const original = question({ content: rich });
+    const fingerprint = questionExplanationFingerprint(original);
+    expect(questionExplanationFingerprint({ ...original, content: { ...rich,
+      provenance: { ...rich.provenance, sourceChecksum: `sha256:${"b".repeat(64)}` },
+    } })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, content: { ...rich,
+      stem: [{ type: "text", text: "Different source vignette under the same legacy stem" }],
+    } })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, content: rich })).toBe(fingerprint);
+  });
+
   it("detects changed questions before accepting AI-generated explanations", () => {
     const original = question();
     const fingerprint = questionExplanationFingerprint(original);
