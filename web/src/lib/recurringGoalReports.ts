@@ -24,7 +24,7 @@ export function recurringGoalSummaries(
   today = state.activeDayKey,
 ): RecurringGoalSummary[] {
   const goals = state.profile.dailySuccess?.requirements ?? [];
-  return goals.filter((goal) => goal.enabled
+  return goals.filter((goal) => goal.enabled && goal.showInReports !== false
     && (goal.schedule.kind === "weekly-range" || goal.schedule.kind === "daily-slots"))
     .map((goal) => {
       if (goal.schedule.kind === "weekly-range") {
