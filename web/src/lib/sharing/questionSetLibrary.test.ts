@@ -70,6 +70,22 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).toHaveBeenCalledTimes(2);
   });
 
+  it.each([undefined, null, 0, -1, 1.5, "1"])(
+    "fails closed when pending moderation revision is not a safe positive integer (%s)",
+    async revision => {
+      const value = snapshot();
+      const rpc = vi.fn().mockResolvedValue({ data: {
+        id: entryId, title: value.title, question_count: 1,
+        status: "pending", snapshot_payload: value, review_revision: revision,
+      }, error: null });
+      service(rpc);
+      await expect(loadPendingQuestionSetReviewPreview(accountId, entryId))
+        .rejects.toThrow(/review revision is missing/i);
+      expect(rpc).toHaveBeenCalledTimes(1);
+      expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+    },
+  );
+
   it.each(["approved", "rejected"])("refuses a %s listing in the pending moderation reader", async status => {
     const value = snapshot();
     const rpc = vi.fn().mockResolvedValue({ data: {
@@ -213,6 +229,7 @@ describe("searchable Question Set client boundary", () => {
     const rpc = vi.fn()
       .mockResolvedValueOnce({ data: {
         id: entryId, title: original.title, question_count: 1, status: "pending", snapshot_payload: original,
+        review_revision: 1,
       }, error: null })
       .mockResolvedValueOnce({ data: null, error: null });
     service(rpc);

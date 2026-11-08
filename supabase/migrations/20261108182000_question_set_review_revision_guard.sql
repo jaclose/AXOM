@@ -11,18 +11,18 @@ alter table public.question_set_library_entries
   add column review_revision bigint not null default 1 check (review_revision > 0);
 
 create function private.question_set_library_increment_review_revision()
-returns trigger language plpgsql set search_path = '' as $
+returns trigger language plpgsql set search_path = '' as $$
 begin
   new.review_revision := old.review_revision + 1;
   return new;
-end $;
+end $$;
 create trigger question_set_library_review_revision
 before update on public.question_set_library_entries
 for each row execute function private.question_set_library_increment_review_revision();
 
 -- The protected reader returns a revision token, not an editable row.
 create or replace function public.get_question_set_library(p_id uuid) returns jsonb
-language plpgsql stable security definer set search_path = '' as $
+language plpgsql stable security definer set search_path = '' as $$
 declare v_entry public.question_set_library_entries;
 begin
   if auth.uid() is null then raise exception 'Sign in to open this Question Set' using errcode='42501'; end if;
@@ -34,7 +34,7 @@ begin
   return pg_catalog.jsonb_build_object('id',v_entry.id,'title',v_entry.title,
     'question_count',v_entry.question_count,'snapshot_payload',v_entry.snapshot_payload,
     'status',v_entry.status,'review_revision',v_entry.review_revision);
-end $;
+end $$;
 revoke all on function public.get_question_set_library(uuid) from public,anon;
 grant execute on function public.get_question_set_library(uuid) to authenticated;
 
