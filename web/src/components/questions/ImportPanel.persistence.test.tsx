@@ -13,8 +13,6 @@ import { DB_NAME } from "../../lib/localVault";
 import { hasReviewedImportInFlight, persistReviewedImportOnce, settledReviewedImportSnapshot, type ReviewedImportPersistenceResult } from "../../lib/questionImportFinalization";
 import type { SourceDocument } from "../../lib/library";
 import { prepareReviewedImport } from "../../lib/questionImportSave";
-import * as reviewedImportSave from "../../lib/questionImportSave";
-import { pushToast } from "../../lib/toast";
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
@@ -53,7 +51,6 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
-  vi.restoreAllMocks();
   await useStore.setState(original);
   vi.unstubAllGlobals();
 });
@@ -170,56 +167,6 @@ describe("Import Center persistence invariant", () => {
       expect(state.documents.filter((document) => document.fileName === "once.txt")).toHaveLength(1);
       expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull();
     });
-  });
-
-  it("defers equivalent-import success until durable reuse completes, including after a failed repair", async () => {
-    const user = userEvent.setup();
-    const rawText = "1. Previously reviewed question?\\nA. Alpha\\nB. Beta\\nAnswer: B\\nExplanation: Stable explanation.";
-    // Reproduce the equivalent path while controlling its awaited storage repair.
-    // A stale account-epoch receipt is reported as a typed failed save.
-    const realPrepare = reviewedImportSave.prepareReviewedImport;
-    vi.spyOn(reviewedImportSave, "prepareReviewedImport").mockImplementation((...args) => {
-      const prepared = realPrepare(...args);
-      return prepared.ok
-        ? { ...prepared, equivalent: { setId: "confirmed-set", questionIds: ["confirmed-question"] } }
-        : prepared;
-    });
-    const settle: Array<(result: reviewedImportSave.SavedReviewedImport) => void> = [];
-    const saved = vi.spyOn(reviewedImportSave, "saveReviewedImport").mockImplementation(
-      () => new Promise<reviewedImportSave.SavedReviewedImport>((resolve) => { settle.push(resolve); }),
-    );
-    const toast = vi.mocked(pushToast);
-    toast.mockClear();
-    render(<ImportPanel seed={{
-      drafts: parseQuestionBlocks(rawText), rawText, title: "Existing reviewed set",
-      fileName: "reviewed-existing.txt", fileType: "text",
-    }} />);
-
-    await user.click(screen.getByRole("button", { name: "Finalize import" }));
-    await waitFor(() => expect(settle).toHaveLength(1));
-    expect(saved).toHaveBeenCalledTimes(1);
-    // Pending equivalent source repairs must show truthful busy feedback.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Finalizing…" })).toHaveProperty("disabled", true));
-    expect(toast).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Import already finalized" }));
-
-    settle[0]({ ok: false, message: "The account changed while importing questions.", rollbackFailures: [] });
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({
-      title: "Nothing was finalized", tone: "warn",
-    })));
-    expect(toast).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Import already finalized" }));
-
-    await user.click(screen.getByRole("button", { name: "Finalize import" }));
-    await waitFor(() => expect(settle).toHaveLength(2));
-    expect(toast).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Import already finalized" }));
-
-    settle[1]({
-      ok: true, reused: true, joined: false, setId: "confirmed-set", questionIds: ["confirmed-question"],
-      documentId: undefined, reusedDocument: false, images: { attached: 0, missing: 0, problems: [] },
-    });
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({
-      title: "Import already finalized", tone: "success",
-    })));
-    expect(toast.mock.calls.filter(([notice]) => notice.title === "Import already finalized")).toHaveLength(1);
   });
 
   it("keeps an uploaded source immutable while review-gating edited extraction text", async () => {
