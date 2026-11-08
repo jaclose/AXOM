@@ -239,6 +239,8 @@ interface Actions {
     quantityKind?: "cards" | "questions" | "count";
     quantityLabel?: string;
     note?: string;
+    academic?: boolean;
+    productive?: boolean;
   }) => void;
   logProductivity: (entry: { trackerId: string; quantity?: number; minutes?: number; note?: string }) => void;
   addProductivityTracker: (tracker: Omit<ProductivityTracker, "id" | "createdAt" | "updatedAt">) => string;
@@ -630,13 +632,15 @@ export const useStore = create<Store>()(
             trackerId: tracker?.id,
             unitType: tracker?.unitType ?? "minutes",
             quantity: tracker?.unitType === "count" ? nextCards : nextMinutes,
-            academic: tracker ? tracker.contributesToAcademicStudy : true,
-            productive: tracker ? tracker.contributesToTotalProductiveTime : true,
+            // A personal activity is not academic unless explicitly chosen or linked.
+            // Do not change existing stored records when introducing this default.
+            academic: tracker ? tracker.contributesToAcademicStudy : academic === true,
+            productive: tracker ? tracker.contributesToTotalProductiveTime : productive !== false,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
-      logActivity: ({ label, trackerId, minutes = 0, quantity = 0, quantityKind, quantityLabel, note }) =>
+      logActivity: ({ label, trackerId, minutes = 0, quantity = 0, quantityKind, quantityLabel, note, academic, productive }) =>
         set((s) => {
           const tracker = trackerId
             ? s.productivityTrackers.find((item) => item.id === trackerId && !item.archived)
