@@ -632,10 +632,8 @@ export const useStore = create<Store>()(
             trackerId: tracker?.id,
             unitType: tracker?.unitType ?? "minutes",
             quantity: tracker?.unitType === "count" ? nextCards : nextMinutes,
-            // A personal activity is not academic unless explicitly chosen or linked.
-            // Do not change existing stored records when introducing this default.
-            academic: tracker ? tracker.contributesToAcademicStudy : academic === true,
-            productive: tracker ? tracker.contributesToTotalProductiveTime : productive !== false,
+            academic: tracker ? tracker.contributesToAcademicStudy : true,
+            productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
@@ -670,8 +668,9 @@ export const useStore = create<Store>()(
             quantity: semanticQuantity,
             quantityKind: kind,
             quantityLabel: quantityLabel?.trim().slice(0, 40) || undefined,
-            academic: tracker ? tracker.contributesToAcademicStudy : true,
-            productive: tracker ? tracker.contributesToTotalProductiveTime : true,
+            // Unlinked personal reports never silently acquire academic time.
+            academic: tracker ? tracker.contributesToAcademicStudy : academic === true,
+            productive: tracker ? tracker.contributesToTotalProductiveTime : productive !== false,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
