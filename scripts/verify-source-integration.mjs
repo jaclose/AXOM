@@ -2,7 +2,7 @@
 // Read-only, exact-source Git tree verification for coordinated AXOM releases.
 // CLI: node scripts/verify-source-integration.mjs manifest.json
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -410,7 +410,8 @@ function assertNoGitGrafts(cwd = process.cwd()) {
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   if (!graftPath) throw new Error("Cannot locate Git graft file for release ancestry.");
   try {
-    const graft = statSync(resolve(cwd, graftPath));
+    // Never follow a link: even an empty target can be replaced with forged ancestry.
+    const graft = lstatSync(resolve(cwd, graftPath));
     if (!graft.isFile() || graft.size !== 0) {
       throw new Error("Refusing release ancestry from repository with Git graft file.");
     }
