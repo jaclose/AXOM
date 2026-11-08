@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accountOperationClient } from "../account/supabase";
-import { createQuestionSetShare } from "./questionSetShare";
+import { createQuestionSetShare, sharedQuestionSetDigest } from "./questionSetShare";
 import {
-  loadPendingQuestionSetReviewPreview, loadQuestionSetLibraryPreview, searchQuestionSetLibrary, submitQuestionSetToLibrary,
+  loadPendingQuestionSetReviewPreview, loadQuestionSetLibraryPreview, reviewQuestionSetSubmission,
+  searchQuestionSetLibrary, submitQuestionSetToLibrary,
 } from "./questionSetLibrary";
 
 vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn() }));
@@ -134,4 +135,77 @@ describe("searchable Question Set client boundary", () => {
     }], error: null });
     await expect(searchQuestionSetLibrary(accountId)).rejects.toThrow(/invalid listing/);
   });
+  it("refuses a replaced answer key after the pending set was inspected", async () => {
+    const original = snapshot();
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+    const changed = snapshot();
+    changed.questions[0].correctKey = "B";
+    changed.questions[0].correctAnswerText = "Second";
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: changed.title, question_count: 1, status: "pending", snapshot_payload: changed,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked the source key"))
+      .rejects.toThrow(/changed since inspection/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+  });
+
+  it.each(["approved", "rejected"])("refuses a %s status transition before moderation decision", async status => {
+    const original = snapshot();
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status, snapshot_payload: original,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Evidence was checked"))
+      .rejects.toThrow(/no longer awaiting academic review/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a tampered review receipt without touching the server", async () => {
+    const original = snapshot();
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: "a".repeat(64), status: "pending" as const };
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked the source key"))
+      .rejects.toThrow(/reviewed Question Set changed/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects an account-epoch change between fresh inspection and decision", async () => {
+    const original = snapshot();
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending", snapshot_payload: original,
+    }, error: null });
+    const assertCurrent = vi.fn().mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("The signed-in account changed."));
+    service(rpc, assertCurrent);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked the source key"))
+      .rejects.toThrow(/account changed/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits an unchanged pending revision using the source-reviewed decision only", async () => {
+    const original = snapshot();
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const };
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: {
+        id: entryId, title: original.title, question_count: 1, status: "pending", snapshot_payload: original,
+      }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+    service(rpc);
+    await reviewQuestionSetSubmission(accountId, reviewed, true, "Checked the source key");
+    expect(rpc).toHaveBeenNthCalledWith(1, "get_question_set_library", { p_id: entryId });
+    expect(rpc).toHaveBeenNthCalledWith(2, "review_question_set_library", {
+      p_id: entryId, p_approved: true, p_reason: "Checked the source key",
+    });
+  });
+
 });
