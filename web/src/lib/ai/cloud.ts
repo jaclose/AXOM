@@ -41,6 +41,8 @@ export interface CloudProviderOptions {
   endpoint: string;
   /** Resolves the current session's access token (null when signed out). */
   getAccessToken: () => Promise<string | null>;
+  /** Revalidate the currently persisted learner consent at every request boundary. */
+  isRequestAllowed: () => boolean;
   /** Public client key for the Supabase gateway (publishable / anon). */
   apiKey?: string;
   tier?: "fast" | "quality";
@@ -60,16 +62,29 @@ export function cloudAiRemaining(): number | null {
 
 export function createCloudProvider(options: CloudProviderOptions): AIProvider & { completeJson(req: CloudJsonRequest): Promise<unknown> } {
   const doFetch = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  // Cached providers outlive the Settings panel, including across another tab's
+  // verified Off write. Never trust creation-time mode or destination alone.
+  const canSend = (): boolean => {
+    try { return options.isRequestAllowed() === true; } catch { return false; }
+  };
+  const consentError = "Cloud AI is off or its trusted connection changed. Check AI settings before retrying.";
   return {
     info: { kind: "anthropic", label: "AXOM Cloud AI (Claude)", local: false, requiresKey: false },
     async available(): Promise<AiAvailability> {
+      if (!canSend()) return { ok: false, detail: consentError };
       const token = await options.getAccessToken().catch(() => null);
+      if (!canSend()) return { ok: false, detail: consentError };
       return token
         ? { ok: true, detail: lastRemaining !== null ? `Signed in · ${lastRemaining} Cloud AI requests left today.` : "Signed in · Claude via your AXOM account." }
         : { ok: false, detail: "Sign in to your AXOM account to use Cloud AI." };
     },
     async completeJson(req: CloudJsonRequest): Promise<unknown> {
+      // Check before invoking auth, then again after the asynchronous token
+      // resolution. An Off / destination change during that await must not
+      // dispatch any learner token or study text.
+      if (!canSend()) throw new Error(consentError);
       const token = await options.getAccessToken();
+      if (!canSend()) throw new Error(consentError);
       if (!token) throw new Error("Sign in to your AXOM account to use Cloud AI.");
       const response = await doFetch(options.endpoint, {
         method: "POST",
@@ -90,8 +105,14 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
           schema: req.schema,
         }),
       });
+      // A response from an already-sent request cannot be un-sent. Avoid
+      // returning its content or updating quota UI after consent changes.
+      if (!canSend()) throw new Error(consentError);
       let payload: { result?: unknown; error?: string; remaining?: number } = {};
       try { payload = await response.json(); } catch { /* handled below */ }
+      // Response bodies may be streamed. Revocation during JSON decoding must
+      // also suppress both the returned proposal and stale quota state.
+      if (!canSend()) throw new Error(consentError);
       if (typeof payload.remaining === "number") lastRemaining = payload.remaining;
       if (!response.ok) {
         if (response.status === 429) lastRemaining = 0;
