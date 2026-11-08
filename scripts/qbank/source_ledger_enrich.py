@@ -219,11 +219,12 @@ def build_lead_dispositions(rows, canonical):
     bypath = {r["original_path"]:r for r in rows}
     for r in rows:
         if r.get("source_sha256"): groups[r["source_sha256"]].append(r)
-    package_original = {}
+    package_original = collections.defaultdict(list)
     for p in canonical:
         original = bypath.get(p.get("source_path"))
         if original and original.get("source_sha256"):
-            package_original[original["source_sha256"]] = p
+            # A SHA identifies source bytes, not a unique native package.
+            package_original[original["source_sha256"]].append(p)
     precedence = {
         "pq": 0, "imcq": 0, "esoft": 0, "small_group": 1, "review_questions": 1,
         "case": 2, "answer_key": 3, "tracker_template": 4, "native_manifest": 5,
@@ -237,12 +238,27 @@ def build_lead_dispositions(rows, canonical):
         ranked = sorted(group, key=lambda r: (precedence.get(r["document_type"], 20), r["priority"],r["original_path"]))
         r = ranked[0]
         t = r["document_type"]
-        p = package_original.get(sha)
+        associated = package_original.get(sha, [])
+        p = associated[0] if len(associated) == 1 else None
         entry = dict(sha256=sha)
-        if p is not None and p.get("canonical_status") != "canonical_distinct_question_collection":
-            entry.update(kind="question-source",status="review-required",
-                         questionCount=p["questions"],readyCount=0,reviewCount=p["questions"],
-                         reason="Native question source changed or became unverifiable after inspection; fresh contained scan required.")
+        if len(associated) > 1:
+            # A shared original SHA can name different native banks/revisions.
+            # Do not sum ambiguous packages or advertise an exact ready count.
+            counts = [pkg.get("questions") for pkg in associated
+                      if type(pkg.get("questions")) is int and pkg["questions"] >= 0]
+            lower_bound = max(counts, default=0)
+            entry.update(kind="question-source", status="review-required",
+                         questionCount=lower_bound, readyCount=0, reviewCount=lower_bound,
+                         countBasis="minimum_distinct_candidate_records_unverified",
+                         reason="Ambiguous native packages reference one source SHA; manual source/revision review required.")
+        elif p is not None and (
+                p.get("canonical_status") != "canonical_distinct_question_collection"
+                or p.get("status") != "local_ready_for_agent2_review"
+                or bool(p.get("issues"))):
+            entry.update(kind="question-source", status="review-required",
+                         questionCount=p["questions"], readyCount=0,
+                         reviewCount=p["questions"],
+                         reason="Native source/package review hold (snapshot, assets or structural issues); fresh contained scan and review required.")
         elif p is not None:
             entry.update(kind="question-source",status="prepared",
                          questionCount=p["questions"],readyCount=0,reviewCount=p["questions"],
@@ -389,9 +405,11 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
     accepted=[];rejected=[]
     expected={}
     ambiguous=set()
+    source_package_counts=collections.Counter()
     for p in canonical:
         record=rows_by_path.get(p.get("source_path"))
         if record and record.get("source_sha256"):
+            source_package_counts[record["source_sha256"]] += 1
             key=(p["bank_id"],record["source_sha256"])
             if key in expected:
                 # Multiple native revisions cite one bank/source tuple. Do not
@@ -399,9 +417,10 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
                 ambiguous.add(key)
             else:
                 expected[key]=p
+    ambiguous_source_shas={sha for sha,n in source_package_counts.items() if n>1}
     def held_native_package(package):
         return (package.get("canonical_status") != "canonical_distinct_question_collection"
-                or package.get("status") == "requires_package_review"
+                or package.get("status") != "local_ready_for_agent2_review"
                 or bool(package.get("issues")))
     for item in native:
         if not isinstance(item,dict):
@@ -410,7 +429,7 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
         source=bysha.get(sha)
         key=(bank_id,sha)
         pkg=expected.get(key)
-        if key in ambiguous:
+        if key in ambiguous or sha in ambiguous_source_shas:
             rejected.append("native_record_ambiguous_source:" + str(bank_id));continue
         if pkg and held_native_package(pkg):
             # A past Agent-2 audit may have been valid for older source bytes,
@@ -430,7 +449,7 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
                              audit_ref=str(audit_path),cloudVerified=False))
     # Raw parser receipts must not circumvent a native source-snapshot hold
     # through the same original-source SHA, even though their audit types differ.
-    blocked_native_source_shas={
+    blocked_native_source_shas=ambiguous_source_shas | {
         key[1] for key,pkg in expected.items()
         if key in ambiguous or held_native_package(pkg)
     }
@@ -458,7 +477,8 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
                              detected=detected,ready=ready,review=review+unresolved,
                              audit_ref=str(audit_path),cloudVerified=False))
     eligible_native_count=sum(1 for key,pkg in expected.items()
-                              if key not in ambiguous and not held_native_package(pkg))
+                              if key not in ambiguous and key[1] not in ambiguous_source_shas
+                              and not held_native_package(pkg))
     return dict(status="audit_assessed_without_upload",validated_sources=accepted,
                 rejected_audit_rows=rejected, canonical_native_packages=eligible_native_count,
                 assessed_source_count=len(accepted),
