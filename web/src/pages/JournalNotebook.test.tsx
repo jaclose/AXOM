@@ -1550,6 +1550,42 @@ describe("Journal notebook foundation", () => {
     expect(removeDocumentListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
   });
 
+  it("finishes Done only after a late edit has also been durably saved", async () => {
+    let finishFirst!: () => void;
+    let finishLatest!: () => void;
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finishLatest = resolve; }));
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Before Done" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done for today" }));
+    await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Day kept.")).toBeNull();
+
+    // Simulate typing while the initial durable flush is still pending.
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Before Done, plus a late private line" } });
+    await act(async () => { finishFirst(); await Promise.resolve(); });
+
+    // A superseded flush must not strand Done or mark the older draft complete.
+    await waitFor(() => expect(flush).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Day kept.")).toBeNull();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
+      .toBe("Before Done, plus a late private line");
+    const latest = useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY));
+    expect(latest?.freeWriting).toBe("Before Done, plus a late private line");
+    const originalId = latest?.id;
+
+    await act(async () => { finishLatest(); await Promise.resolve(); });
+    expect(await screen.findByText("Day kept.")).toBeTruthy();
+    expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ id: originalId, freeWriting: "Before Done, plus a late private line", notebookStatus: "complete" });
+    expect(flush).toHaveBeenCalledTimes(2);
+  });
+
   it("reports Done as saved only after the completed entry is durable", async () => {
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
