@@ -364,7 +364,7 @@ describe("Community Question Set Library", () => {
         },
       }],
     };
-    mock.preview.mockResolvedValueOnce({
+    mock.preview.mockResolvedValue({
       id: summary.id, snapshot: generated, contentDigest: "b".repeat(64), status: "approved",
     });
     const user = userEvent.setup();
@@ -378,6 +378,103 @@ describe("Community Question Set Library", () => {
     expect(payload.snapshot.questions[0].explanation).toBe(generated.questions[0].explanation);
     expect(payload.snapshot.questions[0].choiceRationales).toEqual(generated.questions[0].choiceRationales);
     expect(payload.snapshot.questions[0].correctKey).toBe("B");
+  });
+
+  it("checks the live approved listing again before importing a previously reviewed preview", async () => {
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.preview).toHaveBeenCalledTimes(2);
+    expect(mock.preview).toHaveBeenNthCalledWith(2, "account-1", summary.id);
+    const imported = mock.commit.mock.calls[0][0];
+    expect(imported.snapshot.questions[0].correctKey).toBe("B");
+    expect(imported.identity).toEqual({ shareId: summary.id, contentDigest: "a".repeat(64) });
+    expect(imported.accountGuard.isCurrentAccount("account-1")).toBe(true);
+  });
+
+  it("refuses to import a withdrawn listing after the preview was loaded", async () => {
+    mock.preview.mockReset().mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
+    }).mockRejectedValueOnce(new Error("This Question Set is unavailable. It may have been withdrawn."));
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    expect(await screen.findByText(/may have been withdrawn/)).toBeTruthy();
+    expect(mock.preview).toHaveBeenCalledTimes(2);
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(mock.observers.size).toBe(0);
+  });
+
+  it("refuses changed reviewed snapshots without importing a different answer key", async () => {
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
+    }).mockResolvedValueOnce({
+      id: summary.id, snapshot: { ...snapshot, questions: [{ ...snapshot.questions[0], correctKey: "A" }] },
+      contentDigest: "b".repeat(64), status: "approved",
+    });
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    expect(await screen.findByText(/reviewed Question Set changed/)).toBeTruthy();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+  });
+
+  it("revokes a pending live-import approval check on an A to B to A session round trip", async () => {
+    let finishReview!: (value: unknown) => void;
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
+    }).mockImplementationOnce(() => new Promise(resolve => { finishReview = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.preview).toHaveBeenCalledTimes(2));
+    expect(mock.commit).not.toHaveBeenCalled();
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    await act(async () => {
+      finishReview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+    });
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(mock.observers.size).toBe(0);
+  });
+
+  it("coalesces rapid same-frame import clicks before the live approval check settles", async () => {
+    let finishReview!: (value: unknown) => void;
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
+    }).mockImplementationOnce(() => new Promise(resolve => { finishReview = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    const button = screen.getByRole("button", { name: "Add to my AXOM" });
+    act(() => { fireEvent.click(button); fireEvent.click(button); });
+    expect(mock.preview).toHaveBeenCalledTimes(2);
+    expect(mock.commit).not.toHaveBeenCalled();
+    await act(async () => {
+      finishReview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+    });
+    expect(mock.commit).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Already in my AXOM" })).toBeTruthy();
   });
 
   it("holds unresolved and media-bearing local questions out of public submission", async () => {
