@@ -21,14 +21,21 @@ export interface CloudMediaReference {
   updatedAt: string;
 }
 
-type Reference = { questionId: string; attachment: QuestionImageAttachment; checksum?: string };
+type Reference = { questionId: string; attachment: QuestionImageAttachment; checksum?: string; privateOriginal: boolean };
 export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
   state = contentMetadata(state);
   const refs = new Map<string, Reference>();
   for (const question of [...state.questions, ...privateReviewMedia(state.documents)]) {
     const content = "content" in question ? question.content : undefined;
+    // The question's source is not the provenance of an attachment: an
+    // imported question can acquire a new learner-authored note image.
+    const manualQuestion = "source" in question && question.source === "manual";
     for (const attachment of question.attachments ?? []) {
       const declared = content?.assets.find(asset => asset.id === attachment.assetId)?.checksum;
+      // Only a source-identified, checksum-backed attachment may consider a
+      // shared academic binding on first protection. Unknown/legacy originals
+      // and images added to imported questions retain private recovery rights.
+      const privateOriginal = manualQuestion || !declared;
       const checksum = declared?.replace(/^sha256:/, "");
       if (checksum !== undefined && !/^[a-f0-9]{64}$/.test(checksum)) {
         throw new Error("A source image has an invalid declared checksum. The workspace has not been marked protected.");
@@ -45,9 +52,10 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
         }
         // Keep the last referencing question for cloud-cache reconstruction,
         // while retaining a source checksum declared by any earlier reference.
-        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum: checksum ?? prior.checksum });
+        refs.set(attachment.blobKey, { questionId: question.id, attachment,
+          checksum: checksum ?? prior.checksum, privateOriginal: prior.privateOriginal || privateOriginal });
       } else {
-        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum });
+        refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum, privateOriginal });
       }
     }
   }
@@ -212,7 +220,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           continue;
         }
         const index = job - deferred.length;
-        const [blobKey, { attachment, checksum }] = entries[index];
+        const [blobKey, { attachment, checksum, privateOriginal }] = entries[index];
         // A matching size/timestamp is not proof of unchanged bytes. Check
         // the device original even when reusing a previously protected index.
         const known = prior.get(blobKey);
@@ -248,12 +256,12 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         if (known?.academic && known.hash === hash && !knownAcademic) {
           throw new Error("The original academic image binding is no longer available. Cloud protection remains pending.");
         }
-        // A protected private original must remain private even if a newly
-        // installed academic revision later advertises identical bytes.
-        // Hash identity never transfers storage ownership or restore rights.
+        // Keep an exact prior receipt. A *new* manually authored image also
+        // needs private storage: an unrelated course hash is not authority to
+        // make its recoverability depend on that course's revocable RLS.
         const academic = known && known.hash === hash
           ? (known.academic ? knownAcademic : undefined)
-          : academicByHash.get(hash) ?? undefined;
+          : privateOriginal ? undefined : academicByHash.get(hash) ?? undefined;
         // A former academic-only reference is not proof that a private
         // workspace-media object exists after its academic binding disappears.
         const safeReuse = known && known.hash === hash
