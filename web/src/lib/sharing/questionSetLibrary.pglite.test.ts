@@ -207,6 +207,20 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       ["membership order mismatch", value => { value.orderedQuestionIds = ["different-question"]; }],
       ["duplicate option key", value => { (value.questions[0].options as Array<Record<string, unknown>>)[1].key = "A"; }],
       ["wrong correct answer text", value => { value.questions[0].correctAnswerText = "First option"; }],
+      ["string share version", value => { value.shareFormatVersion = "1" as never; }],
+      ["numeric membership ID", value => { value.orderedQuestionIds = [1 as never]; value.questions[0].id = "1"; }],
+      ["numeric answer key", value => {
+        value.questions[0].correctKey = 1;
+        (value.questions[0].options as Array<Record<string, unknown>>)[1].key = 1;
+      }],
+      ["boolean answer choice text", value => {
+        value.questions[0].correctAnswerText = "true";
+        (value.questions[0].options as Array<Record<string, unknown>>)[1].text = true;
+      }],
+      ["numeric stem", value => { value.questions[0].stem = 123456789; }],
+      ["numeric explanation", value => { value.questions[0].explanation = 12345; }],
+      ["numeric copyright notice", value => { value.copyrightNotice = 123456789 as never; }],
+      ["numeric creation time", value => { value.createdAt = 2026110112000 as never; }],
       ["non-string question tags", value => { value.questions[0].tags = [{ secret: "private" }]; }],
     ];
     const accepted: string[] = [];
@@ -219,6 +233,22 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(accepted).toEqual([]);
     expect((await as<{ source_id: string }>(OWNER, "select source_id from public.my_question_set_library()"))
       .filter(row => row.source_id.startsWith("malformed-"))).toEqual([]);
+  });
+
+  it("keeps pending answer keys and review revisions unchanged after a malformed privileged replacement", async () => {
+    const id = await submit(OWNER, "typed-post-submission-key");
+    const malformed = snapshot();
+    malformed.questions[0].correctKey = 1;
+    (malformed.questions[0].options as Array<Record<string, unknown>>)[1].key = 1;
+    await expect(db.query(
+      "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+      [JSON.stringify(malformed), id],
+    )).rejects.toThrow(/invalid scalar types/i);
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(readback.value.review_revision).toBe(1);
   });
 
   it("denies new submissions when account deletion is processing", async () => {
