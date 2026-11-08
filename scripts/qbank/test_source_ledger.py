@@ -468,9 +468,9 @@ class SourceLedgerTests(unittest.TestCase):
             root.mkdir()
             out.mkdir()
             source = root / "PQ 1.txt"
-            source.write_text("Question 1: authorized synthetic question\\n")
+            source.write_text("Question 1: authorized synthetic question\n")
             outside = base / "outside.txt"
-            outside.write_text("Question 1: OTHER\\nQuestion 2: OTHER\\n")
+            outside.write_text("Question 1: OTHER\nQuestion 2: OTHER\n")
             old_roots, old_out = ledger.ROOTS, ledger.OUT
             try:
                 ledger.ROOTS, ledger.OUT = [("synthetic_sources", root)], out
@@ -496,9 +496,9 @@ class SourceLedgerTests(unittest.TestCase):
             root.mkdir()
             out.mkdir()
             source = root / "01_FTM1_Lectures_DLA.txt"
-            source.write_text("Authorized lesson [Lecture]\\n")
+            source.write_text("Authorized lesson [Lecture]\n")
             outside = base / "outside.txt"
-            outside.write_text("Unapproved external lesson [Lecture]\\n")
+            outside.write_text("Unapproved external lesson [Lecture]\n")
             old_roots, old_out = ledger.ROOTS, ledger.OUT
             try:
                 ledger.ROOTS, ledger.OUT = [("baseline_templates", root)], out
@@ -530,9 +530,9 @@ class SourceLedgerTests(unittest.TestCase):
             root.mkdir()
             out.mkdir()
             source = root / "PQ sample.pdf"
-            source.write_bytes(b"%PDF-1.4\\nsynthetic permitted bytes")
+            source.write_bytes(b"%PDF-1.4\nsynthetic permitted bytes")
             outside = base / "outside.pdf"
-            outside.write_bytes(b"%PDF-1.4\\nsynthetic outside bytes")
+            outside.write_bytes(b"%PDF-1.4\nsynthetic outside bytes")
             old_roots, old_out = ledger.ROOTS, ledger.OUT
             try:
                 ledger.ROOTS, ledger.OUT = [("synthetic_sources", root)], out
