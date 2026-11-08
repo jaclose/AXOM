@@ -1,4 +1,4 @@
-import { useAccount } from "./account/accountStore";
+import { currentReviewedImportAccountScope } from "./account/importEpoch";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import type { QuestionSet, SourceDocument } from "./library";
 import { assertVaultWritesSince, getVaultWriteCheckpoint } from "./localVault";
@@ -257,32 +257,6 @@ const comparableQuestion = (question: ReviewedQuestionInput | QuestionRecord) =>
   citation: question.citation?.trim() || undefined,
   tags: normalizeTagList(question.tags),
 });
-
-// The fingerprint is academic content identity, not an authorization boundary.
-// Epoch increments on A -> B -> A as well as sign-out. Reusing an identical
-// payload after an account transition must create a NEW durable transaction.
-let activeImportAccountId = useAccount.getState().user?.id ?? null;
-let activeImportAccountEpoch = 0;
-useAccount.subscribe((state) => {
-  const nextId = state.user?.id ?? null;
-  if (nextId !== activeImportAccountId) {
-    activeImportAccountId = nextId;
-    activeImportAccountEpoch += 1;
-  }
-});
-
-function currentReviewedImportAccountScope() {
-  const accountId = useAccount.getState().user?.id ?? null;
-  const epoch = activeImportAccountEpoch;
-  return {
-    key: (fingerprint: string) => JSON.stringify([epoch, accountId, fingerprint]),
-    assertCurrent: () => {
-      if (activeImportAccountEpoch !== epoch || useAccount.getState().user?.id !== accountId) {
-        throw new Error("The account changed while importing questions. Reopen this import in your current account.");
-      }
-    },
-  };
-}
 
 const inFlightReviewedImports = new Map<string, Promise<ReviewedImportPersistenceResult>>();
 const inFlightReviewedImportPlans = new Map<string, ReviewedImportPersistencePlan>();
