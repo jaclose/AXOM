@@ -46,10 +46,17 @@ export function loadAiSettings(): AiSettings {
   }
 }
 
-export function saveAiSettings(settings: AiSettings): void {
+/**
+ * Return true only after the exact settings survive a device-storage readback.
+ * Callers that promise a durable security-preference reset must check this
+ * receipt; browser storage may throw or silently decline a write.
+ */
+export function saveAiSettings(settings: AiSettings): boolean {
   try {
-    localStorage.setItem(STORAGE_KEYS.aiSettings, JSON.stringify(settings));
+    const serialized = JSON.stringify(settings);
+    localStorage.setItem(STORAGE_KEYS.aiSettings, serialized);
+    return localStorage.getItem(STORAGE_KEYS.aiSettings) === serialized;
   } catch {
-    /* storage unavailable — settings stay in memory for this session */
+    return false;
   }
 }
