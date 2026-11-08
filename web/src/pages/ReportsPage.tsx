@@ -33,6 +33,7 @@ import { TrackerReport } from "../components/reports/TrackerReport";
 import { RecurringGoalReport } from "../components/reports/RecurringGoalReport";
 import { todaysCapacity } from "../lib/energyInsights";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
+import "../styles/productivity.css";
 
 /** I1-17 (JD): a mini guide behind a Help button, like Course Tracker, Question Bank and Productivity. */
 export const REPORTS_TOUR_STEPS: readonly ModuleTourStep[] = [
