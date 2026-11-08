@@ -77,15 +77,16 @@ export function verifySourceIntegration(manifest, readFile) {
   return { version: 1, completeForDeclaredRanges: false, integratedSha, verifiedSources: sources, verifiedFiles: files.length, files };
 }
 /** Resolve immutable local Git objects; never fetch, checkout, deploy or merge. */
+// In release attestation, local refs/replace must NEVER rewrite an immutable SHA.
 export function readGitFile(sha, path, cwd = process.cwd(), allowMissing = false) {
   validSha(sha, "Git revision");
   validPath(path);
   // A tree object can have the same blobs while not being the reviewed commit.
   // Prove each claimed revision is an actual commit object, not just 40 hex digits.
-  const kind = execFileSync("git", ["cat-file", "-t", sha],
+  const kind = execFileSync("git", ["--no-replace-objects", "cat-file", "-t", sha],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   if (kind !== "commit") throw new Error("Expected pinned commit object: " + sha);
-  const output = execFileSync("git", ["ls-tree", "-r", "--full-tree", sha, "--", path],
+  const output = execFileSync("git", ["--no-replace-objects", "ls-tree", "-r", "--full-tree", sha, "--", path],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trimEnd();
   const rows = output ? output.split("\n") : [];
   if (allowMissing && rows.length === 0) return null;
@@ -217,7 +218,7 @@ export function verifyCompleteSourceIntegration(manifest, { listChanges, isAnces
 export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
   validSha(baseSha, "diff baseSha");
   validSha(headSha, "diff headSha");
-  const raw = execFileSync("git", ["diff", "--no-ext-diff", "--no-renames", "--name-status", "-z", baseSha, headSha, "--"],
+  const raw = execFileSync("git", ["--no-replace-objects", "diff", "--no-ext-diff", "--no-renames", "--name-status", "-z", baseSha, headSha, "--"],
     { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   if (!raw) return [];
   const parts = raw.split("\0");
@@ -232,10 +233,10 @@ export function listGitChanges(baseSha, headSha, cwd = process.cwd()) {
 /** Enumerate local immutable Git tree paths with NUL-delimited binary-safe names. */
 export function listGitTreePaths(sha, cwd = process.cwd()) {
   validSha(sha, "integrated tree SHA");
-  const kind = execFileSync("git", ["cat-file", "-t", sha],
+  const kind = execFileSync("git", ["--no-replace-objects", "cat-file", "-t", sha],
     { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   if (kind !== "commit") throw new Error("Expected pinned Git commit object for tree path inventory.");
-  const output = execFileSync("git", ["ls-tree", "-r", "-z", "--name-only", "--full-tree", sha],
+  const output = execFileSync("git", ["--no-replace-objects", "ls-tree", "-r", "-z", "--name-only", "--full-tree", sha],
     { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   if (!output) return [];
   const paths = output.split("\0");
@@ -248,7 +249,7 @@ export function isGitAncestor(baseSha, headSha, cwd = process.cwd()) {
   validSha(baseSha, "ancestor baseSha");
   validSha(headSha, "ancestor headSha");
   try {
-    execFileSync("git", ["merge-base", "--is-ancestor", baseSha, headSha], { cwd, stdio: "ignore" });
+    execFileSync("git", ["--no-replace-objects", "merge-base", "--is-ancestor", baseSha, headSha], { cwd, stdio: "ignore" });
     return true;
   } catch (cause) {
     if (cause.status === 1) return false;
