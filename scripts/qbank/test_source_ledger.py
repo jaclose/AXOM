@@ -255,7 +255,9 @@ class SourceLedgerTests(unittest.TestCase):
             sha=digest("native source")
             original=directory/"source.pdf"; original.write_bytes(b"native source")
             bysha={"sources":[{"sha256":sha,"kind":"question-source","status":"review-required"}]}
-            packages=[dict(bank_id="example",questions=2,source_path=str(original))]
+            packages=[dict(bank_id="example",questions=2,source_path=str(original),
+                           canonical_status="canonical_distinct_question_collection",
+                           status="local_ready_for_agent2_review",issues=[])]
             rows=[{"source_sha256":sha,"original_path":str(original)}]
             file=directory/"audit.json"
             file.write_text(json.dumps({"native":[{"bankId":"example","sourceSha256":sha,
@@ -293,6 +295,7 @@ class SourceLedgerTests(unittest.TestCase):
                  ["questions_changed_after_inspection"]),
                 ("canonical_distinct_question_collection", "requires_package_review",
                  ["missing_or_unsafe_assets:1"]),
+                (None, "local_ready_for_agent2_review", []),
             ]
             for canonical_status, status, issues in cases:
                 with self.subTest(canonical_status=canonical_status, issues=issues):
