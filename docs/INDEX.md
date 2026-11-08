@@ -12,10 +12,15 @@ Start a session with [AGENTS](../AGENTS.md) and [AI_STATE](AI_STATE.md).
 | A feature's files, invariants and tests | [Feature router](features/README.md) |
 | Visual navigation, semantic relationships, Obsidian setup | [Graph guide](graph/README.md) |
 | Product vision, terminology, normative authority | [Product router](product/README.md) |
+| Product stage direction and integrated learner workflow | [Product operating guide](product/PRODUCT-GUIDE.md) |
+| Brand asset usage, diagram grammar and voice | [Brand implementation guide](design/BRAND-GUIDE.md) |
 | UI tokens, primitives, voice, motion | [Design contract](design/DESIGN.md) |
 | Local setup, scripts, environment | [Development](operations/development.md) |
 | Narrow checks, full gate, CI coverage | [Testing](operations/testing.md) |
 | Web/native releases, updates, account setup | [Deployment](operations/deployment.md) |
+| Exact coding/IDE, QA and cross-worker hygiene | [Engineering SOP](operations/engineering-sop.md) |
+| AXOM FORGE edition naming and release role | [Release nomenclature](operations/release-nomenclature.md) |
+| Revising living guides and tracking decisions | [Document control](operations/document-control.md) |
 | Email configuration and test-draft checks | [Communications readiness](operations/communications-readiness.md) |
 | Known failure patterns | [Troubleshooting](operations/troubleshooting.md) |
 | Durable engineering decisions | [Decision index](decisions/README.md) |

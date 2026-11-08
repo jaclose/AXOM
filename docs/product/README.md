@@ -10,6 +10,7 @@ These are routes to existing canonical sources, not a new product authority.
 | Question | Source |
 | --- | --- |
 | Product identity and enduring principles | [Constitution](../governance/AX-0002-CONSTITUTION.md) |
+| Implementing the product stages and learner journey | [Product operating guide](PRODUCT-GUIDE.md) |
 | Governing document IDs and authority | [Registry](../governance/AX-0000-REGISTRY.md) |
 | Approved backlog records | [Product backlog](../governance/AX-0001-MASTER-PRODUCT-BACKLOG.md) |
 | Product terminology | [Lexicon](../governance/AX-0009-PRODUCT-LEXICON.md) |
