@@ -305,6 +305,47 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(readback.value.review_revision).toBe(1);
   });
 
+  it("rejects well-typed but inconsistent answers and membership on protected snapshot replacement", async () => {
+    const id = await submit(OWNER, "privileged-answer-semantics-guard");
+    const variants: Array<[string, (value: Snapshot) => void]> = [
+      ["membership does not match question ID", value => { value.orderedQuestionIds = ["unrelated-question"]; }],
+      ["duplicate membership IDs", value => {
+        value.questions.push({ ...value.questions[0] });
+        value.orderedQuestionIds.push("shared-question-1");
+      }],
+      ["empty reviewed set", value => { value.questions = []; value.orderedQuestionIds = []; }],
+      ["key absent from choices", value => {
+        value.questions[0].correctKey = "Z";
+        delete value.questions[0].correctAnswerText;
+      }],
+      ["duplicate choice keys", value => {
+        (value.questions[0].options as Array<Record<string, unknown>>)[0].key = "B";
+      }],
+      ["contradictory correct-answer text", value => { value.questions[0].correctAnswerText = "First option"; }],
+      ["blank reviewed key", value => { value.questions[0].correctKey = ""; }],
+      ["too few choices", value => { value.questions[0].options = [{ key: "B", text: "Second option" }]; }],
+      ["too many choices", value => {
+        value.questions[0].options = Array.from({ length: 27 }, (_, index) => ({
+          key: index === 1 ? "B" : `C${index}`,
+          text: index === 1 ? "Second option" : `Synthetic option ${index}`,
+        }));
+      }],
+    ];
+    for (const [label, mutate] of variants) {
+      const altered = snapshot();
+      mutate(altered);
+      await expect(db.query(
+        "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(altered), id],
+      ), label).rejects.toThrow(/inconsistent membership or answer evidence/i);
+    }
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload).toEqual(snapshot());
+    expect(readback.value.review_revision).toBe(1);
+  });
+
   it("retains valid text-only visual intent and reviewed teaching rationales through moderation", async () => {
     const source = snapshot();
     source.tags = ["visual:intent:histology"];
