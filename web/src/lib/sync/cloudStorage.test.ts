@@ -172,6 +172,9 @@ describe("private cloud content and media", () => {
     const manifest = await uploadCloudMedia(client, "account-a", state, guard);
     expect(upload.mock.calls.filter(([bucket]) => bucket === MEDIA_BUCKET)).toHaveLength(1);
     expect(manifest[0].hash).toBe(manifest[1].hash);
+    // The new original must be read back before the upload can be certified.
+    expect(download).toHaveBeenCalledTimes(1);
+    download.mockClear(); // Subsequent calls belong to fresh-device restoration.
     // A fresh device has canonical metadata and the verified cloud index, but no bytes.
     const restoredKey = `fresh-${crypto.randomUUID()}`;
     const restored = { ...attachment, blobKey: restoredKey };
@@ -225,6 +228,8 @@ describe("private cloud content and media", () => {
     expect(manifest).toHaveLength(1);
     expect(manifest[0]).toMatchObject({ blobKey, hash, byteSize: blob.size });
     expect(upload.mock.calls.filter(([bucket]) => bucket === MEDIA_BUCKET)).toHaveLength(1);
+    expect(download).toHaveBeenCalledTimes(1); // First-save integrity readback.
+    download.mockClear(); // Measure lazy recovery separately from upload.
 
     await deleteQuestionAttachmentBlobs([blobKey]);
     await saveCloudMediaIndex("account-a", manifest);
