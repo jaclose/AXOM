@@ -205,6 +205,7 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).toHaveBeenNthCalledWith(1, "get_question_set_library", { p_id: entryId });
     expect(rpc).toHaveBeenNthCalledWith(2, "review_question_set_library", {
       p_id: entryId, p_approved: true, p_reason: "Checked the source key",
+      p_expected_snapshot: original,
     });
   });
 
