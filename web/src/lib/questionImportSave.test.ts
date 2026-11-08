@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import { publishReviewedImportAccount } from "./account/importEpoch";
+import * as sourceDecode from "./decode/sources";
 import { sha256Hex } from "./checksum";
 import { readSourceOriginal, deleteSourceOriginal } from "./decode/sources";
 import type { QuestionSet, SourceDocument } from "./library";
@@ -146,6 +148,47 @@ describe("prepareReviewedImport", () => {
 });
 
 describe("saveReviewedImport", () => {
+  it.each([false, true])("rejects reused account A IDs after an async original repair switches account (ABA=%s)", async (returnToA) => {
+    const original = new Blob([TEXT], { type: "text/plain" });
+    const checksum = await sha256Hex(await original.arrayBuffer());
+    if (!checksum) throw new Error("Expected synthetic source checksum");
+    const document = { ...file, checksum, fileType: "text", sizeBytes: original.size };
+    const { store, state, commits } = memoryStore();
+    publishReviewedImportAccount("account-a");
+    try {
+      const first = prepareReviewedImport(request({ document }), empty, make());
+      if (!first.ok) throw new Error("Expected the initial reviewed set");
+      expect(await saveReviewedImport(first, store)).toMatchObject({ ok: true });
+      expect(commits).toHaveLength(1);
+
+      const reused = prepareReviewedImport(request({ document: { ...document, originalFile: original } }), state, make());
+      if (!reused.ok || !reused.equivalent) throw new Error("Expected a preexisting equivalent A set");
+      const existingASet = reused.equivalent.setId;
+      let finishOriginal!: () => void;
+      const pendingOriginal = new Promise<void>((resolve) => { finishOriginal = resolve; });
+      const originalWrite = vi.spyOn(sourceDecode, "saveSourceOriginal")
+        .mockImplementation(async () => { await pendingOriginal; });
+      vi.spyOn(vault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+      vi.spyOn(vault, "assertVaultWritesSince").mockImplementation(() => undefined);
+      const saving = saveReviewedImport(reused, store);
+      await vi.waitFor(() => expect(originalWrite).toHaveBeenCalledOnce());
+      publishReviewedImportAccount("account-b");
+      if (returnToA) publishReviewedImportAccount("account-a");
+      finishOriginal();
+
+      const outcome = await saving.then(
+        (result) => result,
+        (error: unknown) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error) }),
+      );
+      expect(outcome).toMatchObject({ ok: false, message: expect.stringMatching(/account changed/i) });
+      expect(outcome).not.toMatchObject({ ok: true, setId: existingASet });
+      expect(store.updateDocument).not.toHaveBeenCalled();
+      expect(commits).toHaveLength(1);
+    } finally {
+      publishReviewedImportAccount(null);
+    }
+  });
+
   it("writes the prepared import once, as one commit", async () => {
     const { store, state, commits } = memoryStore();
     const prepared = prepareReviewedImport(request(), empty, make());
