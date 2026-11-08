@@ -99,7 +99,10 @@ def digest_text(text):
 
 def sha256_file(path):
     h = hashlib.sha256()
-    with path.open("rb") as f:
+    # No-follow prevents a file swapped for a symlink between scan and open on POSIX.
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as f:
         for chunk in iter(lambda: f.read(2 * 1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
@@ -298,6 +301,11 @@ def load_candidates(args):
                     skip["unrelated_top_level_file"] += 1
                     continue
                 path = pathlib.Path(base) / name
+                # os.walk(followlinks=False) still yields symlinked *files*.
+                # Never read a file alias whose target may be outside this source root.
+                if path.is_symlink():
+                    skip["symlinked_file_not_followed"] += 1
+                    continue
                 ext = path.suffix.lower()
                 if ext not in DOCUMENT_EXT | ASSET_EXT: skip["non_document_extension"] += 1; continue
                 try:
