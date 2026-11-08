@@ -36,6 +36,9 @@ export function resolveActiveProvider(settings: AiSettings = loadAiSettings()): 
     if (!endpoint) return null;
     return createCloudProvider({
       endpoint,
+      // A component may cache this provider after another tab turns AI Off.
+      // Always consult the current device preference at the moment of use.
+      isRequestAllowed: () => cloudRequestIsCurrentlyAllowed(endpoint),
       apiKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY,
       getAccessToken: async () => {
         const client = await loadSupabase();
@@ -49,6 +52,12 @@ export function resolveActiveProvider(settings: AiSettings = loadAiSettings()): 
 
 export function cloudEndpoint(settings: AiSettings = loadAiSettings()): string | null {
   return trustedCloudAiEndpoint(import.meta.env.VITE_SUPABASE_URL, settings.cloudProxyUrl, import.meta.env.DEV);
+}
+
+/** Fail closed on Off, malformed/unreadable settings or changed Cloud origin. */
+export function cloudRequestIsCurrentlyAllowed(expectedEndpoint: string): boolean {
+  const current = loadAiSettings();
+  return current.mode === "cloud" && cloudEndpoint(current) === expectedEndpoint;
 }
 
 /** Probe the configured provider; used by settings UI and feature gates. */

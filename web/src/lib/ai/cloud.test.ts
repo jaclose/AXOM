@@ -77,7 +77,7 @@ describe("Cloud AI credential destination", () => {
 describe("AXOM Cloud AI client", () => {
   it("sends the session token, never a model key, and returns the result", async () => {
     const fetchImpl = vi.fn(() => reply(200, { result: { cards: [1] }, remaining: 41 }));
-    const provider = createCloudProvider({ endpoint: "https://x.supabase.co/functions/v1/ai-proxy", apiKey: "sb_publishable_x", getAccessToken: async () => "jwt-token", fetchImpl });
+    const provider = createCloudProvider({ endpoint: "https://x.supabase.co/functions/v1/ai-proxy", apiKey: "sb_publishable_x", getAccessToken: async () => "jwt-token", isRequestAllowed: () => true, fetchImpl });
     await expect(provider.completeJson({ system: "s", prompt: "p", maxTokens: 300, task: "cards" })).resolves.toEqual({ cards: [1] });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token", apikey: "sb_publishable_x" });
@@ -89,14 +89,94 @@ describe("AXOM Cloud AI client", () => {
   });
 
   it("explains signed-out, quota and model-refusal states", async () => {
-    const signedOut = createCloudProvider({ endpoint: "e", getAccessToken: async () => null, fetchImpl: vi.fn() });
+    const signedOut = createCloudProvider({ endpoint: "e", getAccessToken: async () => null, isRequestAllowed: () => true, fetchImpl: vi.fn() });
     await expect(signedOut.completeJson({ prompt: "p" })).rejects.toThrow(/Sign in/);
     await expect(signedOut.available()).resolves.toMatchObject({ ok: false });
-    const quota = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", fetchImpl: vi.fn(() => reply(429, { error: "Today's Cloud AI allowance (60 requests) is used up." })) });
+    const quota = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(429, { error: "Today's Cloud AI allowance (60 requests) is used up." })) });
     await expect(quota.completeJson({ prompt: "p" })).rejects.toThrow(/allowance/);
     expect(cloudAiRemaining()).toBe(0);
-    const refusal = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", fetchImpl: vi.fn(() => reply(200, { result: { error: "Source text is empty." } })) });
+    const refusal = createCloudProvider({ endpoint: "e", getAccessToken: async () => "t", isRequestAllowed: () => true, fetchImpl: vi.fn(() => reply(200, { result: { error: "Source text is empty." } })) });
     await expect(refusal.completeJson({ prompt: "p" })).rejects.toThrow("Source text is empty.");
+  });
+});
+
+
+describe("cached Cloud AI provider request-time consent", () => {
+  it("does not resolve a token or dispatch a request after Cloud is turned off", async () => {
+    let allowed = true;
+    const getAccessToken = vi.fn(async () => "private-jwt");
+    const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
+    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, fetchImpl, isRequestAllowed: () => allowed });
+    allowed = false;
+    await expect(provider.available()).resolves.toMatchObject({ ok: false });
+    await expect(provider.completeJson({ prompt: "private study material" })).rejects.toThrow(/Cloud AI is off/);
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cached provider when consent changes while a token is resolving", async () => {
+    let allowed = true;
+    let releaseToken!: (token: string | null) => void;
+    const getAccessToken = vi.fn(() => new Promise<string | null>((resolve) => { releaseToken = resolve; }));
+    const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
+    const provider = createCloudProvider({ endpoint: "https://example.test/ai", getAccessToken, fetchImpl, isRequestAllowed: () => allowed });
+    const request = provider.completeJson({ prompt: "sensitive question text" });
+    expect(getAccessToken).toHaveBeenCalledTimes(1);
+    allowed = false; // Another tab confirmed Off while the auth promise was pending.
+    releaseToken("stale-jwt");
+    await expect(request).rejects.toThrow(/Cloud AI is off/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not return a completed result after an already-dispatched request is opted out", async () => {
+    let allowed = true;
+    let releaseReply!: (response: Response) => void;
+    const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { releaseReply = resolve; }));
+    const provider = createCloudProvider({
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      fetchImpl, isRequestAllowed: () => allowed,
+    });
+    const request = provider.completeJson({ prompt: "sensitive question text" });
+    // Let the access-token await finish before switching modes.
+    await Promise.resolve();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    allowed = false;
+    releaseReply(new Response(JSON.stringify({ result: { text: "obsolete" }, remaining: 12 }), { status: 200 }));
+    await expect(request).rejects.toThrow(/Cloud AI is off/);
+  });
+
+  it("fails closed when consent verification itself throws", async () => {
+    const fetchImpl = vi.fn(() => reply(200, { result: { text: "unused" } }));
+    const provider = createCloudProvider({
+      endpoint: "https://example.test/ai", getAccessToken: async () => "private-jwt",
+      fetchImpl, isRequestAllowed: () => { throw new Error("storage denied"); },
+    });
+    await expect(provider.completeJson({ prompt: "no egress" })).rejects.toThrow(/Cloud AI is off/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("checks current saved mode and exact trusted endpoint, not the creation-time snapshot", async () => {
+    const base = "https://abcdefghijklmnopqrst.supabase.co";
+    const endpoint = base + "/functions/v1/ai-proxy";
+    let stored: Record<string, unknown> = { mode: "cloud", localEndpoint: "http://localhost:11434" };
+    vi.stubEnv("VITE_SUPABASE_URL", base);
+    vi.stubGlobal("localStorage", { getItem: () => JSON.stringify(stored) });
+    try {
+      const { cloudRequestIsCurrentlyAllowed } = await import("./index");
+      expect(cloudRequestIsCurrentlyAllowed(endpoint)).toBe(true);
+      stored = { mode: "off", localEndpoint: "http://localhost:11434" };
+      expect(cloudRequestIsCurrentlyAllowed(endpoint)).toBe(false);
+      stored = { mode: "local", localEndpoint: "http://localhost:11434" };
+      expect(cloudRequestIsCurrentlyAllowed(endpoint)).toBe(false);
+      stored = { mode: "cloud", localEndpoint: "http://localhost:11434", cloudProxyUrl: "https://attacker.example" };
+      expect(cloudRequestIsCurrentlyAllowed(endpoint)).toBe(false);
+      expect(cloudRequestIsCurrentlyAllowed("https://attacker.example")).toBe(false);
+      vi.stubGlobal("localStorage", { getItem: () => { throw new Error("denied"); } });
+      expect(cloudRequestIsCurrentlyAllowed(endpoint)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 });
 
