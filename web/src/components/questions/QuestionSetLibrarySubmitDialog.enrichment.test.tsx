@@ -427,9 +427,13 @@ describe("Question Set draft explanation review", () => {
     fireEvent.click(send);
     await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
 
+    // Count completed initial lookups rather than assuming React only
+    // performs one mount lookup. The requirement is no NEW old-owner readback
+    // after the account switches during the in-flight network request.
+    const ownerOneLookups = mocks.submissions.mock.calls.filter(([id]) => id === "owner-1").length;
     mocks.accountId = "owner-2";
     await act(async () => { resolveSubmission("22222222-2222-4222-8222-222222222222"); });
-    expect(mocks.submissions).toHaveBeenCalledTimes(1); // Initial owner-1 lookup only.
+    expect(mocks.submissions.mock.calls.filter(([id]) => id === "owner-1")).toHaveLength(ownerOneLookups);
     expect(screen.queryByText(/Submission received/)).toBeNull();
     expect(mocks.withdraw).not.toHaveBeenCalled();
   });
