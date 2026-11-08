@@ -411,6 +411,15 @@ describe("Import Center persistence invariant", () => {
         expect(hasReviewedImportInFlight()).toBe(true);
         expect(useStore.getState().questions.filter((question) => question.bank === "Unrelated pending source")).toHaveLength(1);
       });
+      const settled = settledReviewedImportSnapshot({
+        questions: useStore.getState().questions,
+        questionSets: useStore.getState().questionSets,
+        documents: useStore.getState().documents,
+      });
+      expect(settled.questions.filter((question) => question.bank === "Durable question source")).toHaveLength(1);
+      expect(settled.questions.filter((question) => question.bank === "Unrelated pending source")).toHaveLength(0);
+      expect(settled.questionSets.filter((set) => set.title === "Durable question source")).toHaveLength(1);
+      expect(settled.questionSets.filter((set) => set.title === "Unrelated pending source")).toHaveLength(0);
       pending.unmount();
 
       render(<ImportPanel seed={durableSeed} />);
