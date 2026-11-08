@@ -180,7 +180,7 @@ for (const [width, scheme] of [[320, "light"], [390, "dark"], [1440, "light"]] a
     await journal.getByRole("button", { name: "Remove keep 2" }).focus();
     await page.keyboard.down("Enter");
     await expect(journal.getByLabel("Something to keep 2")).toHaveValue("Keep C");
-    await expect(journal.getByLabel("Something to keep")).toBeFocused();
+    await expect(journal.getByLabel("Something to keep", { exact: true })).toBeFocused();
     await page.keyboard.down("Enter");
     await page.keyboard.up("Enter");
     await expect(journal.getByLabel("Something to keep 2")).toHaveValue("Keep C");
