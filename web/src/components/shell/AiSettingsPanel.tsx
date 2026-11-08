@@ -26,6 +26,18 @@ export function AiSettingsPanel() {
   const [settings, setSettings] = useState<AiSettings>(() => loadAiSettings());
   const [probe, setProbe] = useState<AiAvailability | null>(null);
   const [probing, setProbing] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  function useVerifiedCloudServer() {
+    const next = { ...settings, cloudProxyUrl: undefined };
+    // Do not claim recovery when browser storage rejects or silently drops it.
+    if (!saveAiSettings(next)) {
+      setResetError("This device could not save the change. Cloud AI remains blocked. Try again after checking browser storage.");
+      return;
+    }
+    setResetError(null);
+    setSettings(next);
+  }
 
   function update(patch: Partial<AiSettings>) {
     const next = { ...settings, ...patch };
@@ -141,10 +153,11 @@ export function AiSettingsPanel() {
                 A previous Cloud AI address is no longer trusted. AXOM will not send your account token or study text to it.
               </span>
               <div className="row">
-                <GhostButton onClick={() => update({ cloudProxyUrl: undefined })}>
+                <GhostButton onClick={useVerifiedCloudServer}>
                   Use AXOM's verified server
                 </GhostButton>
               </div>
+              {resetError && <span className="sub" role="status">{resetError}</span>}
             </div>
           )}
           <div className="row" style={{ gap: 8 }}>
