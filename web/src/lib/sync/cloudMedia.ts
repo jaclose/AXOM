@@ -93,15 +93,21 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   const academicByHash = new Map<string, AcademicAssetReference>();
   for (const asset of shared) if (!academicByHash.has(asset.sha256)) academicByHash.set(asset.sha256, asset);
   const refs = workspaceMedia(state);
-  if (refs.size > MAX_CLOUD_MEDIA_FILES) throw new SyncPushError(
+  // Deferred content is a same-account recovery receipt, not a transferable
+  // authorization for another learner's stored originals.
+  if (state.deferredContent && state.deferredContent.accountId !== userId) {
+    throw new Error("Deferred account images belong to another account. Cloud protection remains pending.");
+  }
+  // Deferred images not currently enumerated by question attachments must still
+  // exist byte-for-byte on this account. They cannot bypass the normal media cap.
+  const deferred = readMediaManifest((state.deferredContent?.media ?? []).filter(entry => !refs.has(entry.blobKey)));
+  if (refs.size + deferred.length > MAX_CLOUD_MEDIA_FILES) throw new SyncPushError(
     { kind: "rejected", rejection: "too-many-images", status: 0 },
     "This image library has too many files for one protected version.",
   );
   const prior = new Map(previous.map((entry) => [entry.blobKey, entry]));
-  // Deferred review documents can contain image references. Keep their acknowledged
-  // index until the source is downloaded; cache removal cannot delete account media.
-  const manifest: CloudMediaReference[] = [...(state.deferredContent?.media ?? []).filter(entry => !refs.has(entry.blobKey))];
   const entries = [...refs];
+  const totalJobs = deferred.length + entries.length;
   const ordered = new Array<CloudMediaReference>(entries.length);
   const confirmed = confirmedMediaUploads.get(userId) ?? new Set<string>();
   confirmedMediaUploads.set(userId, confirmed);
@@ -175,11 +181,20 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
     await assertCurrent();
   }
   async function worker(): Promise<void> {
-    while (cursor < entries.length && !failed) {
-      const index = cursor++;
-      const [blobKey, { attachment, checksum }] = entries[index];
+    while (cursor < totalJobs && !failed) {
+      const job = cursor++;
       try {
         await assertCurrent();
+        if (job < deferred.length) {
+          // A deferred receipt has no local attachment to inspect. Verify the
+          // exact remote bytes before certifying this protected workspace. Use
+          // the same bounded worker pool and per-attempt dedup as active media.
+          const reference = deferred[job];
+          await verifyRemoteOriginal(reference, reference.academic);
+          continue;
+        }
+        const index = job - deferred.length;
+        const [blobKey, { attachment, checksum }] = entries[index];
         // A matching size/timestamp is not proof of unchanged bytes. Check
         // the device original even when reusing a previously protected index.
         const known = prior.get(blobKey);
@@ -231,10 +246,10 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(MEDIA_UPLOAD_CONCURRENCY, entries.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(MEDIA_UPLOAD_CONCURRENCY, totalJobs) }, worker));
   if (failed) throw failure;
   await assertCurrent();
-  return readMediaManifest([...manifest, ...ordered]);
+  return readMediaManifest([...deferred, ...ordered]);
 }
 
 
