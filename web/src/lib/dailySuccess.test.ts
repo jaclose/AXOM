@@ -65,13 +65,13 @@ describe("mixed-cadence recurrence contracts", () => {
     const result = evaluateDailySuccess(state([focus, gym], [log({ type: "Study", minutes: 60 })]));
     expect(result.eligibleCount).toBe(1);
     expect(result.progress).toBe(100);
-    expect(result.requirements[1]).toMatchObject({ eligible: false, status: "not-eligible" });
+    expect(result.requirements[1]).toMatchObject({ eligible: false, status: "awaiting" });
   });
 
   it("counts gym days separately, allowing rest days in a 4-5 weekly range", () => {
     const gym = requirement({
       id: "gym", label: "Gym", source: { kind: "activity-alias" }, aliases: ["Gym"],
-      target: 1, unit: "times",
+      target: 1, unit: "times", trackingStartsAt: "2026-07-06",
       schedule: { kind: "weekly-range", minimum: 4, preferred: 5, weekStartsOn: 1 },
     });
     const logs = ["2026-07-06","2026-07-08","2026-07-09","2026-07-10"].map((dayKey,i)=>log({id:`gym-${i}`,dayKey,type:"Gym",quantity:1,quantityKind:"count"}));
