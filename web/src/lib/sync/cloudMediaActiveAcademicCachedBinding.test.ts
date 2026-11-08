@@ -55,6 +55,7 @@ async function fixture(options: { includeB?: boolean; denyB?: boolean } = {}) {
   const checked: string[] = [];
   const downloaded: string[] = [];
   const privateUploaded: string[] = [];
+  const privateDownloaded: string[] = [];
   const client = {
     from(table: string) {
       if (table !== "academic_files") throw Error("Unexpected table " + table);
@@ -102,7 +103,10 @@ async function fixture(options: { includeB?: boolean; denyB?: boolean } = {}) {
               expect(uploaded.size).toBe(BYTES.length);
               return { error: null };
             },
-            async download() { throw Error("Private download was not expected"); },
+            async download(path: string) {
+              privateDownloaded.push(path);
+              return { data: new Blob([BYTES], { type: "image/png" }), error: null };
+            },
           };
         }
         throw Error("Unexpected bucket " + bucket);
@@ -110,7 +114,7 @@ async function fixture(options: { includeB?: boolean; denyB?: boolean } = {}) {
     },
   } as unknown as SupabaseClient;
   const previous = [{ blobKey, hash, byteSize: BYTES.length, updatedAt: AT, academic: academicB }];
-  return { state, client, checked, downloaded, privateUploaded, previous, academicB, hash };
+  return { state, client, checked, downloaded, privateUploaded, privateDownloaded, previous, academicB, hash };
 }
 
 beforeEach(() => {
@@ -155,4 +159,20 @@ describe("live-cache academic image revision authority", () => {
     expect(f.checked).toHaveLength(0);
     expect(f.privateUploaded).toEqual([OWNER + "/" + f.hash]);
   });
+  it("never silently converts an existing private protected original into academic-only media by matching hash", async () => {
+    const f = await fixture({ includeB: false });
+    // The protected prior receipt is explicitly PRIVATE, although an unrelated
+    // subsequently installed course happens to contain the very same bytes.
+    // Changing the receipt to academic changes recovery/access semantics:
+    // revoking course RLS would then break restore of the user's private image.
+    const previousPrivate = f.previous.map(({ academic: _academic, ...rest }) => rest);
+    const receipt = await uploadCloudMedia(f.client, OWNER, f.state, assertCurrent, previousPrivate);
+    expect(receipt).toHaveLength(1);
+    expect(receipt[0].academic).toBeUndefined();
+    expect(receipt[0].hash).toBe(f.hash);
+    expect(f.checked).toHaveLength(0);
+    expect(f.privateDownloaded).toEqual([OWNER + "/" + f.hash]);
+    expect(f.privateUploaded).toHaveLength(0);
+  });
+
 });
