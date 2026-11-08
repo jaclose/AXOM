@@ -69,7 +69,9 @@ def canonical_packages(packages, verify_sha=None):
     for p in packages:
         inspected = p.get("inspected_questions_sha256")
         reason = None
-        if not isinstance(inspected, str) or not re.fullmatch(r"[0-9a-f]{64}", inspected):
+        if "questions_differ_from_inventory_sha" in p.get("issues", []):
+            reason = "questions_differ_from_inventory_sha"
+        elif not isinstance(inspected, str) or not re.fullmatch(r"[0-9a-f]{64}", inspected):
             reason = "questions_inspection_digest_unavailable"
         elif verify_sha is None:
             reason = "questions_secure_recheck_unavailable"
@@ -82,7 +84,8 @@ def canonical_packages(packages, verify_sha=None):
                 if current != inspected:
                     reason = "questions_changed_after_inspection"
         if reason:
-            p.setdefault("issues", []).append(reason)
+            if reason not in p.setdefault("issues", []):
+                p["issues"].append(reason)
             p["status"] = "requires_package_review"
             p["canonical_status"] = "source_snapshot_review_required"
             p["canonical_package"] = p["package"]
