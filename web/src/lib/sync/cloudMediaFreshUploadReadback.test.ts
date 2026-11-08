@@ -125,3 +125,31 @@ describe("new upload must verify actual account-storage bytes before a protected
     expect(download).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Backstop for the verified upload path: a transient acknowledge-without-bytes
+ * fault must not poison the account's confirmed-hash cache. The next attempt
+ * must issue a fresh upload and read the exact persisted bytes.
+ * Synthetic in-memory storage only; no learner account or files are accessed.
+ */
+describe("retry after an acknowledged-but-missing first upload", () => {
+  it("remains unprotected until a healthy retry verifies the original bytes", async () => {
+    const { state, hash } = await fixture();
+    mode = "missing";
+    await expect(uploadCloudMedia(client, ACCOUNT, state, assertCurrent))
+      .rejects.toThrow();
+    expect(remote.size).toBe(0);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(download).toHaveBeenCalledTimes(1);
+
+    mode = "intact";
+    const recovered = await uploadCloudMedia(client, ACCOUNT, state, assertCurrent);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]).toMatchObject({ hash, byteSize: ORIGINAL.byteLength });
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(download).toHaveBeenCalledTimes(2);
+    const original = remote.get(ACCOUNT + "/" + hash);
+    expect(original).toBeDefined();
+    expect(new Uint8Array(await original!.arrayBuffer())).toEqual(ORIGINAL);
+  });
+});
