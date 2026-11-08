@@ -93,7 +93,18 @@ export function readGitFile(sha, path, cwd = process.cwd(), allowMissing = false
   if (rows.length !== 1) throw new Error("Expected exactly one tracked file: " + path);
   const match = /^([0-9]{6}) (blob|tree) ([a-f0-9]{40})\t(.+)$/.exec(rows[0]);
   if (!match || match[2] !== "blob" || match[4] !== path) throw new Error("Mismatched Git file identity: " + path);
-  return regularFile({ mode: match[1], blob: match[3] }, path);
+  const file = regularFile({ mode: match[1], blob: match[3] }, path);
+  // A tree can reference an unavailable blob (for example in a partial or
+  // damaged object database). Never attest bytes from the tree OID alone.
+  // Disable lazy promisor fetching: this verifier must remain read-only and
+  // must not silently contact a remote to populate missing objects.
+  try {
+    execFileSync("git", ["--no-replace-objects", "cat-file", "-e", file.blob + "^{blob}"],
+      { cwd, env: { ...process.env, GIT_NO_LAZY_FETCH: "1" }, stdio: "ignore" });
+  } catch {
+    throw new Error("Missing or unreadable pinned Git blob object: " + path);
+  }
+  return file;
 }
 /**
  * v2 complete-range verification: derive paths from immutable Git diffs instead
