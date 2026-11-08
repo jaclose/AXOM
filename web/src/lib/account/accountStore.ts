@@ -1,3 +1,4 @@
+import { publishReviewedImportAccount } from "./importEpoch";
 import { retainDownloadedContent } from "../sync/contentDownloads";
 import { snapshotWorkspace } from "../sync/workspaceSnapshot";
 import { assertVaultWritesSince, getVaultWriteCheckpoint, flushLocalVaultWrites } from "../localVault";
@@ -673,6 +674,14 @@ export const useAccount = create<AccountState>((set, get) => {
       coordinator = next;
     },
   };
+});
+
+// Publish only the active account identity into a dependency-free import
+// coordination bridge. The QBank persistence layer must never eagerly import
+// this heavy account/cloud store (including its mocked dependencies).
+publishReviewedImportAccount(useAccount.getState().user?.id ?? null);
+useAccount.subscribe((state) => {
+  publishReviewedImportAccount(state.user?.id ?? null);
 });
 
 export function platformName(): string {
