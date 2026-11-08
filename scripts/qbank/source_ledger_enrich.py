@@ -239,7 +239,7 @@ def build_lead_dispositions(rows, canonical):
         t = r["document_type"]
         p = package_original.get(sha)
         entry = dict(sha256=sha)
-        if p is not None and p.get("canonical_status") == "source_snapshot_review_required":
+        if p is not None and p.get("canonical_status") != "canonical_distinct_question_collection":
             entry.update(kind="question-source",status="review-required",
                          questionCount=p["questions"],readyCount=0,reviewCount=p["questions"],
                          reason="Native question source changed or became unverifiable after inspection; fresh contained scan required.")
@@ -400,7 +400,7 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
             else:
                 expected[key]=p
     def held_native_package(package):
-        return (package.get("canonical_status") == "source_snapshot_review_required"
+        return (package.get("canonical_status") != "canonical_distinct_question_collection"
                 or package.get("status") == "requires_package_review"
                 or bool(package.get("issues")))
     for item in native:
