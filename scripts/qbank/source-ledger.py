@@ -442,9 +442,13 @@ def inspect_packages(rows):
         path = pathlib.Path(r["original_path"])
         issues = []
         try:
-            root = next((directory for label, directory in ROOTS if label == r["root_label"]), None)
-            if root is None:
+            # A label may cover several configured SSD roots. Select the actual
+            # lexical ancestor of this manifest, not merely the first matching label.
+            matching_roots = [directory for label, directory in ROOTS
+                              if label == r["root_label"] and path.is_relative_to(directory)]
+            if not matching_roots:
                 raise ValueError("unknown_native_package_source_root")
+            root = max(matching_roots, key=lambda directory: len(directory.parts))
             data = read_native_package_json(root, path.parent, path.name)
             if not isinstance(data, dict) or data.get("schemaVersion") != 1:
                 raise ValueError("unsupported_native_manifest_schema")
