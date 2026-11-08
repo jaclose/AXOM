@@ -71,9 +71,9 @@ async function search(who: string, query = "") {
     "select id,title,likes,liked from public.list_question_set_library($1,0)", [query]);
 }
 
-async function approve(who: string, id: string, inspected: Snapshot = snapshot()) {
-  return as(who, "select public.review_question_set_library($1,true,'Checked synthetic source and sharing rights',$2::jsonb)",
-    [id, JSON.stringify(inspected)]);
+async function approve(who: string, id: string, inspected: Snapshot = snapshot(), revision = 1) {
+  return as(who, "select public.review_question_set_library($1,true,'Checked synthetic source and sharing rights',$2::jsonb,$3::bigint)",
+    [id, JSON.stringify(inspected), revision]);
 }
 
 describe("reviewed Question Set Library SQL and RLS", () => {
@@ -109,7 +109,7 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       await expect(as(account, "select owner_id,source_id,review_note,reviewed_by,snapshot_payload from public.question_set_library_entries where id=$1", [id]))
         .rejects.toThrow(/permission denied/i);
     }
-    await expect(as(LEARNER, "select public.review_question_set_library($1,false,'A reason for rejection',$2::jsonb)", [id, JSON.stringify(snapshot())]))
+    await expect(as(LEARNER, "select public.review_question_set_library($1,false,'A reason for rejection',$2::jsonb,$3::bigint)", [id, JSON.stringify(snapshot()), 1]))
       .rejects.toThrow(/reviewer access required/i);
   });
 
@@ -127,9 +127,22 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     const state = await as<{ id: string; status: string }>(OWNER,
       "select id,status from public.my_question_set_library()");
     expect(state.find(row => row.id === id)?.status).toBe("pending");
-    await approve(REVIEWER, id, revised);
+    await approve(REVIEWER, id, revised, 2);
     const approved = await search(LEARNER, "Synthetic reviewed");
     expect(approved.some(row => row.id === id)).toBe(true);
+  });
+
+  it("rejects ABA resubmissions of identical question content using a row revision", async () => {
+    const id = await submit(OWNER, "review-aba", snapshot());
+    // Internal updates simulate a reviewed/rejected/resubmitted set with the
+    // same snapshot. Status and public credit still alter its review evidence.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    await db.query("update public.question_set_library_entries set status='pending', credit='Revised credit' where id=$1", [id]);
+    await expect(approve(REVIEWER, id, snapshot(), 1)).rejects.toThrow(/changed since inspection/i);
+    const pending = await as<{ id: string }>(REVIEWER, "select id from public.pending_question_set_library()");
+    expect(pending.some(row => row.id === id)).toBe(true);
+    await approve(REVIEWER, id, snapshot(), 3);
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
   });
 
   it("fails closed for the legacy review signature and invalid inspected evidence", async () => {
@@ -138,8 +151,8 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       "select public.review_question_set_library($1,true,'Checked the source evidence')", [id]))
       .rejects.toThrow(/Refresh AXOM/i);
     await expect(as(REVIEWER,
-      "select public.review_question_set_library($1,true,'Checked the source evidence',$2::jsonb)",
-      [id, JSON.stringify({ title: "invalid" })]))
+      "select public.review_question_set_library($1,true,'Checked the source evidence',$2::jsonb,$3::bigint)",
+      [id, JSON.stringify({ title: "invalid" }), 1]))
       .rejects.toThrow(/Reopen the inspected/i);
     const pending = await as<{ id: string }>(REVIEWER, "select id from public.pending_question_set_library()");
     expect(pending.some(row => row.id === id)).toBe(true);
