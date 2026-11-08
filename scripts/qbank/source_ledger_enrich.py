@@ -58,13 +58,47 @@ def enrich_source_records(rows):
         if not r.get("unresolved_reason") and disposition.endswith("pending"):
             r["unresolved_reason"] = "inspection_pending"
 
-def canonical_packages(packages):
+def canonical_packages(packages, verify_sha=None):
+    """Canonicalize only inspected, securely rechecked question bytes.
+
+    A late file or directory substitution is an explicit review hold. Never
+    recompute a package identity from an unrestricted post-inspection path.
+    """
     fingerprint_to_primary = {}
     canonical = []
     for p in packages:
-        keyfile = pathlib.Path(p["questions_file"])
+        inspected = p.get("inspected_questions_sha256")
+        reason = None
+        if "questions_differ_from_inventory_sha" in p.get("issues", []):
+            reason = "questions_differ_from_inventory_sha"
+        elif not isinstance(inspected, str) or not re.fullmatch(r"[0-9a-f]{64}", inspected):
+            reason = "questions_inspection_digest_unavailable"
+        elif verify_sha is None:
+            reason = "questions_secure_recheck_unavailable"
+        else:
+            try:
+                current = verify_sha(p)
+            except (OSError, ValueError, KeyError, TypeError):
+                reason = "questions_secure_recheck_unavailable"
+            else:
+                if current != inspected:
+                    reason = "questions_changed_after_inspection"
+        if reason:
+            if reason not in p.setdefault("issues", []):
+                p["issues"].append(reason)
+            p["status"] = "requires_package_review"
+            p["canonical_status"] = "source_snapshot_review_required"
+            p["canonical_package"] = p["package"]
+            p["mirrored_paths"] = []
+            # Path-specific held key: never collapse two unverified source reads.
+            p["canonical_package_key"] = "held:" + _sha(str(p["package"]))[:24]
+            p.pop("questions_sha256", None)
+            canonical.append(p)
+            continue
+
         # Same bank ID alone is not sufficient to collapse distinct revisions.
-        h = hashlib.sha256(keyfile.read_bytes()).hexdigest()
+        # This hash identifies the bytes parsed during the original inspection.
+        h = inspected
         k = (p["bank_id"], h)
         p["questions_sha256"] = h
         p["canonical_package_key"] = _sha("|".join(k))[:24]
@@ -159,13 +193,17 @@ def add_workbook_answer_candidates(rows, existing):
     return proposals
 
 def evidence_counts(rows, canonical, pairs, canonical_jobs):
-    original_q = sum(p["questions"] for p in canonical)
-    original_ans = sum(p["questions_with_answer_fields"] for p in canonical)
+    verified = [p for p in canonical if p.get("canonical_status") == "canonical_distinct_question_collection"]
+    held = [p for p in canonical if p.get("canonical_status") == "source_snapshot_review_required"]
+    original_q = sum(p["questions"] for p in verified)
+    original_ans = sum(p["questions_with_answer_fields"] for p in verified)
     docs = [r for r in rows if r["document_type"] in QUESTION_TYPES]
     sha_count = len({r["source_sha256"] for r in docs if r.get("source_sha256")})
     return dict(
-        canonical_native_packages=len(canonical),
-        mirrored_native_packages=sum(len(p["mirrored_paths"]) for p in canonical),
+        canonical_native_packages=len(verified),
+        native_snapshot_review_held_packages=len(held),
+        native_snapshot_review_held_question_records=sum(p["questions"] for p in held),
+        mirrored_native_packages=sum(len(p["mirrored_paths"]) for p in verified),
         canonical_native_question_records=original_q,
         canonical_native_answer_fields=original_ans,
         native_question_count_basis="distinct bank_id + byte-identical questions.json SHA-256",
@@ -201,7 +239,11 @@ def build_lead_dispositions(rows, canonical):
         t = r["document_type"]
         p = package_original.get(sha)
         entry = dict(sha256=sha)
-        if p is not None:
+        if p is not None and p.get("canonical_status") == "source_snapshot_review_required":
+            entry.update(kind="question-source",status="review-required",
+                         questionCount=p["questions"],readyCount=0,reviewCount=p["questions"],
+                         reason="Native question source changed or became unverifiable after inspection; fresh contained scan required.")
+        elif p is not None:
             entry.update(kind="question-source",status="prepared",
                          questionCount=p["questions"],readyCount=0,reviewCount=p["questions"],
                          reason="Native AXOM package locally verified structurally; source answer correctness and backend readback unverified.")

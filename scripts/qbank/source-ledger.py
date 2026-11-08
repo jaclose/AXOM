@@ -426,10 +426,32 @@ def open_native_package_file(root, package_dir, relative_file):
         os.close(directory_fd)
 
 
-def read_native_package_json(root, package_dir, relative_file):
+def read_native_package_json(root, package_dir, relative_file, with_digest=False):
+    """Parse the exact contained bytes that supply the inspection revision."""
     fd = open_native_package_file(root, package_dir, relative_file)
-    with os.fdopen(fd, "r", encoding="utf-8") as stream:
-        return json.load(stream)
+    with os.fdopen(fd, "rb") as stream:
+        inspected_bytes = stream.read()
+    data = json.loads(inspected_bytes.decode("utf-8"))
+    if with_digest:
+        return data, hashlib.sha256(inspected_bytes).hexdigest()
+    return data
+
+
+def verify_native_package_questions_sha(package):
+    """Securely recheck the inspected revision, without following swapped links."""
+    fd = open_native_package_file(package["source_root"], package["package"],
+                                  package["questions_relative_path"])
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        checksum = hashlib.sha256()
+        while chunk := stream.read(1024 * 1024):
+            checksum.update(chunk)
+        after = os.fstat(stream.fileno())
+        identity = lambda st: (st.st_dev, st.st_ino, st.st_size,
+                               st.st_mtime_ns, st.st_ctime_ns)
+        if identity(before) != identity(after):
+            raise ValueError("questions_changed_during_secure_recheck")
+    return checksum.hexdigest()
 
 
 def native_package_file_exists(root, package_dir, relative_file):
@@ -476,7 +498,8 @@ def inspect_packages(rows):
             if not isinstance(data, dict) or data.get("schemaVersion") != 1:
                 raise ValueError("unsupported_native_manifest_schema")
             questions_file = data.get("questionsFile") or "questions.json"
-            qdata = read_native_package_json(root, path.parent, questions_file)
+            qdata, inspected_questions_sha256 = read_native_package_json(
+                root, path.parent, questions_file, with_digest=True)
             qpath = path.parent / questions_file
             if not isinstance(qdata, dict):
                 raise ValueError("invalid_native_questions_json")
@@ -545,12 +568,16 @@ def inspect_packages(rows):
                     if not actual: issues.append("asset_hash_not_verified:" + a)
                     elif actual != asset_expected_checksums[a]: issues.append("asset_checksum_mismatch:" + a)
             if missing_assets: issues.append("missing_or_unsafe_assets:" + str(len(missing_assets)))
+            qrecord = lookup.get(str(qpath))
+            # A post-scan substitution must not inherit the original source ID.
+            if (qrecord and qrecord.get("source_sha256")
+                    and qrecord["source_sha256"] != inspected_questions_sha256):
+                issues.append("questions_differ_from_inventory_sha")
             native = mapping(str(path), r["root_label"], native=data)
             r.update(native)
             r["extraction_status"] = "native_package_structurally_checked"
             r["prepared_package"] = str(path.parent)
             r["review_status"] = "package_exceptions" if issues else "package_structural_checks_passed_answer_review_separate"
-            qrecord = lookup.get(str(qpath))
             if qrecord:
                 qrecord.update(native)
                 qrecord["prepared_package"] = str(path.parent)
@@ -568,6 +595,8 @@ def inspect_packages(rows):
                     fingerprints[digest_text(normalized)].append(dict(package_manifest=str(path), bank_id=bank.get("id"),
                                                                        question_id=q.get("id"), source_checksum=sorted(declared_src_sha)))
             packages.append(dict(package=str(path.parent), manifest=str(path), questions_file=str(qpath),
+                                 source_root=str(root), questions_relative_path=questions_file,
+                                 inspected_questions_sha256=inspected_questions_sha256,
                                  bank_id=bank.get("id"), bank_title=bank.get("title"), source_filename=src_name,
                                  source_path=str(src_path) if src_exists else None,
                                  questions=len(questions), questions_with_answer_fields=answer_count,
@@ -787,8 +816,9 @@ def report(args):
     acts = parse_templates(records)
     archives = index_source_archives(records)
     coverage = coverage_matrix(acts, records)
+    # Canonical review holds must reach the import queue, not be added afterward.
+    canonical = canonical_packages(packages, verify_native_package_questions_sha)
     queue = prepare_queue(records, packages)
-    canonical = canonical_packages(packages)
     distinct_queue = canonicalize_queue(records, packages, queue)
     enrich_source_records(records)
     unique_pairs = enrich_pairs(records, pairs)

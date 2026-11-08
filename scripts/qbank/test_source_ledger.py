@@ -82,11 +82,146 @@ class SourceLedgerTests(unittest.TestCase):
                 (r/n).mkdir()
                 (r/n/"questions.json").write_text(json.dumps({"questions":questions}))
             packages=[dict(package=str(r/n),questions_file=str(r/n/"questions.json"),bank_id="demo",questions=z,
-                           questions_with_answer_fields=0) for n,z in (("a",1),("b",1),("c",2))]
-            unique=enriched.canonical_packages(packages)
+                           questions_with_answer_fields=0,issues=[],status="local_ready_for_agent2_review",
+                           source_root=str(r),questions_relative_path="questions.json",
+                           inspected_questions_sha256=hashlib.sha256((r/n/"questions.json").read_bytes()).hexdigest())
+                      for n,z in (("a",1),("b",1),("c",2))]
+            unique=enriched.canonical_packages(packages, ledger.verify_native_package_questions_sha)
             self.assertEqual(len(unique),2)
             self.assertEqual(unique[0]["mirrored_paths"],[packages[1]["package"]])
             self.assertNotEqual(unique[0]["canonical_package_key"],unique[1]["canonical_package_key"])
+
+    def test_canonical_sha_matches_exact_inspected_native_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            package_dir = root / "native"
+            package_dir.mkdir()
+            question_bytes = b'{"bankId":"demo","questions":[{"id":"q1","stem":"One question","choices":["A","B"]}]}'
+            (package_dir / "questions.json").write_bytes(question_bytes)
+            (package_dir / "manifest.json").write_text(json.dumps({
+                "schemaVersion": 1, "bank": {"id": "demo", "title": "Synthetic"},
+                "questionsFile": "questions.json", "source": {"filename": "missing.pdf"}
+            }))
+            row = {"document_type": "native_manifest", "root_label": "test_native",
+                   "original_path": str(package_dir / "manifest.json"),
+                   "review_status": "unexamined"}
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("test_native", root)]
+                packages, _, _ = ledger.inspect_packages([row])
+            finally:
+                ledger.ROOTS = old_roots
+            self.assertEqual(len(packages), 1)
+            self.assertEqual(packages[0]["inspected_questions_sha256"],
+                             hashlib.sha256(question_bytes).hexdigest())
+            self.assertEqual(packages[0]["questions_relative_path"], "questions.json")
+
+    def test_canonicalization_holds_changed_source_bytes_with_original_digest(self):
+        import os
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            pdir = root / "native"
+            pdir.mkdir()
+            question = pdir / "questions.json"
+            first = b'{"questions":[{"id":"a"}]}'
+            revised = b'{"questions":[{"id":"b"}]}'
+            self.assertEqual(len(first), len(revised))
+            question.write_bytes(first)
+            original_stat = question.stat()
+            package = dict(package=str(pdir), questions_file=str(question),
+                           questions_relative_path="questions.json", source_root=str(root),
+                           inspected_questions_sha256=hashlib.sha256(first).hexdigest(),
+                           bank_id="demo", questions=1, questions_with_answer_fields=0,
+                           issues=[], status="local_ready_for_agent2_review")
+            question.write_bytes(revised)
+            os.utime(question, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            result = enriched.canonical_packages([package], ledger.verify_native_package_questions_sha)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(package["canonical_status"], "source_snapshot_review_required")
+            self.assertIn("questions_changed_after_inspection", package["issues"])
+            self.assertEqual(package["status"], "requires_package_review")
+            self.assertIsNone(package.get("questions_sha256"))
+            self.assertNotEqual(package["canonical_package_key"],
+                                enriched._sha("demo|" + hashlib.sha256(revised).hexdigest())[:24])
+
+    def test_canonicalization_rejects_leaf_and_parent_symlink_substitution(self):
+        import os
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp) / "source"
+            root.mkdir()
+            external = pathlib.Path(temp) / "external"
+            external.mkdir()
+            (external / "questions.json").write_bytes(b'{"questions":[{"id":"outside"}]}')
+            parent = root / "cohort"
+            parent.mkdir()
+            pdir = parent / "native"
+            pdir.mkdir()
+            qpath = pdir / "questions.json"
+            original = b'{"questions":[{"id":"inside"}]}'
+            qpath.write_bytes(original)
+            def candidate():
+                return dict(package=str(pdir), questions_file=str(qpath),
+                            questions_relative_path="questions.json", source_root=str(root),
+                            inspected_questions_sha256=hashlib.sha256(original).hexdigest(),
+                            bank_id="demo", questions=1, questions_with_answer_fields=0,
+                            issues=[], status="local_ready_for_agent2_review")
+            try:
+                qpath.unlink()
+                qpath.symlink_to(external / "questions.json")
+            except (OSError, NotImplementedError):
+                self.skipTest("filesystem does not permit source symlinks")
+            leaf = candidate()
+            enriched.canonical_packages([leaf], ledger.verify_native_package_questions_sha)
+            self.assertEqual(leaf["canonical_status"], "source_snapshot_review_required")
+            self.assertIn("questions_secure_recheck_unavailable", leaf["issues"])
+            self.assertIsNone(leaf.get("questions_sha256"))
+            qpath.unlink()
+            qpath.write_bytes(original)
+            parent.rename(root / "renamed")
+            try:
+                parent.symlink_to(external, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("filesystem does not permit directory symlinks")
+            linked_parent = candidate()
+            enriched.canonical_packages([linked_parent], ledger.verify_native_package_questions_sha)
+            self.assertEqual(linked_parent["canonical_status"], "source_snapshot_review_required")
+            self.assertIn("questions_secure_recheck_unavailable", linked_parent["issues"])
+            self.assertIsNone(linked_parent.get("questions_sha256"))
+
+    def test_native_inventory_sha_mismatch_never_becomes_canonical_ready(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            pkg_dir = root / "native"
+            pkg_dir.mkdir()
+            qpath = pkg_dir / "questions.json"
+            old = b'{"bankId":"demo","questions":[{"id":"old","stem":"old","choices":["A"]}]}'
+            new = b'{"bankId":"demo","questions":[{"id":"new","stem":"new","choices":["A"]}]}'
+            qpath.write_bytes(new)
+            manifest = pkg_dir / "manifest.json"
+            manifest.write_text(json.dumps({"schemaVersion": 1,
+                "bank": {"id": "demo", "title": "Synthetic"},
+                "questionsFile": "questions.json", "source": {"filename": "missing.pdf"}}))
+            rows = [
+                {"document_type": "native_manifest", "root_label": "test_native",
+                 "original_path": str(manifest), "review_status": "unexamined"},
+                {"document_type": "native_questions", "root_label": "test_native",
+                 "original_path": str(qpath), "source_sha256": hashlib.sha256(old).hexdigest()}
+            ]
+            previous_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("test_native", root)]
+                packages, _, _ = ledger.inspect_packages(rows)
+            finally:
+                ledger.ROOTS = previous_roots
+            self.assertEqual(len(packages), 1)
+            self.assertEqual(packages[0]["inspected_questions_sha256"],
+                             hashlib.sha256(new).hexdigest())
+            self.assertIn("questions_differ_from_inventory_sha", packages[0]["issues"])
+            unique = enriched.canonical_packages(packages, ledger.verify_native_package_questions_sha)
+            self.assertEqual(unique[0]["canonical_status"], "source_snapshot_review_required")
+            self.assertNotIn("questions_sha256", unique[0])
+            self.assertEqual(ledger.prepare_queue(rows, packages)[0]["status"],
+                             "requires_package_review")
 
     def test_dispositions_account_for_unique_sha(self):
         rows=[dict(source_sha256=digest("source"),original_path="/s.pdf",document_type="pq",priority=1,
