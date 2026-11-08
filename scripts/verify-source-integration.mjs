@@ -25,9 +25,11 @@ function validSha(value, label) {
   return value;
 }
 function validPath(value) {
+  // Git rejects case variants of .git metadata paths when checking out a tree.
   if (typeof value !== "string" || !value || !PATH.test(value)
     || value.startsWith("/") || value.startsWith("-")
     || value.split("/").some(segment => !segment || segment === "." || segment === ".."
+      || segment.toLowerCase() === ".git"
       || segment.endsWith(".") || WINDOWS_DEVICE.test(segment))) {
     throw new Error("Unsafe/noncanonical release file path: " + String(value));
   }
