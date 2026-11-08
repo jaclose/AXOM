@@ -15,6 +15,8 @@ import type { Habit, HabitCheckStatus, HabitType } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
 import { linkHabitToTargets, linkedRequirement, unlinkHabitFromTargets } from "../lib/habitTargets";
 import { evaluateDailySuccess } from "../lib/dailySuccess";
+import { RecurringGoalReport } from "../components/reports/RecurringGoalReport";
+import "../styles/productivity.css";
 
 const CHECK_OPTIONS: HabitCheckStatus[] = ["done", "partial", "skipped", "missed"];
 
@@ -22,6 +24,7 @@ export function HabitTrackerPage() {
   const enabled = useStore((s) => s.profile.experimentalFlags?.habits === true);
   const updateProfile = useStore((s) => s.updateProfile);
   const habits = useStore((s) => s.habits);
+  const hasRecurringGoals = useStore((s) => s.profile.dailySuccess?.requirements.some((g) => g.enabled && (g.schedule.kind === "weekly-range" || g.schedule.kind === "daily-slots")) ?? false);
   const [showArchived, setShowArchived] = useState(false);
 
   if (!enabled) {
@@ -47,6 +50,12 @@ export function HabitTrackerPage() {
     <>
       <HabitCreate />
       <HabitTargetsSummary />
+      {hasRecurringGoals && <GlassCard pad>
+        <PanelHeader title="Connected recurring commitments"
+          sub="Read-only view of the same goals from Productivity; check-offs and evidence are not copied." />
+        <RecurringGoalReport includeUnshared />
+        <GButton size="sm" onClick={() => { location.hash = "productivity"; }}>Manage in Productivity</GButton>
+      </GlassCard>}
       <GlassCard pad>
         <PanelHeader
           title="Habits"

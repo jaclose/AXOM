@@ -30,8 +30,10 @@ import { ReportInsightCard, type ReportCardInsight } from "../components/reports
 import { ICON_SIZE } from "../lib/iconSize";
 import { EnergyFocusPanel, useEnergyInputs } from "../components/energy/EnergyInsights";
 import { TrackerReport } from "../components/reports/TrackerReport";
+import { RecurringGoalReport } from "../components/reports/RecurringGoalReport";
 import { todaysCapacity } from "../lib/energyInsights";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
+import "../styles/productivity.css";
 
 /** I1-17 (JD): a mini guide behind a Help button, like Course Tracker, Question Bank and Productivity. */
 export const REPORTS_TOUR_STEPS: readonly ModuleTourStep[] = [
@@ -422,6 +424,10 @@ export function ReportsPage() {
         <div className="report-section-heading"><div><span>Your variables</span><h2 id="report-trackers-title">Trackers</h2></div><p>Everything you chose to follow, against your own goals and limits.</p></div>
         <GlassCard pad className="report-trackers-card">
           <TrackerReport />
+        </GlassCard>
+        <GlassCard pad className="report-recurring-card">
+          <PanelHeader title="Recurring goals" sub="Weekly commitments and named daily check-ins, using the same original records as Productivity." />
+          <RecurringGoalReport />
         </GlassCard>
       </section>
 

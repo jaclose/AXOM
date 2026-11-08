@@ -147,15 +147,17 @@ test("Productivity primary panels stay usable across themes and narrow screens",
         const outer = logger.getBoundingClientRect();
         return Array.from(logger.querySelectorAll("input, select, button")).map((field) => {
           const rect = field.getBoundingClientRect();
-          return { left: rect.left - outer.left, right: rect.right - outer.right, width: rect.width };
+          return { left: rect.left - outer.left, right: rect.right - outer.right, width: rect.width,
+            isCheckbox: field instanceof HTMLInputElement && field.type === "checkbox" };
         });
       });
       expect(logFields.length).toBeGreaterThanOrEqual(6);
       for (const field of logFields) {
         expect(field.left).toBeGreaterThanOrEqual(0);
         expect(field.right).toBeLessThanOrEqual(1);
-        expect(field.width).toBeGreaterThan(40);
+        expect(field.width).toBeGreaterThan(field.isCheckbox ? 15 : 40);
       }
+      await expect(page.getByRole("checkbox", { name: "Count as academic study" })).toBeVisible();
       await expect(page.locator("#productivity-focus .study-streak-monitor")).toBeVisible();
       await expect(page.locator("#productivity-log .study-streak-monitor")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Add a goal" })).toBeVisible();

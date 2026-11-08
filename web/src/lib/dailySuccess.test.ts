@@ -54,6 +54,65 @@ function log(partial: Partial<StudyLog>): StudyLog {
   };
 }
 
+describe("mixed-cadence recurrence contracts", () => {
+  it("keeps an unfinished 4-5 session weekly gym goal outside the daily study score", () => {
+    const gym = requirement({
+      id: "gym", label: "Gym", source: { kind: "activity-alias" }, aliases: ["Gym"],
+      unit: "times", target: 1,
+      schedule: { kind: "weekly-range", minimum: 4, preferred: 5, weekStartsOn: 1 },
+    });
+    const focus = requirement({ target: 60 });
+    const result = evaluateDailySuccess(state([focus, gym], [log({ type: "Study", minutes: 60 })]));
+    expect(result.eligibleCount).toBe(1);
+    expect(result.progress).toBe(100);
+    expect(result.requirements[1]).toMatchObject({ eligible: false, status: "awaiting" });
+  });
+
+  it("counts gym days separately, allowing rest days in a 4-5 weekly range", () => {
+    const gym = requirement({
+      id: "gym", label: "Gym", source: { kind: "activity-alias" }, aliases: ["Gym"],
+      target: 1, unit: "times", trackingStartsAt: "2026-07-06",
+      schedule: { kind: "weekly-range", minimum: 4, preferred: 5, weekStartsOn: 1 },
+    });
+    const logs = ["2026-07-06","2026-07-08","2026-07-09","2026-07-10"].map((dayKey,i)=>log({id:`gym-${i}`,dayKey,type:"Gym",quantity:1,quantityKind:"count"}));
+    const sunday = evaluateDailySuccess({...state([gym],logs),activeDayKey:"2026-07-12"}, "2026-07-12","2026-07-12");
+    expect(sunday.requirements[0].status).toBe("met");
+    expect(sunday.requirements[0].current).toBe(4);
+    expect(sunday.requirements[0].calculation).toContain("preferred 5");
+  });
+
+  it("does not allow a private prayer goal or unfinished weekly goal to alter academic streak credit", () => {
+    const prayer = requirement({
+      id:"prayer",source:{kind:"manual"},lane:"personal",
+      schedule:{kind:"daily-slots",slots:["Fajr","Dhuhr","Asr","Maghrib","Isha"]},
+      target:5,unit:"prayers",showInReports:false,
+    });
+    const gym = requirement({
+      id:"gym",source:{kind:"activity-alias"},lane:"personal",aliases:["Gym"],
+      schedule:{kind:"weekly-range",minimum:4,preferred:5,weekStartsOn:1},
+      target:1,unit:"times",
+    });
+    const focus = requirement({ id:"academic",target:60 });
+    const result=evaluateDailySuccess(state([prayer,gym,focus],[log({minutes:60})]));
+    expect(result.eligibleCount).toBe(1);
+    expect(result.progress).toBe(100);
+    expect(result.requirements.find((r)=>r.requirement.id==="prayer")?.status).toBe("awaiting");
+  });
+
+  it("keeps named prayer occurrences distinct when one is toggled repeatedly", () => {
+    const prayer = requirement({
+      id:"prayer", label:"Prayer", source:{kind:"manual"}, target:5, unit:"prayers",
+      schedule:{kind:"daily-slots",slots:["Fajr","Dhuhr","Asr","Maghrib","Isha"]},
+      manualContributions:[
+        {id:"fajr",requirementId:"prayer",dayKey:TODAY,value:1,mode:"add",slotId:"Fajr",createdAt:TODAY,updatedAt:TODAY},
+        {id:"dhuhr",requirementId:"prayer",dayKey:TODAY,value:1,mode:"add",slotId:"Dhuhr",createdAt:TODAY,updatedAt:TODAY}
+      ],
+    });
+    const result = evaluateDailySuccess(state([prayer]));
+    expect(result.requirements[0]).toMatchObject({current:2,target:5,ratio:0.4});
+  });
+});
+
 describe("daily success", () => {
   it("keeps a configured day neutral when no requirement is selected", () => {
     const result = evaluateDailySuccess(state([]));

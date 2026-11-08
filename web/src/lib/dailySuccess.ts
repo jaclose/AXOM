@@ -67,7 +67,11 @@ export function evaluateDailySuccess(
     : legacyRequirements(state);
   const mode = configured ? "configured" : "legacy";
   const results = requirements.map((requirement) => evaluateRequirement(requirement, state, dayKey, today));
-  const eligible = results.filter((result) => result.eligible && result.status !== "unavailable");
+  const eligible = results.filter((result) =>
+    result.eligible && result.status !== "unavailable"
+    && result.requirement.lane !== "personal"
+    && result.requirement.schedule.kind !== "times-per-week"
+    && result.requirement.schedule.kind !== "weekly-range");
   const totalWeight = eligible.reduce((sum, result) => sum + normalizeWeight(result.requirement.weight), 0);
   const progress = eligible.length && totalWeight > 0
     ? Math.round((eligible.reduce((sum, result) => sum + result.ratio * normalizeWeight(result.requirement.weight), 0) / totalWeight) * 100)
@@ -143,10 +147,31 @@ export function evaluateRequirement(
     };
   }
 
+  if (requirement.schedule.kind === "daily-slots") {
+    // Named occurrences count only the distinct configured slots, never raw taps.
+    const valid = new Set(requirement.schedule.slots);
+    const occurrences = new Map<string, DailySuccessManualContribution>();
+    for (const item of requirement.manualContributions ?? []) {
+      if (item.dayKey === dayKey && item.slotId && valid.has(item.slotId)) occurrences.set(item.slotId, item);
+    }
+    const current = [...occurrences.values()].filter((item) => item.value > 0).length;
+    const target = requirement.schedule.slots.length;
+    return {
+      ...base, eligible: true, current, target,
+      ratio: Math.min(1, current / target),
+      status: current === target ? "met" : current ? "in-progress" : dayKey >= today ? "awaiting" : "missed",
+      sourceRecordIds: [...occurrences.values()].map((item) => item.id),
+      calculation: `${current} of ${target} named occurrences recorded`,
+    };
+  }
+
   if (requirement.schedule.kind === "weekdays" && !requirement.schedule.weekdays.includes(weekday(dayKey))) {
     return { ...base, eligible: false, status: "not-eligible" };
   }
 
+  if (requirement.schedule.kind === "weekly-range") {
+    return evaluateFlexibleWeeklyRange(requirement, state, dayKey, today, base);
+  }
   if (requirement.schedule.kind === "times-per-week") {
     return evaluateWeeklyRequirement(requirement, state, dayKey, today, base);
   }
@@ -172,6 +197,50 @@ export function evaluateRequirement(
     sourceRecordIds: observed.ids,
     contributions: observed.contributions,
     calculation: `${formatNumber(current)} of ${formatNumber(target)} ${requirement.unit}`,
+  };
+}
+
+/**
+ * Flexible weekly commitments are evaluated over a complete civil week,
+ * never included in daily-success/streak denominators. One qualifying
+ * calendar day counts once even when multiple sessions occur that day.
+ */
+function evaluateFlexibleWeeklyRange(
+  requirement: DailySuccessRequirement,
+  state: DailySuccessState,
+  dayKey: string,
+  today: string,
+  base: Omit<DailyRequirementResult, "eligible" | "status">,
+): DailyRequirementResult {
+  const schedule = requirement.schedule as Extract<DailySuccessSchedule, { kind: "weekly-range" }>;
+  const start = weekStart(dayKey, schedule.weekStartsOn === 1 ? 1 : 0);
+  const end = addLocalDays(start, 6);
+  const cutoff = dayKey < today ? end : today;
+  const qualifying = [];
+  const ids: string[] = [];
+  const contributions: TargetContribution[] = [];
+  for (let date = start; date <= end; date = addLocalDays(date, 1)) {
+    if (date < requirement.trackingStartsAt || date > cutoff) continue;
+    const observed = observedValue(requirement, state, date);
+    if (observed.value >= base.target) qualifying.push(date);
+    ids.push(...observed.ids);
+    contributions.push(...observed.contributions);
+  }
+  const minimum = Math.max(1, Math.min(7, schedule.minimum));
+  const preferred = Math.max(minimum, Math.min(7, schedule.preferred));
+  const completed = dayKey < today && dayKey === end;
+  const met = qualifying.length >= minimum;
+  return {
+    ...base,
+    // Weekly completion is displayed in goals/reports, never mixed into daily streak credit.
+    eligible: false,
+    current: qualifying.length,
+    target: minimum,
+    ratio: Math.min(1, qualifying.length / minimum),
+    status: met ? "met" : completed ? "missed" : qualifying.length ? "in-progress" : "awaiting",
+    sourceRecordIds: [...new Set(ids)],
+    contributions,
+    calculation: `${qualifying.length} of minimum ${minimum} days · preferred ${preferred} · week ${start}–${end}`,
   };
 }
 
@@ -257,7 +326,7 @@ function hasSource(source: DailySuccessSource, trackers: ProductivityTracker[], 
 
 export function makeDailyRequirement(
   input: Pick<DailySuccessRequirement, "id" | "label" | "source" | "target" | "unit"> &
-    Partial<Pick<DailySuccessRequirement, "enabled" | "aliases" | "excludedSourceRecordIds" | "includedSourceRecordIds" | "manualContributions" | "weight" | "schedule" | "trackingStartsAt" | "createdAt" | "updatedAt">>,
+    Partial<Pick<DailySuccessRequirement, "enabled" | "lane" | "showInReports" | "aliases" | "excludedSourceRecordIds" | "includedSourceRecordIds" | "manualContributions" | "weight" | "schedule" | "trackingStartsAt" | "createdAt" | "updatedAt">>,
   today: string = localDateKey(),
 ): DailySuccessRequirement {
   const timestamp = new Date().toISOString();
@@ -266,6 +335,8 @@ export function makeDailyRequirement(
     label: input.label.trim() || sourceLabel(input.source),
     source: input.source,
     enabled: input.enabled ?? true,
+    lane: input.lane === "personal" ? "personal" : "academic",
+    showInReports: input.showInReports !== false,
     aliases: normalizeAliases(input.aliases),
     excludedSourceRecordIds: normalizeRecordIds(input.excludedSourceRecordIds),
     includedSourceRecordIds: normalizeRecordIds(input.includedSourceRecordIds),
@@ -300,6 +371,8 @@ export function normalizeDailySuccessConfig(value: unknown): DailySuccessConfig 
         ? candidate.label.trim().slice(0, 120)
         : sourceLabel(source),
       enabled: candidate.enabled !== false,
+      lane: candidate.lane === "personal" ? "personal" : "academic",
+      showInReports: candidate.showInReports !== false,
       source,
       aliases: normalizeAliases(candidate.aliases),
       excludedSourceRecordIds: normalizeRecordIds(candidate.excludedSourceRecordIds),
@@ -367,6 +440,21 @@ function normalizeSchedule(value: unknown): DailySuccessSchedule {
       : [];
     return weekdays.length ? { kind: "weekdays", weekdays } : { kind: "daily" };
   }
+  if (value.kind === "weekly-range") {
+    const minimum = Math.max(1, Math.min(7, Math.round(safePositive(value.minimum, 1))));
+    return {
+      kind: "weekly-range",
+      minimum,
+      preferred: Math.max(minimum, Math.min(7, Math.round(safePositive(value.preferred, minimum)))),
+      weekStartsOn: value.weekStartsOn === 1 ? 1 : 0,
+    };
+  }
+  if (value.kind === "daily-slots") {
+    const slots = Array.isArray(value.slots)
+      ? [...new Set(value.slots.filter((v): v is string => typeof v === "string").map((v) => v.trim().slice(0, 40)).filter(Boolean))].slice(0, 24)
+      : [];
+    return slots.length ? { kind: "daily-slots", slots } : { kind: "daily" };
+  }
   if (value.kind === "times-per-week") {
     return {
       kind: "times-per-week",
@@ -427,6 +515,7 @@ function normalizeManualContributions(
       note: typeof candidate.note === "string" && candidate.note.trim()
         ? candidate.note.trim().slice(0, 240)
         : undefined,
+      slotId: typeof candidate.slotId === "string" && candidate.slotId.trim() ? candidate.slotId.trim().slice(0, 40) : undefined,
       mode,
       createdAt,
       updatedAt: safeTimestamp(candidate.updatedAt, createdAt),

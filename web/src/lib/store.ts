@@ -239,6 +239,8 @@ interface Actions {
     quantityKind?: "cards" | "questions" | "count";
     quantityLabel?: string;
     note?: string;
+    academic?: boolean;
+    productive?: boolean;
   }) => void;
   logProductivity: (entry: { trackerId: string; quantity?: number; minutes?: number; note?: string }) => void;
   addProductivityTracker: (tracker: Omit<ProductivityTracker, "id" | "createdAt" | "updatedAt">) => string;
@@ -636,7 +638,7 @@ export const useStore = create<Store>()(
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
-      logActivity: ({ label, trackerId, minutes = 0, quantity = 0, quantityKind, quantityLabel, note }) =>
+      logActivity: ({ label, trackerId, minutes = 0, quantity = 0, quantityKind, quantityLabel, note, academic, productive }) =>
         set((s) => {
           const tracker = trackerId
             ? s.productivityTrackers.find((item) => item.id === trackerId && !item.archived)
@@ -666,8 +668,9 @@ export const useStore = create<Store>()(
             quantity: semanticQuantity,
             quantityKind: kind,
             quantityLabel: quantityLabel?.trim().slice(0, 40) || undefined,
-            academic: tracker ? tracker.contributesToAcademicStudy : true,
-            productive: tracker ? tracker.contributesToTotalProductiveTime : true,
+            // Unlinked personal reports never silently acquire academic time.
+            academic: tracker ? tracker.contributesToAcademicStudy : academic === true,
+            productive: tracker ? tracker.contributesToTotalProductiveTime : productive !== false,
           };
           return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),

@@ -41,6 +41,14 @@ describe("ProductivityPage daily console", () => {
     });
   });
 
+  it("does not credit a gym self-report as academic study", () => {
+    render(<ProductivityPage />);
+    fireEvent.click(screen.getByRole("button",{name:"Use Exercise template"}));
+    fireEvent.change(screen.getByLabelText("How long in minutes?"),{target:{value:"60"}});
+    fireEvent.click(screen.getByRole("button",{name:"Log"}));
+    expect(useStore.getState().logs[0]).toMatchObject({type:"Exercise",minutes:60,academic:false,productive:true});
+  });
+
   it("uses a quick self-report category without inventing time or questions", () => {
     render(<ProductivityPage />);
     fireEvent.click(screen.getByRole("button", { name: "Use Questions template" }));
