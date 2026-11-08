@@ -519,7 +519,9 @@ export type AcademicStageId =
 export type DailySuccessSchedule =
   | { kind: "daily" }
   | { kind: "weekdays"; weekdays: number[] }
-  | { kind: "times-per-week"; times: number; weekStartsOn?: 0 | 1 };
+  | { kind: "times-per-week"; times: number; weekStartsOn?: 0 | 1 }
+  | { kind: "weekly-range"; minimum: number; preferred: number; weekStartsOn?: 0 | 1 }
+  | { kind: "daily-slots"; slots: string[] };
 
 export type DailySuccessSource =
   | { kind: "study-minutes" }
@@ -577,6 +579,8 @@ export interface DailySuccessManualContribution {
   value: number;
   unit?: string;
   note?: string;
+  /** Stable named occurrence identity such as Fajr or Dhuhr; never a second study log. */
+  slotId?: string;
   /** Add a signed correction, or replace that day's derived total. */
   mode: "add" | "override";
   createdAt: string;
