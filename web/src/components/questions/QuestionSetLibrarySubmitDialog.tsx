@@ -244,6 +244,9 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // The rendered account may lag behind the session store during a switch.
     // Never send another account's saved rights and answer attestations.
     if (!accountId || statusIdentity !== `${accountId}:${set.id}`
+      // Render-time attestation checks are not sufficient: the auth store can
+      // switch synchronously before React rerenders the old click handler.
+      || useAccount.getState().user?.id !== accountId
       || !attestationsForAccount || !rights || !answers || checking || busy || generating || drafts.length
       || unresolved || withMedia || missingExplanations
       || (submission && submission.status !== "rejected")) return;
