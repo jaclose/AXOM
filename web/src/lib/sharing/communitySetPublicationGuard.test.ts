@@ -97,6 +97,29 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(snapshot.questions).toHaveLength(1);
   });
 
+  it("revokes stale publication attestations after silent rich source revisions", () => {
+    const rich: NonNullable<QuestionRecord["content"]> = {
+      id: "source-q-1",
+      source: { filename: "vascular-source.pdf", page: 3 },
+      stem: [{ type: "text", text: "What arterial layer contains vascular smooth muscle?" }],
+      choices: [
+        { id: "a", label: "A", blocks: [{ type: "text", text: "Tunica media" }] },
+        { id: "b", label: "B", blocks: [{ type: "text", text: "Tunica intima" }] },
+      ],
+      assets: [],
+      provenance: { method: "pdf-import", sourceChecksum: `sha256:${"a".repeat(64)}` },
+    };
+    const opened = { ...question, content: rich };
+    const modified = { ...opened, content: { ...rich,
+      provenance: { ...rich.provenance, sourceChecksum: `sha256:${"b".repeat(64)}` },
+    } };
+    // Same public stem, answer, explanation, citation and updatedAt. The
+    // underlying rich source is different and requires renewed review.
+    expect(() => publish({ openedQuestion: opened, liveQuestion: modified })).toThrow(/changed while publishing/);
+    expect(publish({ openedQuestion: opened, liveQuestion: opened }).questions).toHaveLength(1);
+    expect(JSON.stringify(publish({ openedQuestion: opened, liveQuestion: opened }))).not.toContain("sourceChecksum");
+  });
+
   it("never publishes newly held, unexplained or media-dependent questions", () => {
     expect(() => publish({ liveQuestion: { ...question, needsReview: true } })).toThrow(/changed while publishing/);
     expect(() => publish({ liveQuestion: { ...question, explanation: "" } })).toThrow(/changed while publishing/);
