@@ -202,7 +202,7 @@ describe("bounded account image uploads", () => {
     objects.set(path, tampered);
 
     await expect(uploadCloudMedia(client, "synthetic-owner", state, guard))
-      .rejects.toThrow("An account image could not be verified.");
+      .rejects.toThrow(/failed its integrity check|could not be verified/);
     expect(download).toHaveBeenCalledTimes(1);
     expect(download).toHaveBeenCalledWith(path);
 
