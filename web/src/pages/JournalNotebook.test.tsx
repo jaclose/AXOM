@@ -1428,6 +1428,46 @@ describe("Journal notebook foundation", () => {
       .toMatchObject({ freeWriting: "Keep A. B failed.", attachments: [firstImage] });
   });
 
+  it("does not durably mark Done when a failed image is still unacknowledged", async () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "image-done-draft-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      today: "Existing draft remains private.",
+      notebookStatus: "draft" as const,
+      attachments: [],
+    };
+    useStore.setState((s) => ({ journal: [...s.journal, original] }));
+    vi.spyOn(journalNotebook, "readJournalImage")
+      .mockRejectedValue(new Error("Image could not be read"));
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    const mounted = render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Draft text must never complete silently." },
+    });
+    fireEvent.change(screen.getByLabelText("Choose a journal image"), {
+      target: { files: [new File(["invalid"], "unreadable.png", { type: "image/png" })] },
+    });
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", expect.stringContaining("Image could not be read"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Done for today" }));
+    await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 25)); });
+    expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Image could not be read");
+    expect(useStore.getState().journal.find((entry) => entry.id === original.id)?.notebookStatus).toBe("draft");
+
+    mounted.unmount();
+    render(<JournalPage />);
+    openTodayInFullPage();
+    expect(useStore.getState().journal.find((entry) => entry.id === original.id))
+      .toMatchObject({ notebookStatus: "draft", freeWriting: "Draft text must never complete silently." });
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
+      .toBe("Draft text must never complete silently.");
+  });
+
   it("does not rewrite an unchanged historical page during navigation", async () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites");
     render(<JournalPage />);
