@@ -58,7 +58,7 @@ export function recurringGoalSummaries(
       return {
         id:goal.id,label:goal.label,cadence:"daily-slots" as const,
         status:current?.status??"awaiting",
-        progress:`${current?.current??0} of ${goal.schedule.slots.length} named check-ins reported`,
+        progress:`${current?.current??0} of ${goal.schedule.kind === "daily-slots" ? goal.schedule.slots.length : 0} named check-ins reported`,
         periodLabel:"Last 7 days",
         history,sourceRecordIds:current?.sourceRecordIds??[],
       };
