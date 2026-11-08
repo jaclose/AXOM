@@ -383,12 +383,12 @@ def open_native_package_file(root, package_dir, relative_file):
     if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
             and os.open in os.supports_dir_fd):
         raise ValueError("secure_native_package_open_unavailable")
-    if not isinstance(relative_file, str) or not relative_file or "\\x00" in relative_file:
+    if not isinstance(relative_file, str) or not relative_file or "\x00" in relative_file:
         raise ValueError("unsafe_native_package_path")
     file_path = pathlib.PurePosixPath(relative_file)
     windows_path = pathlib.PureWindowsPath(relative_file)
     if (file_path.is_absolute() or windows_path.drive or windows_path.is_absolute()
-            or "\\\\" in relative_file or ".." in file_path.parts
+            or "\\" in relative_file or ".." in file_path.parts
             or not file_path.parts or file_path.name in {".", ".."}):
         raise ValueError("unsafe_native_package_path")
     try:
@@ -460,10 +460,10 @@ def inspect_packages(rows):
             src = data.get("source") or {}
             src_name = pathlib.Path(str(src.get("filename") or "")).name
             src_path = path.parent / "source" / src_name
-            if not native_package_file_exists(root, path.parent, "source/" + src_name):
+            src_exists = native_package_file_exists(root, path.parent, "source/" + src_name)
+            if not src_exists:
                 src_path = path.parent / src_name
-            src_exists = native_package_file_exists(root, path.parent, src_name) if (
-                src_path.parent == path.parent) else True
+                src_exists = native_package_file_exists(root, path.parent, src_name)
             declared_src_sha = set()
             all_assets = set()
             asset_expected_checksums = {}
