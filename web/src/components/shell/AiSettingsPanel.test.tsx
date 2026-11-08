@@ -14,6 +14,7 @@ const cloudUrl = "https://abcdefghijklmnopqrst.supabase.co/functions/v1/ai-proxy
 const mocks = vi.hoisted(() => ({
   saved: { mode: "off", localEndpoint: "http://localhost:11434" } as TestSettings,
   save: vi.fn(),
+  saveOk: true,
   health: vi.fn(async (settings: TestSettings) => ({
     ok: !settings.cloudProxyUrl || settings.cloudProxyUrl === cloudUrl,
     detail: settings.cloudProxyUrl && settings.cloudProxyUrl !== cloudUrl ? "Cloud AI is unavailable." : "AXOM Cloud AI ready.",
@@ -25,8 +26,10 @@ vi.mock("../../lib/ai", () => ({
   DEFAULT_AI_SETTINGS: { mode: "off", localEndpoint: "http://localhost:11434" },
   loadAiSettings: () => ({ ...mocks.saved }),
   saveAiSettings: (settings: TestSettings) => {
-    mocks.saved = { ...settings };
     mocks.save(settings);
+    if (!mocks.saveOk) return false;
+    mocks.saved = { ...settings };
+    return true;
   },
   cloudEndpoint: (settings: TestSettings) => (
     !settings.cloudProxyUrl || settings.cloudProxyUrl === cloudUrl ? cloudUrl : null
@@ -43,6 +46,7 @@ beforeEach(() => {
     cloudProxyUrl: "https://old-untrusted.example/functions/v1/ai-proxy",
   };
   mocks.save.mockClear();
+  mocks.saveOk = true;
   mocks.health.mockClear();
   mocks.health.mockImplementation(async (settings: TestSettings) => ({
     ok: !settings.cloudProxyUrl || settings.cloudProxyUrl === cloudUrl,
@@ -101,6 +105,23 @@ describe("Cloud AI legacy destination recovery", () => {
     await act(async () => { resolveOld?.({ ok: false, detail: "Stale blocked destination" }); });
     expect(screen.getByText("AXOM Cloud AI ready.")).toBeTruthy();
     expect(screen.queryByText("Stale blocked destination")).toBeNull();
+  });
+
+  it("keeps the old destination blocked and offers retry when storage refuses the reset", async () => {
+    mocks.saved.mode = "cloud";
+    mocks.saveOk = false;
+    render(<AiSettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Use AXOM's verified server" }));
+    expect(mocks.saved.cloudProxyUrl).toBe("https://old-untrusted.example/functions/v1/ai-proxy");
+    expect(screen.getByRole("alert", { name: "Cloud AI connection blocked" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toMatch(/could not save the change/);
+    expect(mocks.health).toHaveBeenCalledTimes(1);
+
+    mocks.saveOk = true;
+    fireEvent.click(screen.getByRole("button", { name: "Use AXOM's verified server" }));
+    expect(mocks.saved.cloudProxyUrl).toBeUndefined();
+    await waitFor(() => expect(screen.getByText("AXOM Cloud AI ready.")).toBeTruthy());
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("does not mutate the Cloud destination when choosing Local or Off", () => {
