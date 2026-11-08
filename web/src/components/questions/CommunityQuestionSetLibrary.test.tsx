@@ -135,6 +135,8 @@ describe("Community Question Set Library", () => {
       mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
     });
     expect(guard.isCurrentAccount("account-1")).toBe(false);
+    expect(screen.queryByRole("button", { name: "Saving…" })).toBeNull();
+    expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     await act(async () => { resolveImport({ ok: true, added: 1 }); });
     expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
     expect(mock.observers.size).toBe(0);
@@ -155,6 +157,7 @@ describe("Community Question Set Library", () => {
     });
     await act(async () => { resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" }); });
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
+    expect(screen.queryByText("Opening this Question Set…")).toBeNull();
     expect(mock.observers.size).toBe(0);
   });
 
@@ -173,7 +176,7 @@ describe("Community Question Set Library", () => {
       mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
     });
     await act(async () => { resolveLike(undefined); });
-    expect(screen.getByRole("button", { name: "Like Synthetic practice" }).getAttribute("aria-pressed")).toBe("false");
+    expect((await screen.findByRole("button", { name: "Like Synthetic practice" })).getAttribute("aria-pressed")).toBe("false");
     expect(mock.observers.size).toBe(0);
   });
 
