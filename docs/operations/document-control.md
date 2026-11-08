@@ -1,6 +1,10 @@
 ---
-tags: [axom/operations, axom/governance, axom/documentation]
-authority: proposed-until-merged
+tags:
+  - axom/operations
+  - axom/governance
+  - axom/documentation
+authority: canonical
+lifecycle: proposed-until-merged
 owner: AXOM engineering coordination; release audit AXOM FORGE
 updated: 2026-11-06
 review_trigger: material-policy-or-source-change
