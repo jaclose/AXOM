@@ -602,3 +602,99 @@ test("quota on secondary profile mirror still restores the verified primary fall
     return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
   })).toBe(newer);
 });
+
+
+/**
+ * Independent same-origin durability acceptance at the latest recovery stack:
+ * an offline fallback save must not be displaced by an older second tab after
+ * BFCache-style lifecycle signals. This deliberately uses synthetic data,
+ * never a signed-in learner or cloud account.
+ */
+test("offline fallback winner survives a stale second tab and page suspension", async ({ context }) => {
+  test.setTimeout(120_000);
+  const first = await probe(context);
+  const stale = await context.newPage();
+  await stale.goto(probePath);
+  const original = snapshot("synthetic-initial");
+  const winner = snapshot("offline-fallback-winner", "🪶安全".repeat(50_000));
+  const obsolete = snapshot("obsolete-second-tab");
+
+  await first.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const key = STORAGE_KEYS.persistedState;
+    await vault.localVaultStorage.getItem(key);
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(key, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+  }, original);
+  expect(await stale.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(original);
+
+  // Both tabs and their modules are warm before disconnect; the local write
+  // does not depend on Vite or a production service worker.
+  await context.setOffline(true);
+  try {
+    const fallback = await first.evaluate(async (value) => {
+      const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+      const vault = await import("/src/lib/localVault.ts");
+      const key = STORAGE_KEYS.persistedState;
+      const old = Object.getOwnPropertyDescriptor(window, "indexedDB");
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+      try {
+        const checkpoint = vault.getVaultWriteCheckpoint();
+        await vault.localVaultStorage.setItem(key, value);
+        await vault.flushLocalVaultWrites();
+        vault.assertVaultWritesSince(checkpoint);
+        return localStorage.getItem(key) === value;
+      } finally {
+        if (old) Object.defineProperty(window, "indexedDB", old);
+        else Reflect.deleteProperty(window, "indexedDB");
+      }
+    }, winner);
+    expect(fallback).toBe(true);
+
+    const rejected = await stale.evaluate(async (value) => {
+      const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+      const vault = await import("/src/lib/localVault.ts");
+      const checkpoint = vault.getVaultWriteCheckpoint();
+      await vault.localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+      await vault.flushLocalVaultWrites();
+      try {
+        vault.assertVaultWritesSince(checkpoint);
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    }, obsolete);
+    expect(rejected).toContain("Another AXOM tab saved a newer workspace");
+
+    await stale.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+  } finally {
+    await context.setOffline(false);
+  }
+
+  // Newly initialized tabs and both old tabs must converge on the verified
+  // offline fallback, rather than accepting the obsolete second-tab edit.
+  const fresh = await context.newPage();
+  await fresh.goto(probePath);
+  const read = async (page: Page) => page.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  });
+  expect(await read(fresh)).toBe(winner);
+  await fresh.reload();
+  expect(await read(fresh)).toBe(winner);
+  await first.reload();
+  await stale.reload();
+  expect(await read(first)).toBe(winner);
+  expect(await read(stale)).toBe(winner);
+});
