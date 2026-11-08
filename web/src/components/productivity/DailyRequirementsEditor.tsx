@@ -397,6 +397,9 @@ export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (
               const checked = progress?.status === "met";
               const weekly = requirement.schedule.kind === "weekly-range";
               const named = requirement.schedule.kind === "daily-slots";
+              const weeklyCheck = requirement.manualContributions?.find((item) =>
+                item.dayKey === today && item.mode === "override");
+              const weeklyDoneToday = (weeklyCheck?.value ?? 0) >= requirement.target;
               const completedSlots = new Set((requirement.manualContributions ?? [])
                 .filter((item) => item.dayKey === today && item.slotId && item.value > 0)
                 .map((item) => item.slotId));
@@ -416,7 +419,13 @@ export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (
                     <i style={{ width: `${Math.round((progress?.ratio ?? 0) * 100)}%` }} />
                   </div>
                 </div>
-                {manual && !named && progress?.eligible && (
+                {manual && weekly && (
+                  <GButton size="sm" type="button"
+                    onClick={() => setManualValue(requirement, weeklyDoneToday ? 0 : requirement.target)}>
+                    {weeklyDoneToday ? "Undo today" : "Mark today"} {requirement.label}
+                  </GButton>
+                )}
+                {manual && !weekly && !named && progress?.eligible && (
                   requirement.target <= 1
                     ? <GButton size="sm" onClick={() => setManualValue(requirement, checked ? 0 : requirement.target)}>
                         {checked ? "Undo" : "Complete"} {requirement.label}
