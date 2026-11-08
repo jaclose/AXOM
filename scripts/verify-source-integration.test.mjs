@@ -518,3 +518,86 @@ test("v2 accepts pinned source changes already identically present in advanced i
     ...input, integratedSha: unclaimedSha,
   }, adapters), /[Uu]nexpected integrated|Incomplete source inventory/);
 });
+
+
+test("v2 rejects reachable transient unreviewed commits even when final approved files match", t => {
+  // History-sensitive RED witness: net Git diff and final source blobs are clean,
+  // yet an unreviewed file was published into an intermediate commit object.
+  const cwd = mkdtempSync(join(tmpdir(), "axom-history-transient-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, {
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const commit = msg => {
+    git("add", "-A"); git("commit", "-qm", msg);
+    return git("rev-parse", "HEAD");
+  };
+  git("init", "-q");
+  git("config", "user.name", "AXOM release-history regression");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  writeFileSync(join(cwd, "docs", "approved.txt"), "baseline\n");
+  const baseSha = commit("shared reviewed base");
+  git("checkout", "-qb", "approved", baseSha);
+  writeFileSync(join(cwd, "docs", "approved.txt"), "reviewed source\n");
+  const sourceSha = commit("approved source change");
+  git("checkout", "-qb", "integration", baseSha);
+  git("merge", "--no-ff", "-qm", "integrate reviewed change", sourceSha);
+  const cleanMergeSha = git("rev-parse", "HEAD");
+  writeFileSync(join(cwd, "docs", "unclaimed-transient.txt"), "benign unreviewed placeholder\n");
+  const introducedSha = commit("unreviewed intermediate addition");
+  unlinkSync(join(cwd, "docs", "unclaimed-transient.txt"));
+  const concealedSha = commit("remove unreviewed intermediate addition");
+  const reportInput = integratedSha => ({
+    version: 2, integrationBaseSha: baseSha, integratedSha,
+    sources: [{ baseSha, sourceSha }],
+  });
+  // Local, no-network resolver supplies history from actual immutable Git commits.
+  const history = (from, to) => {
+    const rows = git("--no-replace-objects", "rev-list", "--parents", "--topo-order",
+      to, "^" + from).split("\n").filter(Boolean);
+    return rows.map(row => {
+      const [sha, ...parents] = row.split(" ");
+      if (!parents.length) throw new Error("unexpected root commit in regression fixture");
+      return { sha, parents, changes: listGitChanges(parents[0], sha, cwd) };
+    });
+  };
+  const adapters = {
+    listChanges: (a, b) => listGitChanges(a, b, cwd),
+    isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+    readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+    listTreePaths: sha => listGitTreePaths(sha, cwd),
+    listHistoryChanges: history,
+  };
+  const clean = verifyCompleteSourceIntegration(reportInput(cleanMergeSha), adapters);
+  assert.equal(clean.verifiedFiles, 1);
+  assert.deepEqual(listGitChanges(baseSha, concealedSha, cwd),
+    listGitChanges(baseSha, sourceSha, cwd));
+  assert.equal(readGitFile(concealedSha, "docs/approved.txt", cwd).blob,
+    readGitFile(sourceSha, "docs/approved.txt", cwd).blob);
+  assert.equal(listGitTreePaths(concealedSha, cwd).includes("docs/unclaimed-transient.txt"), false);
+  assert.equal(listGitTreePaths(introducedSha, cwd).includes("docs/unclaimed-transient.txt"), true);
+  assert.throws(
+    () => verifyCompleteSourceIntegration(reportInput(concealedSha), adapters),
+    /[Uu]nreviewed.*history|[Uu]nclaimed.*commit|[Tt]ransient/,
+  );
+  // A transient addition/deletion inside a pinned source range must also fail:
+  // the source's net diff is still only the final approved file.
+  git("checkout", "-qb", "source-history-test", baseSha);
+  writeFileSync(join(cwd, "docs", "source-transient.txt"), "ephemeral source commit\n");
+  commit("source introduced unreviewed file");
+  unlinkSync(join(cwd, "docs", "source-transient.txt"));
+  commit("source removed unreviewed file");
+  writeFileSync(join(cwd, "docs", "approved.txt"), "reviewed source\n");
+  const transientSourceSha = commit("final source approved state");
+  git("checkout", "-qb", "integration-source-test", baseSha);
+  git("merge", "--no-ff", "-qm", "merge source history with temporary file", transientSourceSha);
+  const transientIntegrationSha = git("rev-parse", "HEAD");
+  assert.throws(
+    () => verifyCompleteSourceIntegration({
+      version: 2, integrationBaseSha: baseSha, integratedSha: transientIntegrationSha,
+      sources: [{ baseSha, sourceSha: transientSourceSha }],
+    }, adapters),
+    /[Uu]nreviewed.*history|[Uu]nclaimed.*commit|[Tt]ransient/,
+  );
+});
