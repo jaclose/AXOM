@@ -58,16 +58,36 @@ export function CommunityQuestionSetLibrary() {
 
   useEffect(() => {
     let alive = true;
-    if (!accountId) { setSets([]); setLoading(false); setError(""); return; }
+    if (!accountId) {
+      setSets([]); setMore(false); setLoading(false); setError("");
+      return;
+    }
+    // Search results carry account-specific like state. A sign-out and
+    // sign-in round trip can occur without an intervening React render, so
+    // effect cleanup alone cannot invalidate the earlier response.
+    const session = observeAccountSession(accountId, () => {
+      if (!alive) return;
+      setSets([]); setMore(false); setLoading(false); setError("");
+    });
+    if (!session.current()) {
+      session.stop();
+      setSets([]); setMore(false); setLoading(false); setError("");
+      return;
+    }
     if (offset === 0) setSets([]);
     setLoading(true); setError("");
     void searchQuestionSetLibrary(accountId, search, offset).then(page => {
-      if (!alive) return;
+      if (!alive || !session.current()) return;
       setSets(current => offset === 0 ? page : [...current, ...page.filter(item => !current.some(existing => existing.id === item.id))]);
       setMore(page.length === 24 && offset < 1000);
-    }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "The library could not be loaded."); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    }).catch(cause => {
+      if (alive && session.current())
+        setError(cause instanceof Error ? cause.message : "The library could not be loaded.");
+    }).finally(() => {
+      if (alive && session.current()) setLoading(false);
+      session.stop();
+    });
+    return () => { alive = false; session.stop(); };
   }, [accountId, search, offset, refresh]);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
