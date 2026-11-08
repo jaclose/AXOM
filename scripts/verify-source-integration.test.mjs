@@ -441,3 +441,73 @@ test("pinned Git object and ancestry readbacks ignore untrusted local replace re
     "Git replace must not rewrite the pinned commit ancestry");
   assert.equal(isGitAncestor(source, base, cwd), false);
 });
+
+
+test("v2 accepts pinned source changes already identically present in advanced integration base", t => {
+  // Integration base may independently contain exact reviewed bytes or delete
+  // the same file before a separate reviewed source branch is merged.
+  // The final merge has source ancestry but NO net change from advanced base.
+  const cwd = mkdtempSync(join(tmpdir(), "axom-source-already-present-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, {
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const write = (path, value) => writeFileSync(join(cwd, path), value);
+  const commit = message => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+  git("init", "-q");
+  git("config", "user.name", "AXOM source integration regression");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  write("docs/shared.txt", "original bytes\n");
+  write("docs/deleted.txt", "removed by two independent branches\n");
+  const olderBase = commit("old common base");
+  git("checkout", "-qb", "reviewed-source", olderBase);
+  write("docs/shared.txt", "approved reviewed bytes\n");
+  git("rm", "-q", "--", "docs/deleted.txt");
+  const sourceSha = commit("reviewed source edits");
+  git("checkout", "-qb", "advanced-main", olderBase);
+  write("docs/shared.txt", "approved reviewed bytes\n");
+  git("rm", "-q", "--", "docs/deleted.txt");
+  const integrationBaseSha = commit("advanced base independently converges");
+  git("merge", "--no-ff", "-qm", "integrate legitimate source history", sourceSha);
+  const integratedSha = git("rev-parse", "HEAD");
+  assert.equal(git("rev-list", "--parents", "-n", "1", integratedSha).split(" ").length, 3);
+  assert.equal(isGitAncestor(sourceSha, integratedSha, cwd), true);
+  assert.equal(isGitAncestor(integrationBaseSha, sourceSha, cwd), false);
+  assert.deepEqual(listGitChanges(olderBase, sourceSha, cwd), [
+    { status: "D", path: "docs/deleted.txt" },
+    { status: "M", path: "docs/shared.txt" },
+  ]);
+  assert.deepEqual(listGitChanges(integrationBaseSha, integratedSha, cwd), []);
+  const input = { version: 2, integrationBaseSha, integratedSha,
+    sources: [{ baseSha: olderBase, sourceSha }] };
+  const adapters = {
+    listChanges: (a, b) => listGitChanges(a, b, cwd),
+    isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+    readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+    listTreePaths: sha => listGitTreePaths(sha, cwd),
+  };
+  // RED on prior verifier: expected two changed files, integrated zero,
+  // despite the literal source tip being an ancestor of this merge commit.
+  const report = verifyCompleteSourceIntegration(input, adapters);
+  assert.equal(report.completeForDeclaredRanges, true);
+  assert.equal(report.verifiedFiles, 2);
+  assert.equal(report.deletedFiles, 1);
+  assert.equal(report.alreadyPresentInBase, 2);
+  assert.equal(report.files.find(x => x.path === "docs/shared.txt")?.integratedStatus, "UNCHANGED");
+
+  // Same bytes without the actual reviewed source ancestry is never enough.
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, integratedSha: integrationBaseSha,
+  }, adapters), /not an ancestor/);
+  write("docs/shared.txt", "unreviewed change\n");
+  const unreviewedSha = commit("unreviewed change after source merge");
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, integratedSha: unreviewedSha,
+  }, adapters), /differs from pinned source contents or mode/);
+  write("docs/unclaimed.txt", "unclaimed integration source\n");
+  const unclaimedSha = commit("unexpected release change");
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, integratedSha: unclaimedSha,
+  }, adapters), /[Uu]nexpected integrated|Incomplete source inventory/);
+});
