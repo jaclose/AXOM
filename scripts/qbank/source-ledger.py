@@ -460,8 +460,12 @@ def inspect_packages(rows):
             questions = qdata.get("questions", [])
             if not isinstance(questions, list) or not questions: raise ValueError("missing_or_empty_questions_array")
             bank = data.get("bank") or {}
+            if not isinstance(bank, dict):
+                raise ValueError("invalid_native_bank_metadata")
             if qdata.get("bankId") != bank.get("id"): issues.append("bank_id_mismatch")
             src = data.get("source") or {}
+            if not isinstance(src, dict):
+                raise ValueError("invalid_native_source_metadata")
             src_name = pathlib.Path(str(src.get("filename") or "")).name
             src_path = path.parent / "source" / src_name
             src_exists = native_package_file_exists(root, path.parent, "source/" + src_name)
