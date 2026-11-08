@@ -1,0 +1,391 @@
+{
+  "version": "Build006",
+  "date": "2026-11-08",
+  "inherits": {
+    "run": "Build005",
+    "entries": 222,
+    "deep_profiles": 90
+  },
+  "totals": {
+    "internal_entries": 246,
+    "deep_profiles": 114,
+    "legacy_short_entries": 132,
+    "evidence_records": 120,
+    "image_associations": 78,
+    "unique_image_pages": 77,
+    "photographs_embedded": 0,
+    "PDF_pages": 169,
+    "QA_checks_passed": 25,
+    "QA_failed": 0
+  },
+  "coverage": {
+    "MONDO_imported": false,
+    "ICD11_imported": false,
+    "Orphanet_imported": false,
+    "denominator": null,
+    "coverage_percent": null
+  },
+  "records": [
+    {
+      "id": "AXOM-EN-001",
+      "name": "Prolactinoma",
+      "mechanism": "D2-responsive lactotroph PitNET; hyperprolactinemia suppresses GnRH",
+      "management": "cabergoline; surgery selected cases",
+      "sources": [
+        "PIT-PROL23"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-002",
+      "name": "Acromegaly from growth-hormone-secreting PitNET",
+      "mechanism": "excess GH stimulates IGF-1 and chronic tissue overgrowth",
+      "management": "transsphenoidal resection; somatostatin analogs, pegvisomant or cabergoline in selected cases",
+      "sources": [
+        "PIT-ACRO24"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-003",
+      "name": "Cushing disease",
+      "mechanism": "ACTH-producing pituitary lesion drives bilateral cortisol excess",
+      "management": "pituitary surgery; approved medical control when surgery unsuccessful or not feasible",
+      "sources": [
+        "ENDO-CUSH15"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-004",
+      "name": "Pituitary apoplexy",
+      "mechanism": "hemorrhage/infarction within pituitary tumour causes acute neuroendocrine crisis",
+      "management": "urgent glucocorticoids and neurosurgical/endocrine evaluation",
+      "sources": [
+        "PIT-APOP"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-005",
+      "name": "Sheehan syndrome",
+      "mechanism": "postpartum hemorrhagic shock causes ischemic anterior pituitary injury",
+      "management": "replace cortisol before levothyroxine where both deficient",
+      "sources": [
+        "PIT-SHEEH"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-006",
+      "name": "Arginine vasopressin deficiency",
+      "mechanism": "inadequate AVP secretion prevents urinary concentrating response",
+      "management": "desmopressin and supervised fluid/sodium management",
+      "sources": [
+        "ENDO-AVPD"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-007",
+      "name": "Syndrome of inappropriate antidiuresis",
+      "mechanism": "nonosmotic AVP effect causes impaired free-water excretion",
+      "management": "treat cause; fluid restriction or selected targeted therapy; hypertonic saline if severe symptomatic",
+      "sources": [
+        "ENDO-HYPONA"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-008",
+      "name": "Subacute granulomatous thyroiditis",
+      "mechanism": "painful destructive folliculitis releases stored thyroid hormone",
+      "management": "NSAIDs; short steroid course if severe; temporary beta blockade as needed",
+      "sources": [
+        "ENDO-THYR"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-009",
+      "name": "Toxic multinodular goiter",
+      "mechanism": "autonomous follicular nodules make hormone despite TSH suppression",
+      "management": "antithyroid stabilization, radioiodine or surgery as appropriate",
+      "sources": [
+        "ENDO-THYR"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-010",
+      "name": "Thyroid storm",
+      "mechanism": "decompensated severe thyrotoxicosis causes systemic hyperadrenergic multiorgan injury",
+      "management": "ICU support; thionamide, iodine after thionamide, beta blockade if safe, steroids",
+      "sources": [
+        "ENDO-THYSTORM"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-011",
+      "name": "Myxedema coma",
+      "mechanism": "severe thyroid-hormone deprivation causes hypoventilation, hypothermia and organ dysfunction",
+      "management": "ICU; IV thyroid hormone and stress glucocorticoids until adrenal failure excluded",
+      "sources": [
+        "ENDO-MYXED"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-012",
+      "name": "Anaplastic thyroid carcinoma",
+      "mechanism": "high-grade rapidly invasive thyroid epithelial malignancy, often MAPK-driven",
+      "management": "airway/oncology evaluation; molecular testing; BRAF/MEK targeting when BRAF V600E-positive",
+      "sources": [
+        "NCI-THYR"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-013",
+      "name": "Primary aldosteronism",
+      "mechanism": "renin-independent aldosterone activates MR causing volume expansion and K loss",
+      "management": "screen with aldosterone/renin; adrenalectomy unilateral or MR blockade bilateral",
+      "sources": [
+        "ENDO-PA25"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-014",
+      "name": "Primary adrenal insufficiency",
+      "mechanism": "adrenal destruction or dysfunction causes cortisol deficiency with variable aldosterone loss",
+      "management": "physiologic hydrocortisone and mineralocorticoid where indicated",
+      "sources": [
+        "ENDO-AI24"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-015",
+      "name": "Adrenal crisis",
+      "mechanism": "critical cortisol lack causes vasoplegia, shock, electrolyte/glucose disturbances",
+      "management": "immediate parenteral hydrocortisone, isotonic fluids and cause treatment",
+      "sources": [
+        "ENDO-AI24",
+        "ENDO-GCAI24"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-016",
+      "name": "21-hydroxylase deficiency CAH",
+      "mechanism": "CYP21A2 defect impairs cortisol ± aldosterone synthesis and raises androgen precursors",
+      "management": "specialist steroid/mineralocorticoid replacement and stress dosing",
+      "sources": [
+        "ENDO-CAH18"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-017",
+      "name": "Glucocorticoid-induced adrenal insufficiency",
+      "mechanism": "exogenous glucocorticoids suppress CRH-ACTH axis and adrenal cortisol production",
+      "management": "individualized taper, stress dosing and assessment of HPA recovery",
+      "sources": [
+        "ENDO-GCAI24"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-018",
+      "name": "Hypoparathyroidism",
+      "mechanism": "inadequate PTH lowers renal Ca reclamation and active vitamin D synthesis",
+      "management": "calcium, active vitamin D, magnesium as needed; PTH therapy selected cases",
+      "sources": [
+        "ENDO-HYPOPT22"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-019",
+      "name": "Pseudohypoparathyroidism",
+      "mechanism": "GNAS or other signaling defects cause renal end-organ PTH resistance",
+      "management": "treat hypocalcemia with active vitamin D/calcium; monitor PTH and phosphorus",
+      "sources": [
+        "ENDO-HYPOPT22",
+        "GEN-MEDGEN"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-020",
+      "name": "Diabetic ketoacidosis",
+      "mechanism": "insulin deficiency drives lipolysis, hepatic ketogenesis and high-anion-gap acidosis",
+      "management": "fluid, potassium evaluation/replacement, IV insulin with substrate monitoring",
+      "sources": [
+        "ADA-DKA24",
+        "ADA-2026"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-021",
+      "name": "Hyperosmolar hyperglycemic state",
+      "mechanism": "severe hyperglycemia and water depletion lead to hyperosmolality, generally little ketosis",
+      "management": "fluid resuscitation, potassium and cautious insulin guided by osmolality",
+      "sources": [
+        "ADA-DKA24",
+        "ADA-2026"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-022",
+      "name": "Multiple endocrine neoplasia type 1",
+      "mechanism": "MEN1 loss of menin predisposes parathyroid, pituitary and enteropancreatic tumours",
+      "management": "gene-directed surveillance and organ-specific endocrine tumour management",
+      "sources": [
+        "MEN1-REVIEW",
+        "NCI-MEN"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-023",
+      "name": "Multiple endocrine neoplasia type 2",
+      "mechanism": "germline RET gain of function predisposes MTC ± pheochromocytoma",
+      "management": "variant-guided prophylactic thyroidectomy; treat pheochromocytoma first",
+      "sources": [
+        "NCI-MEN2"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    },
+    {
+      "id": "AXOM-EN-024",
+      "name": "Noninvasive follicular thyroid neoplasm with papillary-like nuclear features",
+      "mechanism": "encapsulated follicular lesion with PTC nuclear features but no invasion, papillae or high-grade features",
+      "management": "diagnostic excision, often lobectomy, without automatic radioiodine",
+      "sources": [
+        "ATA-DTC25"
+      ],
+      "ontology_ids": null,
+      "review_status": "provisional"
+    }
+  ],
+  "image_sources": [
+    {
+      "filename": "Subacute thyroiditis - high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Subacute_thyroiditis_-_high_mag.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Subacute thyroiditis - intermed mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Subacute_thyroiditis_-_intermed_mag.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Subacute thyroiditis - very high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Subacute_thyroiditis_-_very_high_mag.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Primary aldosteronism (1) adrenocortical adenoma.jpg",
+      "creator": "KGH",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Primary_aldosteronism_(1)_adrenocortical_adenoma.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Primary aldosteronism (3) adrenocortical adenoma.jpg",
+      "creator": "KGH",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Primary_aldosteronism_(3)_adrenocortical_adenoma.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Hashimoto thyroiditis -- very low mag.jpg",
+      "creator": "Librepath",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Hashimoto_thyroiditis_--_very_low_mag.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Hashimoto thyroiditis -- high mag.jpg",
+      "creator": "Librepath",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Hashimoto_thyroiditis_--_high_mag.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Parathyroid adenoma high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Parathyroid_adenoma_high_mag.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Oxyphil parathyroid adenoma -- low mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 4.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Oxyphil_parathyroid_adenoma_--_low_mag.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Adrenal pheochromocytoma (1) histopathology.jpg",
+      "creator": "KGH",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Adrenal_pheochromocytoma_(1)_histopathology.jpg",
+      "embedded": false
+    },
+    {
+      "filename": "Adrenal pheochromocytoma (3) histopathology.jpg",
+      "creator": "KGH",
+      "license": "CC BY-SA 3.0",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Adrenal_pheochromocytoma_(3)_histopathology.jpg",
+      "embedded": false
+    }
+  ],
+  "package": {
+    "zip_sha256": "3c71ebca8183e7511479706f592138737744a18f35503f1510f6ee4672a47025",
+    "docx_sha256": "d4b5f3232b191b48c46539b5a27f3c59529e2d27181d9019113a7d58a2e96963",
+    "pdf_sha256": "a134f1bb709f1cdf4aedc01daff8be7667b1504c588c8119fa845e59088a2a3d"
+  },
+  "limitations": [
+    "Full 1.57MB ZIP and editable PDF/DOCX binaries attached to conversation only, Library upload access denied.",
+    "This branch checkpoint preserves condensed structured records, not full clinical manuscript.",
+    "Original pathology image binaries unavailable; online source links only.",
+    "No independent specialist peer review.",
+    "All new ontology crosswalk fields provisional; true coverage not computed.",
+    "The inherited DOCX had an orphan synthetic medical schematic binary which was removed from Build006 deliverable; ZIP excludes earlier document binaries."
+  ]
+}
