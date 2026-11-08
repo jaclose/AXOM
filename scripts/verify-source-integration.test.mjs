@@ -662,3 +662,83 @@ test("v2 refuses transient symlink and gitlink objects in an otherwise approved 
     }, adapters), /[Nn]onregular intermediate source Git object|[Ss]ymbolic intermediate source/);
   }
 });
+
+
+test("v2 opt-in receipts cover every reachable ordinary source-history blob without claiming independent review", t => {
+  // Final source and integration are equal and the intermediate ordinary file
+  // is valid Git history. Unattested interim bytes must not pass strict receipts.
+  const cwd = mkdtempSync(join(tmpdir(), "axom-history-blob-receipts-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, {
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const commit = message => {
+    git("add", "-A"); git("commit", "-qm", message);
+    return git("rev-parse", "HEAD");
+  };
+  git("init", "-q");
+  git("config", "user.name", "AXOM synthetic fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  const path = "docs/approved.txt";
+  writeFileSync(join(cwd, path), "base benign test content\n");
+  const baseSha = commit("base");
+  git("checkout", "-qb", "reviewed-source", baseSha);
+  writeFileSync(join(cwd, path), "intermediate benign test-only content\n");
+  const interimSha = commit("synthetic intermediate source content");
+  writeFileSync(join(cwd, path), "final benign reviewed test content\n");
+  const sourceSha = commit("final source content");
+  git("checkout", "-qb", "release", baseSha);
+  git("merge", "--no-ff", "-qm", "merge source", sourceSha);
+  const integratedSha = git("rev-parse", "HEAD");
+  const interim = readGitFile(interimSha, path, cwd);
+  const final = readGitFile(sourceSha, path, cwd);
+  assert.notEqual(interim.blob, final.blob);
+  assert.deepEqual(listGitChanges(baseSha, sourceSha, cwd), [{ status: "M", path }]);
+  assert.deepEqual(listGitChanges(baseSha, integratedSha, cwd), [{ status: "M", path }]);
+  const adapters = {
+    listChanges: (a, b) => listGitChanges(a, b, cwd),
+    isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+    readFile: (sha, p) => readGitFile(sha, p, cwd, true),
+    listTreePaths: sha => listGitTreePaths(sha, cwd),
+    listHistoryChanges: (a, b) => listGitHistoryChanges(a, b, cwd),
+  };
+  const input = {
+    version: 2, integrationBaseSha: baseSha, integratedSha,
+    sources: [{ baseSha, sourceSha }], requireSourceBlobReceipts: true,
+  };
+  const receipts = [
+    { commitSha: interimSha, path, ...interim },
+    { commitSha: sourceSha, path, ...final },
+  ];
+  // RED against old implementation: it silently ignores the strict flag and
+  // would attest a final tree while no intermediate blob receipt was supplied.
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, sourceBlobReceipts: [receipts[1]],
+  }, adapters), /[Mm]issing.*source blob receipt/);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, sourceBlobReceipts: [{ ...receipts[0], blob: "f".repeat(40) }, receipts[1]],
+  }, adapters), /[Mm]ismatched.*source blob receipt/);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, sourceBlobReceipts: [...receipts, receipts[0]],
+  }, adapters), /[Dd]uplicate.*source blob receipt/);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, sourceBlobReceipts: [...receipts, {
+      commitSha: baseSha, path, ...final,
+    }],
+  }, adapters), /[Uu]nexpected.*source blob receipt/);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, requireSourceBlobReceipts: false, sourceBlobReceipts: receipts,
+  }, adapters), /[Rr]eceipts.*opt-in/);
+  const verified = verifyCompleteSourceIntegration({
+    ...input, sourceBlobReceipts: receipts,
+  }, adapters);
+  assert.equal(verified.sourceBlobReceiptParityVerified, true);
+  assert.equal(verified.sourceBlobReceiptsVerified, 2);
+  assert.equal(verified.independentContentApprovalVerified, false);
+  const legacy = verifyCompleteSourceIntegration({
+    version: 2, integrationBaseSha: baseSha, integratedSha,
+    sources: [{ baseSha, sourceSha }],
+  }, adapters);
+  assert.equal(legacy.sourceBlobReceiptParityVerified, false);
+});
