@@ -322,7 +322,7 @@ def load_candidates(args):
                          answer_variant=answer_variant(name), assessment_number=assessment_number(name,typ),
                          source_sha256=None, duplicate_group=None, answer_key_partner=None,
                          lecture_references=[int(x) for x in re.findall(
-                           r"(?i)\\b(?:lecture|lect|lec)[ _-]*0?(\\d{1,3})\\b",path.stem)],
+                           r"(?i)(?<![a-z0-9])(?:lecture|lect|lec)[ _-]*0?(\d{1,3})(?![a-z0-9])",path.stem)],
                          topic_hint=path.stem, topic_hint_evidence="original_filename_not_semantic_validation",
                          sharing_rights="private_use_only_rights_not_asserted",
                          extraction_status="unexamined", review_status="not_reviewed",
