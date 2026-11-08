@@ -251,3 +251,76 @@ test("v2 rejects integrated Git paths colliding with unchanged inherited file an
   // because its changed-only inventory never saw docs/Guide.ts or Docs/untouched.md.
   assert.throws(() => verifyCompleteSourceIntegration(input, adapters), /[Cc]ase.colli|[Cc]ase.insensitive/);
 });
+
+
+test("v2 attests two older divergent source branches merged into an advanced integration base", t => {
+  // Both source branches fork BEFORE the integration base. Requiring that
+  // integrationBaseSha precede each source tip falsely rejects normal merges.
+  const cwd = mkdtempSync(join(tmpdir(), "axom-v2-divergent-source-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, {
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const write = (path, value) => writeFileSync(join(cwd, path), value);
+  const commit = message => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+  git("init", "-q");
+  git("config", "user.name", "AXOM divergent integration fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  mkdirSync(join(cwd, "docs"));
+  write("docs/alpha.txt", "base alpha\n");
+  const olderBase = commit("common older base");
+
+  git("checkout", "-qb", "source-alpha", olderBase);
+  write("docs/alpha.txt", "reviewed alpha\n");
+  const sourceAlpha = commit("source alpha patch");
+
+  git("checkout", "-qb", "source-beta", olderBase);
+  write("docs/beta.txt", "reviewed beta\n");
+  const sourceBeta = commit("source beta patch");
+
+  git("checkout", "-qb", "advanced-main", olderBase);
+  write("docs/advanced.txt", "already in main\n");
+  const integrationBaseSha = commit("advance integration base independently");
+
+  git("merge", "--no-ff", "-qm", "integrate alpha", sourceAlpha);
+  git("merge", "--no-ff", "-qm", "integrate beta", sourceBeta);
+  const integratedSha = git("rev-parse", "HEAD");
+  assert.equal(isGitAncestor(integrationBaseSha, sourceAlpha, cwd), false);
+  assert.equal(isGitAncestor(integrationBaseSha, sourceBeta, cwd), false);
+  assert.equal(isGitAncestor(sourceAlpha, integratedSha, cwd), true);
+  assert.equal(isGitAncestor(sourceBeta, integratedSha, cwd), true);
+  assert.equal(isGitAncestor(integrationBaseSha, integratedSha, cwd), true);
+
+  const input = { version: 2, integrationBaseSha, integratedSha, sources: [
+    { baseSha: olderBase, sourceSha: sourceAlpha },
+    { baseSha: olderBase, sourceSha: sourceBeta },
+  ] };
+  const adapters = {
+    listChanges: (a, b) => listGitChanges(a, b, cwd),
+    isAncestor: (a, b) => isGitAncestor(a, b, cwd),
+    readFile: (sha, path) => readGitFile(sha, path, cwd, true),
+    listTreePaths: sha => listGitTreePaths(sha, cwd),
+  };
+  assert.deepEqual(listGitChanges(integrationBaseSha, integratedSha, cwd)
+    .map(change => [change.status, change.path]), [
+    ["M", "docs/alpha.txt"], ["A", "docs/beta.txt"],
+  ]);
+  // RED on prior code: both sources are included, but v2 rejects them merely
+  // because newer main did not exist when their branches forked.
+  const report = verifyCompleteSourceIntegration(input, adapters);
+  assert.equal(report.verifiedSources, 2);
+  assert.equal(report.verifiedFiles, 2);
+  assert.equal(report.completeForDeclaredRanges, true);
+
+  // Equal bytes without immutable commit ancestry MUST NOT earn a pass.
+  git("checkout", "-qb", "copied-without-merging", integrationBaseSha);
+  write("docs/alpha.txt", "reviewed alpha\n");
+  write("docs/beta.txt", "reviewed beta\n");
+  const copiedSha = commit("copy matching bytes, not source commits");
+  assert.equal(readGitFile(sourceAlpha, "docs/alpha.txt", cwd).blob,
+    readGitFile(copiedSha, "docs/alpha.txt", cwd).blob);
+  assert.equal(isGitAncestor(sourceAlpha, copiedSha, cwd), false);
+  assert.throws(() => verifyCompleteSourceIntegration({
+    ...input, integratedSha: copiedSha,
+  }, adapters), /not an ancestor/);
+});
