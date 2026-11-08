@@ -101,8 +101,11 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
       if (prior && (prior.revisionId !== asset.revisionId || prior.path !== asset.path)) academicByHash.set(asset.sha256, null);
     }
   }
-  const hasAcademicBinding = (reference: AcademicAssetReference): boolean => shared.some(asset =>
-    asset.revisionId === reference.revisionId && asset.path === reference.path && asset.sha256 === reference.sha256);
+  // Avoid an O(media × academic files) scan during large-library recovery.
+  const academicBindingKeys = new Set(shared.map(asset =>
+    JSON.stringify([asset.revisionId, asset.path, asset.sha256])));
+  const hasAcademicBinding = (reference: AcademicAssetReference): boolean =>
+    academicBindingKeys.has(JSON.stringify([reference.revisionId, reference.path, reference.sha256]));
   const refs = workspaceMedia(state);
   // Deferred content is a same-account recovery receipt, not a transferable
   // authorization for another learner's stored originals.
