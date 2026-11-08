@@ -388,16 +388,34 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
     bysha={r["sha256"]:r for r in dispositions["sources"]}
     accepted=[];rejected=[]
     expected={}
+    ambiguous=set()
     for p in canonical:
         record=rows_by_path.get(p.get("source_path"))
         if record and record.get("source_sha256"):
-            expected[(p["bank_id"],record["source_sha256"])]=p
+            key=(p["bank_id"],record["source_sha256"])
+            if key in expected:
+                # Multiple native revisions cite one bank/source tuple. Do not
+                # let scan ordering select which parser receipt is trusted.
+                ambiguous.add(key)
+            else:
+                expected[key]=p
+    def held_native_package(package):
+        return (package.get("canonical_status") == "source_snapshot_review_required"
+                or package.get("status") == "requires_package_review"
+                or bool(package.get("issues")))
     for item in native:
         if not isinstance(item,dict):
             rejected.append("native_row_not_object");continue
         bank_id,sha=item.get("bankId"),item.get("sourceSha256")
         source=bysha.get(sha)
-        pkg=expected.get((bank_id,sha))
+        key=(bank_id,sha)
+        pkg=expected.get(key)
+        if key in ambiguous:
+            rejected.append("native_record_ambiguous_source:" + str(bank_id));continue
+        if pkg and held_native_package(pkg):
+            # A past Agent-2 audit may have been valid for older source bytes,
+            # but it must never override a current source/asset review hold.
+            rejected.append("native_record_source_review_hold:" + str(bank_id));continue
         detected,ready,review=item.get("questionRecords"),item.get("ready"),item.get("needsReview")
         unresolved=item.get("unresolved",0)
         if (not pkg or not source or any(type(v) is not int or v<0 for v in [detected,ready,review,unresolved])
@@ -431,8 +449,10 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
         accepted.append(dict(sourceSha256=sha,filename=item.get("file"),format=item.get("type"),
                              detected=detected,ready=ready,review=review+unresolved,
                              audit_ref=str(audit_path),cloudVerified=False))
+    eligible_native_count=sum(1 for key,pkg in expected.items()
+                              if key not in ambiguous and not held_native_package(pkg))
     return dict(status="audit_assessed_without_upload",validated_sources=accepted,
-                rejected_audit_rows=rejected, canonical_native_packages=len(expected),
+                rejected_audit_rows=rejected, canonical_native_packages=eligible_native_count,
                 assessed_source_count=len(accepted),
                 assessed_questions_detected=sum(x["detected"] for x in accepted),
                 assessed_ready_not_installed=sum(x["ready"] for x in accepted),
