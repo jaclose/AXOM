@@ -20,8 +20,16 @@ import { clearCloudMediaUploadCache, uploadCloudMedia } from "./cloudMedia";
 const AT = "2026-11-02T00:00:00.000Z";
 const bytes = new Uint8Array([137, 80, 78, 71, 31]);
 const differentBytes = new Uint8Array([137, 80, 78, 71, 32]);
-const upload = vi.fn(async (_path: string, _blob: Blob) => ({ error: null }));
-const client = { storage: { from: () => ({ upload }) } } as unknown as SupabaseClient;
+const remote = new Map<string, Blob>();
+const upload = vi.fn(async (path: string, blob: Blob) => {
+  remote.set(path, blob);
+  return { error: null };
+});
+const download = vi.fn(async (path: string) => ({
+  data: remote.get(path) ?? null,
+  error: remote.has(path) ? null : { statusCode: "404", message: "Synthetic original is absent" },
+}));
+const client = { storage: { from: () => ({ upload, download }) } } as unknown as SupabaseClient;
 const assertCurrent = async () => {};
 
 async function fixture(declaredChecksum?: string): Promise<{
@@ -79,7 +87,9 @@ beforeEach(() => {
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   clearCloudMediaUploadCache();
+  remote.clear();
   upload.mockClear();
+  download.mockClear();
 });
 
 describe("source-declared checksums at cloud image push", () => {
@@ -109,6 +119,7 @@ describe("source-declared checksums at cloud image push", () => {
     const manifest = await uploadCloudMedia(client, "synthetic-owner-match", state, assertCurrent);
     expect(manifest).toHaveLength(1);
     expect(manifest[0].hash).toBe(hash);
+    expect(download).toHaveBeenCalledWith(`synthetic-owner-match/${hash}`);
   });
 
   it("preserves legacy checksum-less source compatibility", async () => {
