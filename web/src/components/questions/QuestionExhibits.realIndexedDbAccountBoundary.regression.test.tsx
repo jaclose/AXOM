@@ -24,6 +24,17 @@ vi.mock("../../lib/account/accountStore", async () => {
 const KEY = "same-idb-key-across-authenticated-users";
 const DATE = "2026-11-09T00:00:00.000Z";
 const FILE_A = "SYNTHETIC_PRIVATE_IMAGE_ONLY_ACCOUNT_A";
+
+// jsdom's Blob does not consistently implement text()/arrayBuffer(), while
+// FileReader exercises the actual structured-cloned bytes stored in IDB.
+function readBlobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? Error("Failed to read synthetic attachment"));
+    reader.readAsText(blob);
+  });
+}
 const attachment: QuestionImageAttachment = {
   id: "same-image-id", blobKey: KEY, createdAt: DATE, updatedAt: DATE,
   fileName: "synthetic.png", mimeType: "image/png", byteSize: FILE_A.length,
@@ -65,7 +76,7 @@ test("A persisted attachment cannot be reacquired and displayed for B before B h
     questionId: "same-question-id", updatedAt: DATE,
   });
   const persisted = await getQuestionAttachmentBlob(KEY, { localOnly: true });
-  expect(await persisted?.blob.text()).toBe(FILE_A);
+  expect(await readBlobText(persisted!.blob)).toBe(FILE_A);
 
   const allocated: Blob[] = [];
   const revoke = vi.fn();
@@ -80,7 +91,7 @@ test("A persisted attachment cannot be reacquired and displayed for B before B h
   const view = render(<QuestionExhibits attachments={[attachment]} />);
   await waitFor(() => expect(screen.getByRole("img", { name: attachment.altText }).getAttribute("src"))
     .toBe("blob:synthetic-attachment-1"));
-  expect(await allocated[0].text()).toBe(FILE_A);
+  expect(await readBlobText(allocated[0])).toBe(FILE_A);
 
   // B's authenticated session has changed. B's workspace/image has NOT been
   // hydrated. The metadata tuple, source id and blobKey intentionally collide.
