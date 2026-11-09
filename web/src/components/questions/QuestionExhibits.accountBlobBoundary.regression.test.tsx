@@ -161,9 +161,13 @@ test("late A blob resolution after A→B cleanup never creates an orphaned priva
   await waitFor(() => expect(screen.getByRole("img", { name: "Current B" }).getAttribute("src")).toBe("blob:current-B"));
 
   // A's cancelled async operation must not create URLs after its cleanup ran.
-  await act(async () => { delayedA.resolve({ blob: a }); await delayedA.promise; });
-  expect(create).not.toHaveBeenCalledWith(a);
-  expect(create).toHaveBeenCalledTimes(1);
+  await act(async () => { delayedA.resolve({ blob: a }); await delayedA.promise; await Promise.resolve(); await Promise.resolve(); });
+  // A Blob is an opaque object: deep equality can treat distinct A/B Blobs as the same.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const allocatedBlobs = create.mock.calls.map(([blob]) => blob as Blob);
+  expect(allocatedBlobs.filter((blob) => blob === a)).toHaveLength(0);
+  expect(allocatedBlobs).toHaveLength(1);
+  expect(allocatedBlobs[0]).toBe(b);
   expect(revoke).not.toHaveBeenCalledWith("blob:orphaned-A");
   expect(screen.getByRole("img", { name: "Current B" }).getAttribute("src")).toBe("blob:current-B");
 });
