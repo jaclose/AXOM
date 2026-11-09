@@ -361,7 +361,7 @@ export interface AttachmentMaintenanceReport {
   /** Automatic deletion is disabled until per-account ownership can be proven. */
   deletedOrphanBlobKeys: string[];
   /** Count of retained origin-shared keys, without disclosing other accounts' key IDs. */
-  preservedUnscopedBlobCount: number;
+  preservedUnscopedBlobCount?: number;
   missingBlobKeys: string[];
 }
 
