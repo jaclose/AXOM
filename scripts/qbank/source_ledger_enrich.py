@@ -194,36 +194,69 @@ def canonicalize_queue(rows, packages, jobs):
                                                          str(x.get("module") or ""), x["source_path"]))
 
 def enrich_pairs(rows, pairs, secure_open=None):
-    records = {r["source_id"]:r for r in rows}
+    """Keep question/answer correspondence proposals bound to original IDs and scope.
+
+    SHA-identical documents do not establish a common week, and a malformed
+    path reference must not consume a valid pair's deduplication identity.
+    Neither source hints nor filename pairing authorize answer attribution.
+    """
+    records = {r["source_id"]: r for r in rows}
     distinct = {}
+    retained = []
     for p in pairs:
         a = records.get(p["questions_only_id"])
         b = records.get(p["answered_id"])
-        if not a or not b: continue
-        k = (a["source_sha256"],b["source_sha256"])
+        if not a or not b:
+            continue
+        references = [
+            dict(role=role, source_id=row["source_id"],
+                 academic_term=row.get("academic_term"), module=row.get("module"),
+                 week=row.get("week"), term_evidence=row.get("term_evidence"),
+                 module_evidence=row.get("module_evidence"),
+                 week_evidence=row.get("week_evidence"))
+            for role, row in (("questions", a), ("answered", b))
+        ]
+        p["scope_references"] = references
+        p["answer_attribution_permitted"] = False
+        left_scope = tuple(a.get(field) for field in ("academic_term", "module", "week"))
+        right_scope = tuple(b.get(field) for field in ("academic_term", "module", "week"))
+        # Hold invalid source IDs/paths before canonical deduplication. Such
+        # a proposal cannot suppress a later correctly bound candidate.
+        if (p.get("original_file") != a.get("original_path")
+                or p.get("answered_file") != b.get("original_path")):
+            p["canonical_pair_status"] = "source_path_mismatch_review_required"
+            p["unresolved"] = "pair_source_path_mismatch"
+            p["text_evidence"] = "text_insufficient_unverified"
+            retained.append(p)
+            continue
+        if left_scope != right_scope:
+            # Missing-vs-known placement is also ambiguous: do not infer
+            # an answer file's week from the matching question filename.
+            p["canonical_pair_status"] = "requires_scope_review"
+            p["unresolved"] = "question_answer_source_scope_conflict"
+            p["text_evidence"] = "text_insufficient_unverified"
+            retained.append(p)
+            continue
+        # A source SHA is a content identity, not a course/week identity.
+        # Retain distinct original academic filings even for identical bytes.
+        k = (a.get("source_sha256"), b.get("source_sha256"), left_scope)
         if k in distinct:
             p["canonical_pair_status"] = "mirrored_same_byte_pair"
             p["canonical_pair"] = distinct[k]["original_file"]
             continue
         p["canonical_pair_status"] = "unique_candidate_pair"
         distinct[k] = p
-        # Validate the path-to-source-ID binding before using either file.
-        # Unknown/mismatched pair paths are not authorization to inspect a file.
-        if (p.get("original_file") != a.get("original_path")
-                or p.get("answered_file") != b.get("original_path")):
-            p["text_evidence"] = "text_insufficient_unverified"
-            p["answer_attribution_permitted"] = False
-            continue
+        retained.append(p)
         left, right = _pdf_first_question(a, secure_open), _pdf_first_question(b, secure_open)
         if left and right:
-            ratio = round(SequenceMatcher(None,left,right).ratio(),3)
+            ratio = round(SequenceMatcher(None, left, right).ratio(), 3)
             p["first_question_text_similarity"] = ratio
-            p["text_evidence"] = "first_question_correspondence_supported" if ratio >= .83 else "partial_or_conflicting_first_question_text"
+            p["text_evidence"] = ("first_question_correspondence_supported"
+                                  if ratio >= .83 else "partial_or_conflicting_first_question_text")
         else:
             p["text_evidence"] = "text_insufficient_unverified"
-        # It is still not safe to copy any answers without comparing the numbered items throughout.
-        p["answer_attribution_permitted"] = False
-    return list(distinct.values())
+        # No medical key, source rationale or item-level answer match is approved.
+    return retained
 
 def add_workbook_answer_candidates(rows, existing):
     # A generic Answers.pdf does not identify a question by its position.
