@@ -171,3 +171,45 @@ test("late A blob resolution after A→B cleanup never creates an orphaned priva
   expect(revoke).not.toHaveBeenCalledWith("blob:orphaned-A");
   expect(screen.getByRole("img", { name: "Current B" }).getAttribute("src")).toBe("blob:current-B");
 });
+
+test("unmount during a multi-image batch revokes created URLs and never reads later entries", async () => {
+  const pendingSecond = deferred<{ blob: Blob }>();
+  const first = new Blob(["first synthetic exhibit"], { type: "image/png" });
+  const second = new Blob(["second synthetic exhibit"], { type: "image/png" });
+  const create = vi.fn((blob: Blob) => blob === first ? "blob:mounted-first" : blob === second ? "blob:late-second" : "blob:unexpected");
+  const revoke = vi.fn();
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+  loadBlob.mockImplementation((key: string) => {
+    if (key === "synthetic:first") return Promise.resolve({ blob: first });
+    if (key === "synthetic:second") return pendingSecond.promise;
+    if (key === "synthetic:third") throw new Error("Cancelled batch must not read third attachment");
+    throw new Error("Unexpected synthetic blob key: " + key);
+  });
+  const attachments = [
+    { ...common, id: "first", blobKey: "synthetic:first" },
+    { ...common, id: "second", blobKey: "synthetic:second" },
+    { ...common, id: "third", blobKey: "synthetic:third" },
+  ] as QuestionImageAttachment[];
+  const view = render(<QuestionExhibits attachments={attachments} />);
+  await waitFor(() => {
+    expect(loadBlob).toHaveBeenCalledWith("synthetic:second");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+  expect(create.mock.calls[0]?.[0]).toBe(first);
+  view.unmount();
+  expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:mounted-first");
+
+  // A late settled read must not allocate a URL or continue the cancelled batch.
+  await act(async () => {
+    pendingSecond.resolve({ blob: second });
+    await pendingSecond.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(create.mock.calls[0]?.[0]).toBe(first);
+  expect(loadBlob).not.toHaveBeenCalledWith("synthetic:third");
+  expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:mounted-first");
+});
