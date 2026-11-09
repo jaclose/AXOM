@@ -18,7 +18,7 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
   // A structured tuple array prevents delimiter collisions between distinct attachment IDs / blob keys.
   // The blob may be rehydrated under its stable key; a newer metadata revision must invalidate old object URLs.
   const signature = JSON.stringify(attachments.map(({ id, blobKey, updatedAt }) => [id, blobKey, updatedAt]));
-  const urls = loaded.signature === signature ? loaded.urls : {};
+  const urls = loaded.signature === signature ? loaded.urls : Object.create(null) as Record<string, string | "missing">;
   const activeZoomed = zoomed?.signature === signature ? zoomed.attachment : null;
   const zoomSignature = zoomed?.signature ?? null;
   const signatureRef = useRef(signature);
@@ -33,7 +33,7 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
     let cancelled = false;
     const created: string[] = [];
     void (async () => {
-      const next: Record<string, string | "missing"> = {};
+      const next: Record<string, string | "missing"> = Object.create(null);
       for (const attachment of attachmentsRef.current) {
         const record = await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined);
         // Cleanup may run while the blob read is pending; do not create an orphaned URL afterward.
