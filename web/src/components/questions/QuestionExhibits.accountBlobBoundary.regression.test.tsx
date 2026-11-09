@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // R22: synthetic A/B exhibit identities. No learner records or private images.
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { QuestionImageAttachment } from "../../lib/questionAttachments";
 import { QuestionExhibits } from "./QuestionExhibits";
@@ -138,4 +138,32 @@ test("ambiguous delimiter characters cannot preserve an old attachment signature
   await waitFor(() => {
     expect(screen.getByRole("img", { name: "B first" }).getAttribute("src")).toBe("blob:new-delimited-B");
   });
+});
+
+test("late A blob resolution after A→B cleanup never creates an orphaned private object URL", async () => {
+  const delayedA = deferred<{ blob: Blob }>();
+  const a = new Blob(["synthetic A, late"], { type: "image/png" });
+  const b = new Blob(["synthetic B, current"], { type: "image/png" });
+  const create = vi.fn((blob: Blob) => blob === a ? "blob:orphaned-A" : blob === b ? "blob:current-B" : "blob:unknown");
+  const revoke = vi.fn();
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+  loadBlob.mockImplementation((key: string) => {
+    if (key === "synthetic:late-A") return delayedA.promise;
+    if (key === "synthetic:current-B") return Promise.resolve({ blob: b });
+    throw new Error("Unexpected key: " + key);
+  });
+  const sourceA: QuestionImageAttachment = { ...common, altText: "Delayed A", blobKey: "synthetic:late-A" };
+  const sourceB: QuestionImageAttachment = { ...common, altText: "Current B", blobKey: "synthetic:current-B" };
+  const view = render(<QuestionExhibits attachments={[sourceA]} />);
+  await waitFor(() => expect(loadBlob).toHaveBeenCalledWith("synthetic:late-A"));
+  view.rerender(<QuestionExhibits attachments={[sourceB]} />);
+  await waitFor(() => expect(screen.getByRole("img", { name: "Current B" }).getAttribute("src")).toBe("blob:current-B"));
+
+  // A's cancelled async operation must not create URLs after its cleanup ran.
+  await act(async () => { delayedA.resolve({ blob: a }); await delayedA.promise; });
+  expect(create).not.toHaveBeenCalledWith(a);
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(revoke).not.toHaveBeenCalledWith("blob:orphaned-A");
+  expect(screen.getByRole("img", { name: "Current B" }).getAttribute("src")).toBe("blob:current-B");
 });
