@@ -326,3 +326,52 @@ describe("R19 immutable 409 and stale-receipt network boundaries", () => {
     expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(BYTES);
   });
 });
+
+
+/**
+ * Independent R20 continuity controls: fail closed during a transient outage,
+ * recover only after a new remote byte proof, and never trust a past
+ * successful checkpoint if the immutable storage bytes later diverge.
+ * Both cases use synthetic IndexedDB and in-memory cloud storage exclusively.
+ */
+describe("R20 retry continuity and post-checkpoint byte integrity", () => {
+  it("recovers a previously protected account image on retry after transient HTTP 503", async () => {
+    const { state, hash, oldKey } = await deferredFixture();
+    const checkpoint = await uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media);
+    expect(checkpoint).toHaveLength(2);
+    expect(checkpoint.some(entry => entry.blobKey === oldKey && entry.hash === hash)).toBe(true);
+
+    // A 503 must not mark the current revision protected or mutate any original.
+    download.mockImplementation(async () => ({
+      data: null, error: { statusCode: "503", message: "synthetic outage" },
+    }));
+    await expect(uploadCloudMedia(client, OWNER, state, assertCurrent, checkpoint))
+      .rejects.toThrow(/could not be verified/i);
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(BYTES);
+
+    // A fresh attempt must not inherit the failed verification promise or a
+    // fabricated protected result: proof must be fetched from restored storage.
+    download.mockReset();
+    download.mockClear();
+    const retry = await uploadCloudMedia(client, OWNER, state, assertCurrent, checkpoint);
+    expect(retry).toEqual(checkpoint);
+    expect(download).toHaveBeenCalled();
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(BYTES);
+  });
+
+  it("rejects post-checkpoint same-size remote tampering even with cached success", async () => {
+    const { state, hash, oldKey } = await deferredFixture();
+    const checkpoint = await uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media);
+    expect(checkpoint.some(entry => entry.blobKey === oldKey && entry.hash === hash)).toBe(true);
+    const changed = new Uint8Array(BYTES);
+    changed[changed.length - 2] ^= 1; // identical length but different SHA-256
+    remote.set(OWNER + "/" + hash, new Blob([changed], { type: "image/png" }));
+    download.mockClear();
+
+    await expect(uploadCloudMedia(client, OWNER, state, assertCurrent, checkpoint))
+      .rejects.toThrow(/failed its integrity check/i);
+    expect(download).toHaveBeenCalled();
+    // No destructive cleanup or replacement of evidence during a failed save.
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(changed);
+  });
+});
