@@ -277,3 +277,52 @@ describe("R17 concurrent private recovery account and 409 boundaries", () => {
     expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(corrupt);
   }, 10_000);
 });
+
+
+/**
+ * Independent R19 positive/negative counterbalance to R17: a legitimate
+ * immutable conflict is recoverable only after exact stored-byte proof,
+ * and an earlier verified receipt cannot make a subsequent network outage
+ * look protected. The client and both accounts remain entirely synthetic.
+ */
+describe("R19 immutable 409 and stale-receipt network boundaries", () => {
+  it("accepts a concurrent 409 only when the recovered private original matches SHA-256 byte for byte", async () => {
+    const { state, hash, oldKey } = await deferredFixture();
+    remote.delete(OWNER + "/" + hash);
+    uploadStarted = new Promise<void>(resolve => { signalUpload = resolve; });
+    saw404 = new Promise<void>(resolve => { signal404 = resolve; });
+    concurrentMissing = true;
+    upload.mockImplementation(async (path: string, _blob: Blob) => {
+      signalUpload();
+      await saw404;
+      // Simulate another same-account writer winning the immutable-object
+      // race with the EXACT original, not a trusting 409-only shortcut.
+      remote.set(path, new Blob([BYTES], { type: "image/png" }));
+      return { error: { statusCode: "409", message: "already exists" } };
+    });
+
+    const manifest = await uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media);
+    expect(first404).toBe(true);
+    expect(manifest).toHaveLength(2);
+    expect(manifest.some(entry => entry.blobKey === oldKey && entry.hash === hash)).toBe(true);
+    expect(manifest.every(entry => entry.hash === hash && !entry.academic)).toBe(true);
+    expect(download.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(BYTES);
+  }, 10_000);
+
+  it("does not reuse a previously verified private image when a later readback returns transient 503", async () => {
+    const { state, hash } = await deferredFixture();
+    const previous = await uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media);
+    expect(previous).toHaveLength(2);
+    expect(remote.has(OWNER + "/" + hash)).toBe(true);
+    download.mockClear();
+    download.mockImplementation(async (_path: string) => ({
+      data: null, error: { statusCode: "503", message: "upstream temporarily unavailable" },
+    }));
+    await expect(uploadCloudMedia(client, OWNER, state, assertCurrent, previous))
+      .rejects.toThrow(/could not be verified/i);
+    expect(download).toHaveBeenCalled();
+    // No destructive recovery, overwrite, or fabricated certifying bytes.
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(BYTES);
+  });
+});
