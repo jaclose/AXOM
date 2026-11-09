@@ -1918,13 +1918,20 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
   const [sending, setSending] = useState(false);
   // State-based disabling renders later; guard against a second same-turn activation.
   const submissionPendingRef = useRef(false);
-  const [sentId, setSentId] = useState("");
+  const [sentId, setSentId] = useState(() => {
+    const prior = journalFeedbackTabSubmissions.get(draftKey);
+    return prior?.fingerprint === journalFeedbackFingerprint(draft) ? prior.receipt ?? "" : "";
+  });
   const [error, setError] = useState("");
-  const [storageError, setStorageError] = useState(loaded.unreadable
-    ? loaded.raw === null
-      ? "AXOM could not read saved feedback in this browser. No draft was replaced. Close feedback and try again."
-      : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
-    : "");
+  const [storageError, setStorageError] = useState(
+    sentId && sessionDrafts.has(draftKey)
+      ? "Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing."
+      : loaded.unreadable
+        ? loaded.raw === null
+          ? "AXOM could not read saved feedback in this browser. No draft was replaced. Close feedback and try again."
+          : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
+        : "",
+  );
   const submittedReceiptRef = useRef<{ key: string; value: string } | null>(null);
   const [saveRetryToken, setSaveRetryToken] = useState(0);
 
@@ -1943,9 +1950,10 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
       if (sentId) {
         // An acknowledgement cannot erase another tab's newer or concurrent edit.
         if (!submittedReceiptRef.current) {
-          // An explicit network receipt does not mean the latest text was
-          // retained locally. Keep the in-memory copy exportable until close.
-          setStorageError("Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing.");
+          // A reopened submitted draft may have its receipt only in this tab.
+          // Keep the in-memory copy available until explicitly exported.
+          if (sessionDrafts.has(draftKey))
+            setStorageError("Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing.");
           return;
         }
         window.localStorage.setItem(`${submittedReceiptRef.current.key}:submitted`, submittedReceiptRef.current.value);
@@ -2015,7 +2023,7 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
     submittedReceiptRef.current = receiptValue ? { key: persistedKeyRef.current, value: receiptValue } : null;
     try {
       const receiptId = await submitJournalFeedbackOncePerTab(draftKey, user.id, draft);
-      sessionDrafts.delete(draftKey);
+      if (submittedContentWasSaved) sessionDrafts.delete(draftKey);
       setSentId(receiptId);
     } catch (cause) {
       // Only a failed request may be retried; a receipt seals this dialog.

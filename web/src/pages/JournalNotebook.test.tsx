@@ -75,6 +75,33 @@ function openTodayInFullPage() {
   fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
 }
 
+async function readSubmittedFeedbackDownload(): Promise<Record<string, unknown>> {
+  const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+  const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+  const createObjectURL = vi.fn((_blob: Blob) => "blob:journal-feedback-submitted");
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Download submitted copy" }));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const blob = createObjectURL.mock.calls[0][0];
+    const content = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    return JSON.parse(content) as Record<string, unknown>;
+  } finally {
+    click.mockRestore();
+    if (originalCreate) Object.defineProperty(URL, "createObjectURL", originalCreate);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    if (originalRevoke) Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
+    else Reflect.deleteProperty(URL, "revokeObjectURL");
+  }
+}
+
 function feedbackWriterCopies(draftKey: string): Array<{ key: string; value: Record<string, unknown> }> {
   const copies: Array<{ key: string; value: Record<string, unknown> }> = [];
   for (let index = 0; index < window.localStorage.length; index += 1) {
@@ -1001,7 +1028,12 @@ describe("Journal notebook foundation", () => {
 
       fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
-      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Older locally saved text");
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(screen.getByRole("status").textContent).toContain("Receipt unsaved-");
+      expect(screen.queryByRole("button", { name: "Send feedback" })).toBeNull();
+      expect(await readSubmittedFeedbackDownload()).toMatchObject({ liked: latest });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
     } finally {
       cleanup();
       vi.restoreAllMocks();
@@ -1044,7 +1076,12 @@ describe("Journal notebook foundation", () => {
       expect(window.localStorage.getItem(receiptKey)).toBeNull();
       fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
-      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Recoverable old legacy text");
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(screen.getByRole("status").textContent).toContain("Receipt storage-");
+      expect(screen.queryByRole("button", { name: "Send feedback" })).toBeNull();
+      expect(await readSubmittedFeedbackDownload()).toMatchObject({ liked: changed });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem(draftKey)).toBe(saved);
     } finally {
       cleanup();
       vi.restoreAllMocks();
