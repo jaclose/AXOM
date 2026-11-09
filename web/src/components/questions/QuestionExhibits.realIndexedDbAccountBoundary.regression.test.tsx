@@ -4,7 +4,6 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { create } from "zustand";
 import { useAccount } from "../../lib/account/accountStore";
 import {
   getQuestionAttachmentBlob,
@@ -14,12 +13,13 @@ import {
 import { DB_NAME } from "../../lib/localVault";
 import { QuestionExhibits } from "./QuestionExhibits";
 
-vi.mock("../../lib/account/accountStore", () => ({
-  useAccount: create(() => ({
+vi.mock("../../lib/account/accountStore", async () => {
+  const { create } = await import("zustand");
+  return { useAccount: create(() => ({
     phase: "signed-in",
     user: { id: "synthetic-A", email: "", displayName: "", emailConfirmed: true },
-  })),
-}));
+  })) };
+});
 
 const KEY = "same-idb-key-across-authenticated-users";
 const DATE = "2026-11-09T00:00:00.000Z";
