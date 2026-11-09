@@ -129,7 +129,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   // the same immutable private object. Only an upload verified in this attempt
   // may authorize a fresh deferred readback; historical cache hits cannot.
   const restoredPrivateOriginals = new Set<string>();
-  const missingDeferredPrivateOriginals: Array<{ reference: CloudMediaReference; error: Error }> = [];
+  const pendingMissingPrivateOriginals: Array<{ reference: CloudMediaReference; error: Error; onVerified?: () => void }> = [];
   let cursor = 0;
   let failed = false;
   let failure: unknown;
@@ -250,7 +250,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
             // already integrity-verified upload to this account. Academic
             // failures, RLS denials and all other errors still fail immediately.
             if (reference.academic || !(error instanceof MissingPrivateOriginalError)) throw error;
-            missingDeferredPrivateOriginals.push({ reference, error });
+            pendingMissingPrivateOriginals.push({ reference, error });
           }
           continue;
         }
@@ -268,12 +268,23 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
           && (checksum === undefined || checksum === known.hash)
           && (!known.academic || knownAcademic)) {
-          // A previous index cannot certify a vanished/corrupted remote object
-          // or an index accidentally received from another account. Verify the
-          // actual current account original before reusing its receipt.
-          await verifyRemoteOriginal(known, knownAcademic);
-          ordered[index] = { ...(knownAcademic ? { academic: knownAcademic } : {}), blobKey,
+          // contentMetadata includes metadata for deferred questions. They
+          // can reach this no-local-Blob path rather than the deferred queue.
+          // Verify a retained receipt now, or wait for a parallel verified
+          // same-account immutable private upload before retrying its 404.
+          const restored = { ...(knownAcademic ? { academic: knownAcademic } : {}), blobKey,
             hash: known.hash, byteSize: known.byteSize, updatedAt: attachment.updatedAt };
+          try {
+            await verifyRemoteOriginal(known, knownAcademic);
+          } catch (error) {
+            if (knownAcademic || !(error instanceof MissingPrivateOriginalError)) throw error;
+            pendingMissingPrivateOriginals.push({
+              reference: known, error,
+              onVerified: () => { ordered[index] = restored; },
+            });
+            continue;
+          }
+          ordered[index] = restored;
           continue;
         }
         if (!record || record.blob.size !== attachment.byteSize) throw new SyncPushError(
@@ -324,7 +335,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   // the matching private bytes with a fresh account-scoped SHA-256 readback.
   // Clear rejected memo once per object; duplicate receipts reuse that proof.
   const retriedDeferredPrivateOriginals = new Set<string>();
-  for (const { reference, error } of missingDeferredPrivateOriginals) {
+  for (const { reference, error, onVerified } of pendingMissingPrivateOriginals) {
     const key = `${reference.hash}:${reference.byteSize}`;
     if (!restoredPrivateOriginals.has(key)) throw error;
     if (!retriedDeferredPrivateOriginals.has(key)) {
@@ -332,6 +343,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
       retriedDeferredPrivateOriginals.add(key);
     }
     await verifyRemoteOriginal(reference);
+    onVerified?.();
   }
   await assertCurrent();
   return readMediaManifest([...deferred, ...ordered]);
