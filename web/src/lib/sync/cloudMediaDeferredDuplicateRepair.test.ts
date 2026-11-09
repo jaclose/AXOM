@@ -176,3 +176,52 @@ describe("R14 deferred question with a separate same-byte private upload", () =>
     expect(download.mock.calls.length).toBeGreaterThanOrEqual(3);
   }, 10_000);
 });
+
+/** R15 independent negative controls for the newly introduced deferred-404 retry.
+ * A matching private hash may be retried only after verified same-account bytes.
+ * RLS denial, different bytes, and corrupted upload receipts stay fail-closed.
+ */
+describe("R15 deferred missing-original repair fail-closed boundaries", () => {
+  it("refuses a forbidden 403 private original even with a same-byte local candidate", async () => {
+    const { state, hash } = await deferredFixture();
+    remote.delete(OWNER + "/" + hash);
+    // A 403 is not a missing object; no same-hash receipt may promote it.
+    download.mockImplementation(async (_path: string) => ({
+      data: null, error: { statusCode: "403", message: "synthetic RLS denied" },
+    }));
+    await expect(uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media))
+      .rejects.toThrow(/could not be verified/i);
+  });
+
+  it("does not use a newly verified but different SHA to heal the deferred old 404", async () => {
+    const { state, hash } = await deferredFixture();
+    remote.delete(OWNER + "/" + hash);
+    const newQuestion = state.questions[0];
+    const newKey = newQuestion.attachments![0].blobKey;
+    const different = new Uint8Array(BYTES);
+    different[different.length - 1] ^= 1; // same byte count, different SHA-256
+    await deleteQuestionAttachmentBlobs([newKey]);
+    await putQuestionAttachmentBlob(newKey, {
+      questionId: newQuestion.id, blob: new Blob([different], { type: "image/png" }),
+      mimeType: "image/png", byteSize: different.length, updatedAt: DATE,
+    });
+    await expect(uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media))
+      .rejects.toThrow(/missing from cloud storage/i);
+    expect(remote.has(OWNER + "/" + hash)).toBe(false);
+  });
+
+  it("rejects an acknowledged same-byte upload when readback has same-size corruption", async () => {
+    const { state, hash } = await deferredFixture();
+    remote.delete(OWNER + "/" + hash);
+    upload.mockImplementation(async (path: string, _blob: Blob) => {
+      const corrupted = new Uint8Array(BYTES);
+      corrupted[corrupted.length - 1] ^= 1; // same size, SHA mismatch
+      remote.set(path, new Blob([corrupted], { type: "image/png" }));
+      return { error: null };
+    });
+    await expect(uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media))
+      .rejects.toThrow(/failed its integrity check/i);
+    expect(remote.has(OWNER + "/" + hash)).toBe(true);
+    expect(download.mock.calls.length).toBeGreaterThan(0);
+  });
+});
