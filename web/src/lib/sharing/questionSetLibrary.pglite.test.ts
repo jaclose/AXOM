@@ -674,7 +674,7 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     const importDefinitionFrom = (filename: string) => {
       const sql = readFileSync(migrationsDir + filename, "utf8");
       const definition = sql.match(
-        /create or replace function public\\.authorize_question_set_library_import\\([\\s\\S]*?end \\$\\$;/,
+        /create or replace function public\.authorize_question_set_library_import\([\s\S]*?end \$\$;/,
       );
       if (!definition) throw new Error("Missing migration import function: " + filename);
       return definition[0];
