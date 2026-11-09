@@ -1361,6 +1361,27 @@ class SourceLedgerTests(unittest.TestCase):
                             and p["unresolved"] == "pair_source_digest_unverified"
                             and not p["answer_attribution_permitted"] for p in result))
 
+
+    def test_unverified_pdf_pairs_go_to_manual_review_not_priority_correspondence(self):
+        # A held scope/path/hash proposal must not be presented to Agent 2 as
+        # an ordinary B2 pair that can have its answers associated by position.
+        held = dict(questions_only_id="wrong-week-question",
+                    answered_id="other-week-answer",
+                    original_file="/synthetic/q.pdf",
+                    answered_file="/synthetic/a.pdf",
+                    canonical_pair_status="requires_scope_review",
+                    unresolved="question_answer_source_scope_conflict",
+                    answer_attribution_permitted=False)
+        valid = dict(questions_only_id="source-q", answered_id="source-a",
+                     original_file="/synthetic/allowed-q.pdf",
+                     answered_file="/synthetic/allowed-a.pdf",
+                     canonical_pair_status="unique_candidate_pair",
+                     answer_attribution_permitted=False)
+        batches = enriched.ordered_import_batches([], [held, valid], [])
+        self.assertEqual(batches["processing_order"][2]["jobs"], [valid])
+        self.assertEqual(batches["processing_order"][5]["pair_review_queue"], [held])
+        self.assertFalse(held["answer_attribution_permitted"])
+
 if __name__ == "__main__":
     ledger.OUT.mkdir(parents=True,exist_ok=True)
     unittest.main()
