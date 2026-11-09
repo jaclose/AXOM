@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accountOperationClient } from "../account/supabase";
 import { createQuestionSetShare, sharedQuestionSetDigest } from "./questionSetShare";
 import {
-  loadPendingQuestionSetReviewPreview, loadQuestionSetLibraryPreview, reviewQuestionSetSubmission,
+  authorizeQuestionSetLibraryImport, loadPendingQuestionSetReviewPreview,
+  loadQuestionSetLibraryPreview, reviewQuestionSetSubmission,
   searchQuestionSetLibrary, submitQuestionSetToLibrary,
 } from "./questionSetLibrary";
 
@@ -34,6 +35,95 @@ function service(rpc: ReturnType<typeof vi.fn>, assertCurrent = vi.fn().mockReso
 beforeEach(() => vi.clearAllMocks());
 
 describe("searchable Question Set client boundary", () => {
+  it("accepts a public preview only with a positive, server-issued review revision", async () => {
+    const value = snapshot();
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: value.title, question_count: 1, status: "approved",
+      snapshot_payload: value, review_revision: 2,
+    }, error: null });
+    service(rpc);
+    const preview = await loadQuestionSetLibraryPreview(accountId, entryId);
+    expect(preview).toMatchObject({ id: entryId, status: "approved", reviewRevision: 2, snapshot: value });
+    expect(preview.contentDigest).toBe(await sharedQuestionSetDigest(value));
+  });
+
+  it.each([undefined, null, 0, -1, 1.5, "2"])(
+    "refuses an approved preview without a safe revision (%s)", async review_revision => {
+      const value = snapshot();
+      const rpc = vi.fn().mockResolvedValue({ data: {
+        id: entryId, title: value.title, question_count: 1, status: "approved",
+        snapshot_payload: value, review_revision,
+      }, error: null });
+      service(rpc);
+      await expect(loadQuestionSetLibraryPreview(accountId, entryId)).rejects.toThrow(/revision is missing/i);
+    },
+  );
+
+  it("authorizes exact approved snapshot and revision in one SQL RPC", async () => {
+    const value = snapshot();
+    const digest = await sharedQuestionSetDigest(value);
+    const inspected = { id: entryId, snapshot: value, contentDigest: digest,
+      status: "approved" as const, reviewRevision: 2 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: value.title, question_count: 1, status: "approved",
+      snapshot_payload: value, review_revision: 2,
+    }, error: null });
+    service(rpc);
+    const approved = await authorizeQuestionSetLibraryImport(accountId, inspected);
+    expect(approved).toMatchObject(inspected);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("authorize_question_set_library_import", {
+      p_id: entryId, p_expected_revision: 2, p_expected_snapshot: value,
+    });
+  });
+
+  it("rejects same-content reapproval on a new review revision", async () => {
+    const value = snapshot();
+    const inspected = { id: entryId, snapshot: value,
+      contentDigest: await sharedQuestionSetDigest(value),
+      status: "approved" as const, reviewRevision: 2 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: value.title, question_count: 1, status: "approved",
+      snapshot_payload: value, review_revision: 4,
+    }, error: null });
+    service(rpc);
+    await expect(authorizeQuestionSetLibraryImport(accountId, inspected))
+      .rejects.toThrow(/changed or was withdrawn/i);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks invalid or tampered import receipts before an RPC", async () => {
+    const value = snapshot();
+    const valid = { id: entryId, snapshot: value,
+      contentDigest: await sharedQuestionSetDigest(value),
+      status: "approved" as const, reviewRevision: 2 };
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(authorizeQuestionSetLibraryImport(accountId, { ...valid, reviewRevision: 0 }))
+      .rejects.toThrow(/Reopen the approved/i);
+    await expect(authorizeQuestionSetLibraryImport(accountId, { ...valid, contentDigest: "a".repeat(64) }))
+      .rejects.toThrow(/previewed Question Set changed/i);
+    await expect(authorizeQuestionSetLibraryImport(accountId, { ...valid, status: "pending" }))
+      .rejects.toThrow(/Reopen the approved/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the server revokes an import or changes its snapshot", async () => {
+    const value = snapshot();
+    const valid = { id: entryId, snapshot: value,
+      contentDigest: await sharedQuestionSetDigest(value),
+      status: "approved" as const, reviewRevision: 2 };
+    const rpc = vi.fn().mockResolvedValueOnce({ data: null, error: { message: "withdrawn" } })
+      .mockResolvedValueOnce({ data: { id: entryId, status: "approved", review_revision: 2,
+        title: value.title, question_count: 1,
+        snapshot_payload: { ...value, title: "Unauthorized change" } }, error: null });
+    service(rpc);
+    await expect(authorizeQuestionSetLibraryImport(accountId, valid))
+      .rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorizeQuestionSetLibraryImport(accountId, valid))
+      .rejects.toThrow(/published Question Set differs|reviewed Question Set changed/i);
+  });
+
   it("refuses a preview with an extra private question field", async () => {
     const value = snapshot() as unknown as { title: string; questions: Array<Record<string, unknown>> };
     value.questions[0].attempts = [{ answer: "B" }];
