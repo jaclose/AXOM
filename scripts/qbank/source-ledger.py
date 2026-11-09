@@ -822,7 +822,7 @@ def report(args):
     distinct_queue = canonicalize_queue(records, packages, queue)
     enrich_source_records(records)
     unique_pairs = enrich_pairs(records, pairs, open_scanned_source_file)
-    unique_pairs.extend(add_workbook_answer_candidates(records, unique_pairs))
+    unique_pairs.extend(add_workbook_answer_candidates(records, unique_pairs, open_scanned_source_file))
     prioritized_batches = ordered_import_batches(distinct_queue, unique_pairs, records)
     enriched = evidence_counts(records, canonical, unique_pairs, distinct_queue)
     dispositions = build_lead_dispositions(records, canonical)

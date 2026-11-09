@@ -274,7 +274,12 @@ def enrich_pairs(rows, pairs, secure_open=None):
         # No medical key, source rationale or item-level answer match is approved.
     return retained
 
-def add_workbook_answer_candidates(rows, existing):
+def add_workbook_answer_candidates(rows, existing, secure_open=None):
+    """Enforce the same source-ID, academic-scope and SHA gates as PDF pairs.
+
+    A same-folder workbook/Answers filename pattern is only a proposal.
+    It cannot bypass the review holds applied to other source pairs.
+    """
     # A generic Answers.pdf does not identify a question by its position.
     # Pair only if one workbook and one answer document share a uniquely identified folder.
     already = {(p["questions_only_id"],p["answered_id"]) for p in existing}
@@ -294,7 +299,10 @@ def add_workbook_answer_candidates(rows, existing):
                 evidence=["same_unique_small_group_folder","sole_workbook_and_sole_answers_file"],
                 text_evidence="unverified_item_correspondence",answer_attribution_permitted=False,
                 canonical_pair_status="unique_group_local_candidate"))
-    return proposals
+    # Previously appended after enrich_pairs, letting a contradictory week or
+    # missing source SHA slip directly into the ordinary B2 matching queue.
+    # Preserve original IDs and naming evidence, then apply the shared holds.
+    return enrich_pairs(rows, proposals, secure_open)
 
 def evidence_counts(rows, canonical, pairs, canonical_jobs):
     verified = [p for p in canonical if p.get("canonical_status") == "canonical_distinct_question_collection"]
