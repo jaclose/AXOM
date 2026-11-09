@@ -95,3 +95,47 @@ test("switching A→B while A lightbox is open removes A image and releases the 
   });
   expect(screen.queryByRole("dialog")).toBeNull();
 });
+
+
+test("ambiguous delimiter characters cannot preserve an old attachment signature", async () => {
+  // Legacy id:blobKey|id:blobKey strings collide for these two distinct arrays.
+  const old = [
+    { ...common, id: "shared", blobKey: "A|next:other", altText: "A first" },
+    { ...common, id: "tail", blobKey: "T", altText: "A tail" },
+  ] as QuestionImageAttachment[];
+  const newer = [
+    { ...common, id: "shared", blobKey: "A", altText: "B first" },
+    { ...common, id: "next", blobKey: "other|tail:T", altText: "B second" },
+  ] as QuestionImageAttachment[];
+  const a = new Blob(["A synthetic"], { type: "image/png" });
+  const tail = new Blob(["old tail synthetic"], { type: "image/png" });
+  const b = new Blob(["B synthetic"], { type: "image/png" });
+  const other = new Blob(["new tail synthetic"], { type: "image/png" });
+  const pendingB = deferred<{ blob: Blob }>();
+  const blobByKey = new Map<string, Promise<{ blob: Blob }>>([
+    ["A|next:other", Promise.resolve({ blob: a })],
+    ["T", Promise.resolve({ blob: tail })],
+    ["A", pendingB.promise],
+    ["other|tail:T", Promise.resolve({ blob: other })],
+  ]);
+  const blobUrl = new Map([[a, "blob:old-delimited-A"], [tail, "blob:old-tail"],
+    [b, "blob:new-delimited-B"], [other, "blob:new-tail"]]);
+  loadBlob.mockImplementation((key: string) => blobByKey.get(key) ?? Promise.reject(new Error("unexpected test key")));
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true, value: vi.fn((blob: Blob) => blobUrl.get(blob) ?? "blob:unexpected"),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+  const view = render(<QuestionExhibits attachments={old} />);
+  await waitFor(() => {
+    expect(screen.getByRole("img", { name: "A first" }).getAttribute("src")).toBe("blob:old-delimited-A");
+  });
+
+  view.rerender(<QuestionExhibits attachments={newer} />);
+  expect(screen.queryByRole("img", { name: "B first" })).toBeNull();
+  expect(view.container.querySelector('img[src="blob:old-delimited-A"]')).toBeNull();
+  pendingB.resolve({ blob: b });
+  await waitFor(() => {
+    expect(screen.getByRole("img", { name: "B first" }).getAttribute("src")).toBe("blob:new-delimited-B");
+  });
+});
