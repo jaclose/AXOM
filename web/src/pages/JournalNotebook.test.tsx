@@ -2504,7 +2504,10 @@ describe("Journal notebook foundation", () => {
     // B may save a new page. B must never inherit A's entry identity, image,
     // text or unsaved edits, even when autosave was queued in A.
     const bText = "Only B may write this new journal page.";
-    fireEvent.change(editor, { target: { value: bText } });
+    // Account isolation remounts the editor in its ordinary inline-desk mode.
+    // Open the full-page editor before using its explicit Save control.
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: bText } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(useStore.getState().journal).toHaveLength(1));
     expect(useStore.getState().journal[0]).toMatchObject({ freeWriting: bText, attachments: [] });
@@ -2521,6 +2524,7 @@ describe("Journal notebook foundation", () => {
     });
     expect(screen.getByRole("status").textContent).toContain("Journal paused");
     act(() => { useStore.setState({ journal: [original] }); });
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
     expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
       .toBe("An even newer unsaved private sentence for A.");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
