@@ -185,6 +185,43 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       .toMatchObject({ likes: 0, liked: false });
   });
 
+  it("clears endorsements on an approved takedown before identical-content republication", async () => {
+    const source = snapshot();
+    const sourceId = "edition-like-revocation";
+    const id = await submit(OWNER, sourceId, source);
+    await approve(REVIEWER, id, source, 1);
+    await as(LEARNER, "select public.set_question_set_library_like($1,true)", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 1, liked: true });
+
+    // A privileged safety takedown withdraws approval without changing the
+    // immutable reviewed answers. Votes for that old revision must not survive.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    expect((await db.query<{ count: number }>(
+      "select count(*)::integer count from public.question_set_library_likes where entry_id=$1", [id],
+    )).rows).toEqual([{ count: 0 }]);
+    await expect(as(LEARNER, "select public.set_question_set_library_like($1,true)", [id]))
+      .rejects.toThrow(/unavailable/i);
+
+    // The owner may resubmit the same source-reviewed answers with new public
+    // credit. Academic review is still required; prior likes never carry over.
+    const [resubmitted] = await as<{ id: string }>(OWNER,
+      "select public.submit_question_set_library($1,$2::jsonb,$3,$4,$5) id",
+      [sourceId, JSON.stringify(source), "New synthetic edition", true, true]);
+    expect(resubmitted.id).toBe(id);
+    const [pending] = (await db.query<{
+      status: string; review_revision: number; snapshot_payload: Snapshot;
+    }>("select status,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(pending).toMatchObject({ status: "pending", review_revision: 4, snapshot_payload: source });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(item => item.id === id)).toBe(false);
+    await approve(REVIEWER, id, source, 4);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 0, liked: false });
+    await as(LEARNER, "select public.set_question_set_library_like($1,true)", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 1, liked: true });
+  });
+
   it("allows only the owner to withdraw and removes the public preview and likes", async () => {
     const id = await submit(OWNER, "withdraw-test");
     await approve(REVIEWER, id);
