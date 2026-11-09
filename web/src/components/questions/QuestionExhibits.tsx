@@ -16,7 +16,8 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   // A structured tuple array prevents delimiter collisions between distinct attachment IDs / blob keys.
-  const signature = JSON.stringify(attachments.map(({ id, blobKey }) => [id, blobKey]));
+  // The blob may be rehydrated under its stable key; a newer metadata revision must invalidate old object URLs.
+  const signature = JSON.stringify(attachments.map(({ id, blobKey, updatedAt }) => [id, blobKey, updatedAt]));
   const urls = loaded.signature === signature ? loaded.urls : {};
   const activeZoomed = zoomed?.signature === signature ? zoomed.attachment : null;
   const zoomSignature = zoomed?.signature ?? null;
