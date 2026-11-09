@@ -35,6 +35,8 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
       const next: Record<string, string | "missing"> = {};
       for (const attachment of attachmentsRef.current) {
         const record = await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined);
+        // Cleanup may run while the blob read is pending; do not create an orphaned URL afterward.
+        if (cancelled) return;
         if (record) {
           const url = URL.createObjectURL(record.blob);
           created.push(url);
