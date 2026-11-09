@@ -360,8 +360,8 @@ export async function createQuestionAttachment(input: {
 export interface AttachmentMaintenanceReport {
   /** Automatic deletion is disabled until per-account ownership can be proven. */
   deletedOrphanBlobKeys: string[];
-  /** Present on the device, but absent from the current workspace's references. */
-  preservedOrphanBlobKeys: string[];
+  /** Count of retained origin-shared keys, without disclosing other accounts' key IDs. */
+  preservedUnscopedBlobCount: number;
   missingBlobKeys: string[];
 }
 
@@ -386,12 +386,12 @@ export async function runQuestionAttachmentMaintenance(
     for (const attachment of question.attachments ?? []) referenced.add(attachment.blobKey);
   }
   const stored = await listQuestionAttachmentBlobKeys();
-  const preservedOrphanBlobKeys = stored.filter(
+  const preservedUnscopedBlobCount = stored.filter(
     (key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key),
-  );
+  ).length;
   const storedSet = new Set(stored);
   const missingBlobKeys = [...referenced].filter((key) => !storedSet.has(key));
-  return { deletedOrphanBlobKeys: [], preservedOrphanBlobKeys, missingBlobKeys };
+  return { deletedOrphanBlobKeys: [], preservedUnscopedBlobCount, missingBlobKeys };
 }
 
 // --- portable backup payloads ------------------------------------------------
