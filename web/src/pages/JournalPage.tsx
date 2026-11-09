@@ -246,29 +246,32 @@ function isNameOnlyJournalRename(previous: Profile, next: Profile, journalUnchan
     && keys.every((key) => key === "name" || key === "userId" || before[key] === after[key]);
 }
 
-export function JournalPage({ registerAppTransitionGuard }: {
+export function JournalPage({ registerAppTransitionGuard, hasAccountWorkspaceReceipt }: {
   registerAppTransitionGuard?: RegisterJournalTransitionGuard;
+  hasAccountWorkspaceReceipt?: (accountId: string, journal: JournalEntry[]) => boolean;
 } = {}) {
   const s = useStore();
   // The profile userId is name-derived, not the authenticated account identity.
   const accountId = useAccount((state) => state.phase === "signed-in" ? state.user?.id ?? null : null);
+  const workspaceReady = accountId === null || Boolean(hasAccountWorkspaceReceipt?.(accountId, s.journal));
   const sessionDraftsRef = useRef(new Map<string, JournalSessionDraft>());
+  const feedbackSessionDraftsRef = useRef(new Map<string, JournalExperienceFeedbackInput>());
   const writerIdentityRef = useRef({
     profile: s.profile, journal: s.journal, accountId, epoch: 0, workspaceEpoch: 0,
-    pendingJournal: null as JournalEntry[] | null,
+    pendingJournal: workspaceReady ? null : s.journal as JournalEntry[] | null,
   });
   const previousWriter = writerIdentityRef.current;
   if (previousWriter.accountId !== accountId) {
     previousWriter.epoch += 1;
     // Auth can arrive before the next account's notebook. Do not mount a new
     // editor or library against the previous account's still-loaded pages.
-    previousWriter.pendingJournal = previousWriter.journal === s.journal ? s.journal : null;
-  } else if (previousWriter.profile.userId !== s.profile.userId
+    previousWriter.pendingJournal = workspaceReady ? null : s.journal;
+  } else if (!previousWriter.pendingJournal && previousWriter.profile.userId !== s.profile.userId
     && !isNameOnlyJournalRename(previousWriter.profile, s.profile, previousWriter.journal === s.journal)) {
     previousWriter.epoch += 1;
     previousWriter.workspaceEpoch += 1;
   }
-  if (previousWriter.pendingJournal && previousWriter.pendingJournal !== s.journal) {
+  if (previousWriter.pendingJournal && workspaceReady) {
     previousWriter.pendingJournal = null;
   }
   previousWriter.profile = s.profile;
@@ -390,18 +393,10 @@ export function JournalPage({ registerAppTransitionGuard }: {
 
   if (previousWriter.pendingJournal) {
     return (
-      <>
-        <section className="journal-notebook-page" role="status" aria-live="polite">
-          <h1>Journal paused</h1>
-          <p>Waiting for this account's workspace to load. Unsaved writing remains in this tab.</p>
-        </section>
-        {feedbackOpen && (
-          <JournalFeedback onClose={() => {
-            setFeedbackOpen(false);
-            clearJournalFeedbackRequest();
-          }} />
-        )}
-      </>
+      <section className="journal-notebook-page" role="status" aria-live="polite">
+        <h1>Journal paused</h1>
+        <p>Waiting for this account's workspace to load. Unsaved writing remains in this tab.</p>
+      </section>
     );
   }
 
@@ -488,7 +483,7 @@ export function JournalPage({ registerAppTransitionGuard }: {
       )}
 
       {feedbackOpen && (
-        <JournalFeedback onClose={() => {
+        <JournalFeedback sessionDrafts={feedbackSessionDraftsRef.current} onClose={() => {
           setFeedbackOpen(false);
           clearJournalFeedbackRequest();
         }} />
@@ -1705,6 +1700,7 @@ interface StoredJournalFeedbackDraft {
   revision: string | null;
   raw: string | null;
   unreadable: boolean;
+  acknowledged: boolean;
 }
 
 // A receipt must never remove a shared localStorage key: another tab can write
@@ -1776,26 +1772,30 @@ function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
   let raw: string | null = null;
   try {
     raw = window.localStorage.getItem(key);
-    if (raw === null) return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false };
+    if (raw === null) return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false, acknowledged: false };
     // A malformed stored draft is not a blank draft. Never overwrite its
     // original bytes during a recovery attempt.
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value))
-      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true };
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true, acknowledged: false };
     const record = value as Record<string, unknown>;
     // Preserve any unsupported or future-version draft verbatim rather than
     // converting its unknown/private fields into an editable lossy snapshot.
     const textLimits: Record<string, number> = { liked: 1000, wantMore: 1000, missing: 1000, painPoints: 1000, comment: 2000 };
-    const allowedFields = ["rating", ...Object.keys(textLimits), "__axomRevision"];
+    const allowedFields = ["rating", ...Object.keys(textLimits), "__axomRevision", "__axomSavedAt", "__axomBaseFingerprint"];
     const invalidRating = "rating" in record
       && (!Number.isInteger(record.rating) || Number(record.rating) < 0 || Number(record.rating) > 5);
     const invalidRevision = "__axomRevision" in record
       && (typeof record.__axomRevision !== "string" || !/^[a-f0-9]{32}$/.test(record.__axomRevision));
+    const invalidSavedAt = "__axomSavedAt" in record
+      && (typeof record.__axomSavedAt !== "number" || !Number.isFinite(record.__axomSavedAt) || record.__axomSavedAt < 0);
+    const invalidBaseFingerprint = "__axomBaseFingerprint" in record
+      && (record.__axomBaseFingerprint !== null && typeof record.__axomBaseFingerprint !== "string");
     const invalidText = Object.entries(textLimits).some(([field, max]) =>
       field in record && (typeof record[field] !== "string" || (record[field] as string).length > max));
     if (Object.keys(record).some((field) => !allowedFields.includes(field))
-      || invalidRating || invalidRevision || invalidText)
-      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true };
+      || invalidRating || invalidRevision || invalidSavedAt || invalidBaseFingerprint || invalidText)
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true, acknowledged: false };
     const draft: JournalExperienceFeedbackInput = {
       rating: Number.isInteger(record.rating) && Number(record.rating) >= 1 && Number(record.rating) <= 5 ? Number(record.rating) : 0,
       liked: typeof record.liked === "string" ? record.liked.slice(0, 1000) : "",
@@ -1813,16 +1813,66 @@ function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
       ? `${revision}:${journalFeedbackFingerprint(draft)}`
       : `legacy:${journalFeedbackFingerprint(raw)}`;
     if (window.localStorage.getItem(`${key}:submitted`) === acknowledged) {
-      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false };
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false, acknowledged: true };
     }
-    return { draft, revision, raw, unreadable: false };
+    return { draft, revision, raw, unreadable: false, acknowledged: false };
   } catch {
     // JSON corruption or a blocked localStorage read must fail closed.
-    return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true };
+    return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true, acknowledged: false };
   }
 }
 
-function JournalFeedback({ onClose }: { onClose: () => void }) {
+interface JournalFeedbackCopy {
+  key: string;
+  stored: StoredJournalFeedbackDraft;
+  savedAt: number;
+  baseFingerprint: string | null;
+}
+
+function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null): {
+  selected: JournalFeedbackCopy;
+  others: JournalFeedbackCopy[];
+  legacyRaw: string | null;
+} {
+  const legacy = readJournalFeedbackDraft(baseKey);
+  const copies: JournalFeedbackCopy[] = [{ key: baseKey, stored: legacy, savedAt: 0, baseFingerprint: null }];
+  const writerPrefix = `${baseKey}:writer:`;
+  try {
+    // The legacy key is read-only. Each mounted editor writes its own key, so
+    // independent tabs cannot overwrite each other's private feedback bytes.
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(writerPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(writerPrefix.length))) continue;
+      const stored = readJournalFeedbackDraft(key);
+      let savedAt = 0;
+      let baseFingerprint: string | null = null;
+      if (stored.raw && !stored.unreadable) {
+        const record = JSON.parse(stored.raw) as Record<string, unknown>;
+        savedAt = typeof record.__axomSavedAt === "number" ? record.__axomSavedAt : 0;
+        baseFingerprint = typeof record.__axomBaseFingerprint === "string" ? record.__axomBaseFingerprint : null;
+      }
+      copies.push({ key, stored, savedAt, baseFingerprint });
+    }
+  } catch {
+    // An incomplete key inventory cannot prove that another draft is absent.
+    return {
+      selected: { key: baseKey, stored: { ...legacy, unreadable: true }, savedAt: 0, baseFingerprint: null },
+      others: [], legacyRaw: legacy.raw,
+    };
+  }
+  const newest = copies.slice(1).filter((copy) => !copy.stored.acknowledged && !copy.stored.unreadable)
+    .sort((a, b) => b.savedAt - a.savedAt || b.key.localeCompare(a.key))[0];
+  const legacyChangedSinceNewest = newest && legacy.raw !== null
+    && newest.baseFingerprint !== journalFeedbackFingerprint(legacy.raw);
+  const preferred = copies.find((copy) => copy.key === selectedKey)
+    ?? (legacy.unreadable || legacyChangedSinceNewest ? copies[0] : newest ?? copies[0]);
+  return { selected: preferred, others: copies.filter((copy) => copy.key !== preferred.key && copy.stored.raw !== null), legacyRaw: legacy.raw };
+}
+
+function JournalFeedback({ onClose, sessionDrafts }: {
+  onClose: () => void;
+  sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
+}) {
   // The dialog can stay mounted across workspace or account switches. Remount
   // its draft state for each owner so one user's text is never written under
   // another owner's localStorage key. Do not migrate legacy authenticated
@@ -1830,20 +1880,41 @@ function JournalFeedback({ onClose }: { onClose: () => void }) {
   const workspaceId = useStore((state) => state.profile.userId);
   const accountId = useAccount((state) => state.user?.id);
   const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
-  return <JournalFeedbackForOwner key={ownerKey} draftKey={`axom-journal-feedback-draft:${ownerKey}`} onClose={onClose} />;
+  const [selection, setSelection] = useState<{ ownerKey: string; key: string } | null>(null);
+  const selectedKey = selection?.ownerKey === ownerKey ? selection.key : null;
+  return <JournalFeedbackForOwner
+    key={`${ownerKey}:${selectedKey ?? "latest"}`}
+    draftKey={`axom-journal-feedback-draft:${ownerKey}`}
+    sessionDrafts={sessionDrafts}
+    selectedKey={selectedKey}
+    onSelectCopy={(key) => setSelection({ ownerKey, key })}
+    onClose={onClose}
+  />;
 }
 
-function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; draftKey: string }) {
+function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, sessionDrafts }: {
+  onClose: () => void;
+  draftKey: string;
+  selectedKey: string | null;
+  onSelectCopy: (key: string) => void;
+  sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
+}) {
   const user = useAccount((state) => state.user);
-  const [loaded] = useState(() => readJournalFeedbackDraft(draftKey));
-  const [draft, setDraft] = useState(loaded.draft);
+  const [savedCopies] = useState(() => readJournalFeedbackCopies(draftKey, selectedKey));
+  const loaded = savedCopies.selected.stored;
+  const [draft, setDraft] = useState(() => sessionDrafts.get(draftKey) ?? loaded.draft);
+  const [savedFingerprint, setSavedFingerprint] = useState(() => journalFeedbackFingerprint(loaded.draft));
   const persistedRevisionRef = useRef(loaded.revision);
   const persistedRawRef = useRef(loaded.raw);
   const persistedDraftRef = useRef(loaded.draft);
+  const persistedKeyRef = useRef(savedCopies.selected.key);
+  const sourceRawRef = useRef(loaded.raw);
+  const sourceKeyRef = useRef(savedCopies.selected.key);
+  const writerKeyRef = useRef<string | null>(null);
   const [conflicted, setConflicted] = useState(loaded.unreadable);
   // Opening or remounting the dialog must never write a stale snapshot back
   // over a newer draft another tab saved between our read and first effect.
-  const initialDraftRef = useRef(draft);
+  const initialDraftRef = useRef(loaded.draft);
   const [sending, setSending] = useState(false);
   // State-based disabling renders later; guard against a second same-turn activation.
   const submissionPendingRef = useRef(false);
@@ -1854,14 +1925,20 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
       ? "AXOM could not read saved feedback in this browser. No draft was replaced. Close feedback and try again."
       : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
     : "");
-  const submittedReceiptRef = useRef<string | null>(null);
+  const submittedReceiptRef = useRef<{ key: string; value: string } | null>(null);
   const [saveRetryToken, setSaveRetryToken] = useState(0);
+
+  function changeDraft(next: JournalExperienceFeedbackInput) {
+    // A failed browser write must survive an account handoff in this tab.
+    sessionDrafts.set(draftKey, next);
+    setDraft(next);
+  }
 
   useEffect(() => {
     // Persist only this editor's actual changes; a mount is not an edit.
     // The identity guard also survives React StrictMode effect replays.
     if (!sentId && draft === initialDraftRef.current) return;
-    if (conflicted) return;
+    if (loaded.unreadable) return;
     try {
       if (sentId) {
         // An acknowledgement cannot erase another tab's newer or concurrent edit.
@@ -1871,23 +1948,33 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
           setStorageError("Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing.");
           return;
         }
-        window.localStorage.setItem(`${draftKey}:submitted`, submittedReceiptRef.current);
+        window.localStorage.setItem(`${submittedReceiptRef.current.key}:submitted`, submittedReceiptRef.current.value);
       } else {
-        // Do not overwrite a newer draft loaded by another tab since this
-        // editor opened. Keep these in-memory edits available for export.
-        // localStorage has no atomic compare-and-set: simultaneous writes
-        // still need a separate concurrency policy and browser acceptance.
-        if (window.localStorage.getItem(draftKey) !== persistedRawRef.current) {
-          setConflicted(true);
-          setStorageError("Another tab changed this feedback draft. Your writing is still here. Download it, then close and reopen feedback to see the saved copy.");
-          return;
-        }
+        const writerKey = writerKeyRef.current ?? `${draftKey}:writer:${journalFeedbackRevision()}`;
         const revision = journalFeedbackRevision();
-        const serialized = JSON.stringify({ ...draft, __axomRevision: revision });
-        window.localStorage.setItem(draftKey, serialized);
+        const serialized = JSON.stringify({
+          ...draft,
+          __axomRevision: revision,
+          __axomSavedAt: Date.now(),
+          __axomBaseFingerprint: savedCopies.legacyRaw === null ? null : journalFeedbackFingerprint(savedCopies.legacyRaw),
+        });
+        window.localStorage.setItem(writerKey, serialized);
+        writerKeyRef.current = writerKey;
+        persistedKeyRef.current = writerKey;
         persistedRawRef.current = serialized;
         persistedRevisionRef.current = revision;
         persistedDraftRef.current = draft;
+        sessionDrafts.delete(draftKey);
+        setSavedFingerprint(journalFeedbackFingerprint(draft));
+        // A legacy writer can still change its old key. Keep both copies and
+        // stop this editor from treating the changed source as its own draft.
+        const sourceBeforeCheck = window.localStorage.getItem(sourceKeyRef.current);
+        const sourceAfterCheck = window.localStorage.getItem(sourceKeyRef.current);
+        if (sourceBeforeCheck !== sourceRawRef.current || sourceAfterCheck !== sourceRawRef.current) {
+          setConflicted(true);
+          setStorageError("Another tab changed this feedback draft. Your version was saved separately. Download it, then close and reopen feedback to see the saved copies.");
+          return;
+        }
       }
       setStorageError("");
     } catch {
@@ -1895,18 +1982,18 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         ? "Feedback was received, but this browser could not mark your saved draft as submitted."
         : "This browser could not keep a local draft. Download it before closing.");
     }
-  }, [conflicted, draft, draftKey, sentId, saveRetryToken]);
+  }, [draft, draftKey, loaded.unreadable, savedCopies.legacyRaw, sentId, saveRetryToken, sessionDrafts]);
 
   async function send() {
     if (!user || conflicted || sentId || submissionPendingRef.current) return;
     if (draft.rating < 1) { setError("Choose a rating before sending."); return; }
-    // Check for changes that arrived after the editor's last successful write.
-    // This prevents an observed stale send; localStorage cannot make the
-    // check atomic against a simultaneous update by an older browser tab.
+    // A send is explicit. Check both the source loaded on open and this
+    // editor's saved copy before submitting its in-memory answers.
     try {
-      if (window.localStorage.getItem(draftKey) !== persistedRawRef.current) {
+      if (window.localStorage.getItem(sourceKeyRef.current) !== sourceRawRef.current
+        || window.localStorage.getItem(persistedKeyRef.current) !== persistedRawRef.current) {
         setConflicted(true);
-        setStorageError("Another tab changed this feedback draft. Your writing is still here. Download it, then close and reopen feedback to see the saved copy.");
+        setStorageError("Another tab changed this feedback draft. Your writing is still here. Download it, then close and reopen feedback to see the saved copies.");
         return;
       }
     } catch {
@@ -1920,13 +2007,16 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     // not acknowledge an older revision as though it contained that draft.
     const submittedContentWasSaved = persistedRawRef.current !== null
       && journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(persistedDraftRef.current);
-    submittedReceiptRef.current = !submittedContentWasSaved ? null
+    const receiptValue = !submittedContentWasSaved ? null
       : persistedRevisionRef.current
         ? `${persistedRevisionRef.current}:${journalFeedbackFingerprint(draft)}`
         : journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(initialDraftRef.current)
           ? `legacy:${journalFeedbackFingerprint(persistedRawRef.current!)}` : null;
+    submittedReceiptRef.current = receiptValue ? { key: persistedKeyRef.current, value: receiptValue } : null;
     try {
-      setSentId(await submitJournalFeedbackOncePerTab(draftKey, user.id, draft));
+      const receiptId = await submitJournalFeedbackOncePerTab(draftKey, user.id, draft);
+      sessionDrafts.delete(draftKey);
+      setSentId(receiptId);
     } catch (cause) {
       // Only a failed request may be retried; a receipt seals this dialog.
       submissionPendingRef.current = false;
@@ -1936,14 +2026,17 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
     }
   }
 
+  const currentDraftSaved = journalFeedbackFingerprint(draft) === savedFingerprint;
+
   return (
     <Modal title="How is the journal feeling?" onClose={onClose} className="journal-feedback-modal" footer={sentId ? (<>
       <GButton onClick={() => downloadBlob("axom-journal-feedback-submitted.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download submitted copy</GButton>
       <GButton variant="primary" onClick={onClose}>Close</GButton>
     </>) : <>
-      {loaded.unreadable && loaded.raw !== null
-        ? <GButton onClick={() => downloadBlob("axom-journal-feedback-unreadable.txt", new Blob([loaded.raw ?? ""], { type: "text/plain" }))}><Download size={ICON_SIZE.body} /> Download saved copy</GButton>
-        : <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>}
+      {loaded.unreadable && loaded.raw !== null &&
+        <GButton onClick={() => downloadBlob("axom-journal-feedback-unreadable.txt", new Blob([loaded.raw ?? ""], { type: "text/plain" }))}><Download size={ICON_SIZE.body} /> Download saved copy</GButton>}
+      {(!loaded.unreadable || sessionDrafts.has(draftKey)) &&
+        <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>}
       <GButton onClick={onClose}>Not now</GButton>
       <GButton variant="primary" disabled={!user || sending || conflicted} onClick={() => { void send(); }}>{sending ? "Sending…" : "Send feedback"}</GButton>
     </>}>
@@ -1954,16 +2047,35 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         <fieldset className="journal-rating-fieldset">
           <legend>Overall experience</legend>
           <div className="journal-rating-choices">
-            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || loaded.unreadable} onClick={() => setDraft({ ...draft, rating: value })}>{value}</button>)}
+            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || loaded.unreadable} onClick={() => changeDraft({ ...draft, rating: value })}>{value}</button>)}
           </div>
         </fieldset>
         <div className="journal-feedback-fields">
-          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, liked: event.target.value })} />
-          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, wantMore: event.target.value })} />
-          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, missing: event.target.value })} />
-          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => setDraft({ ...draft, painPoints: event.target.value })} />
-          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || loaded.unreadable} maxLength={2000} onChange={(event) => setDraft({ ...draft, comment: event.target.value })} />
+          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, liked: event.target.value })} />
+          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, wantMore: event.target.value })} />
+          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, missing: event.target.value })} />
+          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, painPoints: event.target.value })} />
+          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || loaded.unreadable} maxLength={2000} onChange={(event) => changeDraft({ ...draft, comment: event.target.value })} />
         </div>
+        {savedCopies.others.length > 0 && (
+          <details className="journal-feedback-note">
+            <summary>Other saved feedback copies ({savedCopies.others.length})</summary>
+            <p>Copies from other writing sessions stay on this device. Open or download one to recover its words.</p>
+            {savedCopies.others.map((copy, index) => (
+              <div key={copy.key}>
+                <span>Saved copy {index + 1}{copy.stored.acknowledged ? " · submitted" : ""}</span>{" "}
+                {!copy.stored.unreadable && !copy.stored.acknowledged && (
+                  <GButton size="sm" disabled={!currentDraftSaved || sending} onClick={() => onSelectCopy(copy.key)}>Open copy {index + 1}</GButton>
+                )}
+                <GButton size="sm" onClick={() => downloadBlob(
+                  `axom-journal-feedback-copy-${index + 1}.${copy.stored.unreadable ? "txt" : "json"}`,
+                  new Blob([copy.stored.raw ?? ""], { type: copy.stored.unreadable ? "text/plain" : "application/json" }),
+                )}>Download copy {index + 1}</GButton>
+              </div>
+            ))}
+            {!currentDraftSaved && <p role="alert">Save this draft before opening another copy. Download it for recovery if saving is blocked.</p>}
+          </details>
+        )}
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
         {storageError && !loaded.unreadable && !conflicted && <GButton size="sm" onClick={() => setSaveRetryToken((token) => token + 1)}>Retry draft save</GButton>}
