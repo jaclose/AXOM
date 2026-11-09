@@ -69,6 +69,12 @@ not source-authored. The student must inspect and save each batch to their
 private bank, then attest to answer, explanation and
 distribution rights before sending the exact current snapshot for academic review.
 No model or deterministic hint is proof of correctness, citations or source rights.
+The academic reviewer preview includes each choice rationale and identifies saved
+AI-assisted explanation text. The reviewer UI enables approval only after every
+question batch has been opened, all answers have keys, and the reviewer records a
+note and source/rights
+attestation. A reviewer can return a set with a reason without attesting that
+unverified evidence was checked. Pending previews clear when the account changes.
 Absent/unreachable AI, unresolved answer mappings, inaccessible media and failed
 drafts remain explicitly blocked or manual-review work, not fabricated successes.
 
