@@ -44,7 +44,7 @@ beforeEach(async () => {
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   await deleteDatabase(DB_NAME);
   useAccount.setState({
-    phase: "signed-in",
+    phase: "signed-in", link: "linked",
     user: { id: "synthetic-A", email: "", displayName: "", emailConfirmed: true },
   });
 });
@@ -101,7 +101,7 @@ test("A persisted attachment cannot be reacquired and displayed for B before B h
   // expected to be RED; do not claim this is fixed by R27/R28.
   await waitFor(() => {
     expect(screen.queryByRole("img", { name: attachment.altText })).toBeNull();
-    expect(screen.getByText(/synthetic\\.png.*(?:not on this device|not available|could not be displayed|not accessible)/i)).toBeTruthy();
+    expect(screen.getByText(/synthetic[.]png.*(?:not on this device|not available|could not be displayed|not accessible)/i)).toBeTruthy();
   });
   expect(allocated).toHaveLength(1);
   view.unmount();
