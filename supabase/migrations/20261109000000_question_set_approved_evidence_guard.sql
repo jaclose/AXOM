@@ -10,6 +10,7 @@ returns trigger language plpgsql set search_path = '' as $$
 begin
   if old.status = 'approved' and (
     new.snapshot_payload is distinct from old.snapshot_payload
+    or new.id is distinct from old.id
     or new.owner_id is distinct from old.owner_id
     or new.source_id is distinct from old.source_id
     or new.title is distinct from old.title
@@ -23,9 +24,15 @@ begin
     -- Allow only administrative removal from public discovery, never an
     -- unreviewed transition back to pending.
     or new.status not in ('approved', 'rejected')
-    -- An FK ON DELETE SET NULL must remain usable for reviewer account
-    -- erasure; assigning a different reviewer to old evidence is forbidden.
-    or (new.reviewed_by is distinct from old.reviewed_by and new.reviewed_by is not null)
+    -- Only the nested FK ON DELETE SET NULL action may clear a reviewer:
+    -- an ordinary privileged UPDATE must not erase academic provenance.
+    -- Verify that the old reviewer really was deleted, not merely nulled.
+    or (new.reviewed_by is distinct from old.reviewed_by and (
+      new.reviewed_by is not null
+      or old.reviewed_by is null
+      or pg_catalog.pg_trigger_depth() <= 1
+      or exists (select 1 from auth.users reviewer where reviewer.id = old.reviewed_by)
+    ))
   ) then
     raise exception 'Approved Question Set evidence is immutable; withdraw or revoke before resubmission'
       using errcode = '22023';
