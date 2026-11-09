@@ -7,6 +7,15 @@ begin;
 create function private.question_set_library_require_approval_provenance()
 returns trigger language plpgsql set search_path = '' as $$
 begin
+  -- The submission RPC only inserts pending rows. Inserting an already
+  -- approved row directly would otherwise bypass an UPDATE-only guard.
+  if tg_op = 'INSERT' then
+    if new.status is distinct from 'pending' then
+      raise exception 'Question Set entries must be submitted pending academic review'
+        using errcode = '42501';
+    end if;
+    return new;
+  end if;
   if new.status = 'approved' and old.status is distinct from 'approved' then
     -- Only an authenticated academic reviewer may advance a pending
     -- publication. A bare service-role status UPDATE has no reviewer JWT.
@@ -50,7 +59,7 @@ begin
 end $$;
 
 create trigger zz_question_set_library_approval_provenance
-before update of status on public.question_set_library_entries
+before insert or update of status on public.question_set_library_entries
 for each row execute function private.question_set_library_require_approval_provenance();
 
 -- Post-review importer must also refuse historically forged approved rows,
