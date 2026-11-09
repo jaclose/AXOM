@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, ZoomIn } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { useAccount } from "../../lib/account/accountStore";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
 
 export function QuestionExhibits({ attachments }: { attachments: readonly QuestionImageAttachment[] }) {
@@ -17,7 +18,8 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
   attachmentsRef.current = attachments;
   // A structured tuple array prevents delimiter collisions between distinct attachment IDs / blob keys.
   // The blob may be rehydrated under its stable key; a newer metadata revision must invalidate old object URLs.
-  const signature = JSON.stringify(attachments.map(({ id, blobKey, updatedAt }) => [id, blobKey, updatedAt]));
+  const accountScope = useAccount(({ phase, user }) => phase === "signed-in" && user?.id ? `account:${user.id}` : `phase:${phase}`);
+  const signature = JSON.stringify([accountScope, attachments.map(({ id, blobKey, updatedAt }) => [id, blobKey, updatedAt])]);
   const urls = loaded.signature === signature ? loaded.urls : Object.create(null) as Record<string, string | "missing">;
   const activeZoomed = zoomed?.signature === signature ? zoomed.attachment : null;
   const zoomSignature = zoomed?.signature ?? null;
