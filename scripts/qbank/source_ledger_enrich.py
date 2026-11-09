@@ -405,6 +405,17 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
     """Actionable short batches while retaining the exhaustive canonical queue separately."""
     rows_by_id = {r["source_id"]:r for r in rows}
     batch0 = []; batch1 = []; scored = []; triage = []
+    # Pair source path, digest or curriculum holds require manual review;
+    # never list a held relationship among routine B2 correspondence jobs.
+    pair_hold_statuses = {
+        "source_path_mismatch_review_required",
+        "requires_scope_review",
+        "requires_source_review",
+    }
+    held_pairs = [p for p in pairs if p.get("unresolved")
+                  or p.get("canonical_pair_status") in pair_hold_statuses]
+    candidate_pairs = [p for p in pairs if not (p.get("unresolved")
+                       or p.get("canonical_pair_status") in pair_hold_statuses)]
     for index, job in enumerate(canonical_jobs):
         descriptor = dict(queue_index=index, canonical_input_key=job["canonical_input_key"],
                           source_path=job["source_path"],source_ids=job.get("source_ids",[]),
@@ -440,10 +451,10 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
       processing_order=[
         dict(id="B0", description="Five distinct native GOER AXOM packages. Preserve existing asset paths and review answer evidence.", jobs=batch0),
         dict(id="B1", description="Thirteen structured raw TXT banks; 195 detected numbered questions with answer labels, not independently verified.", jobs=batch1),
-        dict(id="B2", description="Ten distinct proposed question-only/answered PDF or workbook pair relationships; compare every numbered stem before associating any answer.", jobs=pairs),
+        dict(id="B2", description=f"{len(candidate_pairs)} proposed question-only/answered PDF or workbook pair relationships; compare every numbered stem before associating any answer.", jobs=candidate_pairs),
         dict(id="B3", description="First 120 high-signal source PDFs/Office files by explicit academic evidence, prioritizing assessed questions.", jobs=scored[:120]),
         dict(id="B4", description="Remaining PDF/Office source candidates; use full canonical queue for eventual processing.", job_indices=[x["queue_index"] for x in scored[120:]]),
-        dict(id="B5", description="Other ambiguous candidate source files; manual parser compatibility review required.", jobs=triage),
+        dict(id="B5", description="Ambiguous source files and held answer-pair relationships require manual provenance and parser review.", jobs=triage, pair_review_queue=held_pairs),
       ],
       full_queue="agent-2-import-inputs-deduplicated.json",
       counting_policy="Batch pair items may overlap B3/B4 file jobs; never sum batch job counts into collection totals.",
