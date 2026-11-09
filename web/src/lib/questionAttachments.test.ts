@@ -214,16 +214,52 @@ describe("blob store", () => {
 });
 
 describe("orphan maintenance", () => {
-  it("deletes unreferenced blobs, reports missing blobs, never touches referenced ones", async () => {
-    await putQuestionAttachmentBlob("referenced", { blob: new Blob(["a"]), mimeType: "image/png", byteSize: 1, questionId: "q1", updatedAt: "t" });
-    await putQuestionAttachmentBlob("orphan", { blob: new Blob(["b"]), mimeType: "image/png", byteSize: 1, questionId: "gone", updatedAt: "t" });
+  const record = (bytes: string, questionId: string) => ({
+    blob: new Blob([bytes]), mimeType: "image/png" as const,
+    byteSize: bytes.length, questionId, updatedAt: "t",
+  });
+
+  it("preserves unowned device bytes and reports missing references without deleting them", async () => {
+    await putQuestionAttachmentBlob("referenced", record("a", "q1"));
+    await putQuestionAttachmentBlob("orphan", record("b", "gone"));
     const questions = [
       { attachments: [metadata({ id: "referenced" }), metadata({ id: "missing-blob" })] },
     ];
     const report = await runQuestionAttachmentMaintenance(questions);
-    expect(report.deletedOrphanBlobKeys).toEqual(["orphan"]);
+    expect(report.deletedOrphanBlobKeys).toEqual([]);
+    expect(report.preservedOrphanBlobKeys).toEqual(["orphan"]);
     expect(report.missingBlobKeys).toEqual(["missing-blob"]);
+    expect(await listQuestionAttachmentBlobKeys()).toEqual(["orphan", "referenced"]);
+
+    // Targeted user-initiated deletion still works, unlike an unscoped sweep.
+    await deleteQuestionAttachmentBlobs(["orphan"]);
     expect(await listQuestionAttachmentBlobKeys()).toEqual(["referenced"]);
+  });
+
+  it("does not erase A's non-private attachment across simulated disjoint and empty B hydration", async () => {
+    await putQuestionAttachmentBlob("account-A-attachment", record("account-A-original", "A-question"));
+    await putQuestionAttachmentBlob("account-B-attachment", record("account-B-original", "B-question"));
+    const bWorkspace = [{ attachments: [metadata({
+      id: "account-B-attachment", blobKey: "account-B-attachment",
+    })] }];
+    const bReport = await runQuestionAttachmentMaintenance(bWorkspace);
+    expect(bReport.deletedOrphanBlobKeys).toEqual([]);
+    expect(bReport.preservedOrphanBlobKeys).toEqual(["account-A-attachment"]);
+
+    // A completely empty workspace is not proof this origin's Blob store
+    // belongs to that account, including during a fresh B rehydration.
+    const emptyReport = await runQuestionAttachmentMaintenance([]);
+    expect(emptyReport.deletedOrphanBlobKeys).toEqual([]);
+    expect(emptyReport.preservedOrphanBlobKeys).toEqual([
+      "account-A-attachment", "account-B-attachment",
+    ]);
+
+    const a = await getQuestionAttachmentBlob("account-A-attachment", { localOnly: true });
+    const b = await getQuestionAttachmentBlob("account-B-attachment", { localOnly: true });
+    expect(a).toMatchObject({ questionId: "A-question", byteSize: 18 });
+    expect(b).toMatchObject({ questionId: "B-question", byteSize: 18 });
+    expect(await a!.blob.text()).toBe("account-A-original");
+    expect(await b!.blob.text()).toBe("account-B-original");
   });
 });
 
