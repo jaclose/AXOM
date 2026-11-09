@@ -108,9 +108,12 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
       await expect(exhibit).toBeVisible();
       expect(await exhibit.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
       await page.locator(".question-exhibit").click();
-      await expect(page.getByRole("dialog", { name: "Question image, enlarged" })).toBeVisible();
+      const imageViewer = page.getByRole("dialog", { name: "Question image", exact: true });
+      await expect(imageViewer).toBeVisible();
+      await imageViewer.getByRole("button", { name: "Zoom in", exact: true }).click();
+      await expect(imageViewer.getByLabel("Image zoom", { exact: true })).toHaveText("150%");
       await page.keyboard.press("Escape");
-      await expect(page.locator(".question-exhibit-lightbox")).toHaveCount(0);
+      await expect(imageViewer).toHaveCount(0);
       await expect(page.locator(".question-stem")).toBeVisible();
       break;
     }
