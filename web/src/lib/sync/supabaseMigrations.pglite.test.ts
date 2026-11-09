@@ -35,6 +35,194 @@ async function canExecute(db: PGlite, role: string, signature: string) {
   const { rows } = await db.query<{ ok: boolean }>("select has_function_privilege($1, $2, 'execute') as ok", [role, signature]);
   return rows[0].ok;
 }
+
+const referenceBatchMigration = "20261105000000_workspace_reference_validation_batch.sql";
+const referenceHash = (index: number) => index.toString(16).padStart(64, "0");
+const referenceImage = (index: number, hash = referenceHash(index), byteSize = 7) => ({
+  blobKey: `image-${index}`, hash, byteSize, updatedAt: "2026-11-09T00:00:00Z",
+});
+const referenceSource = (index: number, hash = referenceHash(index)) => ({
+  collection: "questions", id: `question-${index}`, hash, byteSize: 7, expandedBytes: 20,
+});
+const referencePayload = () => ({
+  _axomCloudFormat: 2, _axomHashFormat: 2, content: "{}", expandedBytes: 2,
+  media: [] as ReturnType<typeof referenceImage>[], sources: [] as ReturnType<typeof referenceSource>[],
+});
+async function saveReferences(db: PGlite, user: string, payload: unknown, base = 0, key = randomUUID()) {
+  return as(db, "authenticated", user,
+    "select public.push_workspace_revision_v2($1,34,$2,$3,gen_random_uuid(),$4) as r", [base, HASH, payload, key]);
+}
+async function seedReferenceObjects(db: PGlite, user: string, bucket: string, hashes: string[], byteSize = 7) {
+  await db.query(`insert into storage.objects(bucket_id,name,metadata)
+    select $1,$2 || '/' || hash,jsonb_build_object('size',$3::bigint)
+    from jsonb_array_elements_text($4::jsonb) as refs(hash) on conflict do nothing`, [bucket, user, byteSize, hashes]);
+}
+
+describe("batched workspace reference validation", () => {
+  it("upgrades an occupied database, retaining writer/security boundaries with 1,300 sources and 116 images", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: referenceBatchMigration });
+    try {
+      await db.query("insert into auth.users(id,email) values($1,'before@test.invalid'),($2,'after@test.invalid')", [A, B]);
+      const payload = { ...referencePayload(), content: JSON.stringify({ sample: "x".repeat(1_700_000) }) };
+      payload.sources = Array.from({ length: 1_300 }, (_, index) => referenceSource(index));
+      payload.media = Array.from({ length: 116 }, (_, index) => referenceImage(index));
+      for (const user of [A, B]) {
+        await seedReferenceObjects(db, user, "workspace-content", payload.sources.map(source => source.hash));
+        await seedReferenceObjects(db, user, "workspace-media", payload.media.map(image => image.hash));
+      }
+      const protectedFunctions = () => db.query(`select oid::regprocedure::text as signature,pg_get_functiondef(oid) as definition
+        from pg_proc where oid in ('axom_private.push_workspace_revision(bigint,integer,text,jsonb,uuid,uuid,text)'::regprocedure,
+          'axom_private.verify_workspace_originals()'::regprocedure) order by signature`);
+      const protectedBefore = await protectedFunctions();
+      const beforeStart = performance.now();
+      expect((await saveReferences(db, A, payload)).rows[0].r).toMatchObject({ status: "accepted", revision: 1 });
+      const beforeMs = performance.now() - beforeStart;
+      await db.exec(readFileSync(migrationsDir + referenceBatchMigration, "utf8"));
+      expect((await protectedFunctions()).rows).toEqual(protectedBefore.rows);
+      const afterKey = randomUUID();
+      const afterStart = performance.now();
+      expect((await saveReferences(db, B, payload, 0, afterKey)).rows[0].r).toMatchObject({ status: "accepted", revision: 1 });
+      const afterMs = performance.now() - afterStart;
+      expect((await db.query("select user_id,revision from public.workspace_revisions order by user_id")).rows)
+        .toEqual([{ user_id: A, revision: 1 }, { user_id: B, revision: 1 }]);
+      const signature = "public.push_workspace_revision_v2(bigint,integer,text,jsonb,uuid,uuid,text)";
+      expect((await db.query("select prosecdef,proconfig from pg_proc where oid=$1::regprocedure", [signature])).rows)
+        .toEqual([{ prosecdef: false, proconfig: ["search_path=pg_catalog, public, pg_temp"] }]);
+      expect(await canExecute(db, "anon", signature)).toBe(false);
+      expect(await canExecute(db, "authenticated", signature)).toBe(true);
+      const rowsBeforeRollback = await db.query("select * from public.workspace_revisions order by user_id");
+      await db.exec(readFileSync(migrationsDir + "20261013230000_shared_account_content_references.sql", "utf8"));
+      expect((await saveReferences(db, B, payload, 0, afterKey)).rows[0].r)
+        .toMatchObject({ status: "accepted", revision: 1, idempotent: true });
+      await db.exec(readFileSync(migrationsDir + referenceBatchMigration, "utf8"));
+      expect((await saveReferences(db, B, payload, 0, afterKey)).rows[0].r)
+        .toMatchObject({ status: "accepted", revision: 1, idempotent: true });
+      expect((await db.query("select * from public.workspace_revisions order by user_id")).rows).toEqual(rowsBeforeRollback.rows);
+      expect((await protectedFunctions()).rows).toEqual(protectedBefore.rows);
+
+      // Explain the same private-source join used by the function, under RLS.
+      // These local PostgreSQL timings are evidence, not a hosted latency SLA.
+      const plan = await as(db, "authenticated", B, `explain (analyze, buffers, format json) select exists (
+        with required as materialized (
+          select distinct entry->>'hash' as hash,(entry->>'byteSize')::bigint as bytes
+          from jsonb_array_elements($1::jsonb) as refs(entry) where not (entry ? 'academic')
+        ), resolved as materialized (
+          select r.bytes,o.id,o.metadata from required r left join lateral (
+            select id,metadata from storage.objects
+            where bucket_id='workspace-content' and name=$2::uuid::text||'/'||r.hash limit 1
+          ) o on true
+        ) select 1 from resolved where id is null or (metadata->>'size')::bigint is distinct from bytes)`, [payload.sources, B]);
+      console.info("Reference batch local PostgreSQL benchmark", JSON.stringify({ beforeMs: Math.round(beforeMs), afterMs: Math.round(afterMs), plan: plan.rows }));
+    } finally { await db.close(); }
+  }, 120_000);
+
+  it("validates every tail entry at 20,000 references while deduplicating bytes, not ownership or size claims", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    try {
+      await db.query("insert into auth.users(id,email) values($1,'owner@test.invalid'),($2,'foreign@test.invalid')", [A, B]);
+      await seedReferenceObjects(db, A, "workspace-media", [HASH], 8_388_608);
+      const payload = referencePayload();
+      payload.media = Array.from({ length: 20_000 }, (_, index) => referenceImage(index, HASH, 8_388_608));
+      payload.sources = Array.from({ length: 20_000 }, (_, index) => referenceSource(index));
+      await seedReferenceObjects(db, A, "workspace-content", payload.sources.map(source => source.hash));
+      const start = performance.now();
+      const key = randomUUID();
+      expect((await saveReferences(db, A, payload, 0, key)).rows[0].r).toMatchObject({ status: "accepted", revision: 1 });
+      console.info("Reference batch 20,000 images + 20,000 sources local milliseconds", Math.round(performance.now() - start));
+      const badImage = (changes: Partial<ReturnType<typeof referenceImage>>) => ({ ...payload,
+        media: [...payload.media.slice(0, -1), { ...payload.media.at(-1)!, ...changes }] });
+      const badSource = (changes: Partial<ReturnType<typeof referenceSource>>) => ({ ...payload,
+        sources: [...payload.sources.slice(0, -1), { ...payload.sources.at(-1)!, ...changes }] });
+      await expect(saveReferences(db, A, badImage({ hash: "invalid" }), 1)).rejects.toMatchObject({ code: "PT400" });
+      await expect(saveReferences(db, A, badSource({ hash: "invalid" }), 1)).rejects.toMatchObject({ code: "PT400" });
+      await expect(saveReferences(db, A, badImage({ blobKey: payload.media[0].blobKey }), 1)).rejects.toMatchObject({ code: "PT400" });
+      await expect(saveReferences(db, A, badSource({ id: payload.sources[0].id }), 1)).rejects.toMatchObject({ code: "PT400" });
+      await expect(saveReferences(db, A, badImage({ byteSize: 7 }), 1)).rejects.toMatchObject({ code: "PT409" });
+      await expect(saveReferences(db, A, badSource({ hash: payload.sources[0].hash, byteSize: 8 }), 1)).rejects.toMatchObject({ code: "PT409" });
+      const foreignHash = "b".repeat(64);
+      await seedReferenceObjects(db, B, "workspace-media", [foreignHash], 8_388_608);
+      await seedReferenceObjects(db, B, "workspace-content", [foreignHash]);
+      await expect(saveReferences(db, A, badImage({ hash: foreignHash }), 1)).rejects.toMatchObject({ code: "PT409" });
+      await expect(saveReferences(db, A, badSource({ hash: foreignHash }), 1)).rejects.toMatchObject({ code: "PT409" });
+      await expect(saveReferences(db, A, badImage({ hash: "c".repeat(64) }), 1)).rejects.toMatchObject({ code: "PT409" });
+      await expect(saveReferences(db, A, badSource({ hash: "c".repeat(64) }), 1)).rejects.toMatchObject({ code: "PT409" });
+      // An acknowledged retry returns its original receipt before inspecting references.
+      expect((await saveReferences(db, A, badImage({ hash: "invalid" }), 0, key)).rows[0].r)
+        .toMatchObject({ status: "accepted", revision: 1, idempotent: true });
+      expect((await db.query("select count(*)::integer as n from public.workspace_revisions")).rows).toEqual([{ n: 1 }]);
+    } finally { await db.close(); }
+  }, 120_000);
+
+  it("retains source expansion and unique-image quotas and rejects malformed metadata before writing", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    try {
+      await db.query("insert into auth.users(id,email) values($1,'quota@test.invalid')", [A]);
+      const images = Array.from({ length: 257 }, (_, index) => referenceImage(index, referenceHash(index), 8_388_608));
+      await seedReferenceObjects(db, A, "workspace-media", images.map(image => image.hash), 8_388_608);
+      await seedReferenceObjects(db, A, "workspace-content", [HASH]);
+      // Metadata on an unrelated object must not be evaluated for this checkpoint.
+      await db.query(`insert into storage.objects(bucket_id,name,metadata)
+        values('workspace-media',$1,'{"size":"unrelated malformed size"}'),
+          ('workspace-content',$1,'{"size":"unrelated malformed size"}')`, [`${A}/${"f".repeat(64)}`]);
+      await expect(saveReferences(db, A, { ...referencePayload(), media: images })).rejects.toMatchObject({ code: "PT413" });
+      const sources = [0, 1].map(index => ({ ...referenceSource(index, HASH), expandedBytes: 268_435_456 }));
+      await expect(saveReferences(db, A, { ...referencePayload(), sources })).rejects.toMatchObject({ code: "PT413" });
+      for (const field of ["byteSize", "expandedBytes"]) {
+        await expect(saveReferences(db, A, { ...referencePayload(), sources: [{ ...referenceSource(0, HASH), [field]: "7" }] }))
+          .rejects.toMatchObject({ code: "PT400" });
+      }
+      await expect(saveReferences(db, A, { ...referencePayload(), sources: [{ ...referenceSource(0, HASH), collection: null }] }))
+        .rejects.toMatchObject({ code: "PT400" });
+      await expect(saveReferences(db, A, { ...referencePayload(), media: Array.from({ length: 20_001 }, (_, index) => referenceImage(index)) }))
+        .rejects.toMatchObject({ code: "PT413" });
+      expect((await db.query("select count(*)::integer as n from public.workspace_revisions")).rows).toEqual([{ n: 0 }]);
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("limits withdrawn academic exceptions to contained entries in this user's exact non-conflict base", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const collection = randomUUID();
+    const revision = randomUUID();
+    try {
+      await db.query("insert into auth.users(id,email) values($1,'publisher@test.invalid'),($2,'reader@test.invalid')", [A, B]);
+      await db.query("insert into public.academic_collections(id,owner_id,title,module,term,visibility,review_status) values($1,$2,'Synthetic batch','TEST','Term 1','shared','approved')", [collection, A]);
+      await db.query("insert into public.academic_revisions(id,collection_id,content_hash,template_text,status,approved_at) values($1,$2,$3,'','ready',now())", [revision, collection, HASH]);
+      await db.query("update public.academic_collections set current_revision_id=$2 where id=$1", [collection, revision]);
+      await db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'image.png',$2,$3,7,'image/png')", [revision, `${collection}/${HASH}`, HASH]);
+      await db.query("insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{\"size\":7}')", [`${collection}/${HASH}`]);
+      await db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'unrelated.png',$2,$3,7,'image/png')", [revision, `${collection}/${"f".repeat(64)}`, "f".repeat(64)]);
+      await db.query("insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{\"size\":\"unrelated malformed size\"}')", [`${collection}/${"f".repeat(64)}`]);
+      const academic = { revisionId: revision, path: "image.png", sha256: HASH };
+      const media = { ...referenceImage(0, HASH), academic };
+      // A projected question's hash/byte length intentionally differs from its source file.
+      const source = { ...referenceSource(0, "d".repeat(64)), byteSize: 10,
+        academic: { ...academic, adapterVersion: 1, kind: "question", reviewedAt: "2026-11-09" } };
+      const payload = { ...referencePayload(), media: [media], sources: [source] };
+      const key = randomUUID();
+      expect((await saveReferences(db, B, payload, 0, key)).rows[0].r).toMatchObject({ status: "accepted", revision: 1 });
+      expect((await saveReferences(db, B, payload, 1)).rows[0].r).toMatchObject({ status: "accepted", revision: 2 });
+      expect((await saveReferences(db, B, payload, 0)).rows[0].r).toMatchObject({ status: "conflict", preserved: true });
+      expect((await db.query("select revision from public.workspace_revisions where user_id=$1 and reason='conflict'", [B])).rows)
+        .toEqual([{ revision: 0 }]);
+      await db.query("update public.academic_collections set withdrawn=true where id=$1", [collection]);
+      expect((await as(db, "authenticated", B, "select * from storage.objects where bucket_id='academic-content'")).rows).toEqual([]);
+      expect((await saveReferences(db, B, payload, 0, key)).rows[0].r).toMatchObject({ status: "accepted", idempotent: true });
+      await expect(saveReferences(db, B, payload, 0)).rejects.toMatchObject({ code: "PT409" });
+      for (const changed of [{ path: "other.png" }, { revisionId: randomUUID() }]) {
+        await expect(saveReferences(db, B, { ...payload, media: [{ ...media, academic: { ...academic, ...changed } }] }, 2))
+          .rejects.toMatchObject({ code: "PT409" });
+        await expect(saveReferences(db, B, { ...payload, sources: [{ ...source, academic: { ...source.academic, ...changed } }] }, 2))
+          .rejects.toMatchObject({ code: "PT409" });
+      }
+      await expect(saveReferences(db, B, { ...payload, media: [{ ...media, byteSize: 8 }] }, 2)).rejects.toMatchObject({ code: "PT409" });
+      // Sharing an accessible hash does not authorize a new private Storage path.
+      await expect(saveReferences(db, B, { ...referencePayload(), media: [referenceImage(0, HASH)] }, 2)).rejects.toMatchObject({ code: "PT409" });
+      const containedSource = { ...source, academic: { ...academic, adapterVersion: 1, kind: "question" } };
+      expect((await saveReferences(db, B, { ...payload, sources: [containedSource] }, 2)).rows[0].r).toMatchObject({ status: "accepted" });
+      await expect(saveReferences(db, B, payload, 99)).rejects.toMatchObject({ code: "PT409" });
+    } finally { await db.close(); }
+  }, 60_000);
+});
 const PRIVILEGED = [
   "public.push_workspace_delta_v2(bigint,text,integer,text,jsonb,uuid,uuid,text)",
   "public.push_workspace_revision_v2(bigint,integer,text,jsonb,uuid,uuid,text)",

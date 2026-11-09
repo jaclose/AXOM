@@ -90,13 +90,14 @@ The final candidate also includes coordinated local corrections described below.
 
 ## Forward-only SQL plan
 
-These nine feature migration files are present in this checkpoint. Their presence and local
+These ten migration files are present in the candidate. Their presence and local
 PGlite checks do not establish hosted execution. Preserve previously numbered
 migrations byte-for-byte; deploy the additive upgrade sequence and record the
 actual database result separately.
 
 | Migration | Purpose |
 | --- | --- |
+| `20261105000000_workspace_reference_validation_batch.sql` | Independently deployable account-save repair using indexed batch reference checks; depends only on the deployed baseline and can precede the nine held feature migrations. |
 | `20261106020000_community_experience.sql` | Community profiles, consent and conversations/progress support. |
 | `20261108182000_question_set_review_revision_guard.sql` | Bind review actions to an exact revision. |
 | `20261108200000_question_set_snapshot_type_guard.sql` | Reject malformed snapshot scalar types. |
@@ -107,15 +108,23 @@ actual database result separately.
 | `20261109060000_question_set_import_tag_projection_upgrade.sql` | Add the forward tag-projection correction without rewriting earlier SQL. |
 | `20261109070000_question_set_like_revision_integrity.sql` | Retain endorsement history with publication epochs. |
 
-Separately held for its remaining performance gate, the prepared sync repair
+The independently reviewed sync repair
 `20261105000000_workspace_reference_validation_batch.sql` changes one function,
 with no row deletion, policy change,
 privilege broadening or global timeout increase. Production logs at
 2026-11-09 16:35–16:40 UTC locate SQL 57014 inside the old repeated Storage
 lookups. Readback still shows checkpoint 71 from September 30 after image
 recovery and upload. Applying the repair to AXOM Production is a separate
-approval boundary. It is not included in this checkpoint until its large-library
-validation passes. Its local rollback restores the function from
+approval boundary. All 33 migration tests passed, including occupied upgrade,
+rollback/reapply and a 20,000-distinct-source stress case with 20,000 image
+references. On the contended local PGlite runtime, the representative
+1,300-source/116-image checkpoint improved from 1,187ms to 421ms; the large
+checkpoint took 7,882ms. These are local measurements, not a hosted latency
+guarantee. Indexed path probes prevent quadratic rescans when RLS cardinality
+estimates are low; unrelated objects are never size-cast before path matching.
+The reviewed SQL SHA-256 is
+`4b5a38e2f19361aa2c1ee8cdcb0c6ea6c5ee5cf42524ac5d407a68b64691b380`.
+Its local rollback restores the function from
 `20261013230000_shared_account_content_references.sql`; it does not undo or
 delete account checkpoints. Hosted repair success requires a fresh owner's
 save and matching revision/hash readback, followed by reload verification.
@@ -154,6 +163,11 @@ remain disabled. Signing/notarization and actual package execution are unverifie
 No installer, release ZIP, tag, GitHub release or downloadable app was generated.
 The existing [desktop procedure](../DESKTOP-RELEASE.md) is the packaging handoff;
 its outdated Node/CI instruction was corrected to the installed pinned toolchain.
+Root and web production dependency audits report zero vulnerabilities. Native
+distribution remains held for the existing updater's transitive `zip 4.6.1`
+[critical advisory](https://github.com/advisories/GHSA-m665-v7pm-7grj); compatibility
+must be validated before changing its major version or producing an installer.
+Optional crawler and development-tool alerts are separate from the web runtime.
 
 ## Verification and outstanding gates
 
