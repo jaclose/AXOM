@@ -227,3 +227,53 @@ describe("R15 deferred missing-original repair fail-closed boundaries", () => {
     expect(download.mock.calls.length).toBeGreaterThan(0);
   });
 });
+
+
+/**
+ * R17 independently probes races not exercised by the R15 negatives:
+ * a new account epoch invalidating a readback and a conflicting immutable
+ * upload whose stored bytes differ despite the 409 acknowledgement.
+ * Everything stays within synthetic, device-local fixtures.
+ */
+describe("R17 concurrent private recovery account and 409 boundaries", () => {
+  it("fails closed when the account epoch changes during fresh remote readback", async () => {
+    const { state, hash } = await deferredFixture();
+    remote.delete(OWNER + "/" + hash);
+    let currentEpoch = 1;
+    let sawRestoredReadback = false;
+    download.mockImplementation(async (path: string) => {
+      const data = remote.get(path) ?? null;
+      if (data) {
+        sawRestoredReadback = true;
+        currentEpoch = 2; // Simulate sign-out or identity handoff while bytes travel.
+      }
+      return { data, error: data ? null : { statusCode: "404", message: "missing original" } };
+    });
+    const assertSameEpoch = async () => {
+      if (currentEpoch !== 1) throw new Error("synthetic account epoch changed");
+    };
+    await expect(uploadCloudMedia(client, OWNER, state, assertSameEpoch, state.deferredContent!.media))
+      .rejects.toThrow(/account epoch changed/i);
+    expect(sawRestoredReadback).toBe(true);
+  });
+
+  it("rejects a concurrent 409 receipt when its remote bytes have a different SHA", async () => {
+    const { state, hash } = await deferredFixture();
+    remote.delete(OWNER + "/" + hash);
+    const corrupt = new Uint8Array(BYTES);
+    corrupt[corrupt.length - 1] ^= 1; // Equal length, different SHA.
+    uploadStarted = new Promise<void>(resolve => { signalUpload = resolve; });
+    saw404 = new Promise<void>(resolve => { signal404 = resolve; });
+    concurrentMissing = true;
+    upload.mockImplementation(async (path: string, _blob: Blob) => {
+      signalUpload();
+      await saw404;
+      remote.set(path, new Blob([corrupt], { type: "image/png" }));
+      return { error: { statusCode: "409", message: "synthetic immutable conflict" } };
+    });
+    await expect(uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media))
+      .rejects.toThrow(/failed its integrity check/i);
+    expect(first404).toBe(true);
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(corrupt);
+  }, 10_000);
+});
