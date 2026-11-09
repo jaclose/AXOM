@@ -10,7 +10,7 @@ import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../l
 export function QuestionExhibits({ attachments }: { attachments: readonly QuestionImageAttachment[] }) {
   // Keep image object URLs and the modal scoped to the exact attachment keys.
   // Imported questions may reuse IDs across accounts/workspaces with different bytes.
-  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string | "missing"> }>({ signature: "", urls: {} });
+  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string | "missing" | "unavailable"> }>({ signature: "", urls: {} });
   const [zoomed, setZoomed] = useState<{ signature: string; attachment: QuestionImageAttachment } | null>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -20,7 +20,7 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
   // The blob may be rehydrated under its stable key; a newer metadata revision must invalidate old object URLs.
   const accountScope = useAccount(({ phase, user }) => phase === "signed-in" && user?.id ? `account:${user.id}` : `phase:${phase}`);
   const signature = JSON.stringify([accountScope, attachments.map(({ id, blobKey, updatedAt }) => [id, blobKey, updatedAt])]);
-  const urls = loaded.signature === signature ? loaded.urls : Object.create(null) as Record<string, string | "missing">;
+  const urls = loaded.signature === signature ? loaded.urls : Object.create(null) as Record<string, string | "missing" | "unavailable">;
   const activeZoomed = zoomed?.signature === signature ? zoomed.attachment : null;
   const zoomSignature = zoomed?.signature ?? null;
   const signatureRef = useRef(signature);
@@ -35,15 +35,20 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
     let cancelled = false;
     const created: string[] = [];
     void (async () => {
-      const next: Record<string, string | "missing"> = Object.create(null);
+      const next: Record<string, string | "missing" | "unavailable"> = Object.create(null);
       for (const attachment of attachmentsRef.current) {
         const record = await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined);
         // Cleanup may run while the blob read is pending; do not create an orphaned URL afterward.
         if (cancelled) return;
         if (record) {
-          const url = URL.createObjectURL(record.blob);
-          created.push(url);
-          next[attachment.id] = url;
+          try {
+            const url = URL.createObjectURL(record.blob);
+            created.push(url);
+            next[attachment.id] = url;
+          } catch {
+            // A failed browser allocation must not suppress or leak adjacent exhibits.
+            next[attachment.id] = "unavailable";
+          }
         } else {
           next[attachment.id] = "missing";
         }
@@ -88,8 +93,10 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
       {attachments.map((attachment, index) => {
         const url = urls[attachment.id];
         const label = attachment.altText || (attachments.length === 1 ? "Question image" : `Question image ${index + 1}`);
-        if (url === "missing") {
-          return <p key={attachment.id} className="question-exhibit-missing">{attachment.fileName} is not on this device.</p>;
+        if (url === "missing" || url === "unavailable") {
+          return <p key={attachment.id} className="question-exhibit-missing">{url === "missing"
+            ? `${attachment.fileName} is not on this device.`
+            : `${attachment.fileName} could not be displayed on this device.`}</p>;
         }
         return (
           <button key={attachment.id} type="button" className="question-exhibit" disabled={!url}
