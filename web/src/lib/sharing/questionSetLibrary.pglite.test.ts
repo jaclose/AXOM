@@ -529,6 +529,56 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect((await search(LEARNER, "Updated synthetic")).some(row => row.id === id)).toBe(true);
   });
 
+  it("rejects forged direct publication and preserves the authenticated reviewer path", async () => {
+    const source = snapshot();
+    const id = await submit(OWNER, "direct-approval-provenance", source);
+    // Privileged maintenance has no academic reviewer JWT; it must never
+    // turn a pending entry into a public Question Set by changing status.
+    await db.query("select set_config('request.jwt.claim.sub','',false)");
+    await expect(db.query(
+      "update public.question_set_library_entries set status='approved' where id=$1", [id],
+    )).rejects.toThrow(/Academic review provenance is required/i);
+    // Even supplying plausible review fields is not a review decision when
+    // the actor has not authenticated as that academic reviewer.
+    await expect(db.query(
+      "update public.question_set_library_entries set status='approved', reviewed_by=$2, reviewed_at=now(), approved_at=now(), review_note='Claimed source review' where id=$1",
+      [id, REVIEWER],
+    )).rejects.toThrow(/Academic review provenance is required/i);
+
+    // A privileged direct INSERT must not skip the pending-review state.
+    await expect(db.query(
+      `insert into public.question_set_library_entries
+        (owner_id,source_id,title,tags,question_count,snapshot_payload,status)
+        values ($1,'direct-insert-forgery','Synthetic reviewed set',array['sample'],1,$2::jsonb,'approved')`,
+      [OWNER, JSON.stringify(source)],
+    )).rejects.toThrow(/submitted pending academic review/i);
+
+    const [held] = (await db.query<{ status: string; review_revision: number }>(
+      "select status,review_revision from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(held).toEqual({ status: "pending", review_revision: 1 });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+
+    await approve(REVIEWER, id, source, 1);
+    const [authorized] = await as<{ value: { status: string; review_revision: number; snapshot_payload: Snapshot } }>(
+      LEARNER, "select public.authorize_question_set_library_import($1,$2::bigint,$3::jsonb) value",
+      [id, 2, JSON.stringify(source)],
+    );
+    expect(authorized.value).toMatchObject({
+      status: "approved", review_revision: 2, snapshot_payload: source,
+    });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+
+    // A takedown may revoke an approved publication, but not silently
+    // reapprove it without another pending academic review.
+    await db.query("select set_config('request.jwt.claim.sub','',false)");
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    await expect(db.query(
+      "update public.question_set_library_entries set status='approved' where id=$1", [id],
+    )).rejects.toThrow(/Academic review provenance is required/i);
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+  });
+
   it("authorizes a single approved import revision, never pending or withdrawn answer evidence", async () => {
     const original = snapshot();
     const id = await submit(OWNER, "import-auth-revision", original);

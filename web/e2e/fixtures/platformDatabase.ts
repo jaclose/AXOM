@@ -18,7 +18,7 @@ const rpcNames = new Set(["axom_operator_role", "axom_operator_overview", "axom_
   "academic_catalog",
   "academic_is_reviewer", "submit_question_set_library", "withdraw_question_set_library", "review_question_set_library",
   "my_question_set_library", "pending_question_set_library", "set_question_set_library_like",
-  "list_question_set_library", "get_question_set_library"]);
+  "list_question_set_library", "get_question_set_library", "authorize_question_set_library_import"]);
 const tables = new Set(["social_profiles", "social_connections", "social_posts", "social_reactions", "social_post_reports", "axom_operator_audit",
   "journal_experience_feedback"]);
 const identifier = (value: string) => {
@@ -79,8 +79,8 @@ export async function createPlatformDatabase() {
   const rpc = async (userId: string, name: string, args: Record<string, unknown> = {}) => {
     if (!rpcNames.has(name)) throw new Error(`Unexpected fixture RPC: ${name}`);
     const keys = Object.keys(args);
-    const signature = keys.map((key, index) => `${identifier(key)} => $${index + 1}${key === "p_snapshot" ? "::jsonb" : ""}`).join(",");
-    const values = keys.map(key => key === "p_snapshot" ? JSON.stringify(args[key]) : args[key]);
+    const signature = keys.map((key, index) => `${identifier(key)} => $${index + 1}${["p_snapshot", "p_expected_snapshot"].includes(key) ? "::jsonb" : ""}`).join(",");
+    const values = keys.map(key => ["p_snapshot", "p_expected_snapshot"].includes(key) ? JSON.stringify(args[key]) : args[key]);
     if (["axom_operator_accounts", "axom_operator_review_queue", "axom_operator_reports",
       "my_question_set_library", "pending_question_set_library", "list_question_set_library"].includes(name)) {
       return asUser(userId, `select * from public.${identifier(name)}(${signature})`, values);
