@@ -368,47 +368,106 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
       privacy="All paths refer to private user-authorized source files. No public upload or blanket content licensing permitted.",
     )
 
-def index_source_archives(rows):
-    """Read ZIP *central directories only*. Never unpack originals or trust CRC32 as SHA256."""
+def index_source_archives(rows, secure_open=None):
+    """Index ZIP central directories from an authorized, revision-bound handle.
+
+    ZIP member bytes are never extracted. A source without a scanned SHA or
+    safe opener remains held; a changed source must not supply filenames or
+    candidate counts under the previous source ID.
+    """
     import zipfile
     archives = []
-    allowed={".pdf",".txt",".docx",".pptx",".ppsx",".xlsx",".xls",".csv",".json"}
+    allowed = {".pdf", ".txt", ".docx", ".pptx", ".ppsx", ".xlsx", ".xls", ".csv", ".json"}
+
+    def checksum(stream):
+        stream.seek(0)
+        digest = hashlib.sha256()
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+        return digest.hexdigest()
+
+    def revision_signature(st):
+        return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
     for r in rows:
-        if r["document_type"] != "archive_review": continue
-        p=pathlib.Path(r["original_path"])
-        archived=dict(archive_path=str(p),archive_sha256=r.get("source_sha256"),
-                      archive_id=r["source_id"],entries=[],errors=[],question_candidate_count=0)
+        if r["document_type"] != "archive_review":
+            continue
+        p = pathlib.Path(r["original_path"])
+        archived = dict(archive_path=str(p), archive_sha256=r.get("source_sha256"),
+                        archive_id=r["source_id"], entries=[], errors=[],
+                        question_candidate_count=0)
         try:
-            with zipfile.ZipFile(p,"r",allowZip64=True) as z:
-                archived["total_zip_entries"]=len(z.infolist())
-                archived["reported_uncompressed_bytes"]=sum(i.file_size for i in z.infolist())
-                for i in z.infolist():
-                    if i.is_dir():continue
-                    name=i.filename
-                    unsafe=name.startswith(("/", "\\")) or ".." in pathlib.PurePosixPath(name).parts
-                    ext=pathlib.Path(name).suffix.casefold()
-                    if ext not in allowed:continue
-                    academic=bool(re.search(r"(?i)(?:\bpq\b|practice.?q|imcq|e.?soft|examsoft|quiz|questions?|workbook|answer.?key)",name))
-                    candidate=dict(virtual_source_id=_sha(str(p)+"|"+name+"|"+str(i.CRC)+"|"+str(i.file_size))[:24],
-                        member_name=name,extension=ext,reported_byte_size=i.file_size,
-                        zip_compressed_bytes=i.compress_size,crc32=f"{i.CRC:08x}",
-                        encrypted=bool(i.flag_bits & 1), unsafe_path=unsafe,
-                        academic_question_hint=academic,
-                        content_sha256=None, status="metadata_only_not_extracted")
-                    archived["entries"].append(candidate)
-                    if academic and not unsafe:archived["question_candidate_count"]+=1
-                    if len(archived["entries"])>=10000:
-                        archived["errors"].append("member_output_capped_at_10000")
-                        break
-            r["archive_index_status"]="central_directory_indexed"
-            r["archive_candidate_members"]=archived["question_candidate_count"]
-            r["archive_total_entries"]=archived["total_zip_entries"]
-        except (OSError,ValueError,zipfile.BadZipFile,RuntimeError) as err:
-            archived["errors"].append(type(err).__name__+":"+str(err)[:100])
-            r["archive_index_status"]="invalid_or_unreadable_archive"
-            r["unresolved_reason"]="archive_central_directory_unreadable"
+            expected = r.get("source_sha256")
+            if (secure_open is None or not isinstance(expected, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", expected) is None):
+                raise ValueError("archive_source_revision_unverified")
+            # Resolving a recorded path through zipfile.ZipFile(path) bypasses
+            # the post-inventory root/leaf no-follow boundary. Use only the
+            # canonical source opener and retain its *same* descriptor.
+            fd = secure_open(r)
+            with os.fdopen(fd, "rb") as stream:
+                before = revision_signature(os.fstat(stream.fileno()))
+                if checksum(stream) != expected:
+                    raise ValueError("archive_source_sha_mismatch")
+                stream.seek(0)
+                with zipfile.ZipFile(stream, "r", allowZip64=True) as z:
+                    infos = z.infolist()
+                    archived["total_zip_entries"] = len(infos)
+                    archived["reported_uncompressed_bytes"] = sum(i.file_size for i in infos)
+                    for i in infos:
+                        if i.is_dir():
+                            continue
+                        name = i.filename
+                        # ZIP names use '/', but Windows traversal strings or
+                        # drives must still be held if later tooling consumes
+                        # these metadata-only candidate names.
+                        win = pathlib.PureWindowsPath(name)
+                        unsafe = (name.startswith(("/", "\\"))
+                                  or "\\" in name or win.drive or win.is_absolute()
+                                  or ".." in pathlib.PurePosixPath(name).parts
+                                  or ".." in win.parts)
+                        ext = pathlib.Path(name).suffix.casefold()
+                        if ext not in allowed:
+                            continue
+                        academic = bool(re.search(
+                            r"(?i)(?:\bpq\b|practice.?q|imcq|e.?soft|examsoft|quiz|questions?|workbook|answer.?key)",
+                            name))
+                        candidate = dict(
+                            virtual_source_id=_sha(str(p) + "|" + name + "|" +
+                                                   str(i.CRC) + "|" + str(i.file_size))[:24],
+                            member_name=name, extension=ext, reported_byte_size=i.file_size,
+                            zip_compressed_bytes=i.compress_size, crc32=f"{i.CRC:08x}",
+                            encrypted=bool(i.flag_bits & 1), unsafe_path=bool(unsafe),
+                            academic_question_hint=academic, content_sha256=None,
+                            status="metadata_only_not_extracted")
+                        archived["entries"].append(candidate)
+                        if academic and not unsafe:
+                            archived["question_candidate_count"] += 1
+                        if len(archived["entries"]) >= 10000:
+                            archived["errors"].append("member_output_capped_at_10000")
+                            break
+                # A concurrent rewrite during ZIP directory reads cannot leave
+                # apparently accepted metadata attached to the old source SHA.
+                if (checksum(stream) != expected or
+                        revision_signature(os.fstat(stream.fileno())) != before):
+                    raise ValueError("archive_changed_during_central_directory_index")
+            r["archive_index_status"] = "central_directory_indexed"
+            r["archive_candidate_members"] = archived["question_candidate_count"]
+            r["archive_total_entries"] = archived["total_zip_entries"]
+        except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as err:
+            # Never retain partial metadata from untrusted or changed sources.
+            archived["entries"] = []
+            archived["question_candidate_count"] = 0
+            archived.pop("total_zip_entries", None)
+            archived.pop("reported_uncompressed_bytes", None)
+            archived["errors"].append(type(err).__name__ + ":" + str(err)[:100])
+            r["archive_index_status"] = "invalid_or_unreadable_archive"
+            r["archive_candidate_members"] = 0
+            r.pop("archive_total_entries", None)
+            r.setdefault("unresolved_reason", "archive_central_directory_unreadable")
         archives.append(archived)
     return archives
+
 
 def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
     """Integrate parser's independent per-SHA assessment without granting cloud status.

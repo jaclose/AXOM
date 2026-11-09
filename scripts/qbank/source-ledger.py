@@ -814,7 +814,7 @@ def report(args):
     pdfprobed = inspect_pdf_sample(records, args.probe_pdfs)
     packages, collisions, package_errors = inspect_packages(records)
     acts = parse_templates(records)
-    archives = index_source_archives(records)
+    archives = index_source_archives(records, open_scanned_source_file)
     coverage = coverage_matrix(acts, records)
     # Canonical review holds must reach the import queue, not be added afterward.
     canonical = canonical_packages(packages, verify_native_package_questions_sha)
