@@ -358,16 +358,26 @@ export async function createQuestionAttachment(input: {
 // --- orphan maintenance ------------------------------------------------------
 
 export interface AttachmentMaintenanceReport {
+  /** Automatic deletion is disabled until per-account ownership can be proven. */
   deletedOrphanBlobKeys: string[];
+  /** Present on the device, but absent from the current workspace's references. */
+  preservedOrphanBlobKeys: string[];
   missingBlobKeys: string[];
 }
 
-/** Bounded, deterministic, non-destructive sweep: deletes blobs no question
- * references; reports (but never deletes) metadata whose blob is missing.
- * SAFETY: only call with a question list that is known to be fully loaded —
- * never before store rehydration (an empty list would orphan every blob).
- * AXOM runs it post-restore/merge with the restored questions passed
- * explicitly; question deletion uses targeted deletes instead of a sweep. */
+/** Read-only inventory of the currently hydrated question references.
+ *
+ * IMPORTANT: questionAttachmentBlobs is shared by every account on this browser
+ * origin, while this list belongs to only the currently hydrated workspace.
+ * An absent key here is NOT proof that another account has discarded it.
+ * Deleting an "orphan" during account B rehydration could erase account A's
+ * still-referenced image. Preserve every unscoped key until the vault has
+ * durable, verified account ownership and a safe legacy migration.
+ *
+ * Explicit, caller-authorized targeted deletion remains separate via
+ * deleteQuestionAttachmentBlobs. This inventory does not fix the distinct
+ * cross-account read/export issue; those paths require their own guards.
+ * Retention may consume more device storage until scoped GC is implemented. */
 export async function runQuestionAttachmentMaintenance(
   questions: ReadonlyArray<{ attachments?: readonly QuestionImageAttachment[] }>,
 ): Promise<AttachmentMaintenanceReport> {
@@ -376,13 +386,12 @@ export async function runQuestionAttachmentMaintenance(
     for (const attachment of question.attachments ?? []) referenced.add(attachment.blobKey);
   }
   const stored = await listQuestionAttachmentBlobKeys();
-  // Private review documents have their own references. Preserve their bytes if
-  // an older app/backup cannot read a document; recovery must remain possible.
-  const orphans = stored.filter((key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key));
-  await deleteQuestionAttachmentBlobs(orphans);
+  const preservedOrphanBlobKeys = stored.filter(
+    (key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key),
+  );
   const storedSet = new Set(stored);
-  const missing = [...referenced].filter((key) => !storedSet.has(key));
-  return { deletedOrphanBlobKeys: orphans, missingBlobKeys: missing };
+  const missingBlobKeys = [...referenced].filter((key) => !storedSet.has(key));
+  return { deletedOrphanBlobKeys: [], preservedOrphanBlobKeys, missingBlobKeys };
 }
 
 // --- portable backup payloads ------------------------------------------------
