@@ -2,18 +2,22 @@
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../checksum";
+import { DB_NAME } from "../localVault";
+import { initializeQuestionAttachmentScope, resetQuestionAttachmentScopeForTests } from "../questionAttachmentScope";
 import {
-  SOURCE_ORIGINAL_CHUNK_BYTES, SOURCE_ORIGINALS_DB, SourceOriginalError, deleteSourceOriginal, hasStoredSourceOriginal,
+  SOURCE_ORIGINAL_CHUNK_BYTES, SOURCE_ORIGINALS_DB, SOURCE_ORIGINALS_DB_VERSION, SourceOriginalError, deleteSourceOriginal, hasStoredSourceOriginal,
   readSourceOriginal, saveSourceOriginal, sourceCoverage,
 } from "./sources";
 
 beforeEach(() => {
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  resetQuestionAttachmentScopeForTests();
+  initializeQuestionAttachmentScope("source-owner", "source-owner");
 });
 afterEach(async () => {
-  await new Promise<void>((resolve) => {
-    const request = fakeIndexedDb.deleteDatabase(SOURCE_ORIGINALS_DB);
+  for (const name of [SOURCE_ORIGINALS_DB, DB_NAME]) await new Promise<void>((resolve) => {
+    const request = fakeIndexedDb.deleteDatabase(name);
     request.onsuccess = () => resolve();
     request.onerror = () => resolve();
     request.onblocked = () => resolve();
@@ -26,7 +30,7 @@ const problemOf = async (run: Promise<unknown>) => run.then(() => "saved", (erro
 
 async function originalEntries(): Promise<Array<{ key: IDBValidKey; value: unknown }>> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SOURCE_ORIGINALS_DB, 1);
+    const request = indexedDB.open(SOURCE_ORIGINALS_DB, SOURCE_ORIGINALS_DB_VERSION);
     request.onupgradeneeded = () => request.result.createObjectStore("originals");
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
@@ -45,7 +49,7 @@ async function originalEntries(): Promise<Array<{ key: IDBValidKey; value: unkno
 
 async function changeOriginal(key: IDBValidKey, value?: unknown): Promise<void> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SOURCE_ORIGINALS_DB, 1);
+    const request = indexedDB.open(SOURCE_ORIGINALS_DB, SOURCE_ORIGINALS_DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const db = request.result, transaction = db.transaction("originals", "readwrite");

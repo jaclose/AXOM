@@ -2,7 +2,7 @@
 
 ## Daily development and local packages
 
-Use Node 22.12+ (CI uses Node 24), Rust stable, and the platform prerequisites
+Use the pinned Node 22.23.4 from `.nvmrc` (also used by CI), Rust stable, and the platform prerequisites
 from [Tauri](https://v2.tauri.app/start/prerequisites/). On macOS, install Xcode
 command-line tools. Install pinned JS dependencies once:
 

@@ -5,99 +5,94 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Homepage alpha
+## CONVERGENCE integration · 2026-11-09
 
-See [cinematic entry](features/cinematic-landing.md).
+Isolated branch `release/2026-11-09-convergence`, based on verified
+`origin/main` `382308aba5ececd039285d4b8ccee9a181b40d7c`. JD explicitly authorized
+combining the existing work, repairs, commits and push through the unified FORGE
+gateway. Original dirty worktrees and project source mirrors are untouched.
+[Candidate manifest](release/2026-11-09-CONVERGENCE.md) records pinned provenance,
+held work, migration order and verification. It is the current release record;
+older checkout claims remain in this file's Git history at the base SHA.
 
-## Productivity and Soundscapes · 2026-11-05
+Included working areas: reviewed QBank publication/import/practice, course-template
+access and week ownership, private Community profiles/feed/rankings, Journal
+concurrent edits, account-scoped image storage, upload diagnostics/progress, and
+foreground notification panels. WIP navigation and direct routes are withheld;
+Tools precedes Academic Support. Native packaging groundwork only: no installer,
+release archive or download has been generated.
 
-PR #122, `codex/productivity-soundscapes-20261105`, includes `eb4e5d3`. JD authorized
-audio publication, push and merge after verification.
-The 566.920-second stereo loop is the default main sound and initial pin.
-[Soundscapes](features/soundscapes.md) owns playback, the reactive Orb and persistent
-dock; [Productivity](features/productivity.md) owns source accounting. No workspace
-schema change. Initial CI passed 4,765 unit tests (35 skips), 89 release tests and
-typecheck/lint/build. Local update/offline and feature browser checks passed.
-Review fixes cover audio races, best-day selection, responsive forms, mobile dock
-interception and readable capsule surfaces. Hosted acceptance and production
-readback are tracked in PR #122.
-Production Supabase denies this connection access: the regenerated Communications
-export bundle still needs deployment. The frontend does not depend on that update.
+The combined package is committed and pushed in draft PR #345. Focused tests and
+real local browser journeys have passed in these areas. The
+complete combined gate, exact-head hosted checks and production acceptance are
+still pending. Do not infer release readiness or cloud publication from those
+focused results. Both approved account-save repairs are applied and the owner's
+new checkpoint is verified. The nine feature migrations and regenerated
+Communications function retain separate production controls.
 
-## Host and Communities repair · 2026-11-04
+## Live account investigation · 2026-11-09
 
-Branch `claude/host-communities-20261104` from `a96f1491`. Host now shows only
-for the verified Project CEO (sidebar, title, Settings, Community shortcut and
-the `#host` route); unknown routes no longer borrow the Host title. New forward
-migration `20261104120000_operator_accounts_email_text.sql` fixes the owner's
-Host dashboard, which failed on every load because `auth.users.email` is
-`varchar(255)` on Supabase. See the
-[operator console](features/community-operator-console.md#operator-console).
-The migration is not on production yet; push, `db push` and deploy need JD.
+Production Supabase connection is restored and verified for `AXOM Production`
+(`jofkmfwkidubxcutkwzf`), now with 46 applied migrations. JD explicitly approved
+`20261105000000_workspace_reference_validation_batch`; isolated CLI application
+and ledger/security readback passed. The nine feature migrations remain absent.
+No content publication or account deletion occurred. Do not target the older project.
 
-## Checkout and release boundary · 2026-11-02 14:55 UTC
+Two missing question images were restored from exact historical backup bytes
+through add-only recovery. JD also approved the v2-only 60-second cleanup allowance
+in `20261105010000_restore_v2_retention_cleanup_window.sql`; isolated apply and
+security readback passed. Both repairs preserve existing access/retention rules.
 
-Remote `main` is `b1d3bea5` after PR #91, which makes missing static assets return
-404 instead of the SPA HTML fallback and removes the blanket immutable asset
-header. Cache-busted version checks for both `axom.info` and `www.axom.info`
-return the same `b1d3bea5` production build. Apex points directly to Production
-without redirecting to `www`, preserving the browser origin that owns local
-workspace storage.
+Manual revision 72 was accepted November 9 at 19:56:14 UTC; exact receipts and
+migration hashes are in the candidate manifest.
+Readback confirms 1,216 questions, 266 tracker rows, 345 logs, 78 documents,
+79 quiz sessions, 116 media references and 1,294 content references. Existing
+retention left 11 canonical checkpoints. Two initial client confirmations failed
+generically after acceptance; the exact cause remains unproven. An idempotent
+retry acknowledged version 72 at 20:03:51 UTC, and **Protected / account copy
+current** persisted after reload. Local saving also confirmed at 20:05:10 UTC.
+This is a real owner-account save/readback, not a multi-device or every-account
+acceptance claim. No manual history cleanup or duplicate checkpoint was needed.
 
-The isolated hotfix checkout `codex/axom-startup-fresh-update-20261102` is
-based on that main commit. It moves web-worker registration ahead of shell
-imports, retries missing assets with a cache-busted request, and offers an
-explicit verified-save refresh if browser quota blocks only the extra recovery
-copy. The focused update, checkpoint and route-boundary tests pass 30/30;
-typecheck and lint pass. The first full web test run exposed one mock-export
-mismatch; after fixing it, focused coverage passed. Full build and hosted CI
-remain pending before merge. No user browser storage was cleared or rewritten.
+The older live tab correctly refuses a stale overwrite. Both safety exports passed
+CRC and all 116 image/30 original-file hash comparisons. Questions, Journal and
+file bytes match. The newer protected copy retains two completed passes, 266
+tracker rows and a substituted 90-minute log. Keep it as the base; do not restore
+the stale copy or union potentially duplicate time. Original ZIPs and a private
+difference ledger preserve older-only records. The newer export was moved by JD to
+`~/Downloads/::::::::/axom-backup-2026-11-09 (2).zip` and reverified.
+Apex and www have separate browser storage: never clear, replace or silently
+transfer either. The newer copy is now protected as revision 72.
 
-## What this release contains
-
-- The frontier joins Ideas/Journal with [Communities](features/communities.md),
-  [Patch Notes](features/patch-notes.md), the qualitative asthma
-  [body simulator](features/body-simulator.md), Dashboard widget improvements,
-  and the **Midnight** palette. It includes earned study credits, bounded
-  one-day streak protection, and account settings work. Community now loads
-  the member's own profile independently, searches opted-in learners on the
-  server, and pages friend connections without silently dropping older ties.
-  Sync verifies a local save before reporting success and bounds content,
-  media and original uploads while preserving the first failure. The simulator is a
-  source-linked study illustration awaiting human medical review, not a
-  clinical tool. Radiordle and Pathordle remain held for provider approval.
-  Course-template file batches now preflight type and size before reads; pasted
-  templates have the same 2 MiB UTF-8 limit. The Host snapshot leads with
-  review and moderation work and has verified desktop/phone theme layouts.
-- [PR #74](https://github.com/jaclose/AXOM/pull/74) adds an explicit route
-  from a reviewed saved source to a private revision and **Unreviewed**
-  Community submission. Sharing needs rights attestation, exact source/media
-  checks and later academic reviewer approval. A synthetic account journey
-  does not prove hosted publishing. [PR #75](https://github.com/jaclose/AXOM/pull/75)
-  records private PDF answer-mark **proposals for review**; visual marks do
-  not change scoring keys or answer-ready status. Current-revision explanation
-  attestation remains required before official academic approval. Local ports
-  of draft PRs #79/#80 add answer-outline and inline-answer-copy receipts for
-  private review only; no bank key or readiness changes.
-- Scoped local ports from draft PRs #33, #36 and #42 add complete-term course
-  downloads/practice, an ordinary shared-course reviewer queue with exact
-  revision and explanation gates, eligible quiz pool counts/multiple subjects,
-  and preservation of unlocks/blueprint lane across backup merges. The
-  [academic library](features/academic-library.md) owns the review contract;
-  these ports passed the combined local gate and still need hosted acceptance. Week
-  practice uses downloaded membership and blocks launch when a question or
-  set was refiled outside the current course.
-- [Host](features/community-operator-console.md#operator-console) uses
-  server-read roles, reasoned/audited moderation and a restricted report
-  queue. Its migrations and verified owner grant are on production; signed-in
-  operator journeys still need real-account acceptance.
-  [Communications](features/communications.md) has a canonical renderer,
-  local previews, unsent Resend welcome/product-update and Broadcast drafts,
-  ten optional opt-out Topics, and a branded preference page. Their exact
-  [readiness record](operations/communications-readiness.md) distinguishes
-  remote drafts from delivery;
-  live Resend send, webhook, SMTP and email-client acceptance remain separate
-  gates.
+The newest QBank source drive is unavailable, as confirmed by JD. Internal copies
+provide 28 verified templates (672 activities) and 13,777 source-question
+identities / 12,380 content signatures, including 24 held revision conflicts.
+This does not establish a 20,000+ reviewed corpus. All eight supplied PDFs are
+indexed: 29,611 physical pages, with 2,815 duplicate T3 compilation pages kept
+distinct without double-counting evidence. Private sorting manifests retain
+lecture/page provenance and unresolved weeks; no official weeks were invented.
+The private Term 4 supplement parses another 266 activities, all reconciled to
+existing tracker IDs without altering progress. Its source metadata remains a
+review artifact, not an installed workspace change. DERS keeps stated Weeks
+15–20; unsupported weeks remain unscheduled. Two missing-material markers stay held.
+All 32 available template files passed a browser load/reload/reimport: 938 source
+rows, 936 installed in an isolated workspace, two identical FTCM rows held with
+both original IDs/progress preserved. Reimport added nothing and retained progress.
+The parser now avoids false lecture-number collisions from foreign course prefixes.
+Older stored keys created by that fallback are held for identity review, including
+learner-moved weeks, so an upgrade cannot transfer progress to a different lecture.
+The legacy-key regression and related course checks passed 68 focused tests.
+Private additions include a corrected 141-question IEA package and a separately
+deduplicated 77-question NCRS text package with source-provided keys/explanations;
+neither is installed in the owner's workspace or published. The census denominator
+remains separate. Together with nine source-slide questions they yield 227
+answer-ready records in the isolated preview, with reload/reimport preserving
+progress. Of these, 27 are key-only notices: the coverage fix reports 200 prose
+explanations without changing keys or source text. Three slide images and exact
+PDF excerpts are preserved. Four slide-question filings have source/template
+evidence, five remain unassigned, all weeks unknown.
+The normal Journal lane resumed and supplied independently reviewed PR #344;
+other quota-limited chats were supported by scoped subagents.
 
 ## Protected content and acceptance
 
@@ -141,13 +136,8 @@ contains private assets and broad replacement/deletion. Check the
 before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
-At `eaad98fa`, the clean combined gate passed typecheck, lint, 4,649 web
-tests (35 skipped), build, update safety, offline games and 167 browser
-journeys (14 conditional skips). On the `c06ae5a6` release tree, root API typecheck,
-88 release tests, 43 repository tests, hygiene, web typecheck/lint/build,
-update/offline checks, 200 focused unit tests and 15 relevant Chrome journeys
-passed. The broad local Vitest run was stopped under severe host load after
-four timing failures; all four files passed serially (88 tests). GitHub
-Quality run 41445654894 passed for `c06ae5a6`.
-Live mail delivery, private-content rights, and real-account Community/Host
-and academic acceptance remain separate gates.
+Next: complete the combined gate and record exact-head checks/preview for the
+pushed candidate. Both approved sync repairs are applied; revision 72 survived
+reload. FORGE #140 controls feature release acceptance. Keep the nine remaining
+production migrations, private-content publication, live communications
+and signed native packaging separate from the code commit.

@@ -6,6 +6,7 @@ import { compressText, decompressText, sha256 } from "../compressedText";
 import { workspaceDigest } from "./workspaceDigest";
 import { makeSeed } from "../seed";
 import { deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
+import { setQuestionAttachmentAccount } from "../questionAttachmentScope";
 import { snapshotWorkspace } from "./workspaceSnapshot";
 import { prepareCloudSnapshot, decodeCloudSnapshot } from "./cloudSnapshot";
 import { CONTENT_BUCKET, clearCloudContentCache, hydrateCloudContent, splitCloudContent, uploadCloudContent } from "./cloudContent";
@@ -37,12 +38,13 @@ function fixture(): NoctyriumState {
   return state;
 }
 beforeEach(() => {
+  setQuestionAttachmentAccount("account-a");
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   objects.clear(); upload.mockClear(); download.mockClear(); guard.mockClear();
   operation.current = { client, userId: "account-a", assertCurrent: guard };
 });
-afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals(); });
+afterEach(() => { dispose?.(); dispose = undefined; setQuestionAttachmentAccount(undefined); vi.unstubAllGlobals(); });
 
 describe("private cloud content and media", () => {
   it("keeps an Unreviewed community marker beside a deferred account download", async () => {
@@ -172,6 +174,9 @@ describe("private cloud content and media", () => {
     const manifest = await uploadCloudMedia(client, "account-a", state, guard);
     expect(upload.mock.calls.filter(([bucket]) => bucket === MEDIA_BUCKET)).toHaveLength(1);
     expect(manifest[0].hash).toBe(manifest[1].hash);
+    // The new original must be read back before the upload can be certified.
+    expect(download).toHaveBeenCalledTimes(1);
+    download.mockClear(); // Subsequent calls belong to fresh-device restoration.
     // A fresh device has canonical metadata and the verified cloud index, but no bytes.
     const restoredKey = `fresh-${crypto.randomUUID()}`;
     const restored = { ...attachment, blobKey: restoredKey };
@@ -225,6 +230,8 @@ describe("private cloud content and media", () => {
     expect(manifest).toHaveLength(1);
     expect(manifest[0]).toMatchObject({ blobKey, hash, byteSize: blob.size });
     expect(upload.mock.calls.filter(([bucket]) => bucket === MEDIA_BUCKET)).toHaveLength(1);
+    expect(download).toHaveBeenCalledTimes(1); // First-save integrity readback.
+    download.mockClear(); // Measure lazy recovery separately from upload.
 
     await deleteQuestionAttachmentBlobs([blobKey]);
     await saveCloudMediaIndex("account-a", manifest);
@@ -245,12 +252,17 @@ describe("private cloud content and media", () => {
     const key = `isolated-${crypto.randomUUID()}`;
     state.questions[0].attachments = [{ id: key, blobKey: key, fileName: "a.png", mimeType: "image/png", byteSize: 7, altText: "Private", createdAt: state.questions[0].createdAt, updatedAt: state.questions[0].updatedAt }];
     await saveCloudMediaIndex("account-a", [{ blobKey: key, hash: "a".repeat(64), byteSize: 7, updatedAt: state.questions[0].updatedAt }]);
+    setQuestionAttachmentAccount("account-b");
+    operation.current = { client, userId: "account-b", assertCurrent: guard };
     dispose = installCloudMediaCache("account-b", () => state);
     expect(await getQuestionAttachmentBlob(key)).toBeUndefined();
     expect(download).not.toHaveBeenCalled();
     dispose();
+    setQuestionAttachmentAccount("account-a");
+    operation.current = { client, userId: "account-a", assertCurrent: guard };
     dispose = installCloudMediaCache("account-a", () => state);
-    operation.current = { client, userId: "account-b", assertCurrent: guard };
+    setQuestionAttachmentAccount(undefined);
+    operation.current = null;
     expect(await getQuestionAttachmentBlob(key)).toBeUndefined();
     expect(download).not.toHaveBeenCalled();
   });

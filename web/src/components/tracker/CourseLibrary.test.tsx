@@ -46,6 +46,25 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
+it("makes template import directly available when no course content is installed", () => {
+  const onTemplate = vi.fn();
+  render(<CourseLibrary onClose={vi.fn()} onTemplate={onTemplate} onOpen={vi.fn()} onCreate={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Saved templates and imports" }));
+  expect(onTemplate).toHaveBeenCalledOnce();
+  expect(screen.getByText(/does not include your school's lecture schedule/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Import course templates" }));
+  expect(onTemplate).toHaveBeenCalledTimes(2);
+});
+
+it("clears an empty search without losing the current course collection", () => {
+  render(<CourseLibrary onClose={vi.fn()} onTemplate={vi.fn()} onOpen={vi.fn()} onCreate={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Course map" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search courses" }), { target: { value: "unmatched-course" } });
+  fireEvent.click(screen.getByRole("button", { name: "Clear course filters" }));
+  expect(screen.getAllByRole("button", { name: /^Preview / })).toHaveLength(34);
+  expect(screen.getByRole("button", { name: "Course map" }).getAttribute("aria-pressed")).toBe("true");
+});
+
 it("keeps the five saved legacy shells keyboard-openable below the 29 canonical course-map cards", async () => {
   const saved = mocks.useStore();
   const onOpen = vi.fn();

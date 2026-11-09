@@ -5,7 +5,7 @@
 // tracker does not already have. Rows the learner has studied keep their
 // progress: a re-load updates titles and places, never passes.
 // ===========================================================================
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Upload } from "lucide-react";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../../lib/localVault";
 import { useStore } from "../../lib/store";
@@ -49,7 +49,7 @@ interface ModulePreview {
 }
 
 const EXAMPLE = "FTM 1 - Lectures + DLAs:\n\nFTM Lecture 01 Histology of the Cell [Lecture]\nDLA 01 Membrane Structure [DLA]";
-const MAX_COURSE_TEMPLATE_FILES = 24;
+const MAX_COURSE_TEMPLATE_FILES = 64;
 const MAX_COURSE_TEMPLATE_BATCH_BYTES = 16 * 1024 * 1024;
 
 function preflightTemplateFiles(files: File[]): void {
@@ -72,7 +72,13 @@ function preflightTemplateFiles(files: File[]): void {
 }
 
 function TemplatePage({ title, onClose, footer, children }: { title: string; onClose: () => void; footer: ReactNode; children: ReactNode; className?: string }) {
-  return <section className="course-library-page" aria-label={title}><header className="course-library-heading"><h1>{title}</h1><GButton onClick={onClose}>Back to course</GButton></header>{children}<div className="row wrap gap8" style={{ marginTop: 24 }}>{footer}</div></section>;
+  const section = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const surface = section.current?.closest<HTMLElement>(".surface-scroll");
+    if (surface) surface.scrollTop = 0;
+    section.current?.querySelector("h1")?.focus({ preventScroll: true });
+  }, []);
+  return <section ref={section} className="course-library-page" aria-label={title}><header className="course-library-heading"><h1 tabIndex={-1}>{title}</h1><GButton onClick={onClose}>Back to course</GButton></header>{children}<div className="row wrap gap8" style={{ marginTop: 24 }}>{footer}</div></section>;
 }
 
 export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templateIds, embedded = false }: { onClose: () => void; onApplied?: () => void; defaultTermId?: string; templateIds?: string[]; embedded?: boolean }) {
@@ -85,6 +91,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [libraryOpen, setLibraryOpen] = useState(!templateIds?.length);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   function add(next: CourseTemplateSection[]) {
     // An incoming revision can rename activities or change candidate identities.
@@ -316,14 +323,14 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
           }} />
         </details>
         <p className="sub" style={{ margin: 0 }}>
-          Choose a saved version or import .txt templates, up to 2 MiB each. Preview their weeks before loading; existing study progress stays.
+          Choose a saved version or import up to 64 .txt templates, up to 2 MiB each and 16 MiB total. Preview their weeks before loading; existing study progress stays.
         </p>
         <div className="row wrap gap8">
-          <label className="gbtn sm">
+          <GButton size="sm" disabled={busy} onClick={() => fileInput.current?.click()}>
             <Upload size={ICON_SIZE.body} aria-hidden="true" /> {busy ? "Reading…" : "Choose template files"}
-            <input type="file" accept=".txt,text/plain" multiple hidden disabled={busy} aria-label="Choose course template files"
-              onChange={(event) => { void addFiles(event.target.files); event.target.value = ""; }} />
-          </label>
+          </GButton>
+          <input ref={fileInput} type="file" accept=".txt,text/plain" multiple hidden disabled={busy} aria-label="Choose course template files"
+            onChange={(event) => { void addFiles(event.target.files); event.target.value = ""; }} />
           {sections.length > 0 && <GhostButton disabled={busy} onClick={() => { setSections([]); setSetup({}); setConflictResolutions({}); }}>Clear</GhostButton>}
         </div>
         <details>

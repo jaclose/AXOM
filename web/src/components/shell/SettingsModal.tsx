@@ -15,6 +15,7 @@ import { privateReviewMedia } from "../../lib/privateLibrary/media";
 import { compactAvatarDataUrl } from "../../lib/avatarImage";
 import { exportStateWithAttachments, mergeStates, parseImport, toPortableState, type BackupScope } from "../../lib/backup";
 import { contentMetadata } from "../../lib/sync/deferredContent";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, type QuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import { retainDownloadedContent } from "../../lib/sync/contentDownloads";
 import { readPortableBackup, type PortableBackupRead } from "../../lib/backupArchive";
 import { flushLocalVaultWrites, assertVaultWritesSince, getVaultWriteCheckpoint } from "../../lib/localVault";
@@ -125,9 +126,15 @@ export async function persistPortableRestore(input: {
   restoredState: NoctyriumState;
   restoreMedia: PortableBackupRead["restoreMedia"];
   restoreOriginals: PortableBackupRead["restoreOriginals"];
+  expectedScope?: QuestionAttachmentScope;
   onProgress?: (message: string) => void;
 }, services: PortableRestoreServices = portableRestoreServices): Promise<string> {
   const { current, fileName, mode, restoredState, restoreMedia, restoreOriginals, onProgress } = input;
+  const scope = input.expectedScope ?? getQuestionAttachmentScope();
+  const assertAccount = () => {
+    if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed during recovery. No further workspace changes were made. Keep your backup and start again in the intended account.");
+  };
+  assertAccount();
   const priorState = toPortableState(current);
   const metadata = contentMetadata(restoredState);
   const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
@@ -146,8 +153,10 @@ export async function persistPortableRestore(input: {
 
   let originals: Awaited<ReturnType<PortableBackupRead["restoreOriginals"]>>;
   try {
+    assertAccount();
     originals = await restoreOriginals(metadata.documents ?? []);
   } catch (error) {
+    assertAccount();
     try {
       await mediaStage.rollback();
     } catch (rollbackError) {
@@ -156,6 +165,7 @@ export async function persistPortableRestore(input: {
     throw new Error(`Original files could not be prepared. ${errorText(error)} The workspace was not changed. Verified original-file bytes may remain cached.`, { cause: error });
   }
 
+  assertAccount();
   if (services.getState() !== current) {
     try {
       await mediaStage.rollback();
@@ -166,22 +176,32 @@ export async function persistPortableRestore(input: {
   }
 
   onProgress?.("Saving the recovered workspace on this device…");
+  let adopted: Store | undefined;
   try {
     const checkpoint = services.getCheckpoint();
-    current.replaceAll(restoredState);
+    current.replaceAll(restoredState, scope.accountId);
+    adopted = services.getState();
     await services.flush();
+    assertAccount();
+    if (services.getState() !== adopted) throw new Error("The workspace changed while recovery was saving.");
     services.assertWritesSince(checkpoint);
   } catch (targetError) {
+    // A later account or edit owns the active workspace. Keep the backup and
+    // staged bytes rather than rolling an older user's snapshot over it.
+    assertAccount();
+    if (adopted && services.getState() !== adopted) throw new Error("The workspace changed while recovery was saving. Keep this tab open and your backup; the newer workspace was not replaced.", { cause: targetError });
     let workspaceRollbackError: unknown;
     let mediaRollbackError: unknown;
     try {
       const rollbackCheckpoint = services.getCheckpoint();
-      current.replaceAll(priorState);
+      current.replaceAll(priorState, scope.accountId);
       await services.flush();
+      assertAccount();
       services.assertWritesSince(rollbackCheckpoint);
     } catch (error) {
       workspaceRollbackError = error;
     }
+    assertAccount();
     try {
       await mediaStage.rollback();
     } catch (error) {
@@ -207,6 +227,7 @@ export async function persistPortableRestore(input: {
   } catch (error) {
     cleanupWarning = ` The workspace is saved, but image cleanup could not finish. ${errorText(error)}`;
   }
+  assertAccount();
 
   return `${mode === "merge" ? "Merged" : "Restored"} ${fileName}. Saved on this device.${mediaStage.restored ? ` Restored ${mediaStage.restored} image attachment${mediaStage.restored === 1 ? "" : "s"}.` : ""}${originals.restored ? ` Restored ${originals.restored} original file${originals.restored === 1 ? "" : "s"}.` : ""}${restoredState.deferredContent ? " Some course files still need downloading from the original account." : ""}${cleanupWarning}`;
 }
@@ -285,9 +306,11 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
   async function doImport(file: File, mode: PortableRestoreMode) {
     if (backupBusy) return;
+    const expectedScope = getQuestionAttachmentScope();
     setBackupBusy(true); setMsg("Reading your backup…");
     try {
       const { rawText, restoreMedia, restoreOriginals } = await readPortableBackup(file);
+      if (!isQuestionAttachmentScopeCurrent(expectedScope)) throw new Error("The account changed while reading your backup. Choose the backup again in the intended account.");
       const next = parseImport(rawText);
       const message = (mode === "replace"
         ? "Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both."
@@ -303,6 +326,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
         restoredState,
         restoreMedia,
         restoreOriginals,
+        expectedScope,
         onProgress: setMsg,
       }));
     } catch (e) {
@@ -416,7 +440,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       )}
       {tab === "account" && (
         <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`} className="settings-account-panel">
-          <AccountSyncPanel onOpenBackup={() => setTab("backup")} />
+          <AccountSyncPanel onOpenBackup={() => setTab("backup")} onOpenCommunity={onClose} />
           {otherWorkspace && <aside className="settings-other-workspace" aria-label="Other AXOM address">
             <div><b>Looking for work on the other AXOM address?</b><p>Browser work is stored separately at each address. This workspace stays here.</p></div>
             <a href={otherWorkspace} target="_blank" rel="noopener noreferrer">Open www.axom.info</a>

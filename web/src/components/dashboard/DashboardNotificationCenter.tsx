@@ -1,4 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { Bell, BookText, CheckCheck, CircleAlert, LoaderCircle, Mail, MessageSquareText, RefreshCw, X } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { useCommunications, type CommunicationsSettings } from "../../lib/communications/client";
@@ -117,7 +118,7 @@ export function DashboardNotificationCenter() {
   const updateProfile = useStore((state) => state.updateProfile);
   const remote = useCommunications();
   const [open, setOpen] = useState(false);
-  const [mobilePanelTop, setMobilePanelTop] = useState(0);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({ visibility: "hidden" });
   const [read, setRead] = useState<Set<string>>(() => userId ? readIds(userId) : new Set());
   const [localNotices, setLocalNotices] = useState<LocalNotice[]>(readLocalNotices);
   const [localRead, setLocalRead] = useState<Set<string>>(readLocalIds);
@@ -153,16 +154,32 @@ export function DashboardNotificationCenter() {
     setRead(userId ? readIds(userId) : new Set());
   }, [userId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const positionPanel = () => {
-      const bottom = rootRef.current?.getBoundingClientRect().bottom ?? 0;
-      setMobilePanelTop(Math.max(12, Math.min(bottom + 8, window.innerHeight - 280)));
+      const anchor = buttonRef.current?.getBoundingClientRect();
+      if (!anchor) return;
+      const margin = 12;
+      const width = Math.min(370, window.innerWidth - margin * 2);
+      const height = Math.min(560, window.innerHeight - margin * 2);
+      const below = window.innerHeight - anchor.bottom - margin - 8;
+      const above = anchor.top - margin - 8;
+      const top = below < Math.min(320, height) && above > below
+        ? Math.max(margin, anchor.top - 8 - height)
+        : Math.max(margin, Math.min(anchor.bottom + 8, window.innerHeight - 280));
+      setPanelStyle({
+        top,
+        left: Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin)),
+        width,
+        maxHeight: Math.min(560, window.innerHeight - top - margin),
+      });
     };
     positionPanel();
-    panelRef.current?.focus();
+    panelRef.current?.focus({ preventScroll: true });
+    const isInside = (target: EventTarget | null) => target instanceof Node
+      && (rootRef.current?.contains(target) || panelRef.current?.contains(target));
     const closeOutside = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return;
+      if (isInside(event.target)) return;
       setOpen(false);
       window.setTimeout(() => {
         const focused = document.activeElement;
@@ -170,7 +187,7 @@ export function DashboardNotificationCenter() {
       }, 0);
     };
     const closeAfterFocusLeaves = (event: FocusEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!isInside(event.target)) setOpen(false);
     };
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -222,7 +239,7 @@ export function DashboardNotificationCenter() {
         <Bell size={ICON_SIZE.emphasis} aria-hidden="true" />
         {badgeCount > 0 && <span className="dashboard-notifications__badge" aria-hidden="true">{badgeCount > 9 ? "9+" : badgeCount}</span>}
       </button>
-      {open && (
+      {open && createPortal(
         <section
           id={panelId}
           ref={panelRef}
@@ -230,7 +247,7 @@ export function DashboardNotificationCenter() {
           role="dialog"
           aria-label="Notifications"
           tabIndex={-1}
-          style={{ "--dashboard-notifications-top": `${mobilePanelTop}px` } as CSSProperties}
+          style={panelStyle}
         >
           <header>
             <div><span>Inbox</span><h2>Notifications</h2></div>
@@ -297,7 +314,7 @@ export function DashboardNotificationCenter() {
             )}
           </div>
           <footer><a href="#communications" onClick={() => markRead(outcomes)}>Email preferences and history <span aria-hidden="true">→</span></a></footer>
-        </section>
+        </section>, document.body
       )}
     </div>
   );

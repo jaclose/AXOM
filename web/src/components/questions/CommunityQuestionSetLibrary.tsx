@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { BookOpen, Download, Heart, RefreshCw, Search } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { BookOpen, Download, Heart, Play, RefreshCw, Search } from "lucide-react";
+import type { QuestionSet } from "../../lib/library";
 import { useAccount } from "../../lib/account/accountStore";
 import { readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
 import {
-  loadQuestionSetLibraryPreview, searchQuestionSetLibrary, setQuestionSetLibraryLike,
+  authorizeQuestionSetLibraryImport, loadQuestionSetLibraryPreview, searchQuestionSetLibrary, setQuestionSetLibraryLike,
   type LibraryQuestionSet, type LibraryQuestionSetPreview,
 } from "../../lib/sharing/questionSetLibrary";
 import { useStore } from "../../lib/store";
@@ -11,7 +12,26 @@ import { Modal } from "../ui/Modal";
 import { GButton, GlassCard, GhostButton, PanelHeader, Tag } from "../ui/primitives";
 import "../../styles/question-set-library.css";
 
-export function CommunityQuestionSetLibrary() {
+// A user can sign out and return to the same account while an async request is
+// pending. Account-ID equality alone cannot authorize that older operation.
+// Subscribe for the operation lifetime, without coupling QBank to cloud sync.
+function observeAccountSession(accountId: string, onRevoked: () => void) {
+  let revoked = useAccount.getState().user?.id !== accountId;
+  const unsubscribe = useAccount.subscribe(state => {
+    if (!revoked && state.user?.id !== accountId) {
+      revoked = true;
+      // Clear pending UI immediately; a batched A → B → A transition may
+      // never produce the accountId effect's intermediate render.
+      onRevoked();
+    }
+  });
+  return {
+    current: () => !revoked && useAccount.getState().user?.id === accountId,
+    stop: unsubscribe,
+  };
+}
+
+export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set: QuestionSet) => void }) {
   const accountId = useAccount(state => state.user?.id);
   const [input, setInput] = useState("");
   const [search, setSearch] = useState("");
@@ -22,28 +42,73 @@ export function CommunityQuestionSetLibrary() {
   const [error, setError] = useState("");
   const [more, setMore] = useState(false);
   const [preview, setPreview] = useState<LibraryQuestionSetPreview>();
+  // A fetched snapshot belongs to the session that opened it. An old click
+  // handler must not import it into a different account before React rerenders.
+  const [previewAccountId, setPreviewAccountId] = useState<string>();
   const [opening, setOpening] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
   const [liking, setLiking] = useState<string>();
+  // React may not have committed the disabled state when a second click runs.
+  // Reserve the mutation synchronously, and release it only for its own request.
+  const likingOperation = useRef<symbol | null>(null);
+  // A second same-frame import click cannot reuse an earlier consent or receipt.
+  const importOperation = useRef<symbol | null>(null);
+  // Preview requests may overlap before React commits `opening`. Keep the
+  // selected preview's auth observer alive after loading: a completed preview
+  // must also be revoked by an A → B → A session round trip before import.
+  const previewRequest = useRef<{ token: symbol; stop: () => void } | null>(null);
+  function cancelPendingPreview() {
+    previewRequest.current?.stop();
+    previewRequest.current = null;
+  }
 
   useEffect(() => {
-    setSets([]); setPreview(undefined); setPreviewError(""); setImported(false); setOffset(0);
+    cancelPendingPreview();
+    setSets([]); setPreview(undefined); setPreviewAccountId(undefined);
+    setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
+    setLiking(undefined); setOffset(0);
   }, [accountId]);
+
+  // Never retain an auth subscription for an abandoned preview on unmount.
+  useEffect(() => () => {
+    previewRequest.current?.stop(); previewRequest.current = null;
+    importOperation.current = null;
+  }, []);
 
   useEffect(() => {
     let alive = true;
-    if (!accountId) { setSets([]); setLoading(false); setError(""); return; }
+    if (!accountId) {
+      setSets([]); setMore(false); setLoading(false); setError("");
+      return;
+    }
+    // Search results carry account-specific like state. A sign-out and
+    // sign-in round trip can occur without an intervening React render, so
+    // effect cleanup alone cannot invalidate the earlier response.
+    const session = observeAccountSession(accountId, () => {
+      if (!alive) return;
+      setSets([]); setMore(false); setLoading(false); setError("");
+    });
+    if (!session.current()) {
+      session.stop();
+      setSets([]); setMore(false); setLoading(false); setError("");
+      return;
+    }
     if (offset === 0) setSets([]);
     setLoading(true); setError("");
     void searchQuestionSetLibrary(accountId, search, offset).then(page => {
-      if (!alive) return;
+      if (!alive || !session.current()) return;
       setSets(current => offset === 0 ? page : [...current, ...page.filter(item => !current.some(existing => existing.id === item.id))]);
       setMore(page.length === 24 && offset < 1000);
-    }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "The library could not be loaded."); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    }).catch(cause => {
+      if (alive && session.current())
+        setError(cause instanceof Error ? cause.message : "The library could not be loaded.");
+    }).finally(() => {
+      if (alive && session.current()) setLoading(false);
+      session.stop();
+    });
+    return () => { alive = false; session.stop(); };
   }, [accountId, search, offset, refresh]);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
@@ -53,40 +118,165 @@ export function CommunityQuestionSetLibrary() {
     setRefresh(value => value + 1);
   }
   async function open(id: string) {
-    if (!accountId || opening) return;
-    setPreview(undefined); setPreviewError(""); setOpening(true); setImported(false);
+    if (!accountId || useAccount.getState().user?.id !== accountId) return;
+    // A second selection supersedes the first immediately, including in the
+    // same React batch. It must not inherit the previous result or error.
+    cancelPendingPreview();
+    const operation = Symbol("community-preview");
+    const openedBy = accountId;
+    const session = observeAccountSession(openedBy, () => {
+      if (previewRequest.current?.token !== operation) return;
+      cancelPendingPreview();
+      setPreview(undefined); setPreviewAccountId(undefined);
+      setPreviewError(""); setOpening(false);
+    });
+    if (!session.current()) { session.stop(); return; }
+    previewRequest.current = { token: operation, stop: session.stop };
+    const isCurrent = () => previewRequest.current?.token === operation && session.current();
+    setPreview(undefined); setPreviewAccountId(undefined);
+    setPreviewError(""); setOpening(true); setImported(false);
+    let accepted = false;
     try {
-      const result = await loadQuestionSetLibraryPreview(accountId, id);
+      const result = await loadQuestionSetLibraryPreview(openedBy, id);
+      // Both the account session and the selected request must remain current.
+      // A late first selection or dismissed modal cannot reopen itself.
+      if (!isCurrent()) return;
+      setPreviewAccountId(openedBy);
       setPreview(result);
       setImported(useStore.getState().questionSets.some(set => {
         const provenance = readSharedQuestionImportProvenance(set);
         return provenance?.shareId === result.id && provenance.contentDigest === result.contentDigest;
       }));
-    } catch (cause) { setPreviewError(cause instanceof Error ? cause.message : "This set could not be opened."); }
-    finally { setOpening(false); }
+      // Keep the observer until the accepted preview is closed, replaced,
+      // revoked, or unmounted. Account-ID equality is not session authority.
+      accepted = true;
+    } catch (cause) {
+      if (isCurrent())
+        setPreviewError(cause instanceof Error ? cause.message : "This set could not be opened.");
+    } finally {
+      if (previewRequest.current?.token === operation) {
+        if (!accepted) cancelPendingPreview();
+        if (session.current()) setOpening(false);
+      } else {
+        session.stop();
+      }
+    }
   }
   async function add() {
-    if (!preview || importing || imported) return;
+    if (!preview || preview.status !== "approved" || !accountId || previewAccountId !== accountId
+      || useAccount.getState().user?.id !== accountId || importing || imported || importOperation.current) return;
+    const selected = preview;
+    const selectedToken = previewRequest.current?.token;
+    if (!selectedToken) return;
+    const operation = Symbol("community-import");
+    importOperation.current = operation;
+    const importingAccount = accountId;
+    const session = observeAccountSession(importingAccount, () => {
+      if (importOperation.current !== operation) return;
+      importOperation.current = null;
+      setImporting(false); setPreview(undefined); setPreviewAccountId(undefined);
+      setPreviewError(""); setImported(false);
+    });
+    const isAuthorized = () => importOperation.current === operation
+      && previewRequest.current?.token === selectedToken && session.current();
+    if (!isAuthorized()) {
+      if (importOperation.current === operation) importOperation.current = null;
+      session.stop(); return;
+    }
     setImporting(true); setPreviewError("");
+    let listingRevalidated = false;
     try {
+      // The import RPC binds the exact approved snapshot and revision under
+      // one SQL row lock. A same-content rejection/reapproval cannot reuse
+      // an earlier preview, and the returned payload is revalidated locally.
+      const current = await authorizeQuestionSetLibraryImport(importingAccount, selected);
+      if (!isAuthorized()) return;
+      if (current.status !== "approved" || current.id !== selected.id
+        || current.reviewRevision !== selected.reviewRevision
+        || current.contentDigest !== selected.contentDigest)
+        throw new Error("This reviewed Question Set changed. Close the preview and reopen the current listing.");
+      listingRevalidated = true;
       const result = await useStore.getState().commitSharedQuestionSetImport({
-        snapshot: preview.snapshot,
-        identity: { shareId: preview.id, contentDigest: preview.contentDigest },
+        snapshot: current.snapshot,
+        identity: { shareId: current.id, contentDigest: current.contentDigest },
+        // A superseded preview or revoked account cannot start a vault write.
+        accountGuard: {
+          accountId: importingAccount,
+          isCurrentAccount: id => id === importingAccount && isAuthorized(),
+        },
       });
+      if (!isAuthorized()) return;
       if (!result.ok) throw new Error(result.message);
       setImported(true);
-    } catch (cause) { setPreviewError(cause instanceof Error ? cause.message : "The set could not be added. Your saved work is unchanged."); }
-    finally { setImporting(false); }
+    } catch (cause) {
+      if (isAuthorized()) {
+        // Failed publication revalidation invalidates the old reviewed copy.
+        // No stale snapshot can be imported merely by retrying the button.
+        if (!listingRevalidated) {
+          setPreview(undefined); setPreviewAccountId(undefined);
+          cancelPendingPreview();
+        }
+        setPreviewError(cause instanceof Error ? cause.message : "The set could not be added. Your saved work is unchanged.");
+      }
+    } finally {
+      const wasLatest = importOperation.current === operation;
+      if (wasLatest) importOperation.current = null;
+      if (wasLatest && session.current()) setImporting(false);
+      session.stop();
+    }
   }
   async function like(set: LibraryQuestionSet) {
-    if (!accountId || liking) return;
+    if (!accountId || useAccount.getState().user?.id !== accountId || liking || likingOperation.current) return;
+    const operation = Symbol("community-like");
+    likingOperation.current = operation;
+    const likingAccount = accountId;
+    const session = observeAccountSession(likingAccount, () => {
+      // An account change revokes the old mutation without blocking the next
+      // session. A late old completion must not unlock a newer request.
+      if (likingOperation.current === operation) likingOperation.current = null;
+      setLiking(undefined); setSets([]); setError("");
+      setRefresh(value => value + 1);
+    });
+    if (!session.current()) {
+      if (likingOperation.current === operation) likingOperation.current = null;
+      session.stop(); return;
+    }
     setLiking(set.id); setError("");
     try {
       await setQuestionSetLibraryLike(accountId, set.id, !set.liked);
+      if (!session.current()) return;
       setSets(current => current.map(item => item.id === set.id
         ? { ...item, liked: !item.liked, likes: item.likes + (item.liked ? -1 : 1) } : item));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Your like could not be saved."); }
-    finally { setLiking(undefined); }
+    } catch (cause) {
+      if (session.current())
+        setError(cause instanceof Error ? cause.message : "Your like could not be saved.");
+    } finally {
+      if (likingOperation.current === operation) likingOperation.current = null;
+      if (session.current()) setLiking(undefined);
+      session.stop();
+    }
+  }
+
+  const activePreview = accountId && previewAccountId === accountId
+    && useAccount.getState().user?.id === accountId ? preview : undefined;
+
+  function practiceImportedSet() {
+    if (!activePreview || !onPractice || !imported || importing
+      || useAccount.getState().user?.id !== previewAccountId || !previewRequest.current) return;
+    // Resolve the saved copy again at click time, so deletion or a replaced
+    // local set cannot launch a stale imported membership.
+    const set = useStore.getState().questionSets.find(candidate => {
+      const receipt = readSharedQuestionImportProvenance(candidate);
+      return receipt?.shareId === activePreview.id && receipt.contentDigest === activePreview.contentDigest;
+    });
+    if (!set) {
+      setImported(false);
+      setPreviewError("This saved set is no longer in your library. Add it again to practice.");
+      return;
+    }
+    cancelPendingPreview();
+    setPreview(undefined); setPreviewAccountId(undefined); setPreviewError("");
+    onPractice(set);
   }
 
   return <GlassCard pad className="qsl-library">
@@ -119,13 +309,15 @@ export function CommunityQuestionSetLibrary() {
       {more && <GButton disabled={loading} onClick={() => setOffset(value => value + 24)}>Load more sets</GButton>}
       <p className="sub">Import copies the reviewed listing into your private AXOM. It does not connect your attempts, notes or files to the contributor.</p>
     </>}
-    {(opening || preview || previewError) && <Modal title={preview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => { setPreview(undefined); setPreviewError(""); }}>
+    {(opening || activePreview || previewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => {
+      cancelPendingPreview(); setOpening(false); setPreview(undefined); setPreviewAccountId(undefined); setPreviewError("");
+    }}>
       <div className="qsl-preview stack gap12" aria-busy={opening || importing}>
         {opening && <p role="status">Opening this Question Set…</p>}
-        {preview && <>
-          <p>{preview.snapshot.questions.length} {preview.snapshot.questions.length === 1 ? "question" : "questions"} · {preview.snapshot.tags.join(" · ") || "No topic tags"}</p>
+        {activePreview && <>
+          <p>{activePreview.snapshot.questions.length} {activePreview.snapshot.questions.length === 1 ? "question" : "questions"} · {activePreview.snapshot.tags.join(" · ") || "No topic tags"}</p>
           <p className="sub">Preview the first three questions. Check their sources while studying.</p>
-          <ol>{preview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
+          <ol>{activePreview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
             {question.citation && <small>Source: {question.citation}</small>}
@@ -133,6 +325,12 @@ export function CommunityQuestionSetLibrary() {
           <GButton variant="primary" disabled={importing || imported} onClick={() => void add()}>
             <Download size={16} aria-hidden="true" /> {imported ? "Already in my AXOM" : importing ? "Saving…" : "Add to my AXOM"}
           </GButton>
+          {imported && onPractice && <>
+            <p role="status">Saved in your library. Your answers and progress stay in your private workspace.</p>
+            <GButton variant="primary" onClick={practiceImportedSet}>
+              <Play size={16} aria-hidden="true" /> Practice this set
+            </GButton>
+          </>}
         </>}
         {previewError && <p role="alert" className="qsl-error">{previewError}</p>}
       </div>

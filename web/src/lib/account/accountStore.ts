@@ -8,7 +8,13 @@ import { SyncCoordinator } from "../sync/syncCoordinator";
 import { SupabaseSyncTransport } from "../sync/supabaseTransport";
 import { clearAccountSync, deviceId, read, write } from "../sync/syncMetadata";
 import { clearCloudContentCache } from "../sync/cloudContent";
-import { clearCloudMediaUploadCache } from "../sync/cloudMedia";
+import { clearCloudMediaUploadCache, workspaceMedia } from "../sync/cloudMedia";
+import { adoptDeviceQuestionAttachments } from "../questionAttachments";
+import { adoptDeviceSourceOriginals } from "../decode/sources";
+import { contentMetadata } from "../sync/deferredContent";
+import { getQuestionAttachmentScope, initializeQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, setQuestionAttachmentAccount } from "../questionAttachmentScope";
+import { recordWorkspaceHydration } from "../workspaceHydrationReceipt";
+import { storeHydration } from "../storeHydration";
 import { clearCloudOriginalUploadCache } from "../sync/cloudOriginals";
 import { restingStatus } from "../sync/syncPolicy";
 import type { AccountDevice, ProtectionStatus, RevisionSummary, SyncFailure } from "../sync/syncTypes";
@@ -17,6 +23,7 @@ import { createLocalBackup } from "../localBackup";
 import { mergeStates, parseImport } from "../backup";
 import { recordRestoreEvent } from "../restoreHistory";
 import { deviceHasOwnWork } from "../saveProgress";
+import type { ShareMode } from "../community/progressBoard";
 
 /**
  * App-wide account state. The Settings panel, the sidebar status badge, and
@@ -42,6 +49,19 @@ export type LinkState = "linked" | "unlinked" | "linked-elsewhere";
 
 /** Every AXOM auth email carries a code, so desktop users never need the link. */
 export type CodeKind = "sign-in" | "signup" | "recovery";
+
+/** These choices seed a new account only. Existing accounts keep their saved consent. */
+export interface CommunitySignupPreferences {
+  discoverable: boolean;
+  shareMode: ShareMode;
+}
+
+function signupCommunityPreferences(preferences?: CommunitySignupPreferences): CommunitySignupPreferences {
+  return {
+    discoverable: preferences?.discoverable === true,
+    shareMode: preferences?.shareMode === "friends" || preferences?.shareMode === "community" ? preferences.shareMode : "off",
+  };
+}
 
 interface AccountState {
   phase: AccountPhase;
@@ -70,8 +90,8 @@ interface AccountState {
 
   init(): void;
   signIn(email: string, password: string): Promise<boolean>;
-  signUp(email: string, password: string, displayName: string): Promise<boolean>;
-  sendCode(email: string): Promise<boolean>;
+  signUp(email: string, password: string, displayName: string, communityPreferences?: CommunitySignupPreferences): Promise<boolean>;
+  sendCode(email: string, communityPreferences?: CommunitySignupPreferences): Promise<boolean>;
   verifyCode(email: string, code: string): Promise<boolean>;
   requestPasswordReset(email: string): Promise<boolean>;
   updatePassword(password: string): Promise<boolean>;
@@ -97,6 +117,8 @@ interface AccountState {
 
 let authSubscription: { unsubscribe(): void } | null = null;
 let initializing = false;
+const bootLinkedAccountId = read().accountUserId;
+let bootInitialSessionScope: ReturnType<typeof getQuestionAttachmentScope> | undefined;
 
 /** Test hook: forget the auth subscription so init() can run again. */
 export function resetAccountInitForTests(): void {
@@ -306,11 +328,19 @@ export const useAccount = create<AccountState>((set, get) => {
         // refresh that failed on a flaky network read as "signed out" while
         // the SDK still held the session: Profile and Account then disagreed.)
         const { data } = supabase.auth.onAuthStateChange((event, session) => {
+          // Only the first SDK event may confirm a boot without a cached session.
+          // A later sign-in or A → B → A transition cannot claim the old vault.
+          const initialScope = bootInitialSessionScope;
+          bootInitialSessionScope = undefined;
+          const resumeBootWorkspace = event === "INITIAL_SESSION" && initialScope
+            && isQuestionAttachmentScopeCurrent(initialScope)
+            && session?.user.id === bootLinkedAccountId;
           if (event === "PASSWORD_RECOVERY") {
             set({ phase: "recovering-password", user: toUser(session), message: "Choose a new password to finish recovery." });
             return;
           }
           applySession(session);
+          if (resumeBootWorkspace) void resumeLinkedWorkspaceAfterHydration();
         });
         authSubscription = data.subscription;
       }).catch(() => {
@@ -332,13 +362,13 @@ export const useAccount = create<AccountState>((set, get) => {
         return true;
       });
       if (result) {
-        set({ message: "Signed in. Nothing on this device has changed." });
+        set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, message: "Signed in. Nothing on this device has changed." });
         await welcomeBack();
       }
       return Boolean(result);
     },
 
-    async signUp(email, password, displayName) {
+    async signUp(email, password, displayName, communityPreferences) {
       const emailError = validateEmail(email) ?? validatePassword(password);
       if (emailError) { set({ error: emailError }); return false; }
       const result = await guarded("Creating your account…", async () => {
@@ -346,7 +376,12 @@ export const useAccount = create<AccountState>((set, get) => {
           email: email.trim(),
           password,
           options: {
-            data: { display_name: displayName.trim().slice(0, 80) || useStore.getState().profile.name || "Learner" },
+            data: {
+              display_name: displayName.trim().slice(0, 80) || useStore.getState().profile.name || "Learner",
+              // The auth-user insert trigger persists this even when email confirmation
+              // happens on another device. It never reapplies it to an existing account.
+              axom_community_preferences: signupCommunityPreferences(communityPreferences),
+            },
             emailRedirectTo: authRedirectUrl(),
           },
         });
@@ -355,17 +390,21 @@ export const useAccount = create<AccountState>((set, get) => {
         return data.session ? "signed-in" : "confirm";
       });
       if (result === "confirm") set({ pendingCodeEmail: email.trim(), pendingCodeKind: "signup", message: `We emailed a confirmation code to ${email.trim()}. Enter it below, or use the link in the email. Local work is unchanged.` });
-      if (result === "signed-in") set({ message: "Account created. Choose whether to protect this device’s workspace." });
+      if (result === "signed-in") set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, message: "Account created. Choose whether to protect this device’s workspace." });
       return Boolean(result);
     },
 
-    async sendCode(email) {
+    async sendCode(email, communityPreferences) {
       const emailError = validateEmail(email);
       if (emailError) { set({ error: emailError }); return false; }
       const result = await guarded("Sending a sign-in code…", async () => {
         const { error } = await (await client()).auth.signInWithOtp({
           email: email.trim(),
-          options: { shouldCreateUser: true, emailRedirectTo: authRedirectUrl() },
+          options: {
+            shouldCreateUser: true,
+            emailRedirectTo: authRedirectUrl(),
+            data: { axom_community_preferences: signupCommunityPreferences(communityPreferences) },
+          },
         });
         if (error) throw error;
         return true;
@@ -462,8 +501,20 @@ export const useAccount = create<AccountState>((set, get) => {
     async linkThisDevice() {
       const user = get().user;
       if (!user) return;
+      const scope = getQuestionAttachmentScope();
+      const assertAdoptingAccount = () => {
+        if (get().user?.id !== user.id || !isQuestionAttachmentScopeCurrent(scope)) {
+          throw new Error("The account changed while selecting this device's workspace. Reopen Account before trying again.");
+        }
+      };
       await guarded("Protecting this device’s workspace…", async () => {
         const meta = read();
+        if (!meta.accountUserId) {
+          await adoptDeviceQuestionAttachments(user.id, workspaceMedia(useStore.getState()).keys());
+          assertAdoptingAccount();
+          await adoptDeviceSourceOriginals(user.id, contentMetadata(useStore.getState()).documents ?? []);
+        }
+        assertAdoptingAccount();
         // A newly linked device uploads against base 0. If the account already
         // holds work from another device, the server keeps BOTH and reports a
         // conflict for the learner to resolve — never a silent overwrite.
@@ -473,6 +524,10 @@ export const useAccount = create<AccountState>((set, get) => {
           await active.flush("foundation");
           return active.currentStatus();
         });
+        assertAdoptingAccount();
+        // This explicit choice selects the local workspace even if the cloud
+        // refuses its upload. Auth events and ordinary edits cannot mint it.
+        recordWorkspaceHydration(user.id, useStore.getState().journal);
         set({ link: "linked", ...protectionView(status) });
         await transport.touchDevice({ deviceId: deviceId(), label: deviceLabel(), platform: platformName(), revision: read().baseRevision }).catch(() => undefined);
         set({
@@ -521,7 +576,7 @@ export const useAccount = create<AccountState>((set, get) => {
         if (!unchanged()) return;
         const checkpoint = getVaultWriteCheckpoint();
         set({ applyingRemote: true });
-        try { useStore.getState().replaceAll(next); } finally { set({ applyingRemote: false }); }
+        try { useStore.getState().replaceAll(next, user.id); } finally { set({ applyingRemote: false }); }
         const applied = useStore.getState();
         write({ ...read(), baseRevision: latest.revision, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
         await flushLocalVaultWrites();
@@ -562,7 +617,7 @@ export const useAccount = create<AccountState>((set, get) => {
         await transport.prepareMediaCache(revision, user.id);
         if (get().user?.id !== user.id || useStore.getState() !== previousState) throw new Error("Your account or workspace changed while downloading. Try the restore again after finishing your edit.");
         const checkpoint = getVaultWriteCheckpoint();
-        useStore.getState().replaceAll(next);
+        useStore.getState().replaceAll(next, user.id);
         await flushLocalVaultWrites();
         assertVaultWritesSince(checkpoint);
         if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Restore was stopped.");
@@ -612,7 +667,7 @@ export const useAccount = create<AccountState>((set, get) => {
         // Merge only after all downloads, so edits made while waiting survive.
         const merged = mergeStates(useStore.getState(), server);
         const checkpoint = getVaultWriteCheckpoint();
-        useStore.getState().replaceAll(merged);
+        useStore.getState().replaceAll(merged, user.id);
         await flushLocalVaultWrites();
         assertVaultWritesSince(checkpoint);
         if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Merge was stopped.");
@@ -747,6 +802,9 @@ export function protectionDetail(view: Pick<AccountState, "protection" | "syncFa
   if (syncFailure?.kind === "auth") {
     return `Your account could not confirm this sign-in. ${saved} If this continues, sign out and sign in again.${next}`;
   }
+  if (syncFailure?.kind === "server" && syncFailure.code === "57014") {
+    return `The account service took too long to finish this save. ${saved} AXOM has not confirmed a new protected version.${next}`;
+  }
   return protection === "paused"
     ? `AXOM could not reach your account after several tries, so it now checks less often. ${saved}${next}`
     : `AXOM could not reach your account. ${saved}${next}`;
@@ -763,4 +821,38 @@ export function failureSummary(view: Pick<AccountState, "syncFailure" | "nextAtt
   const reason = failure.reason ? ` Cause: ${failure.reason}.` : "";
   const next = view.nextAttemptAt ? ` Next automatic try ${new Date(view.nextAttemptAt).toLocaleString()}.` : "";
   return `Last upload failed ${new Date(failure.at).toLocaleString()}: ${what}, ${answer}${failure.code ? `, code ${failure.code}` : ""}.${phase}${reason}${size}${next}`;
+}
+
+// Install before any image I/O. Capture the existing link once; a later
+// account must never acquire ambiguous legacy bytes by being the next reader.
+initializeQuestionAttachmentScope(useAccount.getState().user?.id, read().accountUserId);
+useAccount.subscribe(state => setQuestionAttachmentAccount(state.user?.id));
+
+/** Boot-only activation of the device's previously linked, successfully loaded
+ * vault. Ordinary sign-in/profile changes never call this boundary. */
+export async function resumeLinkedWorkspaceAfterHydration(): Promise<boolean> {
+  const initial = useAccount.getState();
+  const accountId = initial.user?.id;
+  const linkedAccountId = read().accountUserId;
+  const scope = getQuestionAttachmentScope();
+  if (initial.phase !== "signed-in" || !accountId || linkedAccountId !== accountId) return false;
+  try {
+    await storeHydration.wait();
+  } catch {
+    // Startup reports vault failures; they must never issue an ownership receipt.
+    return false;
+  }
+  const current = useAccount.getState();
+  if (!useStore.persist.hasHydrated() || !isQuestionAttachmentScopeCurrent(scope)
+    || current.phase !== "signed-in" || current.user?.id !== accountId
+    || read().accountUserId !== linkedAccountId) return false;
+  recordWorkspaceHydration(accountId, useStore.getState().journal);
+  return true;
+}
+
+const bootAccount = useAccount.getState();
+if (bootAccount.phase === "signed-in" && bootAccount.user?.id === bootLinkedAccountId) {
+  void resumeLinkedWorkspaceAfterHydration();
+} else if (bootAccount.phase === "loading" && !bootAccount.user) {
+  bootInitialSessionScope = getQuestionAttachmentScope();
 }

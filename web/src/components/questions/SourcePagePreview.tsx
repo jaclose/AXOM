@@ -5,6 +5,8 @@ import { readSourceOriginal, saveSourceOriginal } from "../../lib/decode";
 import { ICON_SIZE } from "../../lib/iconSize";
 import type { SourceDocument } from "../../lib/library";
 import { GhostButton } from "../ui/primitives";
+import { useQuestionAttachmentScope } from "./useQuestionAttachmentScope";
+import { isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
 
 type PreviewState = "opening" | "drawn" | "no-original" | "failed";
 
@@ -23,6 +25,8 @@ export function SourcePagePreview({ document: source, page }: {
   const [problem, setProblem] = useState("");
   /** Bumped when a file is attached, so the page is drawn from it. */
   const [attached, setAttached] = useState(0);
+  const scope = useQuestionAttachmentScope();
+  const [drawnScope, setDrawnScope] = useState<typeof scope>();
 
   useEffect(() => {
     let cancelled = false;
@@ -30,7 +34,7 @@ export function SourcePagePreview({ document: source, page }: {
     setState("opening");
     setProblem("");
     void (async () => {
-      const original = await readSourceOriginal(source.id, source.checksum);
+      const original = await readSourceOriginal(source.id, source.checksum, { scope });
       if (cancelled) return;
       if (!original) { setState("no-original"); return; }
       const pdfjs = await import("pdfjs-dist");
@@ -50,7 +54,7 @@ export function SourcePagePreview({ document: source, page }: {
       target.width = Math.ceil(viewport.width);
       target.height = Math.ceil(viewport.height);
       await sheet.render({ canvas: target, canvasContext: context, viewport }).promise;
-      if (!cancelled) setState("drawn");
+      if (!cancelled && isQuestionAttachmentScopeCurrent(scope)) { setDrawnScope(scope); setState("drawn"); }
     })().catch((error: unknown) => {
       if (cancelled) return;
       setProblem(error instanceof Error ? error.message : "This page could not be drawn.");
@@ -60,13 +64,13 @@ export function SourcePagePreview({ document: source, page }: {
       cancelled = true;
       void release?.();
     };
-  }, [source.id, source.checksum, page, attached]);
+  }, [source.id, source.checksum, page, attached, scope]);
 
   async function attach(file: File | undefined) {
     if (!file) return;
     setProblem("");
     try {
-      await saveSourceOriginal(source, file);
+      await saveSourceOriginal(source, file, { scope });
       setAttached((count) => count + 1);
     } catch (error) {
       setProblem(error instanceof Error ? error.message : "The file could not be attached.");
@@ -93,7 +97,7 @@ export function SourcePagePreview({ document: source, page }: {
           <GhostButton onClick={() => fileInput.current?.click()}><FileUp size={ICON_SIZE.body} /> Attach the original file</GhostButton>
         </div>
       )}
-      <canvas ref={canvas} hidden={state !== "drawn"} role="img" aria-label={`${source.title}, page ${page}`} />
+      <canvas ref={canvas} hidden={state !== "drawn" || drawnScope !== scope} role="img" aria-label={`${source.title}, page ${page}`} />
       {pageText && (
         <details className="source-evidence" open={state === "no-original" || state === "failed"}>
           <summary>Text of this page</summary>

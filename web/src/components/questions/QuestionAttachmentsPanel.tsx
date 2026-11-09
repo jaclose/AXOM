@@ -17,6 +17,8 @@ import {
   validateMissingQuestionAttachmentFile,
   type QuestionImageAttachment,
 } from "../../lib/questionAttachments";
+import { useQuestionAttachmentScope } from "./useQuestionAttachmentScope";
+import { isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -33,6 +35,8 @@ export function QuestionAttachmentsPanel({
   attachments: QuestionImageAttachment[];
   onChange: (next: QuestionImageAttachment[]) => void;
 }) {
+  const scope = useQuestionAttachmentScope();
+  const [uiScope, setUiScope] = useState(scope);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<QuestionImageAttachment | null>(null);
@@ -40,7 +44,7 @@ export function QuestionAttachmentsPanel({
   const [restoreCandidate, setRestoreCandidate] = useState<{ attachment: QuestionImageAttachment; file: File; url: string } | null>(null);
   const [restoreError, setRestoreError] = useState("");
   const [repairRevision, setRepairRevision] = useState(0);
-  const [urls, setUrls] = useState<Record<string, string | "missing">>({});
+  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string | "missing"> }>({ signature: "", urls: {} });
   const restoreTitleId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
   const restoreFileRef = useRef<HTMLInputElement>(null);
@@ -55,7 +59,8 @@ export function QuestionAttachmentsPanel({
   // Keyed on the set of blobs (id + blobKey) only — editing alt text must not
   // revoke and re-read every blob (which would flicker thumbnails and briefly
   // reference a revoked object URL).
-  const blobSignature = attachments.map((a) => `${a.id}:${a.blobKey}`).join("|");
+  const blobSignature = JSON.stringify([scope.owner, scope.generation, questionId, attachments.map(a => [a.id, a.blobKey, a.updatedAt])]);
+  const urls = loaded.signature === blobSignature ? loaded.urls : {};
   useEffect(() => {
     let cancelled = false;
     const created: string[] = [];
@@ -64,6 +69,7 @@ export function QuestionAttachmentsPanel({
       for (const attachment of attachmentsRef.current) {
         try {
           const record = await getQuestionAttachmentBlob(attachment.blobKey);
+          if (cancelled) return;
           if (record) {
             const url = URL.createObjectURL(record.blob);
             created.push(url);
@@ -75,7 +81,7 @@ export function QuestionAttachmentsPanel({
           next[attachment.id] = "missing";
         }
       }
-      if (!cancelled) setUrls(next);
+      if (!cancelled) setLoaded({ signature: blobSignature, urls: next });
       else created.forEach((url) => URL.revokeObjectURL(url));
     })();
     return () => {
@@ -85,30 +91,34 @@ export function QuestionAttachmentsPanel({
   }, [questionId, blobSignature, repairRevision]);
 
   useEffect(() => {
+    setUiScope(scope);
+    setBusy(false);
     setPreview(null);
     setRestoreCandidate(null);
     setRestoreTarget(null);
     restoreTargetRef.current = null;
     setRestoreError("");
     setStatus("");
-  }, [questionId]);
+  }, [questionId, scope]);
 
   useEffect(() => () => {
     if (restoreCandidate) URL.revokeObjectURL(restoreCandidate.url);
   }, [restoreCandidate]);
 
   async function addFiles(files: readonly File[]) {
-    if (!files.length || busy) return;
+    if (!files.length || busy || !isQuestionAttachmentScopeCurrent(scope)) return;
     setBusy(true);
     const failures: string[] = [];
     let added = 0;
     // Deterministic: original selection order; one failure never discards the rest.
     for (const file of files) {
+      if (!isQuestionAttachmentScopeCurrent(scope)) return;
       const result = await createQuestionAttachment({
         file,
         questionId,
         existing: attachmentsRef.current,
       });
+      if (!isQuestionAttachmentScopeCurrent(scope)) return;
       if (result.status === "created") {
         const next = [...attachmentsRef.current, result.attachment];
         try {
@@ -118,7 +128,7 @@ export function QuestionAttachmentsPanel({
         } catch {
           // Metadata persistence failed — remove the just-written blob so no
           // orphan survives, then surface the failure.
-          await deleteQuestionAttachmentBlobs([result.attachment.blobKey]).catch(() => {});
+          await deleteQuestionAttachmentBlobs([result.attachment.blobKey], { scope }).catch(() => {});
           failures.push(`"${result.attachment.fileName}" could not be saved.`);
         }
       } else {
@@ -144,6 +154,7 @@ export function QuestionAttachmentsPanel({
   }
 
   async function removeAttachment(attachment: QuestionImageAttachment) {
+    if (!isQuestionAttachmentScopeCurrent(scope)) return;
     // Metadata first (authoritative), then the blob; a failed blob delete is
     // surfaced and the sweep can finish the cleanup later.
     const next = attachmentsRef.current.filter((item) => item.id !== attachment.id);
@@ -155,14 +166,16 @@ export function QuestionAttachmentsPanel({
       return;
     }
     try {
-      await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+      await deleteQuestionAttachmentBlobs([attachment.blobKey], { scope });
+      if (!isQuestionAttachmentScopeCurrent(scope)) return;
       setStatus(`Removed "${attachment.fileName}".`);
     } catch {
-      setStatus(`Removed "${attachment.fileName}" from this question; its stored bytes will be cleaned up on the next maintenance pass.`);
+      if (isQuestionAttachmentScopeCurrent(scope)) setStatus(`Removed "${attachment.fileName}" from this question. Its stored bytes were preserved because removal could not be confirmed.`);
     }
   }
 
   function updateAltText(attachment: QuestionImageAttachment, altText: string) {
+    if (!isQuestionAttachmentScopeCurrent(scope)) return;
     const now = new Date().toISOString();
     const next = attachmentsRef.current.map((item) =>
       item.id === attachment.id ? { ...item, altText: altText.trim().slice(0, 500), updatedAt: now } : item);
@@ -171,6 +184,7 @@ export function QuestionAttachmentsPanel({
   }
 
   function openPreview(attachment: QuestionImageAttachment, trigger: HTMLElement) {
+    if (!isQuestionAttachmentScopeCurrent(scope)) return;
     previewTriggerRef.current = trigger;
     setPreview(attachment);
   }
@@ -183,6 +197,7 @@ export function QuestionAttachmentsPanel({
   }
 
   function requestRestore(attachment: QuestionImageAttachment, trigger: HTMLElement) {
+    if (!isQuestionAttachmentScopeCurrent(scope)) return;
     restoreTargetRef.current = attachment;
     restoreTriggerRef.current = trigger;
     setRestoreTarget(attachment);
@@ -194,6 +209,7 @@ export function QuestionAttachmentsPanel({
     if (!file || !attachment || busy) return;
     setBusy(true);
     const validation = await validateMissingQuestionAttachmentFile(file, attachment);
+    if (!isQuestionAttachmentScopeCurrent(scope)) return;
     setBusy(false);
     if (!validation.ok) {
       setStatus(validation.message);
@@ -215,7 +231,7 @@ export function QuestionAttachmentsPanel({
   }
 
   async function confirmRestore() {
-    if (!restoreCandidate || busy) return;
+    if (!restoreCandidate || busy || !isQuestionAttachmentScopeCurrent(scope)) return;
     const { attachment, file } = restoreCandidate;
     const current = attachmentsRef.current.find((item) => item.id === attachment.id);
     if (!current || current.blobKey !== attachment.blobKey || current.byteSize !== attachment.byteSize) {
@@ -224,6 +240,7 @@ export function QuestionAttachmentsPanel({
     }
     setBusy(true);
     const result = await restoreMissingQuestionAttachment({ file, attachment: current, questionId });
+    if (!isQuestionAttachmentScopeCurrent(scope)) return;
     setBusy(false);
     if (result.status !== "restored") {
       setRestoreError(result.message);
@@ -326,7 +343,7 @@ export function QuestionAttachmentsPanel({
       )}
       <span ref={statusRef} className="sub" role="status" aria-live="polite" tabIndex={-1}>{status}</span>
 
-      {restoreCandidate && (
+      {restoreCandidate && uiScope === scope && (
         <div className="question-attachment-lightbox" role="dialog" aria-modal="true"
           aria-labelledby={restoreTitleId}
           onKeyDown={(event) => { if (event.key === "Escape" && !busy) { event.stopPropagation(); closeRestore(); } }}>
@@ -354,7 +371,7 @@ export function QuestionAttachmentsPanel({
         </div>
       )}
 
-      {preview && (
+      {preview && uiScope === scope && (
         <div
           className="question-attachment-lightbox"
           role="dialog"

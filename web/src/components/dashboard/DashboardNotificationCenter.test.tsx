@@ -159,6 +159,20 @@ describe("DashboardNotificationCenter", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it("renders above dashboard stacking contexts and keeps panel interactions open", () => {
+    const { container } = render(<DashboardNotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 1 item needs attention" }));
+    const panel = screen.getByRole("dialog", { name: "Notifications" });
+    expect(panel.parentElement).toBe(document.body);
+    expect(container.contains(panel)).toBe(false);
+    const markRead = screen.getByRole("button", { name: "Mark all read" });
+    markRead.focus();
+    fireEvent.pointerDown(markRead);
+    fireEvent.click(markRead);
+    expect(screen.getByRole("dialog", { name: "Notifications" })).toBe(panel);
+    expect(screen.getByText("Security notice")).toBeTruthy();
+  });
+
   it("keeps routine history available without turning it into an attention badge", () => {
     remote = {
       data: settings(Array.from({ length: 11 }, (_, index) => ({

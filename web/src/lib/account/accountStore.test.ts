@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { hasWorkspaceHydrationReceipt, recordWorkspaceHydration } from "../workspaceHydrationReceipt";
 
 const rpc = vi.fn();
 const tables: Record<string, unknown[]> = { workspace_revisions: [], account_devices: [], account_profiles: [], workspaces: [] };
@@ -94,6 +95,7 @@ async function watchUploadCacheClears() {
 }
 
 beforeEach(() => {
+  recordWorkspaceHydration(undefined, []);
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   localStorage.clear();
@@ -106,7 +108,7 @@ beforeEach(() => {
   Object.values(auth).forEach((fn) => fn.mockClear());
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
   useStore.setState(makeSeed());
-  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined, syncFailure: undefined, nextAttemptAt: undefined, snapshotBytes: undefined });
+  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined, syncFailure: undefined, nextAttemptAt: undefined, snapshotBytes: undefined, pendingCodeEmail: undefined, pendingCodeKind: undefined });
 });
 
 describe("account validation", () => {
@@ -128,6 +130,7 @@ describe("account lifecycle", () => {
     expect(useAccount.getState().user?.email).toBe("learner@example.com");
     expect(rpc).not.toHaveBeenCalled();
     expect(useStore.getState().courses.length).toBe(before);
+    expect(hasWorkspaceHydrationReceipt("user-1", useStore.getState().journal)).toBe(false);
     expect(localStorage.getItem("axom.sync.metadata.v1") ?? "").not.toContain("secret-access");
   });
 
@@ -151,6 +154,28 @@ describe("account lifecycle", () => {
     expect(pushes.at(-1)![1]).toMatchObject({ p_base_revision: 7, p_reason: "manual" });
     expect(pushes.at(-1)![1].p_idempotency_key).not.toBe(firstPush[1].p_idempotency_key);
     expect(useAccount.getState()).toMatchObject({ protection: "protected", conflictServerRevision: undefined });
+  });
+
+  it("does not authorize Journal hydration after A switches away and back during explicit adoption", async () => {
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    const user = useAccount.getState().user!;
+    let finishUpload!: () => void;
+    rpc.mockImplementation(async (name: string) => {
+      if (name === "push_workspace_revision_v2") {
+        await new Promise<void>(resolve => { finishUpload = resolve; });
+        return { data: null, error: { message: "Synthetic offline response" }, status: 503 };
+      }
+      return { data: null, error: null };
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const adopting = useAccount.getState().linkThisDevice();
+    await vi.waitFor(() => expect(finishUpload).toBeTypeOf("function"));
+    useAccount.setState({ user: { ...user, id: "user-2" } });
+    useAccount.setState({ user });
+    finishUpload();
+    await adopting;
+    expect(hasWorkspaceHydrationReceipt(user.id, useStore.getState().journal)).toBe(false);
+    expect(useAccount.getState().error).toMatch(/account changed/i);
   });
 
   it("merges both versions on conflict: records combine, nothing is deleted, and the result becomes a new revision", async () => {
@@ -190,10 +215,45 @@ describe("account lifecycle", () => {
 
   it("confirms a new account with the emailed code instead of the link", async () => {
     expect(await useAccount.getState().signUp("learner@example.com", "password123", "Learner")).toBe(true);
+    expect(auth.signUp).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({
+      data: { display_name: "Learner", axom_community_preferences: { discoverable: false, shareMode: "off" } },
+    }) }));
     expect(useAccount.getState()).toMatchObject({ pendingCodeEmail: "learner@example.com", pendingCodeKind: "signup" });
     expect(await useAccount.getState().verifyCode("learner@example.com", "12345678")).toBe(true);
     expect(auth.verifyOtp).toHaveBeenCalledWith({ email: "learner@example.com", token: "12345678", type: "email" });
     expect(useAccount.getState()).toMatchObject({ phase: "signed-in", pendingCodeEmail: undefined, pendingCodeKind: undefined });
+  });
+
+  it("sends explicit signup consent before confirmation without reapplying it on verification", async () => {
+    const choices = { discoverable: true, shareMode: "friends" as const };
+    expect(await useAccount.getState().signUp("learner@example.com", "password123", "Learner", choices)).toBe(true);
+    expect(auth.signUp).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({
+      data: { display_name: "Learner", axom_community_preferences: choices },
+    }) }));
+    expect(useAccount.getState().phase).toBe("signed-out");
+    expect(await useAccount.getState().verifyCode("learner@example.com", "12345678")).toBe(true);
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("seeds choices for OTP-created accounts but never writes consent after code sign-in", async () => {
+    const choices = { discoverable: false, shareMode: "community" as const };
+    expect(await useAccount.getState().sendCode("learner@example.com", choices)).toBe(true);
+    expect(auth.signInWithOtp).toHaveBeenCalledWith({ email: "learner@example.com", options: {
+      shouldCreateUser: true, emailRedirectTo: "http://localhost/", data: { axom_community_preferences: choices },
+    } });
+    expect(await useAccount.getState().verifyCode("learner@example.com", "12345678")).toBe(true);
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not carry earlier signup choices into an existing account's password sign-in", async () => {
+    await useAccount.getState().signUp("new@example.com", "password123", "Learner", { discoverable: true, shareMode: "community" });
+    expect(await useAccount.getState().signIn("learner@example.com", "password123")).toBe(true);
+    expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: "learner@example.com", password: "password123" });
+    expect(useAccount.getState()).toMatchObject({ pendingCodeEmail: undefined, pendingCodeKind: undefined });
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("signs a new account straight in when the project does not ask for email confirmation", async () => {
@@ -380,6 +440,7 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
 
     await useAccount.getState().linkThisDevice();
     expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "blocked", syncFailure: { kind: "rejected", rejection: "storage-limit", status: 500, code: "54000" } });
+    expect(hasWorkspaceHydrationReceipt("user-1", useStore.getState().journal)).toBe(true);
     expect(useAccount.getState().message).toMatch(/version history is full/);
     expect(useAccount.getState().message).toMatch(/saved on this device/);
     expect(pushes()).toHaveLength(1);
@@ -417,6 +478,9 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
     expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "refused", status: 400, at }, nextAttemptAt: soon })).toMatch(/refused this upload.*tries again by itself around/);
     expect(protectionDetail({ protection: "paused", syncFailure: { kind: "server", status: 500, at }, nextAttemptAt: soon })).toMatch(/after several tries.*checks less often.*tries again by itself around/);
     expect(protectionDetail({ protection: "retrying", syncFailure: { kind: "network", status: 0, at } })).toMatch(/could not reach your account/);
+    const timedOut = protectionDetail({ protection: "retrying", syncFailure: { kind: "server", status: 500, code: "57014", at }, nextAttemptAt: soon });
+    expect(timedOut).toMatch(/took too long.*not confirmed a new protected version.*tries again by itself around/);
+    expect(timedOut).not.toMatch(/could not reach/);
     expect(protectionDetail({ protection: "retrying", syncFailure: { kind: "auth", status: 401, at } })).toMatch(/sign out and sign in again/);
     for (const status of ["retrying", "paused", "blocked"] as const) {
       const detail = protectionDetail({ protection: status, syncFailure: { kind: "server", status: 500, at } })!;

@@ -28,6 +28,14 @@ export interface LibraryQuestionSetPreview {
   snapshot: SharedQuestionSetSnapshot;
   contentDigest: string;
   status: LibrarySubmission["status"];
+  /** Protected server row revision, required for an academic decision. */
+  reviewRevision?: number;
+}
+
+/** Explicit publisher assertions; this service must not invent consent. */
+export interface CommunityPublicationAttestations {
+  rightsConfirmed: boolean;
+  answersConfirmed: boolean;
 }
 
 const uuid = (value: unknown): value is string => typeof value === "string"
@@ -82,19 +90,81 @@ export async function searchQuestionSetLibrary(accountId: string, search = "", o
   });
 }
 
-export async function loadQuestionSetLibraryPreview(accountId: string, id: string): Promise<LibraryQuestionSetPreview> {
+// The shared SQL reader legitimately returns pending entries to an owner or an
+// academic reviewer. Community learners must only see approved content, while
+// the moderation queue must inspect pending content before deciding approval.
+// Keep these distinct entry points so caller permissions cannot accidentally
+// expand what is discoverable/importable.
+async function loadQuestionSetPreviewForStatus(
+  accountId: string, id: string, requiredStatus: "approved" | "pending",
+): Promise<LibraryQuestionSetPreview> {
   if (!uuid(id)) throw new Error("This Question Set link is invalid.");
   return withAccount(accountId, async client => {
     const { data, error } = await client.rpc("get_question_set_library", { p_id: id });
-    if (error || !record(data) || data.id !== id || !["pending", "approved", "rejected"].includes(String(data.status)))
-      throw new Error("This Question Set is unavailable. It may have been withdrawn.");
+    if (error || !record(data) || data.id !== id || data.status !== requiredStatus)
+      throw new Error(requiredStatus === "approved"
+        ? "This Question Set is unavailable. It may have been withdrawn."
+        : "This submission is no longer awaiting academic review.");
+    if (!count(data.review_revision) || data.review_revision < 1)
+      throw new Error(requiredStatus === "pending"
+        ? "The pending review revision is missing. Refresh the review queue."
+        : "The approved Question Set revision is missing. Reopen the listing.");
     validateShare(data.snapshot_payload);
     const snapshot = data.snapshot_payload;
     if (data.title !== snapshot.title || data.question_count !== snapshot.questions.length)
       throw new Error("This Question Set differs from its protected listing.");
     return { id, snapshot, contentDigest: await sharedQuestionSetDigest(snapshot),
-      status: data.status as LibrarySubmission["status"] };
+      status: requiredStatus,
+      reviewRevision: data.review_revision as number };
   });
+}
+
+/** Public learner discovery/import: never expose pending or rejected snapshots. */
+export function loadQuestionSetLibraryPreview(accountId: string, id: string): Promise<LibraryQuestionSetPreview> {
+  return loadQuestionSetPreviewForStatus(accountId, id, "approved");
+}
+
+/**
+ * Check a preview against the server's exact approved snapshot and revision
+ * under the same SQL row lock. No prior preview or cached digest can authorize
+ * a newer publication. This confirms the state at RPC execution, not a
+ * durable permission lease across a subsequent private vault write.
+ */
+export async function authorizeQuestionSetLibraryImport(
+  accountId: string, inspected: LibraryQuestionSetPreview,
+): Promise<LibraryQuestionSetPreview> {
+  if (!inspected || !uuid(inspected.id) || inspected.status !== "approved"
+    || !count(inspected.reviewRevision) || inspected.reviewRevision < 1
+    || !/^[a-f0-9]{64}$/.test(inspected.contentDigest))
+    throw new Error("Reopen the approved Question Set before importing it.");
+  if (await sharedQuestionSetDigest(inspected.snapshot) !== inspected.contentDigest)
+    throw new Error("The previewed Question Set changed. Reopen the listing.");
+
+  return withAccount(accountId, async client => {
+    const { data, error } = await client.rpc("authorize_question_set_library_import", {
+      p_id: inspected.id,
+      p_expected_revision: inspected.reviewRevision,
+      p_expected_snapshot: inspected.snapshot,
+    });
+    if (error || !record(data) || data.id !== inspected.id || data.status !== "approved"
+      || data.review_revision !== inspected.reviewRevision)
+      throw new Error("This reviewed Question Set changed or was withdrawn. Reopen its listing.");
+    validateShare(data.snapshot_payload);
+    if (data.title !== data.snapshot_payload.title
+      || data.question_count !== data.snapshot_payload.questions.length)
+      throw new Error("The published Question Set differs from its protected listing.");
+    const contentDigest = await sharedQuestionSetDigest(data.snapshot_payload);
+    if (contentDigest !== inspected.contentDigest)
+      throw new Error("The reviewed Question Set changed. Reopen its listing.");
+    return { id: inspected.id, snapshot: data.snapshot_payload, status: "approved",
+      reviewRevision: data.review_revision as number, contentDigest };
+  });
+}
+
+/** Moderation only. The queue checks reviewer access; SQL enforces reviewer
+ * authority again at the review mutation, independent of this read. */
+export function loadPendingQuestionSetReviewPreview(accountId: string, id: string): Promise<LibraryQuestionSetPreview> {
+  return loadQuestionSetPreviewForStatus(accountId, id, "pending");
 }
 
 export async function listMyQuestionSetSubmissions(accountId: string): Promise<LibrarySubmission[]> {
@@ -106,7 +176,12 @@ export async function listMyQuestionSetSubmissions(accountId: string): Promise<L
 }
 
 export async function submitQuestionSetToLibrary(accountId: string, sourceId: string,
-  snapshot: SharedQuestionSetSnapshot, credit: string): Promise<string> {
+  snapshot: SharedQuestionSetSnapshot, credit: string,
+  attestations: CommunityPublicationAttestations): Promise<string> {
+  // A valid answer key is not evidence of redistribution rights or human
+  // source review. Reject direct callers that omit either explicit assertion.
+  if (attestations?.rightsConfirmed !== true || attestations?.answersConfirmed !== true)
+    throw new Error("Confirm redistribution rights and source-reviewed answers before submitting.");
   if (!sourceId.trim() || sourceId !== sourceId.trim() || sourceId.length > 200 || credit.length > 80)
     throw new Error("Check the Question Set identity and public credit.");
   validateShare(snapshot);
@@ -115,7 +190,7 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   return withAccount(accountId, async client => {
     const { data, error } = await client.rpc("submit_question_set_library", {
       p_source_id: sourceId, p_snapshot: snapshot, p_credit: credit.trim(),
-      p_rights_confirmed: true, p_answers_confirmed: true,
+      p_rights_confirmed: attestations.rightsConfirmed, p_answers_confirmed: attestations.answersConfirmed,
     });
     if (error || !uuid(data)) throw new Error(error?.message ?? "The submission could not be confirmed.");
     return data;
@@ -147,10 +222,49 @@ export async function listPendingQuestionSets(accountId: string): Promise<Librar
   });
 }
 
-export async function reviewQuestionSetSubmission(accountId: string, id: string, approved: boolean, reason: string): Promise<void> {
-  if (!uuid(id) || reason.trim().length < 8 || reason.trim().length > 500) throw new Error("Give a review reason of 8 to 500 characters.");
-  return withAccount(accountId, async client => {
-    const { error } = await client.rpc("review_question_set_library", { p_id: id, p_approved: approved, p_reason: reason.trim() });
-    if (error) throw new Error(error.message);
+/**
+ * Recheck the exact pending snapshot a reviewer inspected before submitting a
+ * decision. Review evidence must not silently authorize a replaced answer key
+ * or a withdrawn/resubmitted revision. The SQL RPC still owns reviewer/RLS
+ * authorization; SQL also enforces the inspected revision atomically.
+ */
+export async function reviewQuestionSetSubmission(
+  accountId: string, reviewed: LibraryQuestionSetPreview, approved: boolean, reason: string,
+): Promise<void> {
+  if (!reviewed || !uuid(reviewed.id) || reviewed.status !== "pending"
+    || !count(reviewed.reviewRevision) || reviewed.reviewRevision < 1
+    || !/^[a-f0-9]{64}$/.test(reviewed.contentDigest))
+    throw new Error("Reopen the pending Question Set before reviewing it.");
+  if (reason.trim().length < 8 || reason.trim().length > 500)
+    throw new Error("Give a review reason of 8 to 500 characters.");
+  // Fail closed if the caller supplies an altered preview or a digest from
+  // another snapshot. Neither can stand in for the reviewer-visible revision.
+  if (await sharedQuestionSetDigest(reviewed.snapshot) !== reviewed.contentDigest)
+    throw new Error("The reviewed Question Set changed. Reopen and review it again.");
+
+  // One operation epoch must span *both* the fresh read and the decision,
+  // including an A -> B -> A switch during an asynchronous RPC.
+  const operation = await accountOperationClient();
+  if (operation.userId !== accountId)
+    throw new Error("The signed-in account changed. Reopen the Question Set Library.");
+  await operation.assertCurrent();
+  const { data, error } = await operation.client.rpc("get_question_set_library", { p_id: reviewed.id });
+  await operation.assertCurrent();
+  if (error || !record(data) || data.id !== reviewed.id || data.status !== "pending")
+    throw new Error("This submission is no longer awaiting academic review. Reopen the queue.");
+  validateShare(data.snapshot_payload);
+  if (data.title !== data.snapshot_payload.title || data.question_count !== data.snapshot_payload.questions.length
+    || data.review_revision !== reviewed.reviewRevision
+    || await sharedQuestionSetDigest(data.snapshot_payload) !== reviewed.contentDigest)
+    throw new Error("The pending Question Set changed since inspection. Reopen and review the current answers.");
+  await operation.assertCurrent();
+  const decision = await operation.client.rpc("review_question_set_library", {
+    p_id: reviewed.id, p_approved: approved, p_reason: reason.trim(),
+    // PostgreSQL compares this jsonb against the stored pending snapshot
+    // inside the UPDATE, closing the read-then-decide revision race.
+    p_expected_snapshot: reviewed.snapshot,
+    p_expected_revision: reviewed.reviewRevision,
   });
+  await operation.assertCurrent();
+  if (decision.error) throw new Error(decision.error.message);
 }

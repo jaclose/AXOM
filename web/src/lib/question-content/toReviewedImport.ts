@@ -22,7 +22,7 @@ import type { ImportDestination, ReviewedDraft, ReviewedImportRequest } from "..
 import type { QuestionSource } from "../questions";
 import { legacyQuestionFields } from "./legacyFields";
 import { MAX_PACKAGE_CHOICES, type ImportPackage, type PackageIssue, type PackageQuestion, type QuestionAsset } from "./package";
-import { questionReadiness, type Readiness } from "./readiness";
+import { questionReadiness, type Readiness, type ReadinessVerdict } from "./readiness";
 
 export interface PackageImportOptions {
   originalFile?: Blob;
@@ -125,17 +125,10 @@ function checkedReviewedFiling(value: PackageImportOptions["reviewedFiling"]): {
   return { module, term };
 }
 
-export function packageToReviewedImport(pkg: ImportPackage, issues: readonly PackageIssue[], options: PackageImportOptions = {}): PackageReviewedImport {
-  const { manifest } = pkg;
-  const reviewedFiling = checkedReviewedFiling(options.reviewedFiling);
-  // A source with week 0 is unassigned; preserve that raw value in content, not in the learner's week list.
-  const filing: { module: string; term: number; week?: number } = reviewedFiling
-    ?? { module: manifest.course.name, term: manifest.course.term,
-      ...(manifest.course.week > 0 ? { week: manifest.course.week } : {}) };
-  const held: HeldQuestion[] = [];
-  const withheldAssets: WithheldAsset[] = [];
-  const going: { question: PackageQuestion; advisories: string[]; accepted: string[] }[] = [];
-
+/** The final import's shape and identity gates, shared by previews and saving.
+ * These holds cannot be waived by merely acknowledging an answer review. */
+export function packageImportVerdicts(pkg: ImportPackage, issues: readonly PackageIssue[]): Map<PackageQuestion, ReadinessVerdict & { saveable: boolean }> {
+  const verdicts = new Map<PackageQuestion, ReadinessVerdict & { saveable: boolean }>();
   // Within one set a number names one question. Two with the same number cannot both be saved under it.
   const numbered = new Map<string, number>();
   for (const question of pkg.questions) {
@@ -146,7 +139,7 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
 
   for (const question of pkg.questions) {
     const verdict = questionReadiness(question, issues);
-    const fields = legacyQuestionFields(manifest, question);
+    const fields = legacyQuestionFields(pkg.manifest, question);
     const reasons = [...verdict.reasons];
     let readiness = verdict.readiness;
     let saveable = Boolean(question.correctAnswer);
@@ -174,6 +167,25 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
       if (readiness === "ready") readiness = "needs-review";
       reasons.push(`Another question in the same set also has the number ${number}. Which is which cannot be told from the source.`);
     }
+    verdicts.set(question, { readiness, reasons, advisories: verdict.advisories, saveable });
+  }
+  return verdicts;
+}
+
+export function packageToReviewedImport(pkg: ImportPackage, issues: readonly PackageIssue[], options: PackageImportOptions = {}): PackageReviewedImport {
+  const { manifest } = pkg;
+  const reviewedFiling = checkedReviewedFiling(options.reviewedFiling);
+  // A source with week 0 is unassigned; preserve that raw value in content, not in the learner's week list.
+  const filing: { module: string; term: number; week?: number } = reviewedFiling
+    ?? { module: manifest.course.name, term: manifest.course.term,
+      ...(manifest.course.week > 0 ? { week: manifest.course.week } : {}) };
+  const held: HeldQuestion[] = [];
+  const withheldAssets: WithheldAsset[] = [];
+  const going: { question: PackageQuestion; advisories: string[]; accepted: string[] }[] = [];
+  const verdicts = packageImportVerdicts(pkg, issues);
+  for (const question of pkg.questions) {
+    const verdict = verdicts.get(question)!;
+    const { readiness, reasons, saveable } = verdict;
     const accepted = readiness === "needs-review" && saveable && options.acknowledged?.has(question.id);
     if (readiness === "ready" || accepted) going.push({ question, advisories: verdict.advisories, accepted: accepted ? reasons : [] });
     else held.push({ questionId: question.id, readiness, reasons });
@@ -207,6 +219,8 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
       const explanationSourceSnippet = teachingImage
         ? `Original teaching image: ${teachingImage.sourceFile ?? question.source.filename}${teachingImage.sourcePage !== undefined ? `, page ${teachingImage.sourcePage}` : ""}${teachingImage.checksum ? `, ${teachingImage.checksum}` : ""}.`
         : undefined;
+      const answerEvidencePage = question.source.answerEvidencePage ?? answerImage?.sourcePage;
+      const explanationSourcePage = question.source.explanationSourcePage ?? teachingImage?.sourcePage;
       return {
         stem: fields.stem,
         content: question,
@@ -217,8 +231,11 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
         // The source's own number, as it is. A set never borrows numbers from another set.
         ...(question.source.questionNumber !== undefined ? { questionNumber: question.source.questionNumber } : {}),
         ...(fields.sourcePage !== undefined ? { sourcePage: fields.sourcePage, questionSourcePage: fields.sourcePage } : {}),
-        ...(answerEvidenceSnippet ? { answerEvidenceSnippet, answerEvidencePage: answerImage?.sourcePage } : {}),
-        ...(explanationSourceSnippet ? { explanationSourceSnippet, explanationSourcePage: teachingImage?.sourcePage } : {}),
+        ...(answerEvidence ? { answerEvidence } : {}),
+        ...(answerEvidencePage !== undefined ? { answerEvidencePage } : {}),
+        ...(explanationSourcePage !== undefined ? { explanationSourcePage } : {}),
+        ...(answerEvidenceSnippet ? { answerEvidenceSnippet } : {}),
+        ...(explanationSourceSnippet ? { explanationSourceSnippet } : {}),
         sourceLabel: where,
         ...(shown.length ? { attachmentNames: shown.map((asset) => asset.filename) } : {}),
         parserRuleIds: ["import.package", `import.package.${question.provenance.method}`],

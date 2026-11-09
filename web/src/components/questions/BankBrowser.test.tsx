@@ -41,6 +41,14 @@ afterEach(() => {
 });
 
 describe("BankBrowser mapping review", () => {
+  it("keeps unfinished modes out of the bank and opens an old mode link as All", () => {
+    mocked.questions = [makeQuestion({ stem: "Available question" })];
+    render(<BankBrowser initialMode="exam-simulation" onOpen={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Timed Block|Faculty Style|Exam Simulation/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "All (1)" }).className).toContain("on");
+    expect(screen.getByRole("button", { name: "Available question" })).toBeTruthy();
+  });
+
   it("opens scoped to canonical unresolved and review-suggested mappings", async () => {
     const onOpen = vi.fn();
     const user = userEvent.setup();

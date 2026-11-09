@@ -10,12 +10,12 @@ export const BACKUP_STORE_NAME = "backups";
  * workspace state and never in localStorage (Q2b-2). */
 export const ATTACHMENT_STORE_NAME = "questionAttachmentBlobs";
 /**
- * Physical vault schema version. Version 4 is the coordination barrier for
- * chunked workspace values: a v3 tab must close before the first chunk
- * manifest can be committed, and cannot reopen against the upgraded vault.
+ * Physical vault schema version. Version 5 also closes older tabs whose image
+ * reads and maintenance are not account-scoped. Existing stores and bytes
+ * stay intact; a version-4 client cannot reopen this upgraded vault.
  * This is independent from the logical Zustand store schema.
  */
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 /** Shared upgrade path: create any missing stores without touching existing data. */
 export function ensureVaultStores(db: IDBDatabase) {

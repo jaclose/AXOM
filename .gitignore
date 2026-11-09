@@ -116,6 +116,7 @@ __pycache__/
 .mypy_cache/
 .turbo/
 web/.impeccable/hook.cache.json
+.impeccable/hook.cache.json
 
 # Obsidian: portable defaults only. Bases are user-authored, not disposable caches.
 **/.obsidian/*

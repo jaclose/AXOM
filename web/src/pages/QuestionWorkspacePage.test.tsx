@@ -305,6 +305,17 @@ describe("QuestionWorkspacePage returning state", () => {
     expect(screen.getByText("1 ready to practice · 2 held for answer or source review.")).toBeTruthy();
   });
 
+  it("does not count an answer-provenance notice as main explanation text", () => {
+    useStore.setState({ questions: [
+      question({ id: "key-only", explanation: "PowerPoint slide note 12 explicitly marks B. The supplied notes do not provide a teaching rationale." }),
+      question({ id: "explained", explanation: "The source explains why this mechanism supports the answer." }),
+    ] });
+    render(<QuestionWorkspacePage />);
+    expect(screen.getByLabelText("Question Bank inventory").textContent)
+      .toContain("Answer-ready2Main explanation text1Held for review0Saved sets0");
+    expect(useStore.getState().questions[0].explanation).toContain("slide note 12");
+  });
+
   it("offers a new quiz for a finished session, recent sets, mapping review, and explicit metrics", async () => {
     seedReturningState();
     const user = userEvent.setup();

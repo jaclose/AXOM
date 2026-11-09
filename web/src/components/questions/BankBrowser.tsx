@@ -30,7 +30,7 @@ import { QuestionTagManager } from "./QuestionTagManager";
 import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
 
-const MODES = Object.keys(MODE_META) as QuestionMode[];
+const MODES = (Object.keys(MODE_META) as QuestionMode[]).filter((mode) => MODE_META[mode].ready);
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_COURSES: Course[] = [];
 const PAGE = 100;
@@ -71,7 +71,9 @@ export function BankBrowser({
     return allQuestions.filter((question) => allowed.has(question.id));
   }, [allQuestions, questionIds]);
 
-  const [mode, setMode] = useState<QuestionMode | "all">(initialMode);
+  const [mode, setMode] = useState<QuestionMode | "all">(
+    initialMode === "all" || MODE_META[initialMode].ready ? initialMode : "all",
+  );
   const [criteria, setCriteria] = useState<QuestionFilterCriteria>(() => emptyQuestionFilter());
   const [searchInput, setSearchInput] = useState("");
   const [ordering, setOrdering] = useState<QuestionOrdering>("import");
@@ -401,9 +403,9 @@ export function BankBrowser({
           const meta = MODE_META[m];
           const count = modeCounts.get(m) ?? 0;
           return (
-            <button key={m} className={`filter-pill ${mode === m ? "on" : ""}`} disabled={!meta.ready} title={meta.note}
-              onClick={() => meta.ready && setMode(m)}>
-              {meta.label}{meta.ready ? ` (${count})` : " · soon"}
+            <button key={m} className={`filter-pill ${mode === m ? "on" : ""}`} title={meta.note}
+              onClick={() => setMode(m)}>
+              {meta.label} ({count})
             </button>
           );
         })}

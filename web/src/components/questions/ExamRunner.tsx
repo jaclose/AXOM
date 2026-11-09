@@ -667,6 +667,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     if (stage !== "running") return;
     function onToolEscape(event: KeyboardEvent) {
       if (event.key !== "Escape" || (!activePanel && !annotationTool)) return;
+      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      // A nested blocking dialog owns Escape before the underlying tutor tools.
+      if (dialogs.length && dialogs[dialogs.length - 1] !== stemRef.current?.closest('[role="dialog"][aria-modal="true"]')) return;
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();

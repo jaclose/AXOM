@@ -28,8 +28,9 @@ import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSyn
 import { UserMediaBridge } from "./components/soundscapes/UserMediaBridge";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
+import { CommunityProgressSync } from "./components/community/CommunityProgressSync";
 import { VaultSaveWatcher } from "./components/shell/VaultSaveWatcher";
-import { NAV, navById } from "./components/shell/nav";
+import { NAV, navById, isReleasedRoute } from "./components/shell/nav";
 import { useOperatorAccess } from "./lib/operator/hostClient";
 import { canOpenHost } from "./lib/operator/hostAccess";
 import { NotificationActionBridge } from "./components/shell/NotificationActionBridge";
@@ -79,7 +80,6 @@ const LazyHubFoldersPage = lazy(() => import("./pages/HubFoldersPage").then((mod
 const LazyHelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
 const LazyAboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
 const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then((module) => ({ default: module.LeaderboardsPage })));
-const LazyCommunityPage = lazy(() => import("./pages/CommunityPage").then((module) => ({ default: module.CommunityPage })));
 const LazyHostPage = lazy(() => import("./pages/HostPage").then((module) => ({ default: module.HostPage })));
 const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
 const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage").then((module) => ({ default: module.ActivityHistoryPage })));
@@ -135,7 +135,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   help: () => <LazyHelpPage />,
   appchecker: () => <LazyApplicationCheckerPage />,
   leaderboards: () => <LazyLeaderboardsPage />,
-  community: () => <LazyCommunityPage />,
+  community: () => <LazyCommunitiesPage />,
   host: () => <LazyHostPage />,
   "daily-games": () => <LazyDailyGamesPage />,
   "daily-word": () => <LazyDailyWordPage />,
@@ -412,7 +412,8 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   const requestedRoute = route.split("?")[0];
   // Host is JD's private console. For every other account, including while the
   // role is still being checked, a #host link is simply the dashboard.
-  const routeKey = requestedRoute === "host" && !canOpenHost(hostRole) ? "dashboard" : requestedRoute;
+  const routeKey = !isReleasedRoute(requestedRoute) || (requestedRoute === "host" && !canOpenHost(hostRole))
+    ? "dashboard" : requestedRoute;
   const communicationNav: Record<string, { label: string; subtitle: string }> = { communications: { label: "Communications", subtitle: "Your inbox, on your terms" }, privacy: { label: "Privacy & Data", subtitle: "Keep, download and remove" }, "communications-admin": { label: "Communications studio", subtitle: "Considered writing and delivery" }, host: { label: "Host dashboard", subtitle: "Private AXOM operations and permissions" } };
   // An unknown route renders the dashboard, so it also takes the dashboard's title.
   const nav = NAV.find((n) => n.id === routeKey) ?? communicationNav[routeKey] ?? navById("dashboard") ?? NAV[0];
@@ -532,6 +533,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <FocusCheckIn />
       <NotificationActionBridge />
       <AccountSyncWatcher />
+      <CommunityProgressSync />
       <VaultSaveWatcher />
       <Toaster />
     </div>

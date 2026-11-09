@@ -10,6 +10,8 @@ import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
 import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { carryWorkspaceHydrationForJournalEdit, recordWorkspaceHydration } from "./workspaceHydrationReceipt";
+import { getQuestionAttachmentScope } from "./questionAttachmentScope";
 import type {
   BoardBlueprintLog, BoardExamId, BoardPrepProfile, Course, CourseModule, DailyRolloverEvent, DayPlan, HubFolder, JournalEntry, NoctyriumState,
   PremedExperienceEntry, ProductivityTracker, Prompt, Resource, Task, Term, TrackerItem, Profile, StudyLog, InstalledBlueprintNode, EnergyFactor,
@@ -128,18 +130,44 @@ export type SharedQuestionSetImportCommitResult =
     }
   | { ok: false; message: string; rollbackFailures: string[] };
 
+interface SharedQuestionImportAccountGuard {
+  accountId: string;
+  isCurrentAccount(accountId: string): boolean;
+}
+
 const activeSharedQuestionImports = new Map<string, {
   contentDigest: string;
   promise: Promise<SharedQuestionSetImportCommitResult>;
+  /** Sticky session authorization for this specific pending import. */
+  sessionCurrent?: () => boolean;
 }>();
 
 function coordinateSharedQuestionImport(
   identity: SharedQuestionImportIdentity,
   run: () => Promise<SharedQuestionSetImportCommitResult>,
+  accountGuard?: SharedQuestionImportAccountGuard,
 ): Promise<SharedQuestionSetImportCommitResult> {
   if (typeof identity?.shareId !== "string" || typeof identity?.contentDigest !== "string") return run();
-  const active = activeSharedQuestionImports.get(identity.shareId);
+  // Do not coalesce receipts between accounts or revoked sessions of the same account.
+  const accountId = accountGuard?.accountId;
+  const key = accountId ? `${accountId}:${identity.shareId}` : identity.shareId;
+  const active = activeSharedQuestionImports.get(key);
   if (active) {
+    // A → B → A may leave the account ID unchanged at click time. The first
+    // import's session monitor stays revoked, so it must not authorize a
+    // second session's import or supply that session's completion receipt.
+    let previousSessionValid = true;
+    try {
+      if (active.sessionCurrent) previousSessionValid = active.sessionCurrent() === true;
+    } catch {
+      previousSessionValid = false;
+    }
+    if (!previousSessionValid) {
+      // Let the original IndexedDB write settle if it already began. Never
+      // race a new session's vault write against the previous in-flight one.
+      const retry = () => coordinateSharedQuestionImport(identity, run, accountGuard);
+      return active.promise.then(retry, retry);
+    }
     if (active.contentDigest !== identity.contentDigest.toLowerCase()) {
       return Promise.resolve({
         ok: false,
@@ -150,13 +178,16 @@ function coordinateSharedQuestionImport(
     return active.promise;
   }
   const promise = run().finally(() => {
-    if (activeSharedQuestionImports.get(identity.shareId)?.promise === promise) {
-      activeSharedQuestionImports.delete(identity.shareId);
+    if (activeSharedQuestionImports.get(key)?.promise === promise) {
+      activeSharedQuestionImports.delete(key);
     }
   });
-  activeSharedQuestionImports.set(identity.shareId, {
+  activeSharedQuestionImports.set(key, {
     contentDigest: identity.contentDigest.toLowerCase(),
     promise,
+    sessionCurrent: accountGuard
+      ? () => accountGuard.isCurrentAccount(accountGuard.accountId) === true
+      : undefined,
   });
   return promise;
 }
@@ -302,9 +333,11 @@ interface Actions {
   commitSharedQuestionSetImport: (input: {
     snapshot: SharedQuestionSetSnapshot;
     identity: SharedQuestionImportIdentity;
+    /** Client-side session guard. Server authorization remains authoritative. */
+    accountGuard?: SharedQuestionImportAccountGuard;
   }) => Promise<SharedQuestionSetImportCommitResult>;
   /** Validate and durably persist one complete reviewed import snapshot. */
-  commitReviewedImport: (plan: ReviewedImportPersistencePlan) => Promise<ReviewedImportPersistenceResult>;
+  commitReviewedImport: (plan: ReviewedImportPersistencePlan, assertCurrent?: () => void) => Promise<ReviewedImportPersistenceResult>;
   /** Atomically persist reviewed filing changes for reused source sets. */
   commitReviewedRefiling: (plan: ReviewedRefilingPlan) => Promise<ReviewedRefilingResult>;
   /** Atomically refresh only source-owned fields of an untouched reused set. */
@@ -365,7 +398,7 @@ interface Actions {
   resetDailyWordPuzzles: () => void;
 
   // data management
-  replaceAll: (state: NoctyriumState) => void;
+  replaceAll: (state: NoctyriumState, authenticatedAccountId?: string) => void;
   resetToSeed: () => void;
   startFresh: () => void; // wipe sample data, keep an empty personal profile
 }
@@ -582,10 +615,21 @@ export const useStore = create<Store>()(
         set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) })),
       removeTask: (id) => set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
 
-      addJournal: (e) => set((s) => ({ journal: [{ ...e, id: e.id ?? uid() }, ...s.journal] })),
-      updateJournal: (id, patch) =>
-        set((s) => ({ journal: s.journal.map((j) => (j.id === id ? { ...j, ...patch } : j)) })),
-      removeJournal: (id) => set((s) => ({ journal: s.journal.filter((j) => j.id !== id) })),
+      addJournal: (e) => set((s) => {
+        const journal = [{ ...e, id: e.id ?? uid() }, ...s.journal];
+        carryWorkspaceHydrationForJournalEdit(s.journal, journal);
+        return { journal };
+      }),
+      updateJournal: (id, patch) => set((s) => {
+        const journal = s.journal.map((j) => (j.id === id ? { ...j, ...patch } : j));
+        carryWorkspaceHydrationForJournalEdit(s.journal, journal);
+        return { journal };
+      }),
+      removeJournal: (id) => set((s) => {
+        const journal = s.journal.filter((j) => j.id !== id);
+        carryWorkspaceHydrationForJournalEdit(s.journal, journal);
+        return { journal };
+      }),
 
       addPremedExperience: (e) =>
         set((s) => ({ premedExperiences: [{ ...e, id: uid(), created: now() }, ...(s.premedExperiences ?? [])] })),
@@ -1129,6 +1173,18 @@ export const useStore = create<Store>()(
           message,
           rollbackFailures,
         });
+        const accountUnchanged = () => {
+          const guard = input.accountGuard;
+          if (!guard) return true; // Preserve existing bearer-link imports.
+          if (!guard.accountId?.trim() || typeof guard.isCurrentAccount !== "function") return false;
+          try {
+            return guard.isCurrentAccount(guard.accountId) === true;
+          } catch {
+            return false;
+          }
+        };
+        const accountChanged = () => failure("The active account changed before the Question Set could be saved. Reopen the preview.");
+        if (!accountUnchanged()) return accountChanged();
         let verifiedDigest: string;
         try {
           verifiedDigest = await sharedQuestionSetDigest(input.snapshot);
@@ -1139,6 +1195,9 @@ export const useStore = create<Store>()(
           || verifiedDigest !== input.identity.contentDigest.toLowerCase()) {
           return failure("The shared set content digest does not match its protected snapshot.");
         }
+        // Digesting is asynchronous: reject a stale account before generating
+        // or persisting any new learner-owned records.
+        if (!accountUnchanged()) return accountChanged();
 
         const current = get();
         let plan: ReturnType<typeof importSharedQuestionSet>;
@@ -1213,6 +1272,9 @@ export const useStore = create<Store>()(
         const sameValue = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
         const insertedQuestions = new Map(plan.questions.map((question) => [question.id, question]));
         const writeSequence = getVaultWriteCheckpoint() + 1;
+        // This is the final safe cancellation point. Never roll back a write
+        // solely because an account changes after persistence has started.
+        if (!accountUnchanged()) return accountChanged();
         try {
           await set(() => next);
           assertVaultWrite(writeSequence);
@@ -1262,8 +1324,9 @@ export const useStore = create<Store>()(
           reused: plan.reused,
           alreadyImported: false,
         };
-      }),
-      commitReviewedImport: async (plan) => {
+      }, input.accountGuard),
+      commitReviewedImport: async (plan, assertCurrent) => {
+        assertCurrent?.();
         const current = get();
         const failure = (message: string, rollbackFailures: string[] = []): ReviewedImportPersistenceResult => ({
           ok: false,
@@ -1438,12 +1501,15 @@ export const useStore = create<Store>()(
           // Zustand persist returns the storage promise at runtime. Awaiting it
           // here guarantees that success means the complete snapshot reached
           // IndexedDB or the established localStorage fallback.
+          assertCurrent?.();
           await set(() => next);
+          assertCurrent?.();
           assertVaultWrite(writeSequence);
         } catch (error) {
           const rollbackFailures = new Set<string>();
           const rollbackSequence = getVaultWriteCheckpoint() + 1;
           try {
+            assertCurrent?.();
             await set((live) => {
               const liveQuestionSets = live.questionSets ?? [];
               const liveQuestions = live.questions ?? [];
@@ -2140,20 +2206,27 @@ export const useStore = create<Store>()(
         })),
       resetDailyWordPuzzles: () => set(() => ({ dailyWordPuzzles: [] })),
 
-      replaceAll: (state) => set(() => ({
-        ...state,
-        deferredContent: state.deferredContent,
-        profile: normalizeProfile(state.profile),
-        dailyWordPuzzles: normalizeDailyWordPuzzles(state.dailyWordPuzzles),
-      })),
+      replaceAll: (state, authenticatedAccountId) => {
+        // Record before notifying Zustand subscribers. Only the authenticated
+        // restore boundary supplies account identity; edits never issue receipts.
+        recordWorkspaceHydration(authenticatedAccountId, state.journal);
+        return set(() => ({
+          ...state,
+          deferredContent: state.deferredContent,
+          profile: normalizeProfile(state.profile),
+          dailyWordPuzzles: normalizeDailyWordPuzzles(state.dailyWordPuzzles),
+        }));
+      },
       resetToSeed: () => {
         // Wiping all questions orphans every stored image — purge the blob
         // store so a "reset" leaves no screenshot bytes behind on disk.
-        void listQuestionAttachmentBlobKeys().then((keys) => keys.length ? deleteQuestionAttachmentBlobs(keys) : undefined).catch(() => {});
+        const scope = getQuestionAttachmentScope();
+        void listQuestionAttachmentBlobKeys().then((keys) => keys.length ? deleteQuestionAttachmentBlobs(keys, { scope }) : undefined).catch(() => {});
         set(() => ({ ...makeSeed(), deferredContent: undefined }));
       },
       startFresh: () => {
-        void listQuestionAttachmentBlobKeys().then((keys) => keys.length ? deleteQuestionAttachmentBlobs(keys) : undefined).catch(() => {});
+        const scope = getQuestionAttachmentScope();
+        void listQuestionAttachmentBlobKeys().then((keys) => keys.length ? deleteQuestionAttachmentBlobs(keys, { scope }) : undefined).catch(() => {});
         set((s) => ({
           deferredContent: undefined,
           terms: [], courses: [], tracker: [], productivityTrackers: defaultProductivityTrackers(), tasks: [],

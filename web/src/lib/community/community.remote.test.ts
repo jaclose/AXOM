@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accountOperationClient } from "../account/supabase";
-import { joinCommunity, loadCommunity, searchCommunityProfiles, type CommunityConnection, type CommunityProfile } from "./community";
+import { joinCommunity, loadCommunity, readCommunityPreferences, searchCommunityProfiles, type CommunityConnection, type CommunityProfile } from "./community";
 
 vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn() }));
 vi.mock("../academicLibrary/accountScope", () => ({ academicAccountScope: () => ({ assertCurrent: () => {}, dispose: () => {} }) }));
 
 type Query = {
   table: string;
+  rpc?: string;
+  args?: Record<string, unknown>;
   filters: Record<string, unknown>;
   limit?: number;
   range?: [number, number];
   insert?: unknown;
+  fields?: string;
 };
 type Response = { data: unknown; error: null | { code?: string; message: string } };
 const ok = (data: unknown): Response => ({ data, error: null });
@@ -23,7 +26,7 @@ function mockBackend(answer: (query: Query) => Response) {
   const from = vi.fn((table: string) => {
     const query: Query = { table, filters: {} };
     const builder = {
-      select: () => builder,
+      select: (fields: string) => { query.fields = fields; return builder; },
       order: () => builder,
       limit: (size: number) => { query.limit = size; return builder; },
       range: (first: number, last: number) => { query.range = [first, last]; return builder; },
@@ -39,7 +42,11 @@ function mockBackend(answer: (query: Query) => Response) {
     return builder;
   });
   vi.mocked(accountOperationClient).mockResolvedValue({
-    userId: "me", client: { from }, assertCurrent: async () => {},
+    userId: "me", client: { from, rpc: async (rpc: string, args: Record<string, unknown>) => {
+      const query = { table: "rpc", filters: {}, rpc, args };
+      queries.push(query);
+      return answer(query);
+    } }, assertCurrent: async () => {},
   } as unknown as Awaited<ReturnType<typeof accountOperationClient>>);
   return queries;
 }
@@ -47,6 +54,35 @@ function mockBackend(answer: (query: Query) => Response) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("Community account and directory loading", () => {
+  it("keeps existing profiles and activity readable on the earlier service schema", async () => {
+    const queries = mockBackend(query => {
+      if (query.table === "social_profiles") return ok([profile("me", "owner", false)]);
+      if (query.table === "social_connections") return ok([]);
+      if (query.table === "social_posts") return query.fields?.includes("revision")
+        ? { data: null, error: { code: "42703", message: "column revision does not exist" } } : ok([]);
+      throw new Error(`Unexpected ${query.table}`);
+    });
+    const result = await loadCommunity("me");
+    expect(result.serviceUpgradeRequired).toBe(true);
+    expect(result.profiles[0].handle).toBe("owner");
+    expect(result.posts).toEqual([]);
+    expect(queries.filter(query => query.table === "social_posts")).toHaveLength(2);
+  });
+
+  it("does not disguise denied activity access as an older service", async () => {
+    const queries = mockBackend(query => {
+      if (query.table === "social_profiles") return ok([profile("me", "owner", false)]);
+      if (query.table === "social_posts") return { data: null, error: { code: "42501", message: "permission denied" } };
+      throw new Error(`Unexpected ${query.table}`);
+    });
+    await expect(loadCommunity("me")).rejects.toThrow("could not be reached");
+    expect(queries.filter(query => query.table === "social_posts")).toHaveLength(1);
+  });
+
+  it("names an unavailable consent service without inferring consent", async () => {
+    mockBackend(() => ({ data: null, error: { code: "PGRST202", message: "function not found" } }));
+    await expect(readCommunityPreferences("me")).rejects.toThrow("Community service needs an update");
+  });
   it("keeps an existing owner profile beyond the first 100 directory rows", async () => {
     const firstHundred = Array.from({ length: 100 }, (_, index) => profile(`user-${index}`, `a${String(index).padStart(3, "0")}`));
     const queries = mockBackend(query => {
@@ -111,7 +147,7 @@ describe("Community account and directory loading", () => {
 
   it("searches both server fields, excludes hidden profiles, and never upserts an existing profile", async () => {
     const queries = mockBackend(query => {
-      if (query.insert) return { data: null, error: { code: "23505", message: "duplicate" } };
+      if (query.rpc === "axom_create_community_profile") return { data: null, error: { code: "23505", message: "duplicate" } };
       if (query.filters["ilike:handle"]) return ok([profile("older", "older_learner"), profile("hidden", "hidden", false)]);
       if (query.filters["ilike:display_name"]) return ok([profile("older", "older_learner")]);
       throw new Error(`Unexpected ${query.table}`);
@@ -120,6 +156,6 @@ describe("Community account and directory loading", () => {
     expect(queries.filter(query => query.table === "social_profiles" && !query.insert).map(query => query.filters))
       .toEqual([{ discoverable: true, "ilike:handle": "%older%" }, { discoverable: true, "ilike:display_name": "%older%" }]);
     await expect(joinCommunity("me", "existing", "Existing learner")).rejects.toThrow(/profile already exists/);
-    expect(queries.find(query => query.insert)?.insert).toMatchObject({ user_id: "me", handle: "existing" });
+    expect(queries.find(query => query.rpc)?.args).toEqual({ p_handle: "existing", p_display_name: "Existing learner", p_bio: "" });
   });
 });

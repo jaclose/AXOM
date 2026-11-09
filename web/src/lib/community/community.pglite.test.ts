@@ -202,4 +202,16 @@ describe("Community and operator security against real Postgres RLS", () => {
     await as(A,"delete from public.social_posts where id=$1",[post.id]);
   });
 
+  it("lets automatic sharing raise and re-scope only the author's own single daily row", async () => {
+    const day = "2026-11-03";
+    const [row] = await as<{id:string}>(A,"insert into public.social_posts(user_id,kind,visibility,activity_day,minutes,cards,questions) values($1,'progress','friends',$2,30,0,4) returning id",[A,day]);
+    await expect(as(A,"insert into public.social_posts(user_id,kind,visibility,activity_day,minutes) values($1,'progress','community',$2,60)",[A,day])).rejects.toThrow(/duplicate key/);
+    expect(await as(A,"update public.social_posts set minutes=60,questions=4,visibility='community' where id=$1 and user_id=$2 returning minutes,visibility",[row.id,A]))
+      .toEqual([{minutes:60,visibility:"community"}]);
+    expect(await as(B,"update public.social_posts set minutes=1 where id=$1 returning id",[row.id])).toEqual([]);
+    await expect(as(A,"update public.social_posts set kind='question_set',activity_day=null,set_title='Swap',minutes=0,questions=0 where id=$1",[row.id])).rejects.toThrow(/cannot change/);
+    await expect(as(A,"update public.social_posts set activity_day=current_date + 3 where id=$1",[row.id])).rejects.toThrow(/check constraint/);
+    await as(A,"delete from public.social_posts where id=$1",[row.id]);
+  });
+
 });

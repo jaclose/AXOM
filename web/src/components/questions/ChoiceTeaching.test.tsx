@@ -16,6 +16,15 @@ const question: QuestionRecord = {
 afterEach(cleanup);
 
 describe("ChoiceTeaching", () => {
+  it("does not count a retained answer notice as correct-choice teaching", () => {
+    const source = { ...question, explanation: "PowerPoint slide note 12 explicitly marks B. The supplied notes do not provide a teaching rationale." };
+    const before = JSON.stringify(source);
+    render(<ChoiceTeaching question={source} pickedKey="A" />);
+    expect(screen.getByText("1 of 3 explained")).toBeTruthy();
+    expect(screen.queryByText("The core explanation above covers why this answer is correct.")).toBeNull();
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   it("orders the trusted answer and learner choice first without altering source fields", () => {
     const before = JSON.stringify(question);
     render(<ChoiceTeaching question={question} pickedKey="A" />);

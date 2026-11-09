@@ -8,6 +8,7 @@ import { saveSourceOriginal, readSourceOriginal, deleteSourceOriginal } from "..
 import { readOriginalFile } from "../sourceOriginal";
 import { ORIGINALS_BUCKET, clearCloudOriginalUploadCache, downloadCloudOriginal, repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
 import { makeSeed } from "../seed";
+import { setQuestionAttachmentAccount } from "../questionAttachmentScope";
 
 const mock = vi.hoisted(() => ({
   blobs: new Map<string, Blob>(),
@@ -82,6 +83,7 @@ async function source(bytes: Blob, id = crypto.randomUUID()) {
 }
 
 beforeEach(() => {
+  setQuestionAttachmentAccount("owner");
   clearCloudOriginalUploadCache();
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
@@ -118,11 +120,13 @@ describe("immutable private original-file cloud storage", () => {
   });
 
   it("reuses only account-scoped readback-verified originals across retries", async () => {
-    const { state } = await source(new Blob(["private source"]));
+    const { doc, state } = await source(new Blob(["private source"]));
     await uploadCloudOriginals(client, "owner", state, undefined, guard);
     await uploadCloudOriginals(client, "owner", state, undefined, guard);
     expect(upload).toHaveBeenCalledTimes(1);
     expect(download).toHaveBeenCalledTimes(1);
+    setQuestionAttachmentAccount("other-owner");
+    await saveSourceOriginal(doc, new Blob(["private source"]));
     await uploadCloudOriginals(client, "other-owner", state, undefined, guard);
     expect(upload).toHaveBeenCalledTimes(2);
     expect(download).toHaveBeenCalledTimes(2);
@@ -197,8 +201,10 @@ describe("immutable private original-file cloud storage", () => {
     await uploadCloudOriginals(client, "owner", state, undefined, guard);
     await deleteSourceOriginal(doc.id);
     expect(await readSourceOriginal(doc.id, doc.checksum)).toBeUndefined();
+    setQuestionAttachmentAccount("different-owner");
     await expect(downloadCloudOriginal(client, "different-owner", doc, guard)).rejects.toThrow(/not available offline/);
     expect(await readSourceOriginal(doc.id, doc.checksum)).toBeUndefined();
+    setQuestionAttachmentAccount("owner");
     await downloadCloudOriginal(client, "owner", doc, guard);
     expect(await (await readSourceOriginal(doc.id, doc.checksum))?.text()).toBe("persist across devices");
   });

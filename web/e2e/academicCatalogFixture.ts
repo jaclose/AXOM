@@ -50,6 +50,8 @@ export async function academicCatalogFixture(page: Page) {
     const json = (value: unknown, status = 200) => route.fulfill({ status, headers, json: value });
     // The catalog learner has no operator privileges in the shared app shell.
     if (request.method() === "POST" && path === "/rest/v1/rpc/axom_operator_role") return json(null);
+    // App-wide sharing checks are private by default for this synthetic account.
+    if (request.method() === "POST" && path === "/rest/v1/rpc/axom_community_preferences") return json({ discoverable: false, shareMode: "off", revision: 1 });
     // Onboarding briefly mounts the dashboard's account notification inbox.
     if (request.method() === "POST" && path === "/functions/v1/communications" && url.searchParams.get("action") === "settings") return json({
       preferences: [], identity: { accent: "cyan", theme: "dark" }, history: [], privacy: [],

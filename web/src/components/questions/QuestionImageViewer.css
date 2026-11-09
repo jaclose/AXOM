@@ -1,0 +1,25 @@
+.modal-scrim:has(> .question-image-viewer) { z-index: 400; padding: 12px; }
+.modal.question-image-viewer {
+  display: flex; flex-direction: column; width: min(1240px, calc(100vw - 24px)); max-width: 1240px;
+  height: min(900px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); padding: 16px;
+  overflow: hidden; background: var(--surface-1); color: var(--text);
+}
+.question-image-viewer > .spread { flex: 0 0 auto; gap: 12px; align-items: flex-start; }
+.question-image-viewer > .spread h3 { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-md); }
+.question-image-viewer > .spread .ghost-btn { flex: 0 0 44px; width: 44px; height: 44px; }
+.modal .modal-body.question-image-viewer__body { flex: 1; min-height: 0; margin-top: 8px; }
+.question-image-viewer__content { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: 10px; }
+.question-image-viewer__toolbar { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.question-image-viewer__toolbar .gbtn { min-width: 44px; min-height: 44px; }
+.question-image-viewer__scale { min-width: 5ch; text-align: center; font: var(--fs-sm) var(--font-mono); color: var(--text); }
+.question-image-viewer__viewport {
+  flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain;
+  touch-action: pan-x pan-y pinch-zoom; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.question-image-viewer__viewport:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+.question-image-viewer__viewport[data-zoomed="true"] { cursor: grab; }
+.question-image-viewer__viewport[data-panning="true"] { cursor: grabbing; }
+.question-image-viewer__canvas { display: grid; place-items: center; }
+.question-image-viewer__image { display: block; max-width: none; max-height: none; object-fit: contain; background: #fff; user-select: none; }
+.question-image-viewer__hint { margin: 0; color: var(--text-60); font-size: var(--fs-xs); line-height: 1.5; }
+@media (max-width: 560px) { .modal.question-image-viewer { padding: 12px; border-radius: var(--radius-md); } }

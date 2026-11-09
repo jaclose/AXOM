@@ -61,6 +61,24 @@ describe("exact Course Tracker practice handoff", () => {
     expect(inspectCourseLaunch([]).state).toBe("invalid");
     expect(sessionStorage.getItem(KEY)).toBe("{broken");
   });
+  it("holds disputed on-device identities for review rather than reporting a runnable quiz", () => {
+    store(["q1", "q2"]);
+    const pending = sessionStorage.getItem(KEY);
+    const original = question("q1");
+    const conflicting = question("q1", { stem: "Contradictory stem on the same original ID" });
+    for (const local of [[original, conflicting], [conflicting, original]]) {
+      expect(inspectCourseLaunch([...local, question("q2")])).toEqual({
+        state: "pending", term: "Term 4", module: "FTCM", week: 2,
+        total: 2, ready: 1, missing: 0, review: 1, reviewIds: ["q1"],
+      });
+      expect(sessionStorage.getItem(KEY)).toBe(pending);
+    }
+    // Duplicate local records outside the fixed selection do not block it.
+    expect(inspectCourseLaunch([
+      question("q1"), question("q2"), question("other"), question("other", { stem: "Conflicting outside selection" }),
+    ]).state).toBe("ready");
+  });
+
   it("has no pending state when no handoff exists", () => {
     expect(inspectCourseLaunch([])).toEqual({ state: "none" });
   });

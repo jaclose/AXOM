@@ -340,7 +340,7 @@ describe("IndexedDB-first local vault", () => {
     }
   });
 
-  it("does not let a v3 writer open after a chunked primary commits behind the v4 barrier", async () => {
+  it("does not let v3 or v4 writers reopen after the current vault barrier commits", async () => {
     const key = STORAGE_KEYS.persistedState;
     const persisted = JSON.stringify({
       state: { profile: { userId: "jd" }, documents: [{ rawText: "x".repeat(1_100_000) }] },
@@ -351,10 +351,11 @@ describe("IndexedDB-first local vault", () => {
     await flushLocalVaultWrites();
 
     const current = await openCurrentVault();
-    expect(current.version).toBe(4);
+    expect(current.version).toBe(DB_VERSION);
     expect(JSON.parse((await getDirect(current, key))!)).toMatchObject({ format: "axom-local-vault-chunks" });
     current.close();
     await expect(openVaultAtVersion(3)).rejects.toMatchObject({ name: "VersionError" });
+    await expect(openVaultAtVersion(4)).rejects.toMatchObject({ name: "VersionError" });
     expect(await localVaultStorage.getItem(key)).toBe(persisted);
   });
 

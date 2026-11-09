@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type ChangeEvent, type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -10,6 +10,8 @@ import {
   Trash2, Trophy, X,
 } from "lucide-react";
 import { useStore } from "../lib/store";
+import { userIdFromName } from "../lib/userIdentity";
+import { hasWorkspaceHydrationReceipt, subscribeWorkspaceHydrationReceipt, workspaceHydrationReceiptVersion } from "../lib/workspaceHydrationReceipt";
 import { useUi } from "../lib/uiStore";
 import { useAccount } from "../lib/account/accountStore";
 import * as localVault from "../lib/localVault";
@@ -232,14 +234,63 @@ function JournalDeskLaptop({ today }: { today: string }) {
   );
 }
 
-export function JournalPage({ registerAppTransitionGuard }: {
+// A display-name edit changes the legacy name-derived userId, but it is not a
+// workspace replacement. Retain the editor only if the profile changed in
+// exactly those two fields while the notebook data stayed in the same workspace.
+function isNameOnlyJournalRename(previous: Profile, next: Profile, journalUnchanged: boolean): boolean {
+  if (!journalUnchanged || previous.name === next.name || previous.userId === next.userId) return false;
+  if (previous.userId !== userIdFromName(previous.name) || next.userId !== userIdFromName(next.name)) return false;
+  const before = previous as unknown as Record<string, unknown>;
+  const after = next as unknown as Record<string, unknown>;
+  const keys = Object.keys(before);
+  return keys.length === Object.keys(after).length
+    && keys.every((key) => key === "name" || key === "userId" || before[key] === after[key]);
+}
+
+export function JournalPage({ registerAppTransitionGuard, hasAccountWorkspaceReceipt = hasWorkspaceHydrationReceipt }: {
   registerAppTransitionGuard?: RegisterJournalTransitionGuard;
+  hasAccountWorkspaceReceipt?: (accountId: string, journal: JournalEntry[]) => boolean;
 } = {}) {
   const s = useStore();
+  useSyncExternalStore(subscribeWorkspaceHydrationReceipt, workspaceHydrationReceiptVersion, workspaceHydrationReceiptVersion);
+  // The profile userId is name-derived, not the authenticated account identity.
+  const accountId = useAccount((state) => state.phase === "signed-in" ? state.user?.id ?? null : null);
+  const workspaceReady = accountId === null || Boolean(hasAccountWorkspaceReceipt?.(accountId, s.journal));
+  const sessionDraftsRef = useRef(new Map<string, JournalSessionDraft>());
+  const feedbackSessionDraftsRef = useRef(new Map<string, JournalExperienceFeedbackInput>());
+  const writerIdentityRef = useRef({
+    profile: s.profile, journal: s.journal, accountId, epoch: 0, workspaceEpoch: 0,
+    pendingJournal: workspaceReady ? null : s.journal as JournalEntry[] | null,
+  });
+  const previousWriter = writerIdentityRef.current;
+  if (previousWriter.accountId !== accountId) {
+    previousWriter.epoch += 1;
+    // Auth can arrive before the next account's notebook. Do not mount a new
+    // editor or library against the previous account's still-loaded pages.
+    previousWriter.pendingJournal = workspaceReady ? null : s.journal;
+  } else if (!previousWriter.pendingJournal && previousWriter.profile.userId !== s.profile.userId
+    && !isNameOnlyJournalRename(previousWriter.profile, s.profile, previousWriter.journal === s.journal)) {
+    previousWriter.epoch += 1;
+    previousWriter.workspaceEpoch += 1;
+  }
+  if (previousWriter.pendingJournal && workspaceReady) {
+    previousWriter.pendingJournal = null;
+  }
+  previousWriter.profile = s.profile;
+  previousWriter.journal = s.journal;
+  previousWriter.accountId = accountId;
   const journalDay = useUi((state) => state.journalDay);
   const clearJournalDay = useUi((state) => state.clearJournalDay);
   const reducedMotion = useReducedMotion();
   const [selectedDay, setSelectedDay] = useState(s.activeDayKey || dayKey());
+  // Private in-tab recovery only, never shared store, localStorage or cloud.
+  const sessionDraftKey = `${accountId ?? "local"}:${previousWriter.workspaceEpoch}:${selectedDay}`;
+  const preserveSessionDraft = useCallback((snapshot: JournalSessionDraft) => {
+    sessionDraftsRef.current.set(sessionDraftKey, snapshot);
+  }, [sessionDraftKey]);
+  const clearSessionDraft = useCallback(() => {
+    sessionDraftsRef.current.delete(sessionDraftKey);
+  }, [sessionDraftKey]);
   const [open, setOpen] = useState(false);
   const [startZoomed, setStartZoomed] = useState(false);
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null);
@@ -342,6 +393,15 @@ export function JournalPage({ registerAppTransitionGuard }: {
     if (!reducedMotion) window.setTimeout(() => setTurnDirection(null), 440);
   }
 
+  if (previousWriter.pendingJournal) {
+    return (
+      <section className="journal-notebook-page" role="status" aria-live="polite">
+        <h1>Journal paused</h1>
+        <p>Waiting for this account's workspace to load. Unsaved writing remains in this tab.</p>
+      </section>
+    );
+  }
+
   return (
     <div className={`journal-notebook-page${open ? " is-open" : ""}`}>
       <header className="journal-page-header">
@@ -372,7 +432,12 @@ export function JournalPage({ registerAppTransitionGuard }: {
         />
       ) : (
         <JournalWritingPage
-          key={selectedDay}
+          key={`${writerIdentityRef.current.epoch}:${selectedDay}`}
+          workspaceId={s.profile.userId}
+          ownerAccountId={accountId}
+          recoveredDraft={sessionDraftsRef.current.get(sessionDraftKey)}
+          onPreserveDraft={preserveSessionDraft}
+          onDraftSaved={clearSessionDraft}
           day={selectedDay}
           today={today}
           preferences={preferences}
@@ -420,7 +485,7 @@ export function JournalPage({ registerAppTransitionGuard }: {
       )}
 
       {feedbackOpen && (
-        <JournalFeedback onClose={() => {
+        <JournalFeedback sessionDrafts={feedbackSessionDraftsRef.current} onClose={() => {
           setFeedbackOpen(false);
           clearJournalFeedbackRequest();
         }} />
@@ -588,9 +653,20 @@ interface JournalDraft {
   notebookStatus: "draft" | "complete";
 }
 
+interface JournalSessionDraft {
+  draft: JournalDraft;
+  entryId: string;
+  entryDate: string;
+}
+
 function JournalWritingPage({
-  day, today, preferences, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
+  workspaceId, ownerAccountId, recoveredDraft, onPreserveDraft, onDraftSaved, day, today, preferences, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
 }: {
+  workspaceId: string;
+  ownerAccountId: string | null;
+  recoveredDraft?: JournalSessionDraft;
+  onPreserveDraft: (snapshot: JournalSessionDraft) => void;
+  onDraftSaved: () => void;
   day: string;
   today: string;
   preferences: JournalNotebookPreferences;
@@ -622,26 +698,33 @@ function JournalWritingPage({
   });
   const [promptStep, setPromptStep] = useState(0);
   const [summaryVisible, setSummaryVisible] = useState(false);
-  const [draft, setDraftState] = useState<JournalDraft>(() => draftFromEntry(entry, plan));
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">(entry ? "saved" : "idle");
+  const [draft, setDraftState] = useState<JournalDraft>(() => recoveredDraft?.draft ?? draftFromEntry(entry, plan));
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">(
+    recoveredDraft ? "failed" : entry ? "saved" : "idle",
+  );
   const [saveError, setSaveError] = useState("");
   const [attachmentError, setAttachmentError] = useState("");
   const [addingImage, setAddingImage] = useState(false);
+  const [transitionSaving, setTransitionSaving] = useState(false);
   const [editingGlance, setEditingGlance] = useState<JournalGlanceSectionKey | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
-  const entryIdRef = useRef(entry?.id ?? "");
-  const entryDateRef = useRef(entry?.date ?? `${day}T12:00:00`);
+  const entryIdRef = useRef(recoveredDraft?.entryId ?? entry?.id ?? "");
+  const entryDateRef = useRef(recoveredDraft?.entryDate ?? entry?.date ?? `${day}T12:00:00`);
   const draftRef = useRef(draft);
-  const dirtyRef = useRef(false);
+  const dirtyRef = useRef(Boolean(recoveredDraft));
   const draftVersionRef = useRef(0);
   const mountedRef = useRef(true);
   const transitionPendingRef = useRef(false);
   const lifecyclePersistPendingRef = useRef(false);
+  const lifecyclePersistVersionRef = useRef<number | null>(null);
+  const lifecycleTextQueueRef = useRef<Promise<JournalPersistResult> | null>(null);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const attachmentReadRef = useRef<Promise<void> | null>(null);
+  const attachmentErrorRef = useRef("");
   const saveTimerRef = useRef<number | null>(null);
   const settleTimerRef = useRef<number | null>(null);
   const deskCloseTimerRef = useRef<number | null>(null);
+  const deskCloseEpochRef = useRef(0);
   const returnToDeskWritingRef = useRef(false);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const inlineHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -712,7 +795,16 @@ function JournalWritingPage({
     else setDeskTouched(true);
   }
 
-  function openFullPage() {
+  const openFullPage = useCallback(() => {
+    // Invalidate a pending asynchronous close even after its timer has fired.
+    deskCloseEpochRef.current += 1;
+    // A keyboard-focused Write full page control can still activate while the
+    // inline book is closing. Do not let its stale timer unmount the reopened page.
+    if (deskCloseTimerRef.current !== null) {
+      window.clearTimeout(deskCloseTimerRef.current);
+      deskCloseTimerRef.current = null;
+    }
+    setDeskClosing(false);
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
@@ -720,7 +812,7 @@ function JournalWritingPage({
     setSettling(false);
     setHasInteractedSinceOpen(dirtyRef.current || day !== today);
     setZoomed(true);
-  }
+  }, [day, today]);
 
   useEffect(() => {
     if (zoomed) pageHeadingRef.current?.focus({ preventScroll: true });
@@ -755,15 +847,22 @@ function JournalWritingPage({
 
   useEffect(() => {
     if (supportSignal && !previousSupportSignalRef.current) {
+      // Treat safety-triggered zoom as a reopen, so stale close operations
+      // cannot dismiss support options or the writer's unsaved draft.
+      openFullPage();
       setSupportOpen(true);
       setHasInteractedSinceOpen(true);
-      setZoomed(true);
     }
     previousSupportSignalRef.current = supportSignal;
-  }, [supportSignal]);
+  }, [supportSignal, openFullPage]);
 
   const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
-    if (!mountedRef.current) return "aborted";
+    // The authenticated account must match even before React unmounts an old
+    // editor. An editable name-derived profile ID alone is not a privacy gate.
+    const account = useAccount.getState();
+    const liveOwner = account.phase === "signed-in" ? account.user?.id ?? null : null;
+    if (!mountedRef.current || liveOwner !== ownerAccountId
+      || useStore.getState().profile.userId !== workspaceId) return "aborted";
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) return "no-change";
     const draftVersion = draftVersionRef.current;
@@ -794,6 +893,9 @@ function JournalWritingPage({
         : `journal-${Date.now()}`;
       entryIdRef.current = id;
     }
+    if (draftVersion === draftVersionRef.current && dirtyRef.current) {
+      onPreserveDraft({ draft: current, entryId: id, entryDate: entryDateRef.current });
+    }
     const store = useStore.getState();
     const checkpoint = localVault.getVaultWriteCheckpoint();
     if (mountedRef.current) {
@@ -808,13 +910,21 @@ function JournalWritingPage({
       localVault.assertVaultWritesSince(checkpoint);
       if (draftVersion === draftVersionRef.current) {
         dirtyRef.current = false;
-        if (mountedRef.current) setSaveState("saved");
+        if (mountedRef.current) {
+          setSaveState("saved");
+          const accountAfterSave = useAccount.getState();
+          const ownerAfterSave = accountAfterSave.phase === "signed-in" ? accountAfterSave.user?.id ?? null : null;
+          if (ownerAfterSave === ownerAccountId) onDraftSaved();
+        }
         return "saved";
       }
       return "superseded";
     } catch (cause) {
       if (draftVersion === draftVersionRef.current) {
         dirtyRef.current = true;
+        // A later ordinary Save can fail after pagehide saved this same version.
+        // Invalidate that lifecycle receipt so a new pagehide can retry it.
+        if (lifecyclePersistVersionRef.current === draftVersion) lifecyclePersistVersionRef.current = null;
         if (mountedRef.current) {
           setSaveState("failed");
           setSaveError(localVault.isVaultConflictError(cause)
@@ -825,7 +935,7 @@ function JournalWritingPage({
       }
       return "superseded";
     }
-  }, []);
+  }, [workspaceId, ownerAccountId, onPreserveDraft, onDraftSaved]);
 
   const persist = useCallback((status?: "draft" | "complete") => {
     const queued = persistQueueRef.current.then(
@@ -842,39 +952,108 @@ function JournalWritingPage({
     saveTimerRef.current = null;
   }, []);
 
+  const previousWriterIdRef = useRef(workspaceId);
+  useEffect(() => {
+    if (previousWriterIdRef.current === workspaceId) return;
+    previousWriterIdRef.current = workspaceId;
+    // The writer survived a display-name-only change. Its old debounce timer
+    // captured an obsolete userId and would abort rather than save this draft.
+    // Re-arm it against the new ID without clearing the in-memory writing.
+    if (!dirtyRef.current) return;
+    cancelScheduledSave();
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      void persist();
+    }, 420);
+  }, [workspaceId, persist, cancelScheduledSave]);
+
   const requestDurableTransition = useCallback<JournalTransitionGuard>(async (transition) => {
     if (transitionPendingRef.current) return false;
     transitionPendingRef.current = true;
+    setTransitionSaving(true);
     cancelScheduledSave();
     try {
-      const pendingAttachment = attachmentReadRef.current;
-      if (pendingAttachment) await pendingAttachment;
+      // A later image selection may have joined while an earlier read was
+      // pending. Drain the entire read chain before persisting or navigating.
+      while (attachmentReadRef.current) await attachmentReadRef.current;
       if (!mountedRef.current) return false;
+      // Done may have marked the draft complete before a queued image rejected.
+      // Never write that optimistic status while its failure is unacknowledged.
+      if (attachmentErrorRef.current && draftRef.current.notebookStatus === "complete") return false;
       if (!dirtyRef.current) {
+        // A failed image read is not a successful page turn, even when the
+        // rest of the page is already stored.
+        if (attachmentErrorRef.current) return false;
         transition();
         return true;
       }
       while (mountedRef.current) {
+        if (attachmentErrorRef.current && draftRef.current.notebookStatus === "complete") return false;
+        // Still persist valid writing/images after an image failed, but do not
+        // navigate away and hide its warning. The save receipt is for the
+        // accepted page content, never the rejected image.
         const result = await persist();
         if (result === "superseded") continue;
         if (result === "failed" || result === "aborted" || !mountedRef.current) return false;
+        if (attachmentErrorRef.current) return false;
         transition();
         return true;
       }
       return false;
     } finally {
       transitionPendingRef.current = false;
+      if (mountedRef.current) setTransitionSaving(false);
     }
   }, [cancelScheduledSave, persist]);
 
+  const requestLifecycleTextSave = useCallback(() => {
+    if (!mountedRef.current || !dirtyRef.current) return;
+    const version = draftVersionRef.current;
+    if (lifecyclePersistVersionRef.current === version) return;
+    lifecyclePersistVersionRef.current = version;
+
+    // Start the first snapshot synchronously on pagehide. If that write is
+    // still settling, serialize later versions rather than allowing an older
+    // IndexedDB flush to overtake a newer page.
+    const writeLatest = (): Promise<JournalPersistResult> | JournalPersistResult =>
+      mountedRef.current && dirtyRef.current ? persistNow() : "no-change";
+    const previous = lifecycleTextQueueRef.current;
+    const attempt: Promise<JournalPersistResult> = previous
+      ? previous.then(writeLatest, writeLatest)
+      : persistNow();
+    lifecycleTextQueueRef.current = attempt;
+    void attempt.then((result) => {
+      // A failed write must be eligible for retry on the next lifecycle event,
+      // even if the writer did not type another character.
+      if ((result === "failed" || result === "aborted")
+        && lifecyclePersistVersionRef.current === version) lifecyclePersistVersionRef.current = null;
+    }).catch(() => {
+      if (lifecyclePersistVersionRef.current === version) lifecyclePersistVersionRef.current = null;
+    }).finally(() => {
+      if (lifecycleTextQueueRef.current === attempt) lifecycleTextQueueRef.current = null;
+    });
+  }, [persistNow]);
+
   const persistBeforePageExit = useCallback(() => {
-    if (!dirtyRef.current || lifecyclePersistPendingRef.current) return;
+    const pendingImage = attachmentReadRef.current;
+    if (!dirtyRef.current && !pendingImage) return;
     cancelScheduledSave();
+    // The image waiter is deduplicated separately: it must never suppress a
+    // fresh text version on a second pagehide or hidden-visibility event.
+    requestLifecycleTextSave();
+    if (!pendingImage || lifecyclePersistPendingRef.current) return;
     lifecyclePersistPendingRef.current = true;
-    void persistNow().finally(() => {
+    void pendingImage.then(() => {
+      if (mountedRef.current && dirtyRef.current) {
+        cancelScheduledSave();
+        requestLifecycleTextSave();
+      }
+    }).catch(() => {
+      // The image reader reports its own failure; accepted text remains saved.
+    }).finally(() => {
       lifecyclePersistPendingRef.current = false;
     });
-  }, [cancelScheduledSave, persistNow]);
+  }, [cancelScheduledSave, requestLifecycleTextSave]);
 
   function setDraft(update: (current: JournalDraft) => JournalDraft) {
     const next = update(draftRef.current);
@@ -882,6 +1061,7 @@ function JournalWritingPage({
     draftRef.current = next;
     draftVersionRef.current += 1;
     dirtyRef.current = true;
+    onPreserveDraft({ draft: next, entryId: entryIdRef.current, entryDate: entryDateRef.current });
     setDraftState(next);
     setSaveState("saving");
     setSaveError("");
@@ -898,7 +1078,7 @@ function JournalWritingPage({
     mountedRef.current = true;
     const unregisterTransitionGuard = registerTransitionGuard(requestDurableTransition);
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirtyRef.current && !attachmentReadRef.current) return;
+      if (!dirtyRef.current && !attachmentReadRef.current && !attachmentErrorRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -925,10 +1105,22 @@ function JournalWritingPage({
 
   const putBookDown = useCallback(() => {
     if (addingImage || deskClosing) return;
+    const closeEpoch = deskCloseEpochRef.current;
     void requestDurableTransition(() => {
+      if (deskCloseEpochRef.current !== closeEpoch) return;
       if (reducedMotion) { onClose(); return; }
       setDeskClosing(true);
-      deskCloseTimerRef.current = window.setTimeout(onClose, 900);
+      deskCloseTimerRef.current = window.setTimeout(() => {
+        deskCloseTimerRef.current = null;
+        if (deskCloseEpochRef.current !== closeEpoch) return;
+        // A delayed input can arrive while the book settles. The first save
+        // gate predates that edit, so recheck before removing the page.
+        void requestDurableTransition(() => {
+          if (deskCloseEpochRef.current === closeEpoch) onClose();
+        }).then((closed) => {
+          if (!closed && mountedRef.current && deskCloseEpochRef.current === closeEpoch) setDeskClosing(false);
+        });
+      }, 900);
     });
   }, [addingImage, deskClosing, requestDurableTransition, reducedMotion, onClose]);
 
@@ -939,6 +1131,9 @@ function JournalWritingPage({
   }, [zoomed, settling, deskClosing, deskTouched, addingImage, composing, putBookDown]);
 
   async function completeToday() {
+    // Another page transition, including an earlier Done, already owns this
+    // save gate. Never change the completion status behind its back.
+    if (transitionPendingRef.current || attachmentReadRef.current || attachmentErrorRef.current) return;
     cancelScheduledSave();
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) {
@@ -950,11 +1145,26 @@ function JournalWritingPage({
     draftRef.current = next;
     draftVersionRef.current += 1;
     dirtyRef.current = true;
+    onPreserveDraft({ draft: next, entryId: entryIdRef.current, entryDate: entryDateRef.current });
     setDraftState(next);
     setSaveState("saving");
     setSaveError("");
-    const result = await persist("complete");
-    if (result === "saved") onCompleted(day);
+    // A late edit can supersede the first flush. Keep Done pending until the
+    // latest in-memory draft passes the same exact-write gate as navigation.
+    const completed = await requestDurableTransition(() => onCompleted(day));
+    if (!completed && mountedRef.current && current.notebookStatus !== "complete") {
+      // A failed Done must not turn a later ordinary Save/autosave into a
+      // silent completion. Keep all later writing and its original entry ID.
+      const latest = draftRef.current;
+      if (latest.notebookStatus === "complete") {
+        const restored = { ...latest, notebookStatus: current.notebookStatus };
+        draftRef.current = restored;
+        draftVersionRef.current += 1;
+        dirtyRef.current = true;
+        onPreserveDraft({ draft: restored, entryId: entryIdRef.current, entryDate: entryDateRef.current });
+        setDraftState(restored);
+      }
+    }
   }
 
   function handleBookKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -987,25 +1197,41 @@ function JournalWritingPage({
   async function addAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
+    // A new FileReader cannot join a transition after its vault snapshot began.
+    // The native picker is disabled as well, but guard already-open pickers and synthetic events.
+    if (!file || transitionPendingRef.current) return;
+    attachmentErrorRef.current = "";
     setAttachmentError("");
     setAddingImage(true);
+    // Keep each picker read in the same chain. Otherwise a later selection
+    // replaces the pending ref and a page turn can save before an older image
+    // finishes, silently losing it when the writer leaves the page.
+    const previousRead = attachmentReadRef.current;
     const read = (async () => {
       try {
+        if (previousRead) await previousRead;
         const attachment = await readJournalImage(file, draftRef.current.attachments);
         setDraft((current) => ({ ...current, attachments: [...current.attachments, attachment] }));
       } catch (error) {
-        setAttachmentError(error instanceof Error ? error.message : "AXOM could not add that image.");
-      } finally {
-        setAddingImage(false);
+        const message = error instanceof Error ? error.message : "AXOM could not add that image.";
+        attachmentErrorRef.current = message;
+        if (mountedRef.current) setAttachmentError(message);
       }
     })();
     attachmentReadRef.current = read;
     try {
       await read;
     } finally {
-      if (attachmentReadRef.current === read) attachmentReadRef.current = null;
+      if (attachmentReadRef.current === read) {
+        attachmentReadRef.current = null;
+        setAddingImage(false);
+      }
     }
+  }
+
+  function dismissAttachmentError() {
+    attachmentErrorRef.current = "";
+    setAttachmentError("");
   }
 
   function exportAttachment(attachment: JournalImageAttachment) {
@@ -1088,8 +1314,19 @@ function JournalWritingPage({
           <div className="journal-inline-leaf journal-inline-leaf-right">
             <span className="journal-inline-overline">Private / local first</span>
             <span className="journal-inline-quote">A record you can return to.</span>
-            <p>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Page saved locally" : saveState === "failed" ? "Your changes need saving" : "Ready when you are"}</p>
+            <p>{attachmentError ? "Image not added" : saveState === "saving" ? "Saving…" : saveState === "saved" ? "Page saved locally" : saveState === "failed" ? "Your changes need saving" : "Ready when you are"}</p>
+            {!zoomed && attachmentError && (
+              <div className="journal-inline-save-error" role="alert">
+                {attachmentError}. The image was not added. Choose another image or dismiss this warning before leaving.
+                <GButton size="sm" onClick={dismissAttachmentError}>Dismiss image warning</GButton>
+              </div>
+            )}
             {saveError && <p className="journal-inline-save-error" role="alert">{saveError}</p>}
+            {saveState === "failed" && (
+              <GButton size="sm" disabled={addingImage} onClick={() => { void persist(); }}>
+                <Save size={ICON_SIZE.body} /> Retry save
+              </GButton>
+            )}
             <GButton variant="primary" onClick={openFullPage}><BookOpen size={ICON_SIZE.body} /> Write full page</GButton>
           </div>
         </div>
@@ -1107,7 +1344,7 @@ function JournalWritingPage({
         </GButton>
         <div className="journal-page-position" aria-live="polite">
           <b>{day === today ? "Today" : prettyDate(`${day}T12:00:00`)}</b>
-          <span>{saveState === "saving" ? "Saving to this workspace…" : saveState === "saved" ? "Saved to this workspace" : saveState === "failed" ? "Not saved on this device" : "Ready to write"}</span>
+          <span>{attachmentError ? "Image not added" : saveState === "saving" ? "Saving to this workspace…" : saveState === "saved" ? "Saved to this workspace" : saveState === "failed" ? "Not saved on this device" : "Ready to write"}</span>
         </div>
         <GButton size="sm" onClick={() => turnPage("next")} disabled={day >= today} aria-label="Next journal page">
           Next <ArrowRight size={ICON_SIZE.body} />
@@ -1183,8 +1420,44 @@ function JournalWritingPage({
               <details className="journal-keep-release">
                 <summary>Keep something. Release something.</summary>
                 <div className="journal-win-loss-grid">
-                  <label><span>Something to keep</span><input value={draft.wins[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, wins: [event.target.value] }))} /></label>
-                  <label><span>A loose thread</span><input value={draft.losses[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, losses: [event.target.value] }))} /></label>
+                  {(["wins", "losses"] as const).map((kind) => (
+                    <div key={kind} className="journal-reflection-column">
+                      {(draft[kind].length ? draft[kind] : [""]).map((value, index) => (
+                        <div key={`${kind}-${index}`} className="journal-reflection-row">
+                          <label>
+                            <span>{kind === "wins"
+                              ? (index === 0 ? "Something to keep" : `Something to keep ${index + 1}`)
+                              : (index === 0 ? "A loose thread" : `A loose thread ${index + 1}`)}</span>
+                            <input value={value} onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setDraft((current) => {
+                                const values = current[kind].length ? [...current[kind]] : [""];
+                                values[index] = nextValue;
+                                return { ...current, [kind]: values };
+                              });
+                            }} />
+                          </label>
+                          {draft[kind].length > 0 && (
+                            <button type="button" className="journal-reflection-remove"
+                              aria-label={`Remove ${kind === "wins" ? "keep" : "release"} ${index + 1}`}
+                              onClick={(event) => {
+                                // Index-keyed rows can reuse this button for the next private note.
+                                // Move focus to an editor that survives the removal before updating.
+                                const row = event.currentTarget.closest(".journal-reflection-row");
+                                const focusRow = index === 0 ? row : row?.previousElementSibling;
+                                const editor = focusRow?.querySelector<HTMLInputElement>("input");
+                                if (editor) editor.focus();
+                                else event.currentTarget.blur();
+                                setDraft((current) => ({
+                                  ...current,
+                                  [kind]: current[kind].filter((_, itemIndex) => itemIndex !== index),
+                                }));
+                              }}>Remove</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               </details>
             </section>
@@ -1201,15 +1474,22 @@ function JournalWritingPage({
           <section className="journal-attachments" aria-labelledby="journal-attachments-title">
             <div className="journal-section-head">
               <div><h3 id="journal-attachments-title">Images</h3><span>Optional · saved with this workspace</span></div>
-              <GButton size="sm" onClick={() => fileInputRef.current?.click()} disabled={addingImage}>
+              <GButton size="sm" onClick={() => fileInputRef.current?.click()} disabled={addingImage || transitionSaving}>
                 <ImagePlus size={ICON_SIZE.body} /> {addingImage ? "Adding…" : "Add image"}
               </GButton>
               <input ref={fileInputRef} className="journal-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif"
-                onChange={addAttachment} aria-label="Choose a journal image" />
+                onChange={addAttachment} aria-label="Choose a journal image" disabled={transitionSaving}
+                aria-describedby={transitionSaving ? "journal-image-transition-status" : undefined} />
             </div>
+            {transitionSaving && <p id="journal-image-transition-status" role="status" className="journal-local-note">Finish saving this page before adding an image.</p>}
             <details className="journal-image-storage"><summary>How images are stored</summary><p className="journal-local-note">Images are saved locally first and included in portable exports. Linked account backups may include them when the workspace fits account limits. Maximum 3 MB each and 12 MB per page.</p></details>
             <JournalAccountProtectionWarning />
-            {attachmentError && <div className="journal-attachment-error" role="alert">{attachmentError}</div>}
+            {attachmentError && (
+              <div className="journal-attachment-error" role="alert">
+                <p>{attachmentError}. The image was not added. Choose another image or dismiss this warning before leaving.</p>
+                <GButton size="sm" onClick={dismissAttachmentError}>Dismiss image warning</GButton>
+              </div>
+            )}
             {draft.attachments.length > 0 && (
               <div className="journal-attachment-grid">
                 {draft.attachments.map((attachment) => (
@@ -1417,12 +1697,108 @@ const JOURNAL_FEEDBACK_EMPTY: JournalExperienceFeedbackInput = {
   rating: 0, liked: "", wantMore: "", missing: "", painPoints: "", comment: "",
 };
 
-function readJournalFeedbackDraft(key: string): JournalExperienceFeedbackInput {
+interface StoredJournalFeedbackDraft {
+  draft: JournalExperienceFeedbackInput;
+  revision: string | null;
+  raw: string | null;
+  unreadable: boolean;
+  acknowledged: boolean;
+}
+
+// A receipt must never remove a shared localStorage key: another tab can write
+// between a getItem check and removeItem. The marker identifies exactly
+// the acknowledged revision without copying feedback text to a second key.
+function journalFeedbackFingerprint(draft: JournalExperienceFeedbackInput | string): string {
+  const value = JSON.stringify(draft);
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${value.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
+}
+
+// A component-local ref cannot prevent a second submission after its modal
+// unmounts. Keep only owner-scoped fingerprints and promise/receipt metadata in
+// memory for this tab, never the written feedback or notebook contents.
+// This does not provide server-side exactly-once delivery after reload or an
+// ambiguous network error; a backend idempotency key is a separate release gate.
+interface JournalFeedbackTabSubmission {
+  fingerprint: string;
+  pending: Promise<string> | null;
+  receipt: string | null;
+}
+const journalFeedbackTabSubmissions = new Map<string, JournalFeedbackTabSubmission>();
+
+function submitJournalFeedbackOncePerTab(
+  draftKey: string, accountId: string, draft: JournalExperienceFeedbackInput,
+): Promise<string> {
+  const fingerprint = journalFeedbackFingerprint(draft);
+  const prior = journalFeedbackTabSubmissions.get(draftKey);
+  if (prior?.fingerprint === fingerprint) {
+    // Reopened dialog, same saved text: join the original pending request or
+    // reuse its receipt rather than inserting a duplicate feedback row.
+    return prior.pending ?? Promise.resolve(prior.receipt!);
+  }
+  if (prior?.pending) {
+    return Promise.reject(new Error("Feedback is already being sent in this tab. Try again after it finishes."));
+  }
+
+  const pending = submitJournalFeedback(accountId, draft);
+  const entry: JournalFeedbackTabSubmission = { fingerprint, pending, receipt: null };
+  journalFeedbackTabSubmissions.set(draftKey, entry);
+  // Do not retain the Promise, which closes over submitted text, after it settles.
+  void pending.then((receipt) => {
+    if (journalFeedbackTabSubmissions.get(draftKey) === entry) {
+      entry.receipt = receipt;
+      entry.pending = null;
+    }
+  }, () => {
+    // Failed requests may be retried explicitly. A lost success response is
+    // still ambiguous without server idempotency and remains REVIEW_REQUIRED.
+    if (journalFeedbackTabSubmissions.get(draftKey) === entry)
+      journalFeedbackTabSubmissions.delete(draftKey);
+  });
+  return pending;
+}
+
+function journalFeedbackRevision(): string {
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function readJournalFeedbackDraft(key: string): StoredJournalFeedbackDraft {
+  let raw: string | null = null;
   try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? "null");
-    if (!value || typeof value !== "object") return JOURNAL_FEEDBACK_EMPTY;
+    raw = window.localStorage.getItem(key);
+    if (raw === null) return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false, acknowledged: false };
+    // A malformed stored draft is not a blank draft. Never overwrite its
+    // original bytes during a recovery attempt.
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true, acknowledged: false };
     const record = value as Record<string, unknown>;
-    return {
+    // Preserve any unsupported or future-version draft verbatim rather than
+    // converting its unknown/private fields into an editable lossy snapshot.
+    const textLimits: Record<string, number> = { liked: 1000, wantMore: 1000, missing: 1000, painPoints: 1000, comment: 2000 };
+    const allowedFields = ["rating", ...Object.keys(textLimits), "__axomRevision", "__axomSavedAt", "__axomBaseFingerprint"];
+    const invalidRating = "rating" in record
+      && (!Number.isInteger(record.rating) || Number(record.rating) < 0 || Number(record.rating) > 5);
+    const invalidRevision = "__axomRevision" in record
+      && (typeof record.__axomRevision !== "string" || !/^[a-f0-9]{32}$/.test(record.__axomRevision));
+    const invalidSavedAt = "__axomSavedAt" in record
+      && (typeof record.__axomSavedAt !== "number" || !Number.isFinite(record.__axomSavedAt) || record.__axomSavedAt < 0);
+    const invalidBaseFingerprint = "__axomBaseFingerprint" in record
+      && (record.__axomBaseFingerprint !== null && typeof record.__axomBaseFingerprint !== "string");
+    const invalidText = Object.entries(textLimits).some(([field, max]) =>
+      field in record && (typeof record[field] !== "string" || (record[field] as string).length > max));
+    if (Object.keys(record).some((field) => !allowedFields.includes(field))
+      || invalidRating || invalidRevision || invalidSavedAt || invalidBaseFingerprint || invalidText)
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true, acknowledged: false };
+    const draft: JournalExperienceFeedbackInput = {
       rating: Number.isInteger(record.rating) && Number(record.rating) >= 1 && Number(record.rating) <= 5 ? Number(record.rating) : 0,
       liked: typeof record.liked === "string" ? record.liked.slice(0, 1000) : "",
       wantMore: typeof record.wantMore === "string" ? record.wantMore.slice(0, 1000) : "",
@@ -1430,71 +1806,289 @@ function readJournalFeedbackDraft(key: string): JournalExperienceFeedbackInput {
       painPoints: typeof record.painPoints === "string" ? record.painPoints.slice(0, 1000) : "",
       comment: typeof record.comment === "string" ? record.comment.slice(0, 2000) : "",
     };
+    const revision = typeof record.__axomRevision === "string" && /^[a-f0-9]{32}$/.test(record.__axomRevision)
+      ? record.__axomRevision : null;
+    // Legacy drafts have no revision. A receipt for their exact raw bytes
+    // prevents a second explicit send without rewriting or deleting the draft.
+    // Another tab changing those bytes must make its new text visible.
+    const acknowledged = revision
+      ? `${revision}:${journalFeedbackFingerprint(draft)}`
+      : `legacy:${journalFeedbackFingerprint(raw)}`;
+    if (window.localStorage.getItem(`${key}:submitted`) === acknowledged) {
+      return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: false, acknowledged: true };
+    }
+    return { draft, revision, raw, unreadable: false, acknowledged: false };
   } catch {
-    return JOURNAL_FEEDBACK_EMPTY;
+    // JSON corruption or a blocked localStorage read must fail closed.
+    return { draft: JOURNAL_FEEDBACK_EMPTY, revision: null, raw, unreadable: true, acknowledged: false };
   }
 }
 
-function JournalFeedback({ onClose }: { onClose: () => void }) {
+interface JournalFeedbackCopy {
+  key: string;
+  stored: StoredJournalFeedbackDraft;
+  savedAt: number;
+  baseFingerprint: string | null;
+}
+
+function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null): {
+  selected: JournalFeedbackCopy;
+  others: JournalFeedbackCopy[];
+  legacyRaw: string | null;
+} {
+  const legacy = readJournalFeedbackDraft(baseKey);
+  const copies: JournalFeedbackCopy[] = [{ key: baseKey, stored: legacy, savedAt: 0, baseFingerprint: null }];
+  const writerPrefix = `${baseKey}:writer:`;
+  try {
+    // The legacy key is read-only. Each mounted editor writes its own key, so
+    // independent tabs cannot overwrite each other's private feedback bytes.
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(writerPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(writerPrefix.length))) continue;
+      const stored = readJournalFeedbackDraft(key);
+      let savedAt = 0;
+      let baseFingerprint: string | null = null;
+      if (stored.raw && !stored.unreadable) {
+        const record = JSON.parse(stored.raw) as Record<string, unknown>;
+        savedAt = typeof record.__axomSavedAt === "number" ? record.__axomSavedAt : 0;
+        baseFingerprint = typeof record.__axomBaseFingerprint === "string" ? record.__axomBaseFingerprint : null;
+      }
+      copies.push({ key, stored, savedAt, baseFingerprint });
+    }
+  } catch {
+    // An incomplete key inventory cannot prove that another draft is absent.
+    return {
+      selected: { key: baseKey, stored: { ...legacy, unreadable: true }, savedAt: 0, baseFingerprint: null },
+      others: [], legacyRaw: legacy.raw,
+    };
+  }
+  const newest = copies.slice(1).filter((copy) => !copy.stored.acknowledged && !copy.stored.unreadable)
+    .sort((a, b) => b.savedAt - a.savedAt || b.key.localeCompare(a.key))[0];
+  const legacyChangedSinceNewest = newest && legacy.raw !== null
+    && newest.baseFingerprint !== journalFeedbackFingerprint(legacy.raw);
+  const preferred = copies.find((copy) => copy.key === selectedKey)
+    ?? (legacy.unreadable || legacyChangedSinceNewest ? copies[0] : newest ?? copies[0]);
+  return { selected: preferred, others: copies.filter((copy) => copy.key !== preferred.key && copy.stored.raw !== null), legacyRaw: legacy.raw };
+}
+
+function JournalFeedback({ onClose, sessionDrafts }: {
+  onClose: () => void;
+  sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
+}) {
+  // The dialog can stay mounted across workspace or account switches. Remount
+  // its draft state for each owner so one user's text is never written under
+  // another owner's localStorage key. Do not migrate legacy authenticated
+  // drafts automatically because the old keys did not identify an account.
+  const workspaceId = useStore((state) => state.profile.userId);
+  const accountId = useAccount((state) => state.user?.id);
+  const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
+  const [selection, setSelection] = useState<{ ownerKey: string; key: string } | null>(null);
+  const selectedKey = selection?.ownerKey === ownerKey ? selection.key : null;
+  return <JournalFeedbackForOwner
+    key={`${ownerKey}:${selectedKey ?? "latest"}`}
+    draftKey={`axom-journal-feedback-draft:${ownerKey}`}
+    sessionDrafts={sessionDrafts}
+    selectedKey={selectedKey}
+    onSelectCopy={(key) => setSelection({ ownerKey, key })}
+    onClose={onClose}
+  />;
+}
+
+function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, sessionDrafts }: {
+  onClose: () => void;
+  draftKey: string;
+  selectedKey: string | null;
+  onSelectCopy: (key: string) => void;
+  sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
+}) {
   const user = useAccount((state) => state.user);
-  const draftKey = `axom-journal-feedback-draft:${useStore.getState().profile.userId}`;
-  const [draft, setDraft] = useState(() => readJournalFeedbackDraft(draftKey));
+  const [savedCopies] = useState(() => readJournalFeedbackCopies(draftKey, selectedKey));
+  const loaded = savedCopies.selected.stored;
+  const [draft, setDraft] = useState(() => sessionDrafts.get(draftKey) ?? loaded.draft);
+  const [savedFingerprint, setSavedFingerprint] = useState(() => journalFeedbackFingerprint(loaded.draft));
+  const persistedRevisionRef = useRef(loaded.revision);
+  const persistedRawRef = useRef(loaded.raw);
+  const persistedDraftRef = useRef(loaded.draft);
+  const persistedKeyRef = useRef(savedCopies.selected.key);
+  const sourceRawRef = useRef(loaded.raw);
+  const sourceKeyRef = useRef(savedCopies.selected.key);
+  const writerKeyRef = useRef<string | null>(null);
+  const [conflicted, setConflicted] = useState(loaded.unreadable);
+  // Opening or remounting the dialog must never write a stale snapshot back
+  // over a newer draft another tab saved between our read and first effect.
+  const initialDraftRef = useRef(loaded.draft);
   const [sending, setSending] = useState(false);
-  const [sentId, setSentId] = useState("");
+  // State-based disabling renders later; guard against a second same-turn activation.
+  const submissionPendingRef = useRef(false);
+  const [sentId, setSentId] = useState(() => {
+    const prior = journalFeedbackTabSubmissions.get(draftKey);
+    return prior?.fingerprint === journalFeedbackFingerprint(draft) ? prior.receipt ?? "" : "";
+  });
   const [error, setError] = useState("");
-  const [storageError, setStorageError] = useState("");
+  const [storageError, setStorageError] = useState(
+    sentId && sessionDrafts.has(draftKey)
+      ? "Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing."
+      : loaded.unreadable
+        ? loaded.raw === null
+          ? "AXOM could not read saved feedback in this browser. No draft was replaced. Close feedback and try again."
+          : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
+        : "",
+  );
+  const submittedReceiptRef = useRef<{ key: string; value: string } | null>(null);
+  const [saveRetryToken, setSaveRetryToken] = useState(0);
+
+  function changeDraft(next: JournalExperienceFeedbackInput) {
+    // A failed browser write must survive an account handoff in this tab.
+    sessionDrafts.set(draftKey, next);
+    setDraft(next);
+  }
 
   useEffect(() => {
+    // Persist only this editor's actual changes; a mount is not an edit.
+    // The identity guard also survives React StrictMode effect replays.
+    if (!sentId && draft === initialDraftRef.current) return;
+    if (loaded.unreadable) return;
     try {
-      if (sentId) window.localStorage.removeItem(draftKey);
-      else window.localStorage.setItem(draftKey, JSON.stringify(draft));
+      if (sentId) {
+        // An acknowledgement cannot erase another tab's newer or concurrent edit.
+        if (!submittedReceiptRef.current) {
+          // A reopened submitted draft may have its receipt only in this tab.
+          // Keep the in-memory copy available until explicitly exported.
+          if (sessionDrafts.has(draftKey))
+            setStorageError("Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing.");
+          return;
+        }
+        window.localStorage.setItem(`${submittedReceiptRef.current.key}:submitted`, submittedReceiptRef.current.value);
+      } else {
+        const writerKey = writerKeyRef.current ?? `${draftKey}:writer:${journalFeedbackRevision()}`;
+        const revision = journalFeedbackRevision();
+        const serialized = JSON.stringify({
+          ...draft,
+          __axomRevision: revision,
+          __axomSavedAt: Date.now(),
+          __axomBaseFingerprint: savedCopies.legacyRaw === null ? null : journalFeedbackFingerprint(savedCopies.legacyRaw),
+        });
+        window.localStorage.setItem(writerKey, serialized);
+        writerKeyRef.current = writerKey;
+        persistedKeyRef.current = writerKey;
+        persistedRawRef.current = serialized;
+        persistedRevisionRef.current = revision;
+        persistedDraftRef.current = draft;
+        sessionDrafts.delete(draftKey);
+        setSavedFingerprint(journalFeedbackFingerprint(draft));
+        // A legacy writer can still change its old key. Keep both copies and
+        // stop this editor from treating the changed source as its own draft.
+        const sourceBeforeCheck = window.localStorage.getItem(sourceKeyRef.current);
+        const sourceAfterCheck = window.localStorage.getItem(sourceKeyRef.current);
+        if (sourceBeforeCheck !== sourceRawRef.current || sourceAfterCheck !== sourceRawRef.current) {
+          setConflicted(true);
+          setStorageError("Another tab changed this feedback draft. Your version was saved separately. Download it, then close and reopen feedback to see the saved copies.");
+          return;
+        }
+      }
       setStorageError("");
     } catch {
-      setStorageError("This browser could not keep a local draft. Download it before closing.");
+      setStorageError(sentId
+        ? "Feedback was received, but this browser could not mark your saved draft as submitted."
+        : "This browser could not keep a local draft. Download it before closing.");
     }
-  }, [draft, draftKey, sentId]);
+  }, [draft, draftKey, loaded.unreadable, savedCopies.legacyRaw, sentId, saveRetryToken, sessionDrafts]);
 
   async function send() {
-    if (!user) return;
+    if (!user || conflicted || sentId || submissionPendingRef.current) return;
     if (draft.rating < 1) { setError("Choose a rating before sending."); return; }
+    // A send is explicit. Check both the source loaded on open and this
+    // editor's saved copy before submitting its in-memory answers.
+    try {
+      if (window.localStorage.getItem(sourceKeyRef.current) !== sourceRawRef.current
+        || window.localStorage.getItem(persistedKeyRef.current) !== persistedRawRef.current) {
+        setConflicted(true);
+        setStorageError("Another tab changed this feedback draft. Your writing is still here. Download it, then close and reopen feedback to see the saved copies.");
+        return;
+      }
+    } catch {
+      setStorageError("AXOM could not check the saved feedback draft. No feedback was sent. Download your writing and retry when browser storage is available.");
+      return;
+    }
+    submissionPendingRef.current = true;
     setSending(true);
     setError("");
+    // The network receives the in-memory draft. A failed local write must
+    // not acknowledge an older revision as though it contained that draft.
+    const submittedContentWasSaved = persistedRawRef.current !== null
+      && journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(persistedDraftRef.current);
+    const receiptValue = !submittedContentWasSaved ? null
+      : persistedRevisionRef.current
+        ? `${persistedRevisionRef.current}:${journalFeedbackFingerprint(draft)}`
+        : journalFeedbackFingerprint(draft) === journalFeedbackFingerprint(initialDraftRef.current)
+          ? `legacy:${journalFeedbackFingerprint(persistedRawRef.current!)}` : null;
+    submittedReceiptRef.current = receiptValue ? { key: persistedKeyRef.current, value: receiptValue } : null;
     try {
-      setSentId(await submitJournalFeedback(user.id, draft));
+      const receiptId = await submitJournalFeedbackOncePerTab(draftKey, user.id, draft);
+      if (submittedContentWasSaved) sessionDrafts.delete(draftKey);
+      setSentId(receiptId);
     } catch (cause) {
+      // Only a failed request may be retried; a receipt seals this dialog.
+      submissionPendingRef.current = false;
       setError(cause instanceof Error ? cause.message : "Feedback could not be sent. Your draft is still here.");
     } finally {
       setSending(false);
     }
   }
 
+  const currentDraftSaved = journalFeedbackFingerprint(draft) === savedFingerprint;
+
   return (
-    <Modal title="How is the journal feeling?" onClose={onClose} className="journal-feedback-modal" footer={sentId ? (
+    <Modal title="How is the journal feeling?" onClose={onClose} className="journal-feedback-modal" footer={sentId ? (<>
+      <GButton onClick={() => downloadBlob("axom-journal-feedback-submitted.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download submitted copy</GButton>
       <GButton variant="primary" onClick={onClose}>Close</GButton>
-    ) : <>
-      <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>
+    </>) : <>
+      {loaded.unreadable && loaded.raw !== null &&
+        <GButton onClick={() => downloadBlob("axom-journal-feedback-unreadable.txt", new Blob([loaded.raw ?? ""], { type: "text/plain" }))}><Download size={ICON_SIZE.body} /> Download saved copy</GButton>}
+      {(!loaded.unreadable || sessionDrafts.has(draftKey)) &&
+        <GButton onClick={() => downloadBlob("axom-journal-feedback-draft.json", new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" }))}><Download size={ICON_SIZE.body} /> Download draft</GButton>}
       <GButton onClick={onClose}>Not now</GButton>
-      <GButton variant="primary" disabled={!user || sending} onClick={() => { void send(); }}>{sending ? "Sending…" : "Send feedback"}</GButton>
+      <GButton variant="primary" disabled={!user || sending || conflicted} onClick={() => { void send(); }}>{sending ? "Sending…" : "Send feedback"}</GButton>
     </>}>
       {sentId ? (
-        <div className="journal-feedback-success" role="status"><CheckCircle2 size={ICON_SIZE.emphasis} /><b>Feedback received.</b><span>Thank you for helping shape the journal. Receipt {sentId.slice(0, 8)}.</span></div>
+        <div className="journal-feedback-success" role="status"><CheckCircle2 size={ICON_SIZE.emphasis} /><b>Feedback received.</b><span>Thank you for helping shape the journal. Receipt {sentId.slice(0, 8)}.</span><span>{storageError ? "Keep an exported copy if you want to retain these answers." : "Your saved local copy remains on this device to protect changes made in other tabs."}</span>{storageError && <p role="alert">{storageError}</p>}</div>
       ) : <>
         <p className="sub">Tell us about the journal experience only. AXOM does not attach your entries, images, or study records. Sending happens only when you press Send feedback.</p>
         <fieldset className="journal-rating-fieldset">
           <legend>Overall experience</legend>
           <div className="journal-rating-choices">
-            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} onClick={() => setDraft({ ...draft, rating: value })}>{value}</button>)}
+            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || loaded.unreadable} onClick={() => changeDraft({ ...draft, rating: value })}>{value}</button>)}
           </div>
         </fieldset>
         <div className="journal-feedback-fields">
-          <TextAreaField label="What do you like?" value={draft.liked} maxLength={1000} onChange={(event) => setDraft({ ...draft, liked: event.target.value })} />
-          <TextAreaField label="What do you want more of?" value={draft.wantMore} maxLength={1000} onChange={(event) => setDraft({ ...draft, wantMore: event.target.value })} />
-          <TextAreaField label="What feels missing?" value={draft.missing} maxLength={1000} onChange={(event) => setDraft({ ...draft, missing: event.target.value })} />
-          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} maxLength={1000} onChange={(event) => setDraft({ ...draft, painPoints: event.target.value })} />
-          <TextAreaField label="Anything else?" value={draft.comment} maxLength={2000} onChange={(event) => setDraft({ ...draft, comment: event.target.value })} />
+          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, liked: event.target.value })} />
+          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, wantMore: event.target.value })} />
+          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, missing: event.target.value })} />
+          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, painPoints: event.target.value })} />
+          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || loaded.unreadable} maxLength={2000} onChange={(event) => changeDraft({ ...draft, comment: event.target.value })} />
         </div>
+        {savedCopies.others.length > 0 && (
+          <details className="journal-feedback-note">
+            <summary>Other saved feedback copies ({savedCopies.others.length})</summary>
+            <p>Copies from other writing sessions stay on this device. Open or download one to recover its words.</p>
+            {savedCopies.others.map((copy, index) => (
+              <div key={copy.key}>
+                <span>Saved copy {index + 1}{copy.stored.acknowledged ? " · submitted" : ""}</span>{" "}
+                {!copy.stored.unreadable && !copy.stored.acknowledged && (
+                  <GButton size="sm" disabled={!currentDraftSaved || sending} onClick={() => onSelectCopy(copy.key)}>Open copy {index + 1}</GButton>
+                )}
+                <GButton size="sm" onClick={() => downloadBlob(
+                  `axom-journal-feedback-copy-${index + 1}.${copy.stored.unreadable ? "txt" : "json"}`,
+                  new Blob([copy.stored.raw ?? ""], { type: copy.stored.unreadable ? "text/plain" : "application/json" }),
+                )}>Download copy {index + 1}</GButton>
+              </div>
+            ))}
+            {!currentDraftSaved && <p role="alert">Save this draft before opening another copy. Download it for recovery if saving is blocked.</p>}
+          </details>
+        )}
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
+        {storageError && !loaded.unreadable && !conflicted && <GButton size="sm" onClick={() => setSaveRetryToken((token) => token + 1)}>Retry draft save</GButton>}
         {error && <p className="journal-feedback-note" role="alert">{error}</p>}
       </>}
     </Modal>

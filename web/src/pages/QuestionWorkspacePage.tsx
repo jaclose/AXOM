@@ -20,6 +20,7 @@ import {
 } from "../lib/questions";
 import type { QuizBlock, QuizFilters, QuizMode } from "../lib/quiz";
 import { questionPracticeReadiness } from "../lib/questionFilters";
+import { hasMainExplanation } from "../lib/questionExplanationCoverage";
 import { inspectMissingQuestionRecovery, type MissingQuestionRecovery } from "../lib/questionRecovery";
 import type { QuestionSet, SourceDocument } from "../lib/library";
 import { GlassCard, PanelHeader, EmptyState, GButton } from "../components/ui/primitives";
@@ -210,7 +211,7 @@ export function QuestionWorkspacePage() {
   const collectionMetrics = useMemo(() => questionCollectionMetrics(questions), [questions]);
   const mapping = useMemo(() => summarizeQuestionMappings(questions), [questions]);
   const runnable = runnableQuestions.length;
-  const withExplanation = runnableQuestions.filter((question) => Boolean(question.explanation?.trim())).length;
+  const withExplanation = runnableQuestions.filter(hasMainExplanation).length;
   const heldForReview = questions.length - runnable + privateReview.held;
   const unseen = runnableQuestions.filter((question) => question.attempts.length === 0).length;
   const lastSession = useMemo(() => (s.quizSessions ?? [])
@@ -680,7 +681,7 @@ export function QuestionWorkspacePage() {
           <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Courses</button>
           <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Weeks &amp; sets</button>
         </div>
-        {bankView === "books" ? <QuestionBankLibrary heldForReview={heldForReview} onImport={() => openImport("file")} onCreate={() => setRunner({ mode: "tutor" })}
+        {bankView === "books" ? <QuestionBankLibrary heldForReview={heldForReview} onImport={() => openImport("file")} onCreate={() => setRunner({ mode: "tutor" })} onPracticeSet={runSet}
           onOpenBank={(book, week) => { setBankLocation({ module: book.module, courseId: book.courseId, week }); setBankView("weeks"); }}
           onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, questionIds: selection.questionIds, count: selection.count } }); }} /> :
         <QuestionSetList key={JSON.stringify(bankLocation)} initialScope={bankLocation}
@@ -696,7 +697,7 @@ export function QuestionWorkspacePage() {
           onOpenInsights={() => setTab("insights")}
         />
       }</>}
-      {tab === "community" && <CommunityUploads onOpenLibrary={() => { setBankView("books"); setTab("sets"); }} />}
+      {tab === "community" && <CommunityUploads onOpenLibrary={() => { setBankView("books"); setTab("sets"); }} onPracticeSet={runSet} />}
       {tab === "library" && <SourceLibrary onParseFrom={parseFrom} onGenerateFrom={generateFrom} />}
       {tab === "blocks" && <BlockBuilder onRunBlock={runBlock} onNewBlock={() => setRunner({ mode: "tutor" })} />}
 

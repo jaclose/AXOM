@@ -150,11 +150,11 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
     if (!inGroup) { group += 1; inGroup = true; }
     const label = match[1].trim();
     const week = label.match(/(?:^|[^a-z0-9])(?:week|wk)\s*0*(\d{1,2})(?![0-9])/i);
-    const numbers = compositeNumbers(label, activity ?? "other");
+    const numbers = compositeNumbers(label, activity ?? "other", module);
     items.push({
       label,
       activity: activity ?? "other",
-      number: numbers ? undefined : itemNumber(label, activity ?? "other"),
+      number: numbers ? undefined : itemNumber(label, activity ?? "other", module),
       ...(numbers ? { numbers } : {}),
       group,
       statedWeek: week ? Number(week[1]) : headedWeek,
@@ -359,6 +359,8 @@ export function reconcileCourseTemplate(
       && (!plan.course || !existingCourse || existingCourse === plan.course.trim().toLowerCase());
   });
   const normalizeKey = (key: string) => normalizedTemplateIdentity(key, plan.module);
+  const invalidForeignNumberIds = new Set(inScope.filter(row => row.templateKey
+    && isInvalidForeignNumberKey(row.label, row.templateKey, plan.module)).map(row => row.id));
   const byKey = new Map<string, typeof inScope>();
   const byPlace = new Map<string, typeof inScope>();
   for (const row of inScope) {
@@ -387,6 +389,14 @@ export function reconcileCourseTemplate(
     }
     const match = candidates[0];
     if (match) {
+      if (invalidForeignNumberIds.has(match.id)) {
+        review.push({
+          item,
+          reason: "A prior import used another module's number for this saved activity. Confirm its identity before reusing progress.",
+          candidateIds: [match.id],
+        });
+        continue;
+      }
       if (options.legacyCourseAdoption !== "confirmed-unique"
         && isCourseLessLegacyTrackerPath(match.path, plan)) {
         review.push({
@@ -429,7 +439,7 @@ export function reconcileCourseTemplate(
     const kindPrefix = identity.split("|").slice(0, -1).join("|") + "|";
     const legacyCandidates = inScope.filter((row) => row.templateKey
       && normalizeKey(row.templateKey).startsWith(kindPrefix)
-      && !planKeyCounts.has(normalizeKey(row.templateKey)) && !matched.has(row.id));
+      && (invalidForeignNumberIds.has(row.id) || !planKeyCounts.has(normalizeKey(row.templateKey))) && !matched.has(row.id));
     if (legacyCandidates.length) {
       review.push({ item, reason: "Existing unmatched activities of this type may be renamed or renumbered versions.", candidateIds: legacyCandidates.map((row) => row.id) });
       continue;
@@ -521,15 +531,40 @@ function setsTheWeeks(section: CourseTemplateSection): boolean {
 }
 
 /** Combined numbered lectures are one source row; never attach one row's progress to a later split lecture. */
-function compositeNumbers(label: string, activity: CourseActivity): number[] | undefined {
+function compositeNumbers(label: string, activity: CourseActivity, module: string): number[] | undefined {
   if (activity !== "lecture" && activity !== "flipped-lecture") return undefined;
-  const leading = label.match(/^(?:(?:lecture|lec)|[A-Z][A-Z0-9-]{1,9})\s+(\d{1,3}(?:\s*(?:,|&|and)\s*\d{1,3})+)(?=\s|$)/i);
-  if (!leading) return undefined;
-  const numbers = [...leading[1].matchAll(/\d{1,3}/g)].map(([digits]) => Number(digits));
+  const leading = label.match(/^((?:lecture|lec)|[A-Z][A-Z0-9-]{1,9})\s+(\d{1,3}(?:\s*(?:,|&|and)\s*\d{1,3})+)(?=\s|$)/i);
+  if (!leading || (!/^(lecture|lec)$/i.test(leading[1]) && !isModuleNumberPrefix(leading[1], module))) return undefined;
+  const numbers = [...leading[2].matchAll(/\d{1,3}/g)].map(([digits]) => Number(digits));
   return numbers.length > 1 ? numbers : undefined;
 }
 
-function itemNumber(label: string, activity: CourseActivity): number | undefined {
+/** A reference to a different module is a title, not this module's lecture number. */
+function isModuleNumberPrefix(prefix: string, module: string): boolean {
+  const key = moduleKey(prefix);
+  return [module, ...moduleAliases(module)].some((spelling) => {
+    const code = moduleKey(spelling.trim().split(/\s+/)[0]);
+    return key === code || key === code.replace(/\d+$/, "");
+  });
+}
+
+/** Older imports accepted any code prefix; do not transfer that row's progress to a now-valid number. */
+function isInvalidForeignNumberKey(label: string, key: string, module: string): boolean {
+  const parts = normalizedTemplateIdentity(key, module).split("|");
+  if (parts.at(-3) !== canonicalModuleKey(module) || parts.at(-2) !== "lecture") return false;
+  const prefix = label.match(/^([A-Z][A-Z0-9-]{1,9})\s+/i)?.[1];
+  if (!prefix || /^(lecture|lec)$/i.test(prefix) || isModuleNumberPrefix(prefix, module)) return false;
+  // Allowing this exact prefix reproduces the old generic fallback while
+  // retaining literal Lecture/Lec precedence and combined-number semantics.
+  const legacyNumbers = compositeNumbers(label, "lecture", prefix);
+  const legacyIdentity = legacyNumbers ? `combined-${legacyNumbers.join("-")}` : itemNumber(label, "lecture", prefix)?.toString();
+  if (legacyIdentity === undefined || parts.at(-1) !== legacyIdentity) return false;
+  const currentNumbers = compositeNumbers(label, "lecture", module);
+  const currentIdentity = currentNumbers ? `combined-${currentNumbers.join("-")}` : itemNumber(label, "lecture", module)?.toString();
+  return currentIdentity !== legacyIdentity;
+}
+
+function itemNumber(label: string, activity: CourseActivity, module: string): number | undefined {
   // Prefer this activity's own number, never a reference to another lecture in
   // its title: "DLA 02 before Lecture 06" identifies DLA 2, not Lecture 6.
   const byActivity: Partial<Record<CourseActivity, RegExp>> = {
@@ -548,8 +583,8 @@ function itemNumber(label: string, activity: CourseActivity): number | undefined
   // Some official lists say "CPR 03 Histology" without spelling out Lecture.
   // This applies to lecture kinds only; do not infer assessment numbers.
   if (activity === "lecture" || activity === "flipped-lecture") {
-    const leading = label.match(/^[A-Z][A-Z0-9-]{1,9}\s+0*(\d{1,3})(?=\s|[,;:/-]|$)/);
-    if (leading) return Number(leading[1]);
+    const leading = label.match(/^([A-Z][A-Z0-9-]{1,9})\s+0*(\d{1,3})(?=\s|[,;:/-]|$)/);
+    if (leading && isModuleNumberPrefix(leading[1], module)) return Number(leading[2]);
   }
   return undefined;
 }

@@ -3,6 +3,7 @@
 .academic-bank-discovery .course-collection { margin-top: 16px; }
 .academic-bank-discovery .course-term-section { margin-top: 22px; }
 .course-library-heading { display: flex; align-items: start; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
+.course-library-entry-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .course-library-heading h1, .course-plan-heading h1 { font: var(--fw-semibold) clamp(30px, 4vw, 46px)/1.12 var(--font-display); letter-spacing: -.04em; margin: 8px 0 12px; }
 .course-library-heading p, .course-plan-heading p { max-width: 60ch; color: var(--text-70); }
 .course-eyebrow { font: 500 11px/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: .12em; }

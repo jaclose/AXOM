@@ -236,14 +236,21 @@ function untouchedSourceEvidence(question: QuestionRecord): boolean {
   const teachingSnippet = teachingImage
     ? `Original teaching image: ${teachingImage.sourceFile ?? source.filename}${teachingImage.sourcePage !== undefined ? `, page ${teachingImage.sourcePage}` : ""}${teachingImage.checksum ? `, ${teachingImage.checksum}` : ""}.`
     : undefined;
+  // Accept the exact projections written by either importer version. Mixing
+  // them or changing a recorded value is still a learner edit, not a refresh.
+  const legacyEvidence = !extraction.answerEvidence
+    && extraction.answerEvidencePage === answerImage?.sourcePage
+    && extraction.explanationSourcePage === teachingImage?.sourcePage;
+  const canonicalEvidence = extraction.answerEvidence === content.correctAnswer?.evidence
+    && extraction.answerEvidencePage === (source.answerEvidencePage ?? answerImage?.sourcePage)
+    && extraction.explanationSourcePage === (source.explanationSourcePage ?? teachingImage?.sourcePage);
   return question.citation === citation
     && extraction.questionSourcePage === source.page
     && extraction.answerEvidenceSnippet === answerSnippet
-    && extraction.answerEvidencePage === answerImage?.sourcePage
     && extraction.explanationSourceSnippet === teachingSnippet
-    && extraction.explanationSourcePage === teachingImage?.sourcePage
+    && (legacyEvidence || canonicalEvidence)
     && !extraction.sourceSnippet && !extraction.questionSourceSnippet
-    && !extraction.answerEvidence && !extraction.explanationSource
+    && !extraction.explanationSource
     && !extraction.explanationRawCandidate && !extraction.explanationCleanupOperations?.length
     && extraction.answerDetectionConfidence === undefined
     && extraction.questionDetectionConfidence === undefined

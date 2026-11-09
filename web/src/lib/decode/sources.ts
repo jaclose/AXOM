@@ -4,7 +4,7 @@
 // In the workspace a source document is its text and its identity (a
 // checksum of the file's bytes). Showing a page as it was drawn needs the
 // file itself, which is far too large for a workspace snapshot or for sync.
-// Copies live in this IndexedDB database, keyed by the document's id.
+// Copies live in this IndexedDB database, keyed by account and document identity.
 // An explicit academic download can restore a copy from the protected
 // immutable backend file; attaching the exact local original also works.
 // Workspace snapshots carry identity and text, not these binary bytes.
@@ -15,8 +15,11 @@
 // ===========================================================================
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { SourceDocument } from "../library";
+import { readLegacyLocalBinaryOwner } from "../questionAttachments";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, type QuestionAttachmentScope } from "../questionAttachmentScope";
 
 export const SOURCE_ORIGINALS_DB = "axom-decode-originals-v1";
+export const SOURCE_ORIGINALS_DB_VERSION = 2;
 const STORE = "originals";
 /** Keep each IndexedDB value comfortably below the size at which Chromium
  * starts rejecting otherwise valid source originals. */
@@ -47,17 +50,37 @@ export class SourceOriginalError extends Error {
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SOURCE_ORIGINALS_DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => resolve(request.result);
+    const request = indexedDB.open(SOURCE_ORIGINALS_DB, SOURCE_ORIGINALS_DB_VERSION);
+    let blocked = false;
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE)) request.result.createObjectStore(STORE);
+    };
+    request.onsuccess = () => {
+      if (blocked) { request.result.close(); return; }
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
     request.onerror = () => reject(new SourceOriginalError("storage", "The original file could not be opened on this device."));
-    request.onblocked = () => reject(new SourceOriginalError("storage", "Close other AXOM tabs and try again."));
+    request.onblocked = () => { blocked = true; reject(new SourceOriginalError("storage", "Close other AXOM tabs and try again.")); };
   });
 }
 
-async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>, failure: string): Promise<T> {
+export interface SourceOriginalAccess { scope?: QuestionAttachmentScope; accountId?: string }
+
+function assertOriginalScope(scope: QuestionAttachmentScope, accountId?: string): void {
+  if (!isQuestionAttachmentScopeCurrent(scope) || (accountId !== undefined && scope.accountId !== accountId)) {
+    throw new SourceOriginalError("storage", "The account changed while accessing this original file. Reopen the source and retry.");
+  }
+}
+
+type OriginalStorageId = string | IDBValidKey[];
+const scopedDocumentId = (owner: string, documentId: string): IDBValidKey[] => ["axom-original-v2", owner, documentId];
+
+async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>, failure: string, scope: QuestionAttachmentScope): Promise<T> {
+  assertOriginalScope(scope);
   const db = await open();
   try {
+    assertOriginalScope(scope);
     return await new Promise<T>((resolve, reject) => {
       const transaction = db.transaction(STORE, mode);
       const fail = () => reject(new SourceOriginalError("storage", failure));
@@ -69,7 +92,10 @@ async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStor
         fail();
         return;
       }
-      transaction.oncomplete = () => resolve(request.result);
+      transaction.oncomplete = () => {
+        try { assertOriginalScope(scope); resolve(request.result); }
+        catch (error) { reject(error); }
+      };
       transaction.onerror = fail;
       transaction.onabort = fail;
     });
@@ -78,8 +104,8 @@ async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStor
   }
 }
 
-const versionKey = (id: string, checksum: string) => ["version", id, checksum];
-const chunkKey = (id: string, storageId: string, index: number) => ["chunk", id, storageId, index];
+const versionKey = (id: OriginalStorageId, checksum: string) => ["version", id, checksum];
+const chunkKey = (id: OriginalStorageId, storageId: string, index: number) => ["chunk", id, storageId, index];
 const fingerprint = (checksum: string) => checksum.replace(/^sha256:/, "");
 
 function isChunkedSourceOriginal(value: unknown): value is ChunkedSourceOriginal {
@@ -113,9 +139,9 @@ function newStorageId(checksum: string): string {
   return `${checksum}-${suffix}`;
 }
 
-async function deleteKeys(keys: IDBValidKey[]): Promise<void> {
+async function deleteKeys(keys: IDBValidKey[], scope: QuestionAttachmentScope): Promise<void> {
   for (const key of keys) {
-    await withStore("readwrite", store => store.delete(key), "The original file could not be removed.");
+    await withStore("readwrite", store => store.delete(key), "The original file could not be removed.", scope);
   }
 }
 
@@ -123,11 +149,14 @@ async function deleteKeys(keys: IDBValidKey[]): Promise<void> {
  * a repairing writer behind this transaction; once it completes, these Blob
  * handles remain readable even if the retired chunk records are reclaimed. */
 async function readChunkHandles(
-  documentId: string,
+  documentId: OriginalStorageId,
   manifest: ChunkedSourceOriginal,
   failure: string,
+  scope: QuestionAttachmentScope,
 ): Promise<Blob[] | undefined> {
+  assertOriginalScope(scope);
   const db = await open();
+  try { assertOriginalScope(scope); } catch (error) { db.close(); throw error; }
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE, "readonly");
     const store = transaction.objectStore(STORE);
@@ -147,6 +176,7 @@ async function readChunkHandles(
     }
     transaction.oncomplete = () => {
       db.close();
+      try { assertOriginalScope(scope); } catch (error) { reject(error); return; }
       resolve(invalid || chunks.some(chunk => !(chunk instanceof Blob)) ? undefined : chunks);
     };
     const fail = () => {
@@ -158,11 +188,11 @@ async function readChunkHandles(
   });
 }
 
-async function readChunked(documentId: string, manifest: ChunkedSourceOriginal, checksum: string): Promise<Blob | undefined> {
+async function readChunked(documentId: OriginalStorageId, manifest: ChunkedSourceOriginal, checksum: string, scope: QuestionAttachmentScope): Promise<Blob | undefined> {
   if (manifest.checksum !== checksum || manifest.byteSize < 0
       || manifest.chunkCount !== Math.ceil(manifest.byteSize / manifest.chunkBytes)) return undefined;
   const digest = sha256.create();
-  const chunks = await readChunkHandles(documentId, manifest, "AXOM could not read this version of the original file.");
+  const chunks = await readChunkHandles(documentId, manifest, "AXOM could not read this version of the original file.", scope);
   if (!chunks) return undefined;
   for (const chunk of chunks) {
     digest.update(new Uint8Array(await chunk.arrayBuffer()));
@@ -170,20 +200,20 @@ async function readChunked(documentId: string, manifest: ChunkedSourceOriginal, 
   return hex(digest.digest()) === checksum ? new Blob(chunks, { type: manifest.mimeType }) : undefined;
 }
 
-async function readVersion(documentId: string, checksum: string, value: unknown): Promise<Blob | undefined> {
+async function readVersion(documentId: OriginalStorageId, checksum: string, value: unknown, scope: QuestionAttachmentScope): Promise<Blob | undefined> {
   if (value instanceof Blob) return await hashBlob(value) === checksum ? value : undefined;
-  return isChunkedSourceOriginal(value) ? readChunked(documentId, value, checksum) : undefined;
+  return isChunkedSourceOriginal(value) ? readChunked(documentId, value, checksum, scope) : undefined;
 }
 
-async function saveVersion(documentId: string, checksum: string, file: Blob): Promise<void> {
-  const prior = await withStore<unknown>("readonly", store => store.get(versionKey(documentId, checksum)), "AXOM could not read this version of the original file.");
+async function saveVersion(documentId: OriginalStorageId, checksum: string, file: Blob, scope: QuestionAttachmentScope): Promise<void> {
+  const prior = await withStore<unknown>("readonly", store => store.get(versionKey(documentId, checksum)), "AXOM could not read this version of the original file.", scope);
   // A checksum-addressed version is immutable. Verifying and reusing it avoids
   // duplicating a large file and leaves its chunk keys stable for readers that
   // began before this save.
-  if (await readVersion(documentId, checksum, prior)) return;
+  if (await readVersion(documentId, checksum, prior, scope)) return;
 
   if (file.size < CHUNKED_SOURCE_ORIGINAL_MIN_BYTES) {
-    await withStore("readwrite", store => store.put(file, versionKey(documentId, checksum)), "The original file could not be saved. Check this device's storage and try again.");
+    await withStore("readwrite", store => store.put(file, versionKey(documentId, checksum)), "The original file could not be saved. Check this device's storage and try again.", scope);
     return;
   }
 
@@ -194,15 +224,15 @@ async function saveVersion(documentId: string, checksum: string, file: Blob): Pr
     for (; written < chunkCount; written++) {
       const start = written * SOURCE_ORIGINAL_CHUNK_BYTES;
       const chunk = file.slice(start, Math.min(file.size, start + SOURCE_ORIGINAL_CHUNK_BYTES));
-      await withStore("readwrite", store => store.put(chunk, chunkKey(documentId, storageId, written)), "The original file could not be saved. Check this device's storage and try again.");
+      await withStore("readwrite", store => store.put(chunk, chunkKey(documentId, storageId, written)), "The original file could not be saved. Check this device's storage and try again.", scope);
     }
     const manifest: ChunkedSourceOriginal = {
       kind: "chunked-source-original", version: 1, checksum, byteSize: file.size, mimeType: file.type,
       chunkBytes: SOURCE_ORIGINAL_CHUNK_BYTES, chunkCount, storageId,
     };
-    await swapChunkedVersion(documentId, checksum, manifest);
+    await swapChunkedVersion(documentId, checksum, manifest, scope);
   } catch (error) {
-    await deleteKeys(Array.from({ length: written }, (_, index) => chunkKey(documentId, storageId, index))).catch(() => undefined);
+    await deleteKeys(Array.from({ length: written }, (_, index) => chunkKey(documentId, storageId, index)), scope).catch(() => undefined);
     throw error;
   }
 }
@@ -211,16 +241,20 @@ async function saveVersion(documentId: string, checksum: string, file: Blob): Pr
  * one transaction. Any earlier readonly transaction finishes materializing
  * its Blob handles before this writer can swap and reclaim the old records. */
 async function swapChunkedVersion(
-  documentId: string,
+  documentId: OriginalStorageId,
   checksum: string,
   manifest: ChunkedSourceOriginal,
+  scope: QuestionAttachmentScope,
 ): Promise<void> {
+  assertOriginalScope(scope);
   const db = await open();
+  try { assertOriginalScope(scope); } catch (error) { db.close(); throw error; }
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE, "readwrite");
     const store = transaction.objectStore(STORE);
     const request = store.get(versionKey(documentId, checksum));
     request.onsuccess = () => {
+      if (!isQuestionAttachmentScopeCurrent(scope)) { transaction.abort(); return; }
       const prior = isChunkedSourceOriginal(request.result) ? request.result : undefined;
       store.put(manifest, versionKey(documentId, checksum));
       if (prior && prior.storageId !== manifest.storageId) {
@@ -229,7 +263,10 @@ async function swapChunkedVersion(
         }
       }
     };
-    transaction.oncomplete = () => { db.close(); resolve(); };
+    transaction.oncomplete = () => {
+      db.close();
+      try { assertOriginalScope(scope); resolve(); } catch (error) { reject(error); }
+    };
     const fail = () => {
       db.close();
       reject(new SourceOriginalError("storage", "The original file could not be saved. Check this device's storage and try again."));
@@ -241,61 +278,94 @@ async function swapChunkedVersion(
 
 /** Immutable versions share one verified payload per document/hash. The
  * current id is only a pointer; legacy Blob values remain readable. */
-export async function saveSourceOriginal(document: Pick<SourceDocument, "id" | "checksum">, file: Blob): Promise<void> {
+export async function saveSourceOriginal(document: Pick<SourceDocument, "id" | "checksum">, file: Blob, options: SourceOriginalAccess = {}): Promise<void> {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  assertOriginalScope(scope, options.accountId);
   if (!document.checksum) {
     throw new SourceOriginalError("no-fingerprint", "This source was saved without a fingerprint, so a file cannot be matched to it. Import the file again to attach it.");
   }
   const checksum = fingerprint(document.checksum);
-  // Blob.size is normally immutable, but tests and some host bridges can expose
-  // a decorated Blob. A slice gives storage the browser's canonical byte view.
+  const documentId = scopedDocumentId(scope.owner, document.id);
+  // A slice uses the browser's canonical byte view, including host bridge Blobs.
   const canonicalFile = file.slice(0, file.size, file.type);
   if (await hashBlob(canonicalFile) !== checksum) {
     throw new SourceOriginalError("different-file", "This is a different version of the file. Choose the exact file that was imported, so page numbers still point at the right pages.");
   }
-  const current = await withStore<unknown>("readonly", store => store.get(document.id), "AXOM could not read the original file.");
-  if (current instanceof Blob) {
-    const previousHash = await hashBlob(current);
-    if (previousHash !== checksum) await saveVersion(document.id, previousHash, current);
-  }
-  await saveVersion(document.id, checksum, canonicalFile);
-  await withStore("readwrite", store => store.put({ checksum }, document.id), "The original file could not be saved. Check this device's storage and try again.");
+  await saveVersion(documentId, checksum, canonicalFile, scope);
+  await withStore("readwrite", store => store.put({ checksum }, documentId), "The original file could not be saved. Check this device's storage and try again.", scope);
+  assertOriginalScope(scope, options.accountId);
 }
 
-/** Lightweight UI presence probe. This reads only the current pointer and the
- * version value or chunk manifest; it never reconstructs or hashes file bytes.
- * Call `readSourceOriginal` before displaying or exporting the file. */
-export async function hasStoredSourceOriginal(documentId: string, checksum?: string): Promise<boolean> {
-  const found = await withStore<unknown>("readonly", store => store.get(documentId), "AXOM could not check the original file on this device.");
+async function hasOriginalForId(documentId: OriginalStorageId, checksum: string | undefined, scope: QuestionAttachmentScope): Promise<boolean> {
+  const found = await withStore<unknown>("readonly", store => store.get(documentId), "AXOM could not check the original file on this device.", scope);
   if (found instanceof Blob) return true;
   const expected = checksum ? fingerprint(checksum) : undefined;
   const hash = expected ?? (found && typeof found === "object" && "checksum" in found ? found.checksum : undefined);
   if (typeof hash !== "string") return false;
-  const version = await withStore<unknown>("readonly", store => store.get(versionKey(documentId, hash)), "AXOM could not check this version of the original file.");
+  const version = await withStore<unknown>("readonly", store => store.get(versionKey(documentId, hash)), "AXOM could not check this version of the original file.", scope);
   if (version instanceof Blob) return true;
-  if (!isChunkedSourceOriginal(version)
-      || version.checksum !== hash
-      || version.byteSize < 0
+  if (!isChunkedSourceOriginal(version) || version.checksum !== hash || version.byteSize < 0
       || version.chunkCount !== Math.ceil(version.byteSize / version.chunkBytes)) return false;
-  return Boolean(await readChunkHandles(documentId, version, "AXOM could not check this version of the original file."));
+  return Boolean(await readChunkHandles(documentId, version, "AXOM could not check this version of the original file.", scope));
 }
 
-export async function readSourceOriginal(documentId: string, checksum?: string): Promise<Blob | undefined> {
-  const found = await withStore<unknown>("readonly", store => store.get(documentId), "AXOM could not read the original file.");
+/** Presence never grants read authority; exports and previews verify the bytes. */
+export async function hasStoredSourceOriginal(documentId: string, checksum?: string, options: SourceOriginalAccess = {}): Promise<boolean> {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  assertOriginalScope(scope, options.accountId);
+  let found = await hasOriginalForId(scopedDocumentId(scope.owner, documentId), checksum, scope);
+  if (!found && await readLegacyLocalBinaryOwner() === scope.owner) {
+    assertOriginalScope(scope, options.accountId);
+    found = await hasOriginalForId(documentId, checksum, scope);
+  }
+  assertOriginalScope(scope, options.accountId);
+  return found;
+}
+
+async function readOriginalForId(documentId: OriginalStorageId, checksum: string | undefined, scope: QuestionAttachmentScope): Promise<Blob | undefined> {
+  const found = await withStore<unknown>("readonly", store => store.get(documentId), "AXOM could not read the original file.", scope);
   const expected = checksum ? fingerprint(checksum) : undefined;
   if (found instanceof Blob && (!expected || await hashBlob(found) === expected)) return found;
   const hash = expected ?? (found && typeof found === "object" && "checksum" in found ? found.checksum : undefined);
   if (typeof hash !== "string") return undefined;
-  const version = await withStore<unknown>("readonly", store => store.get(versionKey(documentId, hash)), "AXOM could not read this version of the original file.");
-  return readVersion(documentId, hash, version);
+  const version = await withStore<unknown>("readonly", store => store.get(versionKey(documentId, hash)), "AXOM could not read this version of the original file.", scope);
+  return readVersion(documentId, hash, version, scope);
 }
 
-/** Explicit removal deletes this document's copies, never another source's. */
+export async function readSourceOriginal(documentId: string, checksum?: string, options: SourceOriginalAccess = {}): Promise<Blob | undefined> {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  assertOriginalScope(scope, options.accountId);
+  let original = await readOriginalForId(scopedDocumentId(scope.owner, documentId), checksum, scope);
+  if (!original && await readLegacyLocalBinaryOwner() === scope.owner) {
+    assertOriginalScope(scope, options.accountId);
+    original = await readOriginalForId(documentId, checksum, scope);
+  }
+  assertOriginalScope(scope, options.accountId);
+  return original;
+}
+
+/** Only explicit device adoption can copy known guest originals into an account.
+ * Ambiguous legacy rows are never claimed; all device originals remain intact. */
+export async function adoptDeviceSourceOriginals(accountId: string, documents: readonly Pick<SourceDocument, "id" | "checksum">[]): Promise<void> {
+  const scope = getQuestionAttachmentScope();
+  assertOriginalScope(scope, accountId);
+  for (const document of documents) {
+    if (!document.checksum) continue;
+    const original = await readOriginalForId(scopedDocumentId("device", document.id), document.checksum, scope);
+    assertOriginalScope(scope, accountId);
+    if (original) await saveSourceOriginal(document, original, { scope, accountId });
+  }
+}
+
+/** Explicit removal is limited to this account's copies; legacy bytes stay intact. */
 export async function deleteSourceOriginal(documentId: string): Promise<void> {
-  const versionKeys = await withStore<IDBValidKey[]>("readonly", store => store.getAllKeys(IDBKeyRange.bound(["version", documentId], ["version", documentId, []])), "The original file could not be removed.");
-  const chunkKeys = await withStore<IDBValidKey[]>("readonly", store => store.getAllKeys(IDBKeyRange.bound(["chunk", documentId], ["chunk", documentId, []])), "The original file could not be removed.");
-  await deleteKeys(versionKeys);
-  await deleteKeys(chunkKeys);
-  await withStore("readwrite", store => store.delete(documentId), "The original file could not be removed.");
+  const scope = getQuestionAttachmentScope();
+  const id = scopedDocumentId(scope.owner, documentId);
+  const versionKeys = await withStore<IDBValidKey[]>("readonly", store => store.getAllKeys(IDBKeyRange.bound(["version", id], ["version", id, []])), "The original file could not be removed.", scope);
+  const chunkKeys = await withStore<IDBValidKey[]>("readonly", store => store.getAllKeys(IDBKeyRange.bound(["chunk", id], ["chunk", id, []])), "The original file could not be removed.", scope);
+  await deleteKeys(versionKeys, scope);
+  await deleteKeys(chunkKeys, scope);
+  await withStore("readwrite", store => store.delete(id), "The original file could not be removed.", scope);
 }
 
 /** Fewer characters than this on a page usually means a figure or a scan. It is not a verdict that the page is unreadable. */

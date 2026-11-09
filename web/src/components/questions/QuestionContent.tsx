@@ -1,5 +1,6 @@
 import { createElement, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
+import { useQuestionAttachmentScope } from "./useQuestionAttachmentScope";
 import { blockToPlainText, blocksToPlainText, sanitizeRichText, type AssetRole, type QuestionBlock, type TableBlock } from "../../lib/question-content/blocks";
 import type { PackageQuestion, QuestionAsset } from "../../lib/question-content/package";
 import { effectiveRole, isAssetVisible, visibleBlocks, type ContentViewMode } from "../../lib/question-content/visibility";
@@ -106,10 +107,14 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
   asset: QuestionAsset; attachment?: QuestionImageAttachment; files?: readonly File[]; alt: string; enlarge: boolean;
 }) {
   const file = files?.find((entry) => entry.name === asset.filename);
+  const scope = useQuestionAttachmentScope();
+  const fileOwner = useRef({ file, scope });
+  if (fileOwner.current.file !== file) fileOwner.current = { file, scope };
   // A reused asset ID across questions must never display the prior figure
   // during the render before React runs cleanup for its asynchronous loader.
   // Include both source identity and the actual selected File object.
   const identity = [
+    scope.owner, scope.generation,
     asset.id, asset.filename, asset.checksum ?? "",
     attachment?.blobKey ?? "", attachment?.assetId ?? "", attachment?.updatedAt ?? "",
     file?.name ?? "", file?.size ?? "", file?.lastModified ?? "",
@@ -128,14 +133,16 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
     setLoaded({ identity, asset, file, missing: false });
     setOpen(false);
     void (async () => {
-      const blob = file ?? (attachment ? (await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined))?.blob : undefined);
+      const blob = file
+        ? fileOwner.current.scope === scope ? file : undefined
+        : (attachment ? (await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined))?.blob : undefined);
       if (cancelled) return;
       if (!blob) { setLoaded({ identity, asset, file, missing: true }); return; }
       objectUrl = URL.createObjectURL(blob);
       setLoaded({ identity, asset, file, url: objectUrl, missing: false });
     })();
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [identity, asset, file, attachment, retry]);
+  }, [identity, asset, file, attachment, retry, scope]);
   const crop = asset.crop;
   const width = Math.max(.01, 1 - (crop?.left ?? 0) - (crop?.right ?? 0));
   const height = Math.max(.01, 1 - (crop?.top ?? 0) - (crop?.bottom ?? 0));

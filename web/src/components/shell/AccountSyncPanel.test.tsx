@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAccount } from "../../lib/account/accountStore";
 import type { RevisionSummary } from "../../lib/sync/syncTypes";
 import { markVaultWrite, markVaultWriteFailure } from "../../lib/vaultActivity";
 import { AccountSyncPanel } from "./AccountSyncPanel";
+import { beginSyncProgress, useSyncProgress } from "../../lib/sync/syncProgress";
 
 const initialAccountState = useAccount.getState();
 const user = { id: "learner-1", email: "learner@example.com", displayName: "Alex", emailConfirmed: true };
@@ -17,9 +18,36 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   useAccount.setState(initialAccountState, true);
+  useSyncProgress.setState({ current: null, attention: null });
 });
 
 describe("Account protection experience", () => {
+  it("shows real upload progress only to its account and keeps the last protected receipt", () => {
+    useAccount.setState({ phase: "signed-in", user, link: "linked", protection: "saved-locally", init: vi.fn(), refresh: vi.fn(), lastProtectedAt: "2026-09-30T12:00:00Z" });
+    const progress = beginSyncProgress(user.id);
+    progress.report("content", 21, 60);
+    render(<AccountSyncPanel />);
+    expect(screen.getByText("Saving questions and source text · 21 of 60")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Protecting…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText(/Last protected/).length).toBeGreaterThan(0);
+    act(() => useAccount.setState({ user: { ...user, id: "another-account" } }));
+    expect(screen.queryByText(/Saving questions and source text/)).toBeNull();
+    act(() => progress.finish());
+  });
+
+  it("identifies missing images locally and offers recovery without exposing another account's details", () => {
+    useAccount.setState({ phase: "signed-in", user, link: "linked", protection: "blocked", init: vi.fn(), refresh: vi.fn() });
+    const progress = beginSyncProgress(user.id);
+    progress.attention([{ questionId: "q1", questionLabel: "Review this source figure", fileName: "original-figure.png" }]);
+    progress.finish();
+    const recovery = vi.fn();
+    render(<AccountSyncPanel onOpenBackup={recovery} />);
+    expect(screen.getByText("original-figure.png")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Emergency recovery" }));
+    expect(recovery).toHaveBeenCalledOnce();
+    act(() => useAccount.setState({ user: { ...user, id: "different-account" } }));
+    expect(screen.queryByText("original-figure.png")).toBeNull();
+  });
   it("keeps local recovery visible when accounts are unavailable", () => {
     const onOpenBackup = vi.fn();
     render(<AccountSyncPanel onOpenBackup={onOpenBackup} />);
@@ -44,6 +72,77 @@ describe("Account protection experience", () => {
     expect(screen.queryByText("Password")).toBeNull();
     expect(screen.getByRole("button", { name: "Send code" })).toBeTruthy();
     expect(screen.getByText(/local workspace stays here until you choose/)).toBeTruthy();
+  });
+
+  it("offers private-by-default Community choices during account creation", async () => {
+    const signUp = vi.fn(async () => true);
+    useAccount.setState({ phase: "signed-out", user: null, busy: false, signUp });
+    render(<AccountSyncPanel />);
+    expect(screen.queryByRole("region", { name: "Community and leaderboards" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect((screen.getByRole("checkbox", { name: "Appear in learner search" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: "Off" }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(screen.getByLabelText("Name on your account"), { target: { value: "Alex" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "learner@example.com" } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(signUp).toHaveBeenCalledWith("learner@example.com", "password123", "Alex", { discoverable: false, shareMode: "off" }));
+  });
+
+  it("lets new learners choose sharing without silently opting them into discovery", async () => {
+    const signUp = vi.fn(async () => true);
+    useAccount.setState({ phase: "signed-out", user: null, busy: false, signUp });
+    render(<AccountSyncPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Community" }));
+    expect((screen.getByRole("checkbox", { name: "Appear in learner search" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText(/With learner search off/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Name on your account"), { target: { value: "Alex" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "learner@example.com" } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(signUp).toHaveBeenCalledWith("learner@example.com", "password123", "Alex", { discoverable: false, shareMode: "community" }));
+  });
+
+  it("offers the same choices when an email code may create a new account", async () => {
+    const sendCode = vi.fn(async () => true);
+    useAccount.setState({ phase: "signed-out", user: null, busy: false, sendCode });
+    render(<AccountSyncPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Email code" }));
+    expect(screen.getByText(/Existing accounts keep their saved choices/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Appear in learner search" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Friends" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "learner@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send code" }));
+    await waitFor(() => expect(sendCode).toHaveBeenCalledWith("learner@example.com", { discoverable: true, shareMode: "friends" }));
+  });
+
+  it("does not apply creation choices when the learner switches back to sign-in", async () => {
+    const signIn = vi.fn(async () => true);
+    const signUp = vi.fn(async () => true);
+    useAccount.setState({ phase: "signed-out", user: null, busy: false, signIn, signUp });
+    render(<AccountSyncPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Appear in learner search" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Community" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in", pressed: false }));
+    expect(screen.queryByRole("region", { name: "Community and leaderboards" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "learner@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "password123" } });
+    fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
+    await waitFor(() => expect(signIn).toHaveBeenCalledWith("learner@example.com", "password123"));
+    expect(signUp).not.toHaveBeenCalled();
+  });
+
+  it("shows only the confirmation step once signup choices have been submitted", () => {
+    useAccount.setState({ phase: "signed-out", user: null, busy: false });
+    const { rerender } = render(<AccountSyncPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    act(() => { useAccount.setState({ pendingCodeEmail: "learner@example.com", pendingCodeKind: "signup" }); });
+    rerender(<AccountSyncPanel />);
+    expect(screen.getByLabelText("Confirmation code sent to learner@example.com")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Appear in learner search" })).toBeNull();
+    expect(screen.queryByLabelText("Name on your account")).toBeNull();
   });
 
   it("shows a failed account copy and lets the learner retry without hiding automatic retry timing", () => {

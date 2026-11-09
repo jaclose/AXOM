@@ -26,7 +26,9 @@ function database(results: BoundaryResult[] = []) {
   const calls: { table: string; method: string; args: unknown[] }[] = [];
   const rpcCalls: { name: string; args: Record<string, unknown> | undefined }[] = [];
   const from = vi.fn((table: string) => {
-    const result = results.shift() ?? { data: null, error: null };
+    // Existing privacy-worker scenarios have no social records. The dedicated
+    // community export suite verifies nonempty pages and owner isolation.
+    const result = table.startsWith("social_") ? { data: [], error: null, count: 0 } : results.shift() ?? { data: null, error: null };
     const chain: Record<string, unknown> = {};
     for (const method of ["select", "insert", "update", "upsert", "delete", "eq", "in", "or", "neq", "gt", "gte", "lt", "lte", "is", "not", "order", "limit", "range", "single", "maybeSingle"]) chain[method] = (...args: unknown[]) => { calls.push({ table, method, args }); return chain; };
     chain.then = (resolve: (r: typeof result) => unknown) => Promise.resolve(result).then(resolve);

@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../../lib/seed";
 import type { Store } from "../../lib/store";
 import type { NoctyriumState } from "../../lib/types";
 import { persistPortableRestore } from "./SettingsModal";
+import { resetQuestionAttachmentScopeForTests, setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
+
+afterEach(resetQuestionAttachmentScopeForTests);
 
 type Mode = "replace" | "merge";
 
@@ -56,6 +59,34 @@ function restoreHarness(mode: Mode) {
 }
 
 describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) => {
+  it.each([false, true])("refuses an account transition during source staging, including ABA: %s", async (returnToFirst) => {
+    setQuestionAttachmentAccount("account-a");
+    const h = restoreHarness(mode);
+    h.restoreOriginals.mockImplementationOnce(async () => {
+      setQuestionAttachmentAccount("account-b");
+      if (returnToFirst) setQuestionAttachmentAccount("account-a");
+      return { restored: 1, skipped: 0 };
+    });
+    await expect(h.run()).rejects.toThrow(/account changed during recovery/);
+    expect(h.replaceAll).not.toHaveBeenCalled();
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+  });
+
+  it("never rolls the prior account over a new workspace when a pending save rejects", async () => {
+    setQuestionAttachmentAccount("account-a");
+    const h = restoreHarness(mode);
+    h.flush.mockImplementationOnce(async () => {
+      setQuestionAttachmentAccount("account-b");
+      h.setLive({ ...h.current, profile: { ...h.current.profile, name: "Account B" } } as Store);
+      throw new Error("late save failure");
+    });
+    await expect(h.run()).rejects.toThrow(/account changed during recovery/);
+    expect(h.replaceAll).toHaveBeenCalledTimes(1);
+    expect(h.getLive().profile.name).toBe("Account B");
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+  });
   it("stages binaries, durably adopts the target, then records and maintains it", async () => {
     const h = restoreHarness(mode);
     const message = await h.run();

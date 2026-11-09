@@ -6,6 +6,7 @@ import { SyncPushError } from "./syncFailure";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { readOriginalFile } from "../sourceOriginal";
 import { contentMetadata } from "./deferredContent";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../questionAttachmentScope";
 import { RESUMABLE_CHUNK_BYTES, uploadResumableObject, type ResumableStorageConfig } from "./resumableObject";
 
 export const ORIGINALS_BUCKET = "workspace-originals";
@@ -18,6 +19,7 @@ const originalIdentityKey = (identity: NonNullable<ReturnType<typeof readOrigina
 /** Source identity is part of the normal document metadata. Files live once per
  * account/hash, outside checkpoints, and are acknowledged before the revision. */
 export async function uploadCloudOriginals(client: SupabaseClient, userId: string, state: NoctyriumState, previous: string | undefined, assertCurrent: () => Promise<void>, resumable?: ResumableOriginalUpload, signal?: AbortSignal) {
+  const scope = getQuestionAttachmentScope();
   const prior = previous?.startsWith("{") ? JSON.parse(previous) as Pick<NoctyriumState, "documents"> : undefined;
   const known = new Map((prior?.documents ?? []).flatMap(document => {
     const file = readOriginalFile(document);
@@ -27,6 +29,7 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
   const verified = verifiedOriginalUploads.get(userId) ?? new Set<string>();
   verifiedOriginalUploads.set(userId, verified);
   const ensureCurrent = async () => {
+    if (scope.accountId !== userId || !isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed while protecting original files. Retry from the current account.");
     if (signal?.aborted) throw new DOMException("The original upload was cancelled. The local file is unchanged.", "AbortError");
     await assertCurrent();
     if (signal?.aborted) throw new DOMException("The original upload was cancelled. The local file is unchanged.", "AbortError");
@@ -60,7 +63,7 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
   }
   async function uploadOne(document: SourceDocument, identity: NonNullable<ReturnType<typeof readOriginalFile>>): Promise<void> {
     await ensureCurrent();
-    const original = await readSourceOriginal(document.id, identity.sha256);
+    const original = await readSourceOriginal(document.id, identity.sha256, { scope, accountId: userId });
     if (!original || original.size !== identity.byteSize) throw new SyncPushError(
       { kind: "rejected", rejection: "missing-original", status: 0 },
       "An original source file is missing on this device. Attach the exact file or restore a complete backup before protecting this version.",
@@ -109,6 +112,7 @@ export async function repairMissingCloudOriginals(
   client: SupabaseClient, userId: string, state: NoctyriumState,
   assertCurrent: () => Promise<void>, resumable?: ResumableOriginalUpload,
 ): Promise<number> {
+  const scope = getQuestionAttachmentScope();
   const grouped = new Map<string, SourceDocument[]>();
   for (const document of contentMetadata(state).documents) {
     const identity = readOriginalFile(document);
@@ -137,7 +141,7 @@ export async function repairMissingCloudOriginals(
     let local: SourceDocument | undefined;
     for (const document of documents) {
       await assertCurrent();
-      const copy = await readSourceOriginal(document.id, hash);
+      const copy = await readSourceOriginal(document.id, hash, { scope, accountId: userId });
       if (copy && copy.size === identity.byteSize) { local = document; break; }
     }
     if (!local) {
@@ -154,12 +158,13 @@ export async function repairMissingCloudOriginals(
 }
 
 export async function downloadCloudOriginal(client: SupabaseClient, userId: string, document: SourceDocument, assertCurrent: () => Promise<void>): Promise<void> {
+  const scope = getQuestionAttachmentScope();
   const identity = readOriginalFile(document);
-  if (!identity || await readSourceOriginal(document.id, identity.sha256)) return;
+  if (!identity || await readSourceOriginal(document.id, identity.sha256, { scope, accountId: userId })) return;
   await assertCurrent();
   const { data, error } = await client.storage.from(ORIGINALS_BUCKET).download(`${userId}/${identity.sha256}`);
   if (error || !data) throw new Error("This original file is not available offline yet. Reconnect to its original account and retry.");
   if (data.size !== identity.byteSize || await sha256Hex(await data.arrayBuffer()) !== identity.sha256) throw new Error("The original file failed its integrity check. Your saved work is unchanged.");
   await assertCurrent();
-  await saveSourceOriginal(document, data);
+  await saveSourceOriginal(document, data, { scope, accountId: userId });
 }

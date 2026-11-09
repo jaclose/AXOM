@@ -5,7 +5,7 @@ import { GhostButton } from "./primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 
 export function Modal({
-  title, onClose, children, footer, headerLead, className = "", bodyClassName = "",
+  title, onClose, children, footer, headerLead, className = "", bodyClassName = "", shouldRestoreFocus,
 }: {
   title: string;
   onClose: () => void;
@@ -14,10 +14,13 @@ export function Modal({
   headerLead?: React.ReactNode;
   className?: string;
   bodyClassName?: string;
+  shouldRestoreFocus?: () => boolean;
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
+  const restoreFocusRef = useRef(shouldRestoreFocus);
+  restoreFocusRef.current = shouldRestoreFocus;
 
   useEffect(() => {
     closeRef.current = onClose;
@@ -60,7 +63,7 @@ export function Modal({
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+      if (previouslyFocused?.isConnected && restoreFocusRef.current?.() !== false) previouslyFocused.focus();
     };
   }, []);
 

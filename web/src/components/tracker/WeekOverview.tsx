@@ -14,6 +14,8 @@ import { questionsWithUnambiguousCourse } from "./legacyCourseQuestionScope";
 const ALLOWANCE_FIELDS: CourseActivity[] = ["lecture", "small-group", "imcq", "esoft", "lab"];
 
 function questionLine(week: WeekSummary): string | null {
+  // A held owner does not mean zero questions exist; explain why no progress is shown.
+  if (week.questionScopeAmbiguous) return "Question progress unavailable: course ownership needs review.";
   const { total, attempted, firstTimeCorrect, sourceReviewHeld = 0 } = week.questions;
   const held = sourceReviewHeld
     ? `${sourceReviewHeld} question${sourceReviewHeld === 1 ? "" : "s"} held for source review` : "";

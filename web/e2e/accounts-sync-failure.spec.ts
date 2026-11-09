@@ -50,6 +50,8 @@ async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<
     }
     if (path === "/rest/v1/rpc/touch_account_device") return route.fulfill({ status: 204, headers: CORS });
     if (path === "/rest/v1/rpc/axom_operator_role") return json(200, null)(route);
+    // Keep Community idle while this synthetic journey exercises account recovery.
+    if (request.method() === "POST" && path === "/rest/v1/rpc/axom_community_preferences") return json(200, { discoverable: false, shareMode: "off", revision: 1 })(route);
     if (path === "/rest/v1/account_profiles") return json(200, { display_name: "E2E Learner" })(route);
     if (path === "/rest/v1/workspaces") return json(200, { id: WORKSPACE_ID })(route);
     // The dashboard's notification inbox asks for these on every signed-in load.

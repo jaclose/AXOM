@@ -29,6 +29,21 @@ function bank(evidence: "printed-key" | "answer-reveal-slide"): ReviewBank {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("structured question import review", () => {
+  it("previews duplicate ungrouped source numbers as held before import", () => {
+    const sample = bank("printed-key");
+    sample.pkg.questions = Array.from({ length: 9 }, (_, index) => ({
+      ...sample.pkg.questions[0], id: `source-${index + 1}`,
+      source: { ...sample.pkg.questions[0].source, questionNumber: index < 3 ? 1 : index - 1 },
+      stem: [{ type: "text", text: `Synthetic distinct question ${index + 1}` }],
+    }));
+    const before = JSON.stringify(sample.pkg);
+    render(<BankImportReview bank={sample} onBack={() => {}} />);
+    expect(screen.getByText("9 questions · 6 ready for import · 3 need review · 0 unresolved")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import 6 answer-ready questions" })).toBeTruthy();
+    expect(screen.getByText(/Another question in the same set also has the number 1/)).toBeTruthy();
+    expect(JSON.stringify(sample.pkg)).toBe(before);
+  });
+
   it("shows an answer image once when the package both places and lists it", async () => {
     const user = userEvent.setup();
     const sample = bank("answer-reveal-slide");
@@ -152,8 +167,8 @@ describe("structured question import review", () => {
     const reviewBank = bank("printed-key");
     const question = reviewBank.pkg.questions[0];
     reviewBank.pkg.questions.push(
-      { ...question, id: "q2", correctAnswer: { labels: ["B"], evidence: "answer-reveal-slide" } },
-      { ...question, id: "q3", correctAnswer: undefined },
+      { ...question, id: "q2", source: { ...question.source, questionNumber: 2 }, correctAnswer: { labels: ["B"], evidence: "answer-reveal-slide" } },
+      { ...question, id: "q3", source: { ...question.source, questionNumber: 3 }, correctAnswer: undefined },
     );
     render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
 

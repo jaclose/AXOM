@@ -171,7 +171,7 @@ export function QuestionBankBookContent({ book, onPractice, onOpenBank }: Questi
               {waiting.length} {waiting.length === 1 ? "bank is" : "banks are"} known for this module and not on this device yet. {waiting.length === 1 ? "It adds" : "They add"} nothing to the count above until {waiting.length === 1 ? "it is" : "they are"} imported and checked.
             </p>
           )}
-          <p className="book-note" data-tone="plain">Pictures of imported questions are stored on this device. Sync carries the questions, not the picture files.</p>
+          <p className="book-note" data-tone="plain">Question pictures stay available on this device. Protect your workspace through Account to save them in private account storage, too.</p>
         </>
       }
       right={

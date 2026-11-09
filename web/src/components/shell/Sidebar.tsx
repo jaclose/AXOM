@@ -6,6 +6,7 @@ import {
   DAILY_GAMES_FOLDER,
   getNavAnnouncementId,
   getNavModuleStatus,
+  isReleasedRoute,
   MODULE_STATUS_META,
   navById,
   SIDEBAR_BOTTOM,
@@ -134,6 +135,7 @@ export function Sidebar({
   }
 
   function Item({ id, section }: { id: string; section?: readonly string[] }) {
+    if (!isReleasedRoute(id)) return null;
     if (id === "host" && !canOpenHost(operatorAccess)) return null;
     const item = navById(id);
     if (!item) return null;
@@ -202,9 +204,9 @@ export function Sidebar({
   // Experimental nav (e.g. Habit Tracker) only appears once opted in via
   // Settings → Early Features, even in manage mode.
   const habitsOn = profile.experimentalFlags?.habits === true;
-  const navGate = (id: string) => id !== "habits" || habitsOn;
+  const navGate = (id: string) => isReleasedRoute(id) && (id !== "habits" || habitsOn);
   const toolItems = ordered(manage ? SIDEBAR_TOOLS : SIDEBAR_TOOLS.filter((id) => !hidden.has(id))).filter(navGate);
-  const prepItems = ordered(manage ? SIDEBAR_PREP : SIDEBAR_PREP.filter((id) => !hidden.has(id)));
+  const prepItems = ordered(manage ? SIDEBAR_PREP : SIDEBAR_PREP.filter((id) => !hidden.has(id))).filter(navGate);
   const miscItems = ordered(manage ? SIDEBAR_MISC : SIDEBAR_MISC.filter((id) => !hidden.has(id)));
   const dailyGamesOpen = !profile.dailyGamesCollapsed;
   const dailyGameItems = ordered(manage
@@ -260,33 +262,8 @@ export function Sidebar({
           <div className="nav-cat"><span>Review &amp; reflect</span></div>
           {ordered(SIDEBAR_REVIEW).map((id) => <Item key={id} id={id} section={SIDEBAR_REVIEW} />)}
 
-          {(prepItems.length > 0 || manage) && (
-            <div className="nav-folder">
-              <button
-                id={PREP_FOLDER_TOGGLE_ID}
-                type="button"
-                className="nav-folder-head"
-                aria-controls={PREP_FOLDER_ITEMS_ID}
-                aria-expanded={prepOpen}
-                onClick={() => updateProfile({ prepCollapsed: !profile.prepCollapsed })}>
-                {prepOpen ? <ChevronDown size={ICON_SIZE.body} /> : <ChevronRight size={ICON_SIZE.body} />}
-                <GraduationCap size={ICON_SIZE.body} /><span>Academic Prep</span>
-                {!prepOpen && <span className="nav-folder-count">{prepItems.length}</span>}
-              </button>
-              <div
-                id={PREP_FOLDER_ITEMS_ID}
-                className="nav-folder-items"
-                role="group"
-                aria-labelledby={PREP_FOLDER_TOGGLE_ID}
-                hidden={!prepOpen}
-              >
-                {prepItems.map((id) => <Item key={id} id={id} section={SIDEBAR_PREP} />)}
-              </div>
-            </div>
-          )}
-
           {(toolItems.length > 0 || manage) && (
-            <div className="nav-folder">
+          <div className="nav-folder">
               <button
                 id={TOOLS_FOLDER_TOGGLE_ID}
                 type="button"
@@ -309,6 +286,32 @@ export function Sidebar({
               </div>
             </div>
           )}
+
+          {prepItems.length > 0 && (
+            <div className="nav-folder">
+              <button
+                id={PREP_FOLDER_TOGGLE_ID}
+                type="button"
+                className="nav-folder-head"
+                aria-controls={PREP_FOLDER_ITEMS_ID}
+                aria-expanded={prepOpen}
+                onClick={() => updateProfile({ prepCollapsed: !profile.prepCollapsed })}>
+                {prepOpen ? <ChevronDown size={ICON_SIZE.body} /> : <ChevronRight size={ICON_SIZE.body} />}
+                <GraduationCap size={ICON_SIZE.body} /><span>Academic Support</span>
+                {!prepOpen && <span className="nav-folder-count">{prepItems.length}</span>}
+              </button>
+              <div
+                id={PREP_FOLDER_ITEMS_ID}
+                className="nav-folder-items"
+                role="group"
+                aria-labelledby={PREP_FOLDER_TOGGLE_ID}
+                hidden={!prepOpen}
+              >
+                {prepItems.map((id) => <Item key={id} id={id} section={SIDEBAR_PREP} />)}
+              </div>
+            </div>
+          )}
+
 
           <div className="nav-folder">
               <button

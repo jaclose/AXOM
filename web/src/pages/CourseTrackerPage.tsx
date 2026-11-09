@@ -300,6 +300,7 @@ export function CourseTrackerPage() {
       <div className="tracker-page-toolbar">
         <div><b>Course Tracker</b><span>Your courses, weekly activities, and observed study progress.</span></div>
         <GButton variant="primary" onClick={() => setLibraryOpen(true)}><BookOpen size={ICON_SIZE.body}/> Course Library / Load Course</GButton>
+        <GButton onClick={() => { setTemplateBook(undefined); setTemplateOpen(true); }}><Upload size={ICON_SIZE.body} /> Saved templates and imports</GButton>
         <GButton size="sm" onClick={() => setModuleHelpOpen((open) => !open)} aria-expanded={moduleHelpOpen} aria-controls={moduleHelpOpen ? "course-tracker-help" : undefined}>
           <HelpCircle size={ICON_SIZE.body} /> Help
         </GButton>
@@ -454,7 +455,12 @@ export function CourseTrackerPage() {
               </>}
               {items.length === 0 && (s.tracker.length === 0
                 ? <TrackerFirstRun hasCourses={s.courses.length > 0} cards={cardSystem}
-                    onAction={(action) => action === "list" ? setBulkOpen(true) : action === "course" ? setModuleOpen(true) : setScheduleOpen(true)} />
+                    onAction={(action) => {
+                      if (action === "templates") { setTemplateBook(undefined); setTemplateOpen(true); }
+                      else if (action === "list") setBulkOpen(true);
+                      else if (action === "course") setModuleOpen(true);
+                      else setScheduleOpen(true);
+                    }} />
                 : <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />)}
               {groupBySection
                 ? <GroupedTrackerItems scope={scope} items={visibleItems} highlightId={highlightId} onFocusSection={setScope} primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
@@ -1078,12 +1084,7 @@ function BlueprintTree({
   onSelect: (scope: string) => void;
 }) {
   if (installs.length === 0) {
-    return (
-      <div className="tracker-blueprint-spine empty" aria-label="Installed blueprints">
-        <div className="tracker-blueprint-spine-head"><Brain size={ICON_SIZE.body} /> Blueprints & Exams</div>
-        <a className="tracker-blueprint-empty" href="#step">Install a blueprint to spin up a container here <ChevronRight size={ICON_SIZE.body} /></a>
-      </div>
-    );
+    return null;
   }
   const byLane = new Map(installs.map((install) => [install.laneId, [] as InstalledBlueprint[]]));
   installs.forEach((install) => byLane.get(install.laneId)?.push(install));
