@@ -667,6 +667,26 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(legacy.review_revision).toBe(3);
     expect(legacy.snapshot_payload).toEqual(source);
     expect(legacy.tags).toEqual(["visual:intent:histology", "sample"]);
+    // Exercise the upgrade path too: installations that had already run
+    // 20261109040000 retained the older importer until a new migration ran.
+    // Recreate that installed function, verify the legacy mismatch used to
+    // pass authorization, then install the forward-only replacement.
+    const importDefinitionFrom = (filename: string) => {
+      const sql = readFileSync(migrationsDir + filename, "utf8");
+      const definition = sql.match(
+        /create or replace function public\.authorize_question_set_library_import\([\s\S]*?end \$\$;/,
+      );
+      if (!definition) throw new Error("Missing migration import function: " + filename);
+      return definition[0];
+    };
+    await db.exec(importDefinitionFrom("20261109040000_question_set_approval_provenance_gate.sql"));
+    try {
+      expect((await authorize(source, legacy.review_revision))[0].value.snapshot_payload)
+        .toEqual(source);
+    } finally {
+      // Restore authorization even if the expected pre-upgrade assertion fails.
+      await db.exec(importDefinitionFrom("20261109060000_question_set_import_tag_projection_upgrade.sql"));
+    }
     await expect(authorize(source, legacy.review_revision))
       .rejects.toThrow(/changed or was withdrawn/i);
     await as(OWNER, "select public.withdraw_question_set_library($1)", [id]);
