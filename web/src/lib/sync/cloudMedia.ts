@@ -150,6 +150,11 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         // the current account must be able to read back identical original bytes.
         // Keep this check within the six-worker pool and shared per-hash attempt.
         await assertCurrent();
+        // A concurrent retained-reference read may have memoized a missing
+        // original before this immutable upload created it. A 2xx or 409
+        // acknowledgment must not reuse that earlier verification (success or
+        // failure): prove the post-upload object from current-account bytes.
+        verifiedRemoteOriginals.delete(`private:${hash}:${blob.size}`);
         await verifyRemoteOriginal({ hash, byteSize: blob.size });
         await assertCurrent();
         // Record success only after verifying storage bytes and current identity.
