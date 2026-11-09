@@ -628,6 +628,50 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     });
   });
 
+  it("rejects legacy approved tag projections and malformed import tag evidence", async () => {
+    const source = snapshot();
+    source.tags = ["sample", "visual:intent:histology"];
+    const id = await submit(OWNER, "legacy-import-tag-projection", source);
+    await approve(REVIEWER, id, source, 1);
+    const authorize = (candidate: Snapshot, revision: number) =>
+      as<{ value: { status: string; review_revision: number; snapshot_payload: Snapshot } }>(
+        LEARNER, "select public.authorize_question_set_library_import($1,$2::bigint,$3::jsonb) value",
+        [id, revision, JSON.stringify(candidate)],
+      );
+
+    expect((await authorize(source, 2))[0].value.snapshot_payload).toEqual(source);
+    await expect(authorize({ ...source, tags: { unsafe: "private" } } as unknown as Snapshot, 2))
+      .rejects.toThrow(/Reopen the exact reviewed/i);
+    await expect(authorize({ ...source, tags: ["sample", false] }, 2))
+      .rejects.toThrow(/Reopen the exact reviewed/i);
+
+    // Simulate an already-published legacy row predating the projection
+    // trigger, rather than weakening any current production write grants.
+    // Trigger disables are limited to this privileged synthetic fixture.
+    await db.exec("alter table public.question_set_library_entries disable trigger question_set_library_approved_evidence;");
+    try {
+      await db.exec("alter table public.question_set_library_entries disable trigger zz_question_set_library_projection_consistency;");
+      try {
+        await db.query("update public.question_set_library_entries set tags=array['visual:intent:histology','sample'] where id=$1", [id]);
+      } finally {
+        await db.exec("alter table public.question_set_library_entries enable trigger zz_question_set_library_projection_consistency;");
+      }
+    } finally {
+      await db.exec("alter table public.question_set_library_entries enable trigger question_set_library_approved_evidence;");
+    }
+    // The generic revision trigger still advances, so the rejection must
+    // come from tag projection mismatch, not a stale preview token.
+    const [legacy] = (await db.query<{ review_revision: number; snapshot_payload: Snapshot; tags: string[] }>(
+      "select review_revision,snapshot_payload,tags from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(legacy.review_revision).toBe(3);
+    expect(legacy.snapshot_payload).toEqual(source);
+    expect(legacy.tags).toEqual(["visual:intent:histology", "sample"]);
+    await expect(authorize(source, legacy.review_revision))
+      .rejects.toThrow(/changed or was withdrawn/i);
+    await as(OWNER, "select public.withdraw_question_set_library($1)", [id]);
+  });
+
   it("denies new submissions when account deletion is processing", async () => {
     await db.query("insert into public.privacy_requests(user_id,kind,status) values($1,'deletion','processing')", [LEARNER]);
     await expect(submit(LEARNER, "deletion-locked")).rejects.toThrow(/deletion cleanup|unavailable/i);
