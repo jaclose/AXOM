@@ -190,6 +190,10 @@ export function CommunityQuestionSetLibrary() {
       // an earlier preview, and the returned payload is revalidated locally.
       const current = await authorizeQuestionSetLibraryImport(importingAccount, selected);
       if (!isAuthorized()) return;
+      if (current.status !== "approved" || current.id !== selected.id
+        || current.reviewRevision !== selected.reviewRevision
+        || current.contentDigest !== selected.contentDigest)
+        throw new Error("This reviewed Question Set changed. Close the preview and reopen the current listing.");
       listingRevalidated = true;
       const result = await useStore.getState().commitSharedQuestionSetImport({
         snapshot: current.snapshot,
