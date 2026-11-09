@@ -5,9 +5,11 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Community QBank · 2026-11-06
+## Community QBank · 2026-11-09
 
-Draft PR #148: standalone QBank sharing, guarded AI rationales and visual hints. Production RPCs confirmed; not merged/deployed. See [Questions](features/questions.md).
+Draft PR #148 begins standalone sharing; `codex/aux-qbank-review-preview-20261109-28`
+builds on PR #339 and gates academic preview. FORGE #140 holds release.
+See [Questions](features/questions.md).
 
 ## Homepage alpha
 

@@ -32,15 +32,27 @@ async function seedLocalSet(page: Page) {
       flushVault: () => Promise<void>;
     };
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
-    const result = dev.useStore.getState().addQuestion({
-      id: "fixture-library-question", source: "manual", stem,
-      options: [{ key: "A", text: "First synthetic label" }, { key: "B", text: "Second synthetic label" }],
-      correctKey: "B", explanation: "The synthetic source explicitly marks B.",
-      citation: "Synthetic review fixture, page 1", tags: ["synthetic"],
-    });
-    if (!result.ok || !result.id) throw new Error(result.errors.join(" "));
+    const questionIds: string[] = [];
+    for (let index = 0; index < 21; index += 1) {
+      const first = index === 0;
+      const result = dev.useStore.getState().addQuestion({
+        id: `fixture-library-question-${index + 1}`, source: "manual",
+        stem: first ? stem : `Synthetic review prompt ${index + 1}?`,
+        options: [{ key: "A", text: "First synthetic label" }, { key: "B", text: "Second synthetic label" }],
+        correctKey: "B", explanation: first
+          ? "AXOM AI-assisted explanation (verify against source): The synthetic source explicitly marks B."
+          : "The synthetic source explicitly marks B.",
+        choiceRationales: first ? {
+          A: "The synthetic source excludes the first label.",
+          B: "The synthetic source supports the second label.",
+        } : undefined,
+        citation: "Synthetic review fixture, page 1", tags: ["synthetic"],
+      });
+      if (!result.ok || !result.id) throw new Error(result.errors.join(" "));
+      questionIds.push(result.id);
+    }
     dev.useStore.getState().addQuestionSet({
-      id: "fixture-library-set", title, questionIds: [result.id], sourceDocumentIds: [],
+      id: "fixture-library-set", title, questionIds, sourceDocumentIds: [],
       createdAt: new Date().toISOString(), tags: ["synthetic"], parserWarnings: [], aiEnhanced: false,
     });
     await dev.flushVault();
@@ -117,7 +129,23 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await queue.getByRole("button", { name: "Inspect" }).click();
     const review = page.getByRole("dialog", { name: `Review ${TITLE}` });
     await expect(review.getByText(STEM, { exact: true })).toBeVisible();
+    await expect(review.getByText("Rationale: The synthetic source supports the second label.")).toBeVisible();
+    await expect(review.getByText("AI-assisted draft · verify against source")).toBeVisible();
+    await review.screenshot({ path: "/tmp/axom-question-set-review-first-1440.png" });
     await review.getByRole("textbox", { name: "Review note" }).fill("Synthetic source and distribution rights checked.");
+    await expect(review.getByRole("button", { name: "Approve for library" })).toBeDisabled();
+    await review.getByRole("button", { name: "Show next 20 questions" }).click();
+    await expect(review.getByText("Synthetic review prompt 21?", { exact: true })).toBeVisible();
+    await expect(review.locator(".qsl-review-detail > ol")).toHaveAttribute("start", "21");
+    await review.screenshot({ path: "/tmp/axom-question-set-review-1440.png" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await review.screenshot({ path: "/tmp/axom-question-set-review-390.png" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await review.getByRole("button", { name: "Previous 20 questions" }).click();
+    await expect(review.getByText(STEM, { exact: true })).toBeVisible();
+    await review.screenshot({ path: "/tmp/axom-question-set-review-first-390.png" });
+    await review.getByRole("button", { name: "Show next 20 questions" }).click();
+    await page.setViewportSize({ width: 1440, height: 900 });
     await review.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
     await review.getByRole("button", { name: "Approve for library" }).click();
     await expect(queue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
