@@ -529,6 +529,55 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect((await search(LEARNER, "Updated synthetic")).some(row => row.id === id)).toBe(true);
   });
 
+  it("authorizes a single approved import revision, never pending or withdrawn answer evidence", async () => {
+    const original = snapshot();
+    const id = await submit(OWNER, "import-auth-revision", original);
+    const authorize = (who: string | null, source: Snapshot, revision: number) =>
+      as<{ value: { snapshot_payload: Snapshot; review_revision: number; status: string } }>(who,
+        "select public.authorize_question_set_library_import($1,$2::bigint,$3::jsonb) value",
+        [id, revision, JSON.stringify(source)]);
+
+    // Even an owner or reviewer may not import a pending snapshot through
+    // this public learner endpoint. Anonymous callers have no EXECUTE grant.
+    await expect(authorize(LEARNER, original, 1)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorize(OWNER, original, 1)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorize(null, original, 1)).rejects.toThrow(/permission denied/i);
+    await approve(REVIEWER, id, original, 1);
+
+    const [approved] = await authorize(LEARNER, original, 2);
+    expect(approved.value).toMatchObject({
+      snapshot_payload: original, review_revision: 2, status: "approved",
+    });
+    await expect(authorize(LEARNER, original, 1)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorize(LEARNER, original, 0)).rejects.toThrow(/Reopen the exact reviewed/i);
+
+    const altered = snapshot();
+    altered.questions[0].correctKey = "A";
+    altered.questions[0].correctAnswerText = "First option";
+    await expect(authorize(LEARNER, altered, 2)).rejects.toThrow(/changed or was withdrawn/i);
+
+    // A takedown revokes the earlier authorization, without ever exposing
+    // the rejected snapshot. Reviewer/account direct table reads remain denied.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    await expect(authorize(LEARNER, original, 2)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(as(LEARNER, "select review_revision from public.question_set_library_entries where id=$1", [id]))
+      .rejects.toThrow(/permission denied/i);
+
+    // Resubmit identical questions with revised public credit. Even though the
+    // source-reviewed answers and digest remain unchanged, revision 2 cannot
+    // authorize the newly approved publication (ABA protection).
+    const [resubmitted] = await as<{ id: string }>(OWNER,
+      "select public.submit_question_set_library($1,$2::jsonb,$3,$4,$5) id",
+      ["import-auth-revision", JSON.stringify(original), "Revised synthetic author", true, true]);
+    expect(resubmitted.id).toBe(id);
+    await approve(REVIEWER, id, original, 4);
+    await expect(authorize(LEARNER, original, 2)).rejects.toThrow(/changed or was withdrawn/i);
+    const [current] = await authorize(LEARNER, original, 5);
+    expect(current.value).toMatchObject({
+      snapshot_payload: original, review_revision: 5, status: "approved",
+    });
+  });
+
   it("denies new submissions when account deletion is processing", async () => {
     await db.query("insert into public.privacy_requests(user_id,kind,status) values($1,'deletion','processing')", [LEARNER]);
     await expect(submit(LEARNER, "deletion-locked")).rejects.toThrow(/deletion cleanup|unavailable/i);
