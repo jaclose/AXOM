@@ -410,6 +410,49 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     });
   });
 
+  it("keeps approved reviewer provenance and entry identity immutable, but permits reviewer account erasure", async () => {
+    const reviewerId = "44444444-4444-4444-8444-444444444444";
+    await db.query("insert into auth.users(id,email) values ($1,'provenance-reviewer@example.test')", [reviewerId]);
+    await db.query("insert into public.academic_reviewers(user_id) values ($1)", [reviewerId]);
+    const original = snapshot();
+    const id = await submit(OWNER, "reviewer-provenance-identity", original);
+    await approve(reviewerId, id, original);
+
+    const [before] = (await db.query<{
+      id: string; reviewed_by: string | null; status: string; review_revision: number; snapshot_payload: Snapshot;
+    }>("select id,reviewed_by,status,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(before).toMatchObject({ id, reviewed_by: reviewerId, status: "approved", snapshot_payload: original });
+
+    // A privileged SQL writer cannot impersonate the FK ON DELETE SET NULL behavior
+    // while the reviewer account still exists, nor change the public entry locator.
+    await expect(db.query("update public.question_set_library_entries set reviewed_by=null where id=$1", [id]))
+      .rejects.toThrow(/approved question set evidence is immutable/i);
+    await expect(db.query("update public.question_set_library_entries set id=gen_random_uuid() where id=$1", [id]))
+      .rejects.toThrow(/approved question set evidence is immutable/i);
+    const [unchanged] = (await db.query<{
+      id: string; reviewed_by: string | null; review_revision: number; snapshot_payload: Snapshot;
+    }>("select id,reviewed_by,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(unchanged).toEqual({
+      id, reviewed_by: reviewerId, review_revision: before.review_revision, snapshot_payload: original,
+    });
+
+    // Genuine auth.users deletion must still exercise the FK's SET NULL path.
+    await db.query("delete from auth.users where id=$1", [reviewerId]);
+    const [afterErasure] = (await db.query<{
+      id: string; reviewed_by: string | null; status: string; review_revision: number; snapshot_payload: Snapshot;
+    }>("select id,reviewed_by,status,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(afterErasure).toMatchObject({
+      id, reviewed_by: null, status: "approved", snapshot_payload: original,
+      review_revision: before.review_revision + 1,
+    });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+    await as(OWNER, "select public.withdraw_question_set_library($1)", [id]);
+    const [withdrawn] = (await db.query<{ count: number }>(
+      "select count(*)::integer count from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(withdrawn.count).toBe(0);
+  });
+
   it("denies new submissions when account deletion is processing", async () => {
     await db.query("insert into public.privacy_requests(user_id,kind,status) values($1,'deletion','processing')", [LEARNER]);
     await expect(submit(LEARNER, "deletion-locked")).rejects.toThrow(/deletion cleanup|unavailable/i);
