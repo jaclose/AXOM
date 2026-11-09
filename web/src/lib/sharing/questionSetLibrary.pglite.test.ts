@@ -453,6 +453,82 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(withdrawn.count).toBe(0);
   });
 
+  it("binds searchable title, tags and question count to the exact pending snapshot revision", async () => {
+    const original = snapshot();
+    const id = await submit(OWNER, "projection-consistency-guard", original);
+    const changedTitle = snapshot();
+    changedTitle.title = "Alternate private snapshot title";
+    const changedTags = snapshot();
+    changedTags.tags = ["sample", "visual:intent:histology"];
+    const changedMembership = snapshot();
+    changedMembership.orderedQuestionIds.push("shared-question-2");
+    changedMembership.questions.push({
+      ...changedMembership.questions[0],
+      id: "shared-question-2",
+      stem: "Which synthetic option is marked in question two?",
+    });
+
+    // These writes are privileged-maintenance simulations: no normal learner
+    // has direct write permission to the table. Each otherwise-valid change
+    // must fail unless the indexed projection and exact JSON agree together.
+    const attempts: Array<[string, string, unknown[]]> = [
+      ["title only", "update public.question_set_library_entries set title='Misindexed title' where id=$1", [id]],
+      ["tags only", "update public.question_set_library_entries set tags=array['misindexed'] where id=$1", [id]],
+      ["count only", "update public.question_set_library_entries set question_count=2 where id=$1", [id]],
+      ["snapshot title only", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(changedTitle), id]],
+      ["snapshot tags only", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(changedTags), id]],
+      ["snapshot membership only", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(changedMembership), id]],
+    ];
+    for (const [label, sql, params] of attempts) {
+      await expect(db.query(sql, params), label)
+        .rejects.toThrow(/public projection differs from its snapshot/i);
+    }
+
+    const read = async () => (await db.query<{
+      title: string; tags: string[]; question_count: number; review_revision: number; snapshot_payload: Snapshot;
+    }>("select title,tags,question_count,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows[0];
+    expect(await read()).toEqual({
+      title: original.title,
+      tags: original.tags,
+      question_count: original.questions.length,
+      review_revision: 1,
+      snapshot_payload: original,
+    });
+
+    // A legitimate, *atomic* resnapshot + projection update remains possible
+    // on a pending entry. It still advances the independent academic revision,
+    // so an old inspection cannot authorize the new source-verified answers.
+    const revised = changedMembership;
+    revised.title = "Updated synthetic reviewed set";
+    revised.tags = ["sample", "visual:intent:anatomy"];
+    await db.query(
+      "update public.question_set_library_entries set snapshot_payload=$1::jsonb,title=$2,tags=$3::text[],question_count=$4 where id=$5",
+      [JSON.stringify(revised), revised.title, revised.tags, revised.questions.length, id],
+    );
+    expect(await read()).toEqual({
+      title: revised.title,
+      tags: revised.tags,
+      question_count: revised.questions.length,
+      review_revision: 2,
+      snapshot_payload: revised,
+    });
+    await expect(approve(REVIEWER, id, original, 1)).rejects.toThrow(/changed since inspection/i);
+    await approve(REVIEWER, id, revised, 2);
+    const [preview] = await as<{ value: { title: string; question_count: number; snapshot_payload: Snapshot; status: string } }>(
+      LEARNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(preview.value).toMatchObject({
+      title: revised.title,
+      question_count: 2,
+      snapshot_payload: revised,
+      status: "approved",
+    });
+    expect((await search(LEARNER, "Updated synthetic")).some(row => row.id === id)).toBe(true);
+  });
+
   it("denies new submissions when account deletion is processing", async () => {
     await db.query("insert into public.privacy_requests(user_id,kind,status) values($1,'deletion','processing')", [LEARNER]);
     await expect(submit(LEARNER, "deletion-locked")).rejects.toThrow(/deletion cleanup|unavailable/i);
