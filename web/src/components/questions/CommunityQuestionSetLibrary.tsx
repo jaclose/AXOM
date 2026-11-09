@@ -3,7 +3,7 @@ import { BookOpen, Download, Heart, RefreshCw, Search } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
 import {
-  loadQuestionSetLibraryPreview, searchQuestionSetLibrary, setQuestionSetLibraryLike,
+  authorizeQuestionSetLibraryImport, loadQuestionSetLibraryPreview, searchQuestionSetLibrary, setQuestionSetLibraryLike,
   type LibraryQuestionSet, type LibraryQuestionSetPreview,
 } from "../../lib/sharing/questionSetLibrary";
 import { useStore } from "../../lib/store";
@@ -185,13 +185,11 @@ export function CommunityQuestionSetLibrary() {
     setImporting(true); setPreviewError("");
     let listingRevalidated = false;
     try {
-      // Preview consent is not a durable publication grant. Recheck approved
-      // visibility and the immutable content digest before the first vault write.
-      const current = await loadQuestionSetLibraryPreview(importingAccount, selected.id);
+      // The import RPC binds the exact approved snapshot and revision under
+      // one SQL row lock. A same-content rejection/reapproval cannot reuse
+      // an earlier preview, and the returned payload is revalidated locally.
+      const current = await authorizeQuestionSetLibraryImport(importingAccount, selected);
       if (!isAuthorized()) return;
-      if (current.status !== "approved" || current.id !== selected.id
-        || current.contentDigest !== selected.contentDigest)
-        throw new Error("This reviewed Question Set changed. Close the preview and reopen the current listing.");
       listingRevalidated = true;
       const result = await useStore.getState().commitSharedQuestionSetImport({
         snapshot: current.snapshot,
