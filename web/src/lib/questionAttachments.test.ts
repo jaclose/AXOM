@@ -227,7 +227,7 @@ describe("orphan maintenance", () => {
     ];
     const report = await runQuestionAttachmentMaintenance(questions);
     expect(report.deletedOrphanBlobKeys).toEqual([]);
-    expect(report.preservedOrphanBlobKeys).toEqual(["orphan"]);
+    expect(report.preservedUnscopedBlobCount).toBe(1);
     expect(report.missingBlobKeys).toEqual(["missing-blob"]);
     expect(await listQuestionAttachmentBlobKeys()).toEqual(["orphan", "referenced"]);
 
@@ -244,15 +244,13 @@ describe("orphan maintenance", () => {
     })] }];
     const bReport = await runQuestionAttachmentMaintenance(bWorkspace);
     expect(bReport.deletedOrphanBlobKeys).toEqual([]);
-    expect(bReport.preservedOrphanBlobKeys).toEqual(["account-A-attachment"]);
+    expect(bReport.preservedUnscopedBlobCount).toBe(1);
 
     // A completely empty workspace is not proof this origin's Blob store
     // belongs to that account, including during a fresh B rehydration.
     const emptyReport = await runQuestionAttachmentMaintenance([]);
     expect(emptyReport.deletedOrphanBlobKeys).toEqual([]);
-    expect(emptyReport.preservedOrphanBlobKeys).toEqual([
-      "account-A-attachment", "account-B-attachment",
-    ]);
+    expect(emptyReport.preservedUnscopedBlobCount).toBe(2);
 
     const a = await getQuestionAttachmentBlob("account-A-attachment", { localOnly: true });
     const b = await getQuestionAttachmentBlob("account-B-attachment", { localOnly: true });
