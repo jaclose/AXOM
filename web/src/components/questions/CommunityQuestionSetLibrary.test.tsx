@@ -8,7 +8,7 @@ import type { QuestionRecord } from "../../lib/questions";
 import type { QuestionSet } from "../../lib/library";
 
 const mock = vi.hoisted(() => ({
-  accountId: "account-1", observers: new Set<(state: { user: { id: string } }) => void>(), search: vi.fn(), preview: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
+  accountId: "account-1", observers: new Set<(state: { user: { id: string } }) => void>(), search: vi.fn(), preview: vi.fn(), authorize: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
 }));
 vi.mock("../../lib/account/accountStore", () => {
   const accountState = () => ({ user: { id: mock.accountId } });
@@ -27,6 +27,7 @@ vi.mock("../../lib/account/accountStore", () => {
 vi.mock("../../lib/sharing/questionSetLibrary", () => ({
   searchQuestionSetLibrary: mock.search,
   loadQuestionSetLibraryPreview: mock.preview,
+  authorizeQuestionSetLibraryImport: mock.authorize,
   setQuestionSetLibraryLike: mock.like,
   listMyQuestionSetSubmissions: mock.owned,
   submitQuestionSetToLibrary: mock.submit,
@@ -52,7 +53,8 @@ beforeEach(() => {
   mock.accountId = "account-1";
   mock.observers.clear();
   mock.search.mockResolvedValue([summary]);
-  mock.preview.mockResolvedValue({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+  mock.preview.mockResolvedValue({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 });
+  mock.authorize.mockImplementation(async (_account: string, selected: unknown) => selected);
   mock.like.mockResolvedValue(undefined);
   mock.commit.mockResolvedValue({ ok: true, message: "Saved" });
   mock.owned.mockResolvedValue([]);
@@ -133,7 +135,7 @@ describe("Community Question Set Library", () => {
     let resolveOld!: (value: unknown) => void;
     mock.preview.mockImplementation((_account: string, id: string) => id === summary.id
       ? new Promise(resolve => { resolveOld = resolve; })
-      : Promise.resolve({ id: another.id, snapshot: nextSnapshot, contentDigest: "b".repeat(64), status: "approved" }));
+      : Promise.resolve({ id: another.id, snapshot: nextSnapshot, contentDigest: "b".repeat(64), status: "approved", reviewRevision: 2 }));
     render(<CommunityQuestionSetLibrary />);
     await screen.findByRole("heading", { name: another.title });
     const buttons = screen.getAllByRole("button", { name: "Preview set" });
@@ -144,7 +146,7 @@ describe("Community Question Set Library", () => {
     // The accepted preview remains bound to its originating auth session.
     await waitFor(() => expect(mock.observers.size).toBe(1));
     await act(async () => {
-      resolveOld({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+      resolveOld({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 });
     });
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     expect(screen.getByText("Which second synthetic answer?")).toBeTruthy();
@@ -233,7 +235,7 @@ describe("Community Question Set Library", () => {
     mock.accountId = "account-2";
     view.rerender(<CommunityQuestionSetLibrary />);
     await act(async () => {
-      resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+      resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 });
     });
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
@@ -283,7 +285,7 @@ describe("Community Question Set Library", () => {
       mock.accountId = "account-1";
       mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
     });
-    await act(async () => { resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" }); });
+    await act(async () => { resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 }); });
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     expect(screen.queryByText("Opening this Question Set…")).toBeNull();
     expect(mock.observers.size).toBe(0);
@@ -365,7 +367,7 @@ describe("Community Question Set Library", () => {
       }],
     };
     mock.preview.mockResolvedValue({
-      id: summary.id, snapshot: generated, contentDigest: "b".repeat(64), status: "approved",
+      id: summary.id, snapshot: generated, contentDigest: "b".repeat(64), status: "approved", reviewRevision: 2,
     });
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
@@ -396,8 +398,10 @@ describe("Community Question Set Library", () => {
     await screen.findByText("Which synthetic answer is supported?");
     await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
-    expect(mock.preview).toHaveBeenCalledTimes(2);
-    expect(mock.preview).toHaveBeenNthCalledWith(2, "account-1", summary.id);
+    expect(mock.preview).toHaveBeenCalledTimes(1);
+    expect(mock.authorize).toHaveBeenCalledWith("account-1", expect.objectContaining({
+      id: summary.id, contentDigest: "a".repeat(64), reviewRevision: 2,
+    }));
     const imported = mock.commit.mock.calls[0][0];
     expect(imported.snapshot.questions[0].correctKey).toBe("B");
     expect(imported.identity).toEqual({ shareId: summary.id, contentDigest: "a".repeat(64) });
@@ -426,9 +430,10 @@ describe("Community Question Set Library", () => {
     await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     await waitFor(() => expect(mock.commit).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByRole("button", { name: "Already in my AXOM" }).hasAttribute("disabled")).toBe(true));
-    // Opening the original preview plus one independent live approval check
-    // for each attempt; a failed vault write never grants a reusable permit.
-    expect(mock.preview).toHaveBeenCalledTimes(3);
+    // Opening one preview plus one separate server authorization per attempt;
+    // a failed vault write never grants a reusable permit.
+    expect(mock.preview).toHaveBeenCalledTimes(1);
+    expect(mock.authorize).toHaveBeenCalledTimes(2);
     expect(mock.commit.mock.calls[1][0].identity).toEqual({
       shareId: summary.id, contentDigest: "a".repeat(64),
     });
@@ -438,9 +443,10 @@ describe("Community Question Set Library", () => {
 
   it("rejects a listing changed to pending after an approved preview", async () => {
     mock.preview.mockResolvedValueOnce({
-      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
-    }).mockResolvedValueOnce({
-      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "pending",
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    mock.authorize.mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "pending", reviewRevision: 3,
     });
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
@@ -454,10 +460,27 @@ describe("Community Question Set Library", () => {
     expect(mock.observers.size).toBe(0);
   });
 
+  it("rejects same-content reapproval at a newer review revision", async () => {
+    mock.authorize.mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64),
+      status: "approved", reviewRevision: 4,
+    });
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    expect(await screen.findByText(/reviewed Question Set changed/)).toBeTruthy();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+  });
+
   it("refuses to import a withdrawn listing after the preview was loaded", async () => {
     mock.preview.mockReset().mockResolvedValueOnce({
-      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
-    }).mockRejectedValueOnce(new Error("This Question Set is unavailable. It may have been withdrawn."));
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    mock.authorize.mockRejectedValueOnce(new Error("This Question Set is unavailable. It may have been withdrawn."));
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
     await screen.findByRole("heading", { name: "Synthetic practice" });
@@ -465,7 +488,7 @@ describe("Community Question Set Library", () => {
     await screen.findByText("Which synthetic answer is supported?");
     await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     expect(await screen.findByText(/may have been withdrawn/)).toBeTruthy();
-    expect(mock.preview).toHaveBeenCalledTimes(2);
+    expect(mock.authorize).toHaveBeenCalledTimes(1);
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
     expect(mock.observers.size).toBe(0);
@@ -473,10 +496,11 @@ describe("Community Question Set Library", () => {
 
   it("refuses changed reviewed snapshots without importing a different answer key", async () => {
     mock.preview.mockResolvedValueOnce({
-      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
-    }).mockResolvedValueOnce({
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    mock.authorize.mockResolvedValueOnce({
       id: summary.id, snapshot: { ...snapshot, questions: [{ ...snapshot.questions[0], correctKey: "A" }] },
-      contentDigest: "b".repeat(64), status: "approved",
+      contentDigest: "b".repeat(64), status: "approved", reviewRevision: 2,
     });
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
@@ -492,14 +516,15 @@ describe("Community Question Set Library", () => {
   it("revokes a pending live-import approval check on an A to B to A session round trip", async () => {
     let finishReview!: (value: unknown) => void;
     mock.preview.mockResolvedValueOnce({
-      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
-    }).mockImplementationOnce(() => new Promise(resolve => { finishReview = resolve; }));
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    mock.authorize.mockImplementationOnce(() => new Promise(resolve => { finishReview = resolve; }));
     render(<CommunityQuestionSetLibrary />);
     await screen.findByRole("heading", { name: "Synthetic practice" });
     fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
     await screen.findByText("Which synthetic answer is supported?");
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
-    await waitFor(() => expect(mock.preview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mock.authorize).toHaveBeenCalledTimes(1));
     expect(mock.commit).not.toHaveBeenCalled();
     act(() => {
       mock.accountId = "account-2";
@@ -508,7 +533,7 @@ describe("Community Question Set Library", () => {
       mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
     });
     await act(async () => {
-      finishReview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+      finishReview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 });
     });
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
@@ -518,18 +543,19 @@ describe("Community Question Set Library", () => {
   it("coalesces rapid same-frame import clicks before the live approval check settles", async () => {
     let finishReview!: (value: unknown) => void;
     mock.preview.mockResolvedValueOnce({
-      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved",
-    }).mockImplementationOnce(() => new Promise(resolve => { finishReview = resolve; }));
+      id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    mock.authorize.mockImplementationOnce(() => new Promise(resolve => { finishReview = resolve; }));
     render(<CommunityQuestionSetLibrary />);
     await screen.findByRole("heading", { name: "Synthetic practice" });
     fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
     await screen.findByText("Which synthetic answer is supported?");
     const button = screen.getByRole("button", { name: "Add to my AXOM" });
     act(() => { fireEvent.click(button); fireEvent.click(button); });
-    expect(mock.preview).toHaveBeenCalledTimes(2);
+    expect(mock.authorize).toHaveBeenCalledTimes(1);
     expect(mock.commit).not.toHaveBeenCalled();
     await act(async () => {
-      finishReview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved" });
+      finishReview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 });
     });
     expect(mock.commit).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Already in my AXOM" })).toBeTruthy();

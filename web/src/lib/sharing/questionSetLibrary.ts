@@ -105,21 +105,60 @@ async function loadQuestionSetPreviewForStatus(
       throw new Error(requiredStatus === "approved"
         ? "This Question Set is unavailable. It may have been withdrawn."
         : "This submission is no longer awaiting academic review.");
-    if (requiredStatus === "pending" && (!count(data.review_revision) || data.review_revision < 1))
-      throw new Error("The pending review revision is missing. Refresh the review queue.");
+    if (!count(data.review_revision) || data.review_revision < 1)
+      throw new Error(requiredStatus === "pending"
+        ? "The pending review revision is missing. Refresh the review queue."
+        : "The approved Question Set revision is missing. Reopen the listing.");
     validateShare(data.snapshot_payload);
     const snapshot = data.snapshot_payload;
     if (data.title !== snapshot.title || data.question_count !== snapshot.questions.length)
       throw new Error("This Question Set differs from its protected listing.");
     return { id, snapshot, contentDigest: await sharedQuestionSetDigest(snapshot),
       status: requiredStatus,
-      reviewRevision: requiredStatus === "pending" ? data.review_revision as number : undefined };
+      reviewRevision: data.review_revision as number };
   });
 }
 
 /** Public learner discovery/import: never expose pending or rejected snapshots. */
 export function loadQuestionSetLibraryPreview(accountId: string, id: string): Promise<LibraryQuestionSetPreview> {
   return loadQuestionSetPreviewForStatus(accountId, id, "approved");
+}
+
+/**
+ * Check a preview against the server's exact approved snapshot and revision
+ * under the same SQL row lock. No prior preview or cached digest can authorize
+ * a newer publication. This confirms the state at RPC execution, not a
+ * durable permission lease across a subsequent private vault write.
+ */
+export async function authorizeQuestionSetLibraryImport(
+  accountId: string, inspected: LibraryQuestionSetPreview,
+): Promise<LibraryQuestionSetPreview> {
+  if (!inspected || !uuid(inspected.id) || inspected.status !== "approved"
+    || !count(inspected.reviewRevision) || inspected.reviewRevision < 1
+    || !/^[a-f0-9]{64}$/.test(inspected.contentDigest))
+    throw new Error("Reopen the approved Question Set before importing it.");
+  if (await sharedQuestionSetDigest(inspected.snapshot) !== inspected.contentDigest)
+    throw new Error("The previewed Question Set changed. Reopen the listing.");
+
+  return withAccount(accountId, async client => {
+    const { data, error } = await client.rpc("authorize_question_set_library_import", {
+      p_id: inspected.id,
+      p_expected_revision: inspected.reviewRevision,
+      p_expected_snapshot: inspected.snapshot,
+    });
+    if (error || !record(data) || data.id !== inspected.id || data.status !== "approved"
+      || data.review_revision !== inspected.reviewRevision)
+      throw new Error("This reviewed Question Set changed or was withdrawn. Reopen its listing.");
+    validateShare(data.snapshot_payload);
+    if (data.title !== data.snapshot_payload.title
+      || data.question_count !== data.snapshot_payload.questions.length)
+      throw new Error("The published Question Set differs from its protected listing.");
+    const contentDigest = await sharedQuestionSetDigest(data.snapshot_payload);
+    if (contentDigest !== inspected.contentDigest)
+      throw new Error("The reviewed Question Set changed. Reopen its listing.");
+    return { id: inspected.id, snapshot: data.snapshot_payload, status: "approved",
+      reviewRevision: data.review_revision as number, contentDigest };
+  });
 }
 
 /** Moderation only. The queue checks reviewer access; SQL enforces reviewer
