@@ -321,6 +321,8 @@ class SourceLedgerTests(unittest.TestCase):
             with zipfile.ZipFile(p, "w") as z:
                 z.writestr("NCRS/IMCQ 3.txt", "Question 1: test")
                 z.writestr("../unsafe.pdf", "not-safe")
+                z.writestr("..\\\\IMCQ 7.txt", "windows traversal")
+                z.writestr("C:/IMCQ 8.txt", "windows drive")
                 z.writestr("images/photo.png", "image")
             row = dict(document_type="archive_review", original_path=str(p),
                        source_sha256=hashlib.sha256(p.read_bytes()).hexdigest(),
@@ -332,8 +334,8 @@ class SourceLedgerTests(unittest.TestCase):
             finally:
                 ledger.ROOTS = old_roots
             self.assertEqual(archives[0]["question_candidate_count"], 1)
-            self.assertEqual(len(archives[0]["entries"]), 2)
-            self.assertTrue(any(x["unsafe_path"] for x in archives[0]["entries"]))
+            self.assertEqual(len(archives[0]["entries"]), 4)
+            self.assertEqual(sum(bool(x["unsafe_path"]) for x in archives[0]["entries"]), 3)
             self.assertIsNone(archives[0]["entries"][0]["content_sha256"])
             self.assertEqual(row["archive_index_status"], "central_directory_indexed")
 
@@ -414,6 +416,36 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertEqual(result["question_candidate_count"], 0)
             self.assertNotEqual(row["archive_index_status"], "central_directory_indexed")
             self.assertEqual(row["unresolved_reason"], "oversized_source_needs_staged_review")
+
+    def test_archive_index_holds_revision_changed_during_central_directory_read(self):
+        # A file that changes after the first SHA validation cannot contribute
+        # stale member metadata even if the central directory parsed normally.
+        import zipfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "PQ Week 1.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("IMCQ 1.txt", "synthetic")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="prior-revision", root_label="archive_root")
+            original_infolist = zipfile.ZipFile.infolist
+            def replace_during_index(reader):
+                infos = original_infolist(reader)
+                with archive.open("r+b") as mutable:
+                    mutable.write(b"Z")
+                return infos
+            prior = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                with patch.object(zipfile.ZipFile, "infolist", replace_during_index):
+                    result = enriched.index_source_archives([row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = prior
+            self.assertEqual(result["entries"], [])
+            self.assertEqual(result["question_candidate_count"], 0)
+            self.assertNotEqual(row["archive_index_status"], "central_directory_indexed")
 
     def test_agent2_audit_join_requires_exact_sha_and_count(self):
         with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
