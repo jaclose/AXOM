@@ -1,0 +1,592 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { QuestionSet } from "../../lib/library";
+import type { QuestionRecord } from "../../lib/questions";
+import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
+
+const mocks = vi.hoisted(() => ({
+  accountId: "owner-1",
+  completeJson: vi.fn(),
+  submissions: vi.fn(),
+  submit: vi.fn(),
+  withdraw: vi.fn(),
+  updateQuestion: vi.fn(),
+  flush: vi.fn(),
+  assertWrites: vi.fn(),
+  readVault: vi.fn(),
+  accountListeners: new Set<(state: { user: { id: string } | null }) => void>(),
+  workspace: { questions: [] as unknown[], questionSets: [] as unknown[] },
+}));
+vi.mock("../../lib/account/accountStore", () => {
+  const getAccountState = () => ({ user: mocks.accountId ? { id: mocks.accountId } : null });
+  const useAccount = (selector: (snapshot: ReturnType<typeof getAccountState>) => unknown) => selector(getAccountState());
+  useAccount.getState = getAccountState;
+  useAccount.subscribe = (listener: (state: ReturnType<typeof getAccountState>) => void) => {
+    mocks.accountListeners.add(listener);
+    return () => { mocks.accountListeners.delete(listener); };
+  };
+  return { useAccount };
+});
+vi.mock("../../lib/localVault", () => ({
+  getVaultWriteCheckpoint: () => 1,
+  assertVaultWritesSince: (...args: unknown[]) => mocks.assertWrites(...args),
+  flushLocalVaultWrites: (...args: unknown[]) => mocks.flush(...args),
+  localVaultStorage: { getItem: (...args: unknown[]) => mocks.readVault(...args) },
+}));
+vi.mock("../../lib/ai", () => ({
+  resolveActiveProvider: () => ({
+    info: { kind: "openai-compat", label: "Test AI", local: false, requiresKey: false },
+    completeJson: (...args: unknown[]) => mocks.completeJson(...args),
+    available: async () => ({ ok: true, detail: "ready" }),
+  }),
+}));
+vi.mock("../../lib/store", () => ({
+  useStore: { getState: () => ({ questions: mocks.workspace.questions, questionSets: mocks.workspace.questionSets, updateQuestion: mocks.updateQuestion }) },
+}));
+vi.mock("../../lib/sharing/questionSetLibrary", () => ({
+  listMyQuestionSetSubmissions: (...args: unknown[]) => mocks.submissions(...args),
+  submitQuestionSetToLibrary: (...args: unknown[]) => mocks.submit(...args),
+  withdrawQuestionSetSubmission: (...args: unknown[]) => mocks.withdraw(...args),
+}));
+
+const set: QuestionSet = {
+  id: "set-1", title: "Vascular review", questionIds: ["q-1"], sourceDocumentIds: [],
+  tags: ["vascular"], createdAt: "2026-11-06T12:00:00.000Z",
+  aiEnhanced: false, parserWarnings: [], kind: "custom",
+};
+function question(patch: Partial<QuestionRecord> = {}): QuestionRecord {
+  return {
+    id: "q-1", stem: "Which arterial layer contains smooth muscle?",
+    options: [{ key: "A", text: "Tunica media" }, { key: "B", text: "Tunica intima" }],
+    source: "manual", correctKey: "A", status: "unseen", attempts: [], tags: ["anatomy"],
+    topic: "Vascular histology",
+    createdAt: "2026-11-06T12:00:00.000Z", updatedAt: "2026-11-06T12:00:00.000Z", ...patch,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.accountId = "owner-1";
+  mocks.accountListeners.clear();
+  mocks.flush.mockReset().mockResolvedValue(undefined);
+  mocks.assertWrites.mockReset();
+  mocks.readVault.mockReset().mockImplementation(async () => JSON.stringify({ state: mocks.workspace }));
+  mocks.updateQuestion.mockReset().mockImplementation((id: string, patch: Partial<QuestionRecord>) => {
+    mocks.workspace.questions = mocks.workspace.questions.map(value => {
+      const current = value as QuestionRecord;
+      return current.id === id ? { ...current, ...patch, updatedAt: "2026-11-09T12:00:00.000Z" } : current;
+    });
+  });
+  mocks.workspace.questionSets = [set];
+  mocks.submissions.mockResolvedValue([]);
+  mocks.completeJson.mockResolvedValue({
+    explanation: "Tunica media has concentric vascular smooth muscle layers that control arterial caliber and vascular resistance.",
+    choiceRationales: {
+      A: "Tunica media contains the smooth muscle cells.",
+      B: "Tunica intima contains the endothelial lining rather than the contractile media.",
+    },
+    keywords: ["Vascular smooth muscle", "Tunica media"],
+  });
+});
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+describe("Question Set draft explanation review", () => {
+  it("requires an account-specific submission check before automatic AI", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    let completeLookup!: (value: []) => void;
+    mocks.submissions.mockImplementationOnce(() => new Promise<[]>(resolve => { completeLookup = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { completeLookup([]); });
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+  });
+
+
+  it("prepares explanations automatically only after opening a Community publication review", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("never auto-generates from a held answer or publishes it", async () => {
+    const source = question({ correctKey: undefined, needsReview: true });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/still held for answer or source review/)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("drafts explanations and displays them for human review before any local write", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 missing explanation/)).toBeTruthy();
+    const send = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    const draftButton = screen.getByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(/Question 1 · Review explanation and choices/));
+    const explanationInput = screen.getByRole("textbox", { name: "Question 1 explanation" }) as HTMLTextAreaElement;
+    expect(explanationInput.value).toMatch(/Tunica media has concentric vascular smooth muscle/);
+    fireEvent.change(explanationInput, { target: {
+      value: "The tunica media contains the main smooth muscle layers and adjusts vessel caliber when vascular resistance changes.",
+    } });
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    await waitFor(() => expect(mocks.updateQuestion).toHaveBeenCalledWith("q-1", expect.objectContaining({
+      explanation: expect.stringContaining("AXOM AI-assisted explanation"),
+      choiceRationales: expect.objectContaining({
+        A: expect.stringContaining("AXOM AI-assisted rationale (verify against source): Tunica media"),
+        B: expect.stringContaining("AXOM AI-assisted rationale (verify against source): Tunica intima"),
+      }),
+    })));
+    // These are explicitly model-assisted teaching texts, not source-verified
+    // rationales. Do not alter the underlying source question or answer key.
+    expect(source.choiceRationales).toBeUndefined();
+    expect(source.correctKey).toBe("A");
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps drafts and blocks duplicate saves until a durable readback completes", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    let finishFlush!: () => void;
+    mocks.flush.mockImplementationOnce(() => new Promise<void>(resolve => { finishFlush = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    const save = await screen.findByRole("button", { name: "Save inspected explanations to my QBank" });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    expect(screen.getByRole("button", { name: "Saving explanations…" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/1 AI draft/)).toBeTruthy();
+    expect(screen.queryByText(/Reviewed explanations saved privately/)).toBeNull();
+    expect(mocks.updateQuestion).toHaveBeenCalledOnce();
+    expect(mocks.readVault).not.toHaveBeenCalled();
+
+    await act(async () => { finishFlush(); });
+    expect(await screen.findByText(/Reviewed explanations saved privately/)).toBeTruthy();
+    expect(screen.queryByText(/1 AI draft/)).toBeNull();
+    expect(mocks.assertWrites).toHaveBeenCalledWith(1);
+    expect(mocks.readVault).toHaveBeenCalledOnce();
+  });
+
+  it("retains inspected drafts after a quota failure and safely retries its optimistic revision", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    mocks.assertWrites.mockImplementationOnce(() => { throw new Error("Local storage is full."); });
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/Local storage is full.*Your drafts are still here/)).toBeTruthy();
+    expect(screen.getByText(/1 AI draft/)).toBeTruthy();
+    expect(screen.queryByText(/Reviewed explanations saved privately/)).toBeNull();
+    expect((mocks.workspace.questions[0] as QuestionRecord).explanation).toContain("AXOM AI-assisted explanation");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/Reviewed explanations saved privately/)).toBeTruthy();
+    expect(mocks.updateQuestion).toHaveBeenCalledTimes(2);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not claim success when the persisted snapshot lacks the explanations", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    mocks.readVault.mockResolvedValueOnce(JSON.stringify({ state: { questions: [source], questionSets: [set] } }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/saved explanations could not be verified/)).toBeTruthy();
+    expect(screen.getByText(/1 AI draft/)).toBeTruthy();
+    expect(screen.queryByText(/Reviewed explanations saved privately/)).toBeNull();
+  });
+
+  it("preserves a newer question edit during a pending save and refuses to overwrite it on retry", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    let finishFlush!: () => void;
+    mocks.flush.mockImplementationOnce(() => new Promise<void>(resolve => { finishFlush = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save inspected explanations to my QBank" }));
+    mocks.workspace.questions = [{ ...(mocks.workspace.questions[0] as QuestionRecord), explanation: "Newer independently edited source explanation" }];
+    await act(async () => { finishFlush(); });
+    expect(await screen.findByText(/saved explanations could not be verified/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/avoid overwriting newer work/)).toBeTruthy();
+    expect(mocks.updateQuestion).toHaveBeenCalledOnce();
+    expect((mocks.workspace.questions[0] as QuestionRecord).explanation).toBe("Newer independently edited source explanation");
+    expect(screen.getByText(/1 AI draft/)).toBeTruthy();
+  });
+
+  it("never confirms a pending save after an account switch, even when the original account returns", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    let finishFlush!: () => void;
+    mocks.flush.mockImplementationOnce(() => new Promise<void>(resolve => { finishFlush = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save inspected explanations to my QBank" }));
+    mocks.accountId = "owner-2";
+    for (const listener of mocks.accountListeners) listener({ user: { id: "owner-2" } });
+    mocks.accountId = "owner-1";
+    for (const listener of mocks.accountListeners) listener({ user: { id: "owner-1" } });
+    await act(async () => { finishFlush(); });
+    expect(mocks.readVault).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Reviewed explanations saved privately/)).toBeNull();
+    expect(mocks.accountListeners.size).toBe(0);
+  });
+
+  it("rejects AI choice rationales that exceed the share limit once provenance is added", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    mocks.completeJson.mockResolvedValueOnce({
+      explanation: "Tunica media contains concentric smooth muscle layers regulating arterial caliber and vascular resistance.",
+      choiceRationales: {
+        A: "A".repeat(9_990),
+        B: "Tunica intima contains the endothelial lining rather than the vascular smooth muscle.",
+      },
+      keywords: [],
+    });
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ });
+    await waitFor(() => expect(draftButton.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/Finish the explanation and every choice rationale before saving/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not allow AI to draft a held or unanswered question", async () => {
+    const source = question({ correctKey: undefined, needsReview: true });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draft = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    expect(draft.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Send for review" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects an AI draft if the live source changed before saving", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    mocks.workspace.questions = [{ ...source, stem: "Changed source stem" }];
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/questions changed/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+  });
+  it("refuses saving AI explanations after a silent replacement of reviewed answer evidence", async () => {
+    const source = question({
+      citation: "Authoritative text, page 4",
+      extraction: { confidence: "high", reviewed: true, answerEvidence: "Marked answer A" },
+    });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    // The mapped answer remains marked reviewed, and no updatedAt is bumped.
+    // The old fingerprint checked neither source citation nor answer evidence,
+    // so this stale proposal previously appeared safe to save.
+    mocks.workspace.questions = [{ ...source, citation: "Replacement source, page 9", extraction: {
+      ...source.extraction!, answerEvidence: "Different original key annotation",
+    } }];
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/questions changed/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a previously reviewed question if its live answer becomes held before submission", async () => {
+    const source = question({ explanation: "The tunica media is the arterial smooth muscle layer, important for contraction and resistance." });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    // Simulate an out-of-band import/review update without rerendering the dialog.
+    mocks.workspace.questions = [{ ...source, correctKey: "B", needsReview: true }];
+    fireEvent.click(send);
+    expect(await screen.findByText(/changed while publishing/)).toBeTruthy();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["removed from the live set", { ...set, questionIds: [] }],
+    ["replaced under the same set ID", { ...set, title: "Replacement set" }],
+    ["moved to a different source filing", { ...set, sourceDocumentIds: ["new-source"] }],
+    ["moved to a different course", { ...set, scope: { courseId: "unapproved-course" } }],
+    ["replaced by another imported source", { ...set, importProvenance: {
+      version: 1 as const, shareId: "different-share", contentDigest: "a".repeat(64),
+    } }],
+    ["recreated under the same ID", { ...set, createdAt: "2026-11-07T12:00:00.000Z" }],
+  ])("does not write a prepared draft when its set was %s", async (_reason, changedSet) => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    // An independent import or editor changed the set while the dialog stayed open.
+    // A question fingerprint alone remains valid, but the author's reviewed
+    // membership and source context are no longer the current workspace state.
+    mocks.workspace.questionSets = [changedSet];
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/set changed/i)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not transmit an imported set after silent course refiling", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    // This is a real privacy boundary: the source can remain answer-ready,
+    // but it no longer belongs to the same course/right-to-share context.
+    mocks.workspace.questionSets = [{ ...set, scope: { courseId: "private-course" } }];
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["parser-warning review status", { ...set, parserWarnings: ["Unresolved source extraction warning"] }],
+    ["AI-enhancement status", { ...set, aiEnhanced: true }],
+  ])("refuses AI transmission after silent %s change", async (_reason, changedSet) => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    mocks.workspace.questionSets = [changedSet];
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("never sends a silently refiled question to the AI provider", async () => {
+    const source = question({ courseId: "approved-course", module: "M1" });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draftButton = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draftButton.disabled).toBe(false));
+    // No timestamp change is needed to reproduce the original stale-context gap.
+    mocks.workspace.questions = [{ ...source, courseId: "restricted-course" }];
+    fireEvent.click(draftButton);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not transmit stale or revoked source-review evidence to the AI provider", async () => {
+    const source = question({
+      citation: "Textbook page 12",
+      extraction: { confidence: "high", reviewed: true, answerEvidence: "Printed key A" },
+    });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const button = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+
+    // An external reimport revoked the answer check while the dialog stayed open.
+    // No private question should be transmitted to the model after revocation.
+    mocks.workspace.questions = [{ ...source, extraction: { ...source.extraction!, reviewed: false }, needsReview: true }];
+    fireEvent.click(button);
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("discards an in-flight proposal and stops the batch if the Question Set changed", async () => {
+    const first = question();
+    const second = question({ id: "q-2", stem: "Which layer lines the arterial lumen?" });
+    const pair = { ...set, questionIds: [first.id, second.id] };
+    mocks.workspace.questions = [first, second];
+    mocks.workspace.questionSets = [pair];
+    let resolveAI!: (value: unknown) => void;
+    mocks.completeJson.mockImplementationOnce(() => new Promise(resolve => { resolveAI = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={pair} questions={[first, second]} autoDraft onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.completeJson).toHaveBeenCalledOnce());
+
+    // The first request was already in flight. A second question must not be
+    // sent after membership changed, and the first returned draft is discarded.
+    mocks.workspace.questionSets = [{ ...pair, questionIds: [first.id] }];
+    await act(async () => {
+      resolveAI({
+        explanation: "The tunica media has multiple smooth muscle layers that regulate arterial resistance and caliber.",
+        choiceRationales: {
+          A: "Tunica media contains smooth muscle.",
+          B: "Tunica intima is the endothelial lining.",
+        },
+        keywords: ["vascular smooth muscle"],
+      });
+    });
+    expect(await screen.findByText(/changed during AI drafting/i)).toBeTruthy();
+    expect(screen.queryByText(/AI draft.*to inspect/)).toBeNull();
+    expect(mocks.completeJson).toHaveBeenCalledTimes(1);
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  const publishedSubmission = {
+    id: "11111111-1111-4111-8111-111111111111",
+    sourceId: set.id,
+    title: set.title,
+    credit: "",
+    questionCount: 1,
+    status: "pending" as const,
+    reviewNote: "",
+    createdAt: "2026-11-07T10:00:00.000Z",
+  };
+
+  it("refuses withdrawal of a cached submission after an account switch", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([publishedSubmission]);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+    await waitFor(() => expect(withdraw.hasAttribute("disabled")).toBe(false));
+
+    // The account store can change before React has rerendered this modal.
+    mocks.accountId = "owner-2";
+    fireEvent.click(withdraw);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("refuses withdrawal when the account switches during native confirmation", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([publishedSubmission]);
+    vi.spyOn(window, "confirm").mockImplementationOnce(() => {
+      mocks.accountId = "owner-2";
+      return true;
+    });
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+
+    fireEvent.click(withdraw);
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("does not report successful withdrawal if the same submission is still returned", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([publishedSubmission]);
+    mocks.withdraw.mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+
+    fireEvent.click(withdraw);
+    expect(await screen.findByText(/Withdrawal could not be confirmed/)).toBeTruthy();
+    expect(mocks.withdraw).toHaveBeenCalledWith("owner-1", publishedSubmission.id);
+    expect(screen.queryByText(/was withdrawn from the library/)).toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+
+  it("refuses publication with the previous account's still-rendered attestations", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+
+    // The actual store changed before the component got its React update.
+    mocks.accountId = "owner-2";
+    fireEvent.click(send);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("clears public credit and both attestations when another account opens the same dialog", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    const view = render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" });
+    const rightsBox = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answersBox = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const creditBox = screen.getByRole("textbox", { name: /Public credit/ }) as HTMLInputElement;
+    fireEvent.click(rightsBox);
+    fireEvent.click(answersBox);
+    fireEvent.change(creditBox, { target: { value: "Previous account's credit" } });
+    await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+
+    mocks.accountId = "owner-2";
+    view.rerender(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledWith("owner-2"));
+    await waitFor(() => {
+      expect(rightsBox.checked).toBe(false);
+      expect(answersBox.checked).toBe(false);
+      expect(creditBox.value).toBe("");
+      expect(send.hasAttribute("disabled")).toBe(true);
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not query or confirm old-account submissions after an in-flight publish switches accounts", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    let resolveSubmission!: (id: string) => void;
+    mocks.submit.mockImplementationOnce(() => new Promise<string>(resolve => { resolveSubmission = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+
+    // Count completed initial lookups rather than assuming React only
+    // performs one mount lookup. The requirement is no NEW old-owner readback
+    // after the account switches during the in-flight network request.
+    const ownerOneLookups = mocks.submissions.mock.calls.filter(([id]) => id === "owner-1").length;
+    mocks.accountId = "owner-2";
+    await act(async () => { resolveSubmission("22222222-2222-4222-8222-222222222222"); });
+    expect(mocks.submissions.mock.calls.filter(([id]) => id === "owner-1")).toHaveLength(ownerOneLookups);
+    expect(screen.queryByText(/Submission received/)).toBeNull();
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("does not silently auto-draft private material after the account changes", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    const view = render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+
+    mocks.accountId = "owner-2";
+    view.rerender(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledWith("owner-2"));
+    await waitFor(() => expect(screen.queryByText(/AI draft.*to inspect/)).toBeNull());
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+  });
+});

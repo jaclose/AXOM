@@ -2,14 +2,12 @@ import type { Page } from "@playwright/test";
 import type { StudyLog } from "../src/lib/types";
 import { expect, seedOnboarded, test } from "./fixtures";
 import { createPlatformDatabase, PLATFORM_USERS } from "./fixtures/platformDatabase";
+import { refreshCommunity, createCommunityProfile, setCommunityChoices, linkFixtureWorkspace, connectCommunityFriends } from "./fixtures/communityHelpers";
 
 type Dev = { useStore: { getState: () => { logs: StudyLog[] }; setState: (patch: object) => void }; flushVault: () => Promise<void> };
 
-async function refreshCommunity(page: Page) {
-  await page.locator(".community-page").getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByText("Loading shared activity…", { exact: true })).toHaveCount(0);
-}
 async function seedPrivateProgress(page: Page) {
+  await page.getByRole("button", { name: "Daily progress", exact: true }).click();
   const day = await page.getByLabel("Study day", { exact: true }).inputValue();
   await page.evaluate(async dayKey => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
@@ -20,6 +18,10 @@ async function seedPrivateProgress(page: Page) {
   }, day);
 }
 async function inspectResponsive(page: Page, area: "community" | "host") {
+  if (area === "community") {
+    await expect(page.locator(".community-own-profile")).toBeVisible();
+    await expect(page.locator(".community-page").getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
+  }
   for (const [width, height, theme] of [[1440, 900, "dark"], [390, 844, "light"]] as const) {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ colorScheme: theme, reducedMotion: width === 390 ? "reduce" : "no-preference" });
@@ -28,7 +30,7 @@ async function inspectResponsive(page: Page, area: "community" | "host") {
     await scroller.evaluate(element => { element.scrollTop = 0; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     expect(await page.locator(`.${area}-page`).evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-    await page.screenshot({ path: `/tmp/axom-pr30-${area}-${width}-${theme}.png` });
+    await page.screenshot({ path: `/tmp/axom-pr30-${area}-${width}-${theme}.png`, animations: "disabled" });
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await scroller.evaluate(element => { element.scrollTop = 0; });
@@ -57,7 +59,7 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
       await target.goto(`${baseURL}/#community`);
       console.info(`Platform fixture: browser ${index + 1} opened.`);
       await seedOnboarded(target, { dailyLoopReminders: { checkInEnabled: false, closeoutEnabled: false } });
-      await expect(target.getByRole("heading", { name: "Join Community", exact: true })).toBeVisible();
+      await expect(target.getByRole("heading", { name: "Make yourself at home", exact: true })).toBeVisible();
     }
 
     // No identity gets an operator role from a display name or a client request.
@@ -70,19 +72,12 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(other.getByRole("button", { name: "Host", exact: true })).toHaveCount(0);
     await other.goto(`${baseURL}/#community`);
 
-    await page.getByLabel("Public handle", { exact: true }).fill(owner.handle);
-    await page.getByLabel("Display name", { exact: true }).fill(owner.name);
-    await expect(page.getByRole("checkbox", { name: /discoverable/i })).not.toBeChecked();
-    await page.getByRole("button", { name: "Create profile", exact: true }).focus();
-    await page.keyboard.press("Enter");
-    await expect(page.getByText("Hidden from discovery", { exact: true })).toBeVisible();
-    await other.getByLabel("Public handle", { exact: true }).fill(member.handle);
-    await other.getByLabel("Display name", { exact: true }).fill(member.name);
-    await other.getByRole("checkbox", { name: /discoverable/i }).check();
-    await other.getByRole("button", { name: "Create profile", exact: true }).click();
+    await createCommunityProfile(page, owner);
+    await createCommunityProfile(other, member);
+    await setCommunityChoices(other, true, "off");
     expect(await database.asUser(member.id, "select user_id from public.social_profiles where user_id=$1", [owner.id])).toEqual([]);
     await page.reload();
-    await expect(page.getByText("Hidden from discovery", { exact: true })).toBeVisible();
+    expect((await database.rpc(owner.id, "axom_community_preferences")).discoverable).toBe(false);
     console.info("Platform fixture: profiles and discovery consent checked.");
 
     // Progress exists privately before the explicit publish action; notes never enter a post.
@@ -90,54 +85,72 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     expect(await database.asUser(owner.id, "select id from public.social_posts")).toEqual([]);
     await expect(page.getByRole("combobox", { name: "Who can see this?", exact: true })).toHaveValue("private");
     await page.getByLabel("Write a note (optional)", { exact: true }).fill("A private fixture reflection.");
-    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await page.getByRole("button", { name: "Save post", exact: true }).click();
     await expect(page.locator(".community-post").filter({ hasText: "A private fixture reflection." })).toBeVisible();
     await refreshCommunity(other);
     await expect(other.getByText("A private fixture reflection.", { exact: true })).toHaveCount(0);
     expect(await database.asUser(member.id, "select id from public.social_posts")).toEqual([]);
     const privatePost = page.locator(".community-post").filter({ hasText: "A private fixture reflection." });
-    await privatePost.getByRole("button", { name: "Delete", exact: true }).click();
+    await privatePost.getByRole("button", { name: "Delete post", exact: true }).click();
     await privatePost.getByRole("button", { name: "Remove my post", exact: true }).click();
     await expect(privatePost).toHaveCount(0);
     console.info("Platform fixture: private post and removal checked.");
-    await page.getByRole("button", { name: "Show me", exact: true }).click();
-    await refreshCommunity(other);
-    await page.getByLabel("Find someone", { exact: true }).fill(member.handle);
-    await page.locator(".community-people .community-person").filter({ hasText: member.handle }).getByRole("button", { name: "Add", exact: true }).click();
-    await expect(page.getByText("Request sent", { exact: true })).toBeVisible();
-    await refreshCommunity(other);
-    await other.getByRole("button", { name: "Accept", exact: true }).click();
-    await expect(other.getByText("Friend request accepted.", { exact: true })).toBeVisible();
+    await setCommunityChoices(page, true, "off");
+    await connectCommunityFriends(page, other, member.handle);
     for (const target of [page, other]) {
       await target.reload();
-      await expect(target.getByRole("button", { name: "Friends · remove", exact: true })).toBeVisible();
+      await expect(target.locator(".community-people").getByRole("button", { name: "Friends", exact: true })).toBeVisible();
     }
     expect(await database.asUser(member.id, "select status from public.social_connections")).toEqual([{ status: "accepted" }]);
     console.info("Platform fixture: friendship persisted across both reloads.");
 
+    await page.getByRole("button", { name: "Daily progress", exact: true }).click();
     await page.getByRole("combobox", { name: "Who can see this?", exact: true }).selectOption("friends");
     await page.getByLabel("Write a note (optional)", { exact: true }).fill("A focused study block, shared with friends.");
     await page.getByRole("button", { name: "Publish", exact: true }).click();
-    await expect(page.getByText("Update shared.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Your post is shared.", { exact: true })).toBeVisible();
     await refreshCommunity(other);
     const sharedPost = other.locator(".community-post").filter({ hasText: "A focused study block, shared with friends." });
     await expect(sharedPost).toContainText("45");
     await expect(sharedPost).toContainText("9");
-    await expect(other.getByText(/Self-shared totals, not independently verified/)).toBeVisible();
-    await expect(other.locator(".community-rank").filter({ hasText: owner.name })).toContainText("9 questions");
+    await other.locator(".community-board-note summary").click();
+    await expect(other.getByText(/Self-shared daily totals, not independently verified/)).toBeVisible();
+    await expect(other.locator(".community-board-row").filter({ hasText: owner.name })).toContainText("9 questions");
     await expect(other.getByText("PRIVATE FIXTURE NOTE MUST NEVER ENTER A SOCIAL POST", { exact: true })).toHaveCount(0);
     await sharedPost.getByRole("button", { name: /Kudos/ }).click();
-    await expect(other.getByText("Reaction saved.", { exact: true })).toBeVisible();
+    await expect(other.getByText("Kudos sent.", { exact: true })).toBeVisible();
     await other.reload();
     await expect(sharedPost.getByRole("button", { name: /Kudos/ })).toHaveAttribute("aria-pressed", "true");
     expect(await database.asUser(owner.id, "select count(*)::integer as count from public.social_reactions")).toEqual([{ count: 1 }]);
     console.info("Platform fixture: Kudos persisted after acknowledgement and reload.");
+
+    // Automatic sharing: the member's logged day reaches a friend's leaderboard with no manual post.
+    await other.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      const now = new Date();
+      const dayKey = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+      dev.useStore.setState({ logs: [{ id: "fixture-auto-share", dayKey, ts: now.toISOString(), type: "Manual",
+        minutes: 30, cards: 4, quantity: 6, quantityKind: "questions", academic: true, note: "AUTO SHARE NOTE MUST STAY PRIVATE" }] });
+      await dev.flushVault();
+    });
+    await linkFixtureWorkspace(other);
+    await setCommunityChoices(other, true, "friends");
+    await expect.poll(() => database.asUser(member.id, "select visibility,minutes,cards,questions,caption from public.social_posts where user_id=$1 and kind='progress'", [member.id]), { timeout: 25_000 })
+      .toEqual([{ visibility: "friends", minutes: 30, cards: 4, questions: 6, caption: "" }]);
+    await other.reload();
+    expect((await database.rpc(member.id, "axom_community_preferences")).shareMode).toBe("friends");
+    await refreshCommunity(page);
+    const memberRow = page.locator(".community-board-row").filter({ hasText: member.name });
+    await expect(memberRow).toContainText("30 min");
+    await expect(memberRow).toContainText("Today 30 min");
+    await expect(page.getByText("AUTO SHARE NOTE MUST STAY PRIVATE", { exact: true })).toHaveCount(0);
+    console.info("Platform fixture: automatic sharing reached the friend's leaderboard.");
     await inspectResponsive(other, "community");
 
-    await sharedPost.getByRole("button", { name: "Report", exact: true }).click();
+    await sharedPost.getByRole("button", { name: "Report post", exact: true }).click();
     await sharedPost.getByRole("combobox", { name: "Reason for reporting", exact: true }).selectOption("other");
-    await sharedPost.getByRole("button", { name: "Submit report", exact: true }).click();
-    await expect(other.getByText("Report sent to moderators.", { exact: true })).toBeVisible();
+    await sharedPost.getByRole("button", { name: "Send report", exact: true }).click();
+    await expect(other.getByText("Your report was sent for review.", { exact: true })).toBeVisible();
     await page.goto(`${baseURL}/#host`);
     await expect(page.getByRole("button", { name: "Dismiss report", exact: true })).toBeVisible();
     await page.getByRole("textbox", { name: /^Reason for resolving @/ }).fill("Synthetic acceptance: reviewed the reported study update.");
@@ -157,6 +170,12 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(other.locator(".tb-title")).toHaveText("Dashboard");
     await expect(other.locator(".host-page")).toHaveCount(0);
     await expect(other.getByRole("heading", { name: "Accounts & AI", exact: true })).toHaveCount(0);
+    // Moderators review reports inside Community instead.
+    await other.goto(`${baseURL}/#community`);
+    await expect(other.getByRole("heading", { name: "Reported posts", exact: true })).toBeVisible();
+    await expect(other.getByText(/^Moderator review/)).toBeVisible();
+    await expect(other.getByText("No open reports. Private posts never enter this queue.", { exact: true })).toBeVisible();
+    await other.goto(`${baseURL}/#host`);
     await accountRow.getByRole("combobox", { name: "Role", exact: true }).selectOption("member");
     await accountRow.getByRole("textbox", { name: /^Reason for changing Fixture Briar/ }).fill("Synthetic acceptance: revoke moderation access.");
     await accountRow.getByRole("button", { name: "Apply role", exact: true }).click();
@@ -165,6 +184,8 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(other.locator(".tb-title")).toHaveText("Dashboard");
     await expect(other.locator(".host-page")).toHaveCount(0);
     await other.goto(`${baseURL}/#community`);
+    await expect(other.getByRole("button", { name: "Account sharing settings", exact: true }).first()).toBeVisible();
+    await expect(other.getByRole("heading", { name: "Reported posts", exact: true })).toHaveCount(0);
 
     await accountRow.getByLabel("Daily AI request cap", { exact: true }).fill("2");
     await accountRow.getByRole("textbox", { name: /^Reason for changing Fixture Briar/ }).fill("Synthetic acceptance: cap AI requests at two.");
@@ -181,7 +202,8 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await inspectResponsive(page, "host");
 
     // Removal immediately closes friends-only post and reaction reads on the database.
-    await other.getByRole("button", { name: "Friends · remove", exact: true }).click();
+    await other.locator(".community-people").getByRole("button", { name: "Friends", exact: true }).click();
+    await other.getByRole("button", { name: "Remove friend", exact: true }).click();
     await expect(other.getByText("Friend removed.", { exact: true })).toBeVisible();
     await expect.poll(() => database.asUser(member.id, "select status from public.social_connections")).toEqual([]);
     await other.reload();

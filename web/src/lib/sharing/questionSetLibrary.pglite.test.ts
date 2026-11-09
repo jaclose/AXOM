@@ -71,8 +71,9 @@ async function search(who: string, query = "") {
     "select id,title,likes,liked from public.list_question_set_library($1,0)", [query]);
 }
 
-async function approve(who: string, id: string) {
-  return as(who, "select public.review_question_set_library($1,true,'Checked synthetic source and sharing rights')", [id]);
+async function approve(who: string, id: string, inspected: Snapshot = snapshot(), revision = 1) {
+  return as(who, "select public.review_question_set_library($1,true,'Checked synthetic source and sharing rights',$2::jsonb,$3::bigint)",
+    [id, JSON.stringify(inspected), revision]);
 }
 
 describe("reviewed Question Set Library SQL and RLS", () => {
@@ -108,8 +109,53 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       await expect(as(account, "select owner_id,source_id,review_note,reviewed_by,snapshot_payload from public.question_set_library_entries where id=$1", [id]))
         .rejects.toThrow(/permission denied/i);
     }
-    await expect(as(LEARNER, "select public.review_question_set_library($1,false,'A reason for rejection')", [id]))
+    await expect(as(LEARNER, "select public.review_question_set_library($1,false,'A reason for rejection',$2::jsonb,$3::bigint)", [id, JSON.stringify(snapshot()), 1]))
       .rejects.toThrow(/reviewer access required/i);
+  });
+
+  it("rejects a replaced answer under the SQL row lock and keeps the submission pending", async () => {
+    const inspected = snapshot();
+    const id = await submit(OWNER, "atomic-answer-revision", inspected);
+    const revised = snapshot();
+    revised.questions[0].correctKey = "A";
+    revised.questions[0].correctAnswerText = "First option";
+    // Simulate an internal modification between the reviewer's inspection and
+    // decision. Learners cannot directly update this protected table.
+    await db.query("update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+      [JSON.stringify(revised), id]);
+    await expect(approve(REVIEWER, id, inspected)).rejects.toThrow(/changed since inspection/i);
+    const state = await as<{ id: string; status: string }>(OWNER,
+      "select id,status from public.my_question_set_library()");
+    expect(state.find(row => row.id === id)?.status).toBe("pending");
+    await approve(REVIEWER, id, revised, 2);
+    const approved = await search(LEARNER, "Synthetic reviewed");
+    expect(approved.some(row => row.id === id)).toBe(true);
+  });
+
+  it("rejects ABA resubmissions of identical question content using a row revision", async () => {
+    const id = await submit(OWNER, "review-aba", snapshot());
+    // Internal updates simulate a reviewed/rejected/resubmitted set with the
+    // same snapshot. Status and public credit still alter its review evidence.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    await db.query("update public.question_set_library_entries set status='pending', credit='Revised credit' where id=$1", [id]);
+    await expect(approve(REVIEWER, id, snapshot(), 1)).rejects.toThrow(/changed since inspection/i);
+    const pending = await as<{ id: string }>(REVIEWER, "select id from public.pending_question_set_library()");
+    expect(pending.some(row => row.id === id)).toBe(true);
+    await approve(REVIEWER, id, snapshot(), 3);
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+  });
+
+  it("fails closed for the legacy review signature and invalid inspected evidence", async () => {
+    const id = await submit(OWNER, "reject-legacy-review");
+    await expect(as(REVIEWER,
+      "select public.review_question_set_library($1,true,'Checked the source evidence')", [id]))
+      .rejects.toThrow(/Refresh AXOM/i);
+    await expect(as(REVIEWER,
+      "select public.review_question_set_library($1,true,'Checked the source evidence',$2::jsonb,$3::bigint)",
+      [id, JSON.stringify({ title: "invalid" }), 1]))
+      .rejects.toThrow(/Reopen the inspected/i);
+    const pending = await as<{ id: string }>(REVIEWER, "select id from public.pending_question_set_library()");
+    expect(pending.some(row => row.id === id)).toBe(true);
   });
 
   it("keeps likes unique, account-bound and tied to approved content", async () => {
@@ -139,6 +185,57 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       .toMatchObject({ likes: 0, liked: false });
   });
 
+  it("retains historical endorsements without counting them for a newly approved publication", async () => {
+    const source = snapshot();
+    const sourceId = "edition-like-revocation";
+    const id = await submit(OWNER, sourceId, source);
+    await approve(REVIEWER, id, source, 1);
+    await as(LEARNER, "select public.set_question_set_library_like($1,true)", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 1, liked: true });
+
+    // A privileged safety takedown withdraws approval without changing the
+    // immutable reviewed answers. Votes remain as history for that publication.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    expect((await db.query<{ count: number }>(
+      "select count(*)::integer count from public.question_set_library_likes where entry_id=$1", [id],
+    )).rows).toEqual([{ count: 1 }]);
+    await expect(as(LEARNER, "select public.set_question_set_library_like($1,true)", [id]))
+      .rejects.toThrow(/unavailable/i);
+
+    // The owner may resubmit the same source-reviewed answers with new public
+    // credit. Academic review is still required; prior likes never carry over.
+    const [resubmitted] = await as<{ id: string }>(OWNER,
+      "select public.submit_question_set_library($1,$2::jsonb,$3,$4,$5) id",
+      [sourceId, JSON.stringify(source), "New synthetic edition", true, true]);
+    expect(resubmitted.id).toBe(id);
+    const [pending] = (await db.query<{
+      status: string; review_revision: number; snapshot_payload: Snapshot;
+    }>("select status,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(pending).toMatchObject({ status: "pending", review_revision: 4, snapshot_payload: source });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(item => item.id === id)).toBe(false);
+    await approve(REVIEWER, id, source, 4);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 0, liked: false });
+    await as(LEARNER, "select public.set_question_set_library_like($1,true)", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 1, liked: true });
+    expect((await db.query<{ count: number }>(
+      "select count(*)::integer count from public.question_set_library_likes where entry_id=$1", [id],
+    )).rows).toEqual([{ count: 2 }]);
+    // A harmless maintenance touch can advance review_revision, but cannot
+    // silently discard current votes or forge a different publication epoch.
+    await db.query("update public.question_set_library_entries set publication_epoch=9999 where id=$1", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 1, liked: true });
+    await as(LEARNER, "select public.set_question_set_library_like($1,false)", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).find(item => item.id === id))
+      .toMatchObject({ likes: 0, liked: false });
+    expect((await db.query<{ count: number }>(
+      "select count(*)::integer count from public.question_set_library_likes where entry_id=$1", [id],
+    )).rows).toEqual([{ count: 1 }]);
+  });
+
   it("allows only the owner to withdraw and removes the public preview and likes", async () => {
     const id = await submit(OWNER, "withdraw-test");
     await approve(REVIEWER, id);
@@ -161,6 +258,20 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       ["membership order mismatch", value => { value.orderedQuestionIds = ["different-question"]; }],
       ["duplicate option key", value => { (value.questions[0].options as Array<Record<string, unknown>>)[1].key = "A"; }],
       ["wrong correct answer text", value => { value.questions[0].correctAnswerText = "First option"; }],
+      ["string share version", value => { value.shareFormatVersion = "1" as never; }],
+      ["numeric membership ID", value => { value.orderedQuestionIds = [1 as never]; value.questions[0].id = "1"; }],
+      ["numeric answer key", value => {
+        value.questions[0].correctKey = 1;
+        (value.questions[0].options as Array<Record<string, unknown>>)[1].key = 1;
+      }],
+      ["boolean answer choice text", value => {
+        value.questions[0].correctAnswerText = "true";
+        (value.questions[0].options as Array<Record<string, unknown>>)[1].text = true;
+      }],
+      ["numeric stem", value => { value.questions[0].stem = 123456789; }],
+      ["numeric explanation", value => { value.questions[0].explanation = 12345; }],
+      ["numeric copyright notice", value => { value.copyrightNotice = 123456789 as never; }],
+      ["numeric creation time", value => { value.createdAt = 2026110112000 as never; }],
       ["non-string question tags", value => { value.questions[0].tags = [{ secret: "private" }]; }],
     ];
     const accepted: string[] = [];
@@ -173,6 +284,463 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     expect(accepted).toEqual([]);
     expect((await as<{ source_id: string }>(OWNER, "select source_id from public.my_question_set_library()"))
       .filter(row => row.source_id.startsWith("malformed-"))).toEqual([]);
+  });
+
+  it("keeps pending answer keys and review revisions unchanged after a malformed privileged replacement", async () => {
+    const id = await submit(OWNER, "typed-post-submission-key");
+    const malformed = snapshot();
+    malformed.questions[0].correctKey = 1;
+    (malformed.questions[0].options as Array<Record<string, unknown>>)[1].key = 1;
+    await expect(db.query(
+      "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+      [JSON.stringify(malformed), id],
+    )).rejects.toThrow(/invalid scalar types/i);
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(readback.value.review_revision).toBe(1);
+  });
+
+  it("rejects untyped visual tags and distractor rationales even on privileged snapshot replacement", async () => {
+    const id = await submit(OWNER, "typed-teaching-metadata");
+    const variants: Array<[string, (value: Snapshot) => void]> = [
+      ["non-text visual tag", value => { value.tags = ["visual:intent:histology", { embedded: "private" }]; }],
+      ["non-text question tag", value => { value.questions[0].tags = [42]; }],
+      ["rationale map as array", value => { value.questions[0].choiceRationales = ["invalid"]; }],
+      ["numeric distractor rationale", value => { value.questions[0].choiceRationales = { A: 1 }; }],
+      ["null distractor rationale", value => { value.questions[0].choiceRationales = { A: null }; }],
+      ["unmatched distractor rationale", value => { value.questions[0].choiceRationales = { Z: "Unreviewed option" }; }],
+      ["oversized visual tag", value => { value.tags = ["visual:keyword:" + "x".repeat(64)]; }],
+      ["blank visual tag", value => { value.tags = [" "]; }],
+      ["oversized question tag", value => { value.questions[0].tags = ["x".repeat(65)]; }],
+      ["oversized distractor rationale", value => { value.questions[0].choiceRationales = { A: "x".repeat(10001) }; }],
+      ["blank distractor rationale", value => { value.questions[0].choiceRationales = { A: " " }; }],
+    ];
+    for (const [label, mutate] of variants) {
+      const value = snapshot();
+      mutate(value);
+      await expect(db.query(
+        "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(value), id],
+      ), label).rejects.toThrow(/invalid scalar types/i);
+    }
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload).toEqual(snapshot());
+    expect(readback.value.review_revision).toBe(1);
+  });
+
+  it("rejects private fields at every snapshot nesting level on privileged replacement", async () => {
+    const id = await submit(OWNER, "privileged-private-field-guard");
+    const variants: Array<[string, (value: Snapshot) => void]> = [
+      ["root workspace notes", value => { value.workspaceNotes = { content: "private synthetic note" }; }],
+      ["question attempts", value => { value.questions[0].attempts = [{ answer: "A", userId: OWNER }]; }],
+      ["option source media path", value => {
+        (value.questions[0].options as Array<Record<string, unknown>>)[0].sourceFile = "private-source.pdf";
+      }],
+    ];
+    for (const [label, mutate] of variants) {
+      const altered = snapshot();
+      mutate(altered);
+      await expect(db.query(
+        "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(altered), id],
+      ), label).rejects.toThrow(/private or unsupported fields/i);
+    }
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload).toEqual(snapshot());
+    expect(readback.value.review_revision).toBe(1);
+  });
+
+  it("rejects well-typed but inconsistent answers and membership on protected snapshot replacement", async () => {
+    const id = await submit(OWNER, "privileged-answer-semantics-guard");
+    const variants: Array<[string, (value: Snapshot) => void]> = [
+      ["membership does not match question ID", value => { value.orderedQuestionIds = ["unrelated-question"]; }],
+      ["duplicate membership IDs", value => {
+        value.questions.push({ ...value.questions[0] });
+        value.orderedQuestionIds.push("shared-question-1");
+      }],
+      ["empty reviewed set", value => { value.questions = []; value.orderedQuestionIds = []; }],
+      ["key absent from choices", value => {
+        value.questions[0].correctKey = "Z";
+        delete value.questions[0].correctAnswerText;
+      }],
+      ["duplicate choice keys", value => {
+        (value.questions[0].options as Array<Record<string, unknown>>)[0].key = "B";
+      }],
+      ["contradictory correct-answer text", value => { value.questions[0].correctAnswerText = "First option"; }],
+      ["blank reviewed key", value => { value.questions[0].correctKey = ""; }],
+      ["too few choices", value => { value.questions[0].options = [{ key: "B", text: "Second option" }]; }],
+      ["too many choices", value => {
+        value.questions[0].options = Array.from({ length: 27 }, (_, index) => ({
+          key: index === 1 ? "B" : `C${index}`,
+          text: index === 1 ? "Second option" : `Synthetic option ${index}`,
+        }));
+      }],
+    ];
+    for (const [label, mutate] of variants) {
+      const altered = snapshot();
+      mutate(altered);
+      await expect(db.query(
+        "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(altered), id],
+      ), label).rejects.toThrow(/inconsistent membership or answer evidence/i);
+    }
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.snapshot_payload).toEqual(snapshot());
+    expect(readback.value.review_revision).toBe(1);
+  });
+
+  it("retains valid text-only visual intent and reviewed teaching rationales through moderation", async () => {
+    const source = snapshot();
+    source.tags = ["visual:intent:histology"];
+    source.questions[0].tags = ["visual:keyword:synthetic"];
+    source.questions[0].choiceRationales = {
+      A: "Synthetic distractor is not the marked choice.",
+      B: "Synthetic marked choice matches the reviewed key.",
+    };
+    source.questions[0].explanation = "Synthetic fixture rationale, not a clinical explanation.";
+    const id = await submit(OWNER, "typed-teaching-reviewed", source);
+    await approve(REVIEWER, id, source, 1);
+    const [readback] = await as<{ value: { snapshot_payload: Snapshot; status: string } }>(
+      LEARNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(readback.value.status).toBe("approved");
+    expect(readback.value.snapshot_payload).toEqual(source);
+  });
+
+  it("locks approved public evidence against privileged edits without blocking a safety takedown", async () => {
+    const original = snapshot();
+    const id = await submit(OWNER, "approved-evidence-immutability", original);
+    await approve(REVIEWER, id, original);
+    const altered = snapshot();
+    altered.questions[0].correctKey = "A";
+    altered.questions[0].correctAnswerText = "First option";
+    const attempts: Array<[string, string, unknown[]]> = [
+      ["changed reviewed answer", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2", [JSON.stringify(altered), id]],
+      ["changed public title", "update public.question_set_library_entries set title='Tampered title' where id=$1", [id]],
+      ["changed public credit", "update public.question_set_library_entries set credit='Forged credit' where id=$1", [id]],
+      ["changed discovery tags", "update public.question_set_library_entries set tags=array['tampered'] where id=$1", [id]],
+      ["changed question count", "update public.question_set_library_entries set question_count=2 where id=$1", [id]],
+      ["source reassignment", "update public.question_set_library_entries set source_id='different-private-source' where id=$1", [id]],
+      ["owner reassignment", "update public.question_set_library_entries set owner_id=$1 where id=$2", [LEARNER, id]],
+      ["unreviewed pending transition", "update public.question_set_library_entries set status='pending' where id=$1", [id]],
+      ["altered reviewer identity", "update public.question_set_library_entries set reviewed_by=$1 where id=$2", [OWNER, id]],
+      ["altered review note", "update public.question_set_library_entries set review_note='Forged review reason' where id=$1", [id]],
+      ["altered approval time", "update public.question_set_library_entries set approved_at='2025-01-01' where id=$1", [id]],
+    ];
+    for (const [label, sql, params] of attempts) {
+      await expect(db.query(sql, params), label)
+        .rejects.toThrow(/approved question set evidence is immutable/i);
+    }
+    const [beforeTakedown] = await as<{ value: { snapshot_payload: Snapshot; status: string; review_revision: number } }>(
+      LEARNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(beforeTakedown.value).toMatchObject({
+      snapshot_payload: original, status: "approved", review_revision: 2,
+    });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+
+    // The privileged safety-revocation path must remain available and must
+    // remove public discovery without rewriting or republishing reviewed data.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+    await expect(as(LEARNER, "select public.get_question_set_library($1)", [id]))
+      .rejects.toThrow(/unavailable/i);
+    const [afterTakedown] = await as<{ value: { snapshot_payload: Snapshot; status: string; review_revision: number } }>(
+      OWNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(afterTakedown.value).toMatchObject({
+      snapshot_payload: original, status: "rejected", review_revision: 3,
+    });
+  });
+
+  it("keeps approved reviewer provenance and entry identity immutable, but permits reviewer account erasure", async () => {
+    const reviewerId = "44444444-4444-4444-8444-444444444444";
+    await db.query("insert into auth.users(id,email) values ($1,'provenance-reviewer@example.test')", [reviewerId]);
+    await db.query("insert into public.academic_reviewers(user_id) values ($1)", [reviewerId]);
+    const original = snapshot();
+    const id = await submit(OWNER, "reviewer-provenance-identity", original);
+    await approve(reviewerId, id, original);
+
+    const [before] = (await db.query<{
+      id: string; reviewed_by: string | null; status: string; review_revision: number; snapshot_payload: Snapshot;
+    }>("select id,reviewed_by,status,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(before).toMatchObject({ id, reviewed_by: reviewerId, status: "approved", snapshot_payload: original });
+
+    // A privileged SQL writer cannot impersonate the FK ON DELETE SET NULL behavior
+    // while the reviewer account still exists, nor change the public entry locator.
+    await expect(db.query("update public.question_set_library_entries set reviewed_by=null where id=$1", [id]))
+      .rejects.toThrow(/approved question set evidence is immutable/i);
+    await expect(db.query("update public.question_set_library_entries set id=gen_random_uuid() where id=$1", [id]))
+      .rejects.toThrow(/approved question set evidence is immutable/i);
+    const [unchanged] = (await db.query<{
+      id: string; reviewed_by: string | null; review_revision: number; snapshot_payload: Snapshot;
+    }>("select id,reviewed_by,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(unchanged).toEqual({
+      id, reviewed_by: reviewerId, review_revision: before.review_revision, snapshot_payload: original,
+    });
+
+    // Genuine auth.users deletion must still exercise the FK's SET NULL path.
+    await db.query("delete from auth.users where id=$1", [reviewerId]);
+    const [afterErasure] = (await db.query<{
+      id: string; reviewed_by: string | null; status: string; review_revision: number; snapshot_payload: Snapshot;
+    }>("select id,reviewed_by,status,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows;
+    expect(afterErasure).toMatchObject({
+      id, reviewed_by: null, status: "approved", snapshot_payload: original,
+      review_revision: before.review_revision + 1,
+    });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+    await as(OWNER, "select public.withdraw_question_set_library($1)", [id]);
+    const [withdrawn] = (await db.query<{ count: number }>(
+      "select count(*)::integer count from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(withdrawn.count).toBe(0);
+  });
+
+  it("binds searchable title, tags and question count to the exact pending snapshot revision", async () => {
+    const original = snapshot();
+    const id = await submit(OWNER, "projection-consistency-guard", original);
+    const changedTitle = snapshot();
+    changedTitle.title = "Alternate private snapshot title";
+    const changedTags = snapshot();
+    changedTags.tags = ["sample", "visual:intent:histology"];
+    const changedMembership = snapshot();
+    changedMembership.orderedQuestionIds.push("shared-question-2");
+    changedMembership.questions.push({
+      ...changedMembership.questions[0],
+      id: "shared-question-2",
+      stem: "Which synthetic option is marked in question two?",
+    });
+
+    // These writes are privileged-maintenance simulations: no normal learner
+    // has direct write permission to the table. Each otherwise-valid change
+    // must fail unless the indexed projection and exact JSON agree together.
+    const attempts: Array<[string, string, unknown[]]> = [
+      ["title only", "update public.question_set_library_entries set title='Misindexed title' where id=$1", [id]],
+      ["tags only", "update public.question_set_library_entries set tags=array['misindexed'] where id=$1", [id]],
+      ["count only", "update public.question_set_library_entries set question_count=2 where id=$1", [id]],
+      ["snapshot title only", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(changedTitle), id]],
+      ["snapshot tags only", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(changedTags), id]],
+      ["snapshot membership only", "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(changedMembership), id]],
+    ];
+    for (const [label, sql, params] of attempts) {
+      await expect(db.query(sql, params), label)
+        .rejects.toThrow(/public projection differs from its snapshot/i);
+    }
+
+    const read = async () => (await db.query<{
+      title: string; tags: string[]; question_count: number; review_revision: number; snapshot_payload: Snapshot;
+    }>("select title,tags,question_count,review_revision,snapshot_payload from public.question_set_library_entries where id=$1", [id])).rows[0];
+    expect(await read()).toEqual({
+      title: original.title,
+      tags: original.tags,
+      question_count: original.questions.length,
+      review_revision: 1,
+      snapshot_payload: original,
+    });
+
+    // A legitimate, *atomic* resnapshot + projection update remains possible
+    // on a pending entry. It still advances the independent academic revision,
+    // so an old inspection cannot authorize the new source-verified answers.
+    const revised = changedMembership;
+    revised.title = "Updated synthetic reviewed set";
+    revised.tags = ["sample", "visual:intent:anatomy"];
+    await db.query(
+      "update public.question_set_library_entries set snapshot_payload=$1::jsonb,title=$2,tags=$3::text[],question_count=$4 where id=$5",
+      [JSON.stringify(revised), revised.title, revised.tags, revised.questions.length, id],
+    );
+    expect(await read()).toEqual({
+      title: revised.title,
+      tags: revised.tags,
+      question_count: revised.questions.length,
+      review_revision: 2,
+      snapshot_payload: revised,
+    });
+    await expect(approve(REVIEWER, id, original, 1)).rejects.toThrow(/changed since inspection/i);
+    await approve(REVIEWER, id, revised, 2);
+    const [preview] = await as<{ value: { title: string; question_count: number; snapshot_payload: Snapshot; status: string } }>(
+      LEARNER, "select public.get_question_set_library($1) value", [id],
+    );
+    expect(preview.value).toMatchObject({
+      title: revised.title,
+      question_count: 2,
+      snapshot_payload: revised,
+      status: "approved",
+    });
+    expect((await search(LEARNER, "Updated synthetic")).some(row => row.id === id)).toBe(true);
+  });
+
+  it("rejects forged direct publication and preserves the authenticated reviewer path", async () => {
+    const source = snapshot();
+    const id = await submit(OWNER, "direct-approval-provenance", source);
+    // Privileged maintenance has no academic reviewer JWT; it must never
+    // turn a pending entry into a public Question Set by changing status.
+    await db.query("select set_config('request.jwt.claim.sub','',false)");
+    await expect(db.query(
+      "update public.question_set_library_entries set status='approved' where id=$1", [id],
+    )).rejects.toThrow(/Academic review provenance is required/i);
+    // Even supplying plausible review fields is not a review decision when
+    // the actor has not authenticated as that academic reviewer.
+    await expect(db.query(
+      "update public.question_set_library_entries set status='approved', reviewed_by=$2, reviewed_at=now(), approved_at=now(), review_note='Claimed source review' where id=$1",
+      [id, REVIEWER],
+    )).rejects.toThrow(/Academic review provenance is required/i);
+
+    // A privileged direct INSERT must not skip the pending-review state.
+    await expect(db.query(
+      `insert into public.question_set_library_entries
+        (owner_id,source_id,title,tags,question_count,snapshot_payload,status)
+        values ($1,'direct-insert-forgery','Synthetic reviewed set',array['sample'],1,$2::jsonb,'approved')`,
+      [OWNER, JSON.stringify(source)],
+    )).rejects.toThrow(/submitted pending academic review/i);
+
+    const [held] = (await db.query<{ status: string; review_revision: number }>(
+      "select status,review_revision from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(held).toEqual({ status: "pending", review_revision: 1 });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+
+    await approve(REVIEWER, id, source, 1);
+    const [authorized] = await as<{ value: { status: string; review_revision: number; snapshot_payload: Snapshot } }>(
+      LEARNER, "select public.authorize_question_set_library_import($1,$2::bigint,$3::jsonb) value",
+      [id, 2, JSON.stringify(source)],
+    );
+    expect(authorized.value).toMatchObject({
+      status: "approved", review_revision: 2, snapshot_payload: source,
+    });
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+
+    // A takedown may revoke an approved publication, but not silently
+    // reapprove it without another pending academic review.
+    await db.query("select set_config('request.jwt.claim.sub','',false)");
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    await expect(db.query(
+      "update public.question_set_library_entries set status='approved' where id=$1", [id],
+    )).rejects.toThrow(/Academic review provenance is required/i);
+    expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+  });
+
+  it("authorizes a single approved import revision, never pending or withdrawn answer evidence", async () => {
+    const original = snapshot();
+    const id = await submit(OWNER, "import-auth-revision", original);
+    const authorize = (who: string | null, source: Snapshot, revision: number) =>
+      as<{ value: { snapshot_payload: Snapshot; review_revision: number; status: string } }>(who,
+        "select public.authorize_question_set_library_import($1,$2::bigint,$3::jsonb) value",
+        [id, revision, JSON.stringify(source)]);
+
+    // Even an owner or reviewer may not import a pending snapshot through
+    // this public learner endpoint. Anonymous callers have no EXECUTE grant.
+    await expect(authorize(LEARNER, original, 1)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorize(OWNER, original, 1)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorize(null, original, 1)).rejects.toThrow(/permission denied/i);
+    await approve(REVIEWER, id, original, 1);
+
+    const [approved] = await authorize(LEARNER, original, 2);
+    expect(approved.value).toMatchObject({
+      snapshot_payload: original, review_revision: 2, status: "approved",
+    });
+    await expect(authorize(LEARNER, original, 1)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorize(LEARNER, original, 0)).rejects.toThrow(/Reopen the exact reviewed/i);
+
+    const altered = snapshot();
+    altered.questions[0].correctKey = "A";
+    altered.questions[0].correctAnswerText = "First option";
+    await expect(authorize(LEARNER, altered, 2)).rejects.toThrow(/changed or was withdrawn/i);
+
+    // A takedown revokes the earlier authorization, without ever exposing
+    // the rejected snapshot. Reviewer/account direct table reads remain denied.
+    await db.query("update public.question_set_library_entries set status='rejected' where id=$1", [id]);
+    await expect(authorize(LEARNER, original, 2)).rejects.toThrow(/changed or was withdrawn/i);
+    await expect(as(LEARNER, "select review_revision from public.question_set_library_entries where id=$1", [id]))
+      .rejects.toThrow(/permission denied/i);
+
+    // Resubmit identical questions with revised public credit. Even though the
+    // source-reviewed answers and digest remain unchanged, revision 2 cannot
+    // authorize the newly approved publication (ABA protection).
+    const [resubmitted] = await as<{ id: string }>(OWNER,
+      "select public.submit_question_set_library($1,$2::jsonb,$3,$4,$5) id",
+      ["import-auth-revision", JSON.stringify(original), "Revised synthetic author", true, true]);
+    expect(resubmitted.id).toBe(id);
+    await approve(REVIEWER, id, original, 4);
+    await expect(authorize(LEARNER, original, 2)).rejects.toThrow(/changed or was withdrawn/i);
+    const [current] = await authorize(LEARNER, original, 5);
+    expect(current.value).toMatchObject({
+      snapshot_payload: original, review_revision: 5, status: "approved",
+    });
+  });
+
+  it("rejects legacy approved tag projections and malformed import tag evidence", async () => {
+    const source = snapshot();
+    source.tags = ["sample", "visual:intent:histology"];
+    const id = await submit(OWNER, "legacy-import-tag-projection", source);
+    await approve(REVIEWER, id, source, 1);
+    const authorize = (candidate: Snapshot, revision: number) =>
+      as<{ value: { status: string; review_revision: number; snapshot_payload: Snapshot } }>(
+        LEARNER, "select public.authorize_question_set_library_import($1,$2::bigint,$3::jsonb) value",
+        [id, revision, JSON.stringify(candidate)],
+      );
+
+    expect((await authorize(source, 2))[0].value.snapshot_payload).toEqual(source);
+    await expect(authorize({ ...source, tags: { unsafe: "private" } } as unknown as Snapshot, 2))
+      .rejects.toThrow(/Reopen the exact reviewed/i);
+    await expect(authorize({ ...source, tags: ["sample", false] }, 2))
+      .rejects.toThrow(/Reopen the exact reviewed/i);
+
+    // Simulate an already-published legacy row predating the projection
+    // trigger, rather than weakening any current production write grants.
+    // Trigger disables are limited to this privileged synthetic fixture.
+    await db.exec("alter table public.question_set_library_entries disable trigger question_set_library_approved_evidence;");
+    try {
+      await db.exec("alter table public.question_set_library_entries disable trigger zz_question_set_library_projection_consistency;");
+      try {
+        await db.query("update public.question_set_library_entries set tags=array['visual:intent:histology','sample'] where id=$1", [id]);
+      } finally {
+        await db.exec("alter table public.question_set_library_entries enable trigger zz_question_set_library_projection_consistency;");
+      }
+    } finally {
+      await db.exec("alter table public.question_set_library_entries enable trigger question_set_library_approved_evidence;");
+    }
+    // The generic revision trigger still advances, so the rejection must
+    // come from tag projection mismatch, not a stale preview token.
+    const [legacy] = (await db.query<{ review_revision: number; snapshot_payload: Snapshot; tags: string[] }>(
+      "select review_revision,snapshot_payload,tags from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(legacy.review_revision).toBe(3);
+    expect(legacy.snapshot_payload).toEqual(source);
+    expect(legacy.tags).toEqual(["visual:intent:histology", "sample"]);
+    // Exercise the upgrade path too: installations that had already run
+    // 20261109040000 retained the older importer until a new migration ran.
+    // Recreate that installed function, verify the legacy mismatch used to
+    // pass authorization, then install the forward-only replacement.
+    const importDefinitionFrom = (filename: string) => {
+      const sql = readFileSync(migrationsDir + filename, "utf8");
+      const definition = sql.match(
+        /create or replace function public\.authorize_question_set_library_import\([\s\S]*?end \$\$;/,
+      );
+      if (!definition) throw new Error("Missing migration import function: " + filename);
+      return definition[0];
+    };
+    await db.exec(importDefinitionFrom("20261109040000_question_set_approval_provenance_gate.sql"));
+    try {
+      expect((await authorize(source, legacy.review_revision))[0].value.snapshot_payload)
+        .toEqual(source);
+    } finally {
+      // Restore authorization even if the expected pre-upgrade assertion fails.
+      await db.exec(importDefinitionFrom("20261109060000_question_set_import_tag_projection_upgrade.sql"));
+    }
+    await expect(authorize(source, legacy.review_revision))
+      .rejects.toThrow(/changed or was withdrawn/i);
+    await as(OWNER, "select public.withdraw_question_set_library($1)", [id]);
   });
 
   it("denies new submissions when account deletion is processing", async () => {

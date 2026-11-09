@@ -230,13 +230,9 @@ describe("sidebar module status", () => {
     const newItem = screen.getByRole("button", { name: "Question Bank, New" });
     expect(newItem.querySelector(".nav-status")?.textContent).toBe("NEW");
 
-    const wipItem = screen.getByRole("button", { name: "Anki Lab, Work in progress" });
-    expect(wipItem.querySelector(".nav-status")?.textContent).toBe("WIP");
-
-    const buildingItem = screen.getByRole("button", { name: "Application Checker, Work in progress" });
-    const buildingBadge = buildingItem.querySelector<HTMLElement>(".nav-status");
-    expect(buildingBadge?.textContent).toBe("WIP");
-    expect(buildingBadge?.getAttribute("title")).toBe("Work in progress");
+    expect(screen.queryByRole("button", { name: /Anki Lab/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Application Checker/ })).toBeNull();
+    expect(screen.queryByText("WIP")).toBeNull();
   });
 
   it("keeps status treatments visible for hidden modules in customize mode", () => {
@@ -255,6 +251,9 @@ describe("sidebar module status", () => {
 
     expect(screen.queryByRole("button", { name: "Study Methods, New" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Customize" }));
+
+    expect(screen.queryByRole("button", { name: /Anki Lab|Simulations|Application Checker|USMLE|Pre-Med|Integrations|Habit Tracker|Leaderboards/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Academic Support" })).toBeNull();
 
     const hiddenModule = screen.getByRole("button", { name: "Study Methods, New" });
     expect(hiddenModule.classList.contains("off")).toBe(true);
@@ -298,15 +297,15 @@ describe("sidebar module status", () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.dismissedAnnouncements) ?? "[]")).toContain("daily-word-launch-v1");
 
     rerender(<Sidebar {...props} active="anki" />);
-    expect(screen.getByRole("button", { name: "Anki Lab, Work in progress" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Anki Lab/ })).toBeNull();
     rerender(<Sidebar {...props} active="appchecker" />);
-    expect(screen.getByRole("button", { name: "Application Checker, Work in progress" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Application Checker/ })).toBeNull();
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.dismissedAnnouncements) ?? "[]")).toEqual(["daily-word-launch-v1"]);
   });
 });
 
 describe("sidebar folder disclosure accessibility", () => {
-  it("uses stable controls and keeps collapsed Academic Prep and Tools groups mounted", () => {
+  it("hides the unfinished Academic Support group and keeps Tools disclosure accessible", () => {
     render(
       <Sidebar
         active="dashboard"
@@ -317,18 +316,8 @@ describe("sidebar folder disclosure accessibility", () => {
       />,
     );
 
-    const prepToggle = screen.getByRole("button", { name: "Academic Prep" });
-    const prepItems = document.getElementById("sidebar-academic-prep-items")!;
-    expect(prepToggle.getAttribute("id")).toBe("sidebar-academic-prep-toggle");
-    expect(prepToggle.getAttribute("aria-controls")).toBe(prepItems.id);
-    expect(prepToggle.getAttribute("aria-expanded")).toBe("true");
-    expect(prepItems.getAttribute("aria-labelledby")).toBe(prepToggle.id);
-    expect(prepItems.hidden).toBe(false);
-
-    fireEvent.click(prepToggle);
-    expect(prepToggle.getAttribute("aria-expanded")).toBe("false");
-    expect(document.getElementById("sidebar-academic-prep-items")).toBe(prepItems);
-    expect(prepItems.hidden).toBe(true);
+    expect(screen.queryByRole("button", { name: "Academic Support" })).toBeNull();
+    expect(document.getElementById("sidebar-academic-prep-items")).toBeNull();
 
     const toolsToggle = screen.getByRole("button", { name: "Tools" });
     const toolItems = document.getElementById("sidebar-tools-items")!;

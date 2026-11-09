@@ -10,7 +10,7 @@
     "web/src/lib/communications/model.ts": "df12dc539c4f478044491d3a4a498aa50b7cf2cefd0b4ef5620c20eace895f2b",
     "web/src/lib/communications/server/campaigns.ts": "90e1728f7962b9bc7fb6dd57047a05e22abb39891f8623eddf3857d73729fbcc",
     "web/src/lib/communications/server/handler.ts": "959c308abdba76f889a68886109a6e56f41fcca0fb4e8d9fe14248dd1588d1e4",
-    "web/src/lib/communications/server/privacy.ts": "88ca9ccdfda9876e3adef8dc07b4ec344d2bdedd37a9871113afb9ed202a9900",
+    "web/src/lib/communications/server/privacy.ts": "6200af514bd32e41bf8a0c79bfa00181526e227debe776e2c80204ad923de2f5",
     "web/src/lib/communications/server/provider.ts": "3b8d69d1c2959955e384192ed124e8fc4d05374d165f406895ea34c15dbc2535",
     "web/src/lib/communications/server/service.ts": "4f0445c27da7d83cbb337d7e5aa7a1785e662cff1de03f81660b998fe4bffa27",
     "web/src/lib/communications/snapshot.ts": "256864b7340135a748f3e51744311f6d5fa1692bd0f3b783584c998720f5d86d",
@@ -20,9 +20,9 @@
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
-    "web/src/lib/localVault.ts": "f31565c823ef601bcbffcac909efea797b7a6a26ab6eb44aee099b74095a23bc",
+    "web/src/lib/localVault.ts": "c11842008c5b695ca63701573f2637c69f544a42dca104ead13c46782c9fe7a4",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
-    "web/src/lib/questionAttachments.ts": "ae016c1450aba37bb17fec3e31a640f0e8ba0b705d436094a2a8939fd29847d9",
+    "web/src/lib/questionAttachments.ts": "6008a95bb77ecf8c5932edfd7d6ad747962c089f5ae9b7285014239e034692e5",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
     "web/src/lib/reports.ts": "6b7521623409395c794c18bfedca8e2391dd08b1d16a156f2ed09048da8aa498",
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
@@ -32,15 +32,6 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "6febc24061ed33d723ed4ec5a743401d8724cf28a0ac96baf2247fcbf1619fde"
-  },
-  "authTemplates": {
-    "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",
-    "supabase/templates/communications/magic_link.html": "f8e4801fe3f939c7e188a137b777d28d8b2c2abb1c563c024e8c219dd4fee03d",
-    "supabase/templates/communications/recovery.html": "732df891c1e28f118c3183fc4106c93cc096fd767cd21087ebb5b5a1e556ed27",
-    "supabase/templates/communications/invite.html": "f41a9467a1051e9615cf13a6c3e897c4f8dec8952b849dc5b9cad7f74be67553",
-    "supabase/templates/communications/email_change.html": "96aad919eee5d7017603d5a89ecd354c5c8148b710250dc477768b9150903fe9",
-    "supabase/templates/communications/reauthentication.html": "1fdc5c8f1ffd9f449b06600f491c6baee4717ea9f6a15da9adffc5b28499a54c",
-    "supabase/templates/communications/security.html": "a208ba03fb9bbd712a2f6f798127ed9db478f0ebe891f9fbd0f93c3ad6f16560"
+    "sha256": "6d999326624830ffc30cc13023d330ded8e0c7baff41c5383f32b226041ca1ae"
   }
 }

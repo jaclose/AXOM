@@ -12,15 +12,6 @@ test("every supplied text template persists with its stated module and term", as
   await seedOnboarded(page);
   await page.goto("/#tracker");
   const openTemplateLibrary = async () => {
-    // The course-library route persists across page reloads; do not expect a
-    // "Load Course" navigation button while already inside its collection.
-    // Do not use launcher.isVisible() before the lazily loaded Tracker has
-    // rendered: it can be false for a valid button that appears a moment later.
-    if (!new URL(page.url()).searchParams.has("course-library")) {
-      await page.getByRole("button", { name: "Course Library / Load Course" }).click();
-    }
-    await expect(page.getByRole("heading", { name: "Course Library", exact: true })).toBeVisible();
-    await page.getByText("Manage sources and custom courses", { exact: true }).click();
     await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
   };
   await openTemplateLibrary();
@@ -42,6 +33,13 @@ test("every supplied text template persists with its stated module and term", as
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await reloadAfterSave(page);
   await openTemplateLibrary();
-  await expect(dialog.getByRole("button", { name: /^Use saved / })).toHaveCount(files.length);
+  const persisted = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => { documents: unknown[] } } }> }).__AXOM_DEV__;
+    const library = await import("/src/lib/course-engine/templateLibrary.ts");
+    const saved = library.savedCourseTemplates(dev.useStore.getState().documents);
+    return { count: saved.length, families: library.courseTemplateVersions(saved).length };
+  });
+  expect(persisted.count).toBe(files.length);
+  await expect(dialog.getByRole("button", { name: /^Use saved / })).toHaveCount(persisted.families);
   console.log(JSON.stringify({ privateTemplateAcceptance: expected }));
 });

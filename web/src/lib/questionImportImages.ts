@@ -7,6 +7,7 @@
 // anatomy/ECG image silently.
 // ===========================================================================
 import { sha256Hex } from "./checksum";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, type QuestionAttachmentScope } from "./questionAttachmentScope";
 import type { QuestionAsset } from "./question-content/package";
 import {
   createQuestionAttachment,
@@ -145,6 +146,7 @@ async function linkVerifiedPrivateLibraryImage(input: {
   name: string;
   existing: readonly QuestionImageAttachment[];
   contentAssets: readonly QuestionAsset[];
+  scope: QuestionAttachmentScope;
 }): Promise<AttachmentCreationResult | undefined> {
   const asset = resolveContentAsset(input.name, input.file, input.contentAssets).asset;
   const checksum = asset?.checksum?.toLowerCase();
@@ -160,7 +162,7 @@ async function linkVerifiedPrivateLibraryImage(input: {
 
   let stored;
   try {
-    stored = await getQuestionAttachmentBlob(blobKey, { localOnly: true });
+    stored = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope: input.scope });
   } catch {
     return undefined;
   }
@@ -217,10 +219,17 @@ export async function attachNamedImages(input: {
   questionId: string;
   /** Content-addressed candidates; bytes are reverified before any reuse. */
   contentAssets?: readonly QuestionAsset[];
+  scope?: QuestionAttachmentScope;
 }): Promise<{ attachments: QuestionImageAttachment[]; problems: string[] }> {
+  const scope = input.scope ?? getQuestionAttachmentScope();
+  const assertCurrent = () => {
+    if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed while importing images. Return to the original account and retry.");
+  };
+  assertCurrent();
   const attachments: QuestionImageAttachment[] = [];
   const problems: string[] = [];
   for (const match of matchNamedImages(input.names, input.files)) {
+    assertCurrent();
     if (!match.file) continue;
     const resolved = input.contentAssets?.length
       ? resolveContentAsset(match.name, match.file, input.contentAssets)
@@ -231,6 +240,7 @@ export async function attachNamedImages(input: {
     }
     const asset = resolved.asset;
     const integrityProblem = await declaredAssetProblem(match.file, asset);
+    assertCurrent();
     if (integrityProblem) {
       problems.push(integrityProblem);
       continue;
@@ -241,9 +251,12 @@ export async function attachNamedImages(input: {
           name: match.name,
           existing: attachments,
           contentAssets: asset ? [asset] : input.contentAssets,
+          scope,
         })
       : undefined;
-    const created = linked ?? await createQuestionAttachment({ file: match.file, questionId: input.questionId, existing: attachments });
+    assertCurrent();
+    const created = linked ?? await createQuestionAttachment({ file: match.file, questionId: input.questionId, existing: attachments, scope });
+    assertCurrent();
     if (created.status === "created") attachments.push({ ...created.attachment, role: "exhibit" });
     else problems.push(`${match.file.name}: ${created.message}`);
   }

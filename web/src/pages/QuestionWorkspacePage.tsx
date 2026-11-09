@@ -680,7 +680,7 @@ export function QuestionWorkspacePage() {
           <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Courses</button>
           <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Weeks &amp; sets</button>
         </div>
-        {bankView === "books" ? <QuestionBankLibrary heldForReview={heldForReview} onImport={() => openImport("file")} onCreate={() => setRunner({ mode: "tutor" })}
+        {bankView === "books" ? <QuestionBankLibrary heldForReview={heldForReview} onImport={() => openImport("file")} onCreate={() => setRunner({ mode: "tutor" })} onPracticeSet={runSet}
           onOpenBank={(book, week) => { setBankLocation({ module: book.module, courseId: book.courseId, week }); setBankView("weeks"); }}
           onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, questionIds: selection.questionIds, count: selection.count } }); }} /> :
         <QuestionSetList key={JSON.stringify(bankLocation)} initialScope={bankLocation}
@@ -696,7 +696,7 @@ export function QuestionWorkspacePage() {
           onOpenInsights={() => setTab("insights")}
         />
       }</>}
-      {tab === "community" && <CommunityUploads onOpenLibrary={() => { setBankView("books"); setTab("sets"); }} />}
+      {tab === "community" && <CommunityUploads onOpenLibrary={() => { setBankView("books"); setTab("sets"); }} onPracticeSet={runSet} />}
       {tab === "library" && <SourceLibrary onParseFrom={parseFrom} onGenerateFrom={generateFrom} />}
       {tab === "blocks" && <BlockBuilder onRunBlock={runBlock} onNewBlock={() => setRunner({ mode: "tutor" })} />}
 

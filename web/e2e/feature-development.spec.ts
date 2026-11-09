@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { deferPromisePrompt, expect, SETUP_NAME_LABEL, openMedicalSchools, reloadAfterSave, test } from "./fixtures";
+import { deferPromisePrompt, expect, SETUP_NAME_LABEL, test } from "./fixtures";
 
 /** Dev-only live-store handle installed by src/main.tsx (see comment there). */
 type DevWindow = Window & {
@@ -46,40 +46,15 @@ async function settleViewport(page: Page, width: number) {
   await noOverflow(page);
 }
 
-test("real school research supports search, saved schools, review checks and reload", async ({ page }, testInfo) => {
+test("unfinished pages stay out of navigation and direct links", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
   await skipSetup(page);
-  await page.goto("/#appchecker");
-  await openMedicalSchools(page);
-  await expect(page.getByText("292 schools", { exact: true })).toBeVisible();
-  await page.getByLabel("Has collected research").check();
-  await expect(page.getByRole("status").filter({ hasText: "Showing 24 of 60" })).toBeVisible();
-  await page.getByLabel("Search schools").fill("Stanford");
-  const school = page.getByRole("article").filter({ hasText: "Stanford University School of Medicine" });
-  await school.getByRole("button", { name: "Save school", exact: true }).click();
-  await school.locator("summary").click();
-  const review = school.getByRole("checkbox", { name: "Reviewed MCAT minimum (read exceptions)", exact: true });
-  await review.check();
-  await expect(school).toContainText("Official-page capture");
-  await expect(school.getByRole("link", { name: "Review source" }).first()).toHaveAttribute("href", /^https:\/\//);
-  await reloadAfterSave(page);
-  await page.getByRole("checkbox", { name: /Saved schools/ }).check();
-  await expect(school.getByRole("button", { name: "Saved school" })).toHaveAttribute("aria-pressed", "true");
-  await school.locator("summary").click();
-  await expect(review).toBeChecked();
-  for (const viewport of viewports) {
-    await page.setViewportSize(viewport);
-    await settleViewport(page, viewport.width);
-    await school.getByRole("button", { name: "Saved school" }).scrollIntoViewIfNeeded();
-    await page.screenshot({ path: testInfo.outputPath(`schools-${viewport.width}.png`), animations: "disabled" });
+  for (const route of ["appchecker", "simulations", "anki", "habits", "premed", "step", "integrations"]) {
+    await page.goto(`/#${route}`);
+    await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+    await expect(page.locator(".sidebar").getByText("WIP", { exact: true })).toHaveCount(0);
   }
-  await review.uncheck();
-  await school.getByRole("button", { name: "Saved school" }).click();
-  await expect(page.getByText("No matching schools")).toBeVisible();
-  await page.getByRole("button", { name: "Clear search and filters" }).click();
-  await expect(page.getByText("292 schools", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -142,7 +117,8 @@ test("personal standings use real logs, separate partial weeks and survive reloa
     };
     useStore.setState({ logs: [log("current", 0, 300, 500), log("last", 7, 90, 30), log("previous", 14, 60, 30)] });
   });
-  await page.goto("/#leaderboards");
+  await page.goto("/#communities");
+  await page.getByRole("button", { name: /Personal bests/ }).click();
   await expect(page.getByText("Personal standings", { exact: true })).toBeVisible();
   const standings = page.getByRole("list", { name: "Personal weekly standings" });
   await expect(standings.getByRole("listitem")).toHaveCount(2);
@@ -160,16 +136,13 @@ test("personal standings use real logs, separate partial weeks and survive reloa
     await page.screenshot({ path: testInfo.outputPath(`standings-${viewport.width}.png`), animations: "disabled" });
   }
   await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("button", { name: /Personal bests/ }).click();
   await page.getByRole("button", { name: "Logged cards", exact: true }).click();
   await expect(standings.getByRole("listitem")).toHaveCount(2);
   await expect(standings.locator(".lb-rank")).toHaveText(["1", "1"]);
   await page.goto("/#communities");
   await expect(page).toHaveURL(/#communities$/);
-  await page.getByRole("button", { name: /Daily challenge/ }).click();
-  await expect(page.getByRole("region", { name: "Daily challenge" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "One day. One shared field." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Shared challenges are unavailable here" })).toBeVisible();
-  await expect(page.getByText("This build has no account service. Your personal practice is still available in Question Bank.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Question Bank" })).toHaveAttribute("href", "#questions");
+  await expect(page.getByRole("button", { name: /Daily challenge/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Community", exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });

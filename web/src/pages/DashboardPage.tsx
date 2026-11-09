@@ -1095,8 +1095,7 @@ function PremedHoursWidget() {
   const verified = entries.filter((entry) => entry.verified).reduce((sum, entry) => sum + entry.hours, 0);
   return (
     <GlassCard pad>
-      <PanelHeader title="Pre-Med Hours" sub="Clinical, service, research, and verification evidence"
-        action={<a className="gbtn sm" href="#premed">Open <ArrowRight size={ICON_SIZE.body} /></a>} />
+      <PanelHeader title="Pre-Med Hours" sub="Clinical, service, research, and verification evidence" />
       <div className="trend-widget">
         <div><b>{total}</b><span>total</span></div>
         <div><b>{clinical}</b><span>clinical/shadow</span></div>

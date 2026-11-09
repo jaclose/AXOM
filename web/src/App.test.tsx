@@ -367,6 +367,13 @@ describe("Communications route protection", () => {
 });
 
 describe("Host stays private to the verified owner", () => {
+  it.each(["anki", "simulations", "habits", "step", "step2", "dedicated", "shelf", "step3", "premed", "mcat", "dat", "casper", "premed-log", "integrations", "appchecker", "leaderboards"])("keeps unfinished #%s direct links off the released surface", (route) => {
+    window.location.hash = route;
+    render(<App />);
+    expect(document.querySelector(".tb-title")?.textContent).toBe("Dashboard");
+    expect(screen.queryByText("WIP")).toBeNull();
+  });
+
   it("renders a #host link as the dashboard for an account without the owner role", () => {
     window.location.hash = "host";
     render(<App />);

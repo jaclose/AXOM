@@ -16,13 +16,15 @@ for (const width of [1440, 768, 390]) {
     const dialog = page.getByRole("region", { name: "Load a course template", exact: true });
     const preview = dialog.getByRole("region", { name: "Template for FTM 1" });
     const open = async () => {
-      if (!new URL(page.url()).searchParams.has("course-library")) await page.getByRole("button", { name: "Course Library / Load Course" }).click();
-      await page.getByText("Manage sources and custom courses", { exact: true }).click();
       await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
       await expect(dialog).toBeVisible();
     };
     await open();
-    await dialog.getByLabel("Choose course template files").setInputFiles(file(ORIGINAL));
+    await expect(dialog.getByRole("heading", { name: "Load a course template" })).toBeFocused();
+    const chooser = page.waitForEvent("filechooser");
+    await dialog.getByRole("button", { name: "Choose template files", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await (await chooser).setFiles(file(ORIGINAL));
     await expect(preview).toContainText("3 of 3 activities selected");
     // Importing into the library is durable even when no tracker items are loaded.
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();

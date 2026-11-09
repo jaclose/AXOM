@@ -41,7 +41,7 @@ import { sha256Hex } from "../../lib/checksum";
 import { assignDraftProvenancePages } from "../../lib/questionProvenance";
 import { evaluateImportDraft, evaluateImportDrafts, summarizeImportDrafts } from "../../lib/questionImportTrust";
 import { ALREADY_IMPORTED_RULE, applyPriorImport } from "../../lib/questionImportHistory";
-import { hasReviewedImportInFlight } from "../../lib/questionImportFinalization";
+import { settledReviewedImportSnapshot } from "../../lib/questionImportFinalization";
 import { prepareReviewedImport, saveReviewedImport, type ImportSourceFile } from "../../lib/questionImportSave";
 import { scopeFromMapping } from "../../lib/massImportCandidate";
 import { courseForScope } from "../../lib/course-engine/questionBank";
@@ -235,9 +235,9 @@ export function ImportPanel({
   const [tab, setTab] = useState<ImportTab>(seed?.reference ? "ai" : initialTab);
   const [step, setStep] = useState<ImportStep>(seed?.drafts ? "review" : "source");
   const library = () => ({ questions: s.questions ?? [], questionSets: s.questionSets ?? [], documents: s.documents ?? [] });
-  // What an earlier import brought in is only read from settled state: while a
-  // save is still being written, the store may hold records that get rolled back.
-  const settledLibrary = () => (hasReviewedImportInFlight() ? { questions: [], questionSets: [], documents: [] } : library());
+  // A concurrent import can expose tentative rows before its vault commit;
+  // exclude only those rows, not unrelated questions saved in earlier sessions.
+  const settledLibrary = () => settledReviewedImportSnapshot(library());
   // Read once: what the seed's file already brought in, if it was imported before.
   const [seeded] = useState(() => {
     if (!seed?.drafts) return undefined;

@@ -7,11 +7,12 @@ import { workspaceDigest } from "./workspaceDigest";
 import { uploadCloudContent, hydrateCloudContent, readContentReferences } from "./cloudContent";
 import { canonicalJson, sha256 } from "../compressedText";
 import { prepareCloudSnapshot, decodeCloudSnapshot, contentCheckpointHash } from "./cloudSnapshot";
-import { uploadCloudMedia, readMediaManifest, validateWorkspaceMedia } from "./cloudMedia";
+import { uploadCloudMedia, readMediaManifest, validateWorkspaceMedia, findMissingWorkspaceMedia } from "./cloudMedia";
 import { ORIGINALS_BUCKET, repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
 import { MAX_SNAPSHOT_BYTES } from "./syncPolicy";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
 import { SyncPushError, classifyPushFailure, uploadFailureAt } from "./syncFailure";
+import { beginSyncProgress } from "./syncProgress";
 import type {
   AccountDevice,
   ProtectedRevision,
@@ -40,7 +41,17 @@ export class SupabaseSyncTransport implements SyncTransport {
   prepare = prepareCloudSnapshot;
 
   async push(envelope: SnapshotEnvelope): Promise<PushResult> {
+    const progress = beginSyncProgress(envelope.accountUserId ?? "");
+    try {
+      return await this.pushTracked(envelope, progress.report, progress.attention);
+    } finally {
+      progress.finish();
+    }
+  }
+
+  private async pushTracked(envelope: SnapshotEnvelope, report: ReturnType<typeof beginSyncProgress>["report"], reportMissing: ReturnType<typeof beginSyncProgress>["attention"]): Promise<PushResult> {
     const atPhase = async <T>(phase: SyncUploadPhase, action: () => PromiseLike<T>): Promise<T> => {
+      report(phase);
       try { return await action(); } catch (error) { throw uploadFailureAt(error, phase); }
     };
     const { client, userId, assertCurrent, resumable } = await atPhase("preflight", accountOperationClient);
@@ -75,9 +86,20 @@ export class SupabaseSyncTransport implements SyncTransport {
         previous = result.data;
       }
     }
-    await atPhase("content", () => uploadCloudContent(client, userId, envelope.contentObjects ?? [], previous?.sources ? readContentReferences(previous.sources) : [], assertCurrent));
+    const previousMedia = previous?.media ? readMediaManifest(previous.media) : [];
+    await atPhase("preflight", async () => {
+      const missing = await findMissingWorkspaceMedia(userId, envelope.payload, assertCurrent, previousMedia);
+      if (!missing.length) return;
+      reportMissing(missing);
+      throw new SyncPushError(
+        { kind: "rejected", rejection: "missing-image", status: 0 },
+        "Some question images need their original files. No workspace content was uploaded.",
+      );
+    });
+    await atPhase("content", () => uploadCloudContent(client, userId, envelope.contentObjects ?? [], previous?.sources ? readContentReferences(previous.sources) : [], assertCurrent,
+      (completed, total) => report("content", completed, total)));
     await atPhase("originals", () => uploadCloudOriginals(client, userId, envelope.payload, previous?.content, assertCurrent, resumable));
-    const media = await atPhase("media", () => uploadCloudMedia(client, userId, envelope.payload, assertCurrent, previous?.media ? readMediaManifest(previous.media) : []));
+    const media = await atPhase("media", () => uploadCloudMedia(client, userId, envelope.payload, assertCurrent, previousMedia));
     const payload = { ...envelope.packed!, media };
     if (new TextEncoder().encode(JSON.stringify(payload)).length > MAX_SNAPSHOT_BYTES) throw new SyncPushError({ kind: "rejected", rejection: "too-large", status: 0 }, "This compressed workspace exceeds the account limit.");
     await atPhase("revision", assertCurrent);

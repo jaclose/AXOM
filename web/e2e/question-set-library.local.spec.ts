@@ -151,13 +151,31 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await other.screenshot({ path: "/tmp/axom-question-set-library-390.png" });
 
+    await preview.getByRole("button", { name: "Practice this set" }).click();
+    await expect(other.getByRole("dialog", { name: "Set up a tutor block" })).toBeVisible();
+    await other.getByRole("button", { name: /Start tutor block/ }).click();
+    await other.getByRole("button", { name: "B. Second synthetic label" }).click();
+    await other.getByLabel("Question stem").focus();
+    await other.keyboard.press("Enter");
+    await expect(other.locator(".result-banner[role='status']")).toContainText("Correct");
+    await other.getByRole("button", { name: "Finish block" }).click();
+    await expect(other.getByRole("dialog", { name: "Block results" })).toContainText("1/1 correct (100%)");
+    await other.getByRole("button", { name: "Done", exact: true }).click();
+    await other.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(async () => other.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => {
+        questions: Array<{ stem: string; attempts: Array<{ status: string }> }>;
+      } } }> }).__AXOM_DEV__;
+      return dev?.useStore.getState().questions.find(question => question.stem === "Which synthetic label is the reviewed answer?")?.attempts;
+    })).toMatchObject([{ status: "correct" }]);
+    console.info("Question Set Library fixture: imported set practiced and attempt survived reload.");
+
     await openLocalSets(page);
     await page.getByRole("button", { name: "Submit to library", exact: true }).click();
     const approved = page.getByRole("dialog", { name: `Submit ${TITLE}` });
     await expect(approved.getByText("This set is searchable now.", { exact: true })).toBeVisible();
     await approved.getByRole("button", { name: "Withdraw submission" }).click();
     await expect(approved.getByText("The submission was withdrawn from the library.", { exact: true })).toBeVisible();
-    await preview.getByRole("button", { name: "Close" }).click();
     await other.goto(`${baseURL}/#questions`);
     await openSharedLibrary(other);
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);

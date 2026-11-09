@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { BookOpenCheck, RefreshCw } from "lucide-react";
 import { isAcademicReviewer } from "../../lib/academicLibrary/client";
 import {
-  listPendingQuestionSets, loadQuestionSetLibraryPreview, reviewQuestionSetSubmission,
+  listPendingQuestionSets, loadPendingQuestionSetReviewPreview, reviewQuestionSetSubmission,
   type LibraryQuestionSetPreview, type LibrarySubmission,
 } from "../../lib/sharing/questionSetLibrary";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../ui/primitives";
@@ -35,7 +35,7 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
 
   async function open(id: string) {
     setBusy(true); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
-    try { setPreview(await loadQuestionSetLibraryPreview(accountId, id)); }
+    try { setPreview(await loadPendingQuestionSetReviewPreview(accountId, id)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "This submission could not be opened."); }
     finally { setBusy(false); }
   }
@@ -43,12 +43,19 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
     if (!preview || busy || reason.trim().length < 8 || !attested) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      await reviewQuestionSetSubmission(accountId, preview.id, approved, reason);
+      await reviewQuestionSetSubmission(accountId, preview, approved, reason);
       setPreview(undefined);
       setMessage(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
       setRefresh(value => value + 1);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "The review could not be saved."); }
-    finally { setBusy(false); }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "The review could not be saved.";
+      // An obsolete reviewed revision must not remain approvable by the same
+      // checkbox. Require a fresh inspection and rights/answer attestation.
+      if (/reopen|changed since inspection|changed\. Reopen/i.test(message)) {
+        setPreview(undefined); setReason(""); setAttested(false);
+      }
+      setError(message);
+    } finally { setBusy(false); }
   }
   return <GlassCard pad className="qsl-review-queue">
     <PanelHeader headingLevel={2} title="Question Set Library review" sub="Learner submissions appear in search only after academic review."

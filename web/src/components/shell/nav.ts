@@ -42,7 +42,7 @@ export const NAV = [
   { id: "tracker", label: "Course Tracker", subtitle: "Lecture, DLA, and PQ completion map", icon: BadgeCheck },
   { id: "questions", label: "Question Bank", subtitle: "Import Center, source library, question sets, blocks, and results", icon: HelpCircle },
   { id: "simulations", label: "Simulations", subtitle: "Explore body mechanisms; first study: asthma and albuterol", icon: Activity },
-  { id: "communities", label: "Communities", subtitle: "Shared courses and daily challenges with review status", icon: UsersRound },
+  { id: "communities", label: "Community", subtitle: "Study circle, shared progress, personal bests, and course exchange", icon: UsersRound },
   { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and import an unlisted Question Set link", icon: HelpCircle },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
   { id: "soundscapes", label: "Soundscapes", subtitle: "Study sounds, your own recordings, live visuals, and a listening log", icon: AudioWaveform },
@@ -113,6 +113,17 @@ export function getNavModuleStatusAssignment(id: string): ModuleStatusAssignment
 
 export function getNavModuleStatus(id: string): ModuleStatus | undefined {
   return getNavModuleStatusAssignment(id)?.status;
+}
+
+// Keep unfinished pages out of navigation and direct links. Their saved data
+// stays intact so a later release can restore the destination without migration.
+const PREP_CHILD_ROUTES = new Set<string>([
+  "step2", "dedicated", "shelf", "step3", "mcat", "dat", "casper", "premed-log",
+]);
+
+export function isReleasedRoute(id: string): boolean {
+  const status = getNavModuleStatus(id);
+  return status !== "wip" && status !== "under-construction" && !PREP_CHILD_ROUTES.has(id);
 }
 
 export function getNavAnnouncementId(id: string): string | undefined {

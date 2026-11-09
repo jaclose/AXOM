@@ -124,3 +124,88 @@ test("Completion folds the book and reveals the kept day", async ({ page }) => {
   await page.waitForTimeout(1250);
   await page.screenshot({ path: "/tmp/axom-journal-completion-reveal.png" });
 });
+
+
+for (const [width, scheme] of [[320, "light"], [390, "dark"], [1440, "light"]] as const) {
+  test(`Journal repeated Enter removes only the chosen private reflection at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
+    await page.addInitScript((theme) => localStorage.setItem("axom.theme", theme), scheme);
+    await seedOnboarded(page);
+    await page.goto("/#journal");
+
+    const setup = page.getByRole("dialog", { name: "Make this notebook yours" });
+    await expect(setup).toBeVisible();
+    await setup.getByRole("button", { name: "Skip for now" }).click();
+
+    // This is a synthetic local workspace with a pre-existing multi-note entry.
+    // No account or remote provider is used. Keep the ID to detect a replacement.
+    await page.evaluate(async () => {
+      type Entry = { id: string; wins?: string[]; losses?: string[] };
+      type Dev = {
+        useStore: { getState: () => {
+          addJournal: (entry: Record<string, unknown>) => void;
+          journal: Entry[];
+        } };
+        flushVault: () => Promise<void>;
+      };
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      const now = new Date();
+      const day = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0")].join("-");
+      dev.useStore.getState().addJournal({
+        id: "journal-repeat-key-fixture",
+        date: `${day}T12:00:00`,
+        today: "Synthetic day",
+        tomorrow: "",
+        blockers: "",
+        energy: "Medium",
+        rating: "Useful",
+        freeWriting: "Synthetic private writing",
+        wins: ["Keep A", "Keep B", "Keep C"],
+        losses: ["Release A", "Release B"],
+        notebookStatus: "draft",
+      });
+      await dev.flushVault();
+    });
+    await reloadAfterSave(page);
+
+    await page.getByRole("button", { name: "Open today’s page", exact: true }).click();
+    await page.getByRole("button", { name: "Write full page" }).click();
+    const journal = page.getByRole("dialog", { name: "Full journal" });
+    await journal.getByText("Keep something. Release something.").click();
+    await expect(journal.getByLabel("Something to keep 2")).toHaveValue("Keep B");
+
+    // Native Chromium key events, not a synthetic fireEvent.click. A second
+    // keydown while Enter remains held must not activate the recycled button.
+    await journal.getByRole("button", { name: "Remove keep 2" }).focus();
+    await page.keyboard.down("Enter");
+    await expect(journal.getByLabel("Something to keep 2")).toHaveValue("Keep C");
+    await expect(journal.getByLabel("Something to keep", { exact: true })).toBeFocused();
+    await page.keyboard.down("Enter");
+    await page.keyboard.up("Enter");
+    await expect(journal.getByLabel("Something to keep 2")).toHaveValue("Keep C");
+    await expect(journal.getByLabel("A loose thread 2")).toHaveValue("Release B");
+
+    await journal.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Saved to this workspace", { exact: true })).toBeVisible();
+    await reloadAfterSave(page);
+
+    const saved = await page.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: { getState: () => { journal: Array<{
+          id: string; wins?: string[]; losses?: string[]; notebookStatus?: string;
+        }> } };
+      }> }).__AXOM_DEV__;
+      return dev.useStore.getState().journal.filter((entry) => entry.id === "journal-repeat-key-fixture");
+    });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      id: "journal-repeat-key-fixture",
+      wins: ["Keep A", "Keep C"],
+      losses: ["Release A", "Release B"],
+      notebookStatus: "draft",
+    });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}

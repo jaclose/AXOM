@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, blobToBase64,
   extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
@@ -30,6 +31,8 @@ export function mediaBackupBytes(references: References): number {
 
 /** Binary images avoid the single-string limit of large base64 JSON backups. */
 export async function createMediaBackupArchive(payload: Record<string, unknown>, references: References, documents: readonly SourceDocument[] = [], options: AttachmentReadOptions = {}) {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  options = { ...options, scope };
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
@@ -46,7 +49,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   const missingOriginalIds: string[] = [];
   for (const document of backupOriginalDocuments(documents)) {
     try {
-      const blob = await readSourceOriginal(document.id, document.checksum);
+      const blob = await readSourceOriginal(document.id, document.checksum, options);
       if (!blob || blob.size > MAX_ORIGINAL_BYTES) throw new Error("Original unavailable or too large");
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const file = `originals/${originals.length}`;
@@ -56,6 +59,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   }
   zip.file("workspace.json", JSON.stringify({ ...payload, _backupFormat: FORMAT, _backupVersion: 2, media, originals }));
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true });
+  if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed during export. Start a new export from the current workspace.");
   return { blob, attachmentCount: media.length, missingBlobKeys, originalCount: originals.length, missingOriginalIds };
 }
 
@@ -111,12 +115,13 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     ids.add(item.documentId); files.add(item.file);
   }
   return { rawText, restoreOriginals: async documents => {
+    const scope = getQuestionAttachmentScope();
     let restored = 0, skipped = 0;
     for (const item of originals) {
       const document = documents.find(doc => doc.id === item.documentId && doc.checksum?.replace(/^sha256:/, "") === item.sha256);
-      if (!document || await readSourceOriginal(document.id, document.checksum)) { skipped++; continue; }
+      if (!document || await readSourceOriginal(document.id, document.checksum, { scope })) { skipped++; continue; }
       const bytes = await zip.file(item.file)!.async("uint8array");
-      await saveSourceOriginal(document, new Blob([bytes as BlobPart], { type: item.mimeType }));
+      await saveSourceOriginal(document, new Blob([bytes as BlobPart], { type: item.mimeType }), { scope });
       restored++;
     }
     return { restored, skipped };

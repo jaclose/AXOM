@@ -106,7 +106,7 @@ export function readContentReferences(value: unknown): ContentReference[] {
   });
 }
 
-export async function uploadCloudContent(client: SupabaseClient, userId: string, objects: ContentUpload[], previous: ContentReference[], assertCurrent: () => Promise<void>): Promise<void> {
+export async function uploadCloudContent(client: SupabaseClient, userId: string, objects: ContentUpload[], previous: ContentReference[], assertCurrent: () => Promise<void>, onProgress?: (completed: number, total: number) => void): Promise<void> {
   const confirmed = confirmedContentUploads.get(userId) ?? new Set<string>();
   confirmedContentUploads.set(userId, confirmed);
   const known = new Set([...previous.map((entry) => entry.hash), ...confirmed]);
@@ -116,6 +116,8 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
     return true;
   });
   let cursor = 0;
+  let completed = 0;
+  onProgress?.(completed, pending.length);
   let failed = false;
   let firstError: unknown;
   async function worker() {
@@ -133,6 +135,7 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
           if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
         }
         confirmed.add(reference.hash);
+        onProgress?.(++completed, pending.length);
       } catch (error) {
         if (!failed) { failed = true; firstError = error; }
       }

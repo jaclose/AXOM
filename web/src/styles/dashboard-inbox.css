@@ -129,10 +129,8 @@
   font: var(--fw-heavy) 9px/1 var(--font-ui);
 }
 .dashboard-notifications__panel {
-  position: absolute;
-  z-index: 88;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
+  z-index: 95;
   display: flex;
   flex-direction: column;
   width: min(370px, calc(100vw - 32px));
@@ -187,7 +185,7 @@
   min-width: 44px;
   padding: 0;
 }
-.dashboard-notifications__body { min-height: 0; flex: 1 1 auto; overflow-y: auto; }
+.dashboard-notifications__body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .dashboard-notifications__group-label {
   padding: 13px 15px 3px;
   color: var(--text-45);
@@ -280,14 +278,6 @@
   .reflection-inbox__actions { justify-content: flex-start; flex-wrap: wrap; }
   .reflection-inbox__courtesy { justify-content: flex-start; }
   .reflection-inbox__assurance { justify-self: start; text-align: left; }
-  .dashboard-notifications__panel {
-    position: fixed;
-    top: var(--dashboard-notifications-top, 12px);
-    right: 12px;
-    left: 12px;
-    width: auto;
-    max-height: calc(100vh - var(--dashboard-notifications-top, 12px) - 12px);
-  }
 }
 @media (max-width: 420px) {
   .reflection-inbox { padding: 12px; }

@@ -13,10 +13,12 @@ import { knownBankManifests } from "../../lib/question-content/knownBanks";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
 import { AcademicBankDiscovery } from "../bookshelf/AcademicBankDiscovery";
 import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
+import type { QuestionSet } from "../../lib/library";
 
 const packages: KnownPackage[] = knownBankManifests.map((manifest) => ({ manifest, hasSource: false }));
-export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate, heldForReview }: {
+export function QuestionBankLibrary({ onPractice, onPracticeSet, onOpenBank, onImport, onCreate, heldForReview }: {
   onPractice: (selection: PracticeSelection) => void;
+  onPracticeSet?: (set: QuestionSet) => void;
   onOpenBank: (book: QuestionBankBook, week?: number) => void;
   onImport: () => void;
   onCreate: () => void;
@@ -67,7 +69,7 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
     </details>
     <details className="qb-course-catalog" open={communityOpen} onToggle={event => setCommunityOpen(event.currentTarget.open)}>
       <summary><span><b>Browse learner Question Sets</b><small>Search reviewed sets shared by other AXOM learners.</small></span></summary>
-      {communityOpen && <CommunityQuestionSetLibrary />}
+      {communityOpen && <CommunityQuestionSetLibrary onPractice={onPracticeSet} />}
     </details>
     <details ref={preparedRef} id="prepared-course-library" className="cloud-local-material qb-library-maintenance"
       open={preparedOpen} onToggle={(event) => setPreparedOpen(event.currentTarget.open)}>

@@ -23,7 +23,7 @@ import {
   validateMissingQuestionAttachmentFile,
   type QuestionImageAttachment,
 } from "./questionAttachments";
-import { DB_NAME, DB_VERSION, STORE_NAME, BACKUP_STORE_NAME, ATTACHMENT_STORE_NAME } from "./localVault";
+import { DB_NAME, DB_VERSION, STORE_NAME, BACKUP_STORE_NAME, ATTACHMENT_STORE_NAME, ensureVaultStores } from "./localVault";
 
 function deleteDatabase(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -140,11 +140,114 @@ describe("missing direct-image repair", () => {
     expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
   });
 
+  it.each([
+    ["QuotaExceededError", /browser reported a storage-space limit/i],
+    ["AbortError", /interrupted the image-storage transaction \(AbortError\)/i],
+    ["TransactionInactiveError", /interrupted the image-storage transaction \(TransactionInactiveError\)/i],
+    ["DataCloneError", /could not store the selected file/i],
+    ["NotFoundError", /image store is unavailable/i],
+  ])("explains a plain %s without claiming a restore or exposing raw error text", async (name, expected) => {
+    const originalAdd = FakeIDBObjectStore.prototype.add;
+    const add = vi.spyOn(FakeIDBObjectStore.prototype, "add").mockImplementation(function (this: IDBObjectStore, value, key) {
+      if (this.name === ATTACHMENT_STORE_NAME) throw Object.assign(new Error("private browser implementation details"), { name });
+      return originalAdd.call(this, value, key);
+    });
+    try {
+      const result = await restoreMissingQuestionAttachment({ attachment: metadata(), file: pngFile(), questionId: "q1" });
+      expect(result).toMatchObject({ status: "failed", message: expect.stringMatching(expected) });
+      expect(JSON.stringify(result)).not.toContain("private browser implementation details");
+    } finally { add.mockRestore(); }
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
+  });
+
+  it("reports a newer database version without guessing that storage is full", async () => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION + 1);
+      request.onsuccess = () => { request.result.close(); resolve(); };
+      request.onerror = () => reject(request.error);
+    });
+    const result = await restoreMissingQuestionAttachment({ attachment: metadata(), file: pngFile(), questionId: "q1" });
+    expect(result).toMatchObject({ status: "failed", message: expect.stringContaining("older image-store version") });
+  });
+
+  it("explains an upgrade blocked by an older tab and can retry after it closes", async () => {
+    const older = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION - 1);
+      request.onupgradeneeded = () => ensureVaultStores(request.result);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    older.onversionchange = () => {};
+    try {
+      expect(await restoreMissingQuestionAttachment({ attachment: metadata(), file: pngFile(), questionId: "q1" }))
+        .toMatchObject({ status: "failed", message: expect.stringContaining("Close older AXOM tabs") });
+    } finally { older.close(); }
+    expect(await restoreMissingQuestionAttachment({ attachment: metadata(), file: pngFile(), questionId: "q1" }))
+      .toEqual({ status: "restored" });
+  });
+
+  it("keeps a concurrent winner intact when add returns a non-DOM ConstraintError", async () => {
+    const attachment = metadata();
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngFile(), questionId: "q1", mimeType: "image/png", byteSize: PNG_BYTES.length, updatedAt: attachment.updatedAt,
+    });
+    const originalGet = FakeIDBObjectStore.prototype.get;
+    const originalAdd = FakeIDBObjectStore.prototype.add;
+    let firstRead = true;
+    const get = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, key) {
+      if (this.name === ATTACHMENT_STORE_NAME && firstRead) { firstRead = false; return originalGet.call(this, "simulate-pre-race-miss"); }
+      return originalGet.call(this, key);
+    });
+    const add = vi.spyOn(FakeIDBObjectStore.prototype, "add").mockImplementation(function (this: IDBObjectStore, value, key) {
+      if (this.name === ATTACHMENT_STORE_NAME) throw Object.assign(new Error("Concurrent key reservation"), { name: "ConstraintError" });
+      return originalAdd.call(this, value, key);
+    });
+    try {
+      expect(await restoreMissingQuestionAttachment({ attachment, file: pngFile(), questionId: "q1" }))
+        .toMatchObject({ status: "exists", message: expect.stringContaining("did not replace") });
+    } finally { get.mockRestore(); add.mockRestore(); }
+    expect([...new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer())]).toEqual([...PNG_BYTES]);
+  });
+
+  it("retains a malformed reserved row and reports unavailable bytes instead of an available image", async () => {
+    const attachment = metadata();
+    const damaged = { questionId: "q1", mimeType: "image/png" as const, byteSize: PNG_BYTES.length, updatedAt: attachment.updatedAt };
+    await putQuestionAttachmentBlob(attachment.blobKey, damaged as Parameters<typeof putQuestionAttachmentBlob>[1]);
+    const result = await restoreMissingQuestionAttachment({ attachment, file: pngFile(), questionId: "q1" });
+    expect(result).toMatchObject({ status: "failed", message: expect.stringContaining("reserves this key") });
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toEqual(damaged);
+  });
+
+  it("does not replace a dangling null row when its reserved key causes a real IndexedDB constraint failure", async () => {
+    const attachment = metadata();
+    await putQuestionAttachmentBlob(attachment.blobKey, null as unknown as Parameters<typeof putQuestionAttachmentBlob>[1]);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+    expect(await restoreMissingQuestionAttachment({ attachment, file: pngFile(), questionId: "q1" }))
+      .toMatchObject({ status: "failed", message: expect.stringContaining("reserves this key") });
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([attachment.blobKey]);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it("does not call a Blob descriptor available when its backing bytes cannot be read", async () => {
+    const attachment = metadata();
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([PNG_BYTES]), questionId: "q1", mimeType: "image/png", byteSize: PNG_BYTES.length, updatedAt: attachment.updatedAt,
+    });
+    const read = vi.spyOn(Blob.prototype, "arrayBuffer").mockRejectedValue(Object.assign(new Error("Backing bytes unavailable"), { name: "NotReadableError" }));
+    try {
+      expect(await restoreMissingQuestionAttachment({ attachment, file: pngFile(), questionId: "q1" }))
+        .toMatchObject({ status: "failed", message: expect.stringContaining("could not read the image bytes") });
+    } finally { read.mockRestore(); }
+    expect([...new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer())]).toEqual([...PNG_BYTES]);
+  });
+
   it("does not claim success when the just-written blob cannot be read back", async () => {
     const attachment = metadata({ width: 1536, height: 946 });
     const originalGet = FakeIDBObjectStore.prototype.get;
-    const getSpy = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore) {
-      return originalGet.call(this, "another-key");
+    const getSpy = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, key) {
+      // Only the image read is unavailable; the ownership receipt must remain
+      // readable so this exercises verification rather than a different fault.
+      return originalGet.call(this, this.name === ATTACHMENT_STORE_NAME ? "another-key" : key);
     });
     try {
       const result = await restoreMissingQuestionAttachment({ attachment, file: pngFile(), questionId: "q1" });
@@ -214,16 +317,50 @@ describe("blob store", () => {
 });
 
 describe("orphan maintenance", () => {
-  it("deletes unreferenced blobs, reports missing blobs, never touches referenced ones", async () => {
-    await putQuestionAttachmentBlob("referenced", { blob: new Blob(["a"]), mimeType: "image/png", byteSize: 1, questionId: "q1", updatedAt: "t" });
-    await putQuestionAttachmentBlob("orphan", { blob: new Blob(["b"]), mimeType: "image/png", byteSize: 1, questionId: "gone", updatedAt: "t" });
+  const record = (bytes: string, questionId: string) => ({
+    blob: new Blob([bytes]), mimeType: "image/png" as const,
+    byteSize: bytes.length, questionId, updatedAt: "t",
+  });
+
+  it("preserves unowned device bytes and reports missing references without deleting them", async () => {
+    await putQuestionAttachmentBlob("referenced", record("a", "q1"));
+    await putQuestionAttachmentBlob("orphan", record("b", "gone"));
     const questions = [
       { attachments: [metadata({ id: "referenced" }), metadata({ id: "missing-blob" })] },
     ];
     const report = await runQuestionAttachmentMaintenance(questions);
-    expect(report.deletedOrphanBlobKeys).toEqual(["orphan"]);
+    expect(report.deletedOrphanBlobKeys).toEqual([]);
+    expect(report.preservedUnscopedBlobCount).toBe(1);
     expect(report.missingBlobKeys).toEqual(["missing-blob"]);
+    expect(await listQuestionAttachmentBlobKeys()).toEqual(["orphan", "referenced"]);
+
+    // Targeted user-initiated deletion still works, unlike an unscoped sweep.
+    await deleteQuestionAttachmentBlobs(["orphan"]);
     expect(await listQuestionAttachmentBlobKeys()).toEqual(["referenced"]);
+  });
+
+  it("does not erase A's non-private attachment across simulated disjoint and empty B hydration", async () => {
+    await putQuestionAttachmentBlob("account-A-attachment", record("account-A-original", "A-question"));
+    await putQuestionAttachmentBlob("account-B-attachment", record("account-B-original", "B-question"));
+    const bWorkspace = [{ attachments: [metadata({
+      id: "account-B-attachment", blobKey: "account-B-attachment",
+    })] }];
+    const bReport = await runQuestionAttachmentMaintenance(bWorkspace);
+    expect(bReport.deletedOrphanBlobKeys).toEqual([]);
+    expect(bReport.preservedUnscopedBlobCount).toBe(1);
+
+    // A completely empty workspace is not proof this origin's Blob store
+    // belongs to that account, including during a fresh B rehydration.
+    const emptyReport = await runQuestionAttachmentMaintenance([]);
+    expect(emptyReport.deletedOrphanBlobKeys).toEqual([]);
+    expect(emptyReport.preservedUnscopedBlobCount).toBe(2);
+
+    const a = await getQuestionAttachmentBlob("account-A-attachment", { localOnly: true });
+    const b = await getQuestionAttachmentBlob("account-B-attachment", { localOnly: true });
+    expect(a).toMatchObject({ questionId: "A-question", byteSize: 18 });
+    expect(b).toMatchObject({ questionId: "B-question", byteSize: 18 });
+    expect(await a!.blob.text()).toBe("account-A-original");
+    expect(await b!.blob.text()).toBe("account-B-original");
   });
 });
 

@@ -36,13 +36,16 @@ describe("cloud content upload", () => {
       return { error: null };
     });
     const client = storageClient(upload, vi.fn());
-    const pending = uploadCloudContent(client, "account-a", records, [], guard);
+    const progress = vi.fn();
+    const pending = uploadCloudContent(client, "account-a", records, [], guard, progress);
     await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(8));
     expect(active).toBe(8);
+    expect(progress).toHaveBeenLastCalledWith(0, records.length);
     release();
     await pending;
     expect(upload).toHaveBeenCalledTimes(records.length);
     expect(peak).toBe(8);
+    expect(progress).toHaveBeenLastCalledWith(records.length, records.length);
   });
 
   it("deduplicates a batch and reuses only account-scoped verified uploads on retry", async () => {

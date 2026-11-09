@@ -1,0 +1,36 @@
+.community-preferences { min-width: 0; }
+.community-preferences-form, .community-preference-fields { display: grid; gap: 16px; min-width: 0; }
+.community-preferences-help, .community-preferences-profile-link p, .community-preferences-leave p { margin: 0; color: var(--text-60); font-size: var(--fs-xs); line-height: 1.6; }
+.community-preferences-help > svg { vertical-align: -2px; margin-right: 4px; }
+.community-preferences .community-discovery-choice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; cursor: pointer; }
+.community-discovery-choice input { flex: 0 0 auto; width: 17px; height: 17px; margin: 3px 0 0; accent-color: var(--gold); }
+.community-preferences .community-discovery-choice > span { display: grid; gap: 4px; min-width: 0; font-size: var(--fs-sm); }
+.community-discovery-choice strong { color: var(--text); font-weight: var(--fw-semibold); }
+.community-discovery-choice small { color: var(--text-60); font-size: var(--fs-xs); font-weight: var(--fw-regular); line-height: 1.55; }
+.community-sharing-choice { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.community-sharing-choice legend { margin-bottom: 7px; padding: 0; color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.community-sharing-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; min-width: 0; }
+.community-preferences .community-sharing-option { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 11px; color: var(--text-70); background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-sm); cursor: pointer; }
+.community-preferences .community-sharing-option.selected { background: var(--gold-soft); border-color: var(--gold-line); }
+.community-preferences .community-sharing-option:focus-within { outline: 2px solid var(--gold); outline-offset: 2px; }
+.community-preferences .community-sharing-option-title { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--text); font-size: var(--fs-xs); }
+.community-sharing-option-title input { flex: 0 0 auto; width: 15px; height: 15px; margin: 0; accent-color: var(--gold); }
+.community-sharing-option-title svg { flex: 0 0 auto; color: var(--gold); }
+.community-sharing-option strong { overflow-wrap: anywhere; font-weight: var(--fw-semibold); }
+.community-preferences .community-sharing-option > small { color: var(--text-60); font-size: var(--fs-xs); line-height: 1.5; }
+.community-sharing-choice:disabled .community-sharing-option, .community-discovery-choice:has(input:disabled) { opacity: .65; cursor: default; }
+.community-preferences-note { margin: 0; padding: 9px 11px; color: var(--text-80); background: var(--surface-1); border: 1px dashed var(--gold-line); border-radius: var(--radius-sm); font-size: var(--fs-xs); line-height: 1.6; }
+.community-preferences-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.community-preferences-error { margin: 14px 0 0; padding: 10px 12px; color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+.community-preferences-result, .community-preferences-sync { margin-top: 12px; color: var(--text-80); font-size: var(--fs-xs); }
+.community-preferences-sync p { margin: 0; }
+.community-preferences-profile-link { display: grid; gap: 7px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--hairline-soft); }
+.community-preferences-profile-link a { display: inline-flex; align-items: center; gap: 5px; justify-self: start; color: var(--gold); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.community-preferences-leave { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--hairline-soft); }
+.community-preferences-leave summary { width: fit-content; color: var(--text-60); cursor: pointer; font-size: var(--fs-xs); }
+.community-preferences-leave p { margin: 10px 0; }
+.community-preferences-signup { display: grid; gap: 14px; padding-top: 17px; border-top: 1px solid var(--hairline); }
+.community-preferences-signup h6 { margin: 0; color: var(--text); font-family: var(--font-display); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+@media (max-width: 560px) {
+  .community-sharing-options { grid-template-columns: 1fr; }
+}

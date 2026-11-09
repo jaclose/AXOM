@@ -6,7 +6,8 @@ import { ASSET_ROLES, type AssetRole } from "./question-content/blocks";
 // serialized workspace JSON and never in localStorage. Portable backups may
 // inline base64 payloads inside the exported file only.
 // ===========================================================================
-import { ATTACHMENT_STORE_NAME, DB_NAME, DB_VERSION, ensureVaultStores } from "./localVault";
+import { ATTACHMENT_STORE_NAME, STORE_NAME, DB_NAME, DB_VERSION, ensureVaultStores } from "./localVault";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, legacyQuestionAttachmentOwnerHint, type QuestionAttachmentScope } from "./questionAttachmentScope";
 import { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
 export { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
 
@@ -147,13 +148,15 @@ function openAttachmentDb(): Promise<IDBDatabase> {
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    let blocked = false;
     req.onupgradeneeded = () => ensureVaultStores(req.result);
     req.onsuccess = () => {
+      if (blocked) { req.result.close(); return; }
       req.result.onversionchange = () => req.result.close();
       resolve(req.result);
     };
     req.onerror = () => reject(req.error ?? new Error("Unable to open the attachment store"));
-    req.onblocked = () => reject(new Error("The attachment store is blocked by another tab"));
+    req.onblocked = () => { blocked = true; reject(new Error("The attachment store is blocked by another tab. Close older AXOM tabs and retry.")); };
   });
 }
 
@@ -164,7 +167,9 @@ async function withAttachmentStore<T>(
   const db = await openAttachmentDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(ATTACHMENT_STORE_NAME, mode);
-    const req = run(tx.objectStore(ATTACHMENT_STORE_NAME));
+    let req: IDBRequest<T>;
+    try { req = run(tx.objectStore(ATTACHMENT_STORE_NAME)); }
+    catch (error) { tx.abort(); db.close(); reject(error); return; }
     let result: T;
     let settled = false;
     req.onsuccess = () => { result = req.result; };
@@ -186,13 +191,83 @@ async function withAttachmentStore<T>(
   });
 }
 
-export function putQuestionAttachmentBlob(blobKey: string, record: QuestionAttachmentBlobRecord): Promise<IDBValidKey> {
-  return withAttachmentStore("readwrite", (store) => store.put(record, blobKey));
+const scopedBlobKey = (scope: QuestionAttachmentScope, blobKey: string): IDBValidKey[] => ["axom-attachment-v1", scope.owner, blobKey];
+const LEGACY_OWNER_KEY = "axom.attachments.legacy-owner.v1";
+
+function assertScope(scope: QuestionAttachmentScope, accountId?: string): void {
+  if (!isQuestionAttachmentScopeCurrent(scope) || (accountId !== undefined && scope.accountId !== accountId)) {
+    throw new Error("The account changed during image access. Reopen the question before retrying.");
+  }
+}
+
+/** An atomic, permanent receipt prevents a later account from claiming old
+ * unscoped bytes. Unknown ownership stays unknown; originals remain on disk. */
+export async function readLegacyLocalBinaryOwner(): Promise<string | null> {
+  const hint = legacyQuestionAttachmentOwnerHint();
+  const db = await openAttachmentDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(LEGACY_OWNER_KEY);
+    let owner: string | null = null;
+    request.onsuccess = () => {
+      if (request.result === undefined) store.add({ owner: hint }, LEGACY_OWNER_KEY);
+      owner = request.result === undefined ? hint : request.result?.owner ?? null;
+    };
+    tx.oncomplete = () => { db.close(); resolve(owner); };
+    tx.onerror = tx.onabort = () => { db.close(); reject(tx.error ?? new Error("Image ownership could not be verified.")); };
+  });
+}
+
+export async function putQuestionAttachmentBlob(blobKey: string, record: QuestionAttachmentBlobRecord, options: AttachmentReadOptions = {}): Promise<IDBValidKey> {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  assertScope(scope, options.accountId);
+  const key = await withAttachmentStore("readwrite", (store) => {
+    assertScope(scope, options.accountId);
+    return store.put(record, scopedBlobKey(scope, blobKey));
+  });
+  assertScope(scope, options.accountId);
+  return key;
 }
 
 export type MissingAttachmentRestoreResult =
   | { status: "restored" }
   | { status: "rejected" | "exists" | "failed"; message: string };
+
+function attachmentErrorName(error: unknown): string | undefined {
+  // IndexedDB implementations and other realms may return plain Error objects,
+  // so instanceof DOMException is not a reliable storage-error discriminator.
+  return error && typeof error === "object" && "name" in error && typeof error.name === "string"
+    ? error.name : undefined;
+}
+
+async function readableAttachmentRecord(value: QuestionAttachmentBlobRecord | undefined): Promise<boolean> {
+  if (!value?.blob || typeof value.blob.arrayBuffer !== "function" || value.blob.size <= 0
+    || value.blob.size !== value.byteSize || !QUESTION_ATTACHMENT_TYPES.includes(value.mimeType)) return false;
+  // A Blob descriptor can survive even when its backing bytes cannot be read.
+  return (await value.blob.arrayBuffer()).byteLength === value.byteSize;
+}
+
+function attachmentRestoreFailure(error: unknown, saved = false): MissingAttachmentRestoreResult {
+  const prefix = saved ? "The image was saved but could not be read back. " : "AXOM could not save this image. ";
+  const name = attachmentErrorName(error);
+  if (name === "QuotaExceededError") return { status: "failed", message: `${prefix}The browser reported a storage-space limit. Keep the original, export a portable backup, and retry after making space.` };
+  if (name === "VersionError") return { status: "failed", message: `${prefix}This tab uses an older image-store version. Reload the latest AXOM, close older AXOM tabs, and retry with the original file.` };
+  if (error instanceof Error && error.message.startsWith("The attachment store is blocked by another tab.")) {
+    return { status: "failed", message: `${prefix}Close older AXOM tabs so the image store can open, then retry. Keep the original file.` };
+  }
+  if (error instanceof Error && error.message === "The account changed during image access. Reopen the question before retrying.") {
+    return { status: "failed", message: `${prefix}The account changed. Reopen this question in its original account before retrying.` };
+  }
+  if (["AbortError", "TransactionInactiveError", "InvalidStateError"].includes(name ?? "")) {
+    return { status: "failed", message: `${prefix}The browser interrupted the image-storage transaction (${name}). Keep the original, reload AXOM, and retry.` };
+  }
+  if (name === "NotFoundError") return { status: "failed", message: `${prefix}The image store is unavailable in this tab. Reload the latest AXOM and retry. Keep the original and do not clear browser data.` };
+  if (name === "DataCloneError") return { status: "failed", message: `${prefix}This browser could not store the selected file. Keep the original and retry in an updated browser.` };
+  if (name === "NotReadableError") return { status: "failed", message: `${prefix}The browser could not read the image bytes. Keep the original, export a portable backup, and reload AXOM before retrying.` };
+  if (name === "ConstraintError") return { status: "failed", message: `${prefix}An image record already reserves this key, but its bytes could not be verified. AXOM did not replace it. Keep the original and export a portable backup before repairing storage.` };
+  return { status: "failed", message: `${prefix}Keep the original file and try again.` };
+}
 
 /** A missing attachment has no stored checksum, so require every recorded
  * property and a successful decode before the learner reviews the preview. */
@@ -236,58 +311,123 @@ export async function restoreMissingQuestionAttachment(input: {
   questionId: string;
 }): Promise<MissingAttachmentRestoreResult> {
   const { attachment, file, questionId } = input;
+  const scope = getQuestionAttachmentScope();
   const validation = await validateMissingQuestionAttachmentFile(file, attachment);
   if (!validation.ok) return { status: "rejected", message: validation.message };
   try {
-    await withAttachmentStore("readwrite", (store) => store.add({
+    const existing = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, scope });
+    if (existing) {
+      const readable = await readableAttachmentRecord(existing);
+      assertScope(scope);
+      if (!readable) return attachmentRestoreFailure({ name: "ConstraintError" });
+      return { status: "exists", message: "This image is already stored. AXOM did not replace it." };
+    }
+    await withAttachmentStore("readwrite", (store) => {
+      assertScope(scope);
+      return store.add({
       blob: file,
       mimeType: attachment.mimeType,
       byteSize: file.size,
       questionId,
       updatedAt: attachment.updatedAt,
-    } satisfies QuestionAttachmentBlobRecord, attachment.blobKey));
+      } satisfies QuestionAttachmentBlobRecord, scopedBlobKey(scope, attachment.blobKey));
+    });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "ConstraintError") {
-      return { status: "exists", message: "This image is already stored. AXOM did not replace it." };
+    if (attachmentErrorName(error) === "ConstraintError") {
+      // A competing add can win after the initial read. A reserved key alone
+      // is not evidence of usable bytes; retain malformed/dangling rows too.
+      try {
+        const existing = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, scope });
+        const readable = await readableAttachmentRecord(existing);
+        assertScope(scope);
+        if (readable) return { status: "exists", message: "This image is already stored. AXOM did not replace it." };
+      } catch (readError) { return attachmentRestoreFailure(readError); }
     }
-    return { status: "failed", message: "AXOM could not save this image. Keep the original file and try again." };
+    return attachmentRestoreFailure(error);
   }
   try {
-    const stored = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true });
-    if (!stored || stored.questionId !== questionId || stored.mimeType !== attachment.mimeType
+    const stored = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, scope });
+    if (!await readableAttachmentRecord(stored) || !stored || stored.questionId !== questionId || stored.mimeType !== attachment.mimeType
       || stored.byteSize !== file.size || stored.blob.size !== file.size
       || !equalBytes(new Uint8Array(await stored.blob.arrayBuffer()), new Uint8Array(await file.arrayBuffer()))) {
       return { status: "failed", message: "The image was saved but could not be verified. Keep the original file." };
     }
-  } catch {
-    return { status: "failed", message: "The image was saved but could not be read back. Keep the original file." };
+    assertScope(scope);
+  } catch (error) {
+    return attachmentRestoreFailure(error, true);
   }
   return { status: "restored" };
 }
 
 type MissingAttachmentLoader = (blobKey: string) => Promise<QuestionAttachmentBlobRecord | undefined>;
 let missingAttachmentLoader: MissingAttachmentLoader | undefined;
+let missingAttachmentScope: QuestionAttachmentScope | undefined;
 export function setMissingAttachmentLoader(loader: MissingAttachmentLoader): () => void {
   missingAttachmentLoader = loader;
+  missingAttachmentScope = getQuestionAttachmentScope();
   return () => { if (missingAttachmentLoader === loader) missingAttachmentLoader = undefined; };
 }
 
-export interface AttachmentReadOptions { localOnly?: boolean }
+export interface AttachmentReadOptions { localOnly?: boolean; accountId?: string; scope?: QuestionAttachmentScope }
 
 export async function getQuestionAttachmentBlob(blobKey: string, options: AttachmentReadOptions = {}): Promise<QuestionAttachmentBlobRecord | undefined> {
-  const local = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(blobKey));
-  return local ?? (options.localOnly ? undefined : await missingAttachmentLoader?.(blobKey));
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  assertScope(scope, options.accountId);
+  let local = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(scopedBlobKey(scope, blobKey)));
+  assertScope(scope, options.accountId);
+  if (!local && await readLegacyLocalBinaryOwner() === scope.owner) {
+    assertScope(scope, options.accountId);
+    local = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(blobKey));
+  }
+  assertScope(scope, options.accountId);
+  const result = local ?? (options.localOnly || missingAttachmentScope !== scope ? undefined : await missingAttachmentLoader?.(blobKey));
+  assertScope(scope, options.accountId);
+  return result;
 }
 
-export async function deleteQuestionAttachmentBlobs(blobKeys: readonly string[]): Promise<void> {
+export async function deleteQuestionAttachmentBlobs(blobKeys: readonly string[], options: AttachmentReadOptions = {}): Promise<void> {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  assertScope(scope, options.accountId);
   for (const key of blobKeys) {
-    await withAttachmentStore("readwrite", (store) => store.delete(key));
+    await withAttachmentStore("readwrite", (store) => { assertScope(scope); return store.delete(scopedBlobKey(scope, key)); });
   }
 }
 
-export function listQuestionAttachmentBlobKeys(): Promise<string[]> {
-  return withAttachmentStore<IDBValidKey[]>("readonly", (store) => store.getAllKeys())
-    .then((keys) => keys.map((key) => String(key)));
+export async function listQuestionAttachmentBlobKeys(): Promise<string[]> {
+  const scope = getQuestionAttachmentScope();
+  const canReadLegacy = await readLegacyLocalBinaryOwner() === scope.owner;
+  const keys = await withAttachmentStore<IDBValidKey[]>("readonly", (store) => store.getAllKeys());
+  assertScope(scope);
+  return [...new Set(keys.flatMap(key => Array.isArray(key)
+    ? key[0] === "axom-attachment-v1" && key[1] === scope.owner && typeof key[2] === "string" ? [key[2]] : []
+    : canReadLegacy && typeof key === "string" ? [key] : []))].sort();
+}
+
+/** Called only by the learner's explicit "protect this device" action.
+ * Copy only known device-owned rows, never ambiguous legacy or another
+ * account's rows. The device originals remain available for offline recovery. */
+export async function adoptDeviceQuestionAttachments(accountId: string, blobKeys: Iterable<string>): Promise<void> {
+  const scope = getQuestionAttachmentScope();
+  assertScope(scope, accountId);
+  const deviceScope: QuestionAttachmentScope = { owner: "device", generation: -1 };
+  for (const blobKey of new Set(blobKeys)) {
+    const device = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", store => store.get(scopedBlobKey(deviceScope, blobKey)));
+    assertScope(scope, accountId);
+    if (!device) continue;
+    const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope, accountId });
+    if (current) {
+      const [left, right] = await Promise.all([current.blob.arrayBuffer(), device.blob.arrayBuffer()]);
+      if (current.mimeType !== device.mimeType || !equalBytes(new Uint8Array(left), new Uint8Array(right))) {
+        throw new Error("This account already has a different image with the same identity. Export both workspaces before combining them.");
+      }
+      continue;
+    }
+    await withAttachmentStore("readwrite", store => {
+      assertScope(scope, accountId);
+      return store.add(device, scopedBlobKey(scope, blobKey));
+    });
+    assertScope(scope, accountId);
+  }
 }
 
 // --- creation ---------------------------------------------------------------
@@ -305,7 +445,10 @@ export async function createQuestionAttachment(input: {
   questionId: string;
   existing: readonly QuestionImageAttachment[];
   now?: string;
+  scope?: QuestionAttachmentScope;
 }): Promise<AttachmentCreationResult> {
+  const scope = input.scope ?? getQuestionAttachmentScope();
+  assertScope(scope);
   const name = ("name" in input.file && typeof input.file.name === "string" && input.file.name) || "pasted-image";
   const validation = validateQuestionAttachmentFile(
     { name, type: input.file.type, size: input.file.size },
@@ -342,7 +485,7 @@ export async function createQuestionAttachment(input: {
       byteSize: input.file.size,
       questionId: input.questionId,
       updatedAt: now,
-    });
+    }, { scope });
   } catch (error) {
     const isQuota = error instanceof DOMException && error.name === "QuotaExceededError";
     return {
@@ -358,16 +501,26 @@ export async function createQuestionAttachment(input: {
 // --- orphan maintenance ------------------------------------------------------
 
 export interface AttachmentMaintenanceReport {
+  /** Automatic deletion is disabled until per-account ownership can be proven. */
   deletedOrphanBlobKeys: string[];
+  /** Count of retained origin-shared keys, without disclosing other accounts' key IDs. */
+  preservedUnscopedBlobCount?: number;
   missingBlobKeys: string[];
 }
 
-/** Bounded, deterministic, non-destructive sweep: deletes blobs no question
- * references; reports (but never deletes) metadata whose blob is missing.
- * SAFETY: only call with a question list that is known to be fully loaded —
- * never before store rehydration (an empty list would orphan every blob).
- * AXOM runs it post-restore/merge with the restored questions passed
- * explicitly; question deletion uses targeted deletes instead of a sweep. */
+/** Read-only inventory of the currently hydrated question references.
+ *
+ * IMPORTANT: questionAttachmentBlobs is shared by every account on this browser
+ * origin, while this list belongs to only the currently hydrated workspace.
+ * An absent key here is NOT proof that another account has discarded it.
+ * Deleting an "orphan" during account B rehydration could erase account A's
+ * still-referenced image. Preserve every unscoped key until the vault has
+ * durable, verified account ownership and a safe legacy migration.
+ *
+ * Explicit, caller-authorized targeted deletion remains separate via
+ * deleteQuestionAttachmentBlobs. This inventory does not fix the distinct
+ * cross-account read/export issue; those paths require their own guards.
+ * Retention may consume more device storage until scoped GC is implemented. */
 export async function runQuestionAttachmentMaintenance(
   questions: ReadonlyArray<{ attachments?: readonly QuestionImageAttachment[] }>,
 ): Promise<AttachmentMaintenanceReport> {
@@ -376,13 +529,12 @@ export async function runQuestionAttachmentMaintenance(
     for (const attachment of question.attachments ?? []) referenced.add(attachment.blobKey);
   }
   const stored = await listQuestionAttachmentBlobKeys();
-  // Private review documents have their own references. Preserve their bytes if
-  // an older app/backup cannot read a document; recovery must remain possible.
-  const orphans = stored.filter((key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key));
-  await deleteQuestionAttachmentBlobs(orphans);
+  const preservedUnscopedBlobCount = stored.filter(
+    (key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key),
+  ).length;
   const storedSet = new Set(stored);
-  const missing = [...referenced].filter((key) => !storedSet.has(key));
-  return { deletedOrphanBlobKeys: orphans, missingBlobKeys: missing };
+  const missingBlobKeys = [...referenced].filter((key) => !storedSet.has(key));
+  return { deletedOrphanBlobKeys: [], preservedUnscopedBlobCount, missingBlobKeys };
 }
 
 // --- portable backup payloads ------------------------------------------------
@@ -406,6 +558,8 @@ export async function collectQuestionAttachmentPayloads(
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
   options: AttachmentReadOptions = {},
 ): Promise<{ payloads: QuestionAttachmentExportPayload[]; missingBlobKeys: string[] }> {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  options = { ...options, scope };
   const payloads: QuestionAttachmentExportPayload[] = [];
   const missing: string[] = [];
   for (const question of questions) {
@@ -427,6 +581,7 @@ export async function collectQuestionAttachmentPayloads(
       payloads.push({ ...attachment, questionId: question.id, base64 });
     }
   }
+  assertScope(scope, options.accountId);
   return { payloads, missingBlobKeys: missing };
 }
 
@@ -470,6 +625,7 @@ export async function stageQuestionAttachmentPayloads(
   payloads: readonly QuestionAttachmentExportPayload[],
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
 ): Promise<StagedQuestionAttachmentRestore> {
+  const scope = getQuestionAttachmentScope();
   const surviving = new Map<string, QuestionImageAttachment & { questionId: string }>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) {
@@ -485,7 +641,7 @@ export async function stageQuestionAttachmentPayloads(
     const failures: string[] = [];
     for (const [blobKey, staged] of inserted) {
       try {
-        const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true });
+        const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope });
         if (!current) continue;
         const [currentBytes, stagedBytes] = await Promise.all([
           current.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
@@ -496,7 +652,7 @@ export async function stageQuestionAttachmentPayloads(
           failures.push(blobKey);
           continue;
         }
-        await deleteQuestionAttachmentBlobs([blobKey]);
+        await deleteQuestionAttachmentBlobs([blobKey], { scope });
       } catch {
         failures.push(blobKey);
       }
@@ -517,7 +673,7 @@ export async function stageQuestionAttachmentPayloads(
         throw new Error("A backup image failed validation. No existing image was overwritten.");
       }
 
-      const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true });
+      const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
       if (existing) {
         const existingBytes = new Uint8Array(await existing.blob.arrayBuffer());
         if (existing.mimeType !== payload.mimeType || !equalBytes(existingBytes, bytes)) {
@@ -534,10 +690,11 @@ export async function stageQuestionAttachmentPayloads(
         questionId: target.questionId,
         updatedAt: payload.updatedAt,
       };
-      await putQuestionAttachmentBlob(payload.blobKey, record);
+      await putQuestionAttachmentBlob(payload.blobKey, record, { scope });
       inserted.set(payload.blobKey, record);
       restored += 1;
     }
+    assertScope(scope);
     return { restored, skipped, rollback };
   } catch (error) {
     try {
@@ -557,6 +714,7 @@ export async function restoreQuestionAttachmentPayloads(
   payloads: readonly QuestionAttachmentExportPayload[],
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
 ): Promise<{ restored: number; skipped: number }> {
+  const scope = getQuestionAttachmentScope();
   const surviving = new Map<string, QuestionImageAttachment & { questionId: string }>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) {
@@ -570,7 +728,7 @@ export async function restoreQuestionAttachmentPayloads(
     if (!target) { skipped += 1; continue; }
     let existing: QuestionAttachmentBlobRecord | undefined;
     try {
-      existing = await getQuestionAttachmentBlob(payload.blobKey);
+      existing = await getQuestionAttachmentBlob(payload.blobKey, { scope });
     } catch {
       existing = undefined;
     }
@@ -588,9 +746,10 @@ export async function restoreQuestionAttachmentPayloads(
       byteSize: bytes.byteLength,
       questionId: target.questionId,
       updatedAt: payload.updatedAt,
-    });
+    }, { scope });
     restored += 1;
   }
+  assertScope(scope);
   return { restored, skipped };
 }
 

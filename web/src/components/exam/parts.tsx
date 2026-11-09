@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { QuestionRecord } from "../../lib/questions";
 import type { QuestionImageAttachment } from "../../lib/questionAttachments";
 import { getQuestionAttachmentBlob } from "../../lib/questionAttachments";
+import { useQuestionAttachmentScope } from "../questions/useQuestionAttachmentScope";
 import { LAB_SECTIONS, LAB_VALUES_SOURCE, searchLabValues, type LabSection } from "../../data/labValues";
 import { formatQuestionTime } from "../../lib/exam/questionTime";
 import type { ItemResult } from "../../lib/exam/engine";
@@ -65,8 +66,9 @@ function FragmentRows({ heading, children }: { heading?: string; children: React
  * that is not on this device has no entry (the caller says so in its place).
  */
 export function useExhibitUrls(attachments: readonly QuestionImageAttachment[]): Record<string, string> {
-  const [urls, setUrls] = useState<Record<string, string>>({});
-  const signature = attachments.map((attachment) => `${attachment.id}:${attachment.blobKey}`).join("|");
+  const scope = useQuestionAttachmentScope();
+  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string> }>({ signature: "", urls: {} });
+  const signature = JSON.stringify([scope.owner, scope.generation, attachments.map(a => [a.id, a.blobKey, a.updatedAt])]);
   useEffect(() => {
     let cancelled = false;
     const created: string[] = [];
@@ -74,13 +76,16 @@ export function useExhibitUrls(attachments: readonly QuestionImageAttachment[]):
       const next: Record<string, string> = {};
       for (const attachment of attachments) {
         const record = await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined);
+        if (cancelled) return;
         if (record) {
-          const url = URL.createObjectURL(record.blob);
-          created.push(url);
-          next[attachment.id] = url;
+          try {
+            const url = URL.createObjectURL(record.blob);
+            created.push(url);
+            next[attachment.id] = url;
+          } catch { /* Other exhibits remain usable if the browser cannot allocate this one. */ }
         }
       }
-      if (!cancelled) setUrls(next);
+      if (!cancelled) setLoaded({ signature, urls: next });
       else created.forEach((url) => URL.revokeObjectURL(url));
     })();
     return () => {
@@ -89,7 +94,7 @@ export function useExhibitUrls(attachments: readonly QuestionImageAttachment[]):
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
-  return urls;
+  return loaded.signature === signature ? loaded.urls : {};
 }
 
 /** What the explanation says first: the result in a word, the right answer, and the time taken. */

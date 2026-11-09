@@ -158,6 +158,8 @@ function recheckOperatorAccess(discardCurrent: boolean) {
   checkOperatorAccess();
 }
 const retryOperatorAccess = () => recheckOperatorAccess(true);
+/** Keep the visible role while checking for a newly granted permission. */
+export function refreshOperatorAccess() { if (accessListeners.size) recheckOperatorAccess(false); }
 
 function subscribeOperatorAccess(listener: () => void) {
   if (!accessEventsBound && typeof window !== "undefined") {
@@ -206,6 +208,18 @@ export async function loadOperatorDashboard(accountId: string): Promise<Operator
   return result;
   });
 }
+const validOperatorReports = (value: unknown): value is OperatorReport[] =>
+  bounded(value, 100, item => row(item) && [item.post_id, item.author_handle, item.post_kind, item.reason, item.note, item.latest_at].every(text) && count(item.reports));
+
+export async function loadOperatorReports(accountId: string): Promise<OperatorReport[]> {
+  return withClient(accountId, async client => {
+    const { data, error } = await client.rpc("axom_operator_reports");
+    if (error) throw new Error("Reported posts could not be loaded. Retry when connected.");
+    if (!validOperatorReports(data)) throw new Error("The moderation queue returned incomplete data. Refresh before continuing.");
+    return data;
+  });
+}
+
 export async function searchOperatorAccounts(accountId: string, query: string): Promise<OperatorAccount[]> {
   const term = query.trim();
   if (!term) return [];

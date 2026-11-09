@@ -12,9 +12,10 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { pushToast } from "../../lib/toast";
 import "../../styles/course-tracker.css";
 
-interface Action { id: "list" | "course" | "schedule"; icon: LucideIcon; title: string; detail: string }
+interface Action { id: "templates" | "list" | "course" | "schedule"; icon: LucideIcon; title: string; detail: string }
 
 const ACTIONS: Action[] = [
+  { id: "templates", icon: BookOpen, title: "Load your course templates", detail: "Preview saved plans or import your source files" },
   { id: "list", icon: ListPlus, title: "Paste a lecture list", detail: "From a syllabus, a spreadsheet or your notes" },
   { id: "course", icon: BookOpen, title: "Add a course", detail: "Name it now, add modules as they come" },
   { id: "schedule", icon: CalendarRange, title: "Import a schedule", detail: "A calendar or schedule export" },

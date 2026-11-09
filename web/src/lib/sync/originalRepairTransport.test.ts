@@ -6,6 +6,8 @@ import type { SnapshotEnvelope } from "./syncTypes";
 import { accountOperationClient } from "../account/supabase";
 import { repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
 import { uploadCloudContent } from "./cloudContent";
+import { findMissingWorkspaceMedia, uploadCloudMedia } from "./cloudMedia";
+import { useSyncProgress } from "./syncProgress";
 import { readSyncBaseline } from "./syncBaseline";
 import { SupabaseSyncTransport } from "./supabaseTransport";
 
@@ -20,6 +22,7 @@ vi.mock("./cloudContent", async importOriginal => ({
 }));
 vi.mock("./cloudMedia", async importOriginal => ({
   ...(await importOriginal<object>()),
+  findMissingWorkspaceMedia: vi.fn(async () => []),
   uploadCloudMedia: vi.fn(async () => []),
 }));
 vi.mock("./cloudOriginals", () => ({
@@ -72,6 +75,21 @@ function setup(fail: { code: string; message: string }, repaired: number = 1) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("workspace cloud-original repair acknowledgement", () => {
+  it("reports missing source images before any content upload and keeps private labels out of saved failure data", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    const images = [{ questionId: "private-question", questionLabel: "Private question excerpt", fileName: "private-source.png" }];
+    vi.mocked(findMissingWorkspaceMedia).mockResolvedValueOnce(images);
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "rejected", rejection: "missing-image", phase: "preflight" } });
+    expect(uploadCloudContent).not.toHaveBeenCalled();
+    expect(uploadCloudOriginals).not.toHaveBeenCalled();
+    expect(uploadCloudMedia).not.toHaveBeenCalled();
+    expect(fixture.rpc).not.toHaveBeenCalled();
+    expect(useSyncProgress.getState().attention).toEqual({ accountId: owner, images });
+    expect(useSyncProgress.getState().current).toBeNull();
+    expect(JSON.stringify(error)).not.toMatch(/private-question|Private question|private-source/);
+  });
+
   it("labels account setup failures without retaining private exception text", async () => {
     const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
     vi.mocked(accountOperationClient).mockRejectedValueOnce({

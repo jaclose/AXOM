@@ -10,7 +10,8 @@ import { importFromCsv } from "../../lib/questionImport";
 import { questionMappingStatus } from "../../lib/questions";
 import { parseImport, toPortableState } from "../../lib/backup";
 import { DB_NAME } from "../../lib/localVault";
-import { hasReviewedImportInFlight } from "../../lib/questionImportFinalization";
+import { hasReviewedImportInFlight, persistReviewedImportOnce, settledReviewedImportSnapshot, type ReviewedImportPersistenceResult } from "../../lib/questionImportFinalization";
+import type { SourceDocument } from "../../lib/library";
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
@@ -358,6 +359,119 @@ describe("Import Center persistence invariant", () => {
     expect(state.questions.filter((question) => question.bank === "Retry-safe questions only")).toHaveLength(1);
     expect(state.questionSets.filter((set) => set.title === "Retry-safe questions only")).toHaveLength(1);
     expect(state.documents).toHaveLength(0);
+  });
+
+  it("preserves a settled duplicate warning while an unrelated import is awaiting its durable write", async () => {
+    const user = userEvent.setup();
+    const durableRaw = "1. Already saved question?\nA. Alpha\nB. Beta\nAnswer: B\nExplanation: Verified before another import.";
+    const durableSeed = {
+      drafts: parseQuestionBlocks(durableRaw), rawText: durableRaw, title: "Durable question source",
+      fileName: "durable-questions.txt", fileType: "text", checksum: "durable-questions-checksum",
+    };
+    const saved = render(<ImportPanel seed={durableSeed} />);
+    await user.click(screen.getByRole("button", { name: "Questions" }));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => {
+      expect(useStore.getState().questions.filter((question) => question.bank === "Durable question source")).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull();
+      expect(hasReviewedImportInFlight()).toBe(false);
+    });
+    saved.unmount();
+
+    const storage = useStore.persist.getOptions().storage;
+    if (!storage) throw new Error("Persisted storage is required for this test.");
+    let rejectWrite!: (reason?: unknown) => void;
+    const blockedWrite = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+    let blockNextWrite = true;
+    let writeReleased = false;
+    useStore.persist.setOptions({
+      storage: {
+        getItem: (name) => storage.getItem(name),
+        removeItem: (name) => storage.removeItem(name),
+        setItem: (name, value) => {
+          if (blockNextWrite) {
+            blockNextWrite = false;
+            return blockedWrite;
+          }
+          return storage.setItem(name, value);
+        },
+      },
+    });
+
+    try {
+      const pendingRaw = "1. Unrelated uncommitted question?\nA. One\nB. Two\nAnswer: B\nExplanation: Another source rationale.";
+      const pending = render(<ImportPanel seed={{
+        drafts: parseQuestionBlocks(pendingRaw), rawText: pendingRaw, title: "Unrelated pending source",
+        fileName: "pending-other.txt", fileType: "text", checksum: "pending-other-checksum",
+      }} />);
+      await user.click(screen.getByRole("button", { name: "Questions" }));
+      await user.click(screen.getByRole("button", { name: "Finalize import" }));
+      await waitFor(() => {
+        expect(blockNextWrite).toBe(false);
+        expect(hasReviewedImportInFlight()).toBe(true);
+        expect(useStore.getState().questions.filter((question) => question.bank === "Unrelated pending source")).toHaveLength(1);
+      });
+      const settled = settledReviewedImportSnapshot({
+        questions: useStore.getState().questions,
+        questionSets: useStore.getState().questionSets,
+        documents: useStore.getState().documents,
+      });
+      expect(settled.questions.filter((question) => question.bank === "Durable question source")).toHaveLength(1);
+      expect(settled.questions.filter((question) => question.bank === "Unrelated pending source")).toHaveLength(0);
+      expect(settled.questionSets.filter((set) => set.title === "Durable question source")).toHaveLength(1);
+      expect(settled.questionSets.filter((set) => set.title === "Unrelated pending source")).toHaveLength(0);
+      pending.unmount();
+
+      render(<ImportPanel seed={durableSeed} />);
+      await user.click(screen.getByRole("button", { name: "Questions" }));
+      // The pending question is not durable, but it must not erase evidence
+      // that a different question was successfully imported before it.
+      expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+
+      writeReleased = true;
+      rejectWrite(new Error("Reject unrelated tentative import"));
+      await waitFor(() => {
+        expect(hasReviewedImportInFlight()).toBe(false);
+        expect(useStore.getState().questions.filter((question) => question.bank === "Durable question source")).toHaveLength(1);
+        expect(useStore.getState().questions.filter((question) => question.bank === "Unrelated pending source")).toHaveLength(0);
+        expect(useStore.getState().questionSets.filter((set) => set.title === "Durable question source")).toHaveLength(1);
+      });
+    } finally {
+      if (!writeReleased && !blockNextWrite) rejectWrite(new Error("Cleanup pending write"));
+      useStore.persist.setOptions({ storage });
+    }
+  });
+
+  it("keeps the last durable source-document links while a newer link update is tentative", async () => {
+    const original = {
+      id: "previously-durable-source", title: "Committed source", fileName: "source.txt", fileType: "text",
+      uploadedAt: "2026-11-07T00:00:00.000Z", rawText: "Original source",
+      sizeBytes: 15, tags: [], libraryOnly: false, linkedQuestionSetIds: ["existing-set"],
+    } as SourceDocument;
+    const tentativeDocument = { ...original, linkedQuestionSetIds: ["existing-set", "tentative-set"] };
+    let resolveWrite!: (result: ReviewedImportPersistenceResult) => void;
+    const blocked = new Promise<ReviewedImportPersistenceResult>((resolve) => { resolveWrite = resolve; });
+    const persistence = { ...useStore.getState(), commitReviewedImport: () => blocked };
+    const pending = persistReviewedImportOnce("apex-pending-source-update", persistence, {
+      questions: [],
+      documentWrite: {
+        kind: "update", id: original.id, original,
+        patch: { linkedQuestionSetIds: tentativeDocument.linkedQuestionSetIds },
+      },
+    });
+    try {
+      expect(hasReviewedImportInFlight()).toBe(true);
+      const view = settledReviewedImportSnapshot({ questions: [], questionSets: [], documents: [tentativeDocument] });
+      expect(view.documents).toEqual([original]);
+      expect(tentativeDocument.linkedQuestionSetIds).toEqual(["existing-set", "tentative-set"]);
+    } finally {
+      resolveWrite({ ok: false, message: "Synthetic rejected source-link update", rollbackFailures: [] });
+      await pending;
+    }
+    expect(hasReviewedImportInFlight()).toBe(false);
+    const after = settledReviewedImportSnapshot({ questions: [], questionSets: [], documents: [tentativeDocument] });
+    expect(after.documents).toEqual([tentativeDocument]);
   });
 
   it("joins a tentative real-store import on remount and does not report success when durability fails", async () => {

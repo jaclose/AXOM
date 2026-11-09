@@ -11,6 +11,18 @@ vi.mock("../../lib/store", () => ({ useStore: () => ({ documents: [], courses: [
 vi.mock("../../lib/localVault", () => ({ getVaultWriteCheckpoint: () => 0, flushLocalVaultWrites: vault.flush, assertVaultWritesSince: () => {} }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
+it("opens the file chooser from the keyboard and focuses the embedded page heading", async () => {
+  const user = userEvent.setup();
+  const { container } = render(<div className="surface-scroll"><CourseTemplateLoader onClose={vi.fn()} embedded /></div>);
+  expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Load a course template" }));
+  const input = screen.getByLabelText("Choose course template files");
+  const open = vi.spyOn(input, "click").mockImplementation(() => {});
+  screen.getByRole("button", { name: "Choose template files" }).focus();
+  await user.keyboard("{Enter}");
+  expect(open).toHaveBeenCalledOnce();
+  expect(container.querySelector(".surface-scroll")?.scrollTop).toBe(0);
+});
+
 it("keeps the template text available and does not offer loading after a vault failure", async () => {
   vi.stubGlobal("crypto", webcrypto);
   vault.flush.mockRejectedValueOnce(new Error("Storage is full. Export your work before retrying."));
@@ -73,4 +85,32 @@ it("reads and previews a valid .txt template after preflight", async () => {
   expect(read).toHaveBeenCalledOnce();
   expect(vault.add).toHaveBeenCalledOnce();
   expect(vault.flush).toHaveBeenCalledOnce();
+});
+
+it("accepts a complete 28-file curriculum batch without splitting it", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const files = Array.from({ length: 28 }, (_, index) => {
+    const text = `MODULE ${index + 1} - Lectures:\nLecture 01 Sample activity [Lecture]`;
+    return { name: `module-${index + 1}.txt`, type: "text/plain", size: text.length, text: vi.fn().mockResolvedValue(text) };
+  });
+  render(<CourseTemplateLoader onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Choose course template files"), { target: { files } });
+  expect(await screen.findByRole("region", { name: "Template for MODULE 28" })).toBeTruthy();
+  expect(screen.getAllByRole("region", { name: /^Template for / })).toHaveLength(28);
+  expect(vault.add).toHaveBeenCalledTimes(28);
+  expect(vault.flush).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it.each([
+  { count: 65, size: 40, message: "choose up to 64 template files" },
+  { count: 9, size: MAX_COURSE_TEMPLATE_BYTES, message: "selection exceeds 16 MiB" },
+])("bounds curriculum batches before any read ($count files)", async ({ count, size, message }) => {
+  const read = vi.fn();
+  const files = Array.from({ length: count }, (_, index) => ({ name: `${index}.txt`, type: "text/plain", size, text: read }));
+  render(<CourseTemplateLoader onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Choose course template files"), { target: { files } });
+  expect((await screen.findByRole("alert")).textContent).toContain(message);
+  expect(read).not.toHaveBeenCalled();
+  expect(vault.add).not.toHaveBeenCalled();
 });

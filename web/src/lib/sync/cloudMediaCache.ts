@@ -4,6 +4,7 @@ import { setMissingAttachmentLoader } from "../questionAttachments";
 import { downloadCloudMediaAsset, readMediaManifest, workspaceMedia, type CloudMediaReference } from "./cloudMedia";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
 import type { NoctyriumState } from "../types";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../questionAttachmentScope";
 
 const keyFor = (userId: string) => `axom.cloud.media.v2:${userId}`;
 async function indexStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -36,6 +37,7 @@ export async function saveCloudMediaIndex(userId: string, value: CloudMediaRefer
  * is opened, then stay in the normal offline/export vault. Sign-out removes
  * the network resolver; it never clears cached learner files. */
 export function installCloudMediaCache(userId: string, state: () => NoctyriumState): () => void {
+  const scope = getQuestionAttachmentScope();
   let disposed = false;
   const pending = new Map<string, ReturnType<Parameters<typeof setMissingAttachmentLoader>[0]>>();
   const unregister = setMissingAttachmentLoader((blobKey) => {
@@ -43,7 +45,7 @@ export function installCloudMediaCache(userId: string, state: () => NoctyriumSta
     if (existing) return existing;
     const work = (async () => {
       const reference = workspaceMedia(state()).get(blobKey);
-      if (!reference || disposed) return undefined;
+      if (!reference || disposed || scope.accountId !== userId || !isQuestionAttachmentScopeCurrent(scope)) return undefined;
       const stored = await indexStore<CloudMediaReference[] | undefined>("readonly", (store) => store.get(keyFor(userId)));
       const entry = stored?.find((item) => item.blobKey === blobKey);
       if (!entry || entry.updatedAt !== reference.attachment.updatedAt || entry.byteSize !== reference.attachment.byteSize) return undefined;
@@ -54,7 +56,7 @@ export function installCloudMediaCache(userId: string, state: () => NoctyriumSta
       const current = workspaceMedia(state()).get(blobKey)?.attachment;
       if (disposed || !current || current.updatedAt !== reference.attachment.updatedAt || current.byteSize !== reference.attachment.byteSize) return undefined;
       const record = { ...reference.attachment, questionId: reference.questionId, blob: new Blob([data], { type: reference.attachment.mimeType }) };
-      await putQuestionAttachmentBlob(blobKey, record);
+      await putQuestionAttachmentBlob(blobKey, record, { scope, accountId: userId });
       return record;
     })().finally(() => pending.delete(blobKey));
     pending.set(blobKey, work);

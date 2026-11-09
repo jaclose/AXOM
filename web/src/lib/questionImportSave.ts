@@ -39,6 +39,9 @@ import { assertVaultWrite, assertVaultWritesSince, flushLocalVaultWrites, getVau
 import { saveSourceOriginal } from "./decode/sources";
 import { MAX_SOURCE_ORIGINAL_BYTES, originalFileIdentity } from "./sourceOriginal";
 import { materializeTeachingAnalysis } from "./question-content/materializeTeaching";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, type QuestionAttachmentScope } from "./questionAttachmentScope";
+
+const scopedImportFingerprint = (fingerprint: string, scope = getQuestionAttachmentScope()) => JSON.stringify([scope.owner, scope.generation, fingerprint]);
 
 export type ImportDestination = "set" | "doc" | "both";
 
@@ -245,7 +248,7 @@ export function prepareReviewedImport(
       : `source:${request.sourceType}`,
     candidates: wantsSet ? questions : [],
   });
-  const equivalent = wantsSet && !isReviewedImportInFlight(fingerprint)
+  const equivalent = wantsSet && !isReviewedImportInFlight(scopedImportFingerprint(fingerprint))
     ? findEquivalentReviewedSet({
         sets: library.questionSets,
         questions: library.questions,
@@ -341,6 +344,25 @@ export async function saveReviewedImport(
   store: ReviewedImportStore,
   images: readonly File[] = [],
 ): Promise<SavedReviewedImport> {
+  const scope = getQuestionAttachmentScope();
+  const assertCaller = store.assertCurrent;
+  const guardedStore: ReviewedImportStore = { ...store, assertCurrent: () => {
+    if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed during this import. Existing work and image files were retained. Return to the original account and retry.");
+    assertCaller?.();
+  } };
+  try {
+    return await saveReviewedImportInScope(prepared, guardedStore, images, scope);
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "The import could not finish. Keep the source files and retry.", rollbackFailures: [] };
+  }
+}
+
+async function saveReviewedImportInScope(
+  prepared: PreparedReviewedImport,
+  store: ReviewedImportStore,
+  images: readonly File[],
+  scope: QuestionAttachmentScope,
+): Promise<SavedReviewedImport> {
   store.assertCurrent?.();
   const noImages = { attached: 0, missing: 0, problems: [] as string[] };
   let plan = prepared.plan;
@@ -355,7 +377,7 @@ export async function saveReviewedImport(
       // cloud restorable reference for a file the backend cannot accept.
       const oversized = prepared.originalFile.size > MAX_SOURCE_ORIGINAL_BYTES;
       const originalFile = oversized ? undefined : originalFileIdentity(document, prepared.originalFile);
-      await saveSourceOriginal(document, prepared.originalFile);
+      await saveSourceOriginal(document, prepared.originalFile, { scope });
       store.assertCurrent?.();
       originalSource = oversized
         ? { status: "local-only-oversize", bytes: prepared.originalFile.size,
@@ -368,8 +390,10 @@ export async function saveReviewedImport(
         // An exact repeated import also repairs a legacy record's missing original.
         if (prepared.equivalent) {
           const checkpoint = getVaultWriteCheckpoint();
+          store.assertCurrent?.();
           await store.updateDocument(document.id, { originalFile });
           await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
+          store.assertCurrent?.();
         }
       }
     } catch (error) {
@@ -378,7 +402,8 @@ export async function saveReviewedImport(
   }
   const coordinated = prepared.equivalent
     ? { joined: false, result: { ok: true as const, questionSetId: prepared.equivalent.setId, questionIds: prepared.equivalent.questionIds, documentId: prepared.wantsDoc ? prepared.existingDocumentId : undefined } }
-    : await persistReviewedImportOnce(prepared.fingerprint, store, plan);
+    : await persistReviewedImportOnce(scopedImportFingerprint(prepared.fingerprint, scope), store, plan);
+  store.assertCurrent?.();
   const persisted = coordinated.result;
   if (!persisted.ok) return persisted;
 
@@ -387,6 +412,7 @@ export async function saveReviewedImport(
   const report = { ...noImages, problems: [] as string[] };
   if (persisted.questionSetId && !coordinated.joined && persisted.questionIds.length === prepared.attachmentNames.length) {
     for (const [index, names] of prepared.attachmentNames.entries()) {
+      store.assertCurrent?.();
       // Saved ids come back in the order the questions were given.
       const questionId = persisted.questionIds[index];
       if (!names.length || !questionId) continue;
@@ -394,7 +420,8 @@ export async function saveReviewedImport(
       const existing = priorAttachments ?? [];
       const usable = new Set<string>();
       for (const attachment of existing) {
-        if (await getQuestionAttachmentBlob(attachment.blobKey)) usable.add(imageNameKey(attachment.fileName));
+        if (await getQuestionAttachmentBlob(attachment.blobKey, { scope })) usable.add(imageNameKey(attachment.fileName));
+        store.assertCurrent?.();
       }
       const needed = names.filter(name => !usable.has(imageNameKey(name)));
       store.assertCurrent?.();
@@ -402,7 +429,8 @@ export async function saveReviewedImport(
       report.missing += matchNamedImages(needed, images).filter((match) => !match.file).length;
       if (!images.length) continue;
       const content = prepared.plan.questions[index]?.content;
-      const result = await attachNamedImages({ names: needed, files: images, questionId, contentAssets: content?.assets });
+      const result = await attachNamedImages({ names: needed, files: images, questionId, contentAssets: content?.assets, scope });
+      store.assertCurrent?.();
       if (content) result.attachments = result.attachments.map((attachment) => {
         const asset = content.assets.find((item) => imageNameKey(item.filename) === imageNameKey(attachment.fileName));
         return asset ? { ...attachment, assetId: asset.id, role: asset.role } : { ...attachment, role: "source_page" };
@@ -414,19 +442,23 @@ export async function saveReviewedImport(
           const replaced = new Set(result.attachments.map(attachment => imageNameKey(attachment.fileName)));
           await store.updateQuestion(questionId, { attachments: [...existing.filter(attachment => !replaced.has(imageNameKey(attachment.fileName))), ...result.attachments] });
           await flushLocalVaultWrites();
+          store.assertCurrent?.();
           assertVaultWrite(checkpoint + 1);
           assertVaultWritesSince(checkpoint);
           report.attached += result.attachments.length;
         } catch {
+          store.assertCurrent?.();
           const temporaryBlobKeys = result.attachments
             .map(attachment => attachment.blobKey)
             .filter(blobKey => !isPrivateLibraryAttachmentBlobKey(blobKey));
           let rollbackConfirmed = false;
           let rollbackProblem = "";
           try {
+            store.assertCurrent?.();
             const rollbackCheckpoint = getVaultWriteCheckpoint();
             await store.updateQuestion(questionId, { attachments: priorAttachments });
             await flushLocalVaultWrites();
+            store.assertCurrent?.();
             assertVaultWrite(rollbackCheckpoint + 1);
             assertVaultWritesSince(rollbackCheckpoint);
             rollbackConfirmed = true;
@@ -436,7 +468,8 @@ export async function saveReviewedImport(
           let cleanupProblem = "";
           if (rollbackConfirmed) {
             try {
-              await deleteQuestionAttachmentBlobs(temporaryBlobKeys);
+              store.assertCurrent?.();
+              await deleteQuestionAttachmentBlobs(temporaryBlobKeys, { scope });
             } catch (cleanupCause) {
               cleanupProblem = cleanupCause instanceof Error ? cleanupCause.message : "temporary image cleanup failed";
             }
@@ -448,6 +481,7 @@ export async function saveReviewedImport(
       report.problems.push(...result.problems);
     }
   }
+  store.assertCurrent?.();
   return {
     ok: true, reused: Boolean(prepared.equivalent), joined: coordinated.joined,
     setId: persisted.questionSetId,
