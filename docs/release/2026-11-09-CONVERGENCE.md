@@ -188,7 +188,10 @@ source rows remain visibly held; both original tracker identities are preserved
 in the private review artifact. A false NCRS lecture-number collision was fixed
 by recognizing only the current module's number prefix or known aliases. Generic
 references to other courses retain title-based identity; literal lecture numbers
-and existing labels remain intact. Its 62 focused parser/reconciliation tests passed.
+and existing labels remain intact. Independent upgrade review found that an old
+foreign-prefix numeric key could still transfer progress to the corrected lecture.
+Those legacy keys now remain held for identity review, in either source order and
+after learner week changes. All 68 focused parser/reconciliation tests passed.
 The newer external-drive QBank package was
 not available for this integration; older internal packages have different counts
 and must not be described as the same complete reviewed corpus.
@@ -241,6 +244,11 @@ second clean full sweep. Exact-head hosted checks remain outstanding.
 A hosted release-tool failure exposed a stale source
 integrity hash after the final attachment diagnostic change; regeneration kept
 the communications bundle identical and the 89 release tests passed again.
+The bb9ac62b hosted preview was opened in a fresh, signed-out browser workspace:
+unfinished navigation was absent, notification overlays stayed above dashboard
+cards at 1440×900 and 390×844, close/Escape worked, and the console had no captured
+errors or warnings. This verifies that preview's shell, not live account acceptance
+or a subsequent commit's complete release gate.
 
 The release owner records final results and exact candidate commit here:
 

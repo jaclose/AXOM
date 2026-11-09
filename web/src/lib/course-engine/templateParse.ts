@@ -359,6 +359,8 @@ export function reconcileCourseTemplate(
       && (!plan.course || !existingCourse || existingCourse === plan.course.trim().toLowerCase());
   });
   const normalizeKey = (key: string) => normalizedTemplateIdentity(key, plan.module);
+  const invalidForeignNumberIds = new Set(inScope.filter(row => row.templateKey
+    && isInvalidForeignNumberKey(row.label, row.templateKey, plan.module)).map(row => row.id));
   const byKey = new Map<string, typeof inScope>();
   const byPlace = new Map<string, typeof inScope>();
   for (const row of inScope) {
@@ -387,6 +389,14 @@ export function reconcileCourseTemplate(
     }
     const match = candidates[0];
     if (match) {
+      if (invalidForeignNumberIds.has(match.id)) {
+        review.push({
+          item,
+          reason: "A prior import used another module's number for this saved activity. Confirm its identity before reusing progress.",
+          candidateIds: [match.id],
+        });
+        continue;
+      }
       if (options.legacyCourseAdoption !== "confirmed-unique"
         && isCourseLessLegacyTrackerPath(match.path, plan)) {
         review.push({
@@ -429,7 +439,7 @@ export function reconcileCourseTemplate(
     const kindPrefix = identity.split("|").slice(0, -1).join("|") + "|";
     const legacyCandidates = inScope.filter((row) => row.templateKey
       && normalizeKey(row.templateKey).startsWith(kindPrefix)
-      && !planKeyCounts.has(normalizeKey(row.templateKey)) && !matched.has(row.id));
+      && (invalidForeignNumberIds.has(row.id) || !planKeyCounts.has(normalizeKey(row.templateKey))) && !matched.has(row.id));
     if (legacyCandidates.length) {
       review.push({ item, reason: "Existing unmatched activities of this type may be renamed or renumbered versions.", candidateIds: legacyCandidates.map((row) => row.id) });
       continue;
@@ -536,6 +546,22 @@ function isModuleNumberPrefix(prefix: string, module: string): boolean {
     const code = moduleKey(spelling.trim().split(/\s+/)[0]);
     return key === code || key === code.replace(/\d+$/, "");
   });
+}
+
+/** Older imports accepted any code prefix; do not transfer that row's progress to a now-valid number. */
+function isInvalidForeignNumberKey(label: string, key: string, module: string): boolean {
+  const parts = normalizedTemplateIdentity(key, module).split("|");
+  if (parts.at(-3) !== canonicalModuleKey(module) || parts.at(-2) !== "lecture") return false;
+  const prefix = label.match(/^([A-Z][A-Z0-9-]{1,9})\s+/i)?.[1];
+  if (!prefix || /^(lecture|lec)$/i.test(prefix) || isModuleNumberPrefix(prefix, module)) return false;
+  // Allowing this exact prefix reproduces the old generic fallback while
+  // retaining literal Lecture/Lec precedence and combined-number semantics.
+  const legacyNumbers = compositeNumbers(label, "lecture", prefix);
+  const legacyIdentity = legacyNumbers ? `combined-${legacyNumbers.join("-")}` : itemNumber(label, "lecture", prefix)?.toString();
+  if (legacyIdentity === undefined || parts.at(-1) !== legacyIdentity) return false;
+  const currentNumbers = compositeNumbers(label, "lecture", module);
+  const currentIdentity = currentNumbers ? `combined-${currentNumbers.join("-")}` : itemNumber(label, "lecture", module)?.toString();
+  return currentIdentity !== legacyIdentity;
 }
 
 function itemNumber(label: string, activity: CourseActivity, module: string): number | undefined {

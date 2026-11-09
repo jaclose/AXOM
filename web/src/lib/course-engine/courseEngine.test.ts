@@ -300,6 +300,51 @@ describe("course templates", () => {
     expect(new Set(planCourseTemplate([section]).items.map((item) => item.templateKey)).size).toBe(2);
   });
 
+  it.each([
+    ["current first", false], ["foreign first", true],
+  ])("holds old foreign numeric identities without transferring progress: %s", (_name, foreignFirst) => {
+    for (const combined of [false, true]) {
+      for (const suffix of ["Unscheduled", "Week 7"]) {
+        const foreign = combined ? "BPM 1, 2 Reference topics" : "BPM 1: CPR 1 module reference";
+        const current = combined ? "NCRS 1, 2 Current source topics" : "NCRS 01 Current source topic";
+        const labels = foreignFirst ? [foreign, current] : [current, foreign];
+        const source = ["NCRS - Lectures:", "@week-policy: explicit", ...labels.map(label => `${label} [Lecture]`)].join("\n");
+        const section = parseCourseTemplate(source, "source.txt");
+        const plan = planCourseTemplate([section], { term: "Term 4" });
+        const existing = [{ id: "saved-foreign", path: `Term 4/NCRS/${suffix}`, label: foreign,
+          templateKey: `ncrs|lecture|${combined ? "combined-1-2" : "1"}`, weekSource: "learner" as const,
+          passes: 3, ankiPasses: 2, note: "Keep this source's progress", yield: "high" }];
+        const before = JSON.stringify(existing);
+        const changes = reconcileCourseTemplate(plan, existing);
+        expect(changes.create).toEqual([]);
+        expect(changes.update).toEqual([]);
+        expect(changes.unchanged).toBe(0);
+        expect(changes.review?.map(({ item }) => item.label)).toEqual(labels);
+        expect(changes.review?.every(issue => issue.candidateIds.includes("saved-foreign"))).toBe(true);
+        expect(section.items.map(item => item.label)).toEqual(labels);
+        expect(JSON.stringify(existing)).toBe(before);
+      }
+    }
+  });
+
+  it.each([
+    ["CPR1", "CPR 03 Source topic", "CPR 03 Revised topic"],
+    ["NB Block 2", "NB2 14 Source topic", "NB2 14 Revised topic"],
+    ["NCRS", "BPM 1 reference before Lecture 09", "Revised reference before Lecture 09"],
+    ["NCRS", "Lecture 1, 2 Source topics", "Lecture 1, 2 Revised topics"],
+  ])("continues safe numbered title updates for %s / %s", (module, original, revised) => {
+    const template = (label: string) => parseCourseTemplate(`${module} - Lectures:\n@week-policy: explicit\n${label} [Lecture]`);
+    const beforePlan = planCourseTemplate([template(original)], { term: "Term 4" });
+    const afterPlan = planCourseTemplate([template(revised)], { term: "Term 4" });
+    const existing = [{ ...beforePlan.items[0], id: "trusted-number", passes: 3, ankiPasses: 2 }];
+    const before = JSON.stringify(existing);
+    const changes = reconcileCourseTemplate(afterPlan, existing);
+    expect(changes.create).toEqual([]);
+    expect(changes.review).toBeUndefined();
+    expect(changes.update).toMatchObject([{ id: "trusted-number", label: revised }]);
+    expect(JSON.stringify(existing)).toBe(before);
+  });
+
   it("keeps identical activities in distinct terms independent", () => {
     const section = parseCourseTemplate("DEMO 1 - Lectures:\n\nDEMO Lecture 01 Anatomy [Lecture]");
     const plan = planCourseTemplate([section], { term: "Term 2" });

@@ -50,12 +50,19 @@ The legacy public save RPC has a 60-second allowance, but v2 lacked it. Follow-u
 only on v2; its five focused retention/rollback tests passed and live-setting
 approval is pending. No new protected checkpoint is claimed.
 
-The live tab also reports unsaved local changes. A fresh portable export at
+The older live tab reports a stale-writer conflict: another tab saved a newer
+workspace, and the guard correctly refused to overwrite it. A portable export at
 `~/Downloads/axom-backup-2026-11-09 (1).zip` passed CRC, all 116 image size checks,
 114 unchanged prior-image hashes and 30 original-file hashes. It preserves all
-1,216 questions and 268 tracker rows. Keep the tab open until local/cloud saves
-are verified. Apex and www have separate browser storage: never clear, replace
-or silently transfer either.
+1,216 questions and 268 tracker rows. A second fresh tab loaded the newer durable
+workspace and confirmed "Saved on this device"; its `(2).zip` export also passed
+CRC and every media/original hash comparison. Both contain identical questions,
+Journal and files. The newer copy has two additional completed passes, 266 tracker
+rows and a substituted 90-minute log. Keep this newer copy as the base; do not
+restore the stale copy or union potentially duplicated time. Both original ZIPs
+and a private field-level difference ledger preserve the older-only records.
+Apex and www have separate browser storage: never clear, replace or silently
+transfer either. Successful new cloud-checkpoint acceptance is still pending.
 
 The newest QBank source drive is unavailable, as confirmed by JD. Internal copies
 provide 28 verified templates (672 activities) and 13,777 source-question
@@ -72,6 +79,9 @@ All 32 available template files passed a browser load/reload/reimport: 938 sourc
 rows, 936 installed in an isolated workspace, two identical FTCM rows held with
 both original IDs/progress preserved. Reimport added nothing and retained progress.
 The parser now avoids false lecture-number collisions from foreign course prefixes.
+Older stored keys created by that fallback are held for identity review, including
+learner-moved weeks, so an upgrade cannot transfer progress to a different lecture.
+The legacy-key regression and related course checks passed 68 focused tests.
 Private additions include a corrected 141-question IEA package and a separately
 deduplicated 77-question NCRS text package with source-provided keys/explanations;
 neither is installed or published. The 13,777 census denominator remains separate.
