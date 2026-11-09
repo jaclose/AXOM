@@ -128,7 +128,7 @@ describe("searchable Question Set client boundary", () => {
     const value = snapshot() as unknown as { title: string; questions: Array<Record<string, unknown>> };
     value.questions[0].attempts = [{ answer: "B" }];
     const rpc = vi.fn().mockResolvedValue({ data: {
-      id: entryId, title: value.title, question_count: 1, status: "approved", snapshot_payload: value,
+      id: entryId, title: value.title, question_count: 1, status: "approved", snapshot_payload: value, review_revision: 2,
     }, error: null });
     service(rpc);
     await expect(loadQuestionSetLibraryPreview(accountId, entryId)).rejects.toThrow(/field|key|invalid/i);
