@@ -16,7 +16,7 @@ import { QuestionExhibits } from "./QuestionExhibits";
 vi.mock("../../lib/account/accountStore", async () => {
   const { create } = await import("zustand");
   return { useAccount: create(() => ({
-    phase: "signed-in",
+    phase: "signed-in", link: "linked",
     user: { id: "synthetic-A", email: "", displayName: "", emailConfirmed: true },
   })) };
 });
@@ -86,7 +86,7 @@ test("A persisted attachment cannot be reacquired and displayed for B before B h
   // hydrated. The metadata tuple, source id and blobKey intentionally collide.
   await act(async () => {
     useAccount.setState({
-      phase: "signed-in",
+      phase: "signed-in", link: "linked-elsewhere",
       user: { id: "synthetic-B", email: "", displayName: "", emailConfirmed: true },
     });
   });
