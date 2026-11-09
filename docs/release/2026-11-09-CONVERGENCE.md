@@ -98,7 +98,7 @@ actual database result separately.
 | Migration | Purpose |
 | --- | --- |
 | `20261105000000_workspace_reference_validation_batch.sql` | Independently deployable account-save repair using indexed batch reference checks; depends only on the deployed baseline and can precede the nine held feature migrations. |
-| `20261105010000_restore_v2_retention_cleanup_window.sql` | Restore the legacy endpoint's existing 60-second allowance on v2 only; preserves the atomic writer, access rules and existing history retention. Separately awaiting live-setting approval. |
+| `20261105010000_restore_v2_retention_cleanup_window.sql` | Restore the legacy endpoint's existing 60-second allowance on v2 only; preserves the atomic writer, access rules and existing history retention. Explicitly approved and applied November 9. |
 | `20261106020000_community_experience.sql` | Community profiles, consent and conversations/progress support. |
 | `20261108182000_question_set_review_revision_guard.sql` | Bind review actions to an exact revision. |
 | `20261108200000_question_set_snapshot_type_guard.sql` | Reject malformed snapshot scalar types. |
@@ -148,20 +148,43 @@ The follow-up migration restores the same bounded allowance only to v2 and
 reloads PostgREST's schema cache. It does not change function bodies, ownership,
 grants, invoker security, global role limits or retention selection. Its own DDL
 does not delete rows; a later successful save performs the existing atomic
-history cleanup. Separate live-setting approval is pending.
+history cleanup. JD subsequently approved this exact setting change.
 The new migration's three tests and two existing budget/count checks passed;
 typecheck and scoped lint passed. Its SHA-256 is
 `360e311bc7642352c1306f930f3c7e415945f869f947654eceaafdcd02c4bedd`.
 The second isolated production dry run lists only `20261105010000`, with no
-seeds or roles. No manual cleanup or timeout change has been applied.
+seeds or roles. The approved isolated apply completed, and readback confirmed
+46 migration versions, the 60-second v2 setting and unchanged invoker security.
+No manual history cleanup was performed; the nine feature migrations remain absent.
+
+The owner's manual save created revision 72 at 19:56:14 UTC, hash
+`8f09b48cf185f7afd3bf2dd0f3841c132c5065038a80b20d2d3982c9f004cb47`.
+Readback contains 1,216 questions, 266 tracker rows, 345 logs, 78 documents,
+79 quiz sessions, 116 media references and 1,294 content references. All 116
+media keys, SHA-256 values and byte sizes match actual safety-backup bytes.
+Existing retention left 11 canonical versions. The initial client confirmations
+failed after acceptance with an unclassified post-receipt error; its exact cause
+was not reproduced. A subsequent idempotent retry acknowledged the same revision
+at 20:03:51 UTC, and Protected / account copy current survived reload. This verifies
+the owner's live save, not another physical device or all accounts.
+
+Independent reproduction found two diagnostic robustness defects: synchronous
+image-index failures left database connections open, and late session/cache errors
+lost their receipt phase. The candidate closes those connections and preserves
+receipt/auth classification while retaining mandatory readback and failing on
+cache errors. Five regressions were reproduced before correction; 43 focused
+checks passed, including an explicit private-manifest case that default CI skips.
 
 A fresh portable safety export was verified before further recovery: 1,216
 questions, 268 tracker rows, 116 images and 30 original files. All 114 previously
 archived images remained byte-identical; the two recovered images are included.
 Questions, tracker rows, sets, documents, Journal and quiz sessions match the
 earlier export. The UI reports 39 unavailable/over-limit original-file references.
-The live tab also reports a local-save problem and must remain open until both
-cloud and local persistence are verified; exporting is not proof of either.
+The older tab's stale-writer conflict preserved a newer durable workspace rather
+than overwriting it. A separate verified export of that newer copy retains two
+completed tracker passes; old-only rows and a potentially duplicate study log
+remain in the preserved older backup. The newer copy is now saved locally and
+protected as revision 72. Exporting alone was not used as proof of either save.
 
 ## Content and production boundaries
 
@@ -205,6 +228,43 @@ from the pre/post-midterm files. A private hash-bound sorting overlay records
 It preserves source and learner week labels separately, assigning no invented
 official weeks. Private source text and the overlay are outside this repository.
 
+Private real-content QA installed the 77-question NCRS text addition and the
+141-question IEA package in an isolated signed-out preview. The source texts and
+answer keys were preserved. Of these 218 records, 27 contain only a printed-key
+notice without a teaching rationale. A shared coverage predicate now excludes
+those notices from explanation counts and text-sharing completeness, while
+retaining them as source evidence. It reports 191 main-field prose explanations;
+130 focused tests passed; independent review added coverage for supported choice
+J in key-only notices. This is prose coverage, not medical review.
+
+A separate private nine-question slide package retains explicit printed keys,
+source explanations, three question images and four exact bounded PDF excerpts.
+Four term/module filings have source/template evidence; five remain unassigned
+and all weeks remain unknown. Its corpus denominator stays separate. Real UI
+import revealed repeated question numbers from distinct source groups and dropped
+source-page evidence. The preserved v3 package groups the actual sources,
+passes full conversion with nine ready / zero held, and installs the three held
+questions without duplicating the six already saved. Real browser readback
+confirmed 227 total questions, 18 sets and unchanged practice progress after
+reload. Independent save-path replay preserved all six existing records exactly.
+The shared import gate aligns readiness with conversion; canonical source pages
+and key evidence are retained for new imports and displayed for existing records.
+The resulting coverage is 200 main-field prose explanations / 227 records;
+the other 27 source-key notices remain intact and visibly incomplete.
+The final local UI confirmed 227 / 200, retained all three ambiguous rows before
+the corrected import, then resolved those holds without duplicate questions.
+The import/provenance changes passed 270 focused checks and independent review.
+
+QuestionExhibits gains a shared Fit-to-8x image viewer with keyboard/scroll/drag
+controls and account-safe focus restoration. Independent review found and fixed
+underlying exam keyboard shortcuts and capture-phase Escape interception; 68
+viewer/Modal/runner tests passed. This applies to QuestionExhibits only. The
+separate canonical QuestionContent image lightbox still uses its prior fitted
+view; its mobile magnification remains unfinished. Final browser zoom acceptance
+was not completed before JD requested commit/push and a stop for credit limits.
+Private explanation drafting for 27 source-only notices was stopped separately;
+those drafts are neither reviewed nor installed, and source keys remain unchanged.
+
 ## Native package groundwork
 
 `npm run release:doctor` passed on this Mac after dependency installation: the
@@ -240,7 +300,13 @@ pages and four host-stall timeouts. The hidden-page browser expectations were
 corrected while retaining sourced-school/filter capability coverage as component
 tests. All 16 cases across the five affected browser files then passed, including
 the unchanged timeout cases. This is a full sweep plus focused recovery, not a
-second clean full sweep. Exact-head hosted checks remain outstanding.
+second clean full sweep. Subsequent hosted validation on
+`565779c539a3fb7b66d50485409ae21ffb56065a` passed all three workflows:
+Quality `42684766055`, Mothership `42684765921`, and APEX `42684766154`.
+Each complete acceptance run passed 526 unit-test files / 5,362 tests, with
+22 files / 35 tests explicitly skipped; browser acceptance passed 196 tests
+with 14 skips and no failures or flakes. These results precede the final
+explanation/import and post-receipt corrections; the next head needs new checks.
 A hosted release-tool failure exposed a stale source
 integrity hash after the final attachment diagnostic change; regeneration kept
 the communications bundle identical and the 89 release tests passed again.
@@ -259,8 +325,10 @@ The release owner records final results and exact candidate commit here:
 - [ ] Version-4 to version-5 vault upgrade/blocked-upgrade recovery.
 - [ ] Fresh and upgrade PostgreSQL migration evidence, authenticated RLS and
       rollback/recovery rehearsal for the exact selected migration set.
-- [ ] Real account checkpoint readback and original/media recovery; synthetic
-      IndexedDB/backend tests do not establish production account acceptance.
+- [x] Owner-account checkpoint 72 readback, all 116 media references checked
+      against backup bytes, and Protected state after reload. Another physical
+      device and other accounts remain unverified; 39 original-file references
+      were unavailable or over the portable export limit.
 - [ ] Final integration commit/branch/PR and gateway disposition, then the actual
       deployed commit and live readback if production release is separately enacted.
 - [ ] Native groundwork review, with no native build/download/package claim.

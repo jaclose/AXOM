@@ -8,6 +8,7 @@ import type { QuizBlock } from "../../lib/quiz";
 import { ExamRunner } from "./ExamRunner";
 import { createTextAnnotation } from "../../lib/questionAnnotations";
 import { STORAGE_KEYS } from "../../lib/brand";
+import { QuestionImageViewer } from "./QuestionImageViewer";
 
 const mocked = vi.hoisted(() => ({
   store: {} as Record<string, unknown>,
@@ -127,6 +128,21 @@ function committedAttempts(): Array<{ questionId: string; attempt: Omit<Question
 }
 
 describe("ExamRunner saved blocks and selection semantics", () => {
+  it.each(["calculator", "annotation"] as const)("lets the top image dialog own Escape while the %s tool remains active", (tool) => {
+    setStore();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={() => {}} />);
+    const toolButton = screen.getByRole("button", { name: tool === "calculator" ? "Calculator" : "Erase highlights" });
+    fireEvent.click(toolButton);
+    const closeImage = vi.fn();
+    render(<QuestionImageViewer src="blob:source-ecg" alt="Source ECG" width={1662} height={201} onClose={closeImage} />);
+    const viewport = screen.getByRole("region", { name: "Image detail" });
+    viewport.focus();
+    fireEvent.keyDown(viewport, { key: "Escape" });
+    expect(closeImage).toHaveBeenCalledOnce();
+    if (tool === "calculator") expect(screen.getByRole("dialog", { name: "Calculator" })).toBeTruthy();
+    else expect(toolButton.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("keeps an exact downloaded community revision visibly Unreviewed during practice", () => {
     setStore();
     mocked.store.documents = [{ id: "community-22222222-2222-4222-8222-222222222222",

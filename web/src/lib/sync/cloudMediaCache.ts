@@ -21,10 +21,15 @@ async function indexStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectSto
     request.onblocked = () => { blocked = true; reject(new Error("Close older AXOM tabs before restoring account images.")); };
   });
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
-    const request = run(transaction.objectStore(STORE_NAME));
-    transaction.oncomplete = () => { db.close(); resolve(request.result); };
-    transaction.onerror = transaction.onabort = () => { db.close(); reject(transaction.error ?? new Error("Could not save the account image index.")); };
+    try {
+      const transaction = db.transaction(STORE_NAME, mode);
+      const request = run(transaction.objectStore(STORE_NAME));
+      transaction.oncomplete = () => { db.close(); resolve(request.result); };
+      transaction.onerror = transaction.onabort = () => { db.close(); reject(transaction.error ?? new Error("Could not save the account image index.")); };
+    } catch (error) {
+      db.close();
+      reject(error);
+    }
   });
 }
 

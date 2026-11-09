@@ -9,6 +9,15 @@ const base = (patch: Partial<QuestionRecord> = {}): QuestionRecord => ({
   status: "unseen", tags: [], attempts: [], createdAt: "2026-10-23", updatedAt: "2026-10-23", ...patch,
 });
 describe("summarizeQuestionTeachingCoverage", () => {
+  it("keeps provenance-only explanations in the improvement queue without changing answer readiness", () => {
+    const question = base({ explanation: "PowerPoint slide note 12 explicitly marks A. The supplied notes do not provide a teaching rationale.",
+      choiceRationales: { B: "The source explains why this alternative does not fit." } });
+    const before = JSON.stringify(question);
+    expect(summarizeQuestionTeachingCoverage([question])).toMatchObject({ ready: 1, withExplanation: 0,
+      withCompleteChoiceTeaching: 0, improvementQueueIds: [question.id] });
+    expect(JSON.stringify(question)).toBe(before);
+  });
+
   it("counts only ready questions and prioritizes missing source-grounded layers", () => {
     const complete = base({
       id: "complete", explanation: "Reviewed explanation", choiceRationales: { B: "Reviewed distractor note" },

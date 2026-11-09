@@ -1,6 +1,7 @@
 import type { SourceDocument } from "./library";
 import { analysisIsCurrent, type QuestionAnalysis } from "./decode";
 import { questionMappingStatus, type QuestionRecord } from "./questions";
+import { hasExplanationBlocks, hasExplanationProse, hasMainExplanation } from "./questionExplanationCoverage";
 
 export interface QuestionTeachingCoverage {
   ready: number;
@@ -11,10 +12,11 @@ export interface QuestionTeachingCoverage {
   proposalsToReview: number;
   improvementQueueIds: string[];
 }
-function hasExplanation(question: QuestionRecord): boolean {
-  return Boolean(question.explanation?.trim() || question.content?.explanation?.length);
-}
 
+function hasSourceExplanation(question: QuestionRecord): boolean {
+  return hasMainExplanation(question)
+    || (question.explanation === undefined && hasExplanationBlocks(question.content?.explanation));
+}
 const CHECKED_PACKAGE_TEACHING = /^package-teaching-v\d+:(?:SOURCE_CHECKED|INDEPENDENTLY_CHECKED)$/;
 
 function normalizedKey(value: string | undefined): string | undefined {
@@ -54,7 +56,7 @@ function analysisExplainsEveryChoice(question: QuestionRecord, analysis: Questio
     return key ? [key] : [];
   });
   if (!correctKey || question.options.length < 2 || optionKeys.length !== question.options.length || !optionKeys.includes(correctKey)) return false;
-  if (!analysis.explanation?.trim()) return false;
+  if (!hasExplanationProse(analysis.explanation)) return false;
   const explained = new Set(analysis.distractors.flatMap((entry) => {
     const key = normalizedKey(entry.key);
     return key && entry.whyWrong.trim() ? [key] : [];
@@ -66,7 +68,7 @@ function questionExplainsEveryChoice(question: QuestionRecord): boolean {
   if (!question.correctKey || question.options.length < 2) return false;
   return question.options.every((option) => Boolean(
     question.choiceRationales?.[option.key]?.trim()
-    || (option.key === question.correctKey && hasExplanation(question)),
+    || (option.key === question.correctKey && hasSourceExplanation(question)),
   ));
 }
 
@@ -96,7 +98,7 @@ export function summarizeQuestionTeachingCoverage(
     const availableTeaching = analyses.filter((analysis) => (
       analysis.status === "reviewed" || isCheckedPackageTeaching(analysis)
     ));
-    const explanation = hasExplanation(question) || availableTeaching.some((analysis) => Boolean(analysis.explanation?.trim()));
+    const explanation = hasSourceExplanation(question) || availableTeaching.some((analysis) => hasExplanationProse(analysis.explanation));
     const choices = questionExplainsEveryChoice(question)
       || availableTeaching.some((analysis) => analysisExplainsEveryChoice(question, analysis));
     const reviewed = analyses.some((analysis) => analysis.status === "reviewed");

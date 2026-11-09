@@ -35,6 +35,13 @@ function publish(changes: {
 }
 
 describe("community Question Set exact-revision publication gate", () => {
+  it("refuses provenance-only text without modifying the saved answer or evidence", () => {
+    const source = { ...question, explanation: "PowerPoint slide note 12 explicitly marks A. The supplied notes do not provide a teaching rationale." };
+    const before = JSON.stringify(source);
+    expect(() => publish({ openedQuestion: source, liveQuestion: source })).toThrow(/changed while publishing/);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   it("uses the current reviewed public projection while excluding private notes and source metadata", () => {
     const snapshot = publish();
     expect(snapshot.title).toBe(set.title);

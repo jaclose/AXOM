@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionRecord } from "../../lib/questions";
-import { QuizFeedback } from "./QuizFeedback";
+import { QuestionProvenance, QuizFeedback } from "./QuizFeedback";
 
 const stem = "A 36-year-old man with tuberculosis exposure has a positive PPD skin test.";
 const question: QuestionRecord = {
@@ -33,6 +33,40 @@ const question: QuestionRecord = {
 afterEach(cleanup);
 
 describe("QuizFeedback", () => {
+  it("shows preserved canonical provenance for earlier imports without rewriting the question", () => {
+    const saved: QuestionRecord = { ...question, sourcePage: undefined, citation: undefined, extraction: undefined,
+      content: { id: "synthetic-source", source: { filename: "Synthetic source.pdf", page: 1,
+        answerEvidencePage: 2, explanationSourcePage: 3 },
+      stem: [{ type: "text", text: "Which synthetic option is supported?" }],
+      choices: [], assets: [], correctAnswer: { labels: ["B"], evidence: "printed-key" },
+      provenance: { method: "manual-transcription" } } };
+    const before = JSON.stringify(saved);
+    render(<QuestionProvenance question={saved} />);
+    expect(screen.getByText("Synthetic source.pdf")).toBeTruthy();
+    expect(screen.getByText("page 1")).toBeTruthy();
+    expect(screen.getByText("page 2")).toBeTruthy();
+    expect(screen.getByText("page 3")).toBeTruthy();
+    expect(screen.getByText("Printed answer key")).toBeTruthy();
+    expect(screen.getByText("Source page recorded; no separate explanation excerpt was stored.")).toBeTruthy();
+    expect(screen.queryByText("No explanation source was recorded.")).toBeNull();
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+
+  it("keeps reviewed provenance ahead of older canonical pages and evidence", () => {
+    render(<QuestionProvenance question={{ ...question, content: {
+      id: "synthetic-source", source: { filename: "Original.pdf", page: 8,
+        answerEvidencePage: 9, explanationSourcePage: 10 },
+      stem: [], choices: [], assets: [], correctAnswer: { labels: ["B"], evidence: "printed-key" },
+      provenance: { method: "manual-transcription" },
+    } }} />);
+    expect(screen.getByText("page 1")).toBeTruthy();
+    expect(screen.getByText("page 2")).toBeTruthy();
+    expect(screen.getByText("page 3")).toBeTruthy();
+    expect(screen.getByText("Answer: B. CD4+ T lymphocytes")).toBeTruthy();
+    expect(screen.queryByText("Printed answer key")).toBeNull();
+    expect(screen.queryByText("page 9")).toBeNull();
+  });
+
   it("shows a sourced related diagram beside a revealed keyed explanation", () => {
     const rhinovirus = {
       ...question,

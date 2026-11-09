@@ -1,6 +1,7 @@
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { questionPracticeReadiness } from "../questionFilters";
+import { hasMainExplanation } from "../questionExplanationCoverage";
 import { enrichPublicQuestionSetVisualTags } from "../diagrams/communityVisualSnapshot";
 import { createQuestionSetShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
 
@@ -77,7 +78,7 @@ export function prepareCurrentCommunityQuestionSetSubmission(input: {
     const live = liveById.get(id);
     if (!opened || !live || sourceReceipt(opened) !== sourceReceipt(live)
       || questionPracticeReadiness(live) !== "ready"
-      || !live.explanation?.trim()
+      || !hasMainExplanation(live)
       || Boolean(live.attachments?.length || live.content?.assets.length)) throw new Error(CHANGED);
   }
 

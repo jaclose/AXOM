@@ -151,10 +151,10 @@ export class SupabaseSyncTransport implements SyncTransport {
       // stored hash and revision before the local retry queue can be cleared.
       const storedHash = await atPhase("receipt", () => verifyCloudRevisionReceipt(client, userId, result, envelope.contentHash, assertCurrent));
       verified = { ...result, contentHash: storedHash };
-      await assertCurrent();
-      await saveCloudMediaIndex(userId, media);
+      await atPhase("receipt", assertCurrent);
+      await atPhase("receipt", () => saveCloudMediaIndex(userId, media));
       if (!result.idempotent || storedHash === envelope.contentHash) {
-        await assertCurrent();
+        await atPhase("receipt", assertCurrent);
         await saveSyncBaseline(userId, { revision: result.revision, contentHash: envelope.contentHash, packed: payload });
       }
     }

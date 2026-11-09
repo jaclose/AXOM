@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { countReadyExplanations, hasQuestionExplanation } from "./explanationReview";
 
 describe("ready question explanation observations", () => {
+  it("excludes source-key notices while accepting edited prose despite a stale missing-source flag", () => {
+    const flags = [{ type: "missing_explanation" as const, message: "Original source has no rationale." }];
+    const questions = [
+      { id: "notice", flags, explanation: [{ type: "text" as const,
+        text: "PowerPoint slide note 12 explicitly marks B. The supplied notes do not provide a teaching rationale." }] },
+      { id: "edited", flags, explanation: [{ type: "text" as const, text: "The reviewed mechanism supports this answer." }] },
+    ];
+    const before = JSON.stringify(questions);
+    const verdicts = new Map(questions.map(question => [question.id, { readiness: "ready" as const }]));
+    expect(countReadyExplanations(questions, { verdicts })).toEqual({ readyQuestions: 2, explainedReadyQuestions: 1, missingExplanations: 1 });
+    expect(JSON.stringify(questions)).toBe(before);
+  });
+
   it("counts ready questions with source prose and keeps missing or image-only rationales visible", () => {
     const questions = [
       { id: "ready-explained", explanation: [{ type: "text" as const, text: "The observed mechanism explains the key." }] },

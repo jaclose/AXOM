@@ -2,7 +2,7 @@
 // MOTHERSHIP R18: REAL device-local IndexedDB, not a mocked per-account blob loader.
 // Synthetic users and bytes only. A RED here does not establish a hosted incident.
 import { Blob as NodeBlob } from "node:buffer";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { useAccount } from "../../lib/account/accountStore";
@@ -102,6 +102,9 @@ test("A persisted attachment cannot be reacquired and displayed for B before B h
   await waitFor(() => expect(screen.getByRole("img", { name: attachment.altText }).getAttribute("src"))
     .toBe("blob:synthetic-attachment-1"));
   expect(await readBlobText(allocated[0])).toBe(FILE_A);
+  const opener = screen.getByRole("button", { name: `Enlarge ${attachment.altText}` });
+  fireEvent.click(opener);
+  expect(screen.getByRole("dialog", { name: attachment.altText })).toBeTruthy();
 
   // B's authenticated session has changed. B's workspace/image has NOT been
   // hydrated. The metadata tuple, source id and blobKey intentionally collide.
@@ -121,9 +124,11 @@ test("A persisted attachment cannot be reacquired and displayed for B before B h
   // permanently spinning loading placeholder. The current implementation is
   // now guarded by account-scoped storage as well as URL invalidation.
   await waitFor(() => {
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("img", { name: attachment.altText })).toBeNull();
     expect(screen.getByText(/synthetic[.]png.*(?:not on this device|not available|could not be displayed|not accessible)/i)).toBeTruthy();
   });
+  expect(document.activeElement).not.toBe(opener);
   expect(allocated).toHaveLength(1);
   view.unmount();
 });

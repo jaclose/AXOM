@@ -196,12 +196,49 @@ describe("what a package offers to the canonical import", () => {
     expect(draft.explanationSourcePage).toBe(4);
   });
 
+  it("preserves declared text answer and explanation pages without inventing image evidence", async () => {
+    const { pkg } = invented();
+    const question = pkg.questions.find(entry => entry.id === "syn-q02")!;
+    question.source = { ...question.source, page: 1, answerEvidencePage: 2, explanationSourcePage: 3 };
+    question.assets = [];
+    question.stem = [{ type: "text", text: "Which synthetic labelled option is supported?" }];
+    question.explanation = [{ type: "text", text: "The source gives the supporting mechanism." }];
+    question.correctAnswer = { labels: ["A"], evidence: "printed-key" };
+    const selected = { ...pkg, questions: [question] };
+    const before = JSON.stringify(selected);
+    const converted = packageToReviewedImport(selected, []);
+    expect(converted.imports[0].request.drafts[0]).toMatchObject({ questionSourcePage: 1,
+      answerEvidence: "printed-key", answerEvidencePage: 2, explanationSourcePage: 3 });
+    expect(converted.imports[0].request.drafts[0].answerEvidenceSnippet).toBeUndefined();
+    expect(converted.imports[0].request.drafts[0].explanationSourceSnippet).toBeUndefined();
+    const saved = await importPackage(selected, [], []);
+    expect(saved.status).toBe("saved");
+    const stored = useStore.getState().questions.find(entry => entry.content?.id === question.id)!;
+    expect(stored.extraction).toMatchObject({ questionSourcePage: 1, answerEvidence: "printed-key",
+      answerEvidencePage: 2, explanationSourcePage: 3 });
+    expect(JSON.stringify(selected)).toBe(before);
+  });
+
   it("never takes a question with no key, accepted or not", () => {
     const { pkg, issues } = invented();
     const unkeyed = { ...pkg, questions: pkg.questions.map((question) => (question.id === "syn-q02" ? { ...question, correctAnswer: undefined, flags: [{ type: "answer_needs_review" as const, message: "The answer is only shown by a mark." }] } : question)) };
     const adapted = packageToReviewedImport(unkeyed, issues, { acknowledged: new Set(["syn-q02"]) });
     expect(adapted.imports[0].questionIds).not.toContain("syn-q02");
     expect(adapted.held.find((entry) => entry.questionId === "syn-q02")).toEqual({ questionId: "syn-q02", readiness: "needs-review", reasons: ["The answer is only shown by a mark."] });
+  });
+
+  it("does not let a repeated source ID replace an earlier row's independent shape hold", () => {
+    const { pkg } = invented();
+    const original = pkg.questions.find(question => question.id === "syn-q02")!;
+    const malformed = { ...original, source: { ...original.source, set: 1 },
+      correctAnswer: { labels: ["A", "B"], evidence: "printed-key" as const } };
+    const single = { ...original, source: { ...original.source, set: 2 },
+      correctAnswer: { labels: ["A"], evidence: "printed-key" as const } };
+    const converted = packageToReviewedImport({ ...pkg, questions: [malformed, single] }, []);
+    expect(converted.held).toEqual([expect.objectContaining({ questionId: original.id,
+      reasons: expect.arrayContaining(["The key names more than one choice. Only single-answer questions can be saved yet."]) })]);
+    expect(converted.imports).toHaveLength(1);
+    expect(converted.imports[0].set).toBe(2);
   });
 
   it("keeps all ten source choices and the J key when the source marks J", () => {
@@ -623,11 +660,15 @@ describe("a package through the canonical import", () => {
     expect((await workspaceOnDisk()).questions).toHaveLength(6);
   });
 
-  it("refreshes an untouched equivalent source in place without losing learner tags or image links", async () => {
+  it.each([false, true])("refreshes an untouched equivalent source without losing tags or images; legacy evidence: %s", async (legacyEvidence) => {
     const { earlier, revised, files } = auditedEdition(true);
     const first = await importPackage(earlier, validatePackage(earlier), files);
     const id = first.sections[0].savedIds[0];
     useStore.getState().updateQuestion(id, { tags: ["learner-tag"] });
+    if (legacyEvidence) {
+      const question = useStore.getState().questions.find(entry => entry.id === id)!;
+      useStore.getState().updateQuestion(id, { extraction: { ...question.extraction!, answerEvidence: undefined } });
+    }
     await flushLocalVaultWrites();
     const prior = (await workspaceOnDisk()).questions[0];
     const assessed = validatePackage(revised, { assetFiles: new Set(files.map((file) => file.name)) });
@@ -692,6 +733,7 @@ describe("a package through the canonical import", () => {
 
   it.each([
     ["answer evidence", (question: QuestionRecord) => ({ extraction: { ...question.extraction!, answerEvidenceSnippet: "Reviewer-selected answer excerpt", answerEvidencePage: 9 } })],
+    ["answer evidence kind", (question: QuestionRecord) => ({ extraction: { ...question.extraction!, answerEvidence: "Reviewer-selected evidence" } })],
     ["source page", (question: QuestionRecord) => ({ sourcePage: (question.sourcePage ?? 1) + 1,
       extraction: { ...question.extraction!, questionSourceSnippet: "Reviewer-selected question excerpt", questionSourcePage: (question.sourcePage ?? 1) + 1 } })],
     ["citation", (_question: QuestionRecord) => ({ citation: "Reviewer-corrected citation" })],

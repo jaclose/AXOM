@@ -1,6 +1,7 @@
 import { Check, CircleHelp, Target, X } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
+import { hasMainExplanation } from "../../lib/questionExplanationCoverage";
 
 interface ChoiceTeachingRow {
   key: string;
@@ -15,7 +16,7 @@ function teachingRows(question: QuestionRecord, pickedKey?: string): ChoiceTeach
     key: option.key,
     text: option.text,
     rationale: question.choiceRationales?.[option.key]?.trim() || undefined,
-    coveredByCore: option.key === question.correctKey && Boolean(question.explanation?.trim()),
+    coveredByCore: option.key === question.correctKey && hasMainExplanation(question),
     kind: option.key === question.correctKey ? "correct" : option.key === pickedKey ? "picked" : "alternative",
   }));
   const rank = (row: ChoiceTeachingRow) => row.kind === "correct" ? 0 : row.kind === "picked" ? 1 : 2;

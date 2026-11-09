@@ -524,7 +524,7 @@ it("rejects a misleading ready count when the canonical importer cannot score a 
   f.files.set("banks/sample/bank.json", encode(JSON.stringify(f.bank)));
   await expect(prepareAcademicUpload(f.read, {
     term: "Term 5", module: "GOER", evidence: "human-reviewed",
-  })).rejects.toThrow(/canonical.*import|saveable|scored/i);
+  })).rejects.toThrow("The prepared bank's claimed ready/review counts differ from verified answers and figures (0 ready; 1 review).");
 });
 
 it("rejects same-set duplicate question numbers even if both printed answer keys look ready", async () => {
@@ -537,7 +537,7 @@ it("rejects same-set duplicate question numbers even if both printed answer keys
   f.files.set("catalog.json", encode(JSON.stringify(f.catalog)));
   await expect(prepareAcademicUpload(f.read, {
     term: "Term 5", module: "GOER", evidence: "human-reviewed",
-  })).rejects.toThrow(/canonical.*import|saveable|scored/i);
+  })).rejects.toThrow("The prepared bank's claimed ready/review counts differ from verified answers and figures (0 ready; 2 review).");
 });
 
 it("accepts a small genuine GIF because the learner's attachment installer supports it", async () => {

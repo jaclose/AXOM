@@ -26,43 +26,43 @@ The combined package is committed and pushed in draft PR #345. Focused tests and
 real local browser journeys have passed in these areas. The
 complete combined gate, exact-head hosted checks and production acceptance are
 still pending. Do not infer release readiness or cloud publication from those
-focused results. The reference-validation repair is applied; the v2 cleanup
-allowance, nine feature migrations and regenerated Communications function retain
-separate production controls.
+focused results. Both approved account-save repairs are applied and the owner's
+new checkpoint is verified. The nine feature migrations and regenerated
+Communications function retain separate production controls.
 
 ## Live account investigation · 2026-11-09
 
 Production Supabase connection is restored and verified for `AXOM Production`
-(`jofkmfwkidubxcutkwzf`), now with 45 applied migrations. JD explicitly approved
+(`jofkmfwkidubxcutkwzf`), now with 46 applied migrations. JD explicitly approved
 `20261105000000_workspace_reference_validation_batch`; isolated CLI application
 and ledger/security readback passed. The nine feature migrations remain absent.
 No content publication or account deletion occurred. Do not target the older project.
 
-Both missing question images were recovered from exact matching historical
-backup bytes and restored through the live www workspace's add-only recovery
-controls. The questions were unchanged. Readback confirms 116 private image
-objects and 1,259 source objects uploaded. The live retry passed file validation,
-then SQL 57014 occurred in the unchanged private writer's history cleanup. The
-latest confirmed server revision remains 71, dated September 30. Production has
-60 revisions / 287.6 MB; 50 currently qualify for the existing retention rule.
-The legacy public save RPC has a 60-second allowance, but v2 lacked it. Follow-up
-`20261105010000_restore_v2_retention_cleanup_window.sql` restores that setting
-only on v2; its five focused retention/rollback tests passed and live-setting
-approval is pending. No new protected checkpoint is claimed.
+Two missing question images were restored from exact historical backup bytes
+through add-only recovery. JD also approved the v2-only 60-second cleanup allowance
+in `20261105010000_restore_v2_retention_cleanup_window.sql`; isolated apply and
+security readback passed. Both repairs preserve existing access/retention rules.
 
-The older live tab reports a stale-writer conflict: another tab saved a newer
-workspace, and the guard correctly refused to overwrite it. A portable export at
-`~/Downloads/axom-backup-2026-11-09 (1).zip` passed CRC, all 116 image size checks,
-114 unchanged prior-image hashes and 30 original-file hashes. It preserves all
-1,216 questions and 268 tracker rows. A second fresh tab loaded the newer durable
-workspace and confirmed "Saved on this device"; its `(2).zip` export also passed
-CRC and every media/original hash comparison. Both contain identical questions,
-Journal and files. The newer copy has two additional completed passes, 266 tracker
-rows and a substituted 90-minute log. Keep this newer copy as the base; do not
-restore the stale copy or union potentially duplicated time. Both original ZIPs
-and a private field-level difference ledger preserve the older-only records.
+Manual revision 72 was accepted November 9 at 19:56:14 UTC; exact receipts and
+migration hashes are in the candidate manifest.
+Readback confirms 1,216 questions, 266 tracker rows, 345 logs, 78 documents,
+79 quiz sessions, 116 media references and 1,294 content references. Existing
+retention left 11 canonical checkpoints. Two initial client confirmations failed
+generically after acceptance; the exact cause remains unproven. An idempotent
+retry acknowledged version 72 at 20:03:51 UTC, and **Protected / account copy
+current** persisted after reload. Local saving also confirmed at 20:05:10 UTC.
+This is a real owner-account save/readback, not a multi-device or every-account
+acceptance claim. No manual history cleanup or duplicate checkpoint was needed.
+
+The older live tab correctly refuses a stale overwrite. Both safety exports passed
+CRC and all 116 image/30 original-file hash comparisons. Questions, Journal and
+file bytes match. The newer protected copy retains two completed passes, 266
+tracker rows and a substituted 90-minute log. Keep it as the base; do not restore
+the stale copy or union potentially duplicate time. Original ZIPs and a private
+difference ledger preserve older-only records. The newer export was moved by JD to
+`~/Downloads/::::::::/axom-backup-2026-11-09 (2).zip` and reverified.
 Apex and www have separate browser storage: never clear, replace or silently
-transfer either. Successful new cloud-checkpoint acceptance is still pending.
+transfer either. The newer copy is now protected as revision 72.
 
 The newest QBank source drive is unavailable, as confirmed by JD. Internal copies
 provide 28 verified templates (672 activities) and 13,777 source-question
@@ -84,7 +84,13 @@ learner-moved weeks, so an upgrade cannot transfer progress to a different lectu
 The legacy-key regression and related course checks passed 68 focused tests.
 Private additions include a corrected 141-question IEA package and a separately
 deduplicated 77-question NCRS text package with source-provided keys/explanations;
-neither is installed or published. The 13,777 census denominator remains separate.
+neither is installed in the owner's workspace or published. The census denominator
+remains separate. Together with nine source-slide questions they yield 227
+answer-ready records in the isolated preview, with reload/reimport preserving
+progress. Of these, 27 are key-only notices: the coverage fix reports 200 prose
+explanations without changing keys or source text. Three slide images and exact
+PDF excerpts are preserved. Four slide-question filings have source/template
+evidence, five remain unassigned, all weeks unknown.
 The normal Journal lane resumed and supplied independently reviewed PR #344;
 other quota-limited chats were supported by scoped subagents.
 
@@ -131,7 +137,7 @@ before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
 Next: complete the combined gate and record exact-head checks/preview for the
-pushed candidate. The first sync repair passed 33 migration/recovery tests and is
-applied; the v2-only cleanup allowance awaits separate approval. FORGE #140 controls release
-acceptance. Keep production SQL, private-content publication, live communications
+pushed candidate. Both approved sync repairs are applied; revision 72 survived
+reload. FORGE #140 controls feature release acceptance. Keep the nine remaining
+production migrations, private-content publication, live communications
 and signed native packaging separate from the code commit.

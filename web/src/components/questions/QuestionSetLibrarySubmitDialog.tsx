@@ -10,6 +10,7 @@ import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint,
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
+import { hasMainExplanation } from "../../lib/questionExplanationCoverage";
 import { prepareCurrentCommunityQuestionSetSubmission, sameCommunitySetReviewRevision } from "../../lib/sharing/communitySetPublicationGuard";
 import {
   listMyQuestionSetSubmissions, submitQuestionSetToLibrary, withdrawQuestionSetSubmission,
@@ -78,7 +79,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const unresolved = sourceQuestions.filter(question => !question || questionPracticeReadiness(question) !== "ready").length;
   const withMedia = sourceQuestions.filter(question => question && ((question.attachments?.length ?? 0) > 0
     || (question.content?.assets.length ?? 0) > 0)).length;
-  const missingExplanations = sourceQuestions.filter(question => question && !question.explanation?.trim()).length;
+  const missingExplanations = sourceQuestions.filter(question => question && !hasMainExplanation(question)).length;
   const draftable = useMemo(() => sourceQuestions.filter((question): question is QuestionRecord => Boolean(question)
     && eligibleForExplanationDraft(question!) && !drafts.some(draft => draft.questionId === question!.id)),
   [sourceQuestions, drafts]);

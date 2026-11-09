@@ -450,7 +450,7 @@ describe("authenticated source-level academic readback", () => {
     const f = await fixture({ ambiguousAnswer: true });
     session(f);
     await expect(verifyAcademicCourseReadback(f.upload, f.saved, owner))
-      .rejects.toThrow(/canonical scored importer/);
+      .rejects.toThrow("The owner's restored bank no longer agrees with its source review statuses.");
   });
 
   it("refuses forged auth, inactive version and wrong server bytes or file metadata", async () => {

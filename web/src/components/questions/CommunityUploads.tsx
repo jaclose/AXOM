@@ -5,6 +5,7 @@ import { useUi } from "../../lib/uiStore";
 import { useStore } from "../../lib/store";
 import { questionSetKind, type QuestionSet, type SourceDocument } from "../../lib/library";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
+import { hasMainExplanation } from "../../lib/questionExplanationCoverage";
 import type { QuestionRecord } from "../../lib/questions";
 import type { ReviewedFilingTerm } from "../../lib/privateLibrary/types";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
@@ -104,7 +105,7 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
       if (!members.length) return [];
       return [{ document, questions: members, sets,
         ready: members.filter(question => questionPracticeReadiness(question) === "ready").length,
-        explained: members.filter(question => Boolean(question.explanation?.trim())).length,
+        explained: members.filter(hasMainExplanation).length,
         revision: sourceRevision(document, members) }];
     });
   }, [questionSets, questions, documents]);

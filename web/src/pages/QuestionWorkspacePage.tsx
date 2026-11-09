@@ -20,6 +20,7 @@ import {
 } from "../lib/questions";
 import type { QuizBlock, QuizFilters, QuizMode } from "../lib/quiz";
 import { questionPracticeReadiness } from "../lib/questionFilters";
+import { hasMainExplanation } from "../lib/questionExplanationCoverage";
 import { inspectMissingQuestionRecovery, type MissingQuestionRecovery } from "../lib/questionRecovery";
 import type { QuestionSet, SourceDocument } from "../lib/library";
 import { GlassCard, PanelHeader, EmptyState, GButton } from "../components/ui/primitives";
@@ -210,7 +211,7 @@ export function QuestionWorkspacePage() {
   const collectionMetrics = useMemo(() => questionCollectionMetrics(questions), [questions]);
   const mapping = useMemo(() => summarizeQuestionMappings(questions), [questions]);
   const runnable = runnableQuestions.length;
-  const withExplanation = runnableQuestions.filter((question) => Boolean(question.explanation?.trim())).length;
+  const withExplanation = runnableQuestions.filter(hasMainExplanation).length;
   const heldForReview = questions.length - runnable + privateReview.held;
   const unseen = runnableQuestions.filter((question) => question.attempts.length === 0).length;
   const lastSession = useMemo(() => (s.quizSessions ?? [])

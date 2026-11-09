@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { sha256 } from "../question-content/assets";
 import type { PackageManifest, PackageQuestion } from "../question-content/package";
 import { resolveLibraryReader } from "./nativeInput";
+import { packageToReviewedImport } from "../question-content/toReviewedImport";
+import { assessBank } from "../question-content/assessBank";
 
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 const decode = (bytes: Uint8Array) => JSON.parse(new TextDecoder().decode(bytes));
@@ -39,6 +41,28 @@ async function first(files: Map<string, Uint8Array>) {
 }
 
 describe("local native packages without a user-authored catalog", () => {
+  it.each([false, true])("previews the same source-number gate as final conversion, with explicit sets: %s", async (separateSets) => {
+    const rows = Array.from({ length: 9 }, (_, index) => ({
+      ...question(`q${index + 1}`),
+      stem: [{ type: "text" as const, text: `Which synthetic example ${index + 1} is selected?` }],
+      source: { filename: "Example.pdf", page: 2, questionNumber: index < 3 ? 1 : index - 1,
+        ...(separateSets ? { set: index < 3 ? index + 1 : 1 } : {}) },
+    }));
+    const { files } = await fixture(rows);
+    const before = [...files].map(([name, bytes]) => [name, Buffer.from(bytes).toString("base64")]);
+    const { catalog, bank } = await first(files);
+    const assessment = assessBank(bank.pkg, bank.issues, []);
+    const converted = packageToReviewedImport(bank.pkg, assessment.issues);
+    const ready = separateSets ? 9 : 6;
+    expect(catalog.sources[0]).toMatchObject({ ready, review: 9 - ready });
+    expect(assessment.counts).toEqual({ ready, "needs-review": 9 - ready, unresolved: 0 });
+    expect(converted.imports.reduce((n, section) => n + section.request.drafts.length, 0)).toBe(ready);
+    expect(converted.held).toHaveLength(9 - ready);
+    expect(bank.pkg.questions).toHaveLength(9);
+    expect(bank.pkg.questions.map((q: PackageQuestion) => q.source)).toEqual(rows.map(q => q.source));
+    expect([...files].map(([name, bytes]) => [name, Buffer.from(bytes).toString("base64")])).toEqual(before);
+  });
+
   it.each([true, false])("normalizes a verified bare source digest with original present: %s", async (includeOriginal) => {
     const { files, questions, prefix } = await fixture();
     const checksum = await sha256(source);

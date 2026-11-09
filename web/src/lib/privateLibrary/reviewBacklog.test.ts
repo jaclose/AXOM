@@ -7,10 +7,10 @@ import { summarizePrivateReviewBacklog } from "./reviewBacklog";
 
 const SOURCE_CHECKSUM = "a".repeat(64);
 
-function question(id: string, readiness: "ready" | "needs-review" | "unresolved"): PackageQuestion {
+function question(id: string, readiness: "ready" | "needs-review" | "unresolved", questionNumber: number): PackageQuestion {
   return {
     id,
-    source: { filename: "source.pdf", questionNumber: 1 },
+    source: { filename: "source.pdf", questionNumber },
     stem: [{ type: "text", text: "Which answer is supported?" }],
     choices: [
       { id: `${id}-a`, label: "A", blocks: [{ type: "text", text: "Alpha" }] },
@@ -37,7 +37,7 @@ function bank(readiness: Array<"ready" | "needs-review" | "unresolved">, unreada
         questionsFile: "questions.json",
         assetsDirectory: "assets",
       },
-      questions: readiness.map((value, index) => question(`question-${index + 1}`, value)),
+      questions: readiness.map((value, index) => question(`question-${index + 1}`, value, index + 1)),
     },
     issues: [],
     sourceText: { rawText: "Retained source text" },
@@ -64,6 +64,16 @@ function document(value: PreparedBank | string, patch: Partial<SourceDocument> =
 }
 
 describe("private review backlog", () => {
+  it("keeps source-number collisions in the visible held backlog", () => {
+    const retained = bank(["ready", "ready", "ready", "ready"]);
+    retained.pkg.questions.slice(0, 3).forEach(question => { question.source.questionNumber = 1; });
+    const before = JSON.stringify(retained);
+    expect(summarizePrivateReviewBacklog([document(retained)])).toMatchObject({
+      held: 3, needsReview: 3, unresolved: 0, sources: 1,
+    });
+    expect(JSON.stringify(retained)).toBe(before);
+  });
+
   it("reassesses held questions and includes unreadable retained rows", () => {
     expect(summarizePrivateReviewBacklog([document(bank(["ready", "needs-review", "unresolved"], 2))])).toEqual({
       held: 4,

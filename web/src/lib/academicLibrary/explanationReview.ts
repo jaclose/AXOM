@@ -1,6 +1,6 @@
 import { accountOperationClient } from "../account/supabase";
 import { assessBank } from "../question-content/assessBank";
-import { blockToPlainText } from "../question-content/blocks";
+import { hasExplanationBlocks, hasExplanationProse } from "../questionExplanationCoverage";
 import { sha256 } from "../question-content/assets";
 import type { PackageQuestion } from "../question-content/package";
 import type { Readiness } from "../question-content/readiness";
@@ -23,12 +23,11 @@ export interface ExplanationReviewReceipt extends ExplanationCoverage {
 /** Text presence is only an observation. A reviewer must check the rationale
  * against the source before this revision can enter the official catalog. */
 export function hasQuestionExplanation(question: Pick<PackageQuestion, "explanation" | "teaching">): boolean {
-  const sourceExplanation = question.explanation?.some(block => block.type !== "image" && block.type !== "divider"
-    && blockToPlainText(block).trim().length > 0);
+  const sourceExplanation = hasExplanationBlocks(question.explanation);
   const reviewedTeaching = question.teaching?.factCheck.humanReviewerApproved === true
     && question.teaching.factCheck.answerChanged === false
     && ["SOURCE_CHECKED", "INDEPENDENTLY_CHECKED"].includes(question.teaching.factCheck.status)
-    && question.teaching.whyCorrect.trim().length > 0;
+    && hasExplanationProse(question.teaching.whyCorrect);
   return Boolean(sourceExplanation || reviewedTeaching);
 }
 

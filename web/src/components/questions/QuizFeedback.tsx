@@ -40,7 +40,7 @@ export function QuizFeedback({
   const hasSourceRecord = Boolean(
     sourceTitle || question.citation || question.sourceDocumentId || question.sourcePage
     || question.extraction?.sourceSnippet || question.extraction?.answerEvidence
-    || question.extraction?.explanationSource,
+    || question.extraction?.explanationSource || question.content?.source.filename,
   );
 
   return (
@@ -123,6 +123,14 @@ export function QuizFeedback({
   );
 }
 
+const answerEvidenceLabels = new Map([
+  ["printed-key", "Printed answer key"],
+  ["answer-reveal-slide", "Answer reveal slide"],
+  ["source-mark-verified", "Verified source marking"],
+  ["explanation", "Source explanation"],
+  ["reviewer", "Reviewer decision"],
+]);
+
 export function QuestionProvenance({
   question,
   sourceTitle,
@@ -133,6 +141,7 @@ export function QuestionProvenance({
   onSourceLooksWrong?: () => void;
 }) {
   const extraction = question.extraction;
+  const source = question.content?.source;
   const hasSource = Boolean(
     sourceTitle
     || question.citation
@@ -140,45 +149,52 @@ export function QuestionProvenance({
     || question.sourcePage
     || extraction?.sourceSnippet
     || extraction?.answerEvidence
-    || extraction?.explanationSource,
+    || extraction?.explanationSource
+    || source?.filename,
   );
   if (!hasSource) return null;
 
   const questionSnippet = extraction?.questionSourceSnippet;
   const legacySnippet = extraction?.sourceSnippet;
-  const answerSnippet = extraction?.answerEvidenceSnippet ?? extraction?.answerEvidence;
+  const answerEvidence = extraction?.answerEvidence ?? question.content?.correctAnswer?.evidence;
+  const answerSnippet = extraction?.answerEvidenceSnippet
+    ?? (answerEvidence ? answerEvidenceLabels.get(answerEvidence) ?? answerEvidence : undefined);
+  const answerPage = extraction?.answerEvidencePage ?? source?.answerEvidencePage;
+  const explanationPage = extraction?.explanationSourcePage ?? source?.explanationSourcePage;
   const explanationSnippet = extraction?.explanationSourceSnippet;
   const explanationFallback = extraction?.explanationSource === "answer-section"
     ? "Recorded from a separate answer section; no separate excerpt was stored."
     : extraction?.explanationSource
       ? "Recorded alongside the question; no separate excerpt was stored."
-      : "No explanation source was recorded.";
+      : explanationPage !== undefined
+        ? "Source page recorded; no separate explanation excerpt was stored."
+        : "No explanation source was recorded.";
 
   return (
     <section className="question-provenance" aria-labelledby={`question-provenance-${question.id}`}>
       <div className="row spread wrap gap6">
         <div className="stack" style={{ gap: 2 }}>
           <b id={`question-provenance-${question.id}`}><FileSearch size={ICON_SIZE.body} /> Source</b>
-          <span className="sub">{sourceTitle ?? question.citation ?? question.bank ?? "Imported source"}</span>
+          <span className="sub">{sourceTitle ?? question.citation ?? source?.filename ?? question.bank ?? "Imported source"}</span>
         </div>
         {onSourceLooksWrong && <GhostButton onClick={onSourceLooksWrong}>This source looks wrong</GhostButton>}
       </div>
       <div className="question-provenance-grid">
         <EvidenceExcerpt
           label="Question source"
-          page={extraction?.questionSourcePage ?? question.sourcePage}
+          page={extraction?.questionSourcePage ?? question.sourcePage ?? source?.page}
           snippet={questionSnippet}
           empty="No separate question excerpt was stored."
         />
         <EvidenceExcerpt
           label="Answer evidence"
-          page={extraction?.answerEvidencePage}
+          page={answerPage}
           snippet={answerSnippet}
-          empty="No answer evidence was recorded."
+          empty={answerPage !== undefined ? "Source page recorded; no separate answer excerpt was stored." : "No answer evidence was recorded."}
         />
         <EvidenceExcerpt
           label="Explanation source"
-          page={extraction?.explanationSourcePage}
+          page={explanationPage}
           snippet={explanationSnippet}
           empty={explanationFallback}
         />
