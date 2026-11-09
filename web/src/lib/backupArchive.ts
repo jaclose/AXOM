@@ -1,6 +1,7 @@
 // Keep ZIP in the static dependency graph. Recovery must not fetch a new
 // lazy chunk on the first export or restore after a deployment or network loss.
 import JSZip from "jszip";
+import { captureQuestionAttachmentScope } from "./account/attachmentScope";
 import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
@@ -30,14 +31,17 @@ export function mediaBackupBytes(references: References): number {
 
 /** Binary images avoid the single-string limit of large base64 JSON backups. */
 export async function createMediaBackupArchive(payload: Record<string, unknown>, references: References, documents: readonly SourceDocument[] = [], options: AttachmentReadOptions = {}) {
+  const accountScope = captureQuestionAttachmentScope();
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
   for (const metadata of mediaReferences(references)) {
+    accountScope.assertCurrent();
     try {
       const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
       if (!record) throw new Error("Missing image");
       const bytes = new Uint8Array(await record.blob.arrayBuffer());
+      accountScope.assertCurrent();
       const file = `media/${media.length}`;
       zip.file(file, bytes); media.push({ file, metadata });
     } catch { missingBlobKeys.push(metadata.blobKey); }
@@ -45,6 +49,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   const originals: OriginalEntry[] = [];
   const missingOriginalIds: string[] = [];
   for (const document of backupOriginalDocuments(documents)) {
+    accountScope.assertCurrent();
     try {
       const blob = await readSourceOriginal(document.id, document.checksum);
       if (!blob || blob.size > MAX_ORIGINAL_BYTES) throw new Error("Original unavailable or too large");
@@ -56,6 +61,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   }
   zip.file("workspace.json", JSON.stringify({ ...payload, _backupFormat: FORMAT, _backupVersion: 2, media, originals }));
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true });
+  accountScope.assertCurrent();
   return { blob, attachmentCount: media.length, missingBlobKeys, originalCount: originals.length, missingOriginalIds };
 }
 

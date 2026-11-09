@@ -4,6 +4,7 @@ import { assertVaultWritesSince, getVaultWriteCheckpoint, flushLocalVaultWrites 
 import { create } from "zustand";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { authRedirectUrl, cloudConfigured, loadSupabase, readStoredSession } from "./supabase";
+import { setQuestionAttachmentAccount } from "./attachmentScope";
 import { SyncCoordinator } from "../sync/syncCoordinator";
 import { SupabaseSyncTransport } from "../sync/supabaseTransport";
 import { clearAccountSync, deviceId, read, write } from "../sync/syncMetadata";
@@ -673,6 +674,13 @@ export const useAccount = create<AccountState>((set, get) => {
       coordinator = next;
     },
   };
+});
+
+setQuestionAttachmentAccount(useAccount.getState().user?.id ?? null);
+useAccount.subscribe((state, previous) => {
+  if (state.user?.id !== previous.user?.id) {
+    setQuestionAttachmentAccount(state.user?.id ?? null);
+  }
 });
 
 export function platformName(): string {

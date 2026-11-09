@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setQuestionAttachmentAccount } from "../../lib/account/attachmentScope";
 import { makeSeed } from "../../lib/seed";
 import type { Store } from "../../lib/store";
 import type { NoctyriumState } from "../../lib/types";
 import { persistPortableRestore } from "./SettingsModal";
 
 type Mode = "replace" | "merge";
+
+beforeEach(() => setQuestionAttachmentAccount("synthetic-A"));
+afterEach(() => setQuestionAttachmentAccount(null));
 
 function restoreHarness(mode: Mode) {
   const prior = makeSeed();
@@ -107,6 +111,35 @@ describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) =
     await expect(h.run()).rejects.toThrow(/workspace changed while preparing recovery/);
     expect(h.rollback).toHaveBeenCalledOnce();
     expect(h.replaceAll).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+  });
+
+  it("does not apply a prepared restore after an account switch", async () => {
+    const h = restoreHarness(mode);
+    let entered!: () => void;
+    let release!: () => void;
+    const reading = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    h.restoreOriginals.mockImplementationOnce(async () => {
+      entered();
+      await gate;
+      return { restored: 1, skipped: 0 };
+    });
+    const restoring = h.run();
+    await reading;
+    setQuestionAttachmentAccount("synthetic-B");
+    release();
+    await expect(restoring).rejects.toThrow(/account changed/i);
+    expect(h.replaceAll).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+  });
+
+  it("never replays A's prior workspace into B if the account changes during the save", async () => {
+    const h = restoreHarness(mode);
+    h.flush.mockImplementationOnce(async () => { setQuestionAttachmentAccount("synthetic-B"); });
+    await expect(h.run()).rejects.toThrow(/did not roll back into another account/i);
+    expect(h.replaceAll).toHaveBeenCalledTimes(1);
+    expect(h.replaceAll.mock.calls[0][0].profile.name).toBe(`Recovered ${mode}`);
     expect(h.recordRestore).not.toHaveBeenCalled();
   });
 

@@ -3,6 +3,7 @@ import { accountOperationClient } from "../account/supabase";
 import { setMissingAttachmentLoader } from "../questionAttachments";
 import { downloadCloudMediaAsset, readMediaManifest, workspaceMedia, type CloudMediaReference } from "./cloudMedia";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
+import { captureQuestionAttachmentScope } from "../account/attachmentScope";
 import type { NoctyriumState } from "../types";
 
 const keyFor = (userId: string) => `axom.cloud.media.v2:${userId}`;
@@ -39,6 +40,8 @@ export function installCloudMediaCache(userId: string, state: () => NoctyriumSta
   let disposed = false;
   const pending = new Map<string, ReturnType<Parameters<typeof setMissingAttachmentLoader>[0]>>();
   const unregister = setMissingAttachmentLoader((blobKey) => {
+    const scope = captureQuestionAttachmentScope();
+    if (scope.accountId !== userId) return Promise.resolve(undefined);
     const existing = pending.get(blobKey);
     if (existing) return existing;
     const work = (async () => {
@@ -51,10 +54,11 @@ export function installCloudMediaCache(userId: string, state: () => NoctyriumSta
       if (operation.userId !== userId || disposed) return undefined;
       const data = await downloadCloudMediaAsset(operation.client, userId, entry);
       await operation.assertCurrent();
+      scope.assertCurrent();
       const current = workspaceMedia(state()).get(blobKey)?.attachment;
       if (disposed || !current || current.updatedAt !== reference.attachment.updatedAt || current.byteSize !== reference.attachment.byteSize) return undefined;
       const record = { ...reference.attachment, questionId: reference.questionId, blob: new Blob([data], { type: reference.attachment.mimeType }) };
-      await putQuestionAttachmentBlob(blobKey, record);
+      await putQuestionAttachmentBlob(blobKey, record, scope);
       return record;
     })().finally(() => pending.delete(blobKey));
     pending.set(blobKey, work);

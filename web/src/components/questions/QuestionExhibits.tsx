@@ -4,24 +4,31 @@
 import { useEffect, useRef, useState } from "react";
 import { X, ZoomIn } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { useAccount } from "../../lib/account/accountStore";
+import { captureQuestionAttachmentScope, currentQuestionAttachmentScopeToken } from "../../lib/account/attachmentScope";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
 
 export function QuestionExhibits({ attachments }: { attachments: readonly QuestionImageAttachment[] }) {
-  const [urls, setUrls] = useState<Record<string, string | "missing">>({});
+  useAccount((state) => state.user?.id);
+  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string | "missing"> }>({ signature: "", urls: {} });
   const [zoomed, setZoomed] = useState<QuestionImageAttachment | null>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
-  const signature = attachments.map((attachment) => `${attachment.id}:${attachment.blobKey}`).join("|");
+  const signature = `${currentQuestionAttachmentScopeToken()}|${attachments.map((attachment) => `${attachment.id}:${attachment.blobKey}`).join("|")}`;
+  const urls = loaded.signature === signature ? loaded.urls : {};
 
   useEffect(() => {
     let cancelled = false;
+    const scope = captureQuestionAttachmentScope();
     const created: string[] = [];
     void (async () => {
       const next: Record<string, string | "missing"> = {};
       for (const attachment of attachmentsRef.current) {
         const record = await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined);
+        if (cancelled) break;
+        try { scope.assertCurrent(); } catch { break; }
         if (record) {
           const url = URL.createObjectURL(record.blob);
           created.push(url);
@@ -30,13 +37,17 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
           next[attachment.id] = "missing";
         }
       }
-      if (!cancelled) setUrls(next);
+      if (!cancelled) {
+        try { scope.assertCurrent(); setLoaded({ signature, urls: next }); } catch { /* An account switch invalidated this load. */ }
+      }
     })();
     return () => {
       cancelled = true;
       for (const url of created) URL.revokeObjectURL(url);
     };
   }, [signature]);
+
+  useEffect(() => setZoomed(null), [signature]);
 
   useEffect(() => {
     if (!zoomed) return;

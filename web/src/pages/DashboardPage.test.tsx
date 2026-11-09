@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DASHBOARD_WIDGETS,
@@ -9,6 +9,12 @@ import {
 } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { DashboardPage } from "./DashboardPage";
+
+const backupMocks = vi.hoisted(() => ({ exportStateWithAttachments: vi.fn() }));
+vi.mock("../lib/backup", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/backup")>(),
+  exportStateWithAttachments: backupMocks.exportStateWithAttachments,
+}));
 
 const localValues = new Map<string, string>();
 const memoryLocalStorage = {
@@ -21,6 +27,7 @@ const memoryLocalStorage = {
 };
 
 beforeEach(() => {
+  backupMocks.exportStateWithAttachments.mockReset();
   localValues.clear();
   vi.stubGlobal("localStorage", memoryLocalStorage);
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
@@ -43,6 +50,12 @@ afterEach(() => {
 });
 
 describe("DashboardPage declutter", () => {
+  function showLocalDataWidget() {
+    useStore.getState().updateProfile({
+      hiddenDashboardWidgets: DEFAULT_DASHBOARD_WIDGETS.filter((id) => id !== "localData"),
+    });
+  }
+
   function showWeeklyWidget() {
     useStore.getState().updateProfile({
       hiddenDashboardWidgets: DEFAULT_DASHBOARD_WIDGETS.filter((id) => id !== "weekly"),
@@ -161,5 +174,31 @@ describe("DashboardPage declutter", () => {
     expect(useStore.getState().profile.dashboardWidgetOrder).toEqual(beforeOrder);
     expect(useStore.getState().profile.hiddenDashboardWidgets).toEqual(beforeHidden);
     expect(useStore.getState().tracker.length).toBeGreaterThan(0);
+  });
+
+  it("exports a complete portable copy from the Dashboard backup action", async () => {
+    showLocalDataWidget();
+    backupMocks.exportStateWithAttachments.mockResolvedValueOnce({
+      attachmentCount: 1, missingBlobKeys: [], originalCount: 0,
+      missingOriginalIds: [], deferredSourceCount: 0,
+    });
+    const { container } = render(<DashboardPage />);
+    const widget = within(container.querySelector<HTMLElement>(".local-data-card")!);
+
+    fireEvent.click(widget.getByRole("button", { name: "Export backup" }));
+    await waitFor(() => expect(backupMocks.exportStateWithAttachments).toHaveBeenCalledOnce());
+    expect(backupMocks.exportStateWithAttachments.mock.calls[0][0]).toBe(useStore.getState());
+    expect((await widget.findByRole("status")).textContent).toMatch(/complete backup downloaded/i);
+  });
+
+  it("reports an account-switch export failure without claiming a downloaded backup", async () => {
+    showLocalDataWidget();
+    backupMocks.exportStateWithAttachments.mockRejectedValueOnce(new Error("The signed-in account changed."));
+    const { container } = render(<DashboardPage />);
+    const widget = within(container.querySelector<HTMLElement>(".local-data-card")!);
+
+    fireEvent.click(widget.getByRole("button", { name: "Export backup" }));
+    expect((await widget.findByRole("alert")).textContent).toMatch(/backup was not downloaded.*account changed/i);
+    expect((widget.getByRole("button", { name: "Export backup" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

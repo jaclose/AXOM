@@ -3,6 +3,7 @@ import { contentMetadata } from "./deferredContent";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../compressedText";
 import { privateReviewMedia } from "../privateLibrary/media";
+import { captureQuestionAttachmentScope } from "../account/attachmentScope";
 import { getQuestionAttachmentBlob, MAX_QUESTION_ATTACHMENT_BYTES, QUESTION_ATTACHMENT_TYPES, type QuestionImageAttachment } from "../questionAttachments";
 import type { NoctyriumState } from "../types";
 import { SyncPushError } from "./syncFailure";
@@ -64,6 +65,8 @@ export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): C
 /** Images remain lossless originals. Identical bytes share one immutable object
  * within an account; filenames and local paths never become public URLs. */
 export async function uploadCloudMedia(client: SupabaseClient, userId: string, state: NoctyriumState, assertCurrent: () => Promise<void>, previous: CloudMediaReference[] = []): Promise<CloudMediaReference[]> {
+  const attachmentScope = captureQuestionAttachmentScope();
+  if (attachmentScope.accountId !== userId) throw new Error("The signed-in account changed. Reopen this workspace and try again.");
   const bucket = client.storage.from(MEDIA_BUCKET);
   const shared = storedAcademicBindings(state).assets;
   const academicByHash = new Map<string, AcademicAssetReference>();
@@ -91,6 +94,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
     if (!work) {
       work = (async () => {
         await assertCurrent();
+        attachmentScope.assertCurrent();
         const { error } = await bucket.upload(`${userId}/${hash}`, blob, { contentType: mimeType, upsert: false, cacheControl: "31536000" });
         if (error) {
           if (!('statusCode' in error) || String(error.statusCode) !== "409") throw error;
@@ -99,6 +103,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== hash) throw new Error("An account image could not be verified. The workspace has not been marked protected.");
         }
         await assertCurrent();
+        attachmentScope.assertCurrent();
         confirmed.add(hash);
       })().finally(() => inFlight.delete(hash));
       inFlight.set(hash, work);
@@ -111,13 +116,14 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
       const [blobKey, { attachment }] = entries[index];
       try {
         await assertCurrent();
+        attachmentScope.assertCurrent();
         const known = prior.get(blobKey);
         if (known && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt) {
           const academic = academicByHash.get(known.hash);
           ordered[index] = academic ? { ...known, academic } : known;
           continue;
         }
-        const record = await getQuestionAttachmentBlob(blobKey);
+        const record = await getQuestionAttachmentBlob(blobKey, { scope: attachmentScope });
         if (!record || record.blob.size !== attachment.byteSize) throw new SyncPushError(
           { kind: "rejected", rejection: "missing-image", status: 0 },
           "Some question images are missing on this device. Restore a complete backup before protecting this version.",
@@ -127,6 +133,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
           "A question image is not supported for account storage.",
         );
         const hash = await sha256(new Uint8Array(await record.blob.arrayBuffer()));
+        attachmentScope.assertCurrent();
         const academic = academicByHash.get(hash);
         if (!academic) await ensureUploaded(hash, record.blob, attachment.mimeType);
         ordered[index] = { ...(academic ? { academic } : {}), blobKey, hash, byteSize: record.blob.size, updatedAt: attachment.updatedAt };
@@ -141,6 +148,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   await Promise.all(Array.from({ length: Math.min(MEDIA_UPLOAD_CONCURRENCY, entries.length) }, worker));
   if (failed) throw failure;
   await assertCurrent();
+  attachmentScope.assertCurrent();
   return readMediaManifest([...manifest, ...ordered]);
 }
 

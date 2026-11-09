@@ -1,5 +1,7 @@
 import { createElement, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
+import { useAccount } from "../../lib/account/accountStore";
+import { captureQuestionAttachmentScope, currentQuestionAttachmentScopeToken } from "../../lib/account/attachmentScope";
 import { blockToPlainText, blocksToPlainText, sanitizeRichText, type AssetRole, type QuestionBlock, type TableBlock } from "../../lib/question-content/blocks";
 import type { PackageQuestion, QuestionAsset } from "../../lib/question-content/package";
 import { effectiveRole, isAssetVisible, visibleBlocks, type ContentViewMode } from "../../lib/question-content/visibility";
@@ -105,6 +107,8 @@ function ContentTable({ block, start, annotations = [], annotationProps }: {
 function ContentImage({ asset, attachment, files, alt, enlarge }: {
   asset: QuestionAsset; attachment?: QuestionImageAttachment; files?: readonly File[]; alt: string; enlarge: boolean;
 }) {
+  useAccount((state) => state.user?.id);
+  const scopeToken = currentQuestionAttachmentScopeToken();
   const file = files?.find((entry) => entry.name === asset.filename);
   // A reused asset ID across questions must never display the prior figure
   // during the render before React runs cleanup for its asynchronous loader.
@@ -112,7 +116,7 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
   const identity = [
     asset.id, asset.filename, asset.checksum ?? "",
     attachment?.blobKey ?? "", attachment?.assetId ?? "", attachment?.updatedAt ?? "",
-    file?.name ?? "", file?.size ?? "", file?.lastModified ?? "",
+    file?.name ?? "", file?.size ?? "", file?.lastModified ?? "", scopeToken,
   ].join("|");
   const [loaded, setLoaded] = useState<{
     identity: string; asset: QuestionAsset; file?: File; url?: string; missing: boolean;
@@ -124,12 +128,14 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
   const missing = current?.missing ?? false;
   useEffect(() => {
     let cancelled = false;
+    const scope = captureQuestionAttachmentScope();
     let objectUrl: string | undefined;
     setLoaded({ identity, asset, file, missing: false });
     setOpen(false);
     void (async () => {
       const blob = file ?? (attachment ? (await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined))?.blob : undefined);
       if (cancelled) return;
+      try { scope.assertCurrent(); } catch { return; }
       if (!blob) { setLoaded({ identity, asset, file, missing: true }); return; }
       objectUrl = URL.createObjectURL(blob);
       setLoaded({ identity, asset, file, url: objectUrl, missing: false });

@@ -11,6 +11,7 @@ import { Modal, Field } from "../ui/Modal";
 import { AxomWordmark } from "../ui/BrandMark";
 import { GButton, Tag } from "../ui/primitives";
 import { useStore, type Store } from "../../lib/store";
+import { captureQuestionAttachmentScope } from "../../lib/account/attachmentScope";
 import { privateReviewMedia } from "../../lib/privateLibrary/media";
 import { compactAvatarDataUrl } from "../../lib/avatarImage";
 import { exportStateWithAttachments, mergeStates, parseImport, toPortableState, type BackupScope } from "../../lib/backup";
@@ -125,9 +126,12 @@ export async function persistPortableRestore(input: {
   restoredState: NoctyriumState;
   restoreMedia: PortableBackupRead["restoreMedia"];
   restoreOriginals: PortableBackupRead["restoreOriginals"];
+  accountScope?: ReturnType<typeof captureQuestionAttachmentScope>;
   onProgress?: (message: string) => void;
 }, services: PortableRestoreServices = portableRestoreServices): Promise<string> {
   const { current, fileName, mode, restoredState, restoreMedia, restoreOriginals, onProgress } = input;
+  const accountScope = input.accountScope ?? captureQuestionAttachmentScope();
+  accountScope.assertCurrent();
   const priorState = toPortableState(current);
   const metadata = contentMetadata(restoredState);
   const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
@@ -143,6 +147,7 @@ export async function persistPortableRestore(input: {
   } catch (error) {
     throw new Error(`Image files could not be prepared. ${errorText(error)} The workspace was not changed.`, { cause: error });
   }
+  accountScope.assertCurrent();
 
   let originals: Awaited<ReturnType<PortableBackupRead["restoreOriginals"]>>;
   try {
@@ -155,6 +160,7 @@ export async function persistPortableRestore(input: {
     }
     throw new Error(`Original files could not be prepared. ${errorText(error)} The workspace was not changed. Verified original-file bytes may remain cached.`, { cause: error });
   }
+  accountScope.assertCurrent();
 
   if (services.getState() !== current) {
     try {
@@ -167,11 +173,18 @@ export async function persistPortableRestore(input: {
 
   onProgress?.("Saving the recovered workspace on this device…");
   try {
+    accountScope.assertCurrent();
     const checkpoint = services.getCheckpoint();
     current.replaceAll(restoredState);
     await services.flush();
+    accountScope.assertCurrent();
     services.assertWritesSince(checkpoint);
   } catch (targetError) {
+    // After a switch, replaying A's prior workspace into B would itself cross
+    // the account boundary. Leave staged bytes intact and report uncertainty.
+    try { accountScope.assertCurrent(); } catch {
+      throw new Error("The account changed during recovery. AXOM did not roll back into another account. Keep this tab open and check local save status before retrying.", { cause: targetError });
+    }
     let workspaceRollbackError: unknown;
     let mediaRollbackError: unknown;
     try {
@@ -285,9 +298,11 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
   async function doImport(file: File, mode: PortableRestoreMode) {
     if (backupBusy) return;
+    const accountScope = captureQuestionAttachmentScope();
     setBackupBusy(true); setMsg("Reading your backup…");
     try {
       const { rawText, restoreMedia, restoreOriginals } = await readPortableBackup(file);
+      accountScope.assertCurrent();
       const next = parseImport(rawText);
       const message = (mode === "replace"
         ? "Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both."
@@ -296,6 +311,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       if (!confirm(message)) { setMsg("Restore cancelled. No data changed."); return; }
       const current = useStore.getState();
       const restoredState = mode === "merge" ? mergeStates(current, next) : await retainDownloadedContent(next, current);
+      accountScope.assertCurrent();
       setMsg(await persistPortableRestore({
         current,
         fileName: file.name,
@@ -303,6 +319,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
         restoredState,
         restoreMedia,
         restoreOriginals,
+        accountScope,
         onProgress: setMsg,
       }));
     } catch (e) {

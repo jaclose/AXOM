@@ -1,0 +1,131 @@
+// @vitest-environment jsdom
+// Synthetic accounts exercise persisted device bytes, not a mocked image loader.
+import { Blob as NodeBlob } from "node:buffer";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { useAccount } from "../../lib/account/accountStore";
+import { setQuestionAttachmentAccount } from "../../lib/account/attachmentScope";
+import {
+  getQuestionAttachmentBlob,
+  putQuestionAttachmentBlob,
+  type QuestionImageAttachment,
+} from "../../lib/questionAttachments";
+import { DB_NAME } from "../../lib/localVault";
+import { QuestionExhibits } from "./QuestionExhibits";
+
+vi.mock("../../lib/account/accountStore", async () => {
+  const { create } = await import("zustand");
+  return { useAccount: create(() => ({
+    phase: "signed-in", link: "linked",
+    user: { id: "synthetic-A", email: "", displayName: "", emailConfirmed: true },
+  })) };
+});
+
+const KEY = "same-idb-key-across-authenticated-users";
+const DATE = "2026-11-09T00:00:00.000Z";
+const FILE_A = "SYNTHETIC_PRIVATE_IMAGE_ONLY_ACCOUNT_A";
+
+// fake-indexeddb uses structuredClone; native Node Blob retains its bytes and
+// prototype across that clone, unlike jsdom Blob in this Node test runner.
+// Byte checks must exercise the persisted record, not skip past the setup.
+function readBlobText(blob: Blob): Promise<string> {
+  return blob.text();
+}
+const attachment: QuestionImageAttachment = {
+  id: "same-image-id", blobKey: KEY, createdAt: DATE, updatedAt: DATE,
+  fileName: "synthetic.png", mimeType: "image/png", byteSize: FILE_A.length,
+  altText: "Synthetic question diagram", role: "exhibit",
+};
+
+function deleteDatabase(name: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? Error("Failed to reset synthetic IDB"));
+    request.onblocked = () => reject(Error("A synthetic IDB connection remained open"));
+  });
+}
+
+beforeEach(async () => {
+  // Keep real structured-cloned Blob bytes through fake-indexeddb transactions.
+  // The default jsdom Blob loses its brand in this test environment.
+  vi.stubGlobal("Blob", NodeBlob);
+  vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  await deleteDatabase(DB_NAME);
+  useAccount.setState({
+    phase: "signed-in", link: "linked",
+    user: { id: "synthetic-A", email: "", displayName: "", emailConfirmed: true },
+  });
+  setQuestionAttachmentAccount("synthetic-A");
+});
+
+afterEach(() => {
+  cleanup();
+  setQuestionAttachmentAccount(null);
+  vi.unstubAllGlobals();
+  Reflect.deleteProperty(URL, "createObjectURL");
+  Reflect.deleteProperty(URL, "revokeObjectURL");
+});
+
+test("A persisted attachment cannot be reacquired and displayed for B before B has hydrated its own image bytes", async () => {
+  // This is the actual questionAttachmentBlobs storage API, NOT R27's mocked
+  // getQuestionAttachmentBlob. Each call opens a fresh IDB connection.
+  await putQuestionAttachmentBlob(KEY, {
+    blob: new Blob([FILE_A], { type: "image/png" }),
+    mimeType: "image/png", byteSize: FILE_A.length,
+    questionId: "same-question-id", updatedAt: DATE,
+  });
+  const persisted = await getQuestionAttachmentBlob(KEY, { localOnly: true });
+  expect(await readBlobText(persisted!.blob)).toBe(FILE_A);
+
+  const allocated: Blob[] = [];
+  const revoke = vi.fn();
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true, value: vi.fn((blob: Blob) => {
+      allocated.push(blob);
+      return `blob:synthetic-attachment-${allocated.length}`;
+    }),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+
+  const view = render(<QuestionExhibits attachments={[attachment]} />);
+  await waitFor(() => expect(screen.getByRole("img", { name: attachment.altText }).getAttribute("src"))
+    .toBe("blob:synthetic-attachment-1"));
+  expect(await readBlobText(allocated[0])).toBe(FILE_A);
+
+  // B's authenticated session has changed. B's workspace/image has NOT been
+  // hydrated. The metadata tuple, source id and blobKey intentionally collide.
+  await act(async () => {
+    useAccount.setState({
+      phase: "signed-in", link: "linked-elsewhere",
+      user: { id: "synthetic-B", email: "", displayName: "", emailConfirmed: true },
+    });
+    setQuestionAttachmentAccount("synthetic-B");
+  });
+  view.rerender(<QuestionExhibits attachments={[attachment]} />);
+
+  // The old URL must be revoked, and B must not reacquire A's persisted bytes.
+  await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:synthetic-attachment-1"));
+  // A missing image is explicit while B has no account-bound bytes.
+  await waitFor(() => {
+    expect(screen.queryByRole("img", { name: attachment.altText })).toBeNull();
+    expect(screen.getByText(/synthetic[.]png.*(?:not on this device|not available|could not be displayed|not accessible)/i)).toBeTruthy();
+  });
+  expect(allocated).toHaveLength(1);
+
+  // Returning to A reacquires only A's own persisted bytes after B's failed read.
+  await act(async () => {
+    useAccount.setState({
+      phase: "signed-in", link: "linked",
+      user: { id: "synthetic-A", email: "", displayName: "", emailConfirmed: true },
+    });
+    setQuestionAttachmentAccount("synthetic-A");
+  });
+  view.rerender(<QuestionExhibits attachments={[attachment]} />);
+  await waitFor(() => expect(screen.getByRole("img", { name: attachment.altText }).getAttribute("src"))
+    .toBe("blob:synthetic-attachment-2"));
+  expect(await readBlobText(allocated[1])).toBe(FILE_A);
+  view.unmount();
+});

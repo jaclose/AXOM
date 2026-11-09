@@ -17,7 +17,7 @@ import type {
   TrackerItem, DashboardLayoutPreferences, DashboardWidgetId,
   DashboardWidgetPreferences, DashboardWidgetSize,
 } from "../lib/types";
-import { exportState } from "../lib/backup";
+import { exportStateWithAttachments } from "../lib/backup";
 import { gotoJournalDay, useUi } from "../lib/uiStore";
 import { useInView } from "../lib/useInView";
 import { DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS } from "../lib/seed";
@@ -607,7 +607,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "journal") return <JournalDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "streak") return <ConsistencyDashboardWidget state={state} enabledFields={enabledFields} />;
   if (widgetId === "dailyWord") return <DailyWordDashboardWidget enabledFields={enabledFields} />;
-  if (widgetId === "localData") return <LocalDataWidget state={state} />;
+  if (widgetId === "localData") return <LocalDataWidget />;
   if (widgetId === "premedHours") return <PremedHoursWidget />;
   return null;
 }
@@ -1044,11 +1044,38 @@ function DetailMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function LocalDataWidget({ state }: { state: ReturnType<typeof useStore.getState> }) {
+function LocalDataWidget() {
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportNotice, setExportNotice] = useState<{ text: string; incomplete: boolean } | null>(null);
+
+  async function exportBackup() {
+    if (exportBusy) return;
+    setExportBusy(true);
+    setExportNotice(null);
+    try {
+      const result = await exportStateWithAttachments(useStore.getState());
+      const missingImages = new Set(result.missingBlobKeys).size;
+      const missingOriginals = new Set(result.missingOriginalIds).size;
+      const gaps = [
+        missingImages ? `${missingImages} image${missingImages === 1 ? " is" : "s are"} missing` : "",
+        missingOriginals ? `${missingOriginals} original file${missingOriginals === 1 ? " is" : "s are"} unavailable` : "",
+        result.deferredSourceCount ? `${result.deferredSourceCount} source${result.deferredSourceCount === 1 ? " still needs" : "s still need"} downloading` : "",
+      ].filter(Boolean);
+      setExportNotice(gaps.length
+        ? { incomplete: true, text: `Backup downloaded, but it is not a complete offline copy: ${gaps.join("; ")}. Keep this device and restore the missing files before relying on it.` }
+        : { incomplete: false, text: "Complete backup downloaded with your available images and original files." });
+    } catch (error) {
+      setExportNotice({ incomplete: true, text: `Backup was not downloaded. ${error instanceof Error ? error.message : "Check storage and try again."}` });
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   return (
     <GlassCard pad className="local-data-card" data-tour="data-safety-settings">
       <PanelHeader title="Local data & backup" sub="Your workspace saves locally first; portable exports and owner-private account protection are separate copies"
-        action={<GButton size="sm" onClick={() => exportState(state)}><Download size={ICON_SIZE.body} /> Export backup</GButton>} />
+        action={<GButton size="sm" disabled={exportBusy} onClick={() => void exportBackup()}><Download size={ICON_SIZE.body} /> {exportBusy ? "Preparing backup…" : "Export backup"}</GButton>} />
+      {exportNotice && <p role={exportNotice.incomplete ? "alert" : "status"}>{exportNotice.text}</p>}
       <div className="alpha-notice">
         <span className="alpha-pill">ALPHA</span>
         <span>Web redeployments keep this browser vault intact. Export backups before switching devices, browsers, or domains.</span>

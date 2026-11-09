@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "../compressedText";
-import { putQuestionAttachmentBlob } from "../questionAttachments";
+import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
+import { setQuestionAttachmentAccount } from "../account/attachmentScope";
 import { makeSeed } from "../seed";
 import type { NoctyriumState } from "../types";
 import { MEDIA_BUCKET, clearCloudMediaUploadCache, uploadCloudMedia } from "./cloudMedia";
@@ -45,11 +46,13 @@ async function fixture(count: number): Promise<{ state: NoctyriumState; keys: st
 }
 
 beforeEach(() => {
+  setQuestionAttachmentAccount("owner");
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   clearCloudMediaUploadCache();
   objects.clear(); upload.mockReset(); upload.mockImplementation(defaultUpload); download.mockClear(); guard.mockClear();
 });
+afterEach(() => setQuestionAttachmentAccount(null));
 
 describe("bounded account image uploads", () => {
   it("runs at most six transfers together and returns the original attachment order", async () => {
@@ -77,11 +80,14 @@ describe("bounded account image uploads", () => {
   });
 
   it("reuses only account-scoped successful uploads across a retry", async () => {
-    const { state } = await fixture(2);
+    const { state, keys } = await fixture(2);
     await uploadCloudMedia(client, "owner", state, guard);
     expect(upload).toHaveBeenCalledTimes(2);
     await uploadCloudMedia(client, "owner", state, guard);
     expect(upload).toHaveBeenCalledTimes(2);
+    const records = await Promise.all(keys.map(async key => (await getQuestionAttachmentBlob(key, { localOnly: true }))!));
+    setQuestionAttachmentAccount("another-owner");
+    for (const [index, key] of keys.entries()) await putQuestionAttachmentBlob(key, records[index]);
     await uploadCloudMedia(client, "another-owner", state, guard);
     expect(upload).toHaveBeenCalledTimes(4);
   });

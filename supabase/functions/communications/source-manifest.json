@@ -4,6 +4,8 @@
     "scripts/build-communications.mjs": "0c124b5f6820a38fc27c663cc6800833674db48f77750430cc95fca696c19f0f",
     "scripts/render-communications-auth.mjs": "ce221f06ceface86001291f3c7a55049a526012805cf86a847c837a7ee7aef1f",
     "web/package-lock.json": "236e8d0f2315582c67ab3491e57c28e24c18cc6c0b7341a5fb55375d28d48ad8",
+    "web/src/lib/account/attachmentScope.ts": "1417316fbc88d6f775736388353ac227566eb3c9d6861c68bd66455c47639f41",
+    "web/src/lib/account/supabase.ts": "869a3a1e1c3ff50a5567a0ba20eea56aaed55ec8c5ae887994b723e870d8e5fe",
     "web/src/lib/brand.ts": "aa09ee64dd2b2d3bc3b33b3469d61e51394dffa74c0efdd56ab8ef4724466535",
     "web/src/lib/communications/context.ts": "59e3cd668101f80017c797452c8c86b8c08189a6e60b40485a82e45605ec9073",
     "web/src/lib/communications/email.tsx": "c2fd758c7430dc0b8c49bc61fcb9bb26905ac80810aa8a9daf182d47009394e8",
@@ -22,7 +24,7 @@
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
     "web/src/lib/localVault.ts": "8d182cd317205c4546c4c2ea46922a91818c6bbd47e7716f1ef205c87091b0d1",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
-    "web/src/lib/questionAttachments.ts": "ae016c1450aba37bb17fec3e31a640f0e8ba0b705d436094a2a8939fd29847d9",
+    "web/src/lib/questionAttachments.ts": "586f8d8ceb98563a5f5c58efadf3ceb43704e35ffc65350918b348d278990b0a",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
     "web/src/lib/reports.ts": "6b7521623409395c794c18bfedca8e2391dd08b1d16a156f2ed09048da8aa498",
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
@@ -32,7 +34,7 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "6febc24061ed33d723ed4ec5a743401d8724cf28a0ac96baf2247fcbf1619fde"
+    "sha256": "6bb3ebb1baea1ec98cb132d3d95637ee7e8028c0b5cba46eded53f01aab3b1a7"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",

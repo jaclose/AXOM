@@ -24,6 +24,7 @@ import {
   type QuestionImageAttachment,
 } from "./questionAttachments";
 import { DB_NAME, DB_VERSION, STORE_NAME, BACKUP_STORE_NAME, ATTACHMENT_STORE_NAME } from "./localVault";
+import { captureQuestionAttachmentScope, setQuestionAttachmentAccount } from "./account/attachmentScope";
 
 function deleteDatabase(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -60,7 +61,10 @@ beforeEach(async () => {
   await deleteDatabase(DB_NAME);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  setQuestionAttachmentAccount(null);
+  vi.unstubAllGlobals();
+});
 
 describe("validation", () => {
   it("accepts the four supported image types and rejects everything else", () => {
@@ -213,17 +217,114 @@ describe("blob store", () => {
   });
 });
 
+describe("account-bound attachment bytes", () => {
+  const record = (value: string) => ({
+    blob: new Blob([value], { type: "image/png" }), mimeType: "image/png" as const,
+    byteSize: value.length, questionId: "same-question", updatedAt: "same-time",
+  });
+
+  it("keeps A, B, and legacy bytes separate across persisted reads, export, and targeted deletion", async () => {
+    const blobKey = "shared-key";
+    const questions = [{ id: "same-question", attachments: [metadata({ id: blobKey, blobKey })] }];
+    await putQuestionAttachmentBlob(blobKey, record("legacy"));
+
+    setQuestionAttachmentAccount("A");
+    await putQuestionAttachmentBlob(blobKey, record("AAAA"));
+    expect(await (await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.blob.text()).toBe("AAAA");
+
+    setQuestionAttachmentAccount("B");
+    expect(await getQuestionAttachmentBlob(blobKey, { localOnly: true })).toBeUndefined();
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
+    expect((await collectQuestionAttachmentPayloads(questions, { localOnly: true })).payloads).toEqual([]);
+    await putQuestionAttachmentBlob(blobKey, record("BBBB"));
+    expect((await collectQuestionAttachmentPayloads(questions, { localOnly: true })).payloads[0].base64).toBe(btoa("BBBB"));
+
+    setQuestionAttachmentAccount("A");
+    expect(await (await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.blob.text()).toBe("AAAA");
+    expect((await collectQuestionAttachmentPayloads(questions, { localOnly: true })).payloads[0].base64).toBe(btoa("AAAA"));
+    await deleteQuestionAttachmentBlobs([blobKey]);
+    expect(await getQuestionAttachmentBlob(blobKey, { localOnly: true })).toBeUndefined();
+
+    setQuestionAttachmentAccount("B");
+    expect(await (await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.blob.text()).toBe("BBBB");
+    setQuestionAttachmentAccount(null);
+    expect(await (await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.blob.text()).toBe("legacy");
+  });
+
+  it("invalidates an in-flight read even if A signs back in after B", async () => {
+    setQuestionAttachmentAccount("A");
+    const scope = captureQuestionAttachmentScope();
+    await putQuestionAttachmentBlob("key", record("AAAA"));
+    setQuestionAttachmentAccount("B");
+    setQuestionAttachmentAccount("A");
+    expect(() => scope.assertCurrent()).toThrow("account changed");
+    await expect(getQuestionAttachmentBlob("key", { scope })).rejects.toThrow("account changed");
+  });
+
+  it("keeps account A's bytes through B's empty maintenance and B's same-key restore", async () => {
+    const blobKey = "shared-key";
+    const meta = metadata({ id: blobKey, blobKey, byteSize: 4 });
+    setQuestionAttachmentAccount("A");
+    await putQuestionAttachmentBlob(blobKey, record("AAAA"));
+    setQuestionAttachmentAccount("B");
+    expect((await runQuestionAttachmentMaintenance([])).deletedOrphanBlobKeys).toEqual([]);
+    expect(await getQuestionAttachmentBlob(blobKey, { localOnly: true })).toBeUndefined();
+    const restored = await restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "same-question", base64: btoa("BBBB") }],
+      [{ id: "same-question", attachments: [meta] }],
+    );
+    expect(restored).toEqual({ restored: 1, skipped: 0 });
+    expect(await (await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.blob.text()).toBe("BBBB");
+    setQuestionAttachmentAccount("A");
+    expect(await (await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.blob.text()).toBe("AAAA");
+  });
+});
+
 describe("orphan maintenance", () => {
-  it("deletes unreferenced blobs, reports missing blobs, never touches referenced ones", async () => {
-    await putQuestionAttachmentBlob("referenced", { blob: new Blob(["a"]), mimeType: "image/png", byteSize: 1, questionId: "q1", updatedAt: "t" });
-    await putQuestionAttachmentBlob("orphan", { blob: new Blob(["b"]), mimeType: "image/png", byteSize: 1, questionId: "gone", updatedAt: "t" });
+  const record = (bytes: string, questionId: string) => ({
+    blob: new Blob([bytes]), mimeType: "image/png" as const,
+    byteSize: bytes.length, questionId, updatedAt: "t",
+  });
+
+  it("preserves unowned device bytes and reports missing references without deleting them", async () => {
+    await putQuestionAttachmentBlob("referenced", record("a", "q1"));
+    await putQuestionAttachmentBlob("orphan", record("b", "gone"));
     const questions = [
       { attachments: [metadata({ id: "referenced" }), metadata({ id: "missing-blob" })] },
     ];
     const report = await runQuestionAttachmentMaintenance(questions);
-    expect(report.deletedOrphanBlobKeys).toEqual(["orphan"]);
+    expect(report.deletedOrphanBlobKeys).toEqual([]);
+    expect(report.preservedUnscopedBlobCount).toBe(1);
     expect(report.missingBlobKeys).toEqual(["missing-blob"]);
+    expect(await listQuestionAttachmentBlobKeys()).toEqual(["orphan", "referenced"]);
+
+    // Targeted user-initiated deletion still works, unlike an unscoped sweep.
+    await deleteQuestionAttachmentBlobs(["orphan"]);
     expect(await listQuestionAttachmentBlobKeys()).toEqual(["referenced"]);
+  });
+
+  it("does not erase A's non-private attachment across simulated disjoint and empty B hydration", async () => {
+    await putQuestionAttachmentBlob("account-A-attachment", record("account-A-original", "A-question"));
+    await putQuestionAttachmentBlob("account-B-attachment", record("account-B-original", "B-question"));
+    const bWorkspace = [{ attachments: [metadata({
+      id: "account-B-attachment", blobKey: "account-B-attachment",
+    })] }];
+    const bReport = await runQuestionAttachmentMaintenance(bWorkspace);
+    expect(bReport.deletedOrphanBlobKeys).toEqual([]);
+    expect(bReport.preservedUnscopedBlobCount).toBe(1);
+
+    // A completely empty workspace is not proof this origin's Blob store
+    // belongs to that account, including during a fresh B rehydration.
+    const emptyReport = await runQuestionAttachmentMaintenance([]);
+    expect(emptyReport.deletedOrphanBlobKeys).toEqual([]);
+    expect(emptyReport.preservedUnscopedBlobCount).toBe(2);
+
+    const a = await getQuestionAttachmentBlob("account-A-attachment", { localOnly: true });
+    const b = await getQuestionAttachmentBlob("account-B-attachment", { localOnly: true });
+    expect(a).toMatchObject({ questionId: "A-question", byteSize: 18 });
+    expect(b).toMatchObject({ questionId: "B-question", byteSize: 18 });
+    expect(await a!.blob.text()).toBe("account-A-original");
+    expect(await b!.blob.text()).toBe("account-B-original");
   });
 });
 

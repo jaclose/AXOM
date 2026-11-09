@@ -7,6 +7,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { QuestionRecord } from "../../lib/questions";
 import type { QuestionImageAttachment } from "../../lib/questionAttachments";
 import { getQuestionAttachmentBlob } from "../../lib/questionAttachments";
+import { useAccount } from "../../lib/account/accountStore";
+import { captureQuestionAttachmentScope, currentQuestionAttachmentScopeToken } from "../../lib/account/attachmentScope";
 import { LAB_SECTIONS, LAB_VALUES_SOURCE, searchLabValues, type LabSection } from "../../data/labValues";
 import { formatQuestionTime } from "../../lib/exam/questionTime";
 import type { ItemResult } from "../../lib/exam/engine";
@@ -65,22 +67,28 @@ function FragmentRows({ heading, children }: { heading?: string; children: React
  * that is not on this device has no entry (the caller says so in its place).
  */
 export function useExhibitUrls(attachments: readonly QuestionImageAttachment[]): Record<string, string> {
-  const [urls, setUrls] = useState<Record<string, string>>({});
-  const signature = attachments.map((attachment) => `${attachment.id}:${attachment.blobKey}`).join("|");
+  useAccount((state) => state.user?.id);
+  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string> }>({ signature: "", urls: {} });
+  const signature = `${currentQuestionAttachmentScopeToken()}|${attachments.map((attachment) => `${attachment.id}:${attachment.blobKey}`).join("|")}`;
   useEffect(() => {
     let cancelled = false;
+    const scope = captureQuestionAttachmentScope();
     const created: string[] = [];
     (async () => {
       const next: Record<string, string> = {};
       for (const attachment of attachments) {
         const record = await getQuestionAttachmentBlob(attachment.blobKey).catch(() => undefined);
+        if (cancelled) break;
+        try { scope.assertCurrent(); } catch { break; }
         if (record) {
           const url = URL.createObjectURL(record.blob);
           created.push(url);
           next[attachment.id] = url;
         }
       }
-      if (!cancelled) setUrls(next);
+      if (!cancelled) {
+        try { scope.assertCurrent(); setLoaded({ signature, urls: next }); } catch { /* The account changed while loading. */ }
+      }
       else created.forEach((url) => URL.revokeObjectURL(url));
     })();
     return () => {
@@ -89,7 +97,7 @@ export function useExhibitUrls(attachments: readonly QuestionImageAttachment[]):
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
-  return urls;
+  return loaded.signature === signature ? loaded.urls : {};
 }
 
 /** What the explanation says first: the result in a word, the right answer, and the time taken. */

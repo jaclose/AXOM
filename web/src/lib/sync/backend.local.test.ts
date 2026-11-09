@@ -9,6 +9,7 @@ import { makeSeed } from "../seed";
 import { workspaceDigest } from "./workspaceDigest";
 import { canonicalJson, compressText, sha256 } from "../compressedText";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
+import { setQuestionAttachmentAccount } from "../account/attachmentScope";
 import { snapshotWorkspace } from "./workspaceSnapshot";
 import { prepareCloudSnapshot, decodeCloudSnapshot } from "./cloudSnapshot";
 import { clearCloudContentCache, hydrateCloudContent, uploadCloudContent } from "./cloudContent";
@@ -23,7 +24,7 @@ vi.mock("../account/supabase", () => ({ loadSupabase: async () => operation.clie
   accountOperationClient: async () => ({ ...operation, assertCurrent: async () => {} }) }));
 
 const statusFile = process.env.AXOM_LOCAL_SUPABASE_STATUS;
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { setQuestionAttachmentAccount(null); vi.unstubAllGlobals(); });
 describe.skipIf(!statusFile)("recovery against local Supabase Auth, REST and Storage", () => {
   it("round-trips private sources and images, isolates accounts and acknowledges retries once", async () => {
     const { env } = JSON.parse(readFileSync(statusFile!, "utf8"));
@@ -43,6 +44,7 @@ describe.skipIf(!statusFile)("recovery against local Supabase Auth, REST and Sto
       users.push({ client, id: created.data.user.id });
     }
     const [a, b] = users; const state = makeSeed(); const now = new Date().toISOString();
+    setQuestionAttachmentAccount(a.id);
     state.documents = [{ id: "private-source", title: "Synthetic source", fileName: "test.txt", fileType: "text/plain", sizeBytes: 160000, rawText: "Synthetic source. ".repeat(10000), uploadedAt: now, tags: [], linkedQuestionSetIds: [], libraryOnly: false }];
     // A real, valid PNG; test data only.
     const image = new Blob([Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lZkAAAAASUVORK5CYII=", "base64")], { type: "image/png" });

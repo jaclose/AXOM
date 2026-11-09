@@ -7,6 +7,7 @@ import { ASSET_ROLES, type AssetRole } from "./question-content/blocks";
 // inline base64 payloads inside the exported file only.
 // ===========================================================================
 import { ATTACHMENT_STORE_NAME, DB_NAME, DB_VERSION, ensureVaultStores } from "./localVault";
+import { captureQuestionAttachmentScope } from "./account/attachmentScope";
 import { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
 export { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
 
@@ -24,7 +25,7 @@ export interface QuestionImageAttachment {
   altText: string;
   createdAt: string;
   updatedAt: string;
-  /** Stable key into the questionAttachmentBlobs store (today equal to id). */
+  /** Stable metadata key (today equal to id); authenticated storage adds an account prefix. */
   blobKey: string;
   /**
    * "exhibit": part of the question itself (an ECG, a slide, a graph), shown
@@ -186,8 +187,17 @@ async function withAttachmentStore<T>(
   });
 }
 
-export function putQuestionAttachmentBlob(blobKey: string, record: QuestionAttachmentBlobRecord): Promise<IDBValidKey> {
-  return withAttachmentStore("readwrite", (store) => store.put(record, blobKey));
+type AttachmentScope = ReturnType<typeof captureQuestionAttachmentScope>;
+
+function storageKey(blobKey: string, scope: AttachmentScope): IDBValidKey {
+  return scope.accountId ? ["account", scope.accountId, blobKey] : blobKey;
+}
+
+export async function putQuestionAttachmentBlob(blobKey: string, record: QuestionAttachmentBlobRecord, scope = captureQuestionAttachmentScope()): Promise<IDBValidKey> {
+  scope.assertCurrent();
+  const result = await withAttachmentStore("readwrite", (store) => store.put(record, storageKey(blobKey, scope)));
+  scope.assertCurrent();
+  return result;
 }
 
 export type MissingAttachmentRestoreResult =
@@ -235,17 +245,20 @@ export async function restoreMissingQuestionAttachment(input: {
   attachment: QuestionImageAttachment;
   questionId: string;
 }): Promise<MissingAttachmentRestoreResult> {
+  const scope = captureQuestionAttachmentScope();
   const { attachment, file, questionId } = input;
   const validation = await validateMissingQuestionAttachmentFile(file, attachment);
   if (!validation.ok) return { status: "rejected", message: validation.message };
   try {
+    scope.assertCurrent();
     await withAttachmentStore("readwrite", (store) => store.add({
       blob: file,
       mimeType: attachment.mimeType,
       byteSize: file.size,
       questionId,
       updatedAt: attachment.updatedAt,
-    } satisfies QuestionAttachmentBlobRecord, attachment.blobKey));
+    } satisfies QuestionAttachmentBlobRecord, storageKey(attachment.blobKey, scope)));
+    scope.assertCurrent();
   } catch (error) {
     if (error instanceof DOMException && error.name === "ConstraintError") {
       return { status: "exists", message: "This image is already stored. AXOM did not replace it." };
@@ -253,7 +266,7 @@ export async function restoreMissingQuestionAttachment(input: {
     return { status: "failed", message: "AXOM could not save this image. Keep the original file and try again." };
   }
   try {
-    const stored = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true });
+    const stored = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, scope });
     if (!stored || stored.questionId !== questionId || stored.mimeType !== attachment.mimeType
       || stored.byteSize !== file.size || stored.blob.size !== file.size
       || !equalBytes(new Uint8Array(await stored.blob.arrayBuffer()), new Uint8Array(await file.arrayBuffer()))) {
@@ -272,22 +285,43 @@ export function setMissingAttachmentLoader(loader: MissingAttachmentLoader): () 
   return () => { if (missingAttachmentLoader === loader) missingAttachmentLoader = undefined; };
 }
 
-export interface AttachmentReadOptions { localOnly?: boolean }
+export interface AttachmentReadOptions { localOnly?: boolean; scope?: AttachmentScope }
 
 export async function getQuestionAttachmentBlob(blobKey: string, options: AttachmentReadOptions = {}): Promise<QuestionAttachmentBlobRecord | undefined> {
-  const local = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(blobKey));
-  return local ?? (options.localOnly ? undefined : await missingAttachmentLoader?.(blobKey));
+  const scope = options.scope ?? captureQuestionAttachmentScope();
+  scope.assertCurrent();
+  const local = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(storageKey(blobKey, scope)));
+  scope.assertCurrent();
+  if (local || options.localOnly) return local;
+  if (!missingAttachmentLoader) return undefined;
+  await missingAttachmentLoader(blobKey);
+  scope.assertCurrent();
+  // A loader cannot bypass the account-bound store by returning in-memory
+  // bytes that were never saved under this account's physical key.
+  const restored = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(storageKey(blobKey, scope)));
+  scope.assertCurrent();
+  return restored;
 }
 
-export async function deleteQuestionAttachmentBlobs(blobKeys: readonly string[]): Promise<void> {
+export async function deleteQuestionAttachmentBlobs(blobKeys: readonly string[], scope = captureQuestionAttachmentScope()): Promise<void> {
   for (const key of blobKeys) {
-    await withAttachmentStore("readwrite", (store) => store.delete(key));
+    scope.assertCurrent();
+    await withAttachmentStore("readwrite", (store) => store.delete(storageKey(key, scope)));
   }
+  scope.assertCurrent();
 }
 
-export function listQuestionAttachmentBlobKeys(): Promise<string[]> {
+export function listQuestionAttachmentBlobKeys(scope = captureQuestionAttachmentScope()): Promise<string[]> {
   return withAttachmentStore<IDBValidKey[]>("readonly", (store) => store.getAllKeys())
-    .then((keys) => keys.map((key) => String(key)));
+    .then((keys) => {
+      scope.assertCurrent();
+      return keys.flatMap((key) => {
+        if (scope.accountId) {
+          return Array.isArray(key) && key[0] === "account" && key[1] === scope.accountId && typeof key[2] === "string" ? [key[2]] : [];
+        }
+        return typeof key === "string" ? [key] : [];
+      });
+    });
 }
 
 // --- creation ---------------------------------------------------------------
@@ -306,6 +340,7 @@ export async function createQuestionAttachment(input: {
   existing: readonly QuestionImageAttachment[];
   now?: string;
 }): Promise<AttachmentCreationResult> {
+  const scope = captureQuestionAttachmentScope();
   const name = ("name" in input.file && typeof input.file.name === "string" && input.file.name) || "pasted-image";
   const validation = validateQuestionAttachmentFile(
     { name, type: input.file.type, size: input.file.size },
@@ -342,7 +377,7 @@ export async function createQuestionAttachment(input: {
       byteSize: input.file.size,
       questionId: input.questionId,
       updatedAt: now,
-    });
+    }, scope);
   } catch (error) {
     const isQuota = error instanceof DOMException && error.name === "QuotaExceededError";
     return {
@@ -358,31 +393,40 @@ export async function createQuestionAttachment(input: {
 // --- orphan maintenance ------------------------------------------------------
 
 export interface AttachmentMaintenanceReport {
+  /** Automatic deletion is disabled until per-account ownership can be proven. */
   deletedOrphanBlobKeys: string[];
+  /** Count of retained unreferenced keys visible in the active account/local scope. */
+  preservedUnscopedBlobCount?: number;
   missingBlobKeys: string[];
 }
 
-/** Bounded, deterministic, non-destructive sweep: deletes blobs no question
- * references; reports (but never deletes) metadata whose blob is missing.
- * SAFETY: only call with a question list that is known to be fully loaded —
- * never before store rehydration (an empty list would orphan every blob).
- * AXOM runs it post-restore/merge with the restored questions passed
- * explicitly; question deletion uses targeted deletes instead of a sweep. */
+/** Read-only inventory of the currently hydrated question references.
+ *
+ * IMPORTANT: legacy keys in questionAttachmentBlobs are origin-shared, while
+ * this list belongs to one hydrated workspace. A key absent from that list is
+ * not proof that it is disposable. Keep both legacy and scoped unreferenced
+ * bytes until a separately verified ownership/migration policy exists.
+ *
+ * Explicit, caller-authorized targeted deletion remains separate via
+ * deleteQuestionAttachmentBlobs. Account-bound reads and writes are enforced
+ * separately by the physical key selected for each authenticated session.
+ * Retention may consume more device storage until scoped GC is implemented. */
 export async function runQuestionAttachmentMaintenance(
   questions: ReadonlyArray<{ attachments?: readonly QuestionImageAttachment[] }>,
 ): Promise<AttachmentMaintenanceReport> {
+  const scope = captureQuestionAttachmentScope();
   const referenced = new Set<string>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) referenced.add(attachment.blobKey);
   }
-  const stored = await listQuestionAttachmentBlobKeys();
-  // Private review documents have their own references. Preserve their bytes if
-  // an older app/backup cannot read a document; recovery must remain possible.
-  const orphans = stored.filter((key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key));
-  await deleteQuestionAttachmentBlobs(orphans);
+  const stored = await listQuestionAttachmentBlobKeys(scope);
+  const preservedUnscopedBlobCount = stored.filter(
+    (key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key),
+  ).length;
   const storedSet = new Set(stored);
-  const missing = [...referenced].filter((key) => !storedSet.has(key));
-  return { deletedOrphanBlobKeys: orphans, missingBlobKeys: missing };
+  const missingBlobKeys = [...referenced].filter((key) => !storedSet.has(key));
+  scope.assertCurrent();
+  return { deletedOrphanBlobKeys: [], preservedUnscopedBlobCount, missingBlobKeys };
 }
 
 // --- portable backup payloads ------------------------------------------------
@@ -406,6 +450,7 @@ export async function collectQuestionAttachmentPayloads(
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
   options: AttachmentReadOptions = {},
 ): Promise<{ payloads: QuestionAttachmentExportPayload[]; missingBlobKeys: string[] }> {
+  const scope = options.scope ?? captureQuestionAttachmentScope();
   const payloads: QuestionAttachmentExportPayload[] = [];
   const missing: string[] = [];
   for (const question of questions) {
@@ -415,11 +460,13 @@ export async function collectQuestionAttachmentPayloads(
       // strip every image down to metadata-only.
       let base64: string | undefined;
       try {
-        const record = await getQuestionAttachmentBlob(attachment.blobKey, options);
+        const record = await getQuestionAttachmentBlob(attachment.blobKey, { ...options, scope });
         if (record) base64 = await blobToBase64(record.blob);
       } catch {
+        scope.assertCurrent();
         base64 = undefined;
       }
+      scope.assertCurrent();
       if (base64 === undefined) {
         missing.push(attachment.blobKey);
         continue;
@@ -427,6 +474,7 @@ export async function collectQuestionAttachmentPayloads(
       payloads.push({ ...attachment, questionId: question.id, base64 });
     }
   }
+  scope.assertCurrent();
   return { payloads, missingBlobKeys: missing };
 }
 
@@ -470,6 +518,7 @@ export async function stageQuestionAttachmentPayloads(
   payloads: readonly QuestionAttachmentExportPayload[],
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
 ): Promise<StagedQuestionAttachmentRestore> {
+  const scope = captureQuestionAttachmentScope();
   const surviving = new Map<string, QuestionImageAttachment & { questionId: string }>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) {
@@ -485,7 +534,7 @@ export async function stageQuestionAttachmentPayloads(
     const failures: string[] = [];
     for (const [blobKey, staged] of inserted) {
       try {
-        const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true });
+        const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope });
         if (!current) continue;
         const [currentBytes, stagedBytes] = await Promise.all([
           current.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
@@ -496,7 +545,7 @@ export async function stageQuestionAttachmentPayloads(
           failures.push(blobKey);
           continue;
         }
-        await deleteQuestionAttachmentBlobs([blobKey]);
+        await deleteQuestionAttachmentBlobs([blobKey], scope);
       } catch {
         failures.push(blobKey);
       }
@@ -517,7 +566,7 @@ export async function stageQuestionAttachmentPayloads(
         throw new Error("A backup image failed validation. No existing image was overwritten.");
       }
 
-      const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true });
+      const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
       if (existing) {
         const existingBytes = new Uint8Array(await existing.blob.arrayBuffer());
         if (existing.mimeType !== payload.mimeType || !equalBytes(existingBytes, bytes)) {
@@ -534,10 +583,11 @@ export async function stageQuestionAttachmentPayloads(
         questionId: target.questionId,
         updatedAt: payload.updatedAt,
       };
-      await putQuestionAttachmentBlob(payload.blobKey, record);
+      await putQuestionAttachmentBlob(payload.blobKey, record, scope);
       inserted.set(payload.blobKey, record);
       restored += 1;
     }
+    scope.assertCurrent();
     return { restored, skipped, rollback };
   } catch (error) {
     try {
@@ -557,6 +607,7 @@ export async function restoreQuestionAttachmentPayloads(
   payloads: readonly QuestionAttachmentExportPayload[],
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
 ): Promise<{ restored: number; skipped: number }> {
+  const scope = captureQuestionAttachmentScope();
   const surviving = new Map<string, QuestionImageAttachment & { questionId: string }>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) {
@@ -570,8 +621,9 @@ export async function restoreQuestionAttachmentPayloads(
     if (!target) { skipped += 1; continue; }
     let existing: QuestionAttachmentBlobRecord | undefined;
     try {
-      existing = await getQuestionAttachmentBlob(payload.blobKey);
+      existing = await getQuestionAttachmentBlob(payload.blobKey, { scope });
     } catch {
+      scope.assertCurrent();
       existing = undefined;
     }
     if (existing && existing.updatedAt > payload.updatedAt) { skipped += 1; continue; }
@@ -588,9 +640,10 @@ export async function restoreQuestionAttachmentPayloads(
       byteSize: bytes.byteLength,
       questionId: target.questionId,
       updatedAt: payload.updatedAt,
-    });
+    }, scope);
     restored += 1;
   }
+  scope.assertCurrent();
   return { restored, skipped };
 }
 

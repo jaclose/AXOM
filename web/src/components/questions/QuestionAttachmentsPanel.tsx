@@ -7,6 +7,8 @@ import { useEffect, useId, useRef, useState, type ClipboardEvent } from "react";
 import { ImagePlus, RotateCcw, Trash2, X } from "lucide-react";
 import { GButton, GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { useAccount } from "../../lib/account/accountStore";
+import { captureQuestionAttachmentScope, currentQuestionAttachmentScopeToken } from "../../lib/account/attachmentScope";
 import {
   createQuestionAttachment,
   deleteQuestionAttachmentBlobs,
@@ -37,10 +39,12 @@ export function QuestionAttachmentsPanel({
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<QuestionImageAttachment | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<QuestionImageAttachment | null>(null);
-  const [restoreCandidate, setRestoreCandidate] = useState<{ attachment: QuestionImageAttachment; file: File; url: string } | null>(null);
+  const [restoreCandidate, setRestoreCandidate] = useState<{ attachment: QuestionImageAttachment; file: File; url: string; scopeToken: string } | null>(null);
   const [restoreError, setRestoreError] = useState("");
   const [repairRevision, setRepairRevision] = useState(0);
-  const [urls, setUrls] = useState<Record<string, string | "missing">>({});
+  useAccount((state) => state.user?.id);
+  const scopeToken = currentQuestionAttachmentScopeToken();
+  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string | "missing"> }>({ signature: "", urls: {} });
   const restoreTitleId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
   const restoreFileRef = useRef<HTMLInputElement>(null);
@@ -55,15 +59,20 @@ export function QuestionAttachmentsPanel({
   // Keyed on the set of blobs (id + blobKey) only — editing alt text must not
   // revoke and re-read every blob (which would flicker thumbnails and briefly
   // reference a revoked object URL).
-  const blobSignature = attachments.map((a) => `${a.id}:${a.blobKey}`).join("|");
+  const blobSignature = `${scopeToken}|${attachments.map((a) => `${a.id}:${a.blobKey}`).join("|")}`;
+  const signature = `${questionId}|${blobSignature}|${repairRevision}`;
+  const urls = loaded.signature === signature ? loaded.urls : {};
   useEffect(() => {
     let cancelled = false;
+    const scope = captureQuestionAttachmentScope();
     const created: string[] = [];
     (async () => {
       const next: Record<string, string | "missing"> = {};
       for (const attachment of attachmentsRef.current) {
         try {
           const record = await getQuestionAttachmentBlob(attachment.blobKey);
+          if (cancelled) break;
+          try { scope.assertCurrent(); } catch { break; }
           if (record) {
             const url = URL.createObjectURL(record.blob);
             created.push(url);
@@ -75,14 +84,16 @@ export function QuestionAttachmentsPanel({
           next[attachment.id] = "missing";
         }
       }
-      if (!cancelled) setUrls(next);
+      if (!cancelled) {
+        try { scope.assertCurrent(); setLoaded({ signature, urls: next }); } catch { /* The account changed while loading. */ }
+      }
       else created.forEach((url) => URL.revokeObjectURL(url));
     })();
     return () => {
       cancelled = true;
       created.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [questionId, blobSignature, repairRevision]);
+  }, [questionId, blobSignature, repairRevision, signature]);
 
   useEffect(() => {
     setPreview(null);
@@ -91,7 +102,7 @@ export function QuestionAttachmentsPanel({
     restoreTargetRef.current = null;
     setRestoreError("");
     setStatus("");
-  }, [questionId]);
+  }, [questionId, scopeToken]);
 
   useEffect(() => () => {
     if (restoreCandidate) URL.revokeObjectURL(restoreCandidate.url);
@@ -99,16 +110,19 @@ export function QuestionAttachmentsPanel({
 
   async function addFiles(files: readonly File[]) {
     if (!files.length || busy) return;
+    const scope = captureQuestionAttachmentScope();
     setBusy(true);
     const failures: string[] = [];
     let added = 0;
     // Deterministic: original selection order; one failure never discards the rest.
     for (const file of files) {
+      try { scope.assertCurrent(); } catch { failures.push("The account changed. Choose the image again."); break; }
       const result = await createQuestionAttachment({
         file,
         questionId,
         existing: attachmentsRef.current,
       });
+      try { scope.assertCurrent(); } catch { failures.push("The account changed. Choose the image again."); break; }
       if (result.status === "created") {
         const next = [...attachmentsRef.current, result.attachment];
         try {
@@ -144,8 +158,7 @@ export function QuestionAttachmentsPanel({
   }
 
   async function removeAttachment(attachment: QuestionImageAttachment) {
-    // Metadata first (authoritative), then the blob; a failed blob delete is
-    // surfaced and the sweep can finish the cleanup later.
+    // Metadata first (authoritative), then the blob. Preserve bytes if deletion fails.
     const next = attachmentsRef.current.filter((item) => item.id !== attachment.id);
     onChange(next);
     attachmentsRef.current = next;
@@ -158,7 +171,7 @@ export function QuestionAttachmentsPanel({
       await deleteQuestionAttachmentBlobs([attachment.blobKey]);
       setStatus(`Removed "${attachment.fileName}".`);
     } catch {
-      setStatus(`Removed "${attachment.fileName}" from this question; its stored bytes will be cleaned up on the next maintenance pass.`);
+      setStatus(`Removed "${attachment.fileName}" from this question, but its stored bytes could not be removed. Try again from this account.`);
     }
   }
 
@@ -192,16 +205,18 @@ export function QuestionAttachmentsPanel({
   async function chooseRestoreFile(file: File | undefined) {
     const attachment = restoreTargetRef.current;
     if (!file || !attachment || busy) return;
+    const scope = captureQuestionAttachmentScope();
     setBusy(true);
     const validation = await validateMissingQuestionAttachmentFile(file, attachment);
     setBusy(false);
+    try { scope.assertCurrent(); } catch { return; }
     if (!validation.ok) {
       setStatus(validation.message);
       return;
     }
     setRestoreError("");
     setStatus("");
-    setRestoreCandidate({ attachment, file, url: URL.createObjectURL(file) });
+    setRestoreCandidate({ attachment, file, url: URL.createObjectURL(file), scopeToken });
   }
 
   function closeRestore() {
@@ -215,7 +230,8 @@ export function QuestionAttachmentsPanel({
   }
 
   async function confirmRestore() {
-    if (!restoreCandidate || busy) return;
+    if (!restoreCandidate || restoreCandidate.scopeToken !== scopeToken || busy) return;
+    const scope = captureQuestionAttachmentScope();
     const { attachment, file } = restoreCandidate;
     const current = attachmentsRef.current.find((item) => item.id === attachment.id);
     if (!current || current.blobKey !== attachment.blobKey || current.byteSize !== attachment.byteSize) {
@@ -225,6 +241,7 @@ export function QuestionAttachmentsPanel({
     setBusy(true);
     const result = await restoreMissingQuestionAttachment({ file, attachment: current, questionId });
     setBusy(false);
+    try { scope.assertCurrent(); } catch { return; }
     if (result.status !== "restored") {
       setRestoreError(result.message);
       return;
@@ -326,7 +343,7 @@ export function QuestionAttachmentsPanel({
       )}
       <span ref={statusRef} className="sub" role="status" aria-live="polite" tabIndex={-1}>{status}</span>
 
-      {restoreCandidate && (
+      {restoreCandidate?.scopeToken === scopeToken && (
         <div className="question-attachment-lightbox" role="dialog" aria-modal="true"
           aria-labelledby={restoreTitleId}
           onKeyDown={(event) => { if (event.key === "Escape" && !busy) { event.stopPropagation(); closeRestore(); } }}>
@@ -354,7 +371,7 @@ export function QuestionAttachmentsPanel({
         </div>
       )}
 
-      {preview && (
+      {preview && loaded.signature === signature && (
         <div
           className="question-attachment-lightbox"
           role="dialog"

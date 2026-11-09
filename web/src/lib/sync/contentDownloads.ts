@@ -1,6 +1,7 @@
 import { workspaceMedia, downloadCloudMediaAsset } from "./cloudMedia";
 import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
 import { accountOperationClient } from "../account/supabase";
+import { captureQuestionAttachmentScope } from "../account/attachmentScope";
 import { useStore } from "../store";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
 import type { NoctyriumState } from "../types";
@@ -19,6 +20,8 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   if (!deferred) return state;
   const { client, userId, assertCurrent } = await accountOperationClient();
   if (userId !== deferred.accountId) throw new Error("Sign in to the account that saved this content before downloading it.");
+  const attachmentScope = captureQuestionAttachmentScope();
+  if (attachmentScope.accountId !== userId) throw new Error("The signed-in account changed. Retry the download in the current account.");
   const questions = deferred.questions.filter(record => !selection || selection.questionIds?.includes(record.id));
   const documents = deferred.documents.filter(record => !selection || selection.documentIds?.includes(record.id));
   const qids = new Set(questions.map(record => record.id));
@@ -51,15 +54,17 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
       await assertCurrent();
       const reference = media.get(blobKey);
       if (checksum && reference?.hash !== checksum) throw new Error("This image does not match its immutable question source.");
-      const local = await getQuestionAttachmentBlob(blobKey);
+      const local = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope: attachmentScope });
       if (local && local.blob.size === attachment.byteSize) continue;
       if (!reference) throw new Error("This source has no protected image reference. Keep its original file and retry from a complete backup.");
       const blob = await downloadCloudMediaAsset(client, userId, reference);
       await assertCurrent();
-      await putQuestionAttachmentBlob(blobKey, { ...attachment, questionId, blob });
+      attachmentScope.assertCurrent();
+      await putQuestionAttachmentBlob(blobKey, { ...attachment, questionId, blob }, attachmentScope);
     }
   }));
   await assertCurrent();
+  attachmentScope.assertCurrent();
   const remaining = {
     ...deferred, questions: deferred.questions.filter(record => !qids.has(record.id)),
     documents: deferred.documents.filter(record => !dids.has(record.id)),
@@ -70,15 +75,19 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
 }
 
 export async function downloadAccountContent(selection?: ContentSelection): Promise<void> {
+  const attachmentScope = captureQuestionAttachmentScope();
   const before = useStore.getState();
   const restored = await materializeState(before, selection);
+  attachmentScope.assertCurrent();
   if (restored === before) return;
   // A bank download includes the existing study UI, including its lazy chunk.
   if (typeof window !== "undefined") await import("../../pages/QuestionWorkspacePage");
+  attachmentScope.assertCurrent();
   if (useStore.getState() !== before) throw new Error("Your workspace changed during the download. Your work is safe; retry to apply the downloaded content.");
   const checkpoint = getVaultWriteCheckpoint();
   useStore.setState({ questions: restored.questions, documents: restored.documents, deferredContent: restored.deferredContent });
   await flushLocalVaultWrites();
+  attachmentScope.assertCurrent();
   assertVaultWritesSince(checkpoint);
 }
 

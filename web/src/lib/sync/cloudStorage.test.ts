@@ -13,7 +13,9 @@ import { MEDIA_BUCKET, uploadCloudMedia, validateWorkspaceMedia, workspaceMedia 
 import { installCloudMediaCache, saveCloudMediaIndex } from "./cloudMediaCache";
 import type { NoctyriumState } from "../types";
 import { deferContent } from "./deferredContent";
-import { materializeState, retainDownloadedContent } from "./contentDownloads";
+import { downloadAccountContent, materializeState, retainDownloadedContent } from "./contentDownloads";
+import { useStore } from "../store";
+import { setQuestionAttachmentAccount } from "../account/attachmentScope";
 import { parseImport } from "../backup";
 
 const operation = vi.hoisted(() => ({ current: null as unknown }));
@@ -37,12 +39,15 @@ function fixture(): NoctyriumState {
   return state;
 }
 beforeEach(() => {
+  setQuestionAttachmentAccount("account-a");
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
-  objects.clear(); upload.mockClear(); download.mockClear(); guard.mockClear();
+  objects.clear(); upload.mockClear(); download.mockReset();
+  download.mockImplementation(async (bucket, path) => ({ data: objects.get(`${bucket}/${path}`), error: null }));
+  guard.mockClear();
   operation.current = { client, userId: "account-a", assertCurrent: guard };
 });
-afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals(); });
+afterEach(() => { dispose?.(); dispose = undefined; setQuestionAttachmentAccount(null); vi.unstubAllGlobals(); });
 
 describe("private cloud content and media", () => {
   it("keeps an Unreviewed community marker beside a deferred account download", async () => {
@@ -98,9 +103,45 @@ describe("private cloud content and media", () => {
     operation.current = { client, userId: "account-a", assertCurrent: guard };
     await materializeState(deferred);
     operation.current = { client, userId: "account-b", assertCurrent: guard };
+    setQuestionAttachmentAccount("account-b");
     const other = deferContent(split.workspace, "account-b", split.references, []);
     await expect(materializeState(other)).rejects.toThrow(/downloaded or verified/);
     expect(deferred.deferredContent?.sources).toEqual(split.references);
+  });
+
+  it("does not apply A's downloaded content after switching to B during recovery", async () => {
+    const original = fixture();
+    const split = await splitCloudContent(original);
+    await uploadCloudContent(client, "account-a", split.objects, [], guard);
+    clearCloudContentCache();
+    const deferred = deferContent(split.workspace, "account-a", split.references, []);
+    const priorStore = useStore.getState();
+    useStore.setState(deferred);
+    expect(useStore.getState().deferredContent).toBeDefined();
+    let entered!: () => void;
+    let release!: () => void;
+    const reading = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    download.mockImplementationOnce(async (bucket, path) => {
+      entered();
+      await gate;
+      return { data: objects.get(`${bucket}/${path}`), error: null };
+    });
+    try {
+      const pending = downloadAccountContent({ questionIds: ["q1"] });
+      const first = await Promise.race([
+        reading.then(() => "reading"),
+        pending.then(() => "completed", (error: unknown) => `failed: ${String(error)}`),
+      ]);
+      expect(first).toBe("reading");
+      setQuestionAttachmentAccount("account-b");
+      release();
+      await expect(pending).rejects.toThrow(/account changed/i);
+      expect(useStore.getState().questions).toEqual(deferred.questions);
+    } finally {
+      release();
+      useStore.setState(priorStore);
+    }
   });
 
   it("retains local source bytes when remote notes change, without fetching or overriding the remote learner overlay", async () => {
@@ -184,6 +225,45 @@ describe("private cloud content and media", () => {
     dispose(); dispose = undefined;
     expect(await (await getQuestionAttachmentBlob(restoredKey))!.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());
     expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse A's persisted image for B and retries B's failed cloud recovery", async () => {
+    const state = fixture();
+    const blobKey = `account-bound-${crypto.randomUUID()}`;
+    const a = new Blob(["AAAA"], { type: "image/png" });
+    const b = new Blob(["BBBB"], { type: "image/png" });
+    state.questions[0].attachments = [{
+      id: blobKey, blobKey, fileName: "figure.png", mimeType: "image/png", byteSize: b.size,
+      altText: "Figure", createdAt: state.questions[0].createdAt, updatedAt: state.questions[0].updatedAt,
+    }];
+    await putQuestionAttachmentBlob(blobKey, { blob: a, mimeType: "image/png", byteSize: a.size, questionId: "q1", updatedAt: state.questions[0].updatedAt });
+    const hash = await sha256(new Uint8Array(await b.arrayBuffer()));
+    setQuestionAttachmentAccount("account-b");
+    operation.current = { client, userId: "account-b", assertCurrent: guard };
+    await saveCloudMediaIndex("account-b", [{ blobKey, hash, byteSize: b.size, updatedAt: state.questions[0].updatedAt }]);
+    dispose = installCloudMediaCache("account-b", () => state);
+    await expect(getQuestionAttachmentBlob(blobKey)).rejects.toThrow("integrity check");
+    expect(await getQuestionAttachmentBlob(blobKey, { localOnly: true })).toBeUndefined();
+    objects.set(`${MEDIA_BUCKET}/account-b/${hash}`, b);
+    expect(await (await getQuestionAttachmentBlob(blobKey))?.blob.text()).toBe("BBBB");
+    setQuestionAttachmentAccount("account-a");
+    expect(await (await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.blob.text()).toBe("AAAA");
+  });
+
+  it("does not upload A's image bytes when the transport is invoked for B before account state catches up", async () => {
+    const state = fixture();
+    const blobKey = `mismatched-upload-${crypto.randomUUID()}`;
+    const blob = new Blob(["ACCOUNT_A_ONLY"], { type: "image/png" });
+    state.questions[0].attachments = [{
+      id: blobKey, blobKey, fileName: "figure.png", mimeType: "image/png", byteSize: blob.size,
+      altText: "Figure", createdAt: state.questions[0].createdAt, updatedAt: state.questions[0].updatedAt,
+    }];
+    await putQuestionAttachmentBlob(blobKey, {
+      blob, mimeType: "image/png", byteSize: blob.size,
+      questionId: "q1", updatedAt: state.questions[0].updatedAt,
+    });
+    await expect(uploadCloudMedia(client, "account-b", state, guard)).rejects.toThrow(/signed-in account changed/i);
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("reports an absent question image as a local protection blocker", async () => {
