@@ -1382,6 +1382,73 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(batches["processing_order"][5]["pair_review_queue"], [held])
         self.assertFalse(held["answer_attribution_permitted"])
 
+
+    def test_workbook_pair_conflicting_source_week_is_manual_review(self):
+        # Group-local names are only candidate relationships, not proof of week.
+        from unittest.mock import patch
+        rows = [
+            dict(source_id="w-q", original_path="/synthetic/SG/Workbook.pdf",
+                 original_filename="Workbook.pdf", document_type="small_group",
+                 source_sha256=digest("q"), academic_term="T4", module="NCRS", week=2),
+            dict(source_id="w-a", original_path="/synthetic/SG/Answers.pdf",
+                 original_filename="Answers.pdf", document_type="answer_key",
+                 source_sha256=digest("a"), academic_term="T4", module="NCRS", week=3),
+        ]
+        with patch.object(enriched, "_pdf_first_question") as probe:
+            pairs = enriched.add_workbook_answer_candidates(
+                rows, [], secure_open=lambda _: None)
+        probe.assert_not_called()
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0]["canonical_pair_status"], "requires_scope_review")
+        self.assertEqual(pairs[0]["unresolved"], "question_answer_source_scope_conflict")
+        self.assertEqual([r["week"] for r in pairs[0]["scope_references"]], [2, 3])
+        batches = enriched.ordered_import_batches([], pairs, rows)
+        self.assertEqual(batches["processing_order"][2]["jobs"], [])
+        self.assertEqual(batches["processing_order"][5]["pair_review_queue"], pairs)
+        self.assertFalse(pairs[0]["answer_attribution_permitted"])
+
+    def test_workbook_pair_without_verified_digest_is_not_b2_candidate(self):
+        from unittest.mock import patch
+        rows = [
+            dict(source_id="w-q", original_path="/synthetic/SG/Workbook.pdf",
+                 original_filename="Workbook.pdf", document_type="small_group",
+                 source_sha256=digest("q"), academic_term="T4", module="NCRS", week=2),
+            dict(source_id="w-a", original_path="/synthetic/SG/Answers.pdf",
+                 original_filename="Answers.pdf", document_type="answer_key",
+                 source_sha256=None, academic_term="T4", module="NCRS", week=2),
+        ]
+        with patch.object(enriched, "_pdf_first_question") as probe:
+            pairs = enriched.add_workbook_answer_candidates(
+                rows, [], secure_open=lambda _: None)
+        probe.assert_not_called()
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0]["canonical_pair_status"], "requires_source_review")
+        self.assertEqual(pairs[0]["unresolved"], "pair_source_digest_unverified")
+        batches = enriched.ordered_import_batches([], pairs, rows)
+        self.assertEqual(batches["processing_order"][2]["jobs"], [])
+        self.assertEqual(batches["processing_order"][5]["pair_review_queue"], pairs)
+
+    def test_verified_same_scope_workbook_pair_remains_unapproved_candidate(self):
+        from unittest.mock import patch
+        rows = [
+            dict(source_id="w-q", original_path="/synthetic/SG/Workbook.pdf",
+                 original_filename="Workbook.pdf", document_type="small_group",
+                 source_sha256=digest("q"), academic_term="T4", module="NCRS", week=2),
+            dict(source_id="w-a", original_path="/synthetic/SG/Answers.pdf",
+                 original_filename="Answers.pdf", document_type="answer_key",
+                 source_sha256=digest("a"), academic_term="T4", module="NCRS", week=2),
+        ]
+        with patch.object(enriched, "_pdf_first_question", return_value=None):
+            pairs = enriched.add_workbook_answer_candidates(
+                rows, [], secure_open=lambda _: None)
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0]["canonical_pair_status"], "unique_candidate_pair")
+        self.assertEqual(pairs[0]["scope_references"][0]["source_id"], "w-q")
+        self.assertIn("sole_workbook_and_sole_answers_file", pairs[0]["evidence"])
+        self.assertFalse(pairs[0]["answer_attribution_permitted"])
+        batches = enriched.ordered_import_batches([], pairs, rows)
+        self.assertEqual(batches["processing_order"][2]["jobs"], pairs)
+
 if __name__ == "__main__":
     ledger.OUT.mkdir(parents=True,exist_ok=True)
     unittest.main()
