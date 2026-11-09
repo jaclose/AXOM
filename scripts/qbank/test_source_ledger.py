@@ -312,19 +312,108 @@ class SourceLedgerTests(unittest.TestCase):
                     self.assertEqual(result["sources"][0]["readyCount"], 0)
 
     def test_zip_central_directory_safe_index_only(self):
+        # No member body is opened; only the source-hash-bound central directory
+        # is inspected by a contained descriptor.
         import zipfile
-        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
-            p=pathlib.Path(root)/"T4 Question Sources.zip"
-            with zipfile.ZipFile(p,"w") as z:
-                z.writestr("NCRS/IMCQ 3.txt","Question 1: test")
-                z.writestr("../unsafe.pdf","not-safe")
-                z.writestr("images/photo.png","image")
-            row=dict(document_type="archive_review",original_path=str(p),source_sha256=None,source_id="synthetic")
-            archives=enriched.index_source_archives([row])
-            self.assertEqual(archives[0]["question_candidate_count"],1)
-            self.assertEqual(len(archives[0]["entries"]),2)
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            p = root / "T4 Question Sources.zip"
+            with zipfile.ZipFile(p, "w") as z:
+                z.writestr("NCRS/IMCQ 3.txt", "Question 1: test")
+                z.writestr("../unsafe.pdf", "not-safe")
+                z.writestr("images/photo.png", "image")
+            row = dict(document_type="archive_review", original_path=str(p),
+                       source_sha256=hashlib.sha256(p.read_bytes()).hexdigest(),
+                       source_id="synthetic", root_label="archive_root")
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                archives = enriched.index_source_archives([row], ledger.open_scanned_source_file)
+            finally:
+                ledger.ROOTS = old_roots
+            self.assertEqual(archives[0]["question_candidate_count"], 1)
+            self.assertEqual(len(archives[0]["entries"]), 2)
             self.assertTrue(any(x["unsafe_path"] for x in archives[0]["entries"]))
             self.assertIsNone(archives[0]["entries"][0]["content_sha256"])
+            self.assertEqual(row["archive_index_status"], "central_directory_indexed")
+
+    def test_archive_index_rejects_postscan_symlink_outside_root(self):
+        # An off-root archive must not contribute even metadata-only filenames.
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            base = pathlib.Path(temp)
+            root = base / "authorized"
+            root.mkdir()
+            archive = root / "PQ Week 1.zip"
+            outside = base / "unapproved.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("IMCQ 1.txt", "allowed synthetic entry")
+            original_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+            with zipfile.ZipFile(outside, "w") as z:
+                z.writestr("Private IMCQ 9.txt", "external synthetic entry")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=original_sha, source_id="approved-hash",
+                       root_label="archive_root")
+            archive.unlink()
+            try:
+                archive.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation unsupported")
+            prior = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives([row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = prior
+            self.assertEqual(result["entries"], [])
+            self.assertEqual(result["question_candidate_count"], 0)
+            self.assertNotEqual(row["archive_index_status"], "central_directory_indexed")
+            self.assertNotIn("Private IMCQ 9.txt", repr(result))
+
+    def test_archive_index_rejects_replaced_same_path_with_stale_sha(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "PQ Week 1.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("IMCQ 1.txt", "allowed synthetic entry")
+            recorded_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("IMCQ 2.txt", "substituted source entry")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=recorded_sha, source_id="original-revision",
+                       root_label="archive_root")
+            prior = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives([row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = prior
+            self.assertEqual(result["entries"], [])
+            self.assertEqual(result["question_candidate_count"], 0)
+            self.assertNotEqual(row["archive_index_status"], "central_directory_indexed")
+
+    def test_archive_index_unhashed_source_is_review_held(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "PQ Week 1.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("IMCQ 1.txt", "synthetic")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=None, source_id="unverified",
+                       root_label="archive_root",
+                       unresolved_reason="oversized_source_needs_staged_review")
+            prior = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives([row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = prior
+            self.assertEqual(result["entries"], [])
+            self.assertEqual(result["question_candidate_count"], 0)
+            self.assertNotEqual(row["archive_index_status"], "central_directory_indexed")
+            self.assertEqual(row["unresolved_reason"], "oversized_source_needs_staged_review")
 
     def test_agent2_audit_join_requires_exact_sha_and_count(self):
         with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
