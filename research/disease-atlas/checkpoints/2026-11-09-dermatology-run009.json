@@ -1,0 +1,226 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "release": "V2 Build009",
+  "date": "2026-11-09",
+  "parent": "V2 Build008",
+  "added_chapter": "Dermatology / Dermatopathology / Skin Oncology",
+  "build_status": "educational manuscript structurally audited; specialist review pending",
+  "totals": {
+    "internal_entries": 300,
+    "previous_entries": 280,
+    "legacy_short_entries": 132,
+    "expanded_profiles": 168,
+    "new_detailed_profiles": 20,
+    "evidence_source_records": 185,
+    "online_image_associations": 110,
+    "unique_online_image_pages": 109,
+    "new_original_file_pages": 8,
+    "embedded_medical_photographs": 0,
+    "pdf_pages": 235,
+    "official_ontology_denominator": null,
+    "ontology_coverage_measured": false
+  },
+  "new_diseases": [
+    {
+      "id": "AXOM-DERM-001",
+      "name": "Bullous pemphigoid",
+      "diagnostic_discriminator": "Tense pruritic bullae; subepidermal split with eosinophils and linear basement membrane IgG/C3.",
+      "source_ids": [
+        "DERM-BP-MERCK",
+        "DERM-BP-FDA25",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-002",
+      "name": "Pemphigus vulgaris",
+      "diagnostic_discriminator": "Flaccid blisters, oral erosions, suprabasal acantholysis; intercellular IgG.",
+      "source_ids": [
+        "DERM-PV-DERMNET",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-003",
+      "name": "Pemphigus foliaceus",
+      "diagnostic_discriminator": "Superficial subcorneal acantholysis; desmoglein-1, mucosal sparing.",
+      "source_ids": [
+        "DERM-PF-DERMNET",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-004",
+      "name": "Dermatitis herpetiformis",
+      "diagnostic_discriminator": "Pruritic extensor papulovesicles; granular papillary IgA; gluten-sensitive enteropathy.",
+      "source_ids": [
+        "DERM-DH-DERMNET",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-005",
+      "name": "Linear IgA bullous dermatosis",
+      "diagnostic_discriminator": "Linear IgA deposition along basement membrane; vancomycin association.",
+      "source_ids": [
+        "DERM-LIGA",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-006",
+      "name": "Epidermolysis bullosa acquisita",
+      "diagnostic_discriminator": "Type VII collagen autoantibodies; floor-side salt split; trauma-induced scarring.",
+      "source_ids": [
+        "DERM-EBA26",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-007",
+      "name": "Lichen planus",
+      "diagnostic_discriminator": "Pruritic purple planar papules; lichenoid interface dermatitis.",
+      "source_ids": [
+        "DERM-LP-DERMNET",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-008",
+      "name": "Hidradenitis suppurativa",
+      "diagnostic_discriminator": "Follicular occlusion with recurrent nodules, abscesses and sinus tunnels; inflammatory systemic treatment for severe disease.",
+      "source_ids": [
+        "DERM-HS-S2K24",
+        "DERM-HS-HIST"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-009",
+      "name": "Rosacea",
+      "diagnostic_discriminator": "Central facial flushing, telangiectasia and papules without comedones; ocular risks.",
+      "source_ids": [
+        "DERM-ROSACEA"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-010",
+      "name": "Vitiligo",
+      "diagnostic_discriminator": "Depigmented patches from melanocyte loss; wood-lamp enhancement and possible immune associations.",
+      "source_ids": [
+        "DERM-VITILIGO"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-011",
+      "name": "Alopecia areata",
+      "diagnostic_discriminator": "Nonscarring patchy autoimmune hair loss; preserved follicles and peribulbar lymphocytes.",
+      "source_ids": [
+        "DERM-ALOPECIA"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-012",
+      "name": "Cutaneous small-vessel leukocytoclastic vasculitis",
+      "diagnostic_discriminator": "Palpable purpura, neutrophilic vessel-wall injury; assess renal/other systemic involvement.",
+      "source_ids": [
+        "DERM-CSVV24",
+        "DERM-DIF"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-013",
+      "name": "Pyoderma gangrenosum",
+      "diagnostic_discriminator": "Painful undermined ulcers and pathergy; exclude infection, avoid indiscriminate debridement.",
+      "source_ids": [
+        "DERM-PG-DERMNET"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-014",
+      "name": "Stevens–Johnson syndrome / toxic epidermal necrolysis spectrum",
+      "diagnostic_discriminator": "Mucocutaneous drug reaction with epidermal necrosis/detachment; immediate culprit drug withdrawal and specialized care.",
+      "source_ids": [
+        "DERM-SJSTEN"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-015",
+      "name": "Mycosis fungoides",
+      "diagnostic_discriminator": "Epidermotropic cutaneous T-cell lymphoma with patch-plaque-tumor stages and often serial biopsies.",
+      "source_ids": [
+        "DERM-MF-NCI",
+        "DERM-SEZARY"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-016",
+      "name": "Sézary syndrome",
+      "diagnostic_discriminator": "Leukemic cutaneous T-cell lymphoma: erythroderma and clonal abnormal blood T-cell population.",
+      "source_ids": [
+        "DERM-SEZARY",
+        "DERM-MF-NCI"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-017",
+      "name": "Merkel cell carcinoma",
+      "diagnostic_discriminator": "Aggressive cutaneous neuroendocrine tumor; CK20 perinuclear-dot IHC in many tumors.",
+      "source_ids": [
+        "DERM-MCC-NCI"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-018",
+      "name": "Dermatofibrosarcoma protuberans",
+      "diagnostic_discriminator": "CD34+ storiform spindle tumor with honeycomb subcutaneous invasion; complete margins crucial.",
+      "source_ids": [
+        "DERM-DFSP25"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-019",
+      "name": "Kaposi sarcoma",
+      "diagnostic_discriminator": "HHV8-associated vascular spindle tumor with slitlike channels and HHV8 LANA IHC.",
+      "source_ids": [
+        "DERM-KS-NCI"
+      ]
+    },
+    {
+      "id": "AXOM-DERM-020",
+      "name": "Pityriasis rosea",
+      "diagnostic_discriminator": "Herald patch then oval collarette-scaled eruption along cleavage lines; consider syphilis differential.",
+      "source_ids": [
+        "DERM-PR-DERMNET"
+      ]
+    }
+  ],
+  "image_file_pages": [
+    "Pemphigus vulgaris - very high mag.jpg",
+    "Micrograph of dermatitis herpetiformis.jpg",
+    "Histopathology of lichen planus.jpg",
+    "Micrograph of hidradenitis suppurativa.jpg",
+    "Crohnie Pyoderma gangrenosum.jpg",
+    "Merkel Cell Carcinoma.jpg",
+    "Histopathology of cartwheel pattern in dermatofibrosarcoma protuberans, original.jpg",
+    "Histopathology of Kaposi's sarcoma.png"
+  ],
+  "qa": {
+    "structural_checks_passed": 21,
+    "failed": 0,
+    "accessibility_findings": 0,
+    "docx_zip_integrity": true,
+    "source_ledger_resolved": true
+  },
+  "sha256": {
+    "docx": "71b37dea1b822be8db930578d381de52f72a50c8241297a41ec5a138832cbf02",
+    "pdf": "62aff63db09b672e04f6b633262f43fa43e315707fbc2577e46837a4831703ff",
+    "source_zip": "b09321a43cbfdb5b22415d47ced03302188eafe7165f893c4190f9fbee7f9982"
+  },
+  "limits": [
+    "This checkpoint preserves new disease IDs and diagnostic discriminators, not complete 20-profile text or DOCX/PDF/ZIP binaries.",
+    "Original photographs externally linked only; no binaries retrieved or embedded.",
+    "MONDO/ICD11/Orphanet denominator remains unmeasured.",
+    "Clinical treatment entries not independently specialist reviewed.",
+    "Full source-package upload to Library denied, AccessDeny."
+  ]
+}
