@@ -7,13 +7,25 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
 
 export function QuestionExhibits({ attachments }: { attachments: readonly QuestionImageAttachment[] }) {
-  const [urls, setUrls] = useState<Record<string, string | "missing">>({});
-  const [zoomed, setZoomed] = useState<QuestionImageAttachment | null>(null);
+  // Keep image object URLs and the modal scoped to the exact attachment keys.
+  // Imported questions may reuse IDs across accounts/workspaces with different bytes.
+  const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string | "missing"> }>({ signature: "", urls: {} });
+  const [zoomed, setZoomed] = useState<{ signature: string; attachment: QuestionImageAttachment } | null>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   const signature = attachments.map((attachment) => `${attachment.id}:${attachment.blobKey}`).join("|");
+  const urls = loaded.signature === signature ? loaded.urls : {};
+  const activeZoomed = zoomed?.signature === signature ? zoomed.attachment : null;
+  const zoomSignature = zoomed?.signature ?? null;
+  const signatureRef = useRef(signature);
+  signatureRef.current = signature;
+
+  useEffect(() => {
+    // Do not reopen an old image if the previous signature later returns.
+    setZoomed(previous => previous?.signature === signature ? previous : null);
+  }, [signature]);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,7 +42,7 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
           next[attachment.id] = "missing";
         }
       }
-      if (!cancelled) setUrls(next);
+      if (!cancelled) setLoaded({ signature, urls: next });
     })();
     return () => {
       cancelled = true;
@@ -39,7 +51,7 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
   }, [signature]);
 
   useEffect(() => {
-    if (!zoomed) return;
+    if (!activeZoomed) return;
     closeRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Tab") {
@@ -58,12 +70,13 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("keydown", onKey, true);
-      trigger.current?.focus();
+      // A switched question/account must not receive focus from A's old modal.
+      if (signatureRef.current === zoomSignature) trigger.current?.focus();
     };
-  }, [zoomed]);
+  }, [activeZoomed, zoomSignature]);
 
   if (!attachments.length) return null;
-  const zoomedUrl = zoomed ? urls[zoomed.id] : undefined;
+  const zoomedUrl = activeZoomed ? urls[activeZoomed.id] : undefined;
   return (
     <div className="question-exhibits" role="group" aria-label={attachments.length === 1 ? "Question image" : "Question images"}>
       {attachments.map((attachment, index) => {
@@ -75,17 +88,17 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
         return (
           <button key={attachment.id} type="button" className="question-exhibit" disabled={!url}
             aria-label={`Enlarge ${label}`}
-            onClick={(event) => { trigger.current = event.currentTarget; setZoomed(attachment); }}>
+            onClick={(event) => { trigger.current = event.currentTarget; setZoomed({ signature, attachment }); }}>
             {url ? <img src={url} alt={label} width={attachment.width} height={attachment.height} /> : <span className="question-exhibit-loading" aria-hidden="true" />}
             <span className="question-exhibit-zoom" aria-hidden="true"><ZoomIn size={ICON_SIZE.body} /></span>
           </button>
         );
       })}
-      {zoomed && typeof zoomedUrl === "string" && (
-        <div className="question-exhibit-lightbox" role="dialog" aria-modal="true" aria-label={zoomed.altText || "Question image, enlarged"} onClick={() => setZoomed(null)}>
+      {activeZoomed && typeof zoomedUrl === "string" && (
+        <div className="question-exhibit-lightbox" role="dialog" aria-modal="true" aria-label={activeZoomed.altText || "Question image, enlarged"} onClick={() => setZoomed(null)}>
           <button ref={closeRef} type="button" className="question-exhibit-close" aria-label="Close image" onClick={() => setZoomed(null)}><X size={ICON_SIZE.emphasis} aria-hidden="true" /></button>
           {/* A click on the image itself should not close it. */}
-          <img src={zoomedUrl} alt={zoomed.altText || "Question image"} onClick={(event) => event.stopPropagation()} />
+          <img src={zoomedUrl} alt={activeZoomed.altText || "Question image"} onClick={(event) => event.stopPropagation()} />
         </div>
       )}
     </div>
