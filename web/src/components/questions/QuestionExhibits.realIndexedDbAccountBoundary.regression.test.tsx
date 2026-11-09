@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // MOTHERSHIP R18: REAL device-local IndexedDB, not a mocked per-account blob loader.
 // Synthetic users and bytes only. A RED here does not establish a hosted incident.
+import { Blob as NodeBlob } from "node:buffer";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -25,15 +26,11 @@ const KEY = "same-idb-key-across-authenticated-users";
 const DATE = "2026-11-09T00:00:00.000Z";
 const FILE_A = "SYNTHETIC_PRIVATE_IMAGE_ONLY_ACCOUNT_A";
 
-// jsdom's Blob does not consistently implement text()/arrayBuffer(), while
-// FileReader exercises the actual structured-cloned bytes stored in IDB.
+// fake-indexeddb uses structuredClone; native Node Blob retains its bytes and
+// prototype across that clone, unlike jsdom Blob in this Node test runner.
+// Byte checks must exercise the persisted record, not skip past the setup.
 function readBlobText(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? Error("Failed to read synthetic attachment"));
-    reader.readAsText(blob);
-  });
+  return blob.text();
 }
 const attachment: QuestionImageAttachment = {
   id: "same-image-id", blobKey: KEY, createdAt: DATE, updatedAt: DATE,
@@ -51,6 +48,9 @@ function deleteDatabase(name: string): Promise<void> {
 }
 
 beforeEach(async () => {
+  // Keep real structured-cloned Blob bytes through fake-indexeddb transactions.
+  // The default jsdom Blob loses its brand in this test environment.
+  vi.stubGlobal("Blob", NodeBlob);
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   await deleteDatabase(DB_NAME);
