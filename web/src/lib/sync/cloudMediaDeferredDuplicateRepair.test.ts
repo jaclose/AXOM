@@ -137,8 +137,10 @@ beforeEach(() => {
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   clearCloudMediaUploadCache();
   remote.clear();
-  upload.mockClear();
-  download.mockClear();
+  // Each negative control changes mock behavior; call-history clearing alone leaks
+  // a previous test's 403/corruption response into the next fixture setup.
+  upload.mockReset();
+  download.mockReset();
   concurrentMissing = false;
   first404 = false;
   uploadStarted = Promise.resolve();
