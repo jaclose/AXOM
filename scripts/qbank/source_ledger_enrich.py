@@ -237,14 +237,30 @@ def enrich_pairs(rows, pairs, secure_open=None):
             p["text_evidence"] = "text_insufficient_unverified"
             retained.append(p)
             continue
+        # Missing/invalid digests never prove two originals are byte-identical.
+        # Do not discard either candidate or run correspondence probes.
+        sha_values = (a.get("source_sha256"), b.get("source_sha256"))
+        if any(not isinstance(h, str) or re.fullmatch(r"[0-9a-f]{64}", h) is None
+               for h in sha_values):
+            p["canonical_pair_status"] = "requires_source_review"
+            p["unresolved"] = "pair_source_digest_unverified"
+            p["text_evidence"] = "text_insufficient_unverified"
+            retained.append(p)
+            continue
         # A source SHA is a content identity, not a course/week identity.
         # Retain distinct original academic filings even for identical bytes.
-        k = (a.get("source_sha256"), b.get("source_sha256"), left_scope)
+        k = (*sha_values, left_scope)
         if k in distinct:
             p["canonical_pair_status"] = "mirrored_same_byte_pair"
             p["canonical_pair"] = distinct[k]["original_file"]
+            distinct[k]["mirrored_pair_references"].append(dict(
+                questions_only_id=p["questions_only_id"],
+                answered_id=p["answered_id"],
+                original_file=p["original_file"],
+                answered_file=p["answered_file"]))
             continue
         p["canonical_pair_status"] = "unique_candidate_pair"
+        p["mirrored_pair_references"] = []
         distinct[k] = p
         retained.append(p)
         left, right = _pdf_first_question(a, secure_open), _pdf_first_question(b, secure_open)
