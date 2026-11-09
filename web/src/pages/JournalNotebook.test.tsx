@@ -2535,4 +2535,53 @@ describe("Journal notebook foundation", () => {
     expect(useStore.getState().journal[0].attachments).toEqual([localImage]);
   });
 
+  it("keeps a B account handoff paused when an A-origin late journal write changes the array", () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "journal-late-A-original-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      freeWriting: "A private page must not be displayed to B after an unrelated update.",
+    };
+    act(() => {
+      useStore.setState({ journal: [original] });
+      useStore.getState().updateProfile({ name: "Late Writer Alpha" });
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "late-account-A", email: "late-a@example.invalid", displayName: "Late Writer Alpha", emailConfirmed: true },
+      });
+    });
+    render(<JournalPage />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "A unsaved private draft must remain A-only." },
+    });
+
+    // The account identity changes first; the new workspace has not hydrated.
+    act(() => {
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "late-account-B", email: "late-b@example.invalid", displayName: "Late Writer Beta", emailConfirmed: true },
+      });
+      useStore.getState().updateProfile({ name: "Late Writer Beta" });
+    });
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    // A delayed writer updates the old notebook's array reference; it is NOT
+    // B's authenticated workspace-hydration receipt, even if the profile is B.
+    act(() => {
+      useStore.getState().updateJournal(original.id, { today: "A late write during B account handoff." });
+    });
+    expect(useStore.getState().journal[0]?.id).toBe(original.id);
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByText("A private page must not be displayed to B after an unrelated update.")).toBeNull();
+
+    // A genuine replacement is still allowed to open a clean B notebook.
+    act(() => { useStore.setState({ journal: [] }); });
+    expect((screen.queryByLabelText("Free writing")
+      ?? within(screen.getByRole("region", { name: "Write at your desk" })).getByRole("textbox")
+    ) as HTMLTextAreaElement).toHaveProperty("value", "");
+  });
+
 });
