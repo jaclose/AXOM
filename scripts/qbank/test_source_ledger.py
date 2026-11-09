@@ -1331,7 +1331,35 @@ class SourceLedgerTests(unittest.TestCase):
             result = enriched.enrich_pairs(rows, pairs, secure_open=lambda _: None)
         self.assertEqual(len(result), 1)
         self.assertEqual(pairs[1]["canonical_pair_status"], "mirrored_same_byte_pair")
+        self.assertEqual(result[0]["mirrored_pair_references"], [
+            dict(questions_only_id="second-q", answered_id="second-a",
+                 original_file="/synthetic/second-q", answered_file="/synthetic/second-a")
+        ])
         self.assertFalse(result[0]["answer_attribution_permitted"])
+
+
+    def test_unverified_pair_hashes_are_not_collapsed_or_probed(self):
+        # Distinct un-hashed PDF pairs are not byte-identical evidence, even
+        # when their academic filing happens to match.
+        from unittest.mock import patch
+        rows = []
+        pairs = []
+        for n in ("one", "two"):
+            for role in ("q", "a"):
+                sid = n + "-" + role
+                rows.append(dict(source_id=sid, original_path="/synthetic/" + sid,
+                                 source_sha256=None, academic_term="T4",
+                                 module="NCRS", week=2))
+            pairs.append(dict(questions_only_id=n + "-q", answered_id=n + "-a",
+                              original_file="/synthetic/" + n + "-q",
+                              answered_file="/synthetic/" + n + "-a"))
+        with patch.object(enriched, "_pdf_first_question") as probe:
+            result = enriched.enrich_pairs(rows, pairs, secure_open=lambda _: None)
+        probe.assert_not_called()
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(p["canonical_pair_status"] == "requires_source_review"
+                            and p["unresolved"] == "pair_source_digest_unverified"
+                            and not p["answer_attribution_permitted"] for p in result))
 
 if __name__ == "__main__":
     ledger.OUT.mkdir(parents=True,exist_ok=True)
