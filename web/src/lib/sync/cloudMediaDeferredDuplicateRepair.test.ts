@@ -1,0 +1,178 @@
+// @vitest-environment node
+import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sha256 } from "../compressedText";
+import { deleteQuestionAttachmentBlobs, putQuestionAttachmentBlob } from "../questionAttachments";
+import { makeSeed } from "../seed";
+import type { NoctyriumState } from "../types";
+import { splitCloudContent } from "./cloudContent";
+import { clearCloudMediaUploadCache, uploadCloudMedia } from "./cloudMedia";
+import { deferContent } from "./deferredContent";
+
+/**
+ * Independent R14 deferred/private recovery gate.
+ *
+ * A lazily restored question may have an authenticated private cloud receipt
+ * but no device-local Blob. When a different, newly added private attachment
+ * has byte-for-byte identical contents, its verified immutable upload restores
+ * the same account-private object. The retained deferred reference must not
+ * become a permanently failed revision solely because its 404 happened while
+ * the new copy was uploading.
+ *
+ * All accounts, IndexedDB entries and storage objects are synthetic. Never
+ * contacts AXOM or any Supabase project.
+ */
+const OWNER = "synthetic-r14-deferred-owner";
+const DATE = "2026-11-08T00:00:00.000Z";
+const BYTES = new Uint8Array([137, 80, 78, 71, 82, 49, 52, 65, 88, 79, 77, 11, 22, 33]);
+const remote = new Map<string, Blob>();
+let concurrentMissing = false;
+let first404 = false;
+let uploadStarted: Promise<void> = Promise.resolve();
+let saw404: Promise<void> = Promise.resolve();
+let signalUpload: () => void = () => {};
+let signal404: () => void = () => {};
+
+const upload = vi.fn(async (path: string, blob: Blob) => {
+  if (concurrentMissing) {
+    signalUpload();
+    await saw404;
+  }
+  if (remote.has(path)) return { error: { statusCode: "409" } };
+  remote.set(path, blob);
+  return { error: null };
+});
+const download = vi.fn(async (path: string) => {
+  if (concurrentMissing && !first404) {
+    first404 = true;
+    // Deterministically deliver the old 404 while the fresh private upload
+    // has started but before its immutable object becomes visible.
+    await uploadStarted;
+    signal404();
+    return { data: null, error: { statusCode: "404", message: "missing original" } };
+  }
+  const data = remote.get(path) ?? null;
+  return { data, error: data ? null : { statusCode: "404", message: "missing original" } };
+});
+const client = { storage: { from: () => ({ upload, download }) } } as unknown as SupabaseClient;
+const assertCurrent = async () => {};
+
+async function deferredFixture(): Promise<{
+  state: NoctyriumState;
+  hash: string;
+  oldKey: string;
+}> {
+  const state = makeSeed();
+  state.documents = [];
+  const oldKey = "r14-deferred-old-" + crypto.randomUUID();
+  const originalBlob = new Blob([BYTES], { type: "image/png" });
+  const original = {
+    id: "r14-original-question",
+    source: "manual" as const,
+    stem: "A protected question remains deferred after a cloud reload.",
+    options: [{ key: "A", text: "A" }],
+    correctKey: "A",
+    status: "unseen" as const,
+    tags: [],
+    attempts: [],
+    notes: "",
+    attachments: [{
+      id: "r14-original-image",
+      blobKey: oldKey,
+      fileName: "same.png",
+      mimeType: "image/png" as const,
+      byteSize: originalBlob.size,
+      altText: "Original image",
+      createdAt: DATE,
+      updatedAt: DATE,
+    }],
+    createdAt: DATE,
+    updatedAt: DATE,
+  };
+  state.questions = [original];
+  await putQuestionAttachmentBlob(oldKey, {
+    questionId: original.id,
+    blob: originalBlob,
+    mimeType: "image/png",
+    byteSize: originalBlob.size,
+    updatedAt: DATE,
+  });
+  const protectedOriginal = await uploadCloudMedia(client, OWNER, state, assertCurrent);
+  expect(protectedOriginal).toHaveLength(1);
+  // Produce a legitimate lazy source checkpoint, not an invented media receipt.
+  const split = await splitCloudContent(state);
+  const deferred = deferContent(split.workspace, OWNER, split.references, protectedOriginal);
+  expect(deferred.questions).toHaveLength(0);
+  expect(deferred.deferredContent?.questions).toHaveLength(1);
+  expect(deferred.deferredContent?.media).toEqual(protectedOriginal);
+
+  // The original is now available only via its authenticated account receipt.
+  await deleteQuestionAttachmentBlobs([oldKey]);
+  const newKey = "r14-current-new-" + crypto.randomUUID();
+  const newBlob = new Blob([BYTES], { type: "image/png" });
+  deferred.questions.push({
+    ...original,
+    id: "r14-new-local-question",
+    stem: "Another locally created question contains exactly the same image bytes.",
+    attachments: [{
+      ...original.attachments[0],
+      id: "r14-new-local-image",
+      blobKey: newKey,
+    }],
+  });
+  await putQuestionAttachmentBlob(newKey, {
+    questionId: "r14-new-local-question",
+    blob: newBlob,
+    mimeType: "image/png",
+    byteSize: newBlob.size,
+    updatedAt: DATE,
+  });
+  clearCloudMediaUploadCache(); // Reloaded device starts with no remembered success.
+  return { state: deferred, hash: await sha256(BYTES), oldKey };
+}
+
+beforeEach(() => {
+  vi.stubGlobal("indexedDB", indexedDB);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  clearCloudMediaUploadCache();
+  remote.clear();
+  upload.mockClear();
+  download.mockClear();
+  concurrentMissing = false;
+  first404 = false;
+  uploadStarted = Promise.resolve();
+  saw404 = Promise.resolve();
+  signalUpload = () => {};
+  signal404 = () => {};
+});
+
+describe("R14 deferred question with a separate same-byte private upload", () => {
+  it("preserves deferred and current references while the prior remote original remains readable", async () => {
+    const { state, hash, oldKey } = await deferredFixture();
+    const manifest = await uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media);
+    expect(manifest).toHaveLength(2);
+    expect(new Set(manifest.map(entry => entry.blobKey)).size).toBe(2);
+    expect(manifest.some(entry => entry.blobKey === oldKey)).toBe(true);
+    expect(manifest.every(entry => entry.hash === hash && !entry.academic)).toBe(true);
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(BYTES);
+  });
+
+  it("does not abandon a deferred 404 when a concurrent verified private duplicate restores its exact bytes", async () => {
+    const { state, hash, oldKey } = await deferredFixture();
+    remote.delete(OWNER + "/" + hash);
+    uploadStarted = new Promise<void>(resolve => { signalUpload = resolve; });
+    saw404 = new Promise<void>(resolve => { signal404 = resolve; });
+    concurrentMissing = true;
+
+    const manifest = await uploadCloudMedia(client, OWNER, state, assertCurrent, state.deferredContent!.media);
+    expect(first404).toBe(true);
+    expect(manifest).toHaveLength(2);
+    expect(manifest.some(entry => entry.blobKey === oldKey)).toBe(true);
+    expect(manifest.every(entry => entry.hash === hash && !entry.academic)).toBe(true);
+    // Receipt may be accepted only after the now-present account object is
+    // downloaded and byte-verified. No cross-account or academic shortcuts.
+    expect(new Uint8Array(await remote.get(OWNER + "/" + hash)!.arrayBuffer())).toEqual(BYTES);
+    expect(download.mock.calls.length).toBeGreaterThanOrEqual(3);
+  }, 10_000);
+});
