@@ -1159,6 +1159,83 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(len(source_rows),22)
         self.assertEqual(len(ledger.parse_templates(source_rows)),547)
 
+
+    def test_raw_source_mirrors_conflicting_filing_are_held_and_triaged(self):
+        # One byte SHA can appear under two curricula or source weeks. An
+        # identical file is not proof that either filename filing owns both.
+        sha = digest("synthetic identical source bytes")
+        def row(source_id, term, module, week):
+            return dict(source_id=source_id, source_sha256=sha,
+                        original_path="/synthetic/" + source_id + "/PQ.pdf",
+                        academic_term=term, module=module, week=week,
+                        week_evidence="explicit_path_week" if week is not None else None,
+                        document_type="pq", file_extension=".pdf", priority=2,
+                        answer_variant="questions_only", answer_key_partner=None,
+                        review_status="not_reviewed", unresolved_reason=None)
+        cases = [
+            (row("a", "T4", "NCRS", 2), row("b", "T4", "NCRS", 3)),
+            (row("a", "T4", "NCRS", 2), row("b", "T4", "NCRS", None)),
+            (row("a", "T4", "NCRS", 2), row("b", "T5", "GOER", 2)),
+        ]
+        for rows in cases:
+            with self.subTest(scopes=[(r["academic_term"], r["module"], r["week"]) for r in rows]):
+                for source_rows in (rows, list(reversed(rows))):
+                    jobs = ledger.prepare_queue(source_rows, [])
+                    unique = enriched.canonicalize_queue(source_rows, [], jobs)
+                    self.assertEqual(len(unique), 1)
+                    item = unique[0]
+                    self.assertEqual(set(item["source_ids"]), {"a", "b"})
+                    self.assertEqual(item["status"], "requires_scope_review")
+                    self.assertEqual(item["unresolved"], "conflicting_source_scope_for_identical_bytes")
+                    self.assertIsNone(item["term"])
+                    self.assertIsNone(item["module"])
+                    self.assertIsNone(item["week"])
+                    self.assertEqual({(s["academic_term"], s["module"], s["week"])
+                                      for s in item["scope_references"]},
+                                     {(r["academic_term"], r["module"], r["week"]) for r in rows})
+                    batches = enriched.ordered_import_batches(unique, [], source_rows)
+                    self.assertFalse(batches["processing_order"][3]["jobs"])
+                    self.assertEqual([b["canonical_input_key"]
+                                      for b in batches["processing_order"][5]["jobs"]],
+                                     [item["canonical_input_key"]])
+                    self.assertTrue(batches["processing_order"][5]["jobs"][0]["unresolved"])
+
+    def test_raw_same_filing_mirror_preserves_scope_and_source_ids(self):
+        sha = digest("same synthetic content")
+        rows = [dict(source_id=n, source_sha256=sha,
+                     original_path="/synthetic/" + n + "/PQ.pdf",
+                     academic_term="T4", module="NCRS", week=2,
+                     week_evidence="explicit_path_week", document_type="pq",
+                     file_extension=".pdf", priority=2, answer_variant="questions_only",
+                     answer_key_partner=None, review_status="not_reviewed",
+                     unresolved_reason=None) for n in ("a", "b")]
+        unique = enriched.canonicalize_queue(rows, [], ledger.prepare_queue(rows, []))
+        self.assertEqual(len(unique), 1)
+        item = unique[0]
+        self.assertEqual(item["source_ids"], ["a", "b"])
+        self.assertEqual((item["term"], item["module"], item["week"]), ("T4", "NCRS", 2))
+        self.assertNotEqual(item["status"], "requires_scope_review")
+        self.assertIsNone(item["unresolved"])
+        self.assertEqual(len(item["scope_references"]), 2)
+
+    def test_unresolved_raw_mirror_cannot_appear_ready_in_priority_batches(self):
+        sha = digest("same source")
+        rows = [dict(source_id=n, source_sha256=sha,
+                     original_path="/synthetic/" + n + "/PQ.pdf",
+                     academic_term="T4", module="NCRS", week=2,
+                     document_type="pq", file_extension=".pdf", priority=2,
+                     answer_variant=None, answer_key_partner=None,
+                     review_status="not_reviewed", unresolved_reason=error)
+                for n, error in (("a", None), ("b", "unverified_source_checksum"))]
+        unique = enriched.canonicalize_queue(rows, [], ledger.prepare_queue(rows, []))
+        self.assertEqual(len(unique), 1)
+        self.assertEqual(unique[0]["status"], "requires_source_review")
+        self.assertTrue(unique[0]["unresolved"])
+        self.assertIn("unverified_source_checksum", str(unique[0]["mirror_review_issues"]))
+        batches = enriched.ordered_import_batches(unique, [], rows)
+        self.assertEqual(batches["processing_order"][3]["jobs"], [])
+        self.assertEqual(len(batches["processing_order"][5]["jobs"]), 1)
+
 if __name__ == "__main__":
     ledger.OUT.mkdir(parents=True,exist_ok=True)
     unittest.main()

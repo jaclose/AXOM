@@ -164,6 +164,32 @@ def canonicalize_queue(rows, packages, jobs):
             cloned["mirror_review_issues"] = []
             cloned["canonical_input_key"] = key
             canonical_jobs[key] = cloned
+    # Byte-identical files can be copied into different academic folders.
+    # Preserve every original filing as evidence; never silently assign all
+    # mirrored source IDs to whichever course/week was scanned first.
+    for cloned in canonical_jobs.values():
+        if cloned["input_mode"] == "native_package_folder":
+            continue
+        scopes = []
+        for source_id in cloned.get("source_ids", []):
+            r = row_lookup.get(source_id) or {}
+            scopes.append(dict(source_id=source_id,
+                               academic_term=r.get("academic_term"),
+                               module=r.get("module"), week=r.get("week"),
+                               term_evidence=r.get("term_evidence"),
+                               module_evidence=r.get("module_evidence"),
+                               week_evidence=r.get("week_evidence")))
+        cloned["scope_references"] = sorted(scopes, key=lambda s: s["source_id"])
+        unique_scopes = {(s["academic_term"], s["module"], s["week"]) for s in scopes}
+        if len(unique_scopes) > 1:
+            cloned["status"] = "requires_scope_review"
+            cloned["unresolved"] = "conflicting_source_scope_for_identical_bytes"
+            # A representative path is retained for provenance, not filing.
+            cloned["term"] = cloned["module"] = cloned["week"] = None
+        elif cloned.get("unresolved") or cloned.get("mirror_review_issues"):
+            cloned["status"] = "requires_source_review"
+            if not cloned.get("unresolved"):
+                cloned["unresolved"] = "mirrored_source_review_required"
     return sorted(canonical_jobs.values(), key=lambda x: (x["priority"], bool(x.get("unresolved")),
                                                          str(x.get("module") or ""), x["source_path"]))
 
@@ -333,8 +359,15 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
     for index, job in enumerate(canonical_jobs):
         descriptor = dict(queue_index=index, canonical_input_key=job["canonical_input_key"],
                           source_path=job["source_path"],source_ids=job.get("source_ids",[]),
-                          expected_questions=job.get("expected_questions"),mode=job["input_mode"])
-        if job["input_mode"] == "native_package_folder":
+                          expected_questions=job.get("expected_questions"),mode=job["input_mode"],
+                          status=job.get("status"), unresolved=job.get("unresolved"),
+                          source_scope_count=len(job.get("scope_references", [])))
+        # Source-level provenance/revision holds are triage, not ordinary
+        # high-priority PDF/TXT parsing jobs. Native packages retain their
+        # separate package-review batch contract.
+        if job["input_mode"] != "native_package_folder" and job.get("unresolved"):
+            triage.append(descriptor)
+        elif job["input_mode"] == "native_package_folder":
             batch0.append(descriptor)
         elif job["input_mode"] == "tagged_raw_text":
             batch1.append(descriptor)
