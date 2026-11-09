@@ -390,10 +390,18 @@ export function JournalPage({ registerAppTransitionGuard }: {
 
   if (previousWriter.pendingJournal) {
     return (
-      <section className="journal-notebook-page" role="status" aria-live="polite">
-        <h1>Journal paused</h1>
-        <p>Waiting for this account's workspace to load. Unsaved writing remains in this tab.</p>
-      </section>
+      <>
+        <section className="journal-notebook-page" role="status" aria-live="polite">
+          <h1>Journal paused</h1>
+          <p>Waiting for this account's workspace to load. Unsaved writing remains in this tab.</p>
+        </section>
+        {feedbackOpen && (
+          <JournalFeedback onClose={() => {
+            setFeedbackOpen(false);
+            clearJournalFeedbackRequest();
+          }} />
+        )}
+      </>
     );
   }
 
