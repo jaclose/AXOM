@@ -42,6 +42,14 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
     if (!zoomed) return;
     closeRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Tab") {
+        // This modal currently has one interactive control. Do not let Tab or
+        // Shift+Tab move focus to the answer controls behind the open exhibit.
+        event.preventDefault();
+        event.stopPropagation();
+        closeRef.current?.focus();
+        return;
+      }
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
