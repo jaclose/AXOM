@@ -194,36 +194,85 @@ def canonicalize_queue(rows, packages, jobs):
                                                          str(x.get("module") or ""), x["source_path"]))
 
 def enrich_pairs(rows, pairs, secure_open=None):
-    records = {r["source_id"]:r for r in rows}
+    """Keep question/answer correspondence proposals bound to original IDs and scope.
+
+    SHA-identical documents do not establish a common week, and a malformed
+    path reference must not consume a valid pair's deduplication identity.
+    Neither source hints nor filename pairing authorize answer attribution.
+    """
+    records = {r["source_id"]: r for r in rows}
     distinct = {}
+    retained = []
     for p in pairs:
         a = records.get(p["questions_only_id"])
         b = records.get(p["answered_id"])
-        if not a or not b: continue
-        k = (a["source_sha256"],b["source_sha256"])
+        if not a or not b:
+            continue
+        references = [
+            dict(role=role, source_id=row["source_id"],
+                 academic_term=row.get("academic_term"), module=row.get("module"),
+                 week=row.get("week"), term_evidence=row.get("term_evidence"),
+                 module_evidence=row.get("module_evidence"),
+                 week_evidence=row.get("week_evidence"))
+            for role, row in (("questions", a), ("answered", b))
+        ]
+        p["scope_references"] = references
+        p["answer_attribution_permitted"] = False
+        left_scope = tuple(a.get(field) for field in ("academic_term", "module", "week"))
+        right_scope = tuple(b.get(field) for field in ("academic_term", "module", "week"))
+        # Hold invalid source IDs/paths before canonical deduplication. Such
+        # a proposal cannot suppress a later correctly bound candidate.
+        if (p.get("original_file") != a.get("original_path")
+                or p.get("answered_file") != b.get("original_path")):
+            p["canonical_pair_status"] = "source_path_mismatch_review_required"
+            p["unresolved"] = "pair_source_path_mismatch"
+            p["text_evidence"] = "text_insufficient_unverified"
+            retained.append(p)
+            continue
+        if left_scope != right_scope:
+            # Missing-vs-known placement is also ambiguous: do not infer
+            # an answer file's week from the matching question filename.
+            p["canonical_pair_status"] = "requires_scope_review"
+            p["unresolved"] = "question_answer_source_scope_conflict"
+            p["text_evidence"] = "text_insufficient_unverified"
+            retained.append(p)
+            continue
+        # Missing/invalid digests never prove two originals are byte-identical.
+        # Do not discard either candidate or run correspondence probes.
+        sha_values = (a.get("source_sha256"), b.get("source_sha256"))
+        if any(not isinstance(h, str) or re.fullmatch(r"[0-9a-f]{64}", h) is None
+               for h in sha_values):
+            p["canonical_pair_status"] = "requires_source_review"
+            p["unresolved"] = "pair_source_digest_unverified"
+            p["text_evidence"] = "text_insufficient_unverified"
+            retained.append(p)
+            continue
+        # A source SHA is a content identity, not a course/week identity.
+        # Retain distinct original academic filings even for identical bytes.
+        k = (*sha_values, left_scope)
         if k in distinct:
             p["canonical_pair_status"] = "mirrored_same_byte_pair"
             p["canonical_pair"] = distinct[k]["original_file"]
+            distinct[k]["mirrored_pair_references"].append(dict(
+                questions_only_id=p["questions_only_id"],
+                answered_id=p["answered_id"],
+                original_file=p["original_file"],
+                answered_file=p["answered_file"]))
             continue
         p["canonical_pair_status"] = "unique_candidate_pair"
+        p["mirrored_pair_references"] = []
         distinct[k] = p
-        # Validate the path-to-source-ID binding before using either file.
-        # Unknown/mismatched pair paths are not authorization to inspect a file.
-        if (p.get("original_file") != a.get("original_path")
-                or p.get("answered_file") != b.get("original_path")):
-            p["text_evidence"] = "text_insufficient_unverified"
-            p["answer_attribution_permitted"] = False
-            continue
+        retained.append(p)
         left, right = _pdf_first_question(a, secure_open), _pdf_first_question(b, secure_open)
         if left and right:
-            ratio = round(SequenceMatcher(None,left,right).ratio(),3)
+            ratio = round(SequenceMatcher(None, left, right).ratio(), 3)
             p["first_question_text_similarity"] = ratio
-            p["text_evidence"] = "first_question_correspondence_supported" if ratio >= .83 else "partial_or_conflicting_first_question_text"
+            p["text_evidence"] = ("first_question_correspondence_supported"
+                                  if ratio >= .83 else "partial_or_conflicting_first_question_text")
         else:
             p["text_evidence"] = "text_insufficient_unverified"
-        # It is still not safe to copy any answers without comparing the numbered items throughout.
-        p["answer_attribution_permitted"] = False
-    return list(distinct.values())
+        # No medical key, source rationale or item-level answer match is approved.
+    return retained
 
 def add_workbook_answer_candidates(rows, existing):
     # A generic Answers.pdf does not identify a question by its position.
@@ -356,6 +405,17 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
     """Actionable short batches while retaining the exhaustive canonical queue separately."""
     rows_by_id = {r["source_id"]:r for r in rows}
     batch0 = []; batch1 = []; scored = []; triage = []
+    # Pair source path, digest or curriculum holds require manual review;
+    # never list a held relationship among routine B2 correspondence jobs.
+    pair_hold_statuses = {
+        "source_path_mismatch_review_required",
+        "requires_scope_review",
+        "requires_source_review",
+    }
+    held_pairs = [p for p in pairs if p.get("unresolved")
+                  or p.get("canonical_pair_status") in pair_hold_statuses]
+    candidate_pairs = [p for p in pairs if not (p.get("unresolved")
+                       or p.get("canonical_pair_status") in pair_hold_statuses)]
     for index, job in enumerate(canonical_jobs):
         descriptor = dict(queue_index=index, canonical_input_key=job["canonical_input_key"],
                           source_path=job["source_path"],source_ids=job.get("source_ids",[]),
@@ -391,10 +451,10 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
       processing_order=[
         dict(id="B0", description="Five distinct native GOER AXOM packages. Preserve existing asset paths and review answer evidence.", jobs=batch0),
         dict(id="B1", description="Thirteen structured raw TXT banks; 195 detected numbered questions with answer labels, not independently verified.", jobs=batch1),
-        dict(id="B2", description="Ten distinct proposed question-only/answered PDF or workbook pair relationships; compare every numbered stem before associating any answer.", jobs=pairs),
+        dict(id="B2", description=f"{len(candidate_pairs)} proposed question-only/answered PDF or workbook pair relationships; compare every numbered stem before associating any answer.", jobs=candidate_pairs),
         dict(id="B3", description="First 120 high-signal source PDFs/Office files by explicit academic evidence, prioritizing assessed questions.", jobs=scored[:120]),
         dict(id="B4", description="Remaining PDF/Office source candidates; use full canonical queue for eventual processing.", job_indices=[x["queue_index"] for x in scored[120:]]),
-        dict(id="B5", description="Other ambiguous candidate source files; manual parser compatibility review required.", jobs=triage),
+        dict(id="B5", description="Ambiguous source files and held answer-pair relationships require manual provenance and parser review.", jobs=triage, pair_review_queue=held_pairs),
       ],
       full_queue="agent-2-import-inputs-deduplicated.json",
       counting_policy="Batch pair items may overlap B3/B4 file jobs; never sum batch job counts into collection totals.",

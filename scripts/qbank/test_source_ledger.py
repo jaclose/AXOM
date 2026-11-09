@@ -1236,6 +1236,152 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(batches["processing_order"][3]["jobs"], [])
         self.assertEqual(len(batches["processing_order"][5]["jobs"]), 1)
 
+
+    def test_invalid_pair_path_does_not_shadow_valid_same_digest_pair(self):
+        # An invalid source-ID/path pairing cannot consume the dedup key
+        # and silently discard a later valid pair with the same source SHA.
+        from unittest.mock import patch
+        rows = [
+            dict(source_id="q", original_path="/synthetic/q.pdf", source_sha256=digest("q")),
+            dict(source_id="a", original_path="/synthetic/a.pdf", source_sha256=digest("a")),
+        ]
+        valid = dict(questions_only_id="q", answered_id="a",
+                     original_file="/synthetic/q.pdf", answered_file="/synthetic/a.pdf")
+        invalid = dict(valid, original_file="/outside/unrelated.pdf")
+        long_stem = "Question one describes a wholly synthetic measured physiological mechanism " * 2
+        with patch.object(enriched, "_pdf_first_question", return_value=long_stem) as probe:
+            result = enriched.enrich_pairs(rows, [invalid, valid], secure_open=lambda _: None)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["canonical_pair_status"], "source_path_mismatch_review_required")
+        self.assertFalse(result[0]["answer_attribution_permitted"])
+        self.assertEqual(result[1]["canonical_pair_status"], "unique_candidate_pair")
+        self.assertEqual(result[1]["original_file"], valid["original_file"])
+        self.assertEqual(result[1]["text_evidence"], "first_question_correspondence_supported")
+        self.assertEqual(probe.call_count, 2)
+        self.assertFalse(result[1]["answer_attribution_permitted"])
+
+    def test_pair_mirrors_with_different_source_weeks_are_not_collapsed(self):
+        # A byte SHA is not proof of a shared week or curriculum owner.
+        from unittest.mock import patch
+        rows = []
+        pairs = []
+        for week in (2, 3):
+            q, a = "q" + str(week), "a" + str(week)
+            rows.extend([
+                dict(source_id=q, original_path="/synthetic/" + q + ".pdf",
+                     source_sha256=digest("identical questions"),
+                     academic_term="T4", module="NCRS", week=week,
+                     week_evidence="explicit_path_week"),
+                dict(source_id=a, original_path="/synthetic/" + a + ".pdf",
+                     source_sha256=digest("identical answers"),
+                     academic_term="T4", module="NCRS", week=week,
+                     week_evidence="explicit_path_week"),
+            ])
+            pairs.append(dict(questions_only_id=q, answered_id=a,
+                              original_file="/synthetic/" + q + ".pdf",
+                              answered_file="/synthetic/" + a + ".pdf"))
+        with patch.object(enriched, "_pdf_first_question", return_value=None):
+            result = enriched.enrich_pairs(rows, pairs, secure_open=lambda _: None)
+        self.assertEqual(len(result), 2)
+        self.assertEqual([p["canonical_pair_status"] for p in result],
+                         ["unique_candidate_pair", "unique_candidate_pair"])
+        self.assertEqual([{x["week"] for x in p["scope_references"]} for p in result],
+                         [{2}, {3}])
+        self.assertEqual({tuple(x["source_id"] for x in p["scope_references"])
+                          for p in result}, {("q2", "a2"), ("q3", "a3")})
+        self.assertTrue(all(p["answer_attribution_permitted"] is False for p in result))
+
+    def test_conflicting_question_answer_source_scope_requires_review(self):
+        # Even a plausible first-question match cannot authorize an answer
+        # document filed under another explicit week.
+        from unittest.mock import patch
+        rows = [
+            dict(source_id="q", original_path="/synthetic/q.pdf",
+                 source_sha256=digest("question"), academic_term="T4",
+                 module="NCRS", week=2, week_evidence="explicit_path_week"),
+            dict(source_id="a", original_path="/synthetic/a.pdf",
+                 source_sha256=digest("answers"), academic_term="T4",
+                 module="NCRS", week=3, week_evidence="explicit_path_week"),
+        ]
+        pair = dict(questions_only_id="q", answered_id="a",
+                    original_file="/synthetic/q.pdf", answered_file="/synthetic/a.pdf")
+        with patch.object(enriched, "_pdf_first_question") as probe:
+            result = enriched.enrich_pairs(rows, [pair], secure_open=lambda _: None)
+        probe.assert_not_called()
+        self.assertEqual(result[0]["canonical_pair_status"], "requires_scope_review")
+        self.assertEqual(result[0]["unresolved"], "question_answer_source_scope_conflict")
+        self.assertEqual([x["week"] for x in result[0]["scope_references"]], [2, 3])
+        self.assertEqual(result[0]["text_evidence"], "text_insufficient_unverified")
+        self.assertFalse(result[0]["answer_attribution_permitted"])
+
+    def test_same_scope_pair_mirrors_still_deduplicate(self):
+        from unittest.mock import patch
+        rows = []
+        pairs = []
+        for name in ("first", "second"):
+            for role in ("q", "a"):
+                sid = name + "-" + role
+                rows.append(dict(source_id=sid, original_path="/synthetic/" + sid,
+                                 source_sha256=digest("identical " + role),
+                                 academic_term="T4", module="NCRS", week=2))
+            pairs.append(dict(questions_only_id=name + "-q", answered_id=name + "-a",
+                              original_file="/synthetic/" + name + "-q",
+                              answered_file="/synthetic/" + name + "-a"))
+        with patch.object(enriched, "_pdf_first_question", return_value=None):
+            result = enriched.enrich_pairs(rows, pairs, secure_open=lambda _: None)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(pairs[1]["canonical_pair_status"], "mirrored_same_byte_pair")
+        self.assertEqual(result[0]["mirrored_pair_references"], [
+            dict(questions_only_id="second-q", answered_id="second-a",
+                 original_file="/synthetic/second-q", answered_file="/synthetic/second-a")
+        ])
+        self.assertFalse(result[0]["answer_attribution_permitted"])
+
+
+    def test_unverified_pair_hashes_are_not_collapsed_or_probed(self):
+        # Distinct un-hashed PDF pairs are not byte-identical evidence, even
+        # when their academic filing happens to match.
+        from unittest.mock import patch
+        rows = []
+        pairs = []
+        for n in ("one", "two"):
+            for role in ("q", "a"):
+                sid = n + "-" + role
+                rows.append(dict(source_id=sid, original_path="/synthetic/" + sid,
+                                 source_sha256=None, academic_term="T4",
+                                 module="NCRS", week=2))
+            pairs.append(dict(questions_only_id=n + "-q", answered_id=n + "-a",
+                              original_file="/synthetic/" + n + "-q",
+                              answered_file="/synthetic/" + n + "-a"))
+        with patch.object(enriched, "_pdf_first_question") as probe:
+            result = enriched.enrich_pairs(rows, pairs, secure_open=lambda _: None)
+        probe.assert_not_called()
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(p["canonical_pair_status"] == "requires_source_review"
+                            and p["unresolved"] == "pair_source_digest_unverified"
+                            and not p["answer_attribution_permitted"] for p in result))
+
+
+    def test_unverified_pdf_pairs_go_to_manual_review_not_priority_correspondence(self):
+        # A held scope/path/hash proposal must not be presented to Agent 2 as
+        # an ordinary B2 pair that can have its answers associated by position.
+        held = dict(questions_only_id="wrong-week-question",
+                    answered_id="other-week-answer",
+                    original_file="/synthetic/q.pdf",
+                    answered_file="/synthetic/a.pdf",
+                    canonical_pair_status="requires_scope_review",
+                    unresolved="question_answer_source_scope_conflict",
+                    answer_attribution_permitted=False)
+        valid = dict(questions_only_id="source-q", answered_id="source-a",
+                     original_file="/synthetic/allowed-q.pdf",
+                     answered_file="/synthetic/allowed-a.pdf",
+                     canonical_pair_status="unique_candidate_pair",
+                     answer_attribution_permitted=False)
+        batches = enriched.ordered_import_batches([], [held, valid], [])
+        self.assertEqual(batches["processing_order"][2]["jobs"], [valid])
+        self.assertEqual(batches["processing_order"][5]["pair_review_queue"], [held])
+        self.assertFalse(held["answer_attribution_permitted"])
+
 if __name__ == "__main__":
     ledger.OUT.mkdir(parents=True,exist_ok=True)
     unittest.main()
