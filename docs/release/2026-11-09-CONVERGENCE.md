@@ -1,6 +1,6 @@
 # AXOM CONVERGENCE candidate — 2026-11-09
 
-**State: local integration candidate; not a shipped release.** The release owner
+**State: committed and pushed [candidate #345](https://github.com/jaclose/AXOM/pull/345); not a shipped release.** The release owner
 must replace the outstanding-gates section with exact final evidence before
 claiming release. Baseline: `382308aba5ececd039285d4b8ccee9a181b40d7c`.
 
@@ -90,7 +90,7 @@ The final candidate also includes coordinated local corrections described below.
 
 ## Forward-only SQL plan
 
-These ten migration files are present in the candidate. Their presence and local
+These eleven migration files are present in the candidate. Their presence and local
 PGlite checks do not establish hosted execution. Preserve previously numbered
 migrations byte-for-byte; deploy the additive upgrade sequence and record the
 actual database result separately.
@@ -98,6 +98,7 @@ actual database result separately.
 | Migration | Purpose |
 | --- | --- |
 | `20261105000000_workspace_reference_validation_batch.sql` | Independently deployable account-save repair using indexed batch reference checks; depends only on the deployed baseline and can precede the nine held feature migrations. |
+| `20261105010000_restore_v2_retention_cleanup_window.sql` | Restore the legacy endpoint's existing 60-second allowance on v2 only; preserves the atomic writer, access rules and existing history retention. Separately awaiting live-setting approval. |
 | `20261106020000_community_experience.sql` | Community profiles, consent and conversations/progress support. |
 | `20261108182000_question_set_review_revision_guard.sql` | Bind review actions to an exact revision. |
 | `20261108200000_question_set_snapshot_type_guard.sql` | Reject malformed snapshot scalar types. |
@@ -114,8 +115,9 @@ with no row deletion, policy change,
 privilege broadening or global timeout increase. Production logs at
 2026-11-09 16:35–16:40 UTC locate SQL 57014 inside the old repeated Storage
 lookups. Readback still shows checkpoint 71 from September 30 after image
-recovery and upload. Applying the repair to AXOM Production is a separate
-approval boundary. All 33 migration tests passed, including occupied upgrade,
+recovery and upload. JD approved and the release owner applied only this repair
+to AXOM Production on November 9. Ledger and invoker-security readback passed.
+All 33 migration tests passed, including occupied upgrade,
 rollback/reapply and a 20,000-distinct-source stress case with 20,000 image
 references. On the contended local PGlite runtime, the representative
 1,300-source/116-image checkpoint improved from 1,187ms to 421ms; the large
@@ -128,6 +130,38 @@ Its local rollback restores the function from
 `20261013230000_shared_account_content_references.sql`; it does not undo or
 delete account checkpoints. Hosted repair success requires a fresh owner's
 save and matching revision/hash readback, followed by reload verification.
+The production CLI rehearsal used an isolated copy of the 44 applied migration
+files plus this repair. All 44 local/remote versions matched; `db push --linked
+--dry-run` listed only `20261105000000`, with no seeds or roles. The rehearsal made
+no database changes. The isolated boundary preserves the pinned migration version
+is retained and the nine other feature migrations remain excluded. The isolated
+apply then completed successfully with exactly that migration and no seeds or
+roles. A live save passed the repaired file checks but timed out in the unchanged
+private writer's history-maintenance DELETE. That transaction did not establish
+a new protected version; checkpoint 71 remains the last confirmed version.
+
+Read-only production diagnosis found 60 retained revisions totaling 287,648,283
+stored bytes, with 50 currently eligible for the existing 50 MB retention rule.
+The candidate-selection query took 6.499ms. The legacy public save endpoint has
+`statement_timeout=60s`; v2 lacked that setting and fell back to eight seconds.
+The follow-up migration restores the same bounded allowance only to v2 and
+reloads PostgREST's schema cache. It does not change function bodies, ownership,
+grants, invoker security, global role limits or retention selection. Its own DDL
+does not delete rows; a later successful save performs the existing atomic
+history cleanup. Separate live-setting approval is pending.
+The new migration's three tests and two existing budget/count checks passed;
+typecheck and scoped lint passed. Its SHA-256 is
+`360e311bc7642352c1306f930f3c7e415945f869f947654eceaafdcd02c4bedd`.
+The second isolated production dry run lists only `20261105010000`, with no
+seeds or roles. No manual cleanup or timeout change has been applied.
+
+A fresh portable safety export was verified before further recovery: 1,216
+questions, 268 tracker rows, 116 images and 30 original files. All 114 previously
+archived images remained byte-identical; the two recovered images are included.
+Questions, tracker rows, sets, documents, Journal and quiz sessions match the
+earlier export. The UI reports 39 unavailable/over-limit original-file references.
+The live tab also reports a local-save problem and must remain open until both
+cloud and local persistence are verified; exporting is not proof of either.
 
 ## Content and production boundaries
 
@@ -140,7 +174,22 @@ prepares future diagram use; it is not an approved medical diagram asset library
 The available template corpus was checked separately: 28 templates and 672
 activities parsed with hashes verified, then 14 modules/672 activities installed
 and reloaded in an isolated test workspace. This is not evidence of installation
-in the learner's production account. The newer external-drive QBank package was
+in the learner's production account. A private four-template Term 4 supplement
+adds 266 parsed activities (FTCM 57, NCRS 67, RHPS 57, DERS 85). All 266 map to
+existing saved tracker IDs in a metadata-only review package, with no changes to
+labels, paths, IDs or progress and no new rows. DERS retains its source's stated
+Weeks 15–20; 12 literal learner week labels remain provisional and 169 other
+activities remain unscheduled. Two missing-material placeholders stay separate.
+The supplement is prepared, not installed in the learner account; 126 rows lack an exact slide locator,
+and the source package's calendar screenshots were not independently recovered.
+The combined 32-file browser run loaded 936 of 938 parsed source rows, reloaded,
+and reimported with zero additions and unchanged progress. Two identical FTCM
+source rows remain visibly held; both original tracker identities are preserved
+in the private review artifact. A false NCRS lecture-number collision was fixed
+by recognizing only the current module's number prefix or known aliases. Generic
+references to other courses retain title-based identity; literal lecture numbers
+and existing labels remain intact. Its 62 focused parser/reconciliation tests passed.
+The newer external-drive QBank package was
 not available for this integration; older internal packages have different counts
 and must not be described as the same complete reviewed corpus.
 
@@ -175,6 +224,23 @@ Worker evidence before final integration included targeted QBank publication and
 import checks, media recovery tests, tracker/template checks, Community migration
 and consent tests, and a real two-tab Journal regression. These are scoped receipts,
 not a substitute for the combined candidate gate.
+
+Recorded local checks: repository 43/43, release tooling 89/89, API types, web
+types/lint/build, production update consent/recovery and offline checks passed.
+The full unit sweep reported 5,301 passing tests, two timeouts and three worker
+startup failures; all five affected files passed unchanged on a focused rerun
+(19/19). This does not count as a clean full unit sweep. Final migration coverage
+passed 33/33; Journal/account coverage passed 123/123 and import account-boundary
+coverage passed 69/69. The complete local browser sweep reported 189 passed,
+14 skipped and seven failures: three stale assertions for intentionally hidden
+pages and four host-stall timeouts. The hidden-page browser expectations were
+corrected while retaining sourced-school/filter capability coverage as component
+tests. All 16 cases across the five affected browser files then passed, including
+the unchanged timeout cases. This is a full sweep plus focused recovery, not a
+second clean full sweep. Exact-head hosted checks remain outstanding.
+A hosted release-tool failure exposed a stale source
+integrity hash after the final attachment diagnostic change; regeneration kept
+the communications bundle identical and the 89 release tests passed again.
 
 The release owner records final results and exact candidate commit here:
 

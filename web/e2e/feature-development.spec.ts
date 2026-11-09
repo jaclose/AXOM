@@ -50,9 +50,13 @@ test("unfinished pages stay out of navigation and direct links", async ({ page }
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await skipSetup(page);
+  for (const label of ["Application Checker", "Simulations", "Anki Lab", "Habit Tracker", "Pre-Med / MCAT / DAT", "USMLE / Shelf Prep", "Integrations"]) {
+    await expect(page.locator(".sidebar").getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
   for (const route of ["appchecker", "simulations", "anki", "habits", "premed", "step", "integrations"]) {
     await page.goto(`/#${route}`);
-    await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+    await expect(page.locator(".topbar-heading .tb-title")).toHaveText("Dashboard");
+    await expect(page.getByRole("region", { name: "Dashboard widgets" })).toBeVisible();
     await expect(page.locator(".sidebar").getByText("WIP", { exact: true })).toHaveCount(0);
   }
   expect(errors).toEqual([]);

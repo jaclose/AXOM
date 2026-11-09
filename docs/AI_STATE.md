@@ -22,30 +22,40 @@ foreground notification panels. WIP navigation and direct routes are withheld;
 Tools precedes Academic Support. Native packaging groundwork only: no installer,
 release archive or download has been generated.
 
-Focused tests and real local browser journeys have passed in these areas. The
+The combined package is committed and pushed in draft PR #345. Focused tests and
+real local browser journeys have passed in these areas. The
 complete combined gate, exact-head hosted checks and production acceptance are
 still pending. Do not infer release readiness or cloud publication from those
-focused results. One independent sync repair, nine feature SQL migrations and the regenerated
-Communications function require separately controlled production application.
+focused results. The reference-validation repair is applied; the v2 cleanup
+allowance, nine feature migrations and regenerated Communications function retain
+separate production controls.
 
 ## Live account investigation · 2026-11-09
 
 Production Supabase connection is restored and verified for `AXOM Production`
-(`jofkmfwkidubxcutkwzf`), healthy with 44 applied migrations through
-`20261104120000_operator_accounts_email_text`. No production migration, content
-publication or account deletion occurred. Do not target the older AXOM project.
+(`jofkmfwkidubxcutkwzf`), now with 45 applied migrations. JD explicitly approved
+`20261105000000_workspace_reference_validation_batch`; isolated CLI application
+and ledger/security readback passed. The nine feature migrations remain absent.
+No content publication or account deletion occurred. Do not target the older project.
 
 Both missing question images were recovered from exact matching historical
 backup bytes and restored through the live www workspace's add-only recovery
 controls. The questions were unchanged. Readback confirms 116 private image
-objects and 1,259 source objects uploaded. The final checkpoint still fails:
-production logs show SQL 57014 in repeated Storage lookups inside
-`push_workspace_revision_v2`, under the existing eight-second account timeout.
-The latest protected server revision remains 71, dated September 30. Batched
-validation migration `20261105000000_workspace_reference_validation_batch.sql`
-is prepared for separate production approval; no successful new live
-checkpoint is claimed. Apex and www have separate browser storage: never clear,
-replace or silently transfer either.
+objects and 1,259 source objects uploaded. The live retry passed file validation,
+then SQL 57014 occurred in the unchanged private writer's history cleanup. The
+latest confirmed server revision remains 71, dated September 30. Production has
+60 revisions / 287.6 MB; 50 currently qualify for the existing retention rule.
+The legacy public save RPC has a 60-second allowance, but v2 lacked it. Follow-up
+`20261105010000_restore_v2_retention_cleanup_window.sql` restores that setting
+only on v2; its five focused retention/rollback tests passed and live-setting
+approval is pending. No new protected checkpoint is claimed.
+
+The live tab also reports unsaved local changes. A fresh portable export at
+`~/Downloads/axom-backup-2026-11-09 (1).zip` passed CRC, all 116 image size checks,
+114 unchanged prior-image hashes and 30 original-file hashes. It preserves all
+1,216 questions and 268 tracker rows. Keep the tab open until local/cloud saves
+are verified. Apex and www have separate browser storage: never clear, replace
+or silently transfer either.
 
 The newest QBank source drive is unavailable, as confirmed by JD. Internal copies
 provide 28 verified templates (672 activities) and 13,777 source-question
@@ -54,6 +64,17 @@ This does not establish a 20,000+ reviewed corpus. All eight supplied PDFs are
 indexed: 29,611 physical pages, with 2,815 duplicate T3 compilation pages kept
 distinct without double-counting evidence. Private sorting manifests retain
 lecture/page provenance and unresolved weeks; no official weeks were invented.
+The private Term 4 supplement parses another 266 activities, all reconciled to
+existing tracker IDs without altering progress. Its source metadata remains a
+review artifact, not an installed workspace change. DERS keeps stated Weeks
+15–20; unsupported weeks remain unscheduled. Two missing-material markers stay held.
+All 32 available template files passed a browser load/reload/reimport: 938 source
+rows, 936 installed in an isolated workspace, two identical FTCM rows held with
+both original IDs/progress preserved. Reimport added nothing and retained progress.
+The parser now avoids false lecture-number collisions from foreign course prefixes.
+Private additions include a corrected 141-question IEA package and a separately
+deduplicated 77-question NCRS text package with source-provided keys/explanations;
+neither is installed or published. The 13,777 census denominator remains separate.
 The normal Journal lane resumed and supplied independently reviewed PR #344;
 other quota-limited chats were supported by scoped subagents.
 
@@ -99,7 +120,8 @@ contains private assets and broad replacement/deletion. Check the
 before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
-Next: complete the combined gate, inspect the exact release diff, commit/push
-one candidate and record its checks/preview. FORGE issue #140 controls release
+Next: complete the combined gate and record exact-head checks/preview for the
+pushed candidate. The first sync repair passed 33 migration/recovery tests and is
+applied; the v2-only cleanup allowance awaits separate approval. FORGE #140 controls release
 acceptance. Keep production SQL, private-content publication, live communications
 and signed native packaging separate from the code commit.

@@ -267,6 +267,39 @@ describe("course templates", () => {
     expect(changes.update).toMatchObject([{ id: "record-0", label: "CPR 03 Cardiac Histology, Updated" }]);
   });
 
+  it("keeps a foreign course reference distinct from this module's numbered lecture", () => {
+    const section = parseCourseTemplate("NCRS - Lectures:\n@week-policy: explicit\nNCRS 01 Primary source topic [Lecture]\nBPM 1: CPR 1 module reference [Lecture]");
+    expect(section.items.map((item) => item.number)).toEqual([1, undefined]);
+    const plan = planCourseTemplate([section], { term: "Term 4" });
+    expect(plan.items.map((item) => item.templateKey)).toEqual([
+      "ncrs|lecture|1", "ncrs|lecture|bpm-1-cpr-1-module-reference",
+    ]);
+    const first = reconcileCourseTemplate(plan, []);
+    expect(first.create).toHaveLength(2);
+    expect(first.review ?? []).toEqual([]);
+    const saved = first.create.map((item, index) => ({ ...item, id: `saved-${index}`, passes: index + 1, ankiPasses: index }));
+    const before = JSON.stringify(saved);
+    const again = reconcileCourseTemplate(plan, saved);
+    expect(again).toMatchObject({ create: [], update: [], unchanged: 2 });
+    expect(JSON.stringify(saved)).toBe(before);
+    expect(saved.map((item) => item.label)).toEqual(section.items.map((item) => item.label));
+  });
+
+  it("accepts the module's family code and documented alias while retaining literal lecture numbers", () => {
+    const short = parseCourseTemplate("CPR1 - Lectures:\nCPR 03 Synthetic topic [Lecture]");
+    expect(short.items[0].number).toBe(3);
+    const alias = parseCourseTemplate("NB Block 2 - Lectures:\nNB2 14 Synthetic topic [Lecture]\nExternal reading before Lecture 09 [Lecture]");
+    expect(alias.items.map((item) => item.number)).toEqual([14, 9]);
+  });
+
+  it("does not derive a combined lecture identity from a foreign module reference", () => {
+    const section = parseCourseTemplate("NCRS - Lectures:\nCPR 1, 2 Reference topics [Lecture]\nNCRS 1, 2 Combined source session [Lecture]");
+    expect(section.items[0].numbers).toBeUndefined();
+    expect(section.items[0].number).toBeUndefined();
+    expect(section.items[1].numbers).toEqual([1, 2]);
+    expect(new Set(planCourseTemplate([section]).items.map((item) => item.templateKey)).size).toBe(2);
+  });
+
   it("keeps identical activities in distinct terms independent", () => {
     const section = parseCourseTemplate("DEMO 1 - Lectures:\n\nDEMO Lecture 01 Anatomy [Lecture]");
     const plan = planCourseTemplate([section], { term: "Term 2" });
@@ -298,6 +331,21 @@ describe("course templates", () => {
     const changes = reconcileCourseTemplate(plan, []);
     expect(changes.create).toHaveLength(0);
     expect(changes.review).toHaveLength(2);
+  });
+
+  it("retains both identical source rows for review without combining saved progress", () => {
+    const section = parseCourseTemplate("DEMO - Activities:\n@week-policy: explicit\nNB DEMO 08 [PQ]\nNB DEMO 08 [PQ]", "source.txt");
+    const plan = planCourseTemplate([section], { term: "Term 4" });
+    const existing = plan.items.map((item, index) => ({ ...item, id: `saved-${index}`, passes: index + 1 }));
+    const before = JSON.stringify(existing);
+    for (const rows of [[], existing]) {
+      const changes = reconcileCourseTemplate(plan, rows);
+      expect(changes.create).toEqual([]);
+      expect(changes.update).toEqual([]);
+      expect(changes.review?.map(({ item }) => item.sourceLine)).toEqual([3, 4]);
+    }
+    expect(section.items).toHaveLength(2);
+    expect(JSON.stringify(existing)).toBe(before);
   });
 
   it("keeps renamed unnumbered source activities for review rather than silently creating a second", () => {

@@ -22,7 +22,7 @@
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
     "web/src/lib/localVault.ts": "c11842008c5b695ca63701573f2637c69f544a42dca104ead13c46782c9fe7a4",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
-    "web/src/lib/questionAttachments.ts": "6008a95bb77ecf8c5932edfd7d6ad747962c089f5ae9b7285014239e034692e5",
+    "web/src/lib/questionAttachments.ts": "dec3c1da59c016c55a5cb5db926814f0aaf22a6ebca7982920dab1de5e13f84f",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
     "web/src/lib/reports.ts": "6b7521623409395c794c18bfedca8e2391dd08b1d16a156f2ed09048da8aa498",
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",

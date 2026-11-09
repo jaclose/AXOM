@@ -150,11 +150,11 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
     if (!inGroup) { group += 1; inGroup = true; }
     const label = match[1].trim();
     const week = label.match(/(?:^|[^a-z0-9])(?:week|wk)\s*0*(\d{1,2})(?![0-9])/i);
-    const numbers = compositeNumbers(label, activity ?? "other");
+    const numbers = compositeNumbers(label, activity ?? "other", module);
     items.push({
       label,
       activity: activity ?? "other",
-      number: numbers ? undefined : itemNumber(label, activity ?? "other"),
+      number: numbers ? undefined : itemNumber(label, activity ?? "other", module),
       ...(numbers ? { numbers } : {}),
       group,
       statedWeek: week ? Number(week[1]) : headedWeek,
@@ -521,15 +521,24 @@ function setsTheWeeks(section: CourseTemplateSection): boolean {
 }
 
 /** Combined numbered lectures are one source row; never attach one row's progress to a later split lecture. */
-function compositeNumbers(label: string, activity: CourseActivity): number[] | undefined {
+function compositeNumbers(label: string, activity: CourseActivity, module: string): number[] | undefined {
   if (activity !== "lecture" && activity !== "flipped-lecture") return undefined;
-  const leading = label.match(/^(?:(?:lecture|lec)|[A-Z][A-Z0-9-]{1,9})\s+(\d{1,3}(?:\s*(?:,|&|and)\s*\d{1,3})+)(?=\s|$)/i);
-  if (!leading) return undefined;
-  const numbers = [...leading[1].matchAll(/\d{1,3}/g)].map(([digits]) => Number(digits));
+  const leading = label.match(/^((?:lecture|lec)|[A-Z][A-Z0-9-]{1,9})\s+(\d{1,3}(?:\s*(?:,|&|and)\s*\d{1,3})+)(?=\s|$)/i);
+  if (!leading || (!/^(lecture|lec)$/i.test(leading[1]) && !isModuleNumberPrefix(leading[1], module))) return undefined;
+  const numbers = [...leading[2].matchAll(/\d{1,3}/g)].map(([digits]) => Number(digits));
   return numbers.length > 1 ? numbers : undefined;
 }
 
-function itemNumber(label: string, activity: CourseActivity): number | undefined {
+/** A reference to a different module is a title, not this module's lecture number. */
+function isModuleNumberPrefix(prefix: string, module: string): boolean {
+  const key = moduleKey(prefix);
+  return [module, ...moduleAliases(module)].some((spelling) => {
+    const code = moduleKey(spelling.trim().split(/\s+/)[0]);
+    return key === code || key === code.replace(/\d+$/, "");
+  });
+}
+
+function itemNumber(label: string, activity: CourseActivity, module: string): number | undefined {
   // Prefer this activity's own number, never a reference to another lecture in
   // its title: "DLA 02 before Lecture 06" identifies DLA 2, not Lecture 6.
   const byActivity: Partial<Record<CourseActivity, RegExp>> = {
@@ -548,8 +557,8 @@ function itemNumber(label: string, activity: CourseActivity): number | undefined
   // Some official lists say "CPR 03 Histology" without spelling out Lecture.
   // This applies to lecture kinds only; do not infer assessment numbers.
   if (activity === "lecture" || activity === "flipped-lecture") {
-    const leading = label.match(/^[A-Z][A-Z0-9-]{1,9}\s+0*(\d{1,3})(?=\s|[,;:/-]|$)/);
-    if (leading) return Number(leading[1]);
+    const leading = label.match(/^([A-Z][A-Z0-9-]{1,9})\s+0*(\d{1,3})(?=\s|[,;:/-]|$)/);
+    if (leading && isModuleNumberPrefix(leading[1], module)) return Number(leading[2]);
   }
   return undefined;
 }
