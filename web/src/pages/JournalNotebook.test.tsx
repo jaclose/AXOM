@@ -75,6 +75,51 @@ function openTodayInFullPage() {
   fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
 }
 
+async function readSubmittedFeedbackDownload(): Promise<Record<string, unknown>> {
+  const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+  const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+  const createObjectURL = vi.fn((_blob: Blob) => "blob:journal-feedback-submitted");
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Download submitted copy" }));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const blob = createObjectURL.mock.calls[0][0];
+    const content = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    return JSON.parse(content) as Record<string, unknown>;
+  } finally {
+    click.mockRestore();
+    if (originalCreate) Object.defineProperty(URL, "createObjectURL", originalCreate);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    if (originalRevoke) Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
+    else Reflect.deleteProperty(URL, "revokeObjectURL");
+  }
+}
+
+function feedbackWriterCopies(draftKey: string): Array<{ key: string; value: Record<string, unknown> }> {
+  const copies: Array<{ key: string; value: Record<string, unknown> }> = [];
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    const prefix = `${draftKey}:writer:`;
+    if (!key?.startsWith(prefix) || !/^[a-f0-9]{32}$/.test(key.slice(prefix.length))) continue;
+    const raw = window.localStorage.getItem(key);
+    if (raw) copies.push({ key, value: JSON.parse(raw) as Record<string, unknown> });
+  }
+  return copies;
+}
+
+function feedbackWriterDraft(draftKey: string): Record<string, unknown> {
+  const copies = feedbackWriterCopies(draftKey);
+  expect(copies).toHaveLength(1);
+  return copies[0].value;
+}
+
 describe("Journal notebook foundation", () => {
   it("opens the MacBook for a real timer or recorded progress and closes it with no evidence", () => {
     useStore.setState({ tracker: [], questions: [], tasks: [], sessions: [] });
@@ -424,21 +469,22 @@ describe("Journal notebook foundation", () => {
     window.localStorage.removeItem(keyB);
     useStore.setState({ profile: { ...originalProfile, userId: ownerA } });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
       fireEvent.change(liked(), { target: { value: "Only A should read this private feedback." } });
-      expect(JSON.parse(window.localStorage.getItem(keyA) ?? "{}").liked).toBe("Only A should read this private feedback.");
+      expect(feedbackWriterDraft(keyA).liked).toBe("Only A should read this private feedback.");
 
       act(() => { useStore.setState({ profile: { ...originalProfile, userId: ownerB } }); });
       expect(liked().value).toBe("");
       expect(window.localStorage.getItem(keyB)).toBeNull();
       fireEvent.change(liked(), { target: { value: "B owns a different feedback draft." } });
-      expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B owns a different feedback draft.");
+      expect(feedbackWriterDraft(keyB).liked).toBe("B owns a different feedback draft.");
 
       act(() => { useStore.setState({ profile: { ...originalProfile, userId: ownerA } }); });
       expect(liked().value).toBe("Only A should read this private feedback.");
-      expect(window.localStorage.getItem(keyA)).not.toContain("B owns a different");
+      expect(window.localStorage.getItem(keyA)).toBeNull();
+      expect(feedbackWriterDraft(keyA).liked).not.toBe("B owns a different feedback draft.");
     } finally {
       cleanup();
       useStore.setState({ profile: originalProfile });
@@ -460,21 +506,22 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: accountA, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
       fireEvent.change(liked(), { target: { value: "A's private feedback." } });
-      expect(JSON.parse(window.localStorage.getItem(keyA) ?? "{}").liked).toBe("A's private feedback.");
+      expect(feedbackWriterDraft(keyA).liked).toBe("A's private feedback.");
 
       act(() => { useAccount.setState({ user: accountB }); });
       expect(liked().value).toBe("");
       expect(window.localStorage.getItem(keyB)).toBeNull();
       fireEvent.change(liked(), { target: { value: "B's private feedback." } });
-      expect(JSON.parse(window.localStorage.getItem(keyB) ?? "{}").liked).toBe("B's private feedback.");
+      expect(feedbackWriterDraft(keyB).liked).toBe("B's private feedback.");
 
       act(() => { useAccount.setState({ user: accountA }); });
       expect(liked().value).toBe("A's private feedback.");
-      expect(window.localStorage.getItem(keyA)).not.toContain("B's private feedback.");
+      expect(window.localStorage.getItem(keyA)).toBeNull();
+      expect(feedbackWriterDraft(keyA).liked).not.toBe("B's private feedback.");
     } finally {
       cleanup();
       useAccount.setState(previous);
@@ -498,7 +545,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
       const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
@@ -511,17 +558,17 @@ describe("Journal notebook foundation", () => {
       expect(liked().readOnly).toBe(true);
       expect((screen.getByRole("button", { name: "5 out of 5" }) as HTMLButtonElement).disabled).toBe(true);
       expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(true);
-      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+      expect(feedbackWriterDraft(draftKey).liked)
         .toBe("A note that must not disappear.");
 
       await act(async () => { rejectRequest(new Error("Submission interrupted")); await Promise.resolve(); });
       await waitFor(() => expect(liked().readOnly).toBe(false));
       expect((screen.getByRole("button", { name: "5 out of 5" }) as HTMLButtonElement).disabled).toBe(false);
       expect(screen.getByRole("alert").textContent).toContain("Submission interrupted");
-      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+      expect(feedbackWriterDraft(draftKey).liked)
         .toBe("A note that must not disappear.");
       fireEvent.change(liked(), { target: { value: "New changes after the failed request." } });
-      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+      expect(feedbackWriterDraft(draftKey).liked)
         .toBe("New changes after the failed request.");
     } finally {
       cleanup();
@@ -546,7 +593,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
       fireEvent.click(within(dialog).getByRole("button", { name: "4 out of 5" }));
@@ -560,7 +607,7 @@ describe("Journal notebook foundation", () => {
       });
       expect(submit).toHaveBeenCalledTimes(1);
       expect(failures).toHaveLength(1);
-      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked).toBe("Send this once.");
+      expect(feedbackWriterDraft(draftKey).liked).toBe("Send this once.");
 
       await act(async () => { failures[0](new Error("Temporary failure")); await Promise.resolve(); });
       expect(within(dialog).getByRole("alert").textContent).toContain("Temporary failure");
@@ -569,7 +616,7 @@ describe("Journal notebook foundation", () => {
       expect(failures).toHaveLength(2);
       await act(async () => { failures[1](new Error("Retry refused")); await Promise.resolve(); });
       expect((within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Send this once.");
-      expect(window.localStorage.getItem(draftKey)).toContain("Send this once.");
+      expect(feedbackWriterDraft(draftKey).liked).toBe("Send this once.");
     } finally {
       cleanup();
       useAccount.setState(previousAccount);
@@ -593,7 +640,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Keep one pending request after remount." } });
@@ -613,7 +660,7 @@ describe("Journal notebook foundation", () => {
       await act(async () => { resolveRequest("550e8400-e29b-41d4-a716-446655440000"); await response; });
       expect(await screen.findByText("Feedback received.")).toBeTruthy();
       expect(submit).toHaveBeenCalledTimes(1);
-      expect(window.localStorage.getItem(`${draftKey}:submitted`)).toBeTruthy();
+      expect(window.localStorage.getItem(`${feedbackWriterCopies(draftKey)[0].key}:submitted`)).toBeTruthy();
     } finally {
       cleanup();
       useAccount.setState(previousAccount);
@@ -634,7 +681,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...originalProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Older unsent note." } });
@@ -672,7 +719,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...originalProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Keep my in-memory answers." } });
@@ -711,7 +758,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), {
@@ -725,7 +772,7 @@ describe("Journal notebook foundation", () => {
 
       // A second tab writes a newer, unsent local draft while the RPC is pending.
       const newerDraft = JSON.stringify({
-        ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"),
+        rating: 4, wantMore: "", missing: "", painPoints: "", comment: "",
         liked: "Another tab wrote this after the first submission.",
       });
       window.localStorage.setItem(draftKey, newerDraft);
@@ -763,7 +810,7 @@ describe("Journal notebook foundation", () => {
     const workspaceId = "journal-feedback-receipt-race";
     const account = { id: "receipt-race-account", email: "race@example.test", displayName: "Test", emailConfirmed: true };
     const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
-    const receiptKey = `${draftKey}:submitted`;
+    let receiptKey = `${draftKey}:submitted`;
     let resolveRequest!: (receipt: string) => void;
     vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(
       () => new Promise<string>((resolve) => { resolveRequest = resolve; }),
@@ -776,17 +823,18 @@ describe("Journal notebook foundation", () => {
     let injected = false;
     let competingDraft = "";
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: "Sent first tab draft." } });
       fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+      receiptKey = `${feedbackWriterCopies(draftKey)[0].key}:submitted`;
       const removed = vi.spyOn(Storage.prototype, "removeItem");
       vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
         if (this === window.localStorage && key === receiptKey && !injected) {
           injected = true;
           competingDraft = JSON.stringify({
-            ...JSON.parse(window.localStorage.getItem(draftKey) ?? "{}"),
+            rating: 4, wantMore: "", missing: "", painPoints: "", comment: "",
             liked: "Second tab wrote during receipt.",
           });
           nativeSet.call(this, draftKey, competingDraft);
@@ -830,7 +878,7 @@ describe("Journal notebook foundation", () => {
       for (const example of examples) {
         const raw = JSON.stringify(example);
         window.localStorage.setItem(draftKey, raw);
-        render(<JournalPage />);
+        render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
         fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
         const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
         expect(within(dialog).getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
@@ -870,7 +918,7 @@ describe("Journal notebook foundation", () => {
     useAccount.setState({ user: account, phase: "signed-in" });
     const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockResolvedValue("legacy-receipt");
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Already sent legacy text");
       expect(window.localStorage.getItem(draftKey)).toBe(original);
@@ -912,11 +960,11 @@ describe("Journal notebook foundation", () => {
     const nativeSet = Storage.prototype.setItem;
     let blocked = true;
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
-      if (this === window.localStorage && key === draftKey && blocked) throw new Error("Storage quota exceeded");
+      if (this === window.localStorage && key.startsWith(`${draftKey}:writer:`) && blocked) throw new Error("Storage quota exceeded");
       nativeSet.call(this, key, value);
     });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), {
         target: { value: "Retain this text when storage becomes available." },
@@ -926,7 +974,7 @@ describe("Journal notebook foundation", () => {
 
       blocked = false;
       fireEvent.click(screen.getByRole("button", { name: "Retry draft save" }));
-      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+      expect(feedbackWriterDraft(draftKey).liked)
         .toBe("Retain this text when storage becomes available.");
       expect(screen.queryByRole("button", { name: "Retry draft save" })).toBeNull();
 
@@ -961,10 +1009,10 @@ describe("Journal notebook foundation", () => {
     const nativeSet = Storage.prototype.setItem;
     try {
       vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
-        if (this === window.localStorage && key === draftKey) throw new Error("Storage quota exceeded");
+        if (this === window.localStorage && key.startsWith(`${draftKey}:writer:`)) throw new Error("Storage quota exceeded");
         nativeSet.call(this, key, value);
       });
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: latest } });
       expect(screen.getByRole("alert").textContent).toMatch(/could not keep a local draft/i);
@@ -980,7 +1028,12 @@ describe("Journal notebook foundation", () => {
 
       fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
-      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Older locally saved text");
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(screen.getByRole("status").textContent).toContain("Receipt unsaved-");
+      expect(screen.queryByRole("button", { name: "Send feedback" })).toBeNull();
+      expect(await readSubmittedFeedbackDownload()).toMatchObject({ liked: latest });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem(draftKey)).toBe(original);
     } finally {
       cleanup();
       vi.restoreAllMocks();
@@ -1008,10 +1061,10 @@ describe("Journal notebook foundation", () => {
     const nativeSet = Storage.prototype.setItem;
     try {
       vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
-        if (this === window.localStorage && key === draftKey) throw new Error("Storage quota exceeded");
+        if (this === window.localStorage && key.startsWith(`${draftKey}:writer:`)) throw new Error("Storage quota exceeded");
         nativeSet.call(this, key, value);
       });
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       fireEvent.change(screen.getByLabelText("What do you like?"), { target: { value: changed } });
       expect(screen.getByRole("alert").textContent).toMatch(/could not keep a local draft/i);
@@ -1023,7 +1076,12 @@ describe("Journal notebook foundation", () => {
       expect(window.localStorage.getItem(receiptKey)).toBeNull();
       fireEvent.click(within(screen.getByRole("dialog", { name: "How is the journal feeling?" })).getByText("Close", { selector: "button" }));
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
-      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Recoverable old legacy text");
+      expect(screen.getByRole("status").textContent).toContain("Feedback received.");
+      expect(screen.getByRole("status").textContent).toContain("Receipt storage-");
+      expect(screen.queryByRole("button", { name: "Send feedback" })).toBeNull();
+      expect(await readSubmittedFeedbackDownload()).toMatchObject({ liked: changed });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem(draftKey)).toBe(saved);
     } finally {
       cleanup();
       vi.restoreAllMocks();
@@ -1045,14 +1103,15 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
       expect(within(dialog).queryByRole("alert")).toBeNull();
       expect((within(dialog).getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("Original legacy text");
       expect(window.localStorage.getItem(draftKey)).toBe(legacyDraft);
       fireEvent.change(within(dialog).getByLabelText("What do you like?"), { target: { value: "Original legacy text, continued" } });
-      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}")).toMatchObject({
+      expect(window.localStorage.getItem(draftKey)).toBe(legacyDraft);
+      expect(feedbackWriterDraft(draftKey)).toMatchObject({
         rating: 4, liked: "Original legacy text, continued",
       });
     } finally {
@@ -1075,7 +1134,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       const dialog = screen.getByRole("dialog", { name: "How is the journal feeling?" });
       expect(within(dialog).getByRole("alert").textContent).toMatch(/could not read this saved feedback draft/i);
@@ -1110,7 +1169,7 @@ describe("Journal notebook foundation", () => {
     useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
     useAccount.setState({ user: account, phase: "signed-in" });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
       expect(liked().value).toBe(oldDraft.liked);
@@ -1162,7 +1221,7 @@ describe("Journal notebook foundation", () => {
       return before;
     });
     try {
-      render(<JournalPage />);
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
       expect(interleaved).toBe(true);
@@ -1175,7 +1234,8 @@ describe("Journal notebook foundation", () => {
       expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
 
       fireEvent.change(liked(), { target: { value: "A deliberate new edit." } });
-      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked).toBe("A deliberate new edit.");
+      expect(window.localStorage.getItem(draftKey)).toBe(newerDraft);
+      expect(feedbackWriterDraft(draftKey).liked).toBe("A deliberate new edit.");
     } finally {
       readSpy.mockRestore();
       cleanup();
@@ -2472,7 +2532,10 @@ describe("Journal notebook foundation", () => {
         user: { id: "journal-auth-A", email: "alpha@example.invalid", displayName: "Journal Auth Alpha", emailConfirmed: true },
       });
     });
-    render(<JournalPage />);
+    let trustedAccountId = "journal-auth-A";
+    let trustedJournal = useStore.getState().journal;
+    const hasReceipt = (id: string, journal: typeof trustedJournal) => id === trustedAccountId && journal === trustedJournal;
+    render(<JournalPage hasAccountWorkspaceReceipt={hasReceipt} />);
     openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), {
       target: { value: "An even newer unsaved private sentence for A." },
@@ -2493,7 +2556,14 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("status").textContent).toContain("Journal paused");
     expect(screen.queryByText("A saved private entry that must not appear for B.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    act(() => { useStore.setState({ journal: [] }); });
+    // A replacement array alone cannot prove ownership. The fixture records
+    // a B-bound receipt only for the intended authenticated hydration step.
+    const bJournal: typeof trustedJournal = [];
+    act(() => {
+      trustedAccountId = "journal-auth-B";
+      trustedJournal = bJournal;
+      useStore.setState({ journal: bJournal });
+    });
     expect(useStore.getState().journal).toEqual([]);
 
     const editor = (screen.queryByLabelText("Free writing")
@@ -2523,7 +2593,12 @@ describe("Journal notebook foundation", () => {
       useStore.getState().updateProfile({ name: "Journal Auth Alpha" });
     });
     expect(screen.getByRole("status").textContent).toContain("Journal paused");
-    act(() => { useStore.setState({ journal: [original] }); });
+    const rehydratedA = [original];
+    act(() => {
+      trustedAccountId = "journal-auth-A";
+      trustedJournal = rehydratedA;
+      useStore.setState({ journal: rehydratedA });
+    });
     fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
     expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value)
       .toBe("An even newer unsaved private sentence for A.");
@@ -2550,7 +2625,10 @@ describe("Journal notebook foundation", () => {
         user: { id: "late-account-A", email: "late-a@example.invalid", displayName: "Late Writer Alpha", emailConfirmed: true },
       });
     });
-    render(<JournalPage />);
+    let trustedAccountId = "late-account-A";
+    let trustedJournal = useStore.getState().journal;
+    const hasReceipt = (id: string, journal: typeof trustedJournal) => id === trustedAccountId && journal === trustedJournal;
+    render(<JournalPage hasAccountWorkspaceReceipt={hasReceipt} />);
     openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), {
       target: { value: "A unsaved private draft must remain A-only." },
@@ -2578,10 +2656,168 @@ describe("Journal notebook foundation", () => {
     expect(screen.queryByText("A private page must not be displayed to B after an unrelated update.")).toBeNull();
 
     // A genuine replacement is still allowed to open a clean B notebook.
-    act(() => { useStore.setState({ journal: [] }); });
+    const bJournal: typeof trustedJournal = [];
+    act(() => {
+      trustedAccountId = "late-account-B";
+      trustedJournal = bJournal;
+      useStore.setState({ journal: bJournal });
+    });
     expect((screen.queryByLabelText("Free writing")
       ?? within(screen.getByRole("region", { name: "Write at your desk" })).getByRole("textbox")
     ) as HTMLTextAreaElement).toHaveProperty("value", "");
+  });
+
+  it("restores A's unsaved entry after separate account and workspace handoffs with different profile content", async () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "journal-separated-A-original-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      freeWriting: "A saved page before the handoff.",
+      attachments: [localImage],
+    };
+    const profileA = { ...useStore.getState().profile, name: "Separated Alpha", userId: "journal-separated-A", tagline: "A private profile" };
+    const profileB = { ...profileA, name: "Separated Beta", userId: "journal-separated-B", tagline: "B has different profile content" };
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    act(() => {
+      useStore.setState({ profile: profileA, journal: [original] });
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-separated-A-account", email: "separated-a@example.invalid", displayName: "Separated Alpha", emailConfirmed: true },
+      });
+    });
+    let trustedAccountId = "journal-separated-A-account";
+    let trustedJournal = useStore.getState().journal;
+    const hasReceipt = (id: string, journal: typeof trustedJournal) => id === trustedAccountId && journal === trustedJournal;
+    render(<JournalPage hasAccountWorkspaceReceipt={hasReceipt} />);
+    openTodayInFullPage();
+    const unsavedA = "A's newer unsaved sentence must return with its original entry ID.";
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: unsavedA } });
+
+    // Authentication changes before B's workspace is activated.
+    act(() => {
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-separated-B-account", email: "separated-b@example.invalid", displayName: "Separated Beta", emailConfirmed: true },
+      });
+    });
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    expect(screen.queryByText(unsavedA)).toBeNull();
+    const bJournal: typeof trustedJournal = [];
+    act(() => {
+      trustedAccountId = "journal-separated-B-account";
+      trustedJournal = bJournal;
+      useStore.setState({ profile: profileB, journal: bJournal });
+    });
+    const bEditor = (screen.queryByLabelText("Free writing")
+      ?? within(screen.getByRole("region", { name: "Write at your desk" })).getByRole("textbox")) as HTMLTextAreaElement;
+    expect(bEditor.value).toBe("");
+
+    // Returning to A also separates auth from the verified workspace load.
+    act(() => {
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-separated-A-account", email: "separated-a@example.invalid", displayName: "Separated Alpha", emailConfirmed: true },
+      });
+    });
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    const restoredA = [original];
+    act(() => {
+      trustedAccountId = "journal-separated-A-account";
+      trustedJournal = restoredA;
+      useStore.setState({ profile: profileA, journal: restoredA });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe(unsavedA);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(useStore.getState().journal[0]).toMatchObject({ id: original.id, freeWriting: unsavedA }));
+    expect(useStore.getState().journal[0].attachments).toEqual([localImage]);
+    expect(useStore.getState().journal).toHaveLength(1);
+  });
+
+  it("keeps B paused while A's Save flush settles and restores A's original entry after A→B→A hydration", async () => {
+    const original = {
+      ...useStore.getState().journal[0],
+      id: "journal-deferred-A-original-id",
+      date: `${TODAY_KEY}T12:00:00`,
+      freeWriting: "A's earlier saved page.",
+      attachments: [localImage],
+    };
+    const profileA = { ...useStore.getState().profile, name: "Deferred Alpha", userId: "journal-deferred-A", tagline: "A private profile" };
+    const profileB = { ...profileA, name: "Deferred Beta", userId: "journal-deferred-B", tagline: "B's independent profile" };
+    let releaseAFlush!: () => void;
+    const heldAFlush = new Promise<void>((resolve) => { releaseAFlush = resolve; });
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockImplementationOnce(() => heldAFlush)
+      .mockResolvedValue(undefined);
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    act(() => {
+      useStore.setState({ profile: profileA, journal: [original] });
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-deferred-A-account", email: "deferred-a@example.invalid", displayName: "Deferred Alpha", emailConfirmed: true },
+      });
+    });
+    let trustedAccountId = "journal-deferred-A-account";
+    let trustedJournal = useStore.getState().journal;
+    const hasReceipt = (id: string, journal: typeof trustedJournal) => id === trustedAccountId && journal === trustedJournal;
+    render(<JournalPage hasAccountWorkspaceReceipt={hasReceipt} />);
+    openTodayInFullPage();
+    const latestA = "A's current private sentence while the local flush is pending.";
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: latestA } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(useStore.getState().journal[0]).toMatchObject({ id: original.id, freeWriting: latestA });
+    });
+    expect(screen.getByText("Saving to this workspace…")).toBeTruthy();
+
+    act(() => {
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-deferred-B-account", email: "deferred-b@example.invalid", displayName: "Deferred Beta", emailConfirmed: true },
+      });
+    });
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    await act(async () => { releaseAFlush(); await heldAFlush; });
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    expect(screen.queryByText(latestA)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    const bJournal: typeof trustedJournal = [];
+    act(() => {
+      trustedAccountId = "journal-deferred-B-account";
+      trustedJournal = bJournal;
+      useStore.setState({ profile: profileB, journal: bJournal });
+    });
+    const bEditor = (screen.queryByLabelText("Free writing")
+      ?? within(screen.getByRole("region", { name: "Write at your desk" })).getByRole("textbox")) as HTMLTextAreaElement;
+    expect(bEditor.value).toBe("");
+    expect(useStore.getState().journal).toEqual([]);
+
+    act(() => {
+      useAccount.setState({
+        phase: "signed-in",
+        user: { id: "journal-deferred-A-account", email: "deferred-a@example.invalid", displayName: "Deferred Alpha", emailConfirmed: true },
+      });
+    });
+    expect(screen.getByRole("status").textContent).toContain("Journal paused");
+    const restoredA = [original];
+    act(() => {
+      trustedAccountId = "journal-deferred-A-account";
+      trustedJournal = restoredA;
+      useStore.setState({ profile: profileA, journal: restoredA });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe(latestA);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(useStore.getState().journal[0]).toMatchObject({ id: original.id, freeWriting: latestA }));
+    expect(useStore.getState().journal[0].attachments).toEqual([localImage]);
+    expect(useStore.getState().journal).toHaveLength(1);
   });
 
 });
