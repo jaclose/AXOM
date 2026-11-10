@@ -37,11 +37,11 @@ async function seedLocalSet(page: Page) {
       options: [{ key: "A", text: "First synthetic label" }, { key: "B", text: "Second synthetic label" }],
       correctKey: "B",
       explanation: "AXOM AI-assisted explanation (verify against source): The synthetic source explicitly marks B.",
-      // Legacy rationale keys can carry padding. Source review and learner
-      // preview must recognize them without rewriting the approved snapshot.
+      // Fresh submissions use accepted choice keys. The fixture below creates
+      // a synthetic historical pending record before academic review instead.
       choiceRationales: {
-        " a ": "AXOM AI-assisted rationale (verify against source): A conflicts with the synthetic source.",
-        " b ": "AXOM AI-assisted rationale (verify against source): B matches the synthetic source.",
+        A: "AXOM AI-assisted rationale (verify against source): A conflicts with the synthetic source.",
+        B: "AXOM AI-assisted rationale (verify against source): B matches the synthetic source.",
       },
       citation: "Synthetic review fixture, page 1", tags: ["synthetic", "reviewed-synthetic-keyword"],
     });
@@ -111,6 +111,36 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     console.info("Question Set Library fixture: pending submission created.");
     const [pending] = await database.rpc(owner.id, "my_question_set_library") as Array<{ id: string; status: string }>;
     expect(pending.status).toBe("pending");
+
+    // The live submit RPC correctly rejects rationale keys that do not
+    // exactly match its options. Reproduce historical padded-key content ONLY
+    // inside the isolated SQL test fixture, before a reviewer inspects it.
+    // Never rewrite an approved publication or bypass a real user's source
+    // and distribution-rights attestations.
+    const beforeLegacy = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as {
+      review_revision: number;
+      snapshot_payload: { questions: Array<{ correctKey: string; choiceRationales?: Record<string, string> }> };
+    };
+    const originallySubmitted = beforeLegacy.snapshot_payload.questions[0];
+    expect(originallySubmitted.correctKey).toBe("B");
+    expect(Object.keys(originallySubmitted.choiceRationales ?? {}).sort()).toEqual(["A", "B"]);
+    const legacyRationales = Object.fromEntries(Object.entries(originallySubmitted.choiceRationales ?? {})
+      .map(([key, rationale]) => [` ${key.toLowerCase()} `, rationale]));
+    const mutation = await database.db.query<{ review_revision: number }>(
+      `update public.question_set_library_entries
+          set snapshot_payload = jsonb_set(snapshot_payload, '{questions,0,choiceRationales}', $2::jsonb)
+        where id = $1 and status = 'pending'
+        returning review_revision`,
+      [pending.id, JSON.stringify(legacyRationales)],
+    );
+    expect(mutation.rows).toHaveLength(1);
+    expect(Number(mutation.rows[0].review_revision)).toBe(beforeLegacy.review_revision + 1);
+    const legacyPending = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as typeof beforeLegacy;
+    expect(legacyPending.review_revision).toBe(beforeLegacy.review_revision + 1);
+    expect(legacyPending.snapshot_payload.questions[0]).toEqual({
+      ...originallySubmitted,
+      choiceRationales: legacyRationales,
+    });
 
     await openSharedLibrary(other);
     await expect(other.getByRole("heading", { name: TITLE })).toHaveCount(0);
