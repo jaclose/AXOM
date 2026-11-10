@@ -1,0 +1,42 @@
+name: AXOM QA Media Integrity Vitest
+
+on:
+  pull_request:
+    paths:
+      - "web/src/lib/sync/cloudMedia.ts"
+      - "web/src/lib/sync/cloudMediaCurrentMainIntegrity.qa.test.ts"
+      - "web/src/lib/sync/cloudMediaEpochRevocation.qa.test.ts"
+      - "web/src/lib/questionAttachments.ts"
+      - "web/src/lib/questionAttachmentScope.ts"
+      - ".github/workflows/qa-media-integrity-vitest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  media-integrity:
+    name: Independent synthetic media verification (no accounts)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Record literal checked-out commit
+        run: |
+          git rev-parse HEAD
+          git status --porcelain
+      - run: node scripts/toolchain.mjs
+      - run: npm --prefix web ci
+      - name: Execute both current-main image-integrity and account-epoch regression suites
+        run: >-
+          npm --prefix web run test --
+          src/lib/sync/cloudMediaCurrentMainIntegrity.qa.test.ts
+          src/lib/sync/cloudMediaEpochRevocation.qa.test.ts
+          --reporter=verbose
