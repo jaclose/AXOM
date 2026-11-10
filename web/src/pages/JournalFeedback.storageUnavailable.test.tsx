@@ -88,4 +88,46 @@ describe("Journal feedback when browser storage cannot be read", () => {
     expect(screen.getByRole("button", { name: "Download copy 1" })).toBeTruthy();
     // No Send action: the simulated feedback remains entirely local.
   });
+
+  it("offers in-dialog retry when only the saved submission marker cannot be read", () => {
+    const originalGet = Storage.prototype.getItem;
+    const markerRead = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey === `${key}:submitted`)
+        throw new Error("Temporary receipt read failure");
+      return originalGet.call(this, storageKey);
+    });
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    const liked = screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+    expect(liked.readOnly).toBe(true);
+    expect(liked.value).toBe("");
+    expect(originalGet.call(localStorage, key)).toBe(oldDraft);
+    expect(writes.mock.calls.some(([storageKey]) => String(storageKey).startsWith(key))).toBe(false);
+
+    markerRead.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    const recovered = screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+    expect(recovered.readOnly).toBe(false);
+    expect(recovered.value).toBe("Older private saved feedback.");
+    expect(originalGet.call(localStorage, key)).toBe(oldDraft);
+    expect(writes.mock.calls.some(([storageKey]) => String(storageKey).startsWith(key))).toBe(false);
+  });
+
+  it("keeps unsupported saved bytes locked even when the owner explicitly retries reading", () => {
+    const unsupported = JSON.stringify({ ...JSON.parse(oldDraft), futurePrivateField: "Do not silently discard." });
+    localStorage.setItem(key, unsupported);
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(screen.getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(screen.getByRole("button", { name: "Download saved copy" })).toBeTruthy();
+    expect(localStorage.getItem(key)).toBe(unsupported);
+    expect(writes.mock.calls.some(([storageKey]) => String(storageKey).startsWith(key))).toBe(false);
+  });
 });

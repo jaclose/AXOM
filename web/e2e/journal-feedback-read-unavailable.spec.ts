@@ -90,3 +90,72 @@ test("feedback remains locally recoverable when browser reads fail, then retries
   expect(browserIssues).toEqual([]);
   // Explicit Send never clicked; no outbound feedback or account/provider mutation.
 });
+
+test("retries a blocked submission receipt read without editing the older feedback", async ({ page }) => {
+  const browserIssues: string[] = [];
+  page.on("pageerror", (error) => browserIssues.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning")
+      browserIssues.push(`${message.type()}: ${message.text()}`);
+  });
+  await seedOnboarded(page, { journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true } });
+  const draftKey = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => { profile: { userId: string } } };
+    }> }).__AXOM_DEV__;
+    return `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+  });
+  const older = JSON.stringify({
+    rating: 4, liked: "A previous private draft", wantMore: "",
+    missing: "", painPoints: "", comment: "",
+  });
+  await page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), { key: draftKey, raw: older });
+  await page.addInitScript((key) => {
+    const originalGet = Storage.prototype.getItem;
+    (window as Window & { __axomBlockReceipt?: boolean }).__axomBlockReceipt = true;
+    Storage.prototype.getItem = function (storageKey: string) {
+      if (this === window.localStorage && storageKey === `${key}:submitted`
+        && (window as Window & { __axomBlockReceipt?: boolean }).__axomBlockReceipt)
+        throw new Error("Synthetic feedback marker read denied");
+      return originalGet.call(this, storageKey);
+    };
+  }, draftKey);
+  await page.goto("/#journal?feedback=1", { waitUntil: "networkidle" });
+  const dialog = page.getByRole("dialog", { name: "How is the journal feeling?" });
+  const liked = dialog.getByLabel("What do you like?");
+  await expect(liked).toHaveAttribute("readonly", "");
+  const retry = dialog.getByRole("button", { name: "Retry reading saved feedback" });
+  await expect(retry).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Download saved copy" })).toBeVisible();
+
+  for (const [width, theme] of [[320, "dark"], [390, "light"], [1440, "dark"]] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.evaluate((mode) => { document.documentElement.dataset.theme = mode; }, theme);
+    await expect(retry).toBeVisible();
+    const dimensions = await page.evaluate(() => ({
+      viewport: innerWidth, document: document.documentElement.scrollWidth,
+      dialog: document.querySelector(".journal-feedback-modal")?.getBoundingClientRect().width ?? 0,
+    }));
+    expect(dimensions.document, `page overflow at ${width}px`).toBeLessThanOrEqual(width + 1);
+    expect(dimensions.dialog, `dialog overflow at ${width}px`).toBeLessThanOrEqual(width + 1);
+  }
+
+  await page.evaluate(() => {
+    (window as Window & { __axomBlockReceipt?: boolean }).__axomBlockReceipt = false;
+  });
+  await retry.focus();
+  await expect(retry).toBeFocused();
+  await retry.press("Enter");
+  await expect(liked).toBeEditable();
+  await expect(liked).toHaveValue("A previous private draft");
+  const retained = await page.evaluate((key) => ({
+    raw: localStorage.getItem(key),
+    writers: Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .filter((value) => value?.startsWith(`${key}:writer:`)),
+  }), draftKey);
+  expect(retained.raw).toBe(older);
+  expect(retained.writers).toEqual([]);
+  expect(browserIssues).toEqual([]);
+  // The test never presses Send and uses no real signed-in account or provider.
+});

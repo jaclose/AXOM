@@ -2094,7 +2094,7 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
         )}
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
-        {canWriteInTab && <GButton size="sm" onClick={onRetryRead}>Retry reading saved feedback</GButton>}
+        {loaded.unreadable && <GButton size="sm" onClick={onRetryRead}>Retry reading saved feedback</GButton>}
         {storageError && !loaded.unreadable && !conflicted && <GButton size="sm" onClick={() => setSaveRetryToken((token) => token + 1)}>Retry draft save</GButton>}
         {error && <p className="journal-feedback-note" role="alert">{error}</p>}
       </>}
