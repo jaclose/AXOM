@@ -504,6 +504,36 @@ describe("Community Question Set Library", () => {
     expect(mock.commit.mock.calls[0][0].snapshot.questions[0]).toEqual(reviewed.questions[0]);
   });
 
+  it("shows the recorded choice text for source-valid padded answer keys without changing publication evidence", async () => {
+    // Shared snapshot validation accepts surrounding whitespace and case
+    // differences in correctKey. The preview must use the same normalization
+    // for lookup, without silently replacing the source-reviewed answer key.
+    const approved = {
+      ...snapshot,
+      questions: [{ ...snapshot.questions[0], correctKey: " b ",
+        choiceRationales: { " b ": "Reviewed note: this source supports the keyed choice." },
+      }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: approved, contentDigest: "b".repeat(64),
+      status: "approved", reviewRevision: 2,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    const key = screen.getByText("Submitted answer: b");
+    expect(key.closest("p")?.textContent).toContain("Second");
+    expect(screen.getByText("Reviewed note: this source supports the keyed choice.")).toBeTruthy();
+    expect(screen.queryByText(/No recorded answer key/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0]).toEqual(approved.questions[0]);
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      reviewRevision: 2, contentDigest: "b".repeat(64),
+    });
+  });
+
   it("labels approved visual intent as unreviewed planning metadata without altering the imported questions", async () => {
     const visuallyTagged = {
       ...snapshot,

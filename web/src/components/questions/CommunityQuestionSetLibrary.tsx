@@ -362,7 +362,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
               <summary>Reveal recorded answer and teaching notes</summary>
               <div className="stack gap8">
                 {question.correctKey
-                  ? <p><b>Submitted answer: {question.correctKey}</b> · {question.options.find(option => option.key.toUpperCase() === question.correctKey?.toUpperCase())?.text}</p>
+                  ? <p><b>Submitted answer: {question.correctKey.trim()}</b> · {question.options.find(option => option.key.trim().toUpperCase() === question.correctKey?.trim().toUpperCase())?.text}</p>
                   : <p>No recorded answer key. Do not infer one from the explanation.</p>}
                 {(question.explanation?.startsWith("AXOM AI-assisted explanation")
                   || Object.values(question.choiceRationales ?? {}).some(rationale => rationale.startsWith("AXOM AI-assisted rationale")))
