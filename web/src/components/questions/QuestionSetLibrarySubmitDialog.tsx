@@ -12,6 +12,7 @@ import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
 import { hasMainExplanation } from "../../lib/questionExplanationCoverage";
 import { prepareCurrentCommunityQuestionSetSubmission, sameCommunitySetReviewRevision } from "../../lib/sharing/communitySetPublicationGuard";
+import { mergeReviewedCommunityKeywords } from "../../lib/sharing/communityReviewedKeywords";
 import {
   listMyQuestionSetSubmissions, submitQuestionSetToLibrary, withdrawQuestionSetSubmission,
   type LibrarySubmission,
@@ -59,6 +60,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [drafts, setDrafts] = useState<QuestionExplanationDraft[]>([]);
+  const [keywordEdits, setKeywordEdits] = useState<Record<string, string>>({});
+  const [approvedKeywordIds, setApprovedKeywordIds] = useState<Record<string, boolean>>({});
   const [generating, setGenerating] = useState(false);
   const [savingDrafts, setSavingDrafts] = useState(false);
   const draftSaveOperation = useRef<object | null>(null);
@@ -129,6 +132,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
 
   useEffect(() => {
     setDrafts([]);
+    setKeywordEdits({});
+    setApprovedKeywordIds({});
     setSavingDrafts(false);
     draftSaveRevisions.current.clear();
     // Auto-drafting is authorized by an explicit publish action for the
@@ -241,6 +246,22 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         return;
       }
     }
+    // Keywords are model-suggested, not source evidence. An explicit per-item
+    // opt-in and editable review are required before changing source tags.
+    // Validate the entire batch before writing even the first explanation.
+    const reviewedTags = new Map<string, string[]>();
+    for (const draft of drafts) {
+      if (!approvedKeywordIds[draft.questionId]) continue;
+      const question = current.get(draft.questionId);
+      if (!question) return;
+      try {
+        reviewedTags.set(draft.questionId, mergeReviewedCommunityKeywords(
+          question.tags, keywordEdits[draft.questionId] ?? draft.keywords.join(", ")));
+      } catch (cause) {
+        setGenerationError(cause instanceof Error ? cause.message : "Review suggested keywords before saving.");
+        return;
+      }
+    }
     const operation = {};
     draftSaveOperation.current = operation;
     let accountChanged = false;
@@ -258,10 +279,12 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           explanation: `${AI_EXPLANATION_PREFIX}${draft.explanation.trim()}`,
           choiceRationales: Object.fromEntries(Object.entries(draft.choiceRationales)
             .map(([key, rationale]) => [key, `${AI_RATIONALE_PREFIX}${rationale.trim()}`])),
+          ...(reviewedTags.has(draft.questionId) ? { tags: reviewedTags.get(draft.questionId)! } : {}),
         };
         bank.updateQuestion(draft.questionId, patch);
         const applied = useStore.getState().questions?.find(question => question.id === draft.questionId);
         if (!applied || applied.explanation !== patch.explanation
+          || (reviewedTags.has(draft.questionId) && JSON.stringify(applied.tags) !== JSON.stringify(reviewedTags.get(draft.questionId)))
           || Object.entries(patch.choiceRationales).some(([key, rationale]) => applied.choiceRationales?.[key] !== rationale)) {
           throw new Error("A question could not be updated. Reopen the set before saving.");
         }
@@ -290,6 +313,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         throw new Error("The saved explanations could not be verified, or the questions changed during saving.");
       }
       setDrafts([]);
+      setKeywordEdits({});
+      setApprovedKeywordIds({});
       draftSaveRevisions.current.clear();
       setGenerationProgress("");
       setMessage("Reviewed explanations saved privately. They still require a source check before publication.");
@@ -411,9 +436,19 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
               onChange={event => setDrafts(current => current.map(item => item.questionId === draft.questionId
                 ? { ...item, choiceRationales: { ...item.choiceRationales, [key]: event.target.value } } : item))} />
           </label>)}
+          <label className="qsl-draft-field">Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} suggested keywords
+            <input className="field" maxLength={640} disabled={savingDrafts}
+              value={keywordEdits[draft.questionId] ?? draft.keywords.join(", ")}
+              onChange={event => setKeywordEdits(previous => ({ ...previous, [draft.questionId]: event.target.value }))} />
+          </label>
+          <label className="qsl-check"><input type="checkbox" disabled={savingDrafts}
+            checked={Boolean(approvedKeywordIds[draft.questionId])}
+            onChange={event => setApprovedKeywordIds(previous => ({ ...previous, [draft.questionId]: event.target.checked }))} />
+            <span>Include inspected keywords for Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} (optional; does not verify the source).</span>
+          </label>
         </details>)}
         <GButton disabled={generating || busy || savingDrafts} onClick={() => void saveReviewedDrafts()}>{savingDrafts ? "Saving explanations…" : "Save inspected explanations to my QBank"}</GButton>
-        <p className="sub">Check these AI-generated drafts against the actual source. No explanation is saved or published automatically.</p>
+        <p className="sub">Check all AI-generated explanations against the actual source. Keywords are unverified suggestions, editable and off by default. No explanation or keyword is saved or published automatically.</p>
       </div>}
       {visualPlans.length > 0 && <details className="qsl-visual-hints">
         <summary>Visual keywords for future AXOM diagrams ({visualPlans.length})</summary>
