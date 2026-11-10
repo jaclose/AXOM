@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
+import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -47,7 +47,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   vi.mocked(resolveReport).mockResolvedValue(undefined);
 });
 afterEach(cleanup);
@@ -246,4 +246,77 @@ describe("Host page authorization and moderation", () => {
       "verified-account", "post-id", "dismiss", "Documented false report",
     ));
   });
+  it("does not attest a role update until targeted server state matches the requested role", async () => {
+    const user = userEvent.setup();
+    const target = { ...account("target-role", "Target Role"), role: null };
+    const changed = { ...target, role: "moderator" as const };
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce({ ...dashboard("owner"), accounts: [target] })
+      .mockResolvedValueOnce({ ...dashboard("owner"), accounts: [target] })
+      .mockResolvedValueOnce({ ...dashboard("owner"), accounts: [changed] });
+    vi.mocked(setOperatorRole).mockResolvedValue(undefined);
+    render(<HostPage />);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Role" }), "moderator");
+    await user.type(screen.getByRole("textbox", { name: /Reason for changing Target Role/ }), "Role requested for moderation");
+    await user.click(screen.getByRole("button", { name: "Apply role" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Role updated and audited.")).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("not yet confirm");
+    expect((screen.getByRole("button", { name: "Apply role" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(setOperatorRole).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Retry Host" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("Role updated and audited.")).toBeTruthy();
+    expect(setOperatorRole).toHaveBeenCalledTimes(1);
+  });
+
+  it("verifies an older account's AI policy by exact identity, not an unrelated recent account", async () => {
+    const user = userEvent.setup();
+    const older = account("older-ai", "Older AI");
+    const changed = { ...older, ai_enabled: false, ai_daily_limit: 24 };
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce({ ...dashboard("owner"), accounts: [older] })
+      .mockResolvedValueOnce({ ...dashboard("owner"), accounts: [account("unrelated", "Unrelated")] })
+      .mockResolvedValueOnce({ ...dashboard("owner"), accounts: [changed] });
+    vi.mocked(searchOperatorAccounts).mockResolvedValue([older]);
+    vi.mocked(setOperatorAI).mockResolvedValue(undefined);
+    render(<HostPage />);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Cloud AI" }), "disabled");
+    await user.clear(screen.getByRole("spinbutton", { name: "Daily AI request cap" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Daily AI request cap" }), "24");
+    await user.type(screen.getByRole("textbox", { name: /Reason for changing Older AI/ }), "Restrict token usage");
+    await user.click(screen.getByRole("button", { name: "Apply AI policy" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(searchOperatorAccounts).toHaveBeenCalledWith("verified-account", "older-ai@example.invalid"));
+    expect((await screen.findByRole("alert")).textContent).toContain("not yet confirm");
+    expect(screen.queryByText("AI policy saved and audited.")).toBeNull();
+    expect(setOperatorAI).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Retry Host" }));
+    expect(await screen.findByText("AI policy saved and audited.")).toBeTruthy();
+  });
+
+  it("keeps Host writes blocked while an older target's account lookup is pending", async () => {
+    const user = userEvent.setup();
+    const older = { ...account("older-target", "Older target"), role: "moderator" as const };
+    const changed = { ...older, role: "admin" as const };
+    const lookup = deferred<OperatorAccount[]>();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce({ ...dashboard("owner"), accounts: [older] })
+      .mockResolvedValue({ ...dashboard("owner"), accounts: [] });
+    vi.mocked(searchOperatorAccounts).mockReturnValue(lookup.promise);
+    vi.mocked(setOperatorRole).mockResolvedValue(undefined);
+    render(<HostPage />);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Role" }), "admin");
+    await user.type(screen.getByRole("textbox", { name: /Reason for changing Older target/ }), "Account management escalation");
+    await user.click(screen.getByRole("button", { name: "Apply role" }));
+    await waitFor(() => expect(searchOperatorAccounts).toHaveBeenCalledWith("verified-account", "older-target@example.invalid"));
+    expect(screen.queryByText("Role updated and audited.")).toBeNull();
+    expect(screen.getByText(/Checking the saved Host change against the server/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(setOperatorRole).toHaveBeenCalledTimes(1);
+    await act(async () => { lookup.resolve([changed]); });
+    expect(await screen.findByText("Role updated and audited.")).toBeTruthy();
+    expect(setOperatorRole).toHaveBeenCalledTimes(1);
+  });
+
 });
