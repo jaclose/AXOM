@@ -244,4 +244,64 @@ describe("explicit account source download preserves immutable local image ident
     expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
   });
 
+  it("rejects an A→B→A scope change during a missing-image download even when the Supabase token stayed unchanged", async () => {
+    const { deferred, attachment } = await protectedDeferred();
+    await deleteQuestionAttachmentBlobs([attachment.blobKey], { accountId: owner });
+    // A single accountOperationClient call can continue to observe the same
+    // A session/token while local attachment ownership has cycled A→B→A.
+    // Session-only checks are therefore intentionally still successful.
+    session.current = { client, userId: owner, assertCurrent: async () => undefined };
+    const upstream = download.getMockImplementation()!;
+    let notifyDownload!: () => void;
+    const reachedDownload = new Promise<void>(resolve => { notifyDownload = resolve; });
+    let resumeDownload!: () => void;
+    const resume = new Promise<void>(resolve => { resumeDownload = resolve; });
+    download.mockImplementation(async (bucket, path) => {
+      if (bucket === MEDIA_BUCKET) { notifyDownload(); await resume; }
+      return upstream(bucket, path);
+    });
+    const pending = materializeState(deferred);
+    await reachedDownload;
+    setQuestionAttachmentAccount("synthetic-intermediate-owner-r26");
+    setQuestionAttachmentAccount(owner);
+    resumeDownload();
+    await expect(pending).rejects.toThrow(/account changed/i);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
+    // Access to B's database scope requires B ownership. Read under B,
+    // then return to A; neither identity should have received the bytes.
+    setQuestionAttachmentAccount("synthetic-intermediate-owner-r26");
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: "synthetic-intermediate-owner-r26" })).toBeUndefined();
+    setQuestionAttachmentAccount(owner);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
+    expect(deferred.questions).toHaveLength(0);
+  });
+
+  it("refuses an atomic image write with a superseded originating account generation", async () => {
+    const initiating = getQuestionAttachmentScope();
+    setQuestionAttachmentAccount("synthetic-intermediate-owner-r26");
+    setQuestionAttachmentAccount(owner);
+    const blobKey = "synthetic-epoch-r26-atomic-guard";
+    await expect(addQuestionAttachmentBlobIfAbsent(blobKey, {
+      questionId: "synthetic-epoch-r26",
+      blob: original, byteSize: original.size, mimeType: "image/png", updatedAt: timestamp,
+    }, { accountId: owner, scope: initiating })).rejects.toThrow(/account changed/i);
+    expect(await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
+  });
+
+  it("rejects an A→B→A transition while accountOperationClient is still awaiting the session", async () => {
+    const { deferred, attachment } = await protectedDeferred();
+    await deleteQuestionAttachmentBlobs([attachment.blobKey], { accountId: owner });
+    let resolveSession!: (operation: unknown) => void;
+    session.current = new Promise<unknown>(resolve => { resolveSession = resolve; });
+    const pending = materializeState(deferred);
+    // The local account has already switched twice when Auth returns A's
+    // previous token. A freshly captured scope after this await is unsafe.
+    setQuestionAttachmentAccount("synthetic-during-session-owner-r26");
+    setQuestionAttachmentAccount(owner);
+    resolveSession({ client, userId: owner, assertCurrent: async () => undefined });
+    await expect(pending).rejects.toThrow(/account changed/i);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
+    expect(deferred.questions).toHaveLength(0);
+  });
+
 });

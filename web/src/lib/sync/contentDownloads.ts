@@ -10,6 +10,7 @@ import { hydrateCloudContent, splitCloudContent, mergeSourceFields } from "./clo
 import { readDeferredContent } from "./deferredContent";
 import { downloadAcademicAsset, storedAcademicBindings } from "../academicLibrary/contentReferences";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../questionAttachmentScope";
 import { downloadCloudOriginal } from "./cloudOriginals";
 
 export interface ContentSelection { questionIds?: string[]; documentIds?: string[] }
@@ -19,7 +20,22 @@ export interface ContentSelection { questionIds?: string[]; documentIds?: string
 export async function materializeState(state: NoctyriumState, selection?: ContentSelection): Promise<NoctyriumState> {
   const deferred = readDeferredContent(state.deferredContent);
   if (!deferred) return state;
+  // Capture the initiating owner BEFORE the asynchronous session lookup.
+  // A → B → A while the SDK resolves must not rebind a stale download.
+  const originalScope = getQuestionAttachmentScope();
   const { client, userId, assertCurrent } = await accountOperationClient();
+  const assertAccountGeneration = () => {
+    if (originalScope.accountId !== userId || !isQuestionAttachmentScopeCurrent(originalScope)) {
+      throw new Error("The account changed during original-file recovery. Reopen the course in its original account and retry.");
+    }
+  };
+  // Session identity alone cannot detect a local A → B → A transition.
+  // Bind every protected-media read/write to the same originating generation.
+  const ensureCurrent = async (): Promise<void> => {
+    assertAccountGeneration();
+    await assertCurrent();
+    assertAccountGeneration();
+  };
   if (userId !== deferred.accountId) throw new Error("Sign in to the account that saved this content before downloading it.");
   const questions = deferred.questions.filter(record => !selection || selection.questionIds?.includes(record.id));
   const documents = deferred.documents.filter(record => !selection || selection.documentIds?.includes(record.id));
@@ -27,20 +43,26 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   const dids = new Set(documents.map(record => record.id));
   const sources = deferred.sources.filter(ref => (ref.collection === "questions" ? qids : dids).has(ref.id));
   const partial = { ...state, questions, documents, deferredContent: undefined } as NoctyriumState;
-  const restored = await hydrateCloudContent(client, userId, partial, sources, assertCurrent);
+  await ensureCurrent();
+  const restored = await hydrateCloudContent(client, userId, partial, sources, ensureCurrent);
+  await ensureCurrent();
   // Original PDF/DOCX files belong to the same protected course revision.
   // Keep only verified copies in Decode's existing original-file cache.
   const originals = storedAcademicBindings(state).originals ?? [];
   for (const document of restored.documents) {
-    await downloadCloudOriginal(client, userId, document, assertCurrent);
+    assertAccountGeneration();
+    await downloadCloudOriginal(client, userId, document, ensureCurrent);
+    assertAccountGeneration();
     const original = originals.find(item => item.documentId === document.id);
     if (!original) continue;
     if (original.asset.sha256 !== document.checksum?.replace(/^sha256:/, "")) throw new Error("The original document does not match its saved source identity.");
-    await assertCurrent();
-    if (await readSourceOriginal(document.id, document.checksum)) continue;
+    await ensureCurrent();
+    assertAccountGeneration();
+    if (await readSourceOriginal(document.id, document.checksum, { scope: originalScope, accountId: userId })) continue;
     const blob = await downloadAcademicAsset(client, original.asset);
-    await assertCurrent();
-    await saveSourceOriginal(document, blob);
+    await ensureCurrent();
+    assertAccountGeneration();
+    await saveSourceOriginal(document, blob, { scope: originalScope, accountId: userId });
   }
   // Explicit downloads include their original figures so the resulting bank
   // is actually usable offline. Source metadata alone is never called downloaded.
@@ -50,7 +72,7 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   await Promise.all(Array.from({ length: Math.min(4, figures.length) }, async () => {
     while (cursor < figures.length) {
       const [blobKey, { questionId, attachment, checksum }] = figures[cursor++];
-      await assertCurrent();
+      await ensureCurrent();
       const reference = media.get(blobKey);
       if (!reference || reference.byteSize !== attachment.byteSize || reference.updatedAt !== attachment.updatedAt) {
         throw new Error("This source has no matching protected image reference. Keep its original file and retry from a complete backup.");
@@ -60,48 +82,48 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
       // corrupt image must never be accepted as downloaded course content.
       // Read only this account's current local store, not the lazy cloud loader.
       const local = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
-      await assertCurrent();
+      await ensureCurrent();
       if (local) {
         if (local.blob.size !== reference.byteSize || local.byteSize !== reference.byteSize
           || local.mimeType !== attachment.mimeType
           || await sha256(new Uint8Array(await local.blob.arrayBuffer())) !== reference.hash) {
           throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
         }
-        await assertCurrent();
+        await ensureCurrent();
         continue;
       }
       const blob = await downloadCloudMediaAsset(client, userId, reference);
-      await assertCurrent();
+      await ensureCurrent();
       // Recheck after remote I/O. The subsequent add-only transaction is
       // essential: a second tab can still create the key after this read.
       const raced = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
-      await assertCurrent();
+      await ensureCurrent();
       if (raced) {
         if (raced.blob.size !== reference.byteSize || raced.byteSize !== reference.byteSize
           || raced.mimeType !== attachment.mimeType
           || await sha256(new Uint8Array(await raced.blob.arrayBuffer())) !== reference.hash) {
           throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
         }
-        await assertCurrent();
+        await ensureCurrent();
         continue;
       }
       // A competing tab can win between the final read and this write.
       // Never use a blind put: atomic add preserves the first saved original.
-      await addQuestionAttachmentBlobIfAbsent(blobKey, { ...attachment, questionId, blob }, { accountId: userId });
-      await assertCurrent();
+      await addQuestionAttachmentBlobIfAbsent(blobKey, { ...attachment, questionId, blob }, { accountId: userId, scope: originalScope });
+      await ensureCurrent();
       // A successful add OR a lost race is not an integrity receipt. Confirm
       // the exact bytes currently retained by this account before returning.
       const retained = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
-      await assertCurrent();
+      await ensureCurrent();
       if (!retained || retained.blob.size !== reference.byteSize || retained.byteSize !== reference.byteSize
         || retained.mimeType !== attachment.mimeType
         || await sha256(new Uint8Array(await retained.blob.arrayBuffer())) !== reference.hash) {
         throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
       }
-      await assertCurrent();
+      await ensureCurrent();
     }
   }));
-  await assertCurrent();
+  await ensureCurrent();
   const remaining = {
     ...deferred, questions: deferred.questions.filter(record => !qids.has(record.id)),
     documents: deferred.documents.filter(record => !dids.has(record.id)),

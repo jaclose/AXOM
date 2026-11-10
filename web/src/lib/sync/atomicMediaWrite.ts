@@ -46,9 +46,9 @@ function openAttachmentDatabase(): Promise<IDBDatabase> {
 export async function addQuestionAttachmentBlobIfAbsent(
   blobKey: string,
   record: QuestionAttachmentBlobRecord,
-  options: { accountId: string },
+  options: { accountId: string; scope?: QuestionAttachmentScope },
 ): Promise<"inserted" | "exists"> {
-  const scope = getQuestionAttachmentScope();
+  const scope = options.scope ?? getQuestionAttachmentScope();
   assertRecoveryScope(scope, options.accountId);
   const db = await openAttachmentDatabase();
   try {
