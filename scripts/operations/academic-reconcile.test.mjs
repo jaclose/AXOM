@@ -31,7 +31,10 @@ const tracker = () => ({ activities: [
   { activityId: "FTM1:IMCQ1", term: "T1", module: "FTM 1", weekBasis: "unassigned", installed: true },
 ] });
 const run = (input = {}) => reconcileAcademicContent({
-  inventory: fixture(), dispositions: dispositions(), receipts: receipts(), tracker: tracker(), ...input,
+  // The default synthetic PDF receipt is explicit: source coverage is no longer
+  // implied by unrelated question-bank/cloud/tracker receipts.
+  inventory: fixture(), dispositions: dispositions(), receipts: receipts(), tracker: tracker(),
+  pdfTriage: completePdfTriage("text_with_question_indicators"), ...input,
 });
 
 test("complete requires source identities, dispositions, verified receipts, and tracker records", () => {
@@ -44,6 +47,11 @@ test("complete requires source identities, dispositions, verified receipts, and 
     detectedQuestions: 2, readyQuestions: 2, reviewQuestions: 0, verifiedReadyQuestions: 2,
     expectedBaselineTrackerActivities: 2, reportedTrackerActivities: 2,
     installedTrackerActivities: 2, cloudReceiptSources: 1,
+    pdfJobsRecorded: 1, pdfJobsInQueue: 1, pdfVolumeUnmounted: 0,
+    pdfPathsMissing: 0, pdfLowText: 0, pdfReaderFailures: 0,
+    pdfDeferredSources: 0, pdfNoQuestionIndicators: 0,
+    pdfScopeConflictReviewRows: 0, pdfScopeChangedReviewRows: 0,
+    pdfScopeReviewFlaggedOther: 0, pdfUnverifiedCurrentAvailability: 0,
   });
 });
 
