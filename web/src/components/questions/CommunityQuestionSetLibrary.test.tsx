@@ -278,6 +278,47 @@ describe("Community Question Set Library", () => {
   });
 
 
+  it("refuses a stale SQL authorization response before the local vault is called", async () => {
+    let finishAuthorization!: (value: unknown) => void;
+    mock.authorize.mockImplementationOnce(() => new Promise(resolve => { finishAuthorization = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.authorize).toHaveBeenCalledOnce());
+    expect(mock.commit).not.toHaveBeenCalled();
+
+    // The server may authorize the original revision while a sign-out and
+    // return to the same account happen before its response is consumed.
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    await act(async () => {
+      finishAuthorization({
+        id: summary.id, snapshot, contentDigest: "a".repeat(64),
+        status: "approved", reviewRevision: 2,
+      });
+    });
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
+    expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
+    expect(mock.observers.size).toBe(0);
+
+    // A fresh, deliberate preview may obtain its own new SQL authorization.
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.authorize).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].identity).toEqual({
+      shareId: summary.id, contentDigest: "a".repeat(64),
+    });
+  });
+
   it("revokes in-flight import authorization across an A to B to A account round trip", async () => {
     let resolveImport!: (value: unknown) => void;
     mock.commit.mockImplementationOnce(() => new Promise(resolve => { resolveImport = resolve; }));

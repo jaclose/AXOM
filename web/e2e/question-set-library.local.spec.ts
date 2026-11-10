@@ -172,6 +172,70 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
       }> }).__AXOM_DEV__;
       return dev.useStore.getState().questionSets.some(set => set.importProvenance);
     })).toBe(false);
+    // Interrupt the real learner flow after SQL import authorization, but
+    // before the private vault commit. A completed server response must not
+    // authorize persistence after an invisible B → A → B account round trip.
+    await other.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: {
+          getState: () => { commitSharedQuestionSetImport: (value: unknown) => Promise<unknown> };
+          setState: (patch: { commitSharedQuestionSetImport: (value: unknown) => Promise<unknown> }) => void;
+        };
+      }> }).__AXOM_DEV__;
+      const original = dev.useStore.getState().commitSharedQuestionSetImport;
+      let release!: () => void;
+      const hold = new Promise<void>(resolve => { release = resolve; });
+      const boundary = {
+        reached: false, completed: false,
+        resume: () => {
+          dev.useStore.setState({ commitSharedQuestionSetImport: original });
+          release();
+        },
+      };
+      (window as unknown as { __qslImportBoundary?: typeof boundary }).__qslImportBoundary = boundary;
+      dev.useStore.setState({
+        commitSharedQuestionSetImport: async (payload: unknown) => {
+          boundary.reached = true;
+          await hold;
+          try { return await original(payload); }
+          finally { boundary.completed = true; }
+        },
+      });
+    });
+    await card.getByRole("button", { name: "Preview set" }).click();
+    await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
+    await preview.getByRole("button", { name: "Add to my AXOM" }).click();
+    await expect.poll(() => other.evaluate(() =>
+      (window as unknown as { __qslImportBoundary?: { reached: boolean } }).__qslImportBoundary?.reached ?? false,
+    )).toBe(true);
+    await other.evaluate(async ({ memberId, ownerId }) => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useAccount: {
+          getState: () => { user: { id: string } | null };
+          setState: (patch: { user: { id: string } | null }) => void;
+        };
+      }> }).__AXOM_DEV__;
+      const original = dev.useAccount.getState().user;
+      if (original?.id !== memberId) throw new Error("Expected learner B at vault import boundary");
+      dev.useAccount.setState({ user: { ...original, id: ownerId } });
+      dev.useAccount.setState({ user: original });
+    }, { memberId: member.id, ownerId: owner.id });
+    await expect(preview).toHaveCount(0);
+    await other.evaluate(() => {
+      (window as unknown as { __qslImportBoundary?: { resume: () => void } }).__qslImportBoundary?.resume();
+    });
+    await expect.poll(() => other.evaluate(() =>
+      (window as unknown as { __qslImportBoundary?: { completed: boolean } }).__qslImportBoundary?.completed ?? false,
+    )).toBe(true);
+    expect(await other.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: { getState: () => { questionSets: Array<{ importProvenance?: { shareId: string } }> } };
+      }> }).__AXOM_DEV__;
+      return dev.useStore.getState().questionSets.some(set => set.importProvenance);
+    })).toBe(false);
+    await other.evaluate(() => {
+      delete (window as unknown as { __qslImportBoundary?: unknown }).__qslImportBoundary;
+    });
     // Retain the unchanged public approval; a fresh learner inspection should
     // be able to obtain a new revision-bound import grant.
     await card.getByRole("button", { name: "Preview set" }).click();
