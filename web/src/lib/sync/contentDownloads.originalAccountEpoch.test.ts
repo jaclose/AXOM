@@ -91,6 +91,25 @@ describe("explicit academic original download preserves the initiating account e
     expect(await readSourceOriginal(document.id, document.checksum, { accountId: other })).toBeUndefined();
   });
 
+  it("rejects A-to-B-to-A round trips even when the session ID returns to A", async () => {
+    const { state, document } = await pendingOriginal();
+    let checks = 0;
+    const assertCurrent = vi.fn(async () => {
+      if (getQuestionAttachmentScope().accountId !== account) throw new Error("Account changed.");
+      if (++checks === 2) queueMicrotask(() => {
+        setQuestionAttachmentAccount(other);
+        setQuestionAttachmentAccount(account);
+      });
+    });
+    vi.mocked(accountOperationClient).mockResolvedValue({
+      client: {} as never, userId: account, assertCurrent,
+    } as unknown as Awaited<ReturnType<typeof accountOperationClient>>);
+
+    await expect(materializeState(state)).rejects.toThrow(/account changed/i);
+    expect(getQuestionAttachmentScope().accountId).toBe(account);
+    expect(await readSourceOriginal(document.id, document.checksum, { accountId: account })).toBeUndefined();
+  });
+
   it("still saves and verifies the original under a stable authenticated account", async () => {
     const { state, document, bytes } = await pendingOriginal();
     vi.mocked(accountOperationClient).mockResolvedValue({

@@ -10,6 +10,7 @@ import { hydrateCloudContent, splitCloudContent, mergeSourceFields } from "./clo
 import { readDeferredContent } from "./deferredContent";
 import { downloadAcademicAsset, storedAcademicBindings } from "../academicLibrary/contentReferences";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../questionAttachmentScope";
 import { downloadCloudOriginal } from "./cloudOriginals";
 
 export interface ContentSelection { questionIds?: string[]; documentIds?: string[] }
@@ -20,6 +21,14 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   const deferred = readDeferredContent(state.deferredContent);
   if (!deferred) return state;
   const { client, userId, assertCurrent } = await accountOperationClient();
+  // Pin the account generation before any cloud I/O. The authenticated
+  // session may be unchanged while the local attachment scope cycles A-B-A.
+  const originalScope = getQuestionAttachmentScope();
+  const assertOriginalAccount = () => {
+    if (originalScope.accountId !== userId || !isQuestionAttachmentScopeCurrent(originalScope)) {
+      throw new Error("The account changed during original-file recovery. Reopen the course in its original account and retry.");
+    }
+  };
   if (userId !== deferred.accountId) throw new Error("Sign in to the account that saved this content before downloading it.");
   const questions = deferred.questions.filter(record => !selection || selection.questionIds?.includes(record.id));
   const documents = deferred.documents.filter(record => !selection || selection.documentIds?.includes(record.id));
@@ -32,15 +41,19 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   // Keep only verified copies in Decode's existing original-file cache.
   const originals = storedAcademicBindings(state).originals ?? [];
   for (const document of restored.documents) {
+    assertOriginalAccount();
     await downloadCloudOriginal(client, userId, document, assertCurrent);
+    assertOriginalAccount();
     const original = originals.find(item => item.documentId === document.id);
     if (!original) continue;
     if (original.asset.sha256 !== document.checksum?.replace(/^sha256:/, "")) throw new Error("The original document does not match its saved source identity.");
     await assertCurrent();
-    if (await readSourceOriginal(document.id, document.checksum)) continue;
+    assertOriginalAccount();
+    if (await readSourceOriginal(document.id, document.checksum, { scope: originalScope, accountId: userId })) continue;
     const blob = await downloadAcademicAsset(client, original.asset);
     await assertCurrent();
-    await saveSourceOriginal(document, blob);
+    assertOriginalAccount();
+    await saveSourceOriginal(document, blob, { scope: originalScope, accountId: userId });
   }
   // Explicit downloads include their original figures so the resulting bank
   // is actually usable offline. Source metadata alone is never called downloaded.
