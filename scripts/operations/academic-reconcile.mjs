@@ -129,6 +129,17 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     }
   }
   const questionSources = [...dmap.entries()].filter(([, row]) => row.kind === "question-source");
+  // Source inventory and disposition records determine which PDF originals must
+  // have current-run evidence. A missing optional CLI input cannot silently
+  // convert completed cloud receipts into a complete PDF-source certificate.
+  const pdfQuestionSourceShas = new Set(questionSources.filter(([sha]) => {
+    const source = byHash.get(sha);
+    return source && (/^\.?pdf$/i.test(source.extension ?? "")
+      || /\.pdf$/i.test(source.path ?? ""));
+  }).map(([sha]) => sha));
+  if (pdfQuestionSourceShas.size > 0 && pdfTriage === undefined) {
+    blockers.push(`${pdfQuestionSourceShas.size} PDF question-source originals lack an availability triage ledger; current authorized path presence remains unverified.`);
+  }
   const pendingSources = questionSources.filter(([, row]) => row.status !== "installed");
   if (pendingSources.length) blockers.push(`${pendingSources.length} question sources not installed (prepared, review, unsupported, or missing).`);
   const detectedQuestions = questionSources.reduce((n, [, r]) => n + (r.questionCount ?? 0), 0);
@@ -258,6 +269,10 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
           && entry.status !== "academic_scope_conflict_review"
           && entry.status !== "academic_scope_changed_review")
           scopeFlaggedOutsideHoldStatus += 1;
+      }
+      const unaccountedPdfSources = [...pdfQuestionSourceShas].filter(sha => !seenPdf.has(sha));
+      if (unaccountedPdfSources.length) {
+        blockers.push(`PDF question-source availability missing ${unaccountedPdfSources.length}/${pdfQuestionSourceShas.size} canonical source fingerprints from the triage ledger; verify original coverage, not only row totals.`);
       }
       if (pdfTriage.rows.length !== pdfTriage.queueDistinctPdfJobs)
         blockers.push(`PDF availability triage covers ${pdfTriage.rows.length}/${pdfTriage.queueDistinctPdfJobs} queued original PDF sources; rescan the remainder.`);
