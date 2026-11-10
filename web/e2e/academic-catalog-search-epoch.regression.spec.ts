@@ -110,7 +110,13 @@ for (const width of [320, 390, 1440]) {
 
       // Returning an older valid response must not replace the new query,
       // show the wrong term or mutate the installed question's attempts.
+      const oldResponse = page.waitForResponse(response =>
+        response.url().endsWith("/rpc/academic_catalog")
+        && response.request().method() === "POST"
+        && (response.request().postDataJSON() as { search?: string }).search === "Alpha",
+      );
       releaseOld();
+      expect((await oldResponse).status()).toBe(200);
       await expect.poll(() => oldCompleted).toBe(1);
       await expect(betaCard).toBeVisible();
       await expect(alphaCard).toHaveCount(0);
