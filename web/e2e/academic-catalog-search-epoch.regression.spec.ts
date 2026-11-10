@@ -28,9 +28,14 @@ async function savedCourse(page: Page, sourceIds: readonly string[]) {
 }
 
 async function openCatalog(page: Page) {
-  const region = page.getByRole("region", { name: "Available question banks" });
-  if (!await region.isVisible())
-    await page.getByText("Browse the course catalog", { exact: true }).click();
+  // The discovery region is unmounted while its native details is closed.
+  // Resolve and open the disclosure itself before looking for its contents.
+  const details = page.locator("details.qb-course-catalog").first();
+  await expect(details).toBeVisible();
+  if (!(await details.evaluate(element => (element as HTMLDetailsElement).open)))
+    await details.locator("summary").click();
+  await expect(details).toHaveAttribute("open", "");
+  const region = details.getByRole("region", { name: "Available question banks" });
   await expect(region).toBeVisible();
   return region;
 }
