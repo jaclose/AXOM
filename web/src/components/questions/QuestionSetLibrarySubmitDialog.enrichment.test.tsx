@@ -510,7 +510,79 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.completeJson).toHaveBeenCalledTimes(1);
     expect(mocks.updateQuestion).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
+    // The in-flight observer is removed; only the lifetime session guard remains.
+    expect(mocks.accountListeners.size).toBe(1);
+    cleanup();
     expect(mocks.accountListeners.size).toBe(0);
+  });
+
+  it("revokes a completed AI draft and refuses any further model calls after an invisible A → B → A switch", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      mocks.accountId = "owner-2";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-2" } });
+      mocks.accountId = "owner-1";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-1" } });
+    });
+
+    expect(await screen.findByText(/account session changed while this review was open/i)).toBeTruthy();
+    expect(screen.queryByText(/AI draft.*to inspect/)).toBeNull();
+    const draftButton = screen.getByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    expect(draftButton.disabled).toBe(true);
+    fireEvent.click(draftButton);
+    expect(mocks.completeJson).toHaveBeenCalledOnce();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("discards checked rights and answer attestations after an invisible A → B → A switch", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that controls arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+
+    await act(async () => {
+      mocks.accountId = "owner-2";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-2" } });
+      mocks.accountId = "owner-1";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-1" } });
+    });
+
+    expect((screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement).checked).toBe(false);
+    expect(send.disabled).toBe(true);
+    fireEvent.click(send);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("discards a cached withdrawal capability after an invisible A → B → A switch", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that controls arterial caliber and vascular resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([{ id: "11111111-1111-4111-8111-111111111111", sourceId: set.id, title: set.title, status: "approved" }]);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" }) as HTMLButtonElement;
+    await waitFor(() => expect(withdraw.disabled).toBe(false));
+
+    await act(async () => {
+      mocks.accountId = "owner-2";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-2" } });
+      mocks.accountId = "owner-1";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-1" } });
+    });
+
+    // Hidden React re-renders do not restore the right to act on cached review state.
+    expect(screen.queryByRole("button", { name: "Withdraw submission" })).toBeNull();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(mocks.withdraw).not.toHaveBeenCalled();
   });
 
   it("discards an in-flight proposal and stops the batch if the Question Set changed", async () => {
