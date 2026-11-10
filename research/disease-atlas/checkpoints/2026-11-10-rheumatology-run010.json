@@ -1,0 +1,470 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "release": "V2 Build010",
+  "date": "2026-11-10",
+  "parent": "V2 Build009",
+  "status": "standalone research-only; no AXOM production changes; no merge",
+  "chapter": "Rheumatology, Immunology and Systemic Vasculitis",
+  "totals": {
+    "previous_internal_entries": 300,
+    "new_profiles": 16,
+    "internal_entries": 316,
+    "expanded_profiles": 184,
+    "legacy_short_entries": 132,
+    "evidence_sources": 204,
+    "new_sources": 19,
+    "image_associations": 117,
+    "new_real_photo_source_pages": 7,
+    "actual_embedded_images": 0,
+    "pdf_pages": 255,
+    "verified_official_ontology_denominator": null,
+    "measured_coverage": null
+  },
+  "new_diseases": [
+    {
+      "id": "AXOM-RHEUM-001",
+      "name": "Psoriatic arthritis",
+      "mechanism": "IL-23/IL-17/TNF enthesitis and synovitis with erosive and proliferative bone changes",
+      "distinguishing_diagnostic_pattern": "Dactylitis, enthesitis and psoriasis or nail dystrophy; RF negativity alone insufficient",
+      "management_safety_summary": "NSAIDs/exercise, methotrexate for peripheral arthritis; targeted TNF/IL-17/IL-23 agents by phenotype; monitor infection and liver effects",
+      "source_ids": [
+        "RHEUM-PSA24"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-002",
+      "name": "Axial spondyloarthritis (including radiographic ankylosing spondylitis)",
+      "mechanism": "TNF/IL-17 enthesitis and osteitis; progressive syndesmophyte formation in subset",
+      "distinguishing_diagnostic_pattern": "Inflammatory spinal pain plus objective imaging; HLA-B27 alone not diagnostic",
+      "management_safety_summary": "Exercise and NSAIDs first; targeted TNF/IL-17 agents with objective persistent activity; spinal fractures emergency",
+      "source_ids": [
+        "RHEUM-AXSPA23"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-003",
+      "name": "Calcium pyrophosphate deposition disease",
+      "mechanism": "Calcium pyrophosphate deposition induces NLRP3/IL-1β innate inflammation",
+      "distinguishing_diagnostic_pattern": "Rhomboid weakly positive crystals; acute effusion still requires bacterial culture",
+      "management_safety_summary": "Aspiration and cultures, local corticosteroid, NSAID or colchicine by contraindications; renal/CYP interactions",
+      "source_ids": [
+        "RHEUM-CPPD23",
+        "RHEUM-CPPDIMG24"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-004",
+      "name": "Sjögren disease",
+      "mechanism": "Lymphocytic exocrine epithelitis driven by interferon and B-cell activation",
+      "distinguishing_diagnostic_pattern": "Objective sicca and anti-SSA or lip salivary gland pathology; isolated anti-SSB insufficient",
+      "management_safety_summary": "Artificial tears/saliva and systemic-phenotype-specific therapies, monitor dental, lymphoma and neuropathy risks",
+      "source_ids": [
+        "RHEUM-SJOG24"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-005",
+      "name": "Antiphospholipid syndrome",
+      "mechanism": "Persistent anti-β2GP1/cardiolipin/lupus anticoagulant-associated thrombosis and obstetric morbidity",
+      "distinguishing_diagnostic_pattern": "Clinical thrombosis/pregnancy event plus persistent aPL tested ≥12 weeks apart",
+      "management_safety_summary": "Warfarin-based long-term therapy for thrombotic high-risk APS; pregnancy heparin plus aspirin; DOACs unsuitable in triple-positive high-risk disease",
+      "source_ids": [
+        "RHEUM-APS23",
+        "RHEUM-APS19"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-006",
+      "name": "Dermatomyositis",
+      "mechanism": "Complement microangiopathy and perifascicular myofiber injury; myositis-specific antibodies",
+      "distinguishing_diagnostic_pattern": "Gottron papules and perifascicular atrophy; anti-MDA5 may feature rapidly progressive ILD",
+      "management_safety_summary": "Glucocorticoids and steroid-sparing agents/IVIG in severe cases; anti-MDA5 ILD urgent aggressive care",
+      "source_ids": [
+        "RHEUM-IIM22",
+        "RHEUM-IIMCLASS17"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-007",
+      "name": "Immune-mediated necrotizing myopathy",
+      "mechanism": "Anti-HMGCR or anti-SRP autoimmune myofiber necrosis despite relatively sparse inflammation",
+      "distinguishing_diagnostic_pattern": "Necrosis with few lymphocytes; anti-HMGCR or anti-SRP; statin cessation alone often inadequate",
+      "management_safety_summary": "Glucocorticoids plus immunosuppression or IVIG with individualized anti-HMGCR/anti-SRP care",
+      "source_ids": [
+        "RHEUM-IMNM25",
+        "RHEUM-IIMCLASS17"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-008",
+      "name": "Sporadic inclusion body myositis",
+      "mechanism": "Degenerative and inflammatory muscle injury with rimmed vacuoles; finger-flexor/quadriceps weakness",
+      "distinguishing_diagnostic_pattern": "Finger flexors/quadriceps and rimmed vacuoles; poor typical response to immunosuppression",
+      "management_safety_summary": "Rehabilitation, dysphagia and falls management; avoid reflex escalation of ineffective chronic immunosuppression",
+      "source_ids": [
+        "RHEUM-IIMCLASS17",
+        "RHEUM-IBM25"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-009",
+      "name": "Adult-onset Still disease",
+      "mechanism": "Systemic innate inflammation, prominent IL-1/IL-6 signaling and macrophage activation risk",
+      "distinguishing_diagnostic_pattern": "Quotidian high fevers, transient rash, neutrophilia and high ferritin after exclusion of infection/malignancy",
+      "management_safety_summary": "IL-1 or IL-6 targeted therapy with corticosteroids as appropriate; macrophage activation syndrome emergency",
+      "source_ids": [
+        "RHEUM-STILL24"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-010",
+      "name": "Polymyalgia rheumatica",
+      "mechanism": "Inflammatory periarticular synovial and bursal syndrome after age 50; consider coexistent GCA",
+      "distinguishing_diagnostic_pattern": "Proximal shoulder/hip stiffness with normal CK; assess giant-cell arteritis red flags",
+      "management_safety_summary": "Glucocorticoids carefully tapered, bone protection; new headaches/visual symptoms require GCA assessment",
+      "source_ids": [
+        "RHEUM-PMRTAK26"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-011",
+      "name": "Takayasu arteritis",
+      "mechanism": "Large-vessel inflammatory injury of aorta and major branches causing stenosis or aneurysm",
+      "distinguishing_diagnostic_pattern": "Absent pulses or limb BP discrepancy with aortic branch imaging; CRP can be normal",
+      "management_safety_summary": "Steroids plus steroid-sparing immunosuppression; monitor vessel stenosis/aneurysm by serial imaging",
+      "source_ids": [
+        "RHEUM-PMRTAK26"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-012",
+      "name": "Polyarteritis nodosa",
+      "mechanism": "Segmental transmural necrotizing inflammation of medium arteries; ANCA typically absent",
+      "distinguishing_diagnostic_pattern": "Medium-vessel aneurysms with mononeuritis multiplex; classic GN absent",
+      "management_safety_summary": "Severe PAN: glucocorticoid/cyclophosphamide; HBV-associated form requires antiviral-centered strategy",
+      "source_ids": [
+        "RHEUM-PAN21"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-013",
+      "name": "IgA vasculitis (Henoch–Schönlein purpura)",
+      "mechanism": "Galactose-deficient IgA1 immune complexes in skin and renal mesangium",
+      "distinguishing_diagnostic_pattern": "Palpable purpura and GI/joint symptoms; continue renal and BP surveillance",
+      "management_safety_summary": "Supportive care, urine/proteinuria/BP follow-up; severe renal disease specialist immunosuppression",
+      "source_ids": [
+        "RHEUM-IGAV25"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-014",
+      "name": "Behçet syndrome",
+      "mechanism": "Neutrophilic inflammatory disease affecting variable-size vessels; ulcers, uveitis and thrombosis",
+      "distinguishing_diagnostic_pattern": "Recurrent oral/genital ulcers, eye/vascular involvement; HLA-B51 not diagnostic",
+      "management_safety_summary": "Colchicine for mucocutaneous disease, targeted drugs for severe eye/vascular/CNS disease; bleeding-risk pulmonary aneurysm",
+      "source_ids": [
+        "RHEUM-BEHCET26"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-015",
+      "name": "Relapsing polychondritis",
+      "mechanism": "Immune cartilage destruction of auricular, nasal and tracheobronchial structures",
+      "distinguishing_diagnostic_pattern": "Painful auricular inflammation sparing lobule and risk of airway collapse",
+      "management_safety_summary": "Mild local disease NSAIDs; systemic steroids and DMARDs for severe; tracheobronchial collapse emergency",
+      "source_ids": [
+        "RHEUM-RP22"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    },
+    {
+      "id": "AXOM-RHEUM-016",
+      "name": "IgG4-related disease",
+      "mechanism": "B-cell and CD4 cytotoxic T-cell driven fibroinflammation with storiform fibrosis/obliterative phlebitis",
+      "distinguishing_diagnostic_pattern": "Storiform fibrosis/obliterative phlebitis in organ-appropriate tissue; elevated IgG4 alone insufficient",
+      "management_safety_summary": "Steroids for induction; anti-CD19 inebilizumab FDA-approved in adults 2025; infection/HBV screening and organ monitoring",
+      "source_ids": [
+        "RHEUM-IGG425",
+        "RHEUM-IGG4FDA25"
+      ],
+      "ontology_mondo": null,
+      "ontology_icd11": null,
+      "ontology_orphanet": null,
+      "full_expanded_profile_location": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip; not uploaded to repository",
+      "review_date": "2026-11-10"
+    }
+  ],
+  "new_sources": [
+    {
+      "id": "RHEUM-PSA24",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/38499325/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-AXSPA23",
+      "url": "https://ard.bmj.com/content/82/1/19",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-CPPD23",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/37494275/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-CPPDIMG24",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/38320811/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-SJOG24",
+      "url": "https://academic.oup.com/rheumatology/article/64/2/409/7645909",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-APS23",
+      "url": "https://ard.bmj.com/content/82/10/1258",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-APS19",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11034817/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-IIM22",
+      "url": "https://doi.org/10.1093/rheumatology/keac115",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-IMNM25",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12743563/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-IBM25",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11759215/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-IIMCLASS17",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/29177080/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-STILL24",
+      "url": "https://ard.bmj.com/content/early/2024/10/15/ard-2024-225851",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-PMRTAK26",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/42481270/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-PAN21",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/34235883/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-IGAV25",
+      "url": "https://kdigo.org/guidelines/iga-nephropathy/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-BEHCET26",
+      "url": "https://doi.org/10.1016/j.ard.2026.02.009",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-RP22",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/35238756/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-IGG425",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/39541094/",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    },
+    {
+      "id": "RHEUM-IGG4FDA25",
+      "url": "https://www.accessdata.fda.gov/drugsatfda_docs/label/2025/761142s003lbl.pdf",
+      "rights": "outbound-link reference only; do not reproduce protected full text"
+    }
+  ],
+  "new_real_image_file_pages": [
+    {
+      "disease_id": "AXOM-RHEUM-002",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Bamboo_spine_ankylosing_spondylitis.jpg",
+      "creator": "Stevenfruitsmaak",
+      "license": "CC BY-SA 3.0",
+      "embedded": false,
+      "original_image_binary_retrieved": false,
+      "medical_diagnosis_independently_verified": false,
+      "rights_status": "individual page creator and license inspected; no redistribution; privacy/source attribution review outstanding"
+    },
+    {
+      "disease_id": "AXOM-RHEUM-004",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Sjogren's_syndrome_1.jpg",
+      "creator": "KGH (uploader; creator assumed)",
+      "license": "CC BY-SA 3.0",
+      "embedded": false,
+      "original_image_binary_retrieved": false,
+      "medical_diagnosis_independently_verified": false,
+      "rights_status": "individual page creator and license inspected; no redistribution; privacy/source attribution review outstanding"
+    },
+    {
+      "disease_id": "AXOM-RHEUM-006",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Gottron_papules_.dermatomyocitis.jpg",
+      "creator": "Mohammad2018",
+      "license": "CC BY-SA 4.0",
+      "embedded": false,
+      "original_image_binary_retrieved": false,
+      "medical_diagnosis_independently_verified": false,
+      "rights_status": "individual page creator and license inspected; no redistribution; privacy/source attribution review outstanding"
+    },
+    {
+      "disease_id": "AXOM-RHEUM-008",
+      "source_page": "https://commons.wikimedia.org/wiki/File:IBM_rimmed_vacuoles_HE_x200.jpg",
+      "creator": "Jensflorian",
+      "license": "CC BY-SA 3.0",
+      "embedded": false,
+      "original_image_binary_retrieved": false,
+      "medical_diagnosis_independently_verified": false,
+      "rights_status": "individual page creator and license inspected; no redistribution; privacy/source attribution review outstanding"
+    },
+    {
+      "disease_id": "AXOM-RHEUM-008",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Inclusion_body_myositis_histology.jpg",
+      "creator": "Pedro Machado, Stefen Brady, Michael G Hanna",
+      "license": "CC BY 3.0",
+      "embedded": false,
+      "original_image_binary_retrieved": false,
+      "medical_diagnosis_independently_verified": false,
+      "rights_status": "individual page creator and license inspected; no redistribution; privacy/source attribution review outstanding"
+    },
+    {
+      "disease_id": "AXOM-RHEUM-014",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Behcets_disease.jpg",
+      "creator": "Ahmet Altiner MD and Rajni Mandal MD",
+      "license": "CC BY-SA 3.0",
+      "embedded": false,
+      "original_image_binary_retrieved": false,
+      "medical_diagnosis_independently_verified": false,
+      "rights_status": "individual page creator and license inspected; no redistribution; privacy/source attribution review outstanding"
+    },
+    {
+      "disease_id": "AXOM-RHEUM-016",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Low_power_view_of_IgG4-related_prostatitis.jpg",
+      "creator": "María T. Bourlon et al.",
+      "license": "CC BY 3.0",
+      "embedded": false,
+      "original_image_binary_retrieved": false,
+      "medical_diagnosis_independently_verified": false,
+      "rights_status": "individual page creator and license inspected; no redistribution; privacy/source attribution review outstanding"
+    }
+  ],
+  "artifacts": {
+    "zip_name": "AXOM_Disease_Atlas_V2_Run010_Source_Package.zip",
+    "zip_sha256": "576a3c5d0e8e8a7db68087007b5ebef57cf090928e4bae61454e22c15ccd9734",
+    "docx_name": "AXOM_Disease_Pathology_Atlas_V2_Run010.docx",
+    "pdf_name": "AXOM_Disease_Pathology_Atlas_V2_Run010.pdf",
+    "gallery_name": "AXOM_Rheumatology_Original_Source_Gallery_Run010.html",
+    "full_binary_persistence": "NOT AVAILABLE: persistent Library upload returned AccessDeny"
+  },
+  "qa": {
+    "unique_names_and_ids": true,
+    "all_300_previous_entries_retained": true,
+    "all_16_profiles_required_fields": true,
+    "source_ID_integrity": true,
+    "source_license_pages_7": true,
+    "no_synthetic_images": true,
+    "docx_accessibility_findings": 0,
+    "pdf_pages_verified": 255,
+    "pdf_visual_sample_checked": true,
+    "zip_crc_passed": true,
+    "medical_specialist_review": "pending",
+    "ontology_mapping_review": "pending"
+  },
+  "limits": [
+    "Internal AXOM entries do not imply MONDO class coverage",
+    "DO NOT infer ontology mapping from lexical similarity",
+    "Classification criteria are not clinical diagnostic criteria",
+    "All original image binaries remained unembedded and attribution subject to source context",
+    "Current source ZIP and full manuscripts were generated but cannot be reconstructed byte-for-byte from this condensed GitHub checkpoint alone",
+    "Do not merge or deploy without AXOM FORGE gateway."
+  ]
+}
