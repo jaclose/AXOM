@@ -285,7 +285,17 @@ export function verifyPdfSourceAvailability(rows, jobs, roots,
     || typeof runAt !== "string" || !Number.isFinite(Date.parse(runAt)))
     throw new Error("Current PDF triage run ID and ISO timestamp are required.");
   const bySha = new Map(jobs.map(job => [job.source_sha256, job]));
-  return rows.map(row => {
+  const existing = new Map(rows.map(row => [row.source_sha256, row]));
+  // A first --start/--limit run can leave queued sources absent from both
+  // the previous report and this slice. Emit an explicit hold for every one.
+  const completeRows = jobs.map(job => existing.get(job.source_sha256) ?? {
+    source_sha256: job.source_sha256, source_path: job.source_path,
+    document_type: job.document_type, term: job.term, module: job.module,
+    week: job.week, answer_variant: job.answer_variant,
+    status: "reader_failure_needs_review", inspectionRequired: true,
+    reason: "Source is queued but no bounded PDF inspection or reusable sample exists yet.",
+  }).sort((a, b) => a.source_sha256.localeCompare(b.source_sha256));
+  return completeRows.map(row => {
     const job = bySha.get(row.source_sha256);
     if (!job) throw new Error("Triage source does not match the current PDF queue.");
     // Never inherit a previous run's proof, even from an otherwise identical
