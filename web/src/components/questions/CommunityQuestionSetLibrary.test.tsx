@@ -428,6 +428,61 @@ describe("Community Question Set Library", () => {
     expect(payload.snapshot.questions[0].correctKey).toBe("B");
   });
 
+  it("labels approved visual intent as unreviewed planning metadata without altering the imported questions", async () => {
+    const visuallyTagged = {
+      ...snapshot,
+      tags: ["visual:intent:histology-micrograph", "visual:keyword:glomerulus", "renal"],
+      questions: [{
+        ...snapshot.questions[0],
+        tags: ["visual:intent:histology-micrograph", "visual:keyword:glomerulus", "visual:keyword:eosin"],
+      }],
+    };
+    mock.search.mockResolvedValueOnce([{
+      ...summary, tags: ["visual:intent:histology-micrograph", "renal", "visual:keyword:glomerulus"],
+    }]);
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: visuallyTagged, contentDigest: "b".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    const heading = await screen.findByRole("heading", { name: "Synthetic practice" });
+    const card = heading.closest("article");
+    expect(card?.textContent).toContain("renal");
+    expect(card?.textContent).not.toContain("visual:");
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    expect(screen.getByText("1 question · renal")).toBeTruthy();
+    expect(screen.getByText(/Visual intent metadata: histology micrograph/)).toBeTruthy();
+    expect(screen.getByText(/No diagram is included.*media rights require separate review/)).toBeTruthy();
+    expect(screen.queryByText(/visual:intent:/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    // Metadata is advisory in the UI, yet the source-checked snapshot and its
+    // digest/revision remain exactly what the server authorized for import.
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(visuallyTagged);
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0].correctKey).toBe("B");
+  });
+
+  it("ignores unknown visual-intent kinds rather than presenting them as reviewed images", async () => {
+    mock.search.mockResolvedValueOnce([{
+      ...summary, tags: ["visual:intent:untrusted", "visual:keyword:unlicensed", "renal"],
+    }]);
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id,
+      snapshot: {
+        ...snapshot, tags: ["visual:intent:untrusted", "renal"],
+        questions: [{ ...snapshot.questions[0], tags: ["visual:intent:untrusted", "visual:keyword:unlicensed"] }],
+      },
+      contentDigest: "c".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    const heading = await screen.findByRole("heading", { name: "Synthetic practice" });
+    expect(heading.closest("article")?.textContent).not.toContain("visual:");
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    expect(screen.queryByText(/Visual intent metadata/)).toBeNull();
+    expect(screen.getByText("1 question · renal")).toBeTruthy();
+  });
+
   it("does not invent an answer key or rationale in a legacy preview without evidence", async () => {
     mock.preview.mockResolvedValue({
       id: summary.id,
