@@ -257,7 +257,7 @@ export function JournalPage({ registerAppTransitionGuard, hasAccountWorkspaceRec
   const accountId = useAccount((state) => state.phase === "signed-in" ? state.user?.id ?? null : null);
   const workspaceReady = accountId === null || Boolean(hasAccountWorkspaceReceipt?.(accountId, s.journal));
   const sessionDraftsRef = useRef(new Map<string, JournalSessionDraft>());
-  const feedbackSessionDraftsRef = useRef(new Map<string, JournalExperienceFeedbackInput>());
+  const feedbackSessionDraftsRef = useRef(journalInTabFeedbackDrafts());
   const writerIdentityRef = useRef({
     profile: s.profile, journal: s.journal, accountId, epoch: 0, workspaceEpoch: 0,
     pendingJournal: workspaceReady ? null : s.journal as JournalEntry[] | null,
@@ -1693,6 +1693,21 @@ function JournalWelcome({ initial, initialReminders, onComplete }: {
   );
 }
 
+// Browser storage outages leave feedback only in volatile memory. Retain it
+// through SPA route unmount/remount in the same tab, never across tabs or reload.
+// Keys already include workspace and authenticated account; a successful save
+// clears the matching in-memory copy. Older stored bytes are not touched.
+const journalInTabFeedbackDraftsByWindow = new WeakMap<Window, Map<string, JournalExperienceFeedbackInput>>();
+
+function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInput> {
+  let drafts = journalInTabFeedbackDraftsByWindow.get(window);
+  if (!drafts) {
+    drafts = new Map<string, JournalExperienceFeedbackInput>();
+    journalInTabFeedbackDraftsByWindow.set(window, drafts);
+  }
+  return drafts;
+}
+
 const JOURNAL_FEEDBACK_EMPTY: JournalExperienceFeedbackInput = {
   rating: 0, liked: "", wantMore: "", missing: "", painPoints: "", comment: "",
 };
@@ -1936,7 +1951,7 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
       ? "Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing."
       : loaded.unreadable
         ? loaded.raw === null
-          ? "AXOM cannot read saved feedback. You can write in this tab, but nothing will save until storage returns. Download before closing or reloading. Older saved drafts were not changed."
+          ? "AXOM cannot read saved feedback. You can write in this tab, but nothing will save until storage returns. Download before refreshing or closing this tab. Older saved drafts were not changed."
           : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
         : "",
   );

@@ -54,6 +54,15 @@ test("feedback remains locally recoverable when browser reads fail, then retries
   await page.getByRole("button", { name: "Feedback" }).click();
   await expect(dialog.getByLabel("What do you like?")).toHaveValue("An unsaved in-tab recovery draft");
 
+  // Hash navigation is a same-document SPA route change, unlike page.goto
+  // or reload. The Journal page unmounts, but this tab must retain the draft.
+  await dialog.getByRole("button", { name: "Not now" }).click();
+  await page.evaluate(() => { window.location.hash = "#dashboard"; });
+  await expect(page.getByRole("button", { name: "Feedback", exact: true })).toHaveCount(0);
+  await page.evaluate(() => { window.location.hash = "#journal"; });
+  await page.getByRole("button", { name: "Feedback", exact: true }).click();
+  await expect(dialog.getByLabel("What do you like?")).toHaveValue("An unsaved in-tab recovery draft");
+
   await page.evaluate(() => {
     (window as Window & { __axomBlockFeedbackRead?: boolean }).__axomBlockFeedbackRead = false;
   });

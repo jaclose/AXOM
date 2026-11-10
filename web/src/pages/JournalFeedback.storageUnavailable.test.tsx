@@ -89,6 +89,46 @@ describe("Journal feedback when browser storage cannot be read", () => {
     // No Send action: the simulated feedback remains entirely local.
   });
 
+  it("retains volatile feedback across a same-tab Journal route unmount without modifying older saved bytes", () => {
+    const originalGet = Storage.prototype.getItem;
+    const blockedRead = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith(key)) throw new Error("Storage read denied");
+      return originalGet.call(this, storageKey);
+    });
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+
+    const first = render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    fireEvent.change(screen.getByLabelText("What do you like?"), {
+      target: { value: "Do not lose this when the Journal route unmounts." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    first.unmount(); // Same-tab SPA route exit, not a browser reload.
+    useStore.setState((state) => ({ profile: { ...state.profile, userId: "other-private-workspace" } }));
+    const other = render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    other.unmount(); // Never expose workspace A's in-memory text in workspace B.
+    useStore.setState((state) => ({ profile: { ...state.profile, userId: workspaceId } }));
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Do not lose this when the Journal route unmounts.");
+    expect(screen.getByRole("button", { name: "Download draft" })).toBeTruthy();
+    expect(originalGet.call(localStorage, key)).toBe(oldDraft);
+    expect(writes.mock.calls.some(([storageKey]) => String(storageKey).startsWith(key))).toBe(false);
+
+    blockedRead.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    const copies = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .filter((item) => item?.startsWith(`${key}:writer:`));
+    expect(copies).toHaveLength(1);
+    expect(JSON.parse(originalGet.call(localStorage, copies[0]!) ?? "{}").liked)
+      .toBe("Do not lose this when the Journal route unmounts.");
+    expect(originalGet.call(localStorage, key)).toBe(oldDraft);
+  });
+
   it("offers in-dialog retry when only the saved submission marker cannot be read", () => {
     const originalGet = Storage.prototype.getItem;
     const markerRead = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
