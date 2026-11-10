@@ -324,4 +324,72 @@ describe("Journal feedback when browser storage cannot be read", () => {
     // No user feedback, account record, or notebook content was submitted.
   });
 
+  it("recovers previously saved feedback after a name-only rename and remount without editing its bytes", () => {
+    const before = "Journal R24 Previous Display Name";
+    const after = "Journal R24 Updated Display Name";
+    useStore.getState().updateProfile({ name: before });
+    const priorKey = `axom-journal-feedback-draft:${userIdFromName(before)}`;
+    const nextKey = `axom-journal-feedback-draft:${userIdFromName(after)}`;
+    const previous = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Saved before a name change." });
+    localStorage.setItem(priorKey, previous);
+
+    const first = render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Saved before a name change.");
+    first.unmount();
+
+    // A real browser reload clears component state but keeps localStorage.
+    // There is no volatile in-tab edit to carry across this remount.
+    useStore.getState().updateProfile({ name: after });
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+    fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Saved before a name change.");
+    expect(localStorage.getItem(priorKey)).toBe(previous);
+    expect(localStorage.getItem(nextKey)).toBeNull();
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const storageKey = localStorage.key(i);
+      if (storageKey?.startsWith(priorKey) || storageKey?.startsWith(nextKey)) localStorage.removeItem(storageKey);
+    }
+  });
+
+  it("keeps historical rename pointers private to their signed-in account", async () => {
+    const before = "Journal R24 Signed In A Before";
+    const after = "Journal R24 Signed In A After";
+    const ownerA = { id: "journal-r24-account-a", email: "a@example.test", displayName: "A", emailConfirmed: true };
+    const ownerB = { ...ownerA, id: "journal-r24-account-b", email: "b@example.test" };
+    useAccount.setState({ user: ownerA, phase: "signed-in", link: "linked" });
+    useStore.getState().updateProfile({ name: before });
+    const ownerAKey = `axom-journal-feedback-draft:${userIdFromName(before)}:account:${ownerA.id}`;
+    const renamedAKey = `axom-journal-feedback-draft:${userIdFromName(after)}:account:${ownerA.id}`;
+    const renamedBKey = `axom-journal-feedback-draft:${userIdFromName(after)}:account:${ownerB.id}`;
+    const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Account A historic private feedback." });
+    localStorage.setItem(ownerAKey, original);
+    useStore.getState().updateProfile({ name: after });
+    render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+
+    await act(async () => { useAccount.setState({ user: ownerB }); });
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    expect(screen.queryByText(/Other saved feedback copies/)).toBeNull();
+
+    await act(async () => { useAccount.setState({ user: ownerA }); });
+    expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+    fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Account A historic private feedback.");
+    expect(localStorage.getItem(ownerAKey)).toBe(original);
+    expect(localStorage.getItem(renamedBKey)).toBeNull();
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const storageKey = localStorage.key(i);
+      if (storageKey?.startsWith(ownerAKey) || storageKey?.startsWith(renamedAKey)) localStorage.removeItem(storageKey);
+    }
+  });
+
+
 });
