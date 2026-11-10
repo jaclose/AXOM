@@ -294,7 +294,8 @@ describe("Question Set draft explanation review", () => {
     await act(async () => { finishFlush(); });
     expect(mocks.readVault).not.toHaveBeenCalled();
     expect(screen.queryByText(/Reviewed explanations saved privately/)).toBeNull();
-    expect(mocks.accountListeners.size).toBe(0);
+    // The save observer is detached; the modal-wide session guard stays mounted.
+    expect(mocks.accountListeners.size).toBe(1);
   });
 
   it("rejects AI choice rationales that exceed the share limit once provenance is added", async () => {
@@ -580,7 +581,9 @@ describe("Question Set draft explanation review", () => {
     });
 
     // Hidden React re-renders do not restore the right to act on cached review state.
-    expect(screen.queryByRole("button", { name: "Withdraw submission" })).toBeNull();
+    const revokedWithdraw = screen.getByRole("button", { name: "Withdraw submission" }) as HTMLButtonElement;
+    expect(revokedWithdraw.disabled).toBe(true);
+    fireEvent.click(revokedWithdraw);
     expect(confirm).not.toHaveBeenCalled();
     expect(mocks.withdraw).not.toHaveBeenCalled();
   });
