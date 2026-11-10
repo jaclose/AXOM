@@ -154,6 +154,19 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     if (!provider || !accountId || statusIdentity !== `${accountId}:${set.id}`
       || generating || generationAbort.current || draftSaveOperation.current || !draftable.length) return;
     const controller = new AbortController();
+    // An A→B→A account round trip can happen before React renders the
+    // intermediate account. Revocation must observe every store transition,
+    // not just compare the final account ID after the provider responds.
+    let accountRevoked = false;
+    const stopWatchingAccount = useAccount.subscribe(state => {
+      if (state.user?.id !== accountId) {
+        accountRevoked = true;
+        controller.abort();
+        setDrafts([]);
+        setGenerationProgress("");
+        setGenerationError("The account changed during AI drafting. Reopen this set before preparing explanations.");
+      }
+    });
     generationAbort.current = controller;
     setGenerating(true);
     setGenerationError("");
@@ -165,7 +178,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       // trigger an uncontrolled upload of an entire private Question Bank.
       const batch = draftable.slice(0, 12);
       for (const question of batch) {
-        if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
+        if (controller.signal.aborted || accountRevoked || useAccount.getState().user?.id !== accountId) return;
         const liveInput = currentDraftInput(set, question);
         if (!liveInput) {
           setDrafts([]);
@@ -174,7 +187,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         }
         try {
           const draft = await draftQuestionExplanation(provider, liveInput, controller.signal);
-          if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
+          if (controller.signal.aborted || accountRevoked || useAccount.getState().user?.id !== accountId) return;
           const stillCurrent = currentDraftInput(set, question);
           if (!stillCurrent || questionExplanationFingerprint(stillCurrent) !== draft.sourceFingerprint) {
             setDrafts([]);
@@ -191,11 +204,12 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           if (!next.length) setGenerationError(cause instanceof Error ? cause.message : "The AI provider could not draft this explanation.");
         }
       }
-      if (controller.signal.aborted || useAccount.getState().user?.id !== accountId) return;
+      if (controller.signal.aborted || accountRevoked || useAccount.getState().user?.id !== accountId) return;
       setGenerationProgress(next.length
         ? `${next.length} provisional explanations prepared. Inspect them before saving. ${failures ? `${failures} need manual review.` : ""}`
         : "No explanations could be drafted. Review your source or AI settings.");
     } finally {
+      stopWatchingAccount();
       if (generationAbort.current === controller) generationAbort.current = null;
       setGenerating(false);
     }
