@@ -303,6 +303,11 @@ test("complete status cannot survive an unmounted previously hashed academic PDF
   assert.equal(blocked.counts.pdfVolumeUnmounted, 1);
   assert.ok(blocked.blockers.some(msg => msg.includes("unmounted academic drive")));
   triage.rows[0].status = "text_with_question_indicators";
+  triage.runId = "synthetic-restored-source-run";
+  triage.rows[0].availabilityProof = {
+    runId: triage.runId, source_sha256: a, checkedAt: triage.runAt,
+    authorizedPathAvailable: true,
+  };
   const current = run({ pdfTriage: triage });
   assert.equal(current.complete, true, JSON.stringify(current.blockers));
   assert.equal(current.counts.pdfJobsRecorded, 1);
@@ -393,12 +398,16 @@ test("yesterday's production counts cannot certify a release even if all synthet
   assert.equal(current.complete, true, JSON.stringify(current.blockers));
 });
 
-const completePdfTriage = status => ({
-  schema: "axom-academic-pdf-triage-v1",
-  runAt: new Date().toISOString(),
-  queueDistinctPdfJobs: 1,
-  rows: [{ source_sha256: a, status }],
-});
+const completePdfTriage = status => {
+  const runAt = new Date().toISOString(), runId = "synthetic-verified-batch";
+  return {
+    schema: "axom-academic-pdf-triage-v1", runAt, runId,
+    queueDistinctPdfJobs: 1,
+    rows: [{ source_sha256: a, status,
+      availabilityProof: { runId, source_sha256: a,
+        checkedAt: runAt, authorizedPathAvailable: true } }],
+  };
+};
 
 test("unrecognized PDF triage status cannot certify physical source coverage", () => {
   for (const status of ["source_ready_ai_reviewed", null, 12]) {
@@ -486,6 +495,7 @@ test("per-source availability proof blocks a stale carried-forward ready PDF des
 test("a new runAt alone cannot renew an uninspected PDF source row", () => {
   const triage = completePdfTriage("text_with_question_indicators");
   triage.runId = "synthetic-new-run";
+  delete triage.rows[0].availabilityProof;
   const result = run({ pdfTriage: triage });
   assert.equal(result.complete, false);
   assert.equal(result.counts.pdfUnverifiedCurrentAvailability, 1);
