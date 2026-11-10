@@ -140,7 +140,10 @@ function scopeChangedReviewRow(job, previous) {
   return { source_sha256: job.source_sha256, source_path: job.source_path,
     document_type: job.document_type, term: null, module: null, week: null,
     answer_variant: job.answer_variant, requires_scope_review: true,
-    scope_evidence: [...previousEvidence, ...job.scope_evidence],
+    scope_evidence: [...new Map([...previousEvidence, ...job.scope_evidence].map(item => [
+      JSON.stringify([item.source_id ?? null, item.source_path ?? null,
+        item.term ?? null, item.module ?? null, item.week ?? null]), item,
+    ])).values()],
     status: "academic_scope_changed_review",
     reason: "Academic filing changed since prior PDF triage; source week/provenance must be reviewed before reuse." };
 }
