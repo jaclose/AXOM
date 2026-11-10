@@ -224,6 +224,22 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     } else {
       const seenPdf = new Set(), byStatus = {};
       let scopeFlaggedOutsideHoldStatus = 0;
+      let unverifiedCurrentAvailability = 0;
+      const reportTime = Date.parse(pdfTriage.runAt);
+      // The report timestamp alone does not prove earlier cached PDF originals
+      // were checked again. Each READY row needs a per-run, per-SHA authorized
+      // path check; a source SHA from the manifest is not a current file read.
+      const hasCurrentAvailabilityProof = entry => {
+        const proof = entry.availabilityProof;
+        const checked = Date.parse(proof?.checkedAt ?? "");
+        return typeof pdfTriage.runId === "string" && pdfTriage.runId.length >= 8
+          && proof?.runId === pdfTriage.runId
+          && proof?.source_sha256 === entry.source_sha256
+          && proof?.authorizedPathAvailable === true
+          && Number.isFinite(checked)
+          && checked >= reportTime - 24 * 60 * 60_000
+          && checked <= reportTime + 5 * 60_000;
+      };
       for (const entry of pdfTriage.rows) {
         if (!SHA256.test(entry?.source_sha256 ?? "") || seenPdf.has(entry.source_sha256)) {
           errors.push("PDF availability ledger has a missing or repeated source fingerprint.");
@@ -236,6 +252,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
           continue;
         }
         byStatus[entry.status] = (byStatus[entry.status] ?? 0) + 1;
+        if (entry.status === "text_with_question_indicators" && !hasCurrentAvailabilityProof(entry))
+          unverifiedCurrentAvailability += 1;
         if (entry.requires_scope_review === true
           && entry.status !== "academic_scope_conflict_review"
           && entry.status !== "academic_scope_changed_review")
@@ -243,6 +261,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       }
       if (pdfTriage.rows.length !== pdfTriage.queueDistinctPdfJobs)
         blockers.push(`PDF availability triage covers ${pdfTriage.rows.length}/${pdfTriage.queueDistinctPdfJobs} queued original PDF sources; rescan the remainder.`);
+      if (unverifiedCurrentAvailability)
+        blockers.push(`${unverifiedCurrentAvailability} ready PDF source rows lack per-source availability proof for this triage run; recheck authorized originals and bind source SHA, run ID and checked time.`);
       const unmounted = byStatus.source_volume_unmounted ?? 0;
       const missing = byStatus.source_path_unavailable ?? 0;
       const lowText = byStatus.low_text_scan_or_figures ?? 0;
@@ -266,7 +286,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         pdfVolumeUnmounted: unmounted, pdfPathsMissing: missing, pdfLowText: lowText, pdfReaderFailures: failed,
         pdfDeferredSources: deferred, pdfNoQuestionIndicators: noIndicators,
         pdfScopeConflictReviewRows: scopeConflicts, pdfScopeChangedReviewRows: scopeChanges,
-        pdfScopeReviewFlaggedOther: scopeFlaggedOutsideHoldStatus };
+        pdfScopeReviewFlaggedOther: scopeFlaggedOutsideHoldStatus,
+        pdfUnverifiedCurrentAvailability: unverifiedCurrentAvailability };
     }
   }
   // Reuse the single canonical B4 acceptance report rather than maintaining a
