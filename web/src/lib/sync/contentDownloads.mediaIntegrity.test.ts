@@ -163,7 +163,7 @@ describe("explicit account source download preserves immutable local image ident
     const wrong = new Blob([new Uint8Array([137, 80, 78, 71, 9, 9, 9, 9])], { type: "image/png" });
     const record = {
       questionId: deferred.deferredContent!.questions[0].id,
-      blob: wrong, byteSize: wrong.size, mimeType: "image/png", updatedAt: timestamp,
+      blob: wrong, byteSize: wrong.size, mimeType: attachment.mimeType, updatedAt: timestamp,
     };
     // Two same-account tabs can both decide a key is absent. Only add, never
     // put, makes the concurrent winner permanent and observable by recovery.
