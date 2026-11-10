@@ -281,4 +281,47 @@ describe("Journal feedback when browser storage cannot be read", () => {
     // No storage mutation or feedback submission in this synthetic identity handoff.
   });
 
+  it("does not show account-scoped feedback or enable Send while password recovery is in progress", async () => {
+    // The account store can keep a user object during PASSWORD_RECOVERY, but
+    // only a confirmed signed-in phase may open that account's saved feedback.
+    const isolatedWorkspace = "journal-feedback-recovery-phase-r23";
+    const localKey = `axom-journal-feedback-draft:${isolatedWorkspace}`;
+    const owner = {
+      id: "journal-recovery-account-A", email: "journal-recovery@example.test",
+      displayName: "Recovery A", emailConfirmed: true,
+    };
+    const accountKey = `${localKey}:account:${owner.id}`;
+    const localRaw = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Workspace-only feedback." });
+    const accountRaw = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Private account A feedback." });
+    useStore.setState((state) => ({ profile: { ...state.profile, userId: isolatedWorkspace } }));
+    localStorage.setItem(localKey, localRaw);
+    localStorage.setItem(accountKey, accountRaw);
+    useAccount.setState({ user: owner, phase: "recovering-password", link: "linked" });
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+
+    render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Workspace-only feedback.");
+    expect((screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => { useAccount.setState({ phase: "signed-in" }); });
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Private account A feedback.");
+    expect((screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(false);
+
+    await act(async () => { useAccount.setState({ phase: "recovering-password" }); });
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Workspace-only feedback.");
+    expect((screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(localStorage.getItem(accountKey)).toBe(accountRaw);
+    expect(localStorage.getItem(localKey)).toBe(localRaw);
+    expect(writes.mock.calls.some(([storageKey]) =>
+      String(storageKey).startsWith(localKey))).toBe(false);
+
+    localStorage.removeItem(localKey);
+    localStorage.removeItem(accountKey);
+    // No user feedback, account record, or notebook content was submitted.
+  });
+
 });
