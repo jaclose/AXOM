@@ -37,8 +37,8 @@ async function seedLocalSet(page: Page) {
       options: [{ key: "A", text: "First synthetic label" }, { key: "B", text: "Second synthetic label" }],
       correctKey: "B",
       explanation: "AXOM AI-assisted explanation (verify against source): The synthetic source explicitly marks B.",
-      // Fresh submissions use accepted choice keys. The fixture below creates
-      // a synthetic historical pending record before academic review instead.
+      // Fresh submissions must use the exact source-recorded choice keys.
+      // Invalid later edits are rejected by the live SQL integrity guard.
       choiceRationales: {
         A: "AXOM AI-assisted rationale (verify against source): A conflicts with the synthetic source.",
         B: "AXOM AI-assisted rationale (verify against source): B matches the synthetic source.",
@@ -112,35 +112,34 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     const [pending] = await database.rpc(owner.id, "my_question_set_library") as Array<{ id: string; status: string }>;
     expect(pending.status).toBe("pending");
 
-    // The live submit RPC correctly rejects rationale keys that do not
-    // exactly match its options. Reproduce historical padded-key content ONLY
-    // inside the isolated SQL test fixture, before a reviewer inspects it.
-    // Never rewrite an approved publication or bypass a real user's source
-    // and distribution-rights attestations.
-    const beforeLegacy = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as {
+    // Source/rights attestations and submission precede these negative tests.
+    // Even privileged direct writes must not launder whitespace-padded
+    // rationales or answer keys into a pending set for academic approval.
+    const beforeTamper = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as {
       review_revision: number;
       snapshot_payload: { questions: Array<{ correctKey: string; choiceRationales?: Record<string, string> }> };
     };
-    const originallySubmitted = beforeLegacy.snapshot_payload.questions[0];
-    expect(originallySubmitted.correctKey).toBe("B");
-    expect(Object.keys(originallySubmitted.choiceRationales ?? {}).sort()).toEqual(["A", "B"]);
-    const legacyRationales = Object.fromEntries(Object.entries(originallySubmitted.choiceRationales ?? {})
+    const submittedQuestion = beforeTamper.snapshot_payload.questions[0];
+    expect(submittedQuestion.correctKey).toBe("B");
+    expect(Object.keys(submittedQuestion.choiceRationales ?? {}).sort()).toEqual(["A", "B"]);
+    const invalidRationales = Object.fromEntries(Object.entries(submittedQuestion.choiceRationales ?? {})
       .map(([key, rationale]) => [` ${key.toLowerCase()} `, rationale]));
-    const mutation = await database.db.query<{ review_revision: number }>(
+    await expect(database.db.query(
       `update public.question_set_library_entries
           set snapshot_payload = jsonb_set(snapshot_payload, '{questions,0,choiceRationales}', $2::jsonb)
-        where id = $1 and status = 'pending'
-        returning review_revision`,
-      [pending.id, JSON.stringify(legacyRationales)],
-    );
-    expect(mutation.rows).toHaveLength(1);
-    expect(Number(mutation.rows[0].review_revision)).toBe(beforeLegacy.review_revision + 1);
-    const legacyPending = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as typeof beforeLegacy;
-    expect(legacyPending.review_revision).toBe(beforeLegacy.review_revision + 1);
-    expect(legacyPending.snapshot_payload.questions[0]).toEqual({
-      ...originallySubmitted,
-      choiceRationales: legacyRationales,
-    });
+        where id = $1 and status = 'pending'`,
+      [pending.id, JSON.stringify(invalidRationales)],
+    )).rejects.toThrow(/Question Set choice rationales contain invalid scalar types/);
+    await expect(database.db.query(
+      `update public.question_set_library_entries
+          set snapshot_payload = jsonb_set(snapshot_payload, '{questions,0,correctKey}', '" b "'::jsonb)
+        where id = $1 and status = 'pending'`,
+      [pending.id],
+    )).rejects.toThrow(/Question Set snapshot has inconsistent membership or answer evidence/);
+    const afterTamper = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as typeof beforeTamper;
+    expect(afterTamper).toEqual(beforeTamper);
+    // Rejected mutations must not advance the protected review revision or
+    // make the pending set public. Continue with the original valid snapshot.
 
     await openSharedLibrary(other);
     await expect(other.getByRole("heading", { name: TITLE })).toHaveCount(0);
@@ -159,17 +158,16 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await review.getByRole("button", { name: "Approve for library" }).click();
     await expect(queue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
     console.info("Question Set Library fixture: academic approval recorded.");
-    // Read the approved PostgreSQL snapshot through the learner's restricted
-    // RPC. It must contain the *source-submitted* padded rationale keys, while
-    // the correct answer is still the source-reviewed B.
+    // The learner's restricted RPC must return precisely what was attested
+    // and approved, never either rejected privileged mutation.
     const approvedEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as {
       status: string; review_revision: number;
       snapshot_payload: { questions: Array<{ correctKey?: string; choiceRationales?: Record<string, string> }> };
     };
     expect(approvedEvidence.status).toBe("approved");
     expect(approvedEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
-    expect(Object.keys(approvedEvidence.snapshot_payload.questions[0].choiceRationales ?? {})
-      .some(key => key.trim() !== key)).toBe(true);
+    expect(approvedEvidence.snapshot_payload).toEqual(beforeTamper.snapshot_payload);
+    expect(Object.keys(approvedEvidence.snapshot_payload.questions[0].choiceRationales ?? {}).sort()).toEqual(["A", "B"]);
 
     const library = other.locator(".qsl-library");
     await library.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -298,16 +296,14 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
         importedKey: imported?.correctKey,
         aiProvenance: imported?.explanation?.startsWith("AXOM AI-assisted explanation (verify against source):"),
         choiceProvenance: ["A", "B"].every(key => imported?.choiceRationales?.[key]?.startsWith("AXOM AI-assisted rationale (verify against source):")),
-        // The imported private copy normalizes legacy keys, but the published
-        // version and its reviewer-approved digest are never mutated here.
-        paddedKeysExcluded: !Object.keys(imported?.choiceRationales ?? {}).some(key => key.trim() !== key),
+        recordedRationaleKeys: Object.keys(imported?.choiceRationales ?? {}).sort(),
         sourceCitation: imported?.citation === "Synthetic review fixture, page 1",
         reviewedKeyword: imported?.tags.includes("reviewed-synthetic-keyword"),
       };
     })).toEqual({ importedSet: true, importedKey: "B", aiProvenance: true, choiceProvenance: true,
-      paddedKeysExcluded: true, sourceCitation: true, reviewedKeyword: true });
-    // Import may normalize the *private copy*, never the reviewer-approved
-    // server snapshot or its revision-bound evidence.
+      recordedRationaleKeys: ["A", "B"], sourceCitation: true, reviewedKeyword: true });
+    // Neither a rejected tamper attempt nor a valid private import may
+    // rewrite the reviewer-approved snapshot or revision-bound evidence.
     const afterImportEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as typeof approvedEvidence;
     expect(afterImportEvidence.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
     expect(afterImportEvidence.review_revision).toBe(approvedEvidence.review_revision);
