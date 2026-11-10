@@ -17,6 +17,21 @@ function cacheablePublicResponse(response) {
     && !response.headers.has("set-cookie");
 }
 
+// The updater pre-caches exact build-manifest files with cache.addAll, even
+// where the host's generic header is no-store. An old build must still load
+// its own hash-named checkpoint chunk after the deployment switches over.
+// This narrow read exception applies ONLY to manifest-pinned JS/CSS with
+// no-store as its sole cache directive, never private/auth-varying responses.
+function pinnedPublicBuildAsset(request, response) {
+  if (response.headers.get("cache-control")?.trim().toLowerCase() !== "no-store") return false;
+  if (response.headers.has("set-cookie")) return false;
+  if (/(?:^|,)\s*(?:\*|cookie|authorization)\s*(?:,|$)/i.test(response.headers.get("vary") || "")) return false;
+  if (!response.ok || !/(?:javascript|text\/css)/i.test(response.headers.get("content-type") || "")) return false;
+  const pathname = new URL(request.url).pathname;
+  return PRECACHE.some((path) => /^\.\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(path)
+    && new URL(path, self.registration.scope).pathname === pathname);
+}
+
 function cacheResponse(event, key, response) {
   if (!cacheablePublicResponse(response)) return;
   const copy = response.clone();
@@ -30,7 +45,7 @@ async function cachedAppAsset(request) {
     const cache = await caches.open(name);
     const response = await cache.match(request);
     if (!response) continue;
-    if (!cacheablePublicResponse(response)) continue;
+    if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)) continue;
     if (response.headers.get("content-type")?.includes("text/html")) {
       // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
       await cache.delete(request);

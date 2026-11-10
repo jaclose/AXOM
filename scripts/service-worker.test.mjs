@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-function worker({ failCacheMatch = false, failCachePut = false, scope = 'https://app.test/', fetchResponse = async () => { throw new Error('offline'); } } = {}) {
+function worker({ failCacheMatch = false, failCachePut = false, scope = 'https://app.test/', precache = [], fetchResponse = async () => { throw new Error('offline'); } } = {}) {
   const events = new Map();
   const stores = new Map();
   let activations = 0;
@@ -32,7 +32,10 @@ function worker({ failCacheMatch = false, failCachePut = false, scope = 'https:/
     self: { location: { origin: 'https://app.test' }, registration: { scope }, clients: { matchAll: async () => [] }, addEventListener: (name, fn) => events.set(name, fn), skipWaiting: async () => { activations++; } },
     caches, URL, Response, fetch: fetchResponse,
   };
-  vm.runInNewContext(readFileSync(new URL('../web/public/sw.js', import.meta.url), 'utf8').replaceAll('__AXOM_BUILD_ID__', 'current'), context);
+  const source = readFileSync(new URL('../web/public/sw.js', import.meta.url), 'utf8')
+    .replaceAll('__AXOM_BUILD_ID__', 'current')
+    .replace('const PRECACHE = []; // __AXOM_PRECACHE__', `const PRECACHE = ${JSON.stringify(precache)}; // __AXOM_PRECACHE__`);
+  vm.runInNewContext(source, context);
   return { events, caches, context, activations: () => activations };
 }
 
@@ -264,4 +267,52 @@ test('request cache=no-store bypasses shell cache even for a shipped asset', () 
     },
     respondWith: () => assert.fail('no-store request should not be intercepted'),
   });
+});
+
+test('manifest-pinned checkpoint chunk survives no-store host headers after deployment swap', async () => {
+  const asset = '/assets/updateCheckpoint-7UZDKYto.js';
+  const app = worker({
+    precache: [`.${asset}`],
+    fetchResponse: async () => new Response('old chunk removed', { status: 404, headers: { 'content-type': 'text/javascript' } }),
+  });
+  await (await app.caches.open('axom-shell-current')).put(
+    `https://app.test${asset}`,
+    new Response('export const safe = true;', { headers: { 'content-type': 'text/javascript', 'cache-control': 'no-store' } }),
+  );
+  let pending;
+  app.events.get('fetch')({
+    request: { url: `https://app.test${asset}`, method: 'GET', mode: 'same-origin' },
+    respondWith: (promise) => { pending = promise; },
+    waitUntil: () => {},
+  });
+  const result = await pending;
+  assert.equal(result.status, 200, 'old update checkpoint chunk was not served from pinned shell cache');
+  assert.equal(await result.text(), 'export const safe = true;');
+});
+
+test('pinned chunk cannot replay private, auth-varying or unpinned cached responses', async () => {
+  const pinned = '/assets/updateCheckpoint-7UZDKYto.js';
+  for (const [asset, headers] of [
+    [pinned, { 'cache-control': 'private, no-store' }],
+    [pinned, { 'cache-control': 'no-cache' }],
+    [pinned, { 'cache-control': 'no-store', vary: 'Cookie' }],
+    [pinned, { 'cache-control': 'no-store', 'set-cookie': 'session=A' }],
+    ['/assets/accountImage-7UZDKYto.js', { 'cache-control': 'no-store' }],
+  ]) {
+    const app = worker({
+      precache: [`.${pinned}`],
+      fetchResponse: async () => new Response('network-B', { headers: { 'content-type': 'text/javascript', ...headers } }),
+    });
+    await (await app.caches.open('axom-shell-current')).put(
+      `https://app.test${asset}`,
+      new Response('cached-A', { headers: { 'content-type': 'text/javascript', ...headers } }),
+    );
+    let pending;
+    app.events.get('fetch')({
+      request: { url: `https://app.test${asset}`, method: 'GET', mode: 'same-origin' },
+      respondWith: (promise) => { pending = promise; },
+      waitUntil: () => {},
+    });
+    assert.equal(await (await pending).text(), 'network-B', `replayed protected or unpinned asset: ${asset}`);
+  }
 });
