@@ -1920,7 +1920,7 @@ function JournalFeedback({ onClose, sessionDrafts }: {
   // another owner's localStorage key. Do not migrate legacy authenticated
   // drafts automatically because the old keys did not identify an account.
   const workspaceId = useStore((state) => state.profile.userId);
-  const accountId = useAccount((state) => state.user?.id);
+  const accountId = useAccount((state) => state.phase === "signed-in" ? state.user?.id : undefined);
   const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
   const [selection, setSelection] = useState<{ ownerKey: string; key: string } | null>(null);
   const selectedKey = selection?.ownerKey === ownerKey ? selection.key : null;
@@ -1956,7 +1956,7 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
   retryAttempted: boolean;
   sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
 }) {
-  const user = useAccount((state) => state.user);
+  const user = useAccount((state) => state.phase === "signed-in" ? state.user : null);
   const [savedCopies] = useState(() => readJournalFeedbackCopies(draftKey, selectedKey));
   const loaded = savedCopies.selected.stored;
   // If reading fails, permit in-tab writing and export without claiming a
