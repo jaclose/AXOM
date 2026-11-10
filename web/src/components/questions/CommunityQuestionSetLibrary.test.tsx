@@ -483,6 +483,38 @@ describe("Community Question Set Library", () => {
     expect(screen.getByText("1 question · renal")).toBeTruthy();
   });
 
+  it("retains bounded recognized visual plans when an unknown intent comes first", async () => {
+    const visualTags = [
+      "visual:intent:untrusted", "visual:intent:constructor",
+      "visual:intent:histology-micrograph", "visual:intent:mechanism-diagram", "visual:intent:histology-micrograph",
+      "visual:intent:gross-pathology-specimen", "visual:intent:microbiology-image",
+      "visual:keyword:glomerulus",
+    ];
+    const inspected = {
+      ...snapshot,
+      questions: [{ ...snapshot.questions[0], tags: visualTags }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: inspected, contentDigest: "d".repeat(64),
+      status: "approved", reviewRevision: 2,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    const label = screen.getByText(/Visual intent metadata:/);
+    expect(label.textContent).toContain("histology micrograph, mechanism diagram, gross pathology specimen");
+    expect(label.textContent).not.toContain("untrusted");
+    expect(label.textContent).not.toContain("microbiology image"); // Max three recognized kinds.
+    expect(label.textContent).toContain("No diagram is included");
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    // Presentation cannot rewrite the immutable approved tags, key or revision.
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(inspected);
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      reviewRevision: 2, contentDigest: "d".repeat(64),
+    });
+  });
+
   it("does not invent an answer key or rationale in a legacy preview without evidence", async () => {
     mock.preview.mockResolvedValue({
       id: summary.id,

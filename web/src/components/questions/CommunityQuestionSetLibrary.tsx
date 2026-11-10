@@ -28,13 +28,23 @@ const PUBLIC_VISUAL_INTENTS: Readonly<Record<string, string>> = {
 const topicTags = (tags: readonly string[]) => tags.filter(tag => !tag.startsWith("visual:"));
 
 function VisualIntentNote({ tags }: { tags: readonly string[] }) {
-  const kind = tags.find(tag => tag.startsWith("visual:intent:"))?.slice("visual:intent:".length);
-  const label = kind ? PUBLIC_VISUAL_INTENTS[kind] : undefined;
-  if (!label) return null; // Unknown metadata is never promoted to a clinical assertion.
+  // An unknown or prototype-inherited tag must not hide a later valid hint
+  // or render as a clinical label. Show at most three distinct known intents.
+  const recognized: string[] = [];
+  for (const tag of tags) {
+    if (!tag.startsWith("visual:intent:")) continue;
+    const kind = tag.slice("visual:intent:".length);
+    if (!Object.prototype.hasOwnProperty.call(PUBLIC_VISUAL_INTENTS, kind)) continue;
+    const label = PUBLIC_VISUAL_INTENTS[kind];
+    if (recognized.includes(label)) continue;
+    recognized.push(label);
+    if (recognized.length === 3) break;
+  }
+  if (!recognized.length) return null; // Unknown metadata is not medical evidence.
   const keywords = tags.filter(tag => tag.startsWith("visual:keyword:"))
     .map(tag => tag.slice("visual:keyword:".length))
     .filter(keyword => keyword.length >= 3 && keyword.length <= 49).slice(0, 3);
-  return <p className="sub">Visual intent metadata: {label}{keywords.length ? ` · ${keywords.join(", ")}` : ""}.
+  return <p className="sub">Visual intent metadata: {recognized.join(", ")}{keywords.length ? ` · ${keywords.join(", ")}` : ""}.
     No diagram is included. Medical accuracy and media rights require separate review.</p>;
 }
 
