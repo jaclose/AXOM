@@ -1693,6 +1693,33 @@ function JournalWelcome({ initial, initialReminders, onComplete }: {
   );
 }
 
+// Name-only profile edits change the legacy feedback key. Keep original
+// feedback bytes where they are; record append-only, same-owner lookup links.
+// A link never crosses authenticated accounts or local/account boundaries.
+const JOURNAL_FEEDBACK_BASE_PATTERN = /^axom-journal-feedback-draft:([a-z0-9_-]+)(?::account:([a-zA-Z0-9_-]+))?$/;
+const JOURNAL_FEEDBACK_ALIAS_TOKEN = ":name-alias:v1:";
+const JOURNAL_FEEDBACK_ALIAS_LIMIT = 16;
+
+function journalFeedbackSameOwner(root: string, candidate: string): boolean {
+  const current = JOURNAL_FEEDBACK_BASE_PATTERN.exec(root);
+  const previous = JOURNAL_FEEDBACK_BASE_PATTERN.exec(candidate);
+  return Boolean(current && previous && current[2] === previous[2]);
+}
+
+function journalFeedbackRecordNameAlias(oldKey: string, newKey: string) {
+  if (oldKey === newKey || !journalFeedbackSameOwner(newKey, oldKey)) return;
+  try {
+    // If reads are blocked, do not claim to have durable rename metadata.
+    window.localStorage.getItem(`${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
+    window.localStorage.setItem(
+      `${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${journalFeedbackRevision()}`, oldKey,
+    );
+  } catch {
+    // During an outage the existing in-tab fallback remains exportable.
+    // Nothing overwrites or removes the original saved draft or alias.
+  }
+}
+
 // Browser storage outages leave feedback only in volatile memory. Retain it
 // through SPA route unmount/remount in the same tab, never across tabs or reload.
 // Keys already include workspace and authenticated account; a successful save
@@ -1720,6 +1747,7 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
       const newOwner = accountId ? `${next.profile.userId}:account:${accountId}` : next.profile.userId;
       const oldKey = `axom-journal-feedback-draft:${oldOwner}`;
       const newKey = `axom-journal-feedback-draft:${newOwner}`;
+      journalFeedbackRecordNameAlias(oldKey, newKey);
       const pending = tabDrafts.get(oldKey);
       // Transfer volatile ownership only when the destination is empty.
       // Never overwrite another pending draft; clear the old volatile alias
@@ -1878,31 +1906,58 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
 } {
   const legacy = readJournalFeedbackDraft(baseKey);
   const copies: JournalFeedbackCopy[] = [{ key: baseKey, stored: legacy, savedAt: 0, baseFingerprint: null }];
-  const writerPrefix = `${baseKey}:writer:`;
   try {
-    // The legacy key is read-only. Each mounted editor writes its own key, so
-    // independent tabs cannot overwrite each other's private feedback bytes.
+    // Collect the bounded key inventory once. Previous-name lookup is
+    // restricted to append-only links for the SAME account/local owner.
+    const keys: string[] = [];
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
-      if (!key?.startsWith(writerPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(writerPrefix.length))) continue;
-      const stored = readJournalFeedbackDraft(key);
-      let savedAt = 0;
-      let baseFingerprint: string | null = null;
-      if (stored.raw && !stored.unreadable) {
-        const record = JSON.parse(stored.raw) as Record<string, unknown>;
-        savedAt = typeof record.__axomSavedAt === "number" ? record.__axomSavedAt : 0;
-        baseFingerprint = typeof record.__axomBaseFingerprint === "string" ? record.__axomBaseFingerprint : null;
+      if (key) keys.push(key);
+    }
+    const ownerKeys = [baseKey];
+    for (let ownerIndex = 0; ownerIndex < ownerKeys.length; ownerIndex += 1) {
+      if (ownerIndex >= JOURNAL_FEEDBACK_ALIAS_LIMIT)
+        throw new Error("Too many historical feedback owners");
+      const aliasPrefix = `${ownerKeys[ownerIndex]}${JOURNAL_FEEDBACK_ALIAS_TOKEN}`;
+      for (const key of keys) {
+        if (!key.startsWith(aliasPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(aliasPrefix.length))) continue;
+        const previousKey = window.localStorage.getItem(key);
+        if (previousKey && journalFeedbackSameOwner(baseKey, previousKey) && !ownerKeys.includes(previousKey))
+          ownerKeys.push(previousKey);
       }
-      copies.push({ key, stored, savedAt, baseFingerprint });
+    }
+    for (const ownerKey of ownerKeys) {
+      if (ownerKey !== baseKey) {
+        const old = readJournalFeedbackDraft(ownerKey);
+        if (old.unreadable) throw new Error("An older feedback copy cannot be read");
+        if (old.raw !== null)
+          copies.push({ key: ownerKey, stored: old, savedAt: 0, baseFingerprint: null });
+      }
+      const writerPrefix = `${ownerKey}:writer:`;
+      for (const key of keys) {
+        if (!key.startsWith(writerPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(writerPrefix.length))) continue;
+        const stored = readJournalFeedbackDraft(key);
+        let savedAt = 0;
+        let baseFingerprint: string | null = null;
+        if (stored.raw && !stored.unreadable) {
+          const record = JSON.parse(stored.raw) as Record<string, unknown>;
+          savedAt = typeof record.__axomSavedAt === "number" ? record.__axomSavedAt : 0;
+          baseFingerprint = typeof record.__axomBaseFingerprint === "string" ? record.__axomBaseFingerprint : null;
+        }
+        copies.push({ key, stored, savedAt, baseFingerprint });
+      }
     }
   } catch {
-    // An incomplete key inventory cannot prove that another draft is absent.
+    // An incomplete inventory cannot prove that a newer or older draft is absent.
     return {
       selected: { key: baseKey, stored: { ...legacy, unreadable: true }, savedAt: 0, baseFingerprint: null },
       others: [], legacyRaw: legacy.raw,
     };
   }
-  const newest = copies.slice(1).filter((copy) => !copy.stored.acknowledged && !copy.stored.unreadable)
+  // Never automatically replace the current owner's selection with an older
+  // display-name copy. Expose historical records as explicit recoverable copies.
+  const newest = copies.slice(1).filter((copy) => copy.key.startsWith(`${baseKey}:writer:`)
+    && !copy.stored.acknowledged && !copy.stored.unreadable)
     .sort((a, b) => b.savedAt - a.savedAt || b.key.localeCompare(a.key))[0];
   const legacyChangedSinceNewest = newest && legacy.raw !== null
     && newest.baseFingerprint !== journalFeedbackFingerprint(legacy.raw);
