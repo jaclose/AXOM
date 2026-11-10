@@ -110,6 +110,8 @@ test("same PDF digest with a refilled week must not reuse old positive triage sc
   assert.deepEqual(held[0].scope_evidence.map(item => item.week), [1, 4]);
   assert.equal(recommendNextSources(held).length, 0);
   assert.equal(summarizeTriage(held).scopeChangedReviewRows, 1);
+  assert.deepEqual(mergePdfTriageRows(held, [], selectPdfJobs([job])), held,
+    "held filing evidence must remain idempotent across repeated runs");
 });
 
 test("incremental report retains matching prior cache but drops out-of-queue source hashes", () => {
