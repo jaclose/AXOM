@@ -63,6 +63,12 @@ test("feedback remains locally recoverable when browser reads fail, then retries
   await page.getByRole("button", { name: "Feedback", exact: true }).click();
   await expect(dialog.getByLabel("What do you like?")).toHaveValue("An unsaved in-tab recovery draft");
 
+  // Repeated denied reads must retain both focus and private in-tab writing.
+  const blockedRetry = dialog.getByRole("button", { name: "Retry reading saved feedback" });
+  await blockedRetry.focus();
+  await blockedRetry.press("Enter");
+  await expect(blockedRetry).toBeFocused();
+  await expect(liked).toHaveValue("An unsaved in-tab recovery draft");
   await page.evaluate(() => {
     (window as Window & { __axomBlockFeedbackRead?: boolean }).__axomBlockFeedbackRead = false;
   });
@@ -158,6 +164,8 @@ test("retries a blocked submission receipt read without editing the older feedba
   await retry.press("Enter");
   await expect(liked).toBeEditable();
   await expect(liked).toHaveValue("A previous private draft");
+  await expect(liked).toBeFocused();
+  await expect(dialog.getByRole("status")).toHaveText("Saved feedback is readable again.");
   const retained = await page.evaluate((key) => ({
     raw: localStorage.getItem(key),
     writers: Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))

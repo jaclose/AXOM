@@ -1932,16 +1932,18 @@ function JournalFeedback({ onClose, sessionDrafts }: {
     selectedKey={selectedKey}
     onSelectCopy={(key) => setSelection({ ownerKey, key })}
     onRetryRead={() => setReadRetry((count) => count + 1)}
+    retryAttempted={readRetry > 0}
     onClose={onClose}
   />;
 }
 
-function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, onRetryRead, sessionDrafts }: {
+function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, onRetryRead, retryAttempted, sessionDrafts }: {
   onClose: () => void;
   draftKey: string;
   selectedKey: string | null;
   onSelectCopy: (key: string) => void;
   onRetryRead: () => void;
+  retryAttempted: boolean;
   sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
 }) {
   const user = useAccount((state) => state.user);
@@ -1982,6 +1984,19 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
   );
   const submittedReceiptRef = useRef<{ key: string; value: string } | null>(null);
   const [saveRetryToken, setSaveRetryToken] = useState(0);
+
+  // Retry remounts this owner to re-read browser storage. The shared Modal
+  // initially focuses Close, so restore the relevant keyboard target here.
+  useEffect(() => {
+    if (!retryAttempted) return;
+    const dialogs = document.querySelectorAll<HTMLElement>('.journal-feedback-modal[role="dialog"]');
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return;
+    const target = loaded.unreadable
+      ? dialog.querySelector<HTMLButtonElement>('[data-journal-feedback-retry="true"]')
+      : dialog.querySelector<HTMLTextAreaElement>('textarea:not([readonly])');
+    (target ?? dialog).focus();
+  }, [retryAttempted, loaded.unreadable]);
 
   function changeDraft(next: JournalExperienceFeedbackInput) {
     // A failed browser write must survive an account handoff in this tab.
@@ -2134,7 +2149,8 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
         )}
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
-        {loaded.unreadable && <GButton size="sm" onClick={onRetryRead}>Retry reading saved feedback</GButton>}
+        {retryAttempted && !loaded.unreadable && <p className="journal-feedback-note" role="status">Saved feedback is readable again.</p>}
+        {loaded.unreadable && <GButton size="sm" data-journal-feedback-retry="true" onClick={onRetryRead}>Retry reading saved feedback</GButton>}
         {storageError && !loaded.unreadable && !conflicted && <GButton size="sm" onClick={() => setSaveRetryToken((token) => token + 1)}>Retry draft save</GButton>}
         {error && <p className="journal-feedback-note" role="alert">{error}</p>}
       </>}

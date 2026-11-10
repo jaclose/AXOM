@@ -74,6 +74,11 @@ describe("Journal feedback when browser storage cannot be read", () => {
     expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
       .toBe("A new in-tab draft while reads are blocked.");
 
+    // Repeated failure must retain keyboard focus and the unsaved text.
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("A new in-tab draft while reads are blocked.");
     blockedRead.mockRestore();
     fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
     expect(originalGet.call(localStorage, key)).toBe(oldDraft);
@@ -226,6 +231,8 @@ describe("Journal feedback when browser storage cannot be read", () => {
     const recovered = screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
     expect(recovered.readOnly).toBe(false);
     expect(recovered.value).toBe("Older private saved feedback.");
+    expect(document.activeElement).toBe(recovered);
+    expect(screen.getByText("Saved feedback is readable again.").getAttribute("role")).toBe("status");
     expect(originalGet.call(localStorage, key)).toBe(oldDraft);
     expect(writes.mock.calls.some(([storageKey]) => String(storageKey).startsWith(key))).toBe(false);
   });
@@ -240,6 +247,7 @@ describe("Journal feedback when browser storage cannot be read", () => {
     expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).readOnly).toBe(true);
     expect(screen.getByRole("button", { name: "Download saved copy" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Retry reading saved feedback" }));
     expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).readOnly).toBe(true);
     expect(screen.getByRole("button", { name: "Download saved copy" })).toBeTruthy();
     expect(localStorage.getItem(key)).toBe(unsupported);
