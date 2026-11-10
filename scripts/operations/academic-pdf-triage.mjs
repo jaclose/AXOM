@@ -13,6 +13,7 @@
  * Every PDF read is bounded, and previous results are reused by SHA/mtime.
  */
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import {
   existsSync, lstatSync, mkdirSync, readFileSync, realpathSync,
@@ -73,26 +74,104 @@ export function sourceRoots(home = homedir()) {
 export function selectPdfJobs(queue) {
   if (!Array.isArray(queue)) throw new Error("Canonical queue must be an array.");
   const selected = [];
-  const seen = new Set();
+  const byHash = new Map();
   for (const job of queue) {
     if (job?.input_mode !== "pdf_original_extract_with_review"
-      || extname(job.source_path ?? "").toLowerCase() !== ".pdf") continue;
+      || typeof job.source_path !== "string"
+      || extname(job.source_path).toLowerCase() !== ".pdf") continue;
     const match = shaPattern.exec(job.canonical_input_key ?? "");
     if (!match) {
       // A path-only job is not canonical byte-identifiable and must be
       // reclassified by Agent 1 before a repeat-safe batch.
       continue;
     }
-    if (seen.has(match[1])) continue;
-    seen.add(match[1]);
-    selected.push({ source_sha256: match[1], source_path: job.source_path,
-      equivalent_paths: job.equivalent_paths ?? [], module: job.module ?? null,
-      term: job.term ?? null, week: Number.isInteger(job.week) ? job.week : null,
+    const evidence = { source_id: job.source_id ?? null, source_path: job.source_path,
+      term: job.term ?? null, module: job.module ?? null,
+      week: Number.isInteger(job.week) ? job.week : null };
+    const aliases = Array.isArray(job.equivalent_paths)
+      ? job.equivalent_paths.filter(path => typeof path === "string") : [];
+    const existing = byHash.get(match[1]);
+    if (existing) {
+      // A byte-identical mirror is not proof that its academic filing agrees.
+      // Retain every original scope instead of silently taking the first week.
+      const original = existing.scope_evidence[0];
+      if (["term", "module", "week"].some(key => original[key] !== evidence[key])) {
+        existing.requires_scope_review = true;
+        existing.term = null; existing.module = null; existing.week = null;
+      }
+      existing.scope_evidence.push(evidence);
+      for (const path of [job.source_path, ...aliases]) {
+        if (path !== existing.source_path && !existing.equivalent_paths.includes(path))
+          existing.equivalent_paths.push(path);
+      }
+      continue;
+    }
+    const selectedJob = { source_sha256: match[1], source_path: job.source_path,
+      equivalent_paths: aliases, module: evidence.module,
+      term: evidence.term, week: evidence.week,
       document_type: job.document_type ?? "unclassified",
       answer_variant: job.answered_variant ?? null,
-      priority: Number.isInteger(job.priority) ? job.priority : 10 });
+      priority: Number.isInteger(job.priority) ? job.priority : 10,
+      requires_scope_review: false, scope_evidence: [evidence] };
+    selected.push(selectedJob);
+    byHash.set(match[1], selectedJob);
   }
   return selected;
+}
+
+function scopeConflictReviewRow(job) {
+  return { source_sha256: job.source_sha256, source_path: job.source_path,
+    document_type: job.document_type, term: null, module: null, week: null,
+    answer_variant: job.answer_variant, requires_scope_review: true,
+    scope_evidence: job.scope_evidence,
+    status: "academic_scope_conflict_review",
+    reason: "Byte-identical source filings disagree on term, module or week; manual provenance review required." };
+}
+
+function academicFilingChanged(previous, current) {
+  return ["term", "module", "week"].some(key => (previous[key] ?? null) !== (current[key] ?? null));
+}
+
+function scopeChangedReviewRow(job, previous) {
+  const previousEvidence = Array.isArray(previous.scope_evidence) ? previous.scope_evidence : [{
+    source_id: null, source_path: previous.source_path ?? null,
+    term: previous.term ?? null, module: previous.module ?? null, week: previous.week ?? null,
+    provenance: "previous_triage_cache",
+  }];
+  const seenEvidence = new Set();
+  const scopeEvidence = [...previousEvidence, ...job.scope_evidence].filter(item => {
+    const identity = JSON.stringify([item.source_id ?? null, item.source_path ?? null,
+      item.term ?? null, item.module ?? null, item.week ?? null]);
+    if (seenEvidence.has(identity)) return false;
+    seenEvidence.add(identity);
+    return true;
+  });
+  return { source_sha256: job.source_sha256, source_path: job.source_path,
+    document_type: job.document_type, term: null, module: null, week: null,
+    answer_variant: job.answer_variant, requires_scope_review: true,
+    scope_evidence: scopeEvidence,
+    status: "academic_scope_changed_review",
+    reason: "Academic filing changed since prior PDF triage; source week/provenance must be reviewed before reuse." };
+}
+
+/** Never carry a prior ready triage row across a newly conflicting academic scope. */
+export function mergePdfTriageRows(priorRows, inspectedRows, jobs) {
+  const active = new Set(jobs.map(job => job.source_sha256));
+  const merged = new Map(priorRows.filter(row => active.has(row.source_sha256))
+    .map(row => [row.source_sha256, row]));
+  for (const row of inspectedRows) merged.set(row.source_sha256, row);
+  // Apply all holds, including jobs outside this invocation's --start/--limit.
+  const previousByHash = new Map(priorRows.map(row => [row.source_sha256, row]));
+  for (const job of jobs) {
+    if (job.requires_scope_review) {
+      merged.set(job.source_sha256, scopeConflictReviewRow(job));
+    } else {
+      const previous = previousByHash.get(job.source_sha256);
+      if (previous && academicFilingChanged(previous, job))
+        merged.set(job.source_sha256, scopeChangedReviewRow(job, previous));
+    }
+  }
+  return [...merged.values()].sort((a, b) => a.source_sha256.localeCompare(b.source_sha256));
 }
 
 function parseArgs(argv) {
@@ -146,6 +225,9 @@ function scopedAvailableFile(job, roots) {
 }
 
 async function inspectPdf(job, options, previous) {
+  if (job.requires_scope_review) return scopeConflictReviewRow(job);
+  if (previous && academicFilingChanged(previous, job))
+    return scopeChangedReviewRow(job, previous);
   const source = scopedAvailableFile(job, options.roots);
   const base = { source_sha256: job.source_sha256, source_path: job.source_path,
     document_type: job.document_type, term: job.term, module: job.module,
@@ -191,9 +273,78 @@ async function inspectPdf(job, options, previous) {
   }
 }
 
-export function recommendNextSources(rows, excludedShas = new Set(), count = 100) {
+/**
+ * Revalidate every queued source before any current-run recommendation or
+ * release receipt, including previous cache rows outside --start/--limit.
+ * The SHA is a ledger label only: path stat is NOT full-byte digest validation.
+ * Neither source presence nor PDF sample implies medical or rights approval.
+ */
+export function verifyPdfSourceAvailability(rows, jobs, roots,
+  { runId, runAt, now = () => new Date().toISOString() }) {
+  if (typeof runId !== "string" || runId.length < 8
+    || typeof runAt !== "string" || !Number.isFinite(Date.parse(runAt)))
+    throw new Error("Current PDF triage run ID and ISO timestamp are required.");
+  const bySha = new Map(jobs.map(job => [job.source_sha256, job]));
+  const existing = new Map(rows.map(row => [row.source_sha256, row]));
+  // A first --start/--limit run can leave queued sources absent from both
+  // the previous report and this slice. Emit an explicit hold for every one.
+  const completeRows = jobs.map(job => existing.get(job.source_sha256) ?? {
+    source_sha256: job.source_sha256, source_path: job.source_path,
+    document_type: job.document_type, term: job.term, module: job.module,
+    week: job.week, answer_variant: job.answer_variant,
+    status: "reader_failure_needs_review", inspectionRequired: true,
+    reason: "Source is queued but no bounded PDF inspection or reusable sample exists yet.",
+  }).sort((a, b) => a.source_sha256.localeCompare(b.source_sha256));
+  return completeRows.map(row => {
+    const job = bySha.get(row.source_sha256);
+    if (!job) throw new Error("Triage source does not match the current PDF queue.");
+    // Never inherit a previous run's proof, even from an otherwise identical
+    // parser cache row. A new verified original stat is mandatory.
+    const { availabilityProof: _priorProof, sourceAvailabilityStatus: _priorAvailability,
+      ...previous } = row;
+    let source = scopedAvailableFile(job, roots), st = null;
+    try { if (source) st = statSync(source.path); } catch { source = null; }
+    if (!source || !st || !st.isFile()) {
+      const missingVolume = typeof job.source_path === "string"
+        && job.source_path.startsWith("/Volumes/JDabSSD/")
+        && !existsSync("/Volumes/JDabSSD");
+      const status = missingVolume ? "source_volume_unmounted" : "source_path_unavailable";
+      if (job.requires_scope_review || previous.requires_scope_review)
+        return { ...previous, sourceAvailabilityStatus: status };
+      return { ...previous, status, sourceAvailabilityStatus: status,
+        reason: missingVolume
+          ? "Authorized external academic drive is disconnected; file is not proven deleted."
+          : "No authorized original or identical alias is currently accessible." };
+    }
+    const identityChanged = previous.resolved_path !== source.path
+      || previous.bytes !== st.size || previous.mtime_ms !== st.mtimeMs;
+    const identity = { resolved_path: source.path, usedMirror: source.usedMirror,
+      bytes: st.size, mtime_ms: st.mtimeMs };
+    // Even if an authorized mirror exists now, old sample hints cannot
+    // certify newly changed bytes/path/mtime outside a fresh Poppler inspection.
+    if (previous.status === "text_with_question_indicators" && identityChanged)
+      return { ...previous, ...identity, status: "reader_failure_needs_review",
+        sourceAvailabilityStatus: "changed_original_requires_reinspection",
+        reason: "Current original path or file metadata changed since PDF sampling; rerun bounded source inspection." };
+    const checkedAt = now();
+    if (!Number.isFinite(Date.parse(checkedAt)))
+      throw new Error("Invalid PDF source availability verification clock.");
+    return { ...previous, ...identity, sourceAvailabilityStatus: "authorized_path_present",
+      source_sha_is_ledger_declared_not_rehashed: true,
+      availabilityProof: { runId, source_sha256: row.source_sha256,
+        authorizedPathAvailable: true, checkedAt } };
+  });
+}
+
+export function recommendNextSources(rows, excludedShas = new Set(), count = 100, runId = null) {
   const supported = new Set(["imcq", "pq", "esoft", "review_questions", "small_group", "case"]);
   return rows.filter(row => row.status === "text_with_question_indicators"
+    && row.availabilityProof?.authorizedPathAvailable === true
+    && row.availabilityProof.source_sha256 === row.source_sha256
+    && typeof row.availabilityProof.runId === "string"
+    && row.availabilityProof.runId.length >= 8
+    && (!runId || row.availabilityProof.runId === runId)
+    && row.requires_scope_review !== true
     && !excludedShas.has(row.source_sha256))
     .map(row => {
       const score = 100 + Math.min(10, row.sampledQuestionHeadingIndicators ?? 0) * 3
@@ -212,8 +363,8 @@ export function recommendNextSources(rows, excludedShas = new Set(), count = 100
     .slice(0, count);
 }
 
-export function recommendBalancedSources(rows, excludedShas = new Set(), count = 100) {
-  const candidates = recommendNextSources(rows, excludedShas, rows.length);
+export function recommendBalancedSources(rows, excludedShas = new Set(), count = 100, runId = null) {
+  const candidates = recommendNextSources(rows, excludedShas, rows.length, runId);
   const selected = [], used = new Set();
   const terms = ["T1", "T2", "T3", "T4", "T5"];
   const termQuota = Math.max(1, Math.floor(count / terms.length));
@@ -243,7 +394,9 @@ export function summarizeTriage(rows) {
     textWithQuestionIndicators: byStatus.text_with_question_indicators ?? 0,
     lowTextScanOrFigures: byStatus.low_text_scan_or_figures ?? 0,
     unmountedVolumeSources: byStatus.source_volume_unmounted ?? 0,
-    unreadableOrDeferred: ["source_path_unavailable","source_volume_unmounted","size_limit_deferred","reader_failure_needs_review","encrypted_pdf_review","pdfinfo_unreadable"]
+    scopeConflictReviewRows: byStatus.academic_scope_conflict_review ?? 0,
+    scopeChangedReviewRows: byStatus.academic_scope_changed_review ?? 0,
+    unreadableOrDeferred: ["source_path_unavailable","source_volume_unmounted","size_limit_deferred","reader_failure_needs_review","encrypted_pdf_review","pdfinfo_unreadable","academic_scope_conflict_review","academic_scope_changed_review"]
       .reduce((n, key) => n + (byStatus[key] ?? 0), 0),
     important: "Metadata-only triage is NOT a question count, answer review, source SHA recheck, OCR output, or backend receipt.",
   };
@@ -264,9 +417,10 @@ async function main(args = process.argv.slice(2)) {
       inspected[index] = await inspectPdf(job, options, prior.get(job.source_sha256));
     }
   }));
-  const map = new Map(priorRows.map(row => [row.source_sha256, row]));
-  for (const row of inspected) map.set(row.source_sha256, row);
-  const rows = [...map.values()].sort((a, b) => a.source_sha256.localeCompare(b.source_sha256));
+  const merged = mergePdfTriageRows(priorRows, inspected, jobs);
+  const runId = randomUUID();
+  const runAt = new Date().toISOString();
+  const rows = verifyPdfSourceAvailability(merged, jobs, options.roots, { runId, runAt });
   let processedB3 = new Set();
   try {
     const b3 = JSON.parse(readFileSync(join(artifactDir, "agent-2-priority-batches.json"), "utf8"))
@@ -274,14 +428,14 @@ async function main(args = process.argv.slice(2)) {
     processedB3 = new Set((b3?.jobs ?? []).map(job => shaPattern.exec(job.canonical_input_key ?? "")?.[1]).filter(Boolean));
   } catch { /* A missing specialist manifest does not alter raw triage counts. */ }
   const report = {
-    schema: "axom-academic-pdf-triage-v1", runAt: new Date().toISOString(),
+    schema: "axom-academic-pdf-triage-v1", runId, runAt,
     queuePath: options.input, queueDistinctPdfJobs: jobs.length,
     selectedStart: options.start, selectedJobs: slice.length,
     reportCachedSourceRows: rows.length,
     summary: summarizeTriage(rows),
     alreadyPrioritizedB3SourceHashes: processedB3.size,
-    recommendedNextAfterB3: recommendNextSources(rows, processedB3, 100),
-    balancedNextAfterB3: recommendBalancedSources(rows, processedB3, 100),
+    recommendedNextAfterB3: recommendNextSources(rows, processedB3, 100, runId),
+    balancedNextAfterB3: recommendBalancedSources(rows, processedB3, 100, runId),
     recommendationEvidence: "Three-page PDF text hints only; full source SHA, answer fidelity, figures and rights require review. Balanced recommendation guarantees up to 20 candidates per represented term (T1–T5) before filling remaining capacity.",
     rows,
   };
