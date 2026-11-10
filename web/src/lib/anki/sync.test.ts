@@ -196,6 +196,76 @@ describe("pushing AXOM cards to Anki", () => {
     expect(h.fake.notes.has(old.noteId)).toBe(true);
   });
 
+  it("never re-adds a kind-switch replacement after Anki applied it but its reply was lost", async () => {
+    const fake = new FakeAnkiConnect();
+    const realFetch = createFakeFetch(fake);
+    let loseReplacementReply = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const action = JSON.parse(String(init?.body)) as { action?: string };
+      const reply = await realFetch(input, init);
+      if (loseReplacementReply && action.action === "addNotes") {
+        loseReplacementReply = false;
+        // Anki performed the mutation; the caller cannot know that its HTTP
+        // response was lost. A future sync must discover the existing note.
+        throw new TypeError("the response vanished after addNotes committed");
+      }
+      return reply;
+    };
+    const client = createAnkiClient({ fetchImpl });
+    const run = (cards: AnkiCard[], state: LinkState) => syncCardsToAnki({
+      client, cards, catalog, layout: DEFAULT_DECK_LAYOUT, deletePolicy: "ask", state,
+    });
+    const initial = await run([card("a")], emptyLinkState());
+    expect(initial.report).toMatchObject({ added: 1, offline: false });
+
+    const converted = [card("a", { type: "cloze", front: "{{c1::Renal}} clearance", back: "" })];
+    loseReplacementReply = true;
+    const uncertain = await run(converted, initial.state);
+    expect(uncertain.report).toMatchObject({ offline: true, added: 0 });
+    expect(fake.notes.size).toBe(2); // original Basic plus committed Cloze
+    expect(uncertain.state.links.a.noteId).toBe(initial.state.links.a.noteId);
+
+    const retry = await run(converted, uncertain.state);
+    expect(retry.report).toMatchObject({ added: 0, conflicts: 1, offline: false });
+    expect(retry.state.links.a.issue?.kind).toBe("conflict");
+    expect(fake.notes.size).toBe(2); // no third note with the same AxomId
+    expect(fake.actionsCalled("addNotes")).toHaveLength(2);
+  });
+
+  it("does not relink the old Basic note as a new Cloze when an addNotes batch partially fails", async () => {
+    const h = harness({ addNotesFailure: "throw" });
+    const original = card("a");
+    expect(await h.run([original])).toMatchObject({ added: 1 });
+    const originalId = h.state.links.a.noteId;
+    const invalidCloze = card("a", { type: "cloze", front: "missing a cloze deletion", back: "" });
+
+    const report = await h.run([invalidCloze]);
+    expect(report).toMatchObject({ replaced: 0, failed: 1 });
+    expect(h.state.links.a).toMatchObject({ noteId: originalId, kind: "basic" });
+    expect(h.fake.notes.size).toBe(1); // invalid replacement never existed
+    expect(h.fake.call("areSuspended", { cards: h.state.links.a.cardIds })).toEqual([false]);
+  });
+
+  it("does not mistake intentionally retired note types for an uncertain new replacement", async () => {
+    const h = harness();
+    const basic = card("a");
+    const cloze = card("a", { type: "cloze", front: "{{c1::Card}} A", back: "" });
+    const first = await h.run([basic]);
+    expect(first.added).toBe(1);
+    const originalId = h.state.links.a.noteId;
+
+    const second = await h.run([cloze]);
+    expect(second).toMatchObject({ replaced: 1, conflicts: 0 });
+    const clozeId = h.state.links.a.noteId;
+    expect(h.state.links.a.retiredNoteIds).toEqual([originalId]);
+
+    const third = await h.run([basic]);
+    expect(third).toMatchObject({ replaced: 1, conflicts: 0 });
+    expect(h.state.links.a.noteId).not.toBe(originalId);
+    expect(h.state.links.a.retiredNoteIds).toEqual([originalId, clozeId]);
+    expect(h.fake.notes.size).toBe(3); // historical notes remain, but no accidental conflict
+  });
+
   it("creates the reverse card for basic-reversed cards", async () => {
     const h = harness();
     await h.run([card("a")]);
