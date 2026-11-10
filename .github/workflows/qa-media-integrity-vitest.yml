@@ -6,6 +6,10 @@ on:
       - "web/src/lib/sync/cloudMedia.ts"
       - "web/src/lib/sync/cloudMediaCurrentMainIntegrity.qa.test.ts"
       - "web/src/lib/sync/cloudMediaEpochRevocation.qa.test.ts"
+      - "web/src/lib/sync/atomicMediaWrite.ts"
+      - "web/src/lib/sync/contentDownloads.ts"
+      - "web/src/lib/sync/contentDownloads.mediaIntegrity.test.ts"
+      - "web/src/lib/sync/contentDownloads.originalAccountEpoch.test.ts"
       - "web/src/lib/questionAttachments.ts"
       - "web/src/lib/questionAttachmentScope.ts"
       - ".github/workflows/qa-media-integrity-vitest.yml"
@@ -34,9 +38,25 @@ jobs:
           git status --porcelain
       - run: node scripts/toolchain.mjs
       - run: npm --prefix web ci
-      - name: Execute both current-main image-integrity and account-epoch regression suites
-        run: >-
-          npm --prefix web run test --
-          src/lib/sync/cloudMediaCurrentMainIntegrity.qa.test.ts
-          src/lib/sync/cloudMediaEpochRevocation.qa.test.ts
-          --reporter=verbose
+      - name: Verify cloud media plus available original-recovery suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          suites=(
+            src/lib/sync/cloudMediaCurrentMainIntegrity.qa.test.ts
+            src/lib/sync/cloudMediaEpochRevocation.qa.test.ts
+          )
+          # R24/R25 are separate held MOTHERSHIP branches. Run their tests
+          # once integrated; do not fabricate coverage in the older QA stack.
+          for suite in \
+            src/lib/sync/contentDownloads.mediaIntegrity.test.ts \
+            src/lib/sync/contentDownloads.originalAccountEpoch.test.ts; do
+            if [[ -f "web/$suite" ]]; then
+              suites+=("$suite")
+            else
+              echo "NOT INCLUDED IN THIS COMMIT: $suite (not tested)"
+            fi
+          done
+          printf 'Executing %s synthetic suites:\n' "${#suites[@]}"
+          printf ' - %s\n' "${suites[@]}"
+          npm --prefix web run test -- "${suites[@]}" --reporter=verbose
