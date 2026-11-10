@@ -72,7 +72,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  const staticAsset = /\.(?:js|mjs|css|png|jpe?g|svg|webp|ico|woff2?|webmanifest)$/.test(url.pathname);
+  // Cache only shipped public application assets. Extension alone is not a
+  // privacy boundary: account-specific same-origin image URLs could otherwise
+  // persist in the origin-wide shell cache and outlive an account switch.
+  const scopePath = new URL(self.registration?.scope || `${self.location.origin}/`).pathname;
+  if (!url.pathname.startsWith(scopePath)) return;
+  const publicPath = url.pathname.slice(scopePath.length);
+  const shippedAsset = /^(?:assets|academic-diagrams|anki-guide|cinematics|fonts|icons|landing|scenes|soundscapes|third-party)\//.test(publicPath)
+    || /^(?:apple-touch-icon\.png|favicon-32\.png|favicon\.svg|icon-(?:192|512)\.png|manifest\.webmanifest)$/.test(publicPath);
+  const staticAsset = shippedAsset && /\.(?:js|mjs|css|png|jpe?g|svg|webp|ico|woff2?|webmanifest)$/.test(publicPath);
   if (!staticAsset) return;
   event.respondWith((async () => {
     const hit = await cachedAppAsset(request).catch(() => undefined);

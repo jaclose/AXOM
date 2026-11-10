@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-function worker({ failCacheMatch = false, failCachePut = false, fetchResponse = async () => { throw new Error('offline'); } } = {}) {
+function worker({ failCacheMatch = false, failCachePut = false, scope = 'https://app.test/', fetchResponse = async () => { throw new Error('offline'); } } = {}) {
   const events = new Map();
   const stores = new Map();
   let activations = 0;
@@ -29,7 +29,7 @@ function worker({ failCacheMatch = false, failCachePut = false, fetchResponse = 
     },
   };
   const context = {
-    self: { location: { origin: 'https://app.test' }, clients: { matchAll: async () => [] }, addEventListener: (name, fn) => events.set(name, fn), skipWaiting: async () => { activations++; } },
+    self: { location: { origin: 'https://app.test' }, registration: { scope }, clients: { matchAll: async () => [] }, addEventListener: (name, fn) => events.set(name, fn), skipWaiting: async () => { activations++; } },
     caches, URL, Response, fetch: fetchResponse,
   };
   vm.runInNewContext(readFileSync(new URL('../web/public/sw.js', import.meta.url), 'utf8').replaceAll('__AXOM_BUILD_ID__', 'current'), context);
@@ -118,4 +118,77 @@ test('activation preserves other application caches and old clients', async () =
   app.events.get('activate')({ waitUntil: (value) => { task = value; } });
   await task;
   assert.deepEqual(await app.caches.keys(), ['other-app', 'axom-shell-previous', 'axom-shell-current']);
+});
+
+test('worker does not intercept account-specific same-origin image-shaped URLs', async () => {
+  const app = worker({ fetchResponse: async () => new Response('account-A image', { headers: { 'content-type': 'image/png' } }) });
+  for (const path of [
+    '/private/avatar.png',
+    '/storage/v1/object/private/learner.webp',
+    '/user-files/learner.svg',
+    '/profile-image.png',
+  ]) {
+    let response;
+    let lifetime;
+    app.events.get('fetch')({
+      request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { response = value; },
+      waitUntil: (value) => { lifetime = value; },
+    });
+    if (response) await response;
+    if (lifetime) await lifetime;
+    assert.equal(Boolean(response), false, `private-looking image URL ${path} was intercepted by the public shell cache`);
+  }
+});
+
+test('known shipped public icon URLs still cache for offline reuse', async () => {
+  let online = true;
+  const app = worker({
+    fetchResponse: async () => {
+      if (!online) throw new Error('offline');
+      return new Response('shipped-icon', { headers: { 'content-type': 'image/png' } });
+    },
+  });
+  for (const path of ['/icon-192.png', '/assets/app.png', '/landing/splash.webp']) {
+    const visit = async () => {
+      let response;
+      let lifetime;
+      app.events.get('fetch')({
+        request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { response = value; },
+        waitUntil: (value) => { lifetime = value; },
+      });
+      assert.ok(response, `expected public asset interception for ${path}`);
+      const resolved = await response;
+      if (lifetime) await lifetime;
+      return resolved.text();
+    };
+    online = true;
+    assert.equal(await visit(), 'shipped-icon');
+    online = false;
+    assert.equal(await visit(), 'shipped-icon');
+  }
+});
+
+test('public asset scope follows a subdirectory installation without admitting private paths', async () => {
+  const app = worker({ scope: 'https://app.test/axom/', fetchResponse: async () =>
+    new Response('css', { headers: { 'content-type': 'text/css' } }) });
+  for (const [path, expectedInterception] of [
+    ['/axom/assets/main.css', true],
+    ['/axom/landing/logo.svg', true],
+    ['/axom/private/avatar.png', false],
+    ['/private/avatar.png', false],
+    ['/axom/nonpublic.png', false],
+  ]) {
+    let response;
+    let lifetime;
+    app.events.get('fetch')({
+      request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { response = value; },
+      waitUntil: (value) => { lifetime = value; },
+    });
+    if (response) await response;
+    if (lifetime) await lifetime;
+    assert.equal(Boolean(response), expectedInterception, `incorrect service-worker scope for ${path}`);
+  }
 });
