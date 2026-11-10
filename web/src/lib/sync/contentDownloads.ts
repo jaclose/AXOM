@@ -1,5 +1,7 @@
 import { workspaceMedia, downloadCloudMediaAsset } from "./cloudMedia";
-import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
+import { sha256 } from "../compressedText";
+import { getQuestionAttachmentBlob } from "../questionAttachments";
+import { addQuestionAttachmentBlobIfAbsent } from "./atomicMediaWrite";
 import { accountOperationClient } from "../account/supabase";
 import { useStore } from "../store";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
@@ -50,13 +52,53 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
       const [blobKey, { questionId, attachment, checksum }] = figures[cursor++];
       await assertCurrent();
       const reference = media.get(blobKey);
-      if (checksum && reference?.hash !== checksum) throw new Error("This image does not match its immutable question source.");
-      const local = await getQuestionAttachmentBlob(blobKey);
-      if (local && local.blob.size === attachment.byteSize) continue;
-      if (!reference) throw new Error("This source has no protected image reference. Keep its original file and retry from a complete backup.");
+      if (!reference || reference.byteSize !== attachment.byteSize || reference.updatedAt !== attachment.updatedAt) {
+        throw new Error("This source has no matching protected image reference. Keep its original file and retry from a complete backup.");
+      }
+      if (checksum && reference.hash !== checksum) throw new Error("This image does not match its immutable question source.");
+      // The device's cached original is not an integrity receipt. A same-sized
+      // corrupt image must never be accepted as downloaded course content.
+      // Read only this account's current local store, not the lazy cloud loader.
+      const local = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
+      await assertCurrent();
+      if (local) {
+        if (local.blob.size !== reference.byteSize || local.byteSize !== reference.byteSize
+          || local.mimeType !== attachment.mimeType
+          || await sha256(new Uint8Array(await local.blob.arrayBuffer())) !== reference.hash) {
+          throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
+        }
+        await assertCurrent();
+        continue;
+      }
       const blob = await downloadCloudMediaAsset(client, userId, reference);
       await assertCurrent();
-      await putQuestionAttachmentBlob(blobKey, { ...attachment, questionId, blob });
+      // Recheck after remote I/O. The subsequent add-only transaction is
+      // essential: a second tab can still create the key after this read.
+      const raced = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
+      await assertCurrent();
+      if (raced) {
+        if (raced.blob.size !== reference.byteSize || raced.byteSize !== reference.byteSize
+          || raced.mimeType !== attachment.mimeType
+          || await sha256(new Uint8Array(await raced.blob.arrayBuffer())) !== reference.hash) {
+          throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
+        }
+        await assertCurrent();
+        continue;
+      }
+      // A competing tab can win between the final read and this write.
+      // Never use a blind put: atomic add preserves the first saved original.
+      await addQuestionAttachmentBlobIfAbsent(blobKey, { ...attachment, questionId, blob }, { accountId: userId });
+      await assertCurrent();
+      // A successful add OR a lost race is not an integrity receipt. Confirm
+      // the exact bytes currently retained by this account before returning.
+      const retained = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
+      await assertCurrent();
+      if (!retained || retained.blob.size !== reference.byteSize || retained.byteSize !== reference.byteSize
+        || retained.mimeType !== attachment.mimeType
+        || await sha256(new Uint8Array(await retained.blob.arrayBuffer())) !== reference.hash) {
+        throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
+      }
+      await assertCurrent();
     }
   }));
   await assertCurrent();
