@@ -45,6 +45,12 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   autoDraft?: boolean;
 }) {
   const accountId = useAccount(state => state.user?.id);
+  // The identity that opened this modal owns its private draft and rights
+  // authorization. A→B→A can occur without a React render of B.
+  const openingAccount = useRef(accountId);
+  const sessionRevoked = useRef(false);
+  const [sessionInvalidated, setSessionInvalidated] = useState(false);
+  const sessionActive = !sessionRevoked.current && !sessionInvalidated && accountId === openingAccount.current;
   const [submission, setSubmission] = useState<LibrarySubmission>();
   const [checking, setChecking] = useState(true);
   const [statusIdentity, setStatusIdentity] = useState("");
@@ -54,7 +60,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   // Keep the identity of the learner who actually made these attestations.
   // Account-store changes may render before the reset effect has committed.
   const [attestationAccount, setAttestationAccount] = useState(accountId);
-  const attestationsForAccount = Boolean(accountId && attestationAccount === accountId
+  const attestationsForAccount = Boolean(sessionActive && accountId && attestationAccount === accountId
     && useAccount.getState().user?.id === accountId);
   const [credit, setCredit] = useState("");
   const [error, setError] = useState("");
@@ -92,10 +98,33 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     return plan.kind === "none" ? [] : [{ id: question.id, ...plan }];
   });
 
+  // Observe the entire lifetime of the review, including the idle period
+  // after AI results arrive and after an account has checked attestations.
+  // Once revoked, reopening a fresh modal is the only authorization path.
+  useEffect(() => {
+    const revoke = (nextAccount?: string) => {
+      if (sessionRevoked.current || nextAccount === openingAccount.current) return;
+      sessionRevoked.current = true;
+      generationAbort.current?.abort();
+      setDrafts([]);
+      setKeywordEdits({});
+      setApprovedKeywordIds({});
+      setGenerationProgress("");
+      setRights(false);
+      setAnswers(false);
+      setCredit("");
+      setSessionInvalidated(true);
+    };
+    const unsubscribe = useAccount.subscribe(state => revoke(state.user?.id));
+    revoke(useAccount.getState().user?.id);
+    return unsubscribe;
+  }, []);
+
   async function refresh() {
+    if (sessionRevoked.current) throw new Error("The account session changed. Reopen the set to review or publish it.");
     if (!accountId) { setStatusIdentity(""); setChecking(false); return; }
     const owned = await listMyQuestionSetSubmissions(accountId);
-    if (useAccount.getState().user?.id !== accountId) throw new Error("The account changed during submission lookup.");
+    if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) throw new Error("The account changed during submission lookup.");
     const found = owned.find(item => item.sourceId === set.id);
     setSubmission(found);
     setStatusIdentity(`${accountId}:${set.id}`);
@@ -119,13 +148,13 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     setMessage("");
     if (!accountId) { setChecking(false); return; }
     void listMyQuestionSetSubmissions(accountId).then(owned => {
-      if (alive && useAccount.getState().user?.id === accountId) {
+      if (alive && !sessionRevoked.current && useAccount.getState().user?.id === accountId) {
         setSubmission(owned.find(item => item.sourceId === set.id));
         setStatusIdentity(`${accountId}:${set.id}`);
         setChecking(false);
       }
     }).catch(cause => {
-      if (alive) { setError(cause instanceof Error ? cause.message : "Your submissions could not be checked."); setChecking(false); }
+      if (alive && !sessionRevoked.current) { setError(cause instanceof Error ? cause.message : "Your submissions could not be checked."); setChecking(false); }
     });
     return () => { alive = false; };
   }, [accountId, set.id]);
@@ -151,7 +180,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   }, [accountId, set.id]);
 
   const generateExplanations = useCallback(async () => {
-    if (!provider || !accountId || statusIdentity !== `${accountId}:${set.id}`
+    if (!provider || !sessionActive || sessionRevoked.current || !accountId || statusIdentity !== `${accountId}:${set.id}`
       || generating || generationAbort.current || draftSaveOperation.current || !draftable.length) return;
     const controller = new AbortController();
     // An A→B→A account round trip can happen before React renders the
@@ -213,10 +242,10 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (generationAbort.current === controller) generationAbort.current = null;
       setGenerating(false);
     }
-  }, [provider, accountId, set, statusIdentity, generating, draftable]);
+  }, [provider, accountId, set, statusIdentity, generating, draftable, sessionActive]);
 
   useEffect(() => {
-    if (!autoDraft || checking || !accountId || statusIdentity !== `${accountId}:${set.id}`
+    if (!autoDraft || !sessionActive || sessionRevoked.current || checking || !accountId || statusIdentity !== `${accountId}:${set.id}`
       || !provider || provider.info.kind === "mock"
       || !draftable.length || (submission && submission.status !== "rejected")
       || autoDraftStarted.current) return;
@@ -224,10 +253,10 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // preparation. Re-renders never create additional inference batches.
     autoDraftStarted.current = true;
     void generateExplanations();
-  }, [autoDraft, accountId, set.id, statusIdentity, checking, submission, provider, draftable.length, generateExplanations]);
+  }, [autoDraft, accountId, set.id, statusIdentity, checking, submission, provider, draftable.length, generateExplanations, sessionActive]);
 
   async function saveReviewedDrafts() {
-    if (generating || !accountId || statusIdentity !== `${accountId}:${set.id}`
+    if (!sessionActive || sessionRevoked.current || generating || !accountId || statusIdentity !== `${accountId}:${set.id}`
       || draftSaveOperation.current || !drafts.length || useAccount.getState().user?.id !== accountId) return;
     const bank = useStore.getState();
     // The fingerprint protects individual question evidence; the live set also
@@ -280,7 +309,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     draftSaveOperation.current = operation;
     let accountChanged = false;
     const unsubscribe = useAccount.subscribe(state => { if (state.user?.id !== accountId) accountChanged = true; });
-    const stillCurrent = () => !accountChanged && draftSaveOperation.current === operation && useAccount.getState().user?.id === accountId;
+    const stillCurrent = () => !accountChanged && !sessionRevoked.current && draftSaveOperation.current === operation && useAccount.getState().user?.id === accountId;
     setSavingDrafts(true);
     setGenerationError("");
     setMessage("");
@@ -346,7 +375,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   async function submit() {
     // The rendered account may lag behind the session store during a switch.
     // Never send another account's saved rights and answer attestations.
-    if (!accountId || statusIdentity !== `${accountId}:${set.id}`
+    if (!sessionActive || sessionRevoked.current || !accountId || statusIdentity !== `${accountId}:${set.id}`
       // Render-time attestation checks are not sufficient: the auth store can
       // switch synchronously before React rerenders the old click handler.
       || useAccount.getState().user?.id !== accountId
@@ -367,7 +396,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       });
       // Account-operation RPCs also assert the current session. Avoid an old
       // account's follow-up query/confirmation if it changed while awaiting.
-      if (useAccount.getState().user?.id !== accountId) return;
+      if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
       const result = await refresh();
       if (!result || result.id !== id) throw new Error("The submission could not be read back. Check its status before retrying.");
       setMessage(result?.status === "rejected"
@@ -390,12 +419,12 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // An account switch can happen while a submission is displayed or even
     // during the native confirmation prompt. Never act on another account's
     // cached submission (the server's RLS is still the final authority).
-    if (!accountId || statusIdentity !== `${accountId}:${set.id}`
+    if (!sessionActive || sessionRevoked.current || !accountId || statusIdentity !== `${accountId}:${set.id}`
       || useAccount.getState().user?.id !== accountId || !submission
       || submission.sourceId !== set.id || checking || busy || generating || draftSaveOperation.current
       || !window.confirm(
         "Withdraw this Question Set from the shared library? Already imported copies stay with other learners.")) return;
-    if (useAccount.getState().user?.id !== accountId) return;
+    if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
 
     const withdrawingId = submission.id;
     setBusy(true); setError(""); setMessage("");
@@ -419,13 +448,14 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   return <Modal title={`Submit ${set.title}`} onClose={busy || savingDrafts ? () => {} : () => { generationAbort.current?.abort(); onClose(); }}>
     <div className="qsl-submit stack gap12" aria-busy={busy || checking || generating || savingDrafts}>
       <p>Offer this Question Set to every signed-in AXOM learner. An academic reviewer checks it before it appears in search.</p>
+      {sessionInvalidated && <p role="alert" className="qsl-error">The account session changed while this review was open. Close and reopen the Question Set to draft, save, submit, or withdraw safely.</p>}
       <div className="qsl-submit-facts"><BookUp2 size={20} aria-hidden="true" /><b>{set.questionIds.length} questions</b><span>Only question text, choices, answers, explanations, tags and citations are submitted. Your attempts, notes, files and course filing stay private.</span></div>
       {unresolved > 0 && <p role="alert" className="qsl-error">{unresolved} question{unresolved === 1 ? " is" : "s are"} still held for answer or source review. Resolve them before submitting this set.</p>}
       {withMedia > 0 && <p role="alert" className="qsl-error">{withMedia} question{withMedia === 1 ? " uses" : "s use"} an image or media that this library snapshot cannot carry. Keep this set private until media-safe sharing is available.</p>}
       {missingExplanations > 0 && <div className="qsl-assist stack gap8">
         <b>{missingExplanations} missing explanation{missingExplanations === 1 ? "" : "s"}</b>
         <p>AXOM can draft rationales from your already-reviewed answers. No answer key changes. Model output is provisional until you inspect and save it.</p>
-        {provider && provider.info.kind !== "mock" ? <GButton disabled={checking || statusIdentity !== `${accountId}:${set.id}` || generating || savingDrafts || busy || draftable.length === 0} onClick={() => void generateExplanations()}>
+        {provider && provider.info.kind !== "mock" ? <GButton disabled={!sessionActive || checking || statusIdentity !== `${accountId}:${set.id}` || generating || savingDrafts || busy || draftable.length === 0} onClick={() => void generateExplanations()}>
           <Sparkles size={16} aria-hidden="true" /> {generating ? "Drafting explanations…" : `Draft explanations (${Math.min(draftable.length, 12)} at a time)`}
         </GButton> : <p>Enable AXOM Cloud AI or a local model in Settings to draft explanations, or write them in Question Bank.</p>}
         {generating && <GhostButton onClick={() => generationAbort.current?.abort()}>Cancel drafting</GhostButton>}
@@ -461,7 +491,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
             <span>Include inspected keywords for Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} (optional; does not verify the source).</span>
           </label>
         </details>)}
-        <GButton disabled={generating || busy || savingDrafts} onClick={() => void saveReviewedDrafts()}>{savingDrafts ? "Saving explanations…" : "Save inspected explanations to my QBank"}</GButton>
+        <GButton disabled={!sessionActive || generating || busy || savingDrafts} onClick={() => void saveReviewedDrafts()}>{savingDrafts ? "Saving explanations…" : "Save inspected explanations to my QBank"}</GButton>
         <p className="sub">Check all AI-generated explanations against the actual source. Keywords are unverified suggestions, editable and off by default. No explanation or keyword is saved or published automatically.</p>
       </div>}
       {visualPlans.length > 0 && <details className="qsl-visual-hints">
@@ -478,7 +508,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         <p>{submission.status === "approved" ? "This set is searchable now." : submission.status === "pending"
           ? "This set is waiting for academic review." : "This set needs a revision before it can be listed."}</p>
         {submission.reviewNote && <p className="sub">Reviewer note: {submission.reviewNote}</p>}
-        <GhostButton disabled={busy} onClick={() => void withdraw()}>Withdraw submission</GhostButton>
+        <GhostButton disabled={busy || !sessionActive} onClick={() => void withdraw()}>Withdraw submission</GhostButton>
       </div>}
       {(!submission || submission.status === "rejected") && accountId && !checking && <>
         <label className="qsl-field">Public credit (optional)
@@ -488,7 +518,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           <span>I own this content or have permission to distribute every question, answer and explanation.</span></label>
         <label className="qsl-check"><input type="checkbox" checked={attestationsForAccount && answers} disabled={busy || !attestationsForAccount} onChange={event => setAnswers(event.target.checked)} />
           <span>I checked every answer against its source, verified every explanation, and resolved source-key conflicts.</span></label>
-        <GButton variant="primary" disabled={busy || checking || statusIdentity !== `${accountId}:${set.id}` || !attestationsForAccount || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
+        <GButton variant="primary" disabled={!sessionActive || busy || checking || statusIdentity !== `${accountId}:${set.id}` || !attestationsForAccount || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
           <ShieldCheck size={16} aria-hidden="true" /> {busy ? "Submitting…" : "Send for review"}
         </GButton>
       </>}
