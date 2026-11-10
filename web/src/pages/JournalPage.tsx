@@ -1923,9 +1923,14 @@ function JournalFeedback({ onClose, sessionDrafts }: {
   const accountId = useAccount((state) => state.user?.id);
   const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
   const [selection, setSelection] = useState<{ ownerKey: string; key: string } | null>(null);
-  const [readRetry, setReadRetry] = useState<{ ownerKey: string; selectedKey: string | null; count: number } | null>(null);
   const selectedKey = selection?.ownerKey === ownerKey ? selection.key : null;
-  const retryCount = readRetry?.ownerKey === ownerKey && readRetry.selectedKey === selectedKey ? readRetry.count : 0;
+  // A prior retry must not steal focus or announce recovery after A -> B -> A.
+  // A visit changes whenever the owner or selected saved copy changes.
+  const retryVisitRef = useRef(0);
+  useEffect(() => { retryVisitRef.current += 1; }, [ownerKey, selectedKey]);
+  const [readRetry, setReadRetry] = useState<{ ownerKey: string; selectedKey: string | null; visit: number; count: number } | null>(null);
+  const retryCount = readRetry?.ownerKey === ownerKey && readRetry.selectedKey === selectedKey
+    && readRetry.visit === retryVisitRef.current ? readRetry.count : 0;
   return <JournalFeedbackForOwner
     key={`${ownerKey}:${selectedKey ?? "latest"}:${retryCount}`}
     draftKey={`axom-journal-feedback-draft:${ownerKey}`}
@@ -1933,8 +1938,9 @@ function JournalFeedback({ onClose, sessionDrafts }: {
     selectedKey={selectedKey}
     onSelectCopy={(key) => setSelection({ ownerKey, key })}
     onRetryRead={() => setReadRetry((previous) => ({
-      ownerKey, selectedKey,
-      count: previous?.ownerKey === ownerKey && previous.selectedKey === selectedKey ? previous.count + 1 : 1,
+      ownerKey, selectedKey, visit: retryVisitRef.current,
+      count: previous?.ownerKey === ownerKey && previous.selectedKey === selectedKey
+        && previous.visit === retryVisitRef.current ? previous.count + 1 : 1,
     }))}
     retryAttempted={retryCount > 0}
     onClose={onClose}

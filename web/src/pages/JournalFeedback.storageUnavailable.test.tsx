@@ -273,6 +273,11 @@ describe("Journal feedback when browser storage cannot be read", () => {
     expect(screen.queryByText("Saved feedback is readable again.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry reading saved feedback" })).toBeNull();
     expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    // Returning to A is a new visit: it must not reuse the old retry focus or status.
+    await act(async () => { useAccount.setState({ user: ownerA }); });
+    expect(screen.queryByText("Saved feedback is readable again.")).toBeNull();
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    expect(document.activeElement).not.toBe(screen.getByLabelText("What do you like?"));
     // No storage mutation or feedback submission in this synthetic identity handoff.
   });
 
