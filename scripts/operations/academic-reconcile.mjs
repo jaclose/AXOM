@@ -22,6 +22,8 @@ const pdfAvailabilityStatuses = new Set([
   "text_with_question_indicators", "text_without_question_indicators", "low_text_scan_or_figures",
   "source_path_unavailable", "source_volume_unmounted", "size_limit_deferred",
   "reader_failure_needs_review", "encrypted_pdf_review", "pdfinfo_unreadable",
+  // Canonical PDF triage deliberately holds conflicting or changed source filings.
+  "academic_scope_conflict_review", "academic_scope_changed_review",
 ]);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const sample = (array, max = 12) => array.slice(0, max);
@@ -221,6 +223,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       errors.push("PDF availability ledger is absent, malformed or has no timestamp.");
     } else {
       const seenPdf = new Set(), byStatus = {};
+      let scopeFlaggedOutsideHoldStatus = 0;
       for (const entry of pdfTriage.rows) {
         if (!SHA256.test(entry?.source_sha256 ?? "") || seenPdf.has(entry.source_sha256)) {
           errors.push("PDF availability ledger has a missing or repeated source fingerprint.");
@@ -233,6 +236,10 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
           continue;
         }
         byStatus[entry.status] = (byStatus[entry.status] ?? 0) + 1;
+        if (entry.requires_scope_review === true
+          && entry.status !== "academic_scope_conflict_review"
+          && entry.status !== "academic_scope_changed_review")
+          scopeFlaggedOutsideHoldStatus += 1;
       }
       if (pdfTriage.rows.length !== pdfTriage.queueDistinctPdfJobs)
         blockers.push(`PDF availability triage covers ${pdfTriage.rows.length}/${pdfTriage.queueDistinctPdfJobs} queued original PDF sources; rescan the remainder.`);
@@ -246,6 +253,10 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       if (failed) blockers.push(`${failed} PDF originals failed bounded inspection and need a tracked parser disposition.`);
       const deferred = (byStatus.size_limit_deferred ?? 0) + (byStatus.encrypted_pdf_review ?? 0);
       const noIndicators = byStatus.text_without_question_indicators ?? 0;
+      const scopeConflicts = byStatus.academic_scope_conflict_review ?? 0;
+      const scopeChanges = byStatus.academic_scope_changed_review ?? 0;
+      const scopeReviewHolds = scopeConflicts + scopeChanges + scopeFlaggedOutsideHoldStatus;
+      if (scopeReviewHolds) blockers.push(`${scopeReviewHolds} PDF original triage records have conflicting or changed academic scope; manual term/module/week provenance review required.`);
       if (deferred) blockers.push(`${deferred} PDF originals are deferred or encrypted; obtain authorized source review before claiming coverage.`);
       if (noIndicators) blockers.push(`${noIndicators} PDF question jobs have no sampled question indicators; verify source classification before claiming completeness.`);
       const age = Date.now() - Date.parse(pdfTriage.runAt);
@@ -253,7 +264,9 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         blockers.push("PDF availability snapshot is stale or future-dated; rerun the staged triage before accepting physical-source coverage.");
       pdfTriageMetrics = { pdfJobsRecorded: pdfTriage.rows.length, pdfJobsInQueue: pdfTriage.queueDistinctPdfJobs,
         pdfVolumeUnmounted: unmounted, pdfPathsMissing: missing, pdfLowText: lowText, pdfReaderFailures: failed,
-        pdfDeferredSources: deferred, pdfNoQuestionIndicators: noIndicators };
+        pdfDeferredSources: deferred, pdfNoQuestionIndicators: noIndicators,
+        pdfScopeConflictReviewRows: scopeConflicts, pdfScopeChangedReviewRows: scopeChanges,
+        pdfScopeReviewFlaggedOther: scopeFlaggedOutsideHoldStatus };
     }
   }
   // Reuse the single canonical B4 acceptance report rather than maintaining a
