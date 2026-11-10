@@ -27,6 +27,7 @@ function worker({ failCacheMatch = false, failCachePut = false, scope = 'https:/
       return {
         addAll: async (keys) => { assert.equal(new Set(keys).size, keys.length); },
         match: async (key) => values.get(absolute(key))?.clone(),
+        delete: async (key) => values.delete(absolute(key)),
         put: async (key, value) => {
           if (failCachePut) throw new Error('cache quota exceeded');
           values.set(absolute(key), value.clone());
@@ -68,6 +69,41 @@ test('offline navigation uses current shell rather than older retained shell', a
   let response;
   app.events.get('fetch')({ request: { url: 'https://app.test/', method: 'GET', mode: 'navigate' }, respondWith: (value) => { response = value; } });
   assert.equal(await (await response).text(), 'current');
+});
+
+test('current public assets win over retained generations; newest safe fallback survives offline', async () => {
+  const app = worker();
+  const oldest = await app.caches.open('axom-shell-oldest');
+  const previous = await app.caches.open('axom-shell-previous');
+  const current = await app.caches.open('axom-shell-current');
+  const image = (text) => new Response(text, { headers: { 'content-type': 'image/png' } });
+  await oldest.put('/icon-192.png', image('oldest-icon'));
+  await previous.put('/icon-192.png', image('previous-icon'));
+  await current.put('/icon-192.png', image('current-icon'));
+  await oldest.put('/landing/splash.webp', image('oldest-splash'));
+  await previous.put('/landing/splash.webp', image('previous-splash'));
+  await oldest.put('/assets/retained-12345678.js',
+    new Response('previous-only-chunk', { headers: { 'content-type': 'text/javascript' } }));
+  await oldest.put('/assets/shared-12345678.js',
+    new Response('<!doctype html>stale rewrite', { headers: { 'content-type': 'text/html' } }));
+  await current.put('/assets/shared-12345678.js',
+    new Response('current-chunk', { headers: { 'content-type': 'text/javascript' } }));
+
+  const offlineRead = async (path) => {
+    let response;
+    app.events.get('fetch')({
+      request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { response = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(response, `public path ${path} must be intercepted`);
+    return (await response).text();
+  };
+  assert.equal(await offlineRead('/icon-192.png'), 'current-icon', 'same-path older icon must not mask the current one');
+  assert.equal(await offlineRead('/landing/splash.webp'), 'previous-splash', 'newest retained fallback should win');
+  assert.equal(await offlineRead('/assets/retained-12345678.js'), 'previous-only-chunk', 'old-only code must survive offline');
+  assert.equal(await offlineRead('/assets/shared-12345678.js'), 'current-chunk', 'stale HTML rewrite must be ignored');
+  assert.equal(await oldest.match('/assets/shared-12345678.js'), undefined, 'stale cached HTML must still be evicted');
 });
 
 test('version and API requests bypass caches; missing JS never returns HTML', async () => {
