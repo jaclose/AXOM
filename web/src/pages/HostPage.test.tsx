@@ -227,7 +227,8 @@ describe("Host page authorization and moderation", () => {
     await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
     await user.click(dismiss);
     expect((await screen.findByRole("alert")).textContent).toContain("Connection lost");
-    await user.click(dismiss);
+    // The verified refresh replaces the old controls, so retry on the current snapshot.
+    await user.click(await screen.findByRole("button", { name: "Dismiss report" }));
     await waitFor(() => expect(resolveReport).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
   });
