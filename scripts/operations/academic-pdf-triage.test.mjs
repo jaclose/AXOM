@@ -352,3 +352,23 @@ test("R19: actual zero-inspection CLI refresh issues a new run ID, invalidates m
     assert.equal(missing.rows[0].source_sha256, HASH1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("R19: unvisited queued originals outside an initial partial slice produce explicit held rows, not disappearing denominators", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-unvisited-"));
+  try {
+    const source = join(root, "unvisited.pdf");
+    writeFileSync(source, "%PDF synthetic unsampled text");
+    const [job] = selectPdfJobs([fakePdfJob(HASH2, source)]);
+    const [row] = verifyPdfSourceAvailability([], [job], [root], {
+      runId: "r19-unvisited-run", runAt: "2026-11-10T20:20:00.000Z",
+      now: () => "2026-11-10T20:20:01.000Z",
+    });
+    assert.equal(row.source_sha256, HASH2);
+    assert.equal(row.status, "reader_failure_needs_review");
+    assert.equal(row.inspectionRequired, true);
+    assert.match(row.reason, /no bounded PDF inspection/);
+    assert.equal(row.availabilityProof.runId, "r19-unvisited-run");
+    assert.equal(recommendNextSources([row], new Set(), 100, "r19-unvisited-run").length, 0);
+    assert.equal(summarizeTriage([row]).measuredPdfJobRows, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
