@@ -122,7 +122,18 @@ test("actual navigation retires unpersisted quota-only saved badge but keeps wor
     const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
     const storage = await import("/src/lib/localVault.ts");
     const activity = await import("/src/lib/vaultActivity.ts");
+    // This diagnostic is read-only. A normal history reload can retain all
+    // IndexedDB bytes while never exercising real BFCache restoration.
+    const navigation = performance.getEntriesByType("navigation")[0] as
+      | (PerformanceNavigationTiming & {
+          notRestoredReasons?: { reasons?: Array<{ reason: string }> | null } | null;
+        })
+      | undefined;
+    const notRestoredReasonCodes =
+      navigation?.notRestoredReasons?.reasons?.map((entry) => entry.reason) ?? null;
     return {
+      navigationType: navigation?.type ?? null,
+      notRestoredReasonCodes,
       saved: activity.readLastVaultWrite() !== null,
       marker: localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt),
       bytes: await storage.localVaultStorage.getItem(STORAGE_KEYS.persistedState),
@@ -139,7 +150,7 @@ test("actual navigation retires unpersisted quota-only saved badge but keeps wor
   // assertions but is NOT BFCache acceptance.
   expect(
     restored.pageshowPersisted,
-    `BFCache was not observed (pagehide.persisted=${restored.pagehidePersisted}, pageshow.persisted=${restored.pageshowPersisted}); a passing navigation test cannot be reported as BFCache coverage.`,
+    `BFCache was not observed (pagehide.persisted=${restored.pagehidePersisted}, pageshow.persisted=${restored.pageshowPersisted}, navigationType=${restored.navigationType}, notRestoredReasonCodes=${JSON.stringify(restored.notRestoredReasonCodes)}); a passing history navigation is not BFCache coverage. Default Playwright launches disable BFCache; this may be a harness limitation, not an AXOM defect.`,
   ).toBe("true");
 });
 
