@@ -25,7 +25,24 @@ function cacheablePublicResponse(response) {
 // its own hash-named checkpoint chunk after the deployment switches over.
 // This narrow read exception applies ONLY to manifest-pinned JS/CSS with
 // no-store as its sole cache directive, never private/auth-varying responses.
+// Browser-fetched responses carry a final URL. A manifest-listed request must
+// never authorize a redirected response or bytes from another asset/origin.
+// Ignore the query: asset fetches add __axom_revalidate for stale-host recovery.
+function matchesRequestedResource(request, response) {
+  if (response.redirected || response.status !== 200 || !response.url) return false;
+  try {
+    const requested = new URL(request.url);
+    const resolved = new URL(response.url);
+    return requested.origin === resolved.origin && requested.pathname === resolved.pathname;
+  } catch {
+    return false;
+  }
+}
+
 function pinnedPublicBuildAsset(request, response) {
+  // Earlier precache entries are preserved across upgrades. A synthetic cache
+  // fixture may have no response URL, but known redirects are never trusted.
+  if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) return false;
   if (response.headers.get("cache-control")?.trim().toLowerCase() !== "no-store") return false;
   if (response.headers.has("set-cookie")) return false;
   if (/(?:^|,)\s*(?:\*|cookie|authorization)\s*(?:,|$)/i.test(response.headers.get("vary") || "")) return false;
@@ -39,6 +56,7 @@ function pinnedPublicBuildAsset(request, response) {
 // immutable build code. Only exact Vite-manifest-listed hashed JS/CSS can use
 // an explicit Cache Storage offline fallback; media and user URLs never qualify.
 function shippedPublicBuildAsset(request, response) {
+  if (!matchesRequestedResource(request, response)) return false;
   const control = (response.headers.get("cache-control") || "").trim().toLowerCase();
   if (control !== "no-store" && control !== "no-cache") return false;
   if (!response.ok || response.headers.has("set-cookie")) return false;
@@ -54,6 +72,7 @@ function shippedPublicBuildAsset(request, response) {
 }
 
 function cacheResponse(event, key, response) {
+  if (!matchesRequestedResource(event.request, response)) return;
   if (!cacheablePublicResponse(response) && !shippedPublicBuildAsset(event.request, response)) return;
   const copy = response.clone();
   // A failed cache write must not turn a successful network response into a failed request.
@@ -66,6 +85,9 @@ async function cachedAppAsset(request) {
     const cache = await caches.open(name);
     const response = await cache.match(request);
     if (!response) continue;
+    // Legacy synthetic cache fixtures can omit URL; browser-fetched entries
+    // have it and must match their original origin/path before replay.
+    if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) continue;
     if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)
       && !shippedPublicBuildAsset(request, response)) continue;
     if (response.headers.get("content-type")?.includes("text/html")) {

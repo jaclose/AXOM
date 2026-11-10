@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+// Synthetic node:Response objects have no network URL. Mirror the browser's
+// fetch/clone URL provenance so the worker can fail closed in production.
+function withNetworkUrl(response, url) {
+  if (response.url) return response;
+  Object.defineProperty(response, 'url', { value: String(url), configurable: true });
+  const clone = response.clone.bind(response);
+  response.clone = () => withNetworkUrl(clone(), url);
+  return response;
+}
+
 function worker({ failCacheMatch = false, failCachePut = false, scope = 'https://app.test/', precache = [], shippedChunks = [], fetchResponse = async () => { throw new Error('offline'); } } = {}) {
   const events = new Map();
   const stores = new Map();
@@ -30,7 +40,7 @@ function worker({ failCacheMatch = false, failCachePut = false, scope = 'https:/
   };
   const context = {
     self: { location: { origin: 'https://app.test' }, registration: { scope }, clients: { matchAll: async () => [] }, addEventListener: (name, fn) => events.set(name, fn), skipWaiting: async () => { activations++; } },
-    caches, URL, Response, fetch: fetchResponse,
+    caches, URL, Response, fetch: async (request, ...args) => withNetworkUrl(await fetchResponse(request, ...args), typeof request === 'string' ? request : request.url),
   };
   const source = readFileSync(new URL('../web/public/sw.js', import.meta.url), 'utf8')
     .replaceAll('__AXOM_BUILD_ID__', 'current')
@@ -391,5 +401,50 @@ test('manifest chunk exception rejects private, auth-varying, unlisted and wrong
     assert.equal(await visit(), 'private-or-unverified');
     online = false;
     await assert.rejects(visit(), /offline/, `unsafe cache replay: ${path}, ${JSON.stringify(headers)}`);
+  }
+});
+
+test('redirects and mismatched final URLs cannot persist manifest-listed lazy scripts', async () => {
+  const path = '/assets/DailyWordPage-12345678.js';
+  const cases = [
+    { name: 'cross-origin redirect', finalUrl: 'https://other.example/api/private.js', redirected: true, control: 'no-store', status: 200 },
+    { name: 'same-origin private redirect', finalUrl: 'https://app.test/api/private.js', redirected: true, control: 'no-cache', status: 200 },
+    { name: 'mismatched final path without redirect flag', finalUrl: 'https://app.test/api/private.js', redirected: false, control: 'no-store', status: 200 },
+    { name: 'partial content', finalUrl: `https://app.test${path}`, redirected: false, control: 'no-cache', status: 206 },
+    { name: 'ordinary cacheable redirected asset', finalUrl: 'https://app.test/api/other.js', redirected: true, control: '', status: 200 },
+  ];
+  for (const scenario of cases) {
+    let online = true;
+    const app = worker({
+      shippedChunks: [`.${path}`],
+      fetchResponse: async () => {
+        if (!online) throw new Error('offline');
+        const response = new Response('synthetic-account-bytes', {
+          status: scenario.status,
+          headers: {
+            'content-type': 'text/javascript',
+            ...(scenario.control ? { 'cache-control': scenario.control } : {}),
+          },
+        });
+        Object.defineProperty(response, 'url', { value: scenario.finalUrl });
+        Object.defineProperty(response, 'redirected', { value: scenario.redirected });
+        return response;
+      },
+    });
+    const visit = async () => {
+      let output;
+      const pending = [];
+      app.events.get('fetch')({
+        request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+        respondWith: (promise) => { output = promise; },
+        waitUntil: (promise) => { pending.push(promise); },
+      });
+      const response = await output;
+      await Promise.all(pending);
+      return response;
+    };
+    assert.equal(await (await visit()).text(), 'synthetic-account-bytes', scenario.name + ': online response unchanged');
+    online = false;
+    await assert.rejects(visit(), /offline/, scenario.name + ': unsafe bytes replayed offline');
   }
 });
