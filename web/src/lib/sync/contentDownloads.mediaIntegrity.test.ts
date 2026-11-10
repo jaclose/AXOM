@@ -267,7 +267,11 @@ describe("explicit account source download preserves immutable local image ident
     resumeDownload();
     await expect(pending).rejects.toThrow(/account changed/i);
     expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
+    // Reading B while A is active must fail closed. Switch the synthetic current
+    // account to B before inspecting B-scoped IndexedDB, then restore A.
+    setQuestionAttachmentAccount("synthetic-intermediate-owner-r26");
     expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: "synthetic-intermediate-owner-r26" })).toBeUndefined();
+    setQuestionAttachmentAccount(owner);
     expect(deferred.questions).toHaveLength(0);
   });
 
