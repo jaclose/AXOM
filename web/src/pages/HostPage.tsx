@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BarChart3, CircleAlert, Crown, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import {
@@ -40,11 +40,11 @@ function HostAccountPage() {
   const pendingReadbackVersion = useRef<number | null>(null);
   const mutationOutcome = useRef<{ success?: string; error?: string } | null>(null);
   const refreshVersion = useRef(0);
-  const requestRefresh = () => {
+  const requestRefresh = useCallback(() => {
     const next = ++refreshVersion.current;
     setRefresh(next);
     return next;
-  };
+  }, []);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -89,7 +89,7 @@ function HostAccountPage() {
       window.removeEventListener("focus", recheck);
       window.removeEventListener("axom:operator-access-changed", recheck);
     };
-  }, []);
+  }, [requestRefresh]);
   const role = dashboard?.role;
   const owner = role === "owner";
   const attentionCount = (dashboard?.overview?.academic_review_pending ?? 0) + (dashboard?.overview?.reports_pending ?? 0);
