@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-function worker({ failCacheMatch = false, failCachePut = false, scope = 'https://app.test/', precache = [], fetchResponse = async () => { throw new Error('offline'); } } = {}) {
+function worker({ failCacheMatch = false, failCachePut = false, scope = 'https://app.test/', precache = [], shippedChunks = [], fetchResponse = async () => { throw new Error('offline'); } } = {}) {
   const events = new Map();
   const stores = new Map();
   let activations = 0;
@@ -34,7 +34,8 @@ function worker({ failCacheMatch = false, failCachePut = false, scope = 'https:/
   };
   const source = readFileSync(new URL('../web/public/sw.js', import.meta.url), 'utf8')
     .replaceAll('__AXOM_BUILD_ID__', 'current')
-    .replace('const PRECACHE = []; // __AXOM_PRECACHE__', `const PRECACHE = ${JSON.stringify(precache)}; // __AXOM_PRECACHE__`);
+    .replace('const PRECACHE = []; // __AXOM_PRECACHE__', `const PRECACHE = ${JSON.stringify(precache)}; // __AXOM_PRECACHE__`)
+    .replace('const SHIPPED_CHUNKS = []; // __AXOM_SHIPPED_CHUNKS__', `const SHIPPED_CHUNKS = ${JSON.stringify(shippedChunks)}; // __AXOM_SHIPPED_CHUNKS__`);
   vm.runInNewContext(source, context);
   return { events, caches, context, activations: () => activations };
 }
@@ -314,5 +315,81 @@ test('pinned chunk cannot replay private, auth-varying or unpinned cached respon
       waitUntil: () => {},
     });
     assert.equal(await (await pending).text(), 'network-B', `replayed protected or unpinned asset: ${asset}`);
+  }
+});
+
+test('manifest-declared lazy JS/CSS with no-cache or no-store headers caches on first use and reopens offline', async () => {
+  const assets = [
+    ['/assets/DailyWordPage-abcdefgh.js', 'text/javascript'],
+    ['/assets/DailyWordPage-abcdefgh.css', 'text/css'],
+    ['/assets/dailyWordWords-12345678.js', 'application/javascript'],
+  ];
+  for (const control of ['no-cache', 'no-store']) {
+    let online = true;
+    const app = worker({
+      shippedChunks: assets.map(([path]) => `.${path}`),
+      fetchResponse: async (url) => {
+        if (!online) throw new Error('offline');
+        const asset = assets.find(([path]) => new URL(url).pathname === path);
+        return new Response('verified-public-build-asset', {
+          headers: { 'cache-control': control, 'content-type': asset?.[1] || 'text/plain' },
+        });
+      },
+    });
+    for (const [path] of assets) {
+      const visit = async () => {
+        let pending;
+        let lifetime;
+        app.events.get('fetch')({
+          request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+          respondWith: (result) => { pending = result; },
+          waitUntil: (result) => { lifetime = result; },
+        });
+        const result = await pending;
+        if (lifetime) await lifetime;
+        return result.text();
+      };
+      assert.equal(await visit(), 'verified-public-build-asset', `first-use ${control}: ${path}`);
+      online = false;
+      assert.equal(await visit(), 'verified-public-build-asset', `offline reload ${control}: ${path}`);
+      online = true;
+    }
+  }
+});
+
+test('manifest chunk exception rejects private, auth-varying, unlisted and wrong-MIME content', async () => {
+  const known = '/assets/DailyWordPage-abcdefgh.js';
+  for (const [path, headers] of [
+    [known, { 'cache-control': 'private, no-store', 'content-type': 'text/javascript' }],
+    [known, { 'cache-control': 'no-store', 'content-type': 'text/javascript', vary: 'Cookie' }],
+    [known, { 'cache-control': 'no-cache', 'content-type': 'text/javascript', vary: '*' }],
+    [known, { 'cache-control': 'no-store', 'content-type': 'text/javascript', 'set-cookie': 'session=A' }],
+    [known, { 'cache-control': 'no-store', 'content-type': 'image/png' }],
+    ['/assets/accountCustom-12345678.js', { 'cache-control': 'no-store', 'content-type': 'text/javascript' }],
+    ['/assets/DailyWordPage-unhashed.js', { 'cache-control': 'no-store', 'content-type': 'text/javascript' }],
+  ]) {
+    let online = true;
+    const app = worker({
+      shippedChunks: [`.${known}`],
+      fetchResponse: async () => {
+        if (!online) throw new Error('offline');
+        return new Response('private-or-unverified', { headers });
+      },
+    });
+    const visit = async () => {
+      let pending;
+      let lifetime;
+      app.events.get('fetch')({
+        request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+        respondWith: (result) => { pending = result; },
+        waitUntil: (result) => { lifetime = result; },
+      });
+      const result = await pending;
+      if (lifetime) await lifetime;
+      return result.text();
+    };
+    assert.equal(await visit(), 'private-or-unverified');
+    online = false;
+    await assert.rejects(visit(), /offline/, `unsafe cache replay: ${path}, ${JSON.stringify(headers)}`);
   }
 });

@@ -4,6 +4,9 @@ const BUILD_ID = "__AXOM_BUILD_ID__";
 const CACHE_PREFIX = "axom-shell-";
 const CACHE = CACHE_PREFIX + BUILD_ID;
 const PRECACHE = []; // __AXOM_PRECACHE__
+// Exact hashed JS/CSS artifacts emitted by this build, including lazy routes.
+// Injection does not add optional games to install-time PRECACHE.
+const SHIPPED_CHUNKS = []; // __AXOM_SHIPPED_CHUNKS__
 const CORE = [...new Set(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...PRECACHE])];
 
 // Cache Storage does not enforce HTTP Cache-Control on explicit cache.put.
@@ -32,8 +35,26 @@ function pinnedPublicBuildAsset(request, response) {
     && new URL(path, self.registration.scope).pathname === pathname);
 }
 
+// Some hosts and controlled update tests send no-store or no-cache even for
+// immutable build code. Only exact Vite-manifest-listed hashed JS/CSS can use
+// an explicit Cache Storage offline fallback; media and user URLs never qualify.
+function shippedPublicBuildAsset(request, response) {
+  const control = (response.headers.get("cache-control") || "").trim().toLowerCase();
+  if (control !== "no-store" && control !== "no-cache") return false;
+  if (!response.ok || response.headers.has("set-cookie")) return false;
+  if (/(?:^|,)\s*(?:\*|cookie|authorization)\s*(?:,|$)/i.test(response.headers.get("vary") || "")) return false;
+  const contentType = response.headers.get("content-type") || "";
+  const pathname = new URL(request.url).pathname;
+  return SHIPPED_CHUNKS.some((path) => {
+    if (!/^\.\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(path)) return false;
+    if (new URL(path, self.registration.scope).pathname !== pathname) return false;
+    return path.endsWith(".css") ? /^text\/css(?:;|$)/i.test(contentType)
+      : /^(?:text|application)\/javascript(?:;|$)/i.test(contentType);
+  });
+}
+
 function cacheResponse(event, key, response) {
-  if (!cacheablePublicResponse(response)) return;
+  if (!cacheablePublicResponse(response) && !shippedPublicBuildAsset(event.request, response)) return;
   const copy = response.clone();
   // A failed cache write must not turn a successful network response into a failed request.
   event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key, copy)).catch(() => {}));
@@ -45,7 +66,8 @@ async function cachedAppAsset(request) {
     const cache = await caches.open(name);
     const response = await cache.match(request);
     if (!response) continue;
-    if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)) continue;
+    if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)
+      && !shippedPublicBuildAsset(request, response)) continue;
     if (response.headers.get("content-type")?.includes("text/html")) {
       // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
       await cache.delete(request);
