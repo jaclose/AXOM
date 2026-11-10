@@ -475,6 +475,44 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("revokes an in-flight AI batch after an A → B → A account round trip without an intermediate React render", async () => {
+    const first = question();
+    const second = question({ id: "q-2", stem: "Which arterial layer is the synthetic endothelial lining?" });
+    const pair = { ...set, questionIds: [first.id, second.id] };
+    mocks.workspace.questions = [first, second];
+    mocks.workspace.questionSets = [pair];
+    let resolveAI!: (value: unknown) => void;
+    mocks.completeJson.mockImplementationOnce(() => new Promise(resolve => { resolveAI = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={pair} questions={[first, second]} autoDraft onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.completeJson).toHaveBeenCalledOnce());
+
+    // Account changes may be batched between React commits, so inspecting
+    // only the current account when the provider finishes is insufficient.
+    await act(async () => {
+      mocks.accountId = "owner-2";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-2" } });
+      mocks.accountId = "owner-1";
+      for (const listener of mocks.accountListeners) listener({ user: { id: "owner-1" } });
+    });
+    await act(async () => {
+      resolveAI({
+        explanation: "The synthetic source shows that arterial tunica media contains smooth muscle and regulates resistance.",
+        choiceRationales: {
+          A: "Tunica media is the smooth muscle layer.",
+          B: "Tunica intima is the endothelial lining, not the smooth muscle layer.",
+        },
+        keywords: ["smooth muscle"],
+      });
+    });
+
+    expect(screen.getByText(/account changed during AI drafting/i)).toBeTruthy();
+    expect(screen.queryByText(/AI draft.*to inspect/)).toBeNull();
+    expect(mocks.completeJson).toHaveBeenCalledTimes(1);
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.accountListeners.size).toBe(0);
+  });
+
   it("discards an in-flight proposal and stops the batch if the Question Set changed", async () => {
     const first = question();
     const second = question({ id: "q-2", stem: "Which layer lines the arterial lumen?" });
