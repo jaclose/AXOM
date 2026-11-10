@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyPdfText, isWithinRoot, parsePdfInfo, selectPdfJobs, sourceRoots, summarizeTriage, recommendNextSources, recommendBalancedSources } from "./academic-pdf-triage.mjs";
+import { classifyPdfText, isWithinRoot, parsePdfInfo, selectPdfJobs, mergePdfTriageRows, sourceRoots, summarizeTriage, recommendNextSources, recommendBalancedSources } from "./academic-pdf-triage.mjs";
 
 const HASH1 = "a".repeat(64);
 const HASH2 = "b".repeat(64);
@@ -41,6 +41,89 @@ test("canonical job selection is source-hash driven and excludes non-PDF parser 
   assert.equal(selected.length, 2);
   assert.deepEqual(selected.map(row => row.source_sha256), [HASH1, HASH2]);
   assert.equal(selected[0].document_type, "pq");
+});
+
+test("byte-identical PDFs from conflicting source weeks are review-held, independent of queue order", () => {
+  const first = { canonical_input_key: "byte:" + HASH1, input_mode: "pdf_original_extract_with_review",
+    source_id: "T1-original", source_path: "/authorized/t1.pdf", term: "T1", module: "FTM", week: 2 };
+  const second = { ...first, source_id: "T4-mirror", source_path: "/authorized/t4.pdf",
+    term: "T4", module: "NCRS", week: 5 };
+  for (const queue of [[first, second], [second, first]]) {
+    const jobs = selectPdfJobs(queue);
+    assert.equal(jobs.length, 1);
+    const [held] = jobs;
+    assert.equal(held.requires_scope_review, true);
+    assert.equal(held.term, null);
+    assert.equal(held.module, null);
+    assert.equal(held.week, null);
+    assert.deepEqual(held.scope_evidence.map(row => row.source_id).sort(), ["T1-original", "T4-mirror"]);
+    assert.deepEqual(held.scope_evidence.map(row => row.source_path).sort(),
+      ["/authorized/t1.pdf", "/authorized/t4.pdf"]);
+    assert.equal(recommendNextSources([{ ...held, status: "text_with_question_indicators",
+      sampledQuestionHeadingIndicators: 10 }]).length, 0);
+  }
+});
+
+test("missing week versus assigned week is a conflict, but equal-scope mirrors remain eligible", () => {
+  const original = { canonical_input_key: "byte:" + HASH2, input_mode: "pdf_original_extract_with_review",
+    source_id: "first", source_path: "/authorized/first.pdf", term: "T2", module: "CPR", week: 3 };
+  const unknown = { ...original, source_id: "unknown", source_path: "/authorized/unknown.pdf", week: null };
+  const [held] = selectPdfJobs([original, unknown]);
+  assert.equal(held.requires_scope_review, true);
+  assert.equal(held.week, null);
+  const [good] = selectPdfJobs([original, { ...original,
+    source_id: "mirror", source_path: "/authorized/mirror.pdf" }]);
+  assert.equal(good.requires_scope_review, false);
+  assert.equal(good.week, 3);
+  assert.deepEqual(good.equivalent_paths, ["/authorized/mirror.pdf"]);
+});
+
+test("stale positive PDF triage cache cannot recommend a newly conflicted scope", () => {
+  const first = { canonical_input_key: "byte:" + HASH3, input_mode: "pdf_original_extract_with_review",
+    source_id: "source-a", source_path: "/authorized/a.pdf", term: "T1", module: "FTM", week: 1 };
+  const second = { ...first, source_id: "source-b", source_path: "/authorized/b.pdf", week: 2 };
+  const jobs = selectPdfJobs([first, second]);
+  const oldReady = { source_sha256: HASH3, source_path: "/authorized/a.pdf",
+    term: "T1", module: "FTM", week: 1, status: "text_with_question_indicators",
+    sampledQuestionHeadingIndicators: 7 };
+  const rows = mergePdfTriageRows([oldReady], [], jobs);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, "academic_scope_conflict_review");
+  assert.equal(rows[0].term, null);
+  assert.equal(rows[0].week, null);
+  assert.equal(recommendNextSources(rows).length, 0);
+  assert.equal(summarizeTriage(rows).scopeConflictReviewRows, 1);
+});
+
+test("same PDF digest with a refilled week must not reuse old positive triage scope", () => {
+  const job = { canonical_input_key: "byte:" + HASH1,
+    input_mode: "pdf_original_extract_with_review",
+    source_id: "current", source_path: "/authorized/same.pdf", term: "T1", module: "FTM", week: 4 };
+  const previous = { source_sha256: HASH1, source_path: "/authorized/same.pdf",
+    term: "T1", module: "FTM", week: 1,
+    status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 8 };
+  const held = mergePdfTriageRows([previous], [], selectPdfJobs([job]));
+  assert.equal(held.length, 1);
+  assert.equal(held[0].status, "academic_scope_changed_review");
+  assert.equal(held[0].week, null);
+  assert.equal(held[0].scope_evidence.length, 2);
+  assert.deepEqual(held[0].scope_evidence.map(item => item.week), [1, 4]);
+  assert.equal(recommendNextSources(held).length, 0);
+  assert.equal(summarizeTriage(held).scopeChangedReviewRows, 1);
+  assert.deepEqual(mergePdfTriageRows(held, [], selectPdfJobs([job])), held,
+    "held filing evidence must remain idempotent across repeated runs");
+});
+
+test("incremental report retains matching prior cache but drops out-of-queue source hashes", () => {
+  const job = { canonical_input_key: "byte:" + HASH1, input_mode: "pdf_original_extract_with_review",
+    source_path: "/authorized/current.pdf", module: "NCRS", term: "T4", week: 1 };
+  const rows = mergePdfTriageRows([
+    { source_sha256: HASH1, source_path: "/authorized/current.pdf", term: "T4", module: "NCRS", week: 1,
+      status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 2 },
+    { source_sha256: HASH2, status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 99 },
+  ], [], selectPdfJobs([job]));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].source_sha256, HASH1);
 });
 
 test("root validation prevents traversal and unrelated personal file access", () => {

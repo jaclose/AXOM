@@ -73,26 +73,104 @@ export function sourceRoots(home = homedir()) {
 export function selectPdfJobs(queue) {
   if (!Array.isArray(queue)) throw new Error("Canonical queue must be an array.");
   const selected = [];
-  const seen = new Set();
+  const byHash = new Map();
   for (const job of queue) {
     if (job?.input_mode !== "pdf_original_extract_with_review"
-      || extname(job.source_path ?? "").toLowerCase() !== ".pdf") continue;
+      || typeof job.source_path !== "string"
+      || extname(job.source_path).toLowerCase() !== ".pdf") continue;
     const match = shaPattern.exec(job.canonical_input_key ?? "");
     if (!match) {
       // A path-only job is not canonical byte-identifiable and must be
       // reclassified by Agent 1 before a repeat-safe batch.
       continue;
     }
-    if (seen.has(match[1])) continue;
-    seen.add(match[1]);
-    selected.push({ source_sha256: match[1], source_path: job.source_path,
-      equivalent_paths: job.equivalent_paths ?? [], module: job.module ?? null,
-      term: job.term ?? null, week: Number.isInteger(job.week) ? job.week : null,
+    const evidence = { source_id: job.source_id ?? null, source_path: job.source_path,
+      term: job.term ?? null, module: job.module ?? null,
+      week: Number.isInteger(job.week) ? job.week : null };
+    const aliases = Array.isArray(job.equivalent_paths)
+      ? job.equivalent_paths.filter(path => typeof path === "string") : [];
+    const existing = byHash.get(match[1]);
+    if (existing) {
+      // A byte-identical mirror is not proof that its academic filing agrees.
+      // Retain every original scope instead of silently taking the first week.
+      const original = existing.scope_evidence[0];
+      if (["term", "module", "week"].some(key => original[key] !== evidence[key])) {
+        existing.requires_scope_review = true;
+        existing.term = null; existing.module = null; existing.week = null;
+      }
+      existing.scope_evidence.push(evidence);
+      for (const path of [job.source_path, ...aliases]) {
+        if (path !== existing.source_path && !existing.equivalent_paths.includes(path))
+          existing.equivalent_paths.push(path);
+      }
+      continue;
+    }
+    const selectedJob = { source_sha256: match[1], source_path: job.source_path,
+      equivalent_paths: aliases, module: evidence.module,
+      term: evidence.term, week: evidence.week,
       document_type: job.document_type ?? "unclassified",
       answer_variant: job.answered_variant ?? null,
-      priority: Number.isInteger(job.priority) ? job.priority : 10 });
+      priority: Number.isInteger(job.priority) ? job.priority : 10,
+      requires_scope_review: false, scope_evidence: [evidence] };
+    selected.push(selectedJob);
+    byHash.set(match[1], selectedJob);
   }
   return selected;
+}
+
+function scopeConflictReviewRow(job) {
+  return { source_sha256: job.source_sha256, source_path: job.source_path,
+    document_type: job.document_type, term: null, module: null, week: null,
+    answer_variant: job.answer_variant, requires_scope_review: true,
+    scope_evidence: job.scope_evidence,
+    status: "academic_scope_conflict_review",
+    reason: "Byte-identical source filings disagree on term, module or week; manual provenance review required." };
+}
+
+function academicFilingChanged(previous, current) {
+  return ["term", "module", "week"].some(key => (previous[key] ?? null) !== (current[key] ?? null));
+}
+
+function scopeChangedReviewRow(job, previous) {
+  const previousEvidence = Array.isArray(previous.scope_evidence) ? previous.scope_evidence : [{
+    source_id: null, source_path: previous.source_path ?? null,
+    term: previous.term ?? null, module: previous.module ?? null, week: previous.week ?? null,
+    provenance: "previous_triage_cache",
+  }];
+  const seenEvidence = new Set();
+  const scopeEvidence = [...previousEvidence, ...job.scope_evidence].filter(item => {
+    const identity = JSON.stringify([item.source_id ?? null, item.source_path ?? null,
+      item.term ?? null, item.module ?? null, item.week ?? null]);
+    if (seenEvidence.has(identity)) return false;
+    seenEvidence.add(identity);
+    return true;
+  });
+  return { source_sha256: job.source_sha256, source_path: job.source_path,
+    document_type: job.document_type, term: null, module: null, week: null,
+    answer_variant: job.answer_variant, requires_scope_review: true,
+    scope_evidence: scopeEvidence,
+    status: "academic_scope_changed_review",
+    reason: "Academic filing changed since prior PDF triage; source week/provenance must be reviewed before reuse." };
+}
+
+/** Never carry a prior ready triage row across a newly conflicting academic scope. */
+export function mergePdfTriageRows(priorRows, inspectedRows, jobs) {
+  const active = new Set(jobs.map(job => job.source_sha256));
+  const merged = new Map(priorRows.filter(row => active.has(row.source_sha256))
+    .map(row => [row.source_sha256, row]));
+  for (const row of inspectedRows) merged.set(row.source_sha256, row);
+  // Apply all holds, including jobs outside this invocation's --start/--limit.
+  const previousByHash = new Map(priorRows.map(row => [row.source_sha256, row]));
+  for (const job of jobs) {
+    if (job.requires_scope_review) {
+      merged.set(job.source_sha256, scopeConflictReviewRow(job));
+    } else {
+      const previous = previousByHash.get(job.source_sha256);
+      if (previous && academicFilingChanged(previous, job))
+        merged.set(job.source_sha256, scopeChangedReviewRow(job, previous));
+    }
+  }
+  return [...merged.values()].sort((a, b) => a.source_sha256.localeCompare(b.source_sha256));
 }
 
 function parseArgs(argv) {
@@ -146,6 +224,9 @@ function scopedAvailableFile(job, roots) {
 }
 
 async function inspectPdf(job, options, previous) {
+  if (job.requires_scope_review) return scopeConflictReviewRow(job);
+  if (previous && academicFilingChanged(previous, job))
+    return scopeChangedReviewRow(job, previous);
   const source = scopedAvailableFile(job, options.roots);
   const base = { source_sha256: job.source_sha256, source_path: job.source_path,
     document_type: job.document_type, term: job.term, module: job.module,
@@ -194,6 +275,7 @@ async function inspectPdf(job, options, previous) {
 export function recommendNextSources(rows, excludedShas = new Set(), count = 100) {
   const supported = new Set(["imcq", "pq", "esoft", "review_questions", "small_group", "case"]);
   return rows.filter(row => row.status === "text_with_question_indicators"
+    && row.requires_scope_review !== true
     && !excludedShas.has(row.source_sha256))
     .map(row => {
       const score = 100 + Math.min(10, row.sampledQuestionHeadingIndicators ?? 0) * 3
@@ -243,7 +325,9 @@ export function summarizeTriage(rows) {
     textWithQuestionIndicators: byStatus.text_with_question_indicators ?? 0,
     lowTextScanOrFigures: byStatus.low_text_scan_or_figures ?? 0,
     unmountedVolumeSources: byStatus.source_volume_unmounted ?? 0,
-    unreadableOrDeferred: ["source_path_unavailable","source_volume_unmounted","size_limit_deferred","reader_failure_needs_review","encrypted_pdf_review","pdfinfo_unreadable"]
+    scopeConflictReviewRows: byStatus.academic_scope_conflict_review ?? 0,
+    scopeChangedReviewRows: byStatus.academic_scope_changed_review ?? 0,
+    unreadableOrDeferred: ["source_path_unavailable","source_volume_unmounted","size_limit_deferred","reader_failure_needs_review","encrypted_pdf_review","pdfinfo_unreadable","academic_scope_conflict_review","academic_scope_changed_review"]
       .reduce((n, key) => n + (byStatus[key] ?? 0), 0),
     important: "Metadata-only triage is NOT a question count, answer review, source SHA recheck, OCR output, or backend receipt.",
   };
@@ -264,9 +348,7 @@ async function main(args = process.argv.slice(2)) {
       inspected[index] = await inspectPdf(job, options, prior.get(job.source_sha256));
     }
   }));
-  const map = new Map(priorRows.map(row => [row.source_sha256, row]));
-  for (const row of inspected) map.set(row.source_sha256, row);
-  const rows = [...map.values()].sort((a, b) => a.source_sha256.localeCompare(b.source_sha256));
+  const rows = mergePdfTriageRows(priorRows, inspected, jobs);
   let processedB3 = new Set();
   try {
     const b3 = JSON.parse(readFileSync(join(artifactDir, "agent-2-priority-batches.json"), "utf8"))
