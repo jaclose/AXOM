@@ -12,6 +12,32 @@ import { Modal } from "../ui/Modal";
 import { GButton, GlassCard, GhostButton, PanelHeader, Tag } from "../ui/primitives";
 import "../../styles/question-set-library.css";
 
+/**
+ * Published visual:* tags are planning metadata, not ordinary subject tags
+ * or proof that a diagram has passed medical/licensing review. Keep them
+ * searchable in the immutable snapshot, but label them accurately in UI.
+ */
+const PUBLIC_VISUAL_INTENTS: Readonly<Record<string, string>> = {
+  "anatomical-schematic": "anatomical schematic",
+  "histology-micrograph": "histology micrograph",
+  "pathology-comparison": "pathology comparison",
+  "gross-pathology-specimen": "gross pathology specimen",
+  "microbiology-image": "microbiology image",
+  "mechanism-diagram": "mechanism diagram",
+};
+const topicTags = (tags: readonly string[]) => tags.filter(tag => !tag.startsWith("visual:"));
+
+function VisualIntentNote({ tags }: { tags: readonly string[] }) {
+  const kind = tags.find(tag => tag.startsWith("visual:intent:"))?.slice("visual:intent:".length);
+  const label = kind ? PUBLIC_VISUAL_INTENTS[kind] : undefined;
+  if (!label) return null; // Unknown metadata is never promoted to a clinical assertion.
+  const keywords = tags.filter(tag => tag.startsWith("visual:keyword:"))
+    .map(tag => tag.slice("visual:keyword:".length))
+    .filter(keyword => keyword.length >= 3 && keyword.length <= 49).slice(0, 3);
+  return <p className="sub">Visual intent metadata: {label}{keywords.length ? ` · ${keywords.join(", ")}` : ""}.
+    No diagram is included. Medical accuracy and media rights require separate review.</p>;
+}
+
 // A user can sign out and return to the same account while an async request is
 // pending. Account-ID equality alone cannot authorize that older operation.
 // Subscribe for the operation lifetime, without coupling QBank to cloud sync.
@@ -299,7 +325,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
         <div className="qsl-card-top"><span>LEARNER COLLECTION</span><Tag tone="neutral">{set.questionCount} {set.questionCount === 1 ? "question" : "questions"}</Tag></div>
         <h3>{set.title}</h3>
         <p>{set.credit ? `By ${set.credit}` : "Shared by an AXOM learner"}</p>
-        <div className="qsl-tags">{set.tags.slice(0, 4).map(tag => <span key={tag}>{tag}</span>)}</div>
+        <div className="qsl-tags">{topicTags(set.tags).slice(0, 4).map(tag => <span key={tag}>{tag}</span>)}</div>
         <div className="qsl-card-actions">
           <GButton size="sm" onClick={() => void open(set.id)}>Preview set</GButton>
           <GhostButton disabled={liking === set.id} aria-label={`${set.liked ? "Unlike" : "Like"} ${set.title}`}
@@ -315,12 +341,13 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       <div className="qsl-preview stack gap12" aria-busy={opening || importing}>
         {opening && <p role="status">Opening this Question Set…</p>}
         {activePreview && <>
-          <p>{activePreview.snapshot.questions.length} {activePreview.snapshot.questions.length === 1 ? "question" : "questions"} · {activePreview.snapshot.tags.join(" · ") || "No topic tags"}</p>
+          <p>{activePreview.snapshot.questions.length} {activePreview.snapshot.questions.length === 1 ? "question" : "questions"} · {topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
           <p className="sub">Preview the first three questions. Check their sources while studying.</p>
           <ol>{activePreview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
             {question.citation && <small>Source: {question.citation}</small>}
+            <VisualIntentNote tags={question.tags} />
             <details className="qsl-preview-teaching">
               <summary>Reveal recorded answer and teaching notes</summary>
               <div className="stack gap8">
