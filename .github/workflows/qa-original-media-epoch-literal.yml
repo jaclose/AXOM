@@ -33,7 +33,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Assert literal QA head and pinned MOTHERSHIP source parent
+      - name: Assert literal QA head and pinned MOTHERSHIP source ancestry
         shell: bash
         env:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -43,12 +43,18 @@ jobs:
           git rev-parse HEAD
           test -z "$EXPECTED_HEAD_SHA" || test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
           git merge-base --is-ancestor "$PINNED_SOURCE_SHA" HEAD
-          # Only synthetic tests and this workflow may differ from the pinned source.
-          unexpected="$(git diff --name-only "$PINNED_SOURCE_SHA" HEAD | grep -Ev '^(\.github/workflows/qa-original-media-epoch-literal\.yml|web/src/lib/sync/(contentDownloads\.mediaIntegrity\.test\.ts|cloudStorage\.test\.ts))
+          while IFS= read -r path; do
+            case "$path" in
+              ".github/workflows/qa-original-media-epoch-literal.yml" | \
+              "web/src/lib/sync/contentDownloads.mediaIntegrity.test.ts" | \
+              "web/src/lib/sync/cloudStorage.test.ts") ;;
+              *) echo "Unexpected non-QA source change: $path"; exit 1 ;;
+            esac
+          done < <(git diff --name-only "$PINNED_SOURCE_SHA" HEAD)
           test -z "$(git status --porcelain)"
       - run: node scripts/toolchain.mjs
       - run: npm --prefix web ci
-      - name: Assert both MOTHERSHIP source recovery suites are present and run
+      - name: Execute MOTHERSHIP original recovery and cloud account isolation regression
         shell: bash
         run: |
           set -euo pipefail
@@ -59,19 +65,4 @@ jobs:
             src/lib/sync/contentDownloads.mediaIntegrity.test.ts \
             src/lib/sync/contentDownloads.originalAccountEpoch.test.ts \
             src/lib/sync/cloudStorage.test.ts \
-            --reporter=verbose
- || true)"
-          test -z "$unexpected"
-          test -z "$(git status --porcelain)"
-      - run: node scripts/toolchain.mjs
-      - run: npm --prefix web ci
-      - name: Assert both MOTHERSHIP source recovery suites are present and run
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f web/src/lib/sync/contentDownloads.mediaIntegrity.test.ts
-          test -f web/src/lib/sync/contentDownloads.originalAccountEpoch.test.ts
-          npm --prefix web run test -- \
-            src/lib/sync/contentDownloads.mediaIntegrity.test.ts \
-            src/lib/sync/contentDownloads.originalAccountEpoch.test.ts \
             --reporter=verbose
