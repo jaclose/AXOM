@@ -31,7 +31,10 @@ const tracker = () => ({ activities: [
   { activityId: "FTM1:IMCQ1", term: "T1", module: "FTM 1", weekBasis: "unassigned", installed: true },
 ] });
 const run = (input = {}) => reconcileAcademicContent({
-  inventory: fixture(), dispositions: dispositions(), receipts: receipts(), tracker: tracker(), ...input,
+  // The default synthetic PDF receipt is explicit: source coverage is no longer
+  // implied by unrelated question-bank/cloud/tracker receipts.
+  inventory: fixture(), dispositions: dispositions(), receipts: receipts(), tracker: tracker(),
+  pdfTriage: completePdfTriage("text_with_question_indicators"), ...input,
 });
 
 test("complete requires source identities, dispositions, verified receipts, and tracker records", () => {
@@ -44,6 +47,11 @@ test("complete requires source identities, dispositions, verified receipts, and 
     detectedQuestions: 2, readyQuestions: 2, reviewQuestions: 0, verifiedReadyQuestions: 2,
     expectedBaselineTrackerActivities: 2, reportedTrackerActivities: 2,
     installedTrackerActivities: 2, cloudReceiptSources: 1,
+    pdfJobsRecorded: 1, pdfJobsInQueue: 1, pdfVolumeUnmounted: 0,
+    pdfPathsMissing: 0, pdfLowText: 0, pdfReaderFailures: 0,
+    pdfDeferredSources: 0, pdfNoQuestionIndicators: 0,
+    pdfScopeConflictReviewRows: 0, pdfScopeChangedReviewRows: 0,
+    pdfScopeReviewFlaggedOther: 0, pdfUnverifiedCurrentAvailability: 0,
   });
 });
 
@@ -523,4 +531,50 @@ test("per-source authorization evidence must bind the correct SHA, run, timestam
     assert.equal(result.complete, false, JSON.stringify(mutation));
     assert.ok(result.blockers.some(message => message.includes("per-source availability")), JSON.stringify(result));
   }
+});
+
+test("R20 RED: PDF question-source coverage cannot be certified when its triage ledger is omitted", () => {
+  const result = run({ pdfTriage: undefined });
+  assert.equal(result.complete, false,
+    "Cloud question receipts do not prove the original PDF is currently accessible.");
+  assert.ok(result.blockers.some(message => message.includes("PDF question-source") && message.includes("availability")),
+    JSON.stringify(result.blockers));
+
+  const nonPdfInventory = fixture();
+  nonPdfInventory.entries[0] = { ...nonPdfInventory.entries[0],
+    path: "sources/IMCQ-1.txt", extension: "txt" };
+  nonPdfInventory.entries[1] = { ...nonPdfInventory.entries[1],
+    path: "sources/IMCQ-1-copy.txt", extension: "txt", duplicateOf: "sources/IMCQ-1.txt" };
+  const nonPdf = run({ inventory: nonPdfInventory, pdfTriage: undefined });
+  assert.equal(nonPdf.complete, true,
+    "Pure non-PDF source sets must not require a PDF availability ledger.");
+});
+
+test("R20 RED: unrelated present PDF triage SHA cannot substitute for the actual question source", () => {
+  const triage = completePdfTriage("text_with_question_indicators");
+  triage.rows = [{ ...triage.rows[0], source_sha256: b,
+    availabilityProof: { ...triage.rows[0].availabilityProof, source_sha256: b } }];
+  // SHA 'b' is in the inventory as a text Course Tracker template, not the PDF question original 'a'.
+  const result = run({ pdfTriage: triage });
+  assert.equal(result.complete, false,
+    "Matching row and queue denominators do not establish coverage of the PDF question-source SHA.");
+  assert.ok(result.blockers.some(message => message.includes("PDF question-source") && message.includes("missing")),
+    JSON.stringify(result.blockers));
+});
+
+test("R20: PDF aliases sharing a canonical question SHA still require explicit PDF proof", () => {
+  const inventory = fixture();
+  inventory.entries[0] = { ...inventory.entries[0],
+    path: "sources/IMCQ-1.bin", extension: "bin" };
+  inventory.entries[1] = { ...inventory.entries[1],
+    duplicateOf: "sources/IMCQ-1.bin" };
+  const withoutTriage = run({ inventory, pdfTriage: undefined });
+  assert.equal(withoutTriage.complete, false,
+    "A PDF duplicate alias must not be hidden by a non-PDF canonical path.");
+  assert.ok(withoutTriage.blockers.some(message => message.includes("PDF question-source")),
+    JSON.stringify(withoutTriage.blockers));
+  const withTriage = run({ inventory,
+    pdfTriage: completePdfTriage("text_with_question_indicators") });
+  assert.equal(withTriage.complete, true,
+    "The exact source SHA and current-run proof should still certify this synthetic alias.");
 });
