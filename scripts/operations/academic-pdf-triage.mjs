@@ -13,6 +13,7 @@
  * Every PDF read is bounded, and previous results are reused by SHA/mtime.
  */
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import {
   existsSync, lstatSync, mkdirSync, readFileSync, realpathSync,
@@ -272,9 +273,67 @@ async function inspectPdf(job, options, previous) {
   }
 }
 
-export function recommendNextSources(rows, excludedShas = new Set(), count = 100) {
+/**
+ * Revalidate every queued source before any current-run recommendation or
+ * release receipt, including previous cache rows outside --start/--limit.
+ * The SHA is a ledger label only: path stat is NOT full-byte digest validation.
+ * Neither source presence nor PDF sample implies medical or rights approval.
+ */
+export function verifyPdfSourceAvailability(rows, jobs, roots,
+  { runId, runAt, now = () => new Date().toISOString() }) {
+  if (typeof runId !== "string" || runId.length < 8
+    || typeof runAt !== "string" || !Number.isFinite(Date.parse(runAt)))
+    throw new Error("Current PDF triage run ID and ISO timestamp are required.");
+  const bySha = new Map(jobs.map(job => [job.source_sha256, job]));
+  return rows.map(row => {
+    const job = bySha.get(row.source_sha256);
+    if (!job) throw new Error("Triage source does not match the current PDF queue.");
+    // Never inherit a previous run's proof, even from an otherwise identical
+    // parser cache row. A new verified original stat is mandatory.
+    const { availabilityProof: _priorProof, sourceAvailabilityStatus: _priorAvailability,
+      ...previous } = row;
+    let source = scopedAvailableFile(job, roots), st = null;
+    try { if (source) st = statSync(source.path); } catch { source = null; }
+    if (!source || !st || !st.isFile()) {
+      const missingVolume = typeof job.source_path === "string"
+        && job.source_path.startsWith("/Volumes/JDabSSD/")
+        && !existsSync("/Volumes/JDabSSD");
+      const status = missingVolume ? "source_volume_unmounted" : "source_path_unavailable";
+      if (job.requires_scope_review || previous.requires_scope_review)
+        return { ...previous, sourceAvailabilityStatus: status };
+      return { ...previous, status, sourceAvailabilityStatus: status,
+        reason: missingVolume
+          ? "Authorized external academic drive is disconnected; file is not proven deleted."
+          : "No authorized original or identical alias is currently accessible." };
+    }
+    const identityChanged = previous.resolved_path !== source.path
+      || previous.bytes !== st.size || previous.mtime_ms !== st.mtimeMs;
+    const identity = { resolved_path: source.path, usedMirror: source.usedMirror,
+      bytes: st.size, mtime_ms: st.mtimeMs };
+    // Even if an authorized mirror exists now, old sample hints cannot
+    // certify newly changed bytes/path/mtime outside a fresh Poppler inspection.
+    if (previous.status === "text_with_question_indicators" && identityChanged)
+      return { ...previous, ...identity, status: "reader_failure_needs_review",
+        sourceAvailabilityStatus: "changed_original_requires_reinspection",
+        reason: "Current original path or file metadata changed since PDF sampling; rerun bounded source inspection." };
+    const checkedAt = now();
+    if (!Number.isFinite(Date.parse(checkedAt)))
+      throw new Error("Invalid PDF source availability verification clock.");
+    return { ...previous, ...identity, sourceAvailabilityStatus: "authorized_path_present",
+      source_sha_is_ledger_declared_not_rehashed: true,
+      availabilityProof: { runId, source_sha256: row.source_sha256,
+        authorizedPathAvailable: true, checkedAt } };
+  });
+}
+
+export function recommendNextSources(rows, excludedShas = new Set(), count = 100, runId = null) {
   const supported = new Set(["imcq", "pq", "esoft", "review_questions", "small_group", "case"]);
   return rows.filter(row => row.status === "text_with_question_indicators"
+    && row.availabilityProof?.authorizedPathAvailable === true
+    && row.availabilityProof.source_sha256 === row.source_sha256
+    && typeof row.availabilityProof.runId === "string"
+    && row.availabilityProof.runId.length >= 8
+    && (!runId || row.availabilityProof.runId === runId)
     && row.requires_scope_review !== true
     && !excludedShas.has(row.source_sha256))
     .map(row => {
@@ -294,8 +353,8 @@ export function recommendNextSources(rows, excludedShas = new Set(), count = 100
     .slice(0, count);
 }
 
-export function recommendBalancedSources(rows, excludedShas = new Set(), count = 100) {
-  const candidates = recommendNextSources(rows, excludedShas, rows.length);
+export function recommendBalancedSources(rows, excludedShas = new Set(), count = 100, runId = null) {
+  const candidates = recommendNextSources(rows, excludedShas, rows.length, runId);
   const selected = [], used = new Set();
   const terms = ["T1", "T2", "T3", "T4", "T5"];
   const termQuota = Math.max(1, Math.floor(count / terms.length));
@@ -348,7 +407,10 @@ async function main(args = process.argv.slice(2)) {
       inspected[index] = await inspectPdf(job, options, prior.get(job.source_sha256));
     }
   }));
-  const rows = mergePdfTriageRows(priorRows, inspected, jobs);
+  const merged = mergePdfTriageRows(priorRows, inspected, jobs);
+  const runId = randomUUID();
+  const runAt = new Date().toISOString();
+  const rows = verifyPdfSourceAvailability(merged, jobs, options.roots, { runId, runAt });
   let processedB3 = new Set();
   try {
     const b3 = JSON.parse(readFileSync(join(artifactDir, "agent-2-priority-batches.json"), "utf8"))
@@ -356,14 +418,14 @@ async function main(args = process.argv.slice(2)) {
     processedB3 = new Set((b3?.jobs ?? []).map(job => shaPattern.exec(job.canonical_input_key ?? "")?.[1]).filter(Boolean));
   } catch { /* A missing specialist manifest does not alter raw triage counts. */ }
   const report = {
-    schema: "axom-academic-pdf-triage-v1", runAt: new Date().toISOString(),
+    schema: "axom-academic-pdf-triage-v1", runId, runAt,
     queuePath: options.input, queueDistinctPdfJobs: jobs.length,
     selectedStart: options.start, selectedJobs: slice.length,
     reportCachedSourceRows: rows.length,
     summary: summarizeTriage(rows),
     alreadyPrioritizedB3SourceHashes: processedB3.size,
-    recommendedNextAfterB3: recommendNextSources(rows, processedB3, 100),
-    balancedNextAfterB3: recommendBalancedSources(rows, processedB3, 100),
+    recommendedNextAfterB3: recommendNextSources(rows, processedB3, 100, runId),
+    balancedNextAfterB3: recommendBalancedSources(rows, processedB3, 100, runId),
     recommendationEvidence: "Three-page PDF text hints only; full source SHA, answer fidelity, figures and rights require review. Balanced recommendation guarantees up to 20 candidates per represented term (T1–T5) before filling remaining capacity.",
     rows,
   };
