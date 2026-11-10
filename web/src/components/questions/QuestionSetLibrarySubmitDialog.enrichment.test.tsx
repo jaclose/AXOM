@@ -158,6 +158,61 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("keeps AI keyword suggestions private unless the publisher explicitly opts in", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/Question 1 · Review explanation and choices/));
+    const keywords = screen.getByRole("textbox", { name: "Question 1 suggested keywords" }) as HTMLInputElement;
+    expect(keywords.value).toContain("vascular smooth muscle");
+    const optIn = screen.getByRole("checkbox", { name: /Include inspected keywords for Question 1/ }) as HTMLInputElement;
+    expect(optIn.checked).toBe(false);
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    await waitFor(() => expect(mocks.updateQuestion).toHaveBeenCalledOnce());
+    const patch = mocks.updateQuestion.mock.calls[0][1] as Partial<QuestionRecord>;
+    expect(patch.tags).toBeUndefined();
+    expect(source.tags).toEqual(["anatomy"]);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("adds only explicitly reviewed, bounded keywords while preserving author tags and answer keys", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/Question 1 · Review explanation and choices/));
+    fireEvent.change(screen.getByRole("textbox", { name: "Question 1 suggested keywords" }), {
+      target: { value: "Vascular Smooth Muscle; anatomy, Histology, histology" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Include inspected keywords for Question 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    await waitFor(() => expect(screen.getByText(/Reviewed explanations saved privately/)).toBeTruthy());
+    expect(mocks.updateQuestion).toHaveBeenCalledWith("q-1", expect.objectContaining({
+      tags: ["anatomy", "vascular smooth muscle", "histology"],
+    }));
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+    expect(source.tags).toEqual(["anatomy"]);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects excessive opted-in AI keywords before touching any questions", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/Question 1 · Review explanation and choices/));
+    fireEvent.change(screen.getByRole("textbox", { name: "Question 1 suggested keywords" }), {
+      target: { value: "one,two,three,four,five,six,seven,eight,nine" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Include inspected keywords for Question 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/at most eight keywords/)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("keeps drafts and blocks duplicate saves until a durable readback completes", async () => {
     const source = question();
     mocks.workspace.questions = [source];
