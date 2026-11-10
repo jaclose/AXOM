@@ -37,9 +37,11 @@ async function seedLocalSet(page: Page) {
       options: [{ key: "A", text: "First synthetic label" }, { key: "B", text: "Second synthetic label" }],
       correctKey: "B",
       explanation: "AXOM AI-assisted explanation (verify against source): The synthetic source explicitly marks B.",
+      // Legacy rationale keys can carry padding. Source review and learner
+      // preview must recognize them without rewriting the approved snapshot.
       choiceRationales: {
-        A: "AXOM AI-assisted rationale (verify against source): A conflicts with the synthetic source.",
-        B: "AXOM AI-assisted rationale (verify against source): B matches the synthetic source.",
+        " a ": "AXOM AI-assisted rationale (verify against source): A conflicts with the synthetic source.",
+        " b ": "AXOM AI-assisted rationale (verify against source): B matches the synthetic source.",
       },
       citation: "Synthetic review fixture, page 1", tags: ["synthetic", "reviewed-synthetic-keyword"],
     });
@@ -127,6 +129,17 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await review.getByRole("button", { name: "Approve for library" }).click();
     await expect(queue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
     console.info("Question Set Library fixture: academic approval recorded.");
+    // Read the approved PostgreSQL snapshot through the learner's restricted
+    // RPC. It must contain the *source-submitted* padded rationale keys, while
+    // the correct answer is still the source-reviewed B.
+    const approvedEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as {
+      status: string; review_revision: number;
+      snapshot_payload: { questions: Array<{ correctKey?: string; choiceRationales?: Record<string, string> }> };
+    };
+    expect(approvedEvidence.status).toBe("approved");
+    expect(approvedEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(Object.keys(approvedEvidence.snapshot_payload.questions[0].choiceRationales ?? {})
+      .some(key => key.trim() !== key)).toBe(true);
 
     const library = other.locator(".qsl-library");
     await library.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -145,6 +158,7 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await revealTeaching.click();
     await expect(preview.getByText(/Submitted answer: B/)).toBeVisible();
     await expect(preview.getByText(/AI-assisted teaching text/)).toBeVisible();
+    await expect(preview.getByText("Source: Synthetic review fixture, page 1")).toBeVisible();
     await expect(preview.getByText(/The synthetic source explicitly marks B/)).toBeVisible();
     await expect(preview.getByText(/A conflicts with the synthetic source/)).toBeVisible();
     await expect(preview.getByText(/B matches the synthetic source/)).toBeVisible();
@@ -245,7 +259,7 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     expect(await other.evaluate(async () => {
       const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => {
         questionSets: Array<{ title: string; importProvenance?: { shareId: string } }>;
-        questions: Array<{ stem: string; correctKey?: string; explanation?: string; choiceRationales?: Record<string, string>; tags: string[] }>;
+        questions: Array<{ stem: string; correctKey?: string; explanation?: string; choiceRationales?: Record<string, string>; citation?: string; tags: string[] }>;
       } } }> }).__AXOM_DEV__;
       const state = dev.useStore.getState();
       const imported = state.questions.find(question => question.stem === "Which synthetic label is the reviewed answer?");
@@ -254,9 +268,19 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
         importedKey: imported?.correctKey,
         aiProvenance: imported?.explanation?.startsWith("AXOM AI-assisted explanation (verify against source):"),
         choiceProvenance: ["A", "B"].every(key => imported?.choiceRationales?.[key]?.startsWith("AXOM AI-assisted rationale (verify against source):")),
+        // The imported private copy normalizes legacy keys, but the published
+        // version and its reviewer-approved digest are never mutated here.
+        paddedKeysExcluded: !Object.keys(imported?.choiceRationales ?? {}).some(key => key.trim() !== key),
+        sourceCitation: imported?.citation === "Synthetic review fixture, page 1",
         reviewedKeyword: imported?.tags.includes("reviewed-synthetic-keyword"),
       };
-    })).toEqual({ importedSet: true, importedKey: "B", aiProvenance: true, choiceProvenance: true, reviewedKeyword: true });
+    })).toEqual({ importedSet: true, importedKey: "B", aiProvenance: true, choiceProvenance: true,
+      paddedKeysExcluded: true, sourceCitation: true, reviewedKeyword: true });
+    // Import may normalize the *private copy*, never the reviewer-approved
+    // server snapshot or its revision-bound evidence.
+    const afterImportEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as typeof approvedEvidence;
+    expect(afterImportEvidence.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
+    expect(afterImportEvidence.review_revision).toBe(approvedEvidence.review_revision);
     console.info("Question Set Library fixture: second account previewed, liked and imported.");
     await other.setViewportSize({ width: 390, height: 844 });
     expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
