@@ -47,6 +47,7 @@ afterEach(async () => {
 async function pendingOriginal() {
   const bytes = new Blob(["%PDF synthetic immutable original scoped to owner A"], { type: "application/pdf" });
   const checksum = await sha256Hex(await bytes.arrayBuffer());
+  if (!checksum) throw new Error("Synthetic source checksum unavailable.");
   const document: SourceDocument = {
     id: "synthetic-original-epoch", title: "Synthetic source", fileName: "source.pdf",
     fileType: "pdf", checksum, uploadedAt: "2026-11-10", rawText: "Synthetic source",
@@ -83,7 +84,7 @@ describe("explicit academic original download preserves the initiating account e
     });
     vi.mocked(accountOperationClient).mockResolvedValue({
       client: {} as never, userId: account, assertCurrent,
-    } as Awaited<ReturnType<typeof accountOperationClient>>);
+    } as unknown as Awaited<ReturnType<typeof accountOperationClient>>);
 
     await expect(materializeState(state)).rejects.toThrow(/account changed/i);
     expect(getQuestionAttachmentScope().accountId).toBe(other);
@@ -97,7 +98,7 @@ describe("explicit academic original download preserves the initiating account e
       assertCurrent: async () => {
         if (getQuestionAttachmentScope().accountId !== account) throw new Error("Account changed.");
       },
-    } as Awaited<ReturnType<typeof accountOperationClient>>);
+    } as unknown as Awaited<ReturnType<typeof accountOperationClient>>);
 
     const restored = await materializeState(state);
     expect(restored.documents.map(item => item.id)).toContain(document.id);
