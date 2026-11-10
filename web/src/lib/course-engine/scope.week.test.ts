@@ -329,3 +329,71 @@ describe("source module inheritance after course refiling", () => {
     assert.equal(JSON.stringify(moved), before);
   });
 });
+
+describe("secondary collections cannot replace primary source evidence", () => {
+  it("holds review, custom and legacy missed-review primary pointers without losing attempts", () => {
+    const sources = [
+      { kind: "review" as const, tags: [] },
+      { kind: "custom" as const, tags: [] },
+      { kind: undefined, tags: ["missed-review"] },
+    ];
+    for (const meta of sources) {
+      const sets = new Map([["secondary", { scope: sourceScope, questionIds: ["q"], ...meta }]]);
+      const q = question("q", {
+        setId: "secondary", ...sourceScope, status: "correct",
+        attempts: [{ at: "2026-11-06T00:00:00Z", status: "correct" }],
+      });
+      const snapshot = JSON.stringify(q);
+      const progress = scopeProgress([q], sourceScope, sets);
+      assert.equal(progress.total, 0);
+      assert.equal(progress.sourceReviewHeld, 1);
+      assert.deepEqual(groupQuestionsByScope([q], sets).find((group) => group.key === "unassigned")?.questionIds, ["q"]);
+      assert.equal(JSON.stringify(q), snapshot);
+    }
+  });
+
+  it("retains a genuine generated primary source when its own record is compatible", () => {
+    const generated = new Map([["generated", {
+      kind: "generated" as const, scope: sourceScope, questionIds: ["q"],
+    }]]);
+    const q = question("q", { setId: "generated", ...sourceScope });
+    assert.equal(scopeProgress([q], sourceScope, generated).total, 1);
+    assert.deepEqual(groupQuestionsByScope([q], generated).flatMap((group) => group.questionIds), ["q"]);
+  });
+});
+
+describe("immutable original question content collisions", () => {
+  it("holds same-ID rewritten stems and answer options in both orders, preserving records", () => {
+    const source = new Map([["source", { scope: sourceScope, questionIds: ["collision"] }]]);
+    const original = question("collision", {
+      stem: "Which original mechanism is tested?",
+      options: [{ key: "A", text: "Original rationale" }, { key: "B", text: "Alternative" }],
+      correctKey: "A",
+    });
+    for (const altered of [
+      { ...original, stem: "A different medical mechanism is tested" },
+      { ...original, options: [{ key: "A", text: "Changed correct option" }, { key: "B", text: "Alternative" }] },
+      { ...original, questionNumber: 40 },
+    ]) {
+      for (const pair of [[original, altered], [altered, original]]) {
+        const before = JSON.stringify(pair);
+        const progress = scopeProgress(pair, sourceScope, source);
+        assert.equal(progress.total, 0);
+        assert.equal(progress.attempted, 0);
+        assert.equal(progress.sourceReviewHeld, 1);
+        assert.deepEqual(groupQuestionsByScope(pair, source).find(group => group.key === "unassigned")?.questionIds, ["collision"]);
+        assert.equal(JSON.stringify(pair), before);
+      }
+    }
+  });
+
+  it("counts a truly equivalent original once, ignoring learner annotations", () => {
+    const source = new Map([["source", { scope: sourceScope, questionIds: ["same"] }]]);
+    const original = question("same", { stem: "Same original", correctKey: "A" });
+    const equivalent = { ...original, notes: "Learner-owned marginal note", marked: true };
+    const counted = scopeProgress([equivalent, original], sourceScope, source);
+    assert.equal(counted.total, 1);
+    assert.deepEqual(counted.questionIds, ["same"]);
+    assert.equal(counted.sourceReviewHeld, undefined);
+  });
+});
