@@ -1883,27 +1883,33 @@ function JournalFeedback({ onClose, sessionDrafts }: {
   const accountId = useAccount((state) => state.user?.id);
   const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
   const [selection, setSelection] = useState<{ ownerKey: string; key: string } | null>(null);
+  const [readRetry, setReadRetry] = useState(0);
   const selectedKey = selection?.ownerKey === ownerKey ? selection.key : null;
   return <JournalFeedbackForOwner
-    key={`${ownerKey}:${selectedKey ?? "latest"}`}
+    key={`${ownerKey}:${selectedKey ?? "latest"}:${readRetry}`}
     draftKey={`axom-journal-feedback-draft:${ownerKey}`}
     sessionDrafts={sessionDrafts}
     selectedKey={selectedKey}
     onSelectCopy={(key) => setSelection({ ownerKey, key })}
+    onRetryRead={() => setReadRetry((count) => count + 1)}
     onClose={onClose}
   />;
 }
 
-function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, sessionDrafts }: {
+function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, onRetryRead, sessionDrafts }: {
   onClose: () => void;
   draftKey: string;
   selectedKey: string | null;
   onSelectCopy: (key: string) => void;
+  onRetryRead: () => void;
   sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
 }) {
   const user = useAccount((state) => state.user);
   const [savedCopies] = useState(() => readJournalFeedbackCopies(draftKey, selectedKey));
   const loaded = savedCopies.selected.stored;
+  // If reading fails, permit in-tab writing and export without claiming a
+  // durable save or overwriting an unknown older draft. Corrupt bytes remain locked.
+  const canWriteInTab = loaded.unreadable && loaded.raw === null;
   const [draft, setDraft] = useState(() => sessionDrafts.get(draftKey) ?? loaded.draft);
   const [savedFingerprint, setSavedFingerprint] = useState(() => journalFeedbackFingerprint(loaded.draft));
   const persistedRevisionRef = useRef(loaded.revision);
@@ -1930,7 +1936,7 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
       ? "Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing."
       : loaded.unreadable
         ? loaded.raw === null
-          ? "AXOM could not read saved feedback in this browser. No draft was replaced. Close feedback and try again."
+          ? "AXOM cannot read saved feedback. You can write in this tab, but nothing will save until storage returns. Download before closing or reloading. Older saved drafts were not changed."
           : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
         : "",
   );
@@ -2057,15 +2063,15 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
         <fieldset className="journal-rating-fieldset">
           <legend>Overall experience</legend>
           <div className="journal-rating-choices">
-            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || loaded.unreadable} onClick={() => changeDraft({ ...draft, rating: value })}>{value}</button>)}
+            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || (loaded.unreadable && !canWriteInTab)} onClick={() => changeDraft({ ...draft, rating: value })}>{value}</button>)}
           </div>
         </fieldset>
         <div className="journal-feedback-fields">
-          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, liked: event.target.value })} />
-          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, wantMore: event.target.value })} />
-          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, missing: event.target.value })} />
-          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, painPoints: event.target.value })} />
-          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || loaded.unreadable} maxLength={2000} onChange={(event) => changeDraft({ ...draft, comment: event.target.value })} />
+          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, liked: event.target.value })} />
+          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, wantMore: event.target.value })} />
+          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, missing: event.target.value })} />
+          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, painPoints: event.target.value })} />
+          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={2000} onChange={(event) => changeDraft({ ...draft, comment: event.target.value })} />
         </div>
         {savedCopies.others.length > 0 && (
           <details className="journal-feedback-note">
@@ -2088,6 +2094,7 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
         )}
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
+        {canWriteInTab && <GButton size="sm" onClick={onRetryRead}>Retry reading saved feedback</GButton>}
         {storageError && !loaded.unreadable && !conflicted && <GButton size="sm" onClick={() => setSaveRetryToken((token) => token + 1)}>Retry draft save</GButton>}
         {error && <p className="journal-feedback-note" role="alert">{error}</p>}
       </>}

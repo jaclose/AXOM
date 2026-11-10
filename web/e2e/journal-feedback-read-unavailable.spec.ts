@@ -1,0 +1,92 @@
+import { readFile } from "node:fs/promises";
+import { expect, seedOnboarded, test } from "./fixtures";
+import { DEFAULT_JOURNAL_NOTEBOOK } from "../src/lib/journalNotebook";
+
+test("feedback remains locally recoverable when browser reads fail, then retries without replacing older bytes", async ({ page }) => {
+  const browserIssues: string[] = [];
+  page.on("pageerror", (error) => browserIssues.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning")
+      browserIssues.push(`${message.type()}: ${message.text()}`);
+  });
+
+  await seedOnboarded(page, { journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true } });
+  const draftKey = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => { profile: { userId: string } } };
+    }> }).__AXOM_DEV__;
+    return `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+  });
+  const oldDraft = JSON.stringify({
+    rating: 3, liked: "The older private browser draft", wantMore: "",
+    missing: "", painPoints: "", comment: "",
+  });
+  await page.evaluate(({ key, old }) => localStorage.setItem(key, old), { key: draftKey, old: oldDraft });
+
+  // Browser state is synthetic and private to the Playwright context. Do not
+  // disable the app's vault or tamper with existing user/browser profiles.
+  await page.addInitScript((key) => {
+    const nativeGet = Storage.prototype.getItem;
+    (window as Window & { __axomBlockFeedbackRead?: boolean }).__axomBlockFeedbackRead = true;
+    Storage.prototype.getItem = function (storageKey: string) {
+      if (this === window.localStorage
+        && storageKey.startsWith(key)
+        && (window as Window & { __axomBlockFeedbackRead?: boolean }).__axomBlockFeedbackRead)
+        throw new Error("Synthetic localStorage read denied");
+      return nativeGet.call(this, storageKey);
+    };
+  }, draftKey);
+  await page.goto("/#journal?feedback=1", { waitUntil: "networkidle" });
+  expect(await page.evaluate((key) => { try { localStorage.getItem(key); return "readable"; } catch { return "denied"; } }, draftKey)).toBe("denied");
+  const dialog = page.getByRole("dialog", { name: "How is the journal feeling?" });
+  const liked = dialog.getByLabel("What do you like?");
+  await expect(liked).toBeEditable();
+  await expect(dialog.getByText(/AXOM cannot read saved feedback/)).toBeVisible();
+  await liked.fill("An unsaved in-tab recovery draft");
+  await expect(dialog.getByRole("button", { name: "Download draft" })).toBeVisible();
+  const exportReady = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Download draft" }).click();
+  const exported = await exportReady;
+  expect(exported.suggestedFilename()).toBe("axom-journal-feedback-draft.json");
+  const exportedText = await readFile(await exported.path(), "utf8");
+  expect(JSON.parse(exportedText).liked).toBe("An unsaved in-tab recovery draft");
+  await dialog.getByRole("button", { name: "Not now" }).click();
+  await page.getByRole("button", { name: "Feedback" }).click();
+  await expect(dialog.getByLabel("What do you like?")).toHaveValue("An unsaved in-tab recovery draft");
+
+  await page.evaluate(() => {
+    (window as Window & { __axomBlockFeedbackRead?: boolean }).__axomBlockFeedbackRead = false;
+  });
+  await dialog.getByRole("button", { name: "Retry reading saved feedback" }).click();
+  const state = await page.evaluate((key) => {
+    const legacy = localStorage.getItem(key);
+    const writerKeys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .filter((value): value is string => Boolean(value?.startsWith(`${key}:writer:`)));
+    return { legacy, writerKeys, writer: writerKeys.length === 1 ? localStorage.getItem(writerKeys[0]) : null };
+  }, draftKey);
+  expect(state.legacy).toBe(oldDraft);
+  expect(state.writerKeys).toHaveLength(1);
+  expect(JSON.parse(state.writer ?? "{}").liked).toBe("An unsaved in-tab recovery draft");
+
+  await dialog.getByRole("button", { name: "Not now" }).click();
+  await page.getByRole("button", { name: "Feedback" }).click();
+  await expect(dialog.getByLabel("What do you like?")).toHaveValue("An unsaved in-tab recovery draft");
+  await expect(dialog.getByText("Other saved feedback copies (1)")).toBeVisible();
+  await dialog.getByText("Other saved feedback copies (1)").click();
+  await expect(dialog.getByRole("button", { name: "Download copy 1" })).toBeVisible();
+
+  for (const [width, theme] of [[320, "light"], [390, "dark"], [1440, "light"]] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.evaluate((mode) => { document.documentElement.dataset.theme = mode; }, theme);
+    await expect(dialog.getByLabel("What do you like?")).toBeVisible();
+    const dimensions = await page.evaluate(() => ({
+      viewport: window.innerWidth, page: document.documentElement.scrollWidth,
+      modal: document.querySelector(".journal-feedback-modal")?.getBoundingClientRect().width ?? 0,
+    }));
+    expect(dimensions.page, `horizontal document overflow at ${width}px`).toBeLessThanOrEqual(dimensions.viewport + 1);
+    expect(dimensions.modal).toBeLessThanOrEqual(width + 1);
+  }
+  expect(browserIssues).toEqual([]);
+  // Explicit Send never clicked; no outbound feedback or account/provider mutation.
+});
