@@ -408,6 +408,34 @@ test("unrecognized PDF triage status cannot certify physical source coverage", (
   }
 });
 
+test("known academic PDF scope conflict and changed-scope statuses produce review blockers", () => {
+  for (const [status, countKey] of [
+    ["academic_scope_conflict_review", "pdfScopeConflictReviewRows"],
+    ["academic_scope_changed_review", "pdfScopeChangedReviewRows"],
+  ]) {
+    const triage = completePdfTriage(status);
+    triage.rows[0].requires_scope_review = true;
+    triage.rows[0].scope_evidence = [
+      { source_id: "synthetic-first", source_path: "FTM/first.pdf", term: 1, module: "FTM", week: 2 },
+      { source_id: "synthetic-second", source_path: "FTM/second.pdf", term: 2, module: "FTM", week: 2 },
+    ];
+    const result = run({ pdfTriage: triage });
+    assert.equal(result.complete, false, JSON.stringify(result));
+    assert.ok(!result.errors.some(message => message.includes("unknown status")), JSON.stringify(result.errors));
+    assert.equal(result.counts[countKey], 1, JSON.stringify(result.counts));
+    assert.ok(result.blockers.some(message => message.includes("academic scope")), JSON.stringify(result.blockers));
+  }
+});
+
+test("stale sampled-text PDF readiness with scope review flag cannot certify availability", () => {
+  const triage = completePdfTriage("text_with_question_indicators");
+  triage.rows[0].requires_scope_review = true;
+  const result = run({ pdfTriage: triage });
+  assert.equal(result.complete, false, JSON.stringify(result));
+  assert.equal(result.counts.pdfScopeReviewFlaggedOther, 1);
+  assert.ok(result.blockers.some(message => message.includes("academic scope")), JSON.stringify(result.blockers));
+});
+
 test("PDFs deferred by size or encrypted content remain explicitly held", () => {
   for (const status of ["size_limit_deferred", "encrypted_pdf_review"]) {
     const result = run({ pdfTriage: completePdfTriage(status) });
