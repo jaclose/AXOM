@@ -369,7 +369,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
                   && <p className="qsl-preview-ai-warning">AI-assisted teaching text. Model provenance is retained; verify the medical claims against the cited source.</p>}
                 {question.explanation && <p>{question.explanation}</p>}
                 {question.choiceRationales && <ul>{question.options.flatMap(option => {
-                  const rationale = question.choiceRationales?.[option.key];
+                  // A reviewed snapshot may use different casing for a
+                  // choice and its rationale. Match normalized own keys only:
+                  // direct property lookup can read inherited Object members.
+                  const rationale = Object.entries(question.choiceRationales ?? {})
+                    .find(([key]) => key.trim().toUpperCase() === option.key.trim().toUpperCase())?.[1];
                   return rationale ? [<li key={option.key}><b>{option.key}. {option.text}</b> <span>{rationale}</span></li>] : [];
                 })}</ul>}
                 {!question.explanation && !question.choiceRationales

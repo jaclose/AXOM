@@ -469,6 +469,41 @@ describe("Community Question Set Library", () => {
     expect(payload.snapshot.questions[0].correctKey).toBe("B");
   });
 
+  it("shows recorded choice rationales when reviewed option and rationale key casing differ", async () => {
+    // Both spellings are accepted by the snapshot validator. They must map
+    // to the same reviewed choices without fabricating any missing rationale.
+    const reviewed = {
+      ...snapshot,
+      questions: [{
+        ...snapshot.questions[0],
+        choiceRationales: {
+          a: "Source-reviewed note: Alpha contradicts the synthetic answer.",
+          b: "Source-reviewed note: Beta is the keyed synthetic answer.",
+        },
+      }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: reviewed, contentDigest: "b".repeat(64),
+      status: "approved", reviewRevision: 2,
+    });
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.getByText(/Submitted answer: B/)).toBeTruthy();
+    expect(screen.getByText(reviewed.questions[0].choiceRationales.a)).toBeTruthy();
+    expect(screen.getByText(reviewed.questions[0].choiceRationales.b)).toBeTruthy();
+    expect(screen.queryByText(/AI-assisted teaching text/)).toBeNull();
+    expect(mock.commit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    // The UI normalizes the lookup only; it never rewrites the approved
+    // revision, answer key, choice rationales, or provenance during import.
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0]).toEqual(reviewed.questions[0]);
+  });
+
   it("labels approved visual intent as unreviewed planning metadata without altering the imported questions", async () => {
     const visuallyTagged = {
       ...snapshot,
