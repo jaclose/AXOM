@@ -168,3 +168,82 @@ test("retries a blocked submission receipt read without editing the older feedba
   expect(browserIssues).toEqual([]);
   // The test never presses Send and uses no real signed-in account or provider.
 });
+
+test("a name-only workspace rename retains in-tab feedback during denied reads", async ({ page }) => {
+  const browserIssues: string[] = [];
+  page.on("pageerror", (error) => browserIssues.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") browserIssues.push(message.text());
+  });
+  await seedOnboarded(page, {
+    name: "Journal Rename Before",
+    journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true },
+  });
+  const originalKey = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => { profile: { userId: string } } };
+    }> }).__AXOM_DEV__;
+    return `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+  });
+  const oldDraft = JSON.stringify({
+    rating: 3, liked: "Older unchanged private words", wantMore: "",
+    missing: "", painPoints: "", comment: "",
+  });
+  await page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), { key: originalKey, raw: oldDraft });
+  await page.addInitScript(() => {
+    const originalGet = Storage.prototype.getItem;
+    (window as Window & { __axomBlockRenameReads?: boolean }).__axomBlockRenameReads = true;
+    Storage.prototype.getItem = function (key: string) {
+      if (this === window.localStorage && key.startsWith("axom-journal-feedback-draft:")
+        && (window as Window & { __axomBlockRenameReads?: boolean }).__axomBlockRenameReads)
+        throw new Error("Synthetic feedback read denied across name edit");
+      return originalGet.call(this, key);
+    };
+  });
+  await page.goto("/#journal?feedback=1", { waitUntil: "networkidle" });
+  const dialog = page.getByRole("dialog", { name: "How is the journal feeling?" });
+  await expect(dialog.getByLabel("What do you like?")).toBeEditable();
+  await dialog.getByLabel("What do you like?").fill("Private feedback written before my display name changed");
+  await dialog.getByRole("button", { name: "Not now" }).click();
+  await page.evaluate(() => { window.location.hash = "#dashboard"; });
+  await expect(page.getByRole("button", { name: "Feedback", exact: true })).toHaveCount(0);
+  const renamedKey = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => {
+        updateProfile: (value: { name: string }) => void;
+        profile: { userId: string };
+      } };
+    }> }).__AXOM_DEV__;
+    dev.useStore.getState().updateProfile({ name: "Journal Rename After" });
+    return `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+  });
+  expect(renamedKey).not.toBe(originalKey);
+  await page.evaluate(() => { window.location.hash = "#journal"; });
+  await page.getByRole("button", { name: "Feedback", exact: true }).click();
+  await expect(dialog.getByLabel("What do you like?"))
+    .toHaveValue("Private feedback written before my display name changed");
+  await expect(dialog.getByRole("button", { name: "Download draft" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(dialog.getByLabel("What do you like?")).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as Window & { __axomBlockRenameReads?: boolean }).__axomBlockRenameReads = false;
+  });
+  await dialog.getByRole("button", { name: "Retry reading saved feedback" }).click();
+  const recovered = await page.evaluate(({ oldKey, newKey }) => {
+    const writers = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .filter((key) => key?.startsWith(`${newKey}:writer:`));
+    return {
+      legacy: localStorage.getItem(oldKey),
+      writers,
+      copy: writers.length === 1 ? localStorage.getItem(writers[0]!) : null,
+    };
+  }, { oldKey: originalKey, newKey: renamedKey });
+  expect(recovered.legacy).toBe(oldDraft);
+  expect(recovered.writers).toHaveLength(1);
+  expect(JSON.parse(recovered.copy ?? "{}").liked)
+    .toBe("Private feedback written before my display name changed");
+  expect(browserIssues).toEqual([]);
+  // Local synthetic data only. No account session or feedback submission.
+});

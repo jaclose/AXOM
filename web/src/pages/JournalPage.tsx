@@ -1698,12 +1698,37 @@ function JournalWelcome({ initial, initialReminders, onComplete }: {
 // Keys already include workspace and authenticated account; a successful save
 // clears the matching in-memory copy. Older stored bytes are not touched.
 const journalInTabFeedbackDraftsByWindow = new WeakMap<Window, Map<string, JournalExperienceFeedbackInput>>();
+const journalInTabFeedbackRenameObservers = new WeakSet<Window>();
 
 function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInput> {
   let drafts = journalInTabFeedbackDraftsByWindow.get(window);
   if (!drafts) {
     drafts = new Map<string, JournalExperienceFeedbackInput>();
     journalInTabFeedbackDraftsByWindow.set(window, drafts);
+  }
+  if (!journalInTabFeedbackRenameObservers.has(window)) {
+    journalInTabFeedbackRenameObservers.add(window);
+    // Name-only profile edits can happen after the Journal route unmounts.
+    // The name-derived workspace ID changes, but the private writing owner does
+    // not. Move only an existing volatile draft, never saved browser bytes.
+    const tabDrafts = drafts;
+    useStore.subscribe((next, previous) => {
+      if (!isNameOnlyJournalRename(previous.profile, next.profile, previous.journal === next.journal)) return;
+      const account = useAccount.getState();
+      const accountId = account.phase === "signed-in" ? account.user?.id ?? null : null;
+      const oldOwner = accountId ? `${previous.profile.userId}:account:${accountId}` : previous.profile.userId;
+      const newOwner = accountId ? `${next.profile.userId}:account:${accountId}` : next.profile.userId;
+      const oldKey = `axom-journal-feedback-draft:${oldOwner}`;
+      const newKey = `axom-journal-feedback-draft:${newOwner}`;
+      const pending = tabDrafts.get(oldKey);
+      // Transfer volatile ownership only when the destination is empty.
+      // Never overwrite another pending draft; clear the old volatile alias
+      // so a later rename cannot resurrect an already-saved stale copy.
+      if (pending && !tabDrafts.has(newKey)) {
+        tabDrafts.set(newKey, pending);
+        tabDrafts.delete(oldKey);
+      }
+    });
   }
   return drafts;
 }

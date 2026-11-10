@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
@@ -9,6 +9,7 @@ import { usePomodoro } from "../lib/pomodoro";
 import { dayKey } from "../lib/scoring";
 import { localDateKey } from "../lib/dailyRollover";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "../lib/journalNotebook";
+import { userIdFromName } from "../lib/userIdentity";
 import { JournalPage } from "./JournalPage";
 
 const workspaceId = "journal-feedback-read-blocked-r17";
@@ -127,6 +128,80 @@ describe("Journal feedback when browser storage cannot be read", () => {
     expect(JSON.parse(originalGet.call(localStorage, copies[0]!) ?? "{}").liked)
       .toBe("Do not lose this when the Journal route unmounts.");
     expect(originalGet.call(localStorage, key)).toBe(oldDraft);
+  });
+
+  it("keeps unreadable feedback through a name-only rename on the same signed-in account, not account B", async () => {
+    const firstName = "Private Writer Original";
+    const nextName = "Private Writer Renamed";
+    const owner = {
+      id: "journal-rename-account-A", email: "journal-a@example.test",
+      displayName: "Writer A", emailConfirmed: true,
+    };
+    const other = { ...owner, id: "journal-rename-account-B", email: "journal-b@example.test" };
+    useAccount.setState({ user: owner, phase: "signed-in", link: "linked" });
+    useStore.getState().updateProfile({ name: firstName });
+    const originalKey = `axom-journal-feedback-draft:${userIdFromName(firstName)}:account:${owner.id}`;
+    const renamedKey = `axom-journal-feedback-draft:${userIdFromName(nextName)}:account:${owner.id}`;
+    const originalGet = Storage.prototype.getItem;
+    localStorage.setItem(originalKey, oldDraft);
+    const denied = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith("axom-journal-feedback-draft:"))
+        throw new Error("Feedback read unavailable");
+      return originalGet.call(this, storageKey);
+    });
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+
+    const first = render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    fireEvent.change(screen.getByLabelText("What do you like?"), {
+      target: { value: "Do not discard my private feedback after changing my display name." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    first.unmount();
+
+    useStore.getState().updateProfile({ name: nextName });
+    const second = render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Do not discard my private feedback after changing my display name.");
+
+    await act(async () => { useAccount.setState({ user: other }); });
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    await act(async () => { useAccount.setState({ user: owner }); });
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Do not discard my private feedback after changing my display name.");
+    const firstJournal = useStore.getState().journal;
+    await act(async () => { useStore.setState((state) => ({
+      profile: { ...state.profile, userId: "journal-renamed-separate-workspace" },
+      journal: [...state.journal],
+    })); });
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    await act(async () => { useStore.setState((state) => ({
+      profile: { ...state.profile, userId: userIdFromName(nextName) },
+      journal: firstJournal,
+    })); });
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Do not discard my private feedback after changing my display name.");
+    expect(originalGet.call(localStorage, originalKey)).toBe(oldDraft);
+    expect(writes.mock.calls.some(([storageKey]) => String(storageKey).startsWith("axom-journal-feedback-draft:")))
+      .toBe(false);
+
+    denied.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    const saved = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .filter((value) => value?.startsWith(`${renamedKey}:writer:`));
+    expect(saved).toHaveLength(1);
+    expect(JSON.parse(originalGet.call(localStorage, saved[0]!) ?? "{}").liked)
+      .toBe("Do not discard my private feedback after changing my display name.");
+    expect(originalGet.call(localStorage, originalKey)).toBe(oldDraft);
+    // Reverting the display name must show the original saved draft, not a
+    // stale volatile alias after the renamed copy was safely saved.
+    await act(async () => { useStore.getState().updateProfile({ name: firstName }); });
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Older private saved feedback.");
+    second.unmount();
+    localStorage.removeItem(originalKey);
+    for (const item of saved) localStorage.removeItem(item!);
   });
 
   it("offers in-dialog retry when only the saved submission marker cannot be read", () => {
