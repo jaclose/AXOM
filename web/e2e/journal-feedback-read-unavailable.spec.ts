@@ -269,6 +269,7 @@ test("saved feedback from a prior display name remains explicitly recoverable af
         profile: { userId: string };
         updateProfile: (value: { name: string }) => void;
       } };
+      flushVault: () => Promise<void>;
     }> }).__AXOM_DEV__;
     const base = `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
     const saved = JSON.stringify({
@@ -280,8 +281,7 @@ test("saved feedback from a prior display name remains explicitly recoverable af
     const renamed = `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
     // This waits for the existing local-first profile persistence gate, not
     // a simulated account/provider save.
-    const vault = await import("../src/lib/localVault");
-    await vault.flushLocalVaultWrites();
+    await dev.flushVault();
     return { base, renamed, saved };
   });
   expect(before.renamed).not.toBe(before.base);
