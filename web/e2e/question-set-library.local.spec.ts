@@ -129,6 +129,17 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await review.getByRole("button", { name: "Approve for library" }).click();
     await expect(queue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
     console.info("Question Set Library fixture: academic approval recorded.");
+    // Read the approved PostgreSQL snapshot through the learner's restricted
+    // RPC. It must contain the *source-submitted* padded rationale keys, while
+    // the correct answer is still the source-reviewed B.
+    const approvedEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as {
+      status: string; review_revision: number;
+      snapshot_payload: { questions: Array<{ correctKey?: string; choiceRationales?: Record<string, string> }> };
+    };
+    expect(approvedEvidence.status).toBe("approved");
+    expect(approvedEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(Object.keys(approvedEvidence.snapshot_payload.questions[0].choiceRationales ?? {})
+      .some(key => key.trim() !== key)).toBe(true);
 
     const library = other.locator(".qsl-library");
     await library.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -265,6 +276,11 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
       };
     })).toEqual({ importedSet: true, importedKey: "B", aiProvenance: true, choiceProvenance: true,
       paddedKeysExcluded: true, sourceCitation: true, reviewedKeyword: true });
+    // Import may normalize the *private copy*, never the reviewer-approved
+    // server snapshot or its revision-bound evidence.
+    const afterImportEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as typeof approvedEvidence;
+    expect(afterImportEvidence.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
+    expect(afterImportEvidence.review_revision).toBe(approvedEvidence.review_revision);
     console.info("Question Set Library fixture: second account previewed, liked and imported.");
     await other.setViewportSize({ width: 390, height: 844 });
     expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
