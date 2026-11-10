@@ -16,6 +16,13 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const supportedKinds = new Set(["question-source", "answer-key", "course-template", "reference", "asset", "other", "excluded"]);
 const supportedStates = new Set(["installed", "review-required", "prepared", "unsupported", "excluded", "missing-source"]);
 const originalFileStates = new Set(["cloud-verified", "local-only", "not-provided"]);
+// Keep this enumeration aligned with academic-pdf-triage.mjs. Unknown producer
+// statuses must never silently certify the original-source availability gate.
+const pdfAvailabilityStatuses = new Set([
+  "text_with_question_indicators", "text_without_question_indicators", "low_text_scan_or_figures",
+  "source_path_unavailable", "source_volume_unmounted", "size_limit_deferred",
+  "reader_failure_needs_review", "encrypted_pdf_review", "pdfinfo_unreadable",
+]);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const sample = (array, max = 12) => array.slice(0, max);
 
@@ -215,12 +222,16 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     } else {
       const seenPdf = new Set(), byStatus = {};
       for (const entry of pdfTriage.rows) {
-        if (!SHA256.test(entry.source_sha256 ?? "") || seenPdf.has(entry.source_sha256)) {
+        if (!SHA256.test(entry?.source_sha256 ?? "") || seenPdf.has(entry.source_sha256)) {
           errors.push("PDF availability ledger has a missing or repeated source fingerprint.");
           continue;
         }
         seenPdf.add(entry.source_sha256);
         if (!byHash.has(entry.source_sha256)) errors.push(`PDF availability SHA ${entry.source_sha256.slice(0, 12)} is not in the source manifest.`);
+        if (!pdfAvailabilityStatuses.has(entry.status)) {
+          errors.push(`PDF availability SHA ${entry.source_sha256.slice(0, 12)} has unknown status: ${String(entry.status)}`);
+          continue;
+        }
         byStatus[entry.status] = (byStatus[entry.status] ?? 0) + 1;
       }
       if (pdfTriage.rows.length !== pdfTriage.queueDistinctPdfJobs)
@@ -233,11 +244,16 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       if (missing) blockers.push(`${missing} PDF originals lack an accessible authorized path; reconcile exact SHA aliases.`);
       if (lowText) blockers.push(`${lowText} low-text/image-heavy PDF originals need bounded OCR or explicit manual review before completeness.`);
       if (failed) blockers.push(`${failed} PDF originals failed bounded inspection and need a tracked parser disposition.`);
+      const deferred = (byStatus.size_limit_deferred ?? 0) + (byStatus.encrypted_pdf_review ?? 0);
+      const noIndicators = byStatus.text_without_question_indicators ?? 0;
+      if (deferred) blockers.push(`${deferred} PDF originals are deferred or encrypted; obtain authorized source review before claiming coverage.`);
+      if (noIndicators) blockers.push(`${noIndicators} PDF question jobs have no sampled question indicators; verify source classification before claiming completeness.`);
       const age = Date.now() - Date.parse(pdfTriage.runAt);
       if (age < -5 * 60000 || age > 24 * 60 * 60000)
         blockers.push("PDF availability snapshot is stale or future-dated; rerun the staged triage before accepting physical-source coverage.");
       pdfTriageMetrics = { pdfJobsRecorded: pdfTriage.rows.length, pdfJobsInQueue: pdfTriage.queueDistinctPdfJobs,
-        pdfVolumeUnmounted: unmounted, pdfPathsMissing: missing, pdfLowText: lowText, pdfReaderFailures: failed };
+        pdfVolumeUnmounted: unmounted, pdfPathsMissing: missing, pdfLowText: lowText, pdfReaderFailures: failed,
+        pdfDeferredSources: deferred, pdfNoQuestionIndicators: noIndicators };
     }
   }
   // Reuse the single canonical B4 acceptance report rather than maintaining a

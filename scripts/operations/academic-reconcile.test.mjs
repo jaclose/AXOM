@@ -392,3 +392,52 @@ test("yesterday's production counts cannot certify a release even if all synthet
   const current = run({ production: { ...production, observedAt: new Date().toISOString() } });
   assert.equal(current.complete, true, JSON.stringify(current.blockers));
 });
+
+const completePdfTriage = status => ({
+  schema: "axom-academic-pdf-triage-v1",
+  runAt: new Date().toISOString(),
+  queueDistinctPdfJobs: 1,
+  rows: [{ source_sha256: a, status }],
+});
+
+test("unrecognized PDF triage status cannot certify physical source coverage", () => {
+  for (const status of ["source_ready_ai_reviewed", null, 12]) {
+    const result = run({ pdfTriage: completePdfTriage(status) });
+    assert.equal(result.complete, false, `Unexpectedly accepted PDF triage status ${String(status)}`);
+    assert.ok(result.errors.some(message => message.includes("unknown status")), JSON.stringify(result.errors));
+  }
+});
+
+test("PDFs deferred by size or encrypted content remain explicitly held", () => {
+  for (const status of ["size_limit_deferred", "encrypted_pdf_review"]) {
+    const result = run({ pdfTriage: completePdfTriage(status) });
+    assert.equal(result.complete, false, `Unexpectedly accepted ${status}`);
+    assert.equal(result.counts.pdfDeferredSources, 1);
+    assert.ok(result.blockers.some(message => message.includes("deferred or encrypted")), JSON.stringify(result.blockers));
+  }
+});
+
+test("PDF question jobs without sampled question indicators require review before release", () => {
+  const result = run({ pdfTriage: completePdfTriage("text_without_question_indicators") });
+  assert.equal(result.complete, false);
+  assert.equal(result.counts.pdfNoQuestionIndicators, 1);
+  assert.ok(result.blockers.some(message => message.includes("no sampled question indicators")));
+});
+
+test("PDF triage positive control retains supported scanned-text coverage", () => {
+  const result = run({ pdfTriage: completePdfTriage("text_with_question_indicators") });
+  assert.equal(result.complete, true, JSON.stringify(result));
+  assert.equal(result.counts.pdfDeferredSources, 0);
+  assert.equal(result.counts.pdfNoQuestionIndicators, 0);
+});
+
+test("malformed PDF triage rows produce release errors without crashing reconciliation", () => {
+  for (const invalidRow of [null, "invalid", {}, { source_sha256: a }]) {
+    const triage = completePdfTriage("text_with_question_indicators");
+    triage.rows = [invalidRow];
+    assert.doesNotThrow(() => run({ pdfTriage: triage }));
+    const result = run({ pdfTriage: triage });
+    assert.equal(result.complete, false);
+    assert.ok(result.errors.some(message => message.includes("source fingerprint") || message.includes("unknown status")));
+  }
+});
