@@ -139,3 +139,73 @@ test("actual navigation retires unpersisted quota-only saved badge but keeps wor
     description: String(restored.pageshowPersisted === "true"),
   });
 });
+
+test("offline burst with both storage backends exhausted fails closed, preserves prior save, and recovers", async ({ context }) => {
+  const page = await makeProbe(context);
+  const keyValue = workspace("confirmed-before-dual-exhaustion");
+  const recovered = workspace("recovered-after-dual-exhaustion");
+  await page.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const key = STORAGE_KEYS.persistedState;
+    await vault.localVaultStorage.getItem(key);
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(key, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+  }, keyValue);
+
+  await context.setOffline(true);
+  const failed = await page.evaluate(async (attempts) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const activity = await import("/src/lib/vaultActivity.ts");
+    const key = STORAGE_KEYS.persistedState;
+    const idbDescriptor = Object.getOwnPropertyDescriptor(window, "indexedDB");
+    const originalSet = Storage.prototype.setItem;
+    Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    Storage.prototype.setItem = function (name: string, value: string) {
+      if (name === key) throw new DOMException("Synthetic storage exhausted", "QuotaExceededError");
+      return originalSet.call(this, name, value);
+    };
+    try {
+      const checkpoint = vault.getVaultWriteCheckpoint();
+      for (const attempt of attempts) await vault.localVaultStorage.setItem(key, attempt);
+      await vault.flushLocalVaultWrites();
+      let acknowledged = false;
+      let error = "";
+      try { vault.assertVaultWritesSince(checkpoint); acknowledged = true; }
+      catch (caught) { error = caught instanceof Error ? caught.message : String(caught); }
+      return { acknowledged, error, failureVisible: activity.readVaultWriteFailure() !== null };
+    } finally {
+      Storage.prototype.setItem = originalSet;
+      if (idbDescriptor) Object.defineProperty(window, "indexedDB", idbDescriptor);
+      else Reflect.deleteProperty(window, "indexedDB");
+    }
+  }, Array.from({ length: 12 }, (_, i) => workspace("unsaved-offline-burst-" + i)));
+  expect(failed.acknowledged).toBe(false);
+  expect(failed.error).toMatch(/IndexedDB|fallback|quota/i);
+  expect(failed.failureVisible).toBe(true);
+
+  await context.setOffline(false);
+  expect(await page.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(keyValue);
+
+  await page.evaluate(async (value) => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    const checkpoint = vault.getVaultWriteCheckpoint();
+    await vault.localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+  }, recovered);
+  await page.reload();
+  expect(await page.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/localVault.ts");
+    return vault.localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe(recovered);
+});
