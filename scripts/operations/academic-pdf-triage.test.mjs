@@ -95,11 +95,29 @@ test("stale positive PDF triage cache cannot recommend a newly conflicted scope"
   assert.equal(summarizeTriage(rows).scopeConflictReviewRows, 1);
 });
 
+test("same PDF digest with a refilled week must not reuse old positive triage scope", () => {
+  const job = { canonical_input_key: "byte:" + HASH1,
+    input_mode: "pdf_original_extract_with_review",
+    source_id: "current", source_path: "/authorized/same.pdf", term: "T1", module: "FTM", week: 4 };
+  const previous = { source_sha256: HASH1, source_path: "/authorized/same.pdf",
+    term: "T1", module: "FTM", week: 1,
+    status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 8 };
+  const held = mergePdfTriageRows([previous], [], selectPdfJobs([job]));
+  assert.equal(held.length, 1);
+  assert.equal(held[0].status, "academic_scope_changed_review");
+  assert.equal(held[0].week, null);
+  assert.equal(held[0].scope_evidence.length, 2);
+  assert.deepEqual(held[0].scope_evidence.map(item => item.week), [1, 4]);
+  assert.equal(recommendNextSources(held).length, 0);
+  assert.equal(summarizeTriage(held).scopeChangedReviewRows, 1);
+});
+
 test("incremental report retains matching prior cache but drops out-of-queue source hashes", () => {
   const job = { canonical_input_key: "byte:" + HASH1, input_mode: "pdf_original_extract_with_review",
     source_path: "/authorized/current.pdf", module: "NCRS", term: "T4", week: 1 };
   const rows = mergePdfTriageRows([
-    { source_sha256: HASH1, status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 2 },
+    { source_sha256: HASH1, source_path: "/authorized/current.pdf", term: "T4", module: "NCRS", week: 1,
+      status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 2 },
     { source_sha256: HASH2, status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 99 },
   ], [], selectPdfJobs([job]));
   assert.equal(rows.length, 1);
