@@ -134,10 +134,13 @@ test("actual navigation retires unpersisted quota-only saved badge but keeps wor
   expect(restored.marker).toBeNull();
   expect(restored.bytes).toBe(bytes);
   expect(restored.pagehidePersisted).not.toBeNull();
-  test.info().annotations.push({
-    type: "actual-bfcache-restoration-observed",
-    description: String(restored.pageshowPersisted === "true"),
-  });
+  // An actual BFCache restore must produce a persisted=true pageshow on the
+  // returning document. A normal history navigation can pass the durability
+  // assertions but is NOT BFCache acceptance.
+  expect(
+    restored.pageshowPersisted,
+    `BFCache was not observed (pagehide.persisted=${restored.pagehidePersisted}, pageshow.persisted=${restored.pageshowPersisted}); a passing navigation test cannot be reported as BFCache coverage.`,
+  ).toBe("true");
 });
 
 test("offline burst with both storage backends exhausted fails closed, preserves prior save, and recovers", async ({ context }) => {
