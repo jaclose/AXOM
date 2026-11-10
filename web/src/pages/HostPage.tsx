@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BarChart3, CircleAlert, Crown, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import {
@@ -32,6 +32,19 @@ function HostAccountPage() {
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // React may batch two click events before the disabled state commits.
+  // The synchronous guard prevents duplicate privileged RPCs and audit writes.
+  const mutationInFlight = useRef(false);
+  // Keep privileged writes blocked until a post-settlement server readback succeeds.
+  // A lost acknowledgement is not proof that a role/AI/audit write was rolled back.
+  const pendingReadbackVersion = useRef<number | null>(null);
+  const mutationOutcome = useRef<{ success?: string; error?: string } | null>(null);
+  const refreshVersion = useRef(0);
+  const requestRefresh = useCallback(() => {
+    const next = ++refreshVersion.current;
+    setRefresh(next);
+    return next;
+  }, []);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -46,20 +59,37 @@ function HostAccountPage() {
     setDashboard(undefined);
     if (!userId) { setLoading(false); return; }
     setLoading(true); setError("");
-    void loadOperatorDashboard(userId).then(value => { if (alive) setDashboard(value); })
-      .catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "Host console unavailable."); })
-      .finally(() => { if (alive) setLoading(false); });
+    void loadOperatorDashboard(userId).then(value => {
+      if (!alive) return;
+      setDashboard(value);
+      // Older focus/initial reads must never release a newer mutation barrier.
+      if (pendingReadbackVersion.current !== null && refresh >= pendingReadbackVersion.current) {
+        const result = mutationOutcome.current;
+        pendingReadbackVersion.current = null;
+        mutationOutcome.current = null;
+        mutationInFlight.current = false;
+        setBusy(false);
+        if (result?.success) setMessage(result.success);
+        if (result?.error) setError(result.error);
+      }
+    }).catch(cause => {
+      if (!alive) return;
+      const detail = cause instanceof Error ? cause.message : "Host console unavailable.";
+      setError(pendingReadbackVersion.current !== null && refresh >= pendingReadbackVersion.current
+        ? `Host readback failed: ${detail}. The action may have been applied. Retry Host to verify the server state before another change.`
+        : detail);
+    }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [userId, refresh]);
   useEffect(() => {
-    const recheck = () => setRefresh(value => value + 1);
+    const recheck = () => requestRefresh();
     window.addEventListener("focus", recheck);
     window.addEventListener("axom:operator-access-changed", recheck);
     return () => {
       window.removeEventListener("focus", recheck);
       window.removeEventListener("axom:operator-access-changed", recheck);
     };
-  }, []);
+  }, [requestRefresh]);
   const role = dashboard?.role;
   const owner = role === "owner";
   const attentionCount = (dashboard?.overview?.academic_review_pending ?? 0) + (dashboard?.overview?.reports_pending ?? 0);
@@ -83,14 +113,20 @@ function HostAccountPage() {
   const activeSearch = accountSearch?.query === normalizedSearch ? accountSearch : undefined;
   const accounts = normalizedSearch ? activeSearch?.status === "ready" ? activeSearch.accounts : [] : dashboard?.accounts ?? [];
   async function change(fn: () => Promise<void>, success: string) {
-    if (busy) return;
+    if (mutationInFlight.current || busy) return;
+    mutationInFlight.current = true;
     setBusy(true); setError(""); setMessage("");
     try {
       await fn();
-      setMessage(success);
-      setRefresh(n => n + 1);
-    } catch (e) { setError(e instanceof Error ? e.message : "The change was not saved."); }
-    finally { setBusy(false); }
+      mutationOutcome.current = { success };
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "The change could not be confirmed.";
+      mutationOutcome.current = { error: `${detail}. Verify the refreshed server state before retrying.` };
+    } finally {
+      // Even a rejected transport reply may follow a committed server-side audit.
+      // Do not permit another action until a request started after this point resolves.
+      pendingReadbackVersion.current = requestRefresh();
+    }
   }
   function controlFor(account: OperatorAccount) {
     const draft = aiDrafts[account.user_id] ?? { enabled: account.ai_enabled, limit: String(account.ai_daily_limit) };
@@ -142,14 +178,14 @@ function HostAccountPage() {
       {role && <Tag tone="gold">{role === "owner" ? "Project CEO" : role === "admin" ? "Administrator" : "Moderator"}</Tag>}
     </section>
     <div className="host-toolbar">
-      <GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15} aria-hidden="true"/> Refresh</GButton>
+      <GButton size="sm" disabled={loading || busy} onClick={() => requestRefresh()}><RefreshCw size={15} aria-hidden="true"/> Refresh</GButton>
       <nav className="host-quick-nav" aria-label="Host sections">
         <a className="ghost-btn" href="#communities">Communities</a>
         <a className="ghost-btn" href="#questions">Question Bank</a>
       </nav>
     </div>
     {loading && <p role="status">Checking operator access…</p>}
-    {error && <div role="alert" className="host-warning"><p>{error}</p><GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}>Retry Host</GButton></div>}
+    {error && <div role="alert" className="host-warning"><p>{error}</p><GButton size="sm" disabled={loading || (busy && pendingReadbackVersion.current === null)} onClick={() => requestRefresh()}>Retry Host</GButton></div>}
     {message && <p role="status" className="sub">{message}</p>}
     {!userId && <GlassCard pad><PanelHeader title="Sign-in required" headingLevel={2} sub="Use your verified AXOM account to access host operations." /></GlassCard>}
     {!loading && userId && dashboard?.role === null && <GlassCard pad><PanelHeader title="Operator permission required" headingLevel={2}
@@ -234,6 +270,8 @@ function HostAccountPage() {
             <div className="row wrap gap8"><GButton size="sm" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8}
               onClick={() => void change(() => resolveReport(userId!, report.post_id, "dismiss", reportReasons[report.post_id] ?? ""), "Report dismissed and audited.")}>Dismiss report</GButton>
               <GButton size="sm" variant="danger" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8} onClick={() => {
+                // Skip a second destructive prompt before React commits the busy state.
+                if (mutationInFlight.current || busy) return;
                 if (window.confirm("Remove this reported post? The author’s private workspace stays untouched."))
                   void change(() => resolveReport(userId!, report.post_id, "remove", reportReasons[report.post_id] ?? ""), "Reported post removed and audited.");
               }}>Remove post</GButton>
