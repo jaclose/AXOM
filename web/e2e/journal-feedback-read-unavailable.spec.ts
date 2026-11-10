@@ -255,3 +255,56 @@ test("a name-only workspace rename retains in-tab feedback during denied reads",
   expect(browserIssues).toEqual([]);
   // Local synthetic data only. No account session or feedback submission.
 });
+
+
+test("saved feedback from a prior display name remains explicitly recoverable after browser reload", async ({ page }) => {
+  await seedOnboarded(page, {
+    name: "Journal Rename R24 Before",
+    journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true },
+  });
+  await page.goto("/#journal", { waitUntil: "networkidle" });
+  const before = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => {
+        profile: { userId: string };
+        updateProfile: (value: { name: string }) => void;
+      } };
+    }> }).__AXOM_DEV__;
+    const base = `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+    const saved = JSON.stringify({
+      rating: 4, liked: "The earlier name's existing saved feedback.",
+      wantMore: "", missing: "", painPoints: "", comment: "",
+    });
+    localStorage.setItem(base, saved);
+    dev.useStore.getState().updateProfile({ name: "Journal Rename R24 After" });
+    const renamed = `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+    // This waits for the existing local-first profile persistence gate, not
+    // a simulated account/provider save.
+    const vault = await import("../src/lib/localVault");
+    await vault.flushLocalVaultWrites();
+    return { base, renamed, saved };
+  });
+  expect(before.renamed).not.toBe(before.base);
+  const alias = await page.evaluate((key) => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+    .filter((item) => item?.startsWith(`${key}:name-alias:v1:`)), before.renamed);
+  expect(alias).toHaveLength(1);
+
+  await page.reload({ waitUntil: "networkidle" });
+  const ownerAfterReload = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => { profile: { userId: string } } };
+    }> }).__AXOM_DEV__;
+    return `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+  });
+  expect(ownerAfterReload).toBe(before.renamed);
+  await page.getByRole("button", { name: "Feedback", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "How is the journal feeling?" });
+  await expect(dialog.getByText("Other saved feedback copies (1)")).toBeVisible();
+  await dialog.getByText("Other saved feedback copies (1)").click();
+  await dialog.getByRole("button", { name: "Open copy 1" }).click();
+  await expect(dialog.getByLabel("What do you like?"))
+    .toHaveValue("The earlier name's existing saved feedback.");
+  const unchanged = await page.evaluate((key) => localStorage.getItem(key), before.base);
+  expect(unchanged).toBe(before.saved);
+  // No feedback was submitted or migrated. Original writer and saved bytes remain.
+});
