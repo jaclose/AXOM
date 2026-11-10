@@ -193,3 +193,22 @@
   font: inherit; line-height: 1.5; resize: vertical;
 }
 .qsl-draft-field textarea:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+
+/* Deliberate spoiler reveal: no answer or teaching text is exposed visually
+   until the learner opens a specific approved public question. */
+.qsl-preview-teaching {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+.qsl-preview-teaching > summary { cursor: pointer; font-weight: 600; }
+.qsl-preview-teaching > div { padding-top: 10px; overflow-wrap: anywhere; }
+.qsl-preview-teaching p { margin: 0; }
+.qsl-preview-teaching ul { margin: 0; padding-left: 20px; }
+.qsl-preview-teaching .qsl-preview-ai-warning {
+  border-left: 2px solid var(--gold);
+  padding-left: 10px;
+  color: var(--text-70);
+}

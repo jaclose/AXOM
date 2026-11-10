@@ -409,12 +409,39 @@ describe("Community Question Set Library", () => {
     await screen.findByRole("heading", { name: "Synthetic practice" });
     await user.click(screen.getByRole("button", { name: "Preview set" }));
     await screen.findByText("Which synthetic answer is supported?");
+    const reveal = screen.getByText("Reveal recorded answer and teaching notes");
+    const teaching = reveal.closest("details");
+    expect(teaching?.open).toBe(false);
+    expect(mock.commit).not.toHaveBeenCalled();
+    await user.click(reveal);
+    expect(teaching?.open).toBe(true);
+    expect(screen.getByText(/Submitted answer: B/)).toBeTruthy();
+    expect(screen.getByText(/AI-assisted teaching text/)).toBeTruthy();
+    expect(screen.getByText(generated.questions[0].explanation)).toBeTruthy();
+    expect(screen.getByText(generated.questions[0].choiceRationales.A)).toBeTruthy();
+    expect(screen.getByText(generated.questions[0].choiceRationales.B)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
     const payload = mock.commit.mock.calls[0][0];
     expect(payload.snapshot.questions[0].explanation).toBe(generated.questions[0].explanation);
     expect(payload.snapshot.questions[0].choiceRationales).toEqual(generated.questions[0].choiceRationales);
     expect(payload.snapshot.questions[0].correctKey).toBe("B");
+  });
+
+  it("does not invent an answer key or rationale in a legacy preview without evidence", async () => {
+    mock.preview.mockResolvedValue({
+      id: summary.id,
+      snapshot: { ...snapshot, questions: [{ ...snapshot.questions[0], correctKey: undefined }] },
+      contentDigest: "c".repeat(64), status: "approved", reviewRevision: 1,
+    });
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await user.click(await screen.findByRole("button", { name: "Preview set" }));
+    await user.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.getByText("No recorded answer key. Do not infer one from the explanation.")).toBeTruthy();
+    expect(screen.getByText("No teaching rationale was included in this approved snapshot.")).toBeTruthy();
+    expect(screen.queryByText(/Submitted answer:/)).toBeNull();
+    expect(mock.commit).not.toHaveBeenCalled();
   });
 
   it("checks the live approved listing again before importing a previously reviewed preview", async () => {
