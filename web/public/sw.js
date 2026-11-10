@@ -80,8 +80,13 @@ function cacheResponse(event, key, response) {
 }
 
 async function cachedAppAsset(request) {
+  // Inspect retained generations in creation order, then the current build.
+  // The last valid matching asset wins, while stale HTML rewrites in older
+  // caches are still evicted even when the current cache has a valid copy.
   const names = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX));
-  for (const name of names) {
+  const ordered = [...names.filter((name) => name !== CACHE), CACHE];
+  let preferred;
+  for (const name of ordered) {
     const cache = await caches.open(name);
     const response = await cache.match(request);
     if (!response) continue;
@@ -95,9 +100,9 @@ async function cachedAppAsset(request) {
       await cache.delete(request);
       continue;
     }
-    return response;
+    preferred = response;
   }
-  return undefined;
+  return preferred;
 }
 
 self.addEventListener("install", (event) => {
