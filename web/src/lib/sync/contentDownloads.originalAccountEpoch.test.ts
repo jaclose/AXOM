@@ -79,8 +79,8 @@ describe("explicit academic original download preserves the initiating account e
       if (getQuestionAttachmentScope().accountId !== account) throw new Error("Account changed during original download.");
       checks += 1;
       // The promise is acknowledged in A, but the browser changes account
-      // before the awaiting caller resumes its next local storage operation.
-      if (checks === 1) queueMicrotask(() => setQuestionAttachmentAccount(other));
+      // before the awaiting caller resumes its next local save.
+      if (checks === 2) queueMicrotask(() => setQuestionAttachmentAccount(other));
     });
     vi.mocked(accountOperationClient).mockResolvedValue({
       client: {} as never, userId: account, assertCurrent,
@@ -96,7 +96,7 @@ describe("explicit academic original download preserves the initiating account e
     let checks = 0;
     const assertCurrent = vi.fn(async () => {
       if (getQuestionAttachmentScope().accountId !== account) throw new Error("Account changed.");
-      if (++checks === 1) queueMicrotask(() => {
+      if (++checks === 2) queueMicrotask(() => {
         setQuestionAttachmentAccount(other);
         setQuestionAttachmentAccount(account);
       });
