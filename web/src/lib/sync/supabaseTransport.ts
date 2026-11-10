@@ -347,9 +347,9 @@ export function readPushResult(data: unknown, status = 200): PushResult {
   throw new SyncPushError({ kind: "rejected", rejection: "refused", status }, "The account answered in a way this version of AXOM does not understand.");
 }
 
-/** Allow for a slow uplink (about 40 KB a second) on top of the account's own time, up to five minutes. */
+/** Outlive the 60s database RPC budget, plus room for a slow uplink, up to five minutes. */
 export function pushTimeout(payloadBytes: number): number {
-  return Math.min(300_000, 45_000 + Math.round(payloadBytes / 40));
+  return Math.max(75_000, Math.min(300_000, 45_000 + Math.round(payloadBytes / 40)));
 }
 
 function timeoutSignal(ms: number): AbortSignal | undefined {
