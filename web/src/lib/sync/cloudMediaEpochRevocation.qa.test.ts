@@ -117,7 +117,11 @@ describe("current-main media integrity: in-flight epoch revocation", () => {
       expect(await uploadCloudMedia(client, owner, state, freshGuard, before)).toEqual(before);
       expect(await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: owner }))
         .toBeDefined();
-      expect(originals.get(path)).toBe(blob);
+      const retainedRemote = originals.get(path);
+      expect(retainedRemote).toBeDefined();
+      expect(retainedRemote?.type).toBe(blob.type);
+      expect(new Uint8Array(await retainedRemote!.arrayBuffer()))
+        .toEqual(new Uint8Array(await blob.arrayBuffer()));
       expect(upload).not.toHaveBeenCalled();
     },
   );
