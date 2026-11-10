@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyPdfText, isWithinRoot, parsePdfInfo, selectPdfJobs, mergePdfTriageRows, sourceRoots, summarizeTriage, recommendNextSources, recommendBalancedSources, verifyPdfSourceAvailability } from "./academic-pdf-triage.mjs";
@@ -315,4 +316,39 @@ test("R19: symlink escaping the authorized source root cannot receive availabili
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   }
+});
+
+test("R19: actual zero-inspection CLI refresh issues a new run ID, invalidates missing original, and writes no source bytes", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-cli-"));
+  try {
+    const original = join(root, "synthetic.pdf"), queuePath = join(root, "queue.json");
+    const reportPath = join(root, "report.json");
+    writeFileSync(original, "%PDF synthetic, never processed by Poppler");
+    const [job] = selectPdfJobs([fakePdfJob(HASH1, original)]);
+    writeFileSync(queuePath, JSON.stringify([fakePdfJob(HASH1, original)]));
+    writeFileSync(reportPath, JSON.stringify({ rows: [fakeReadyRow(job, statSync(original))] }));
+    const cliPath = new URL("./academic-pdf-triage.mjs", import.meta.url);
+    const invoke = () => {
+      const child = spawnSync(process.execPath, [cliPath.pathname, "--input", queuePath,
+        "--out", reportPath, "--start", "1", "--limit", "1", "--allow-root", root],
+        { encoding: "utf8", timeout: 10000 });
+      assert.equal(child.status, 0, child.stderr);
+      return JSON.parse(readFileSync(reportPath, "utf8"));
+    };
+    const first = invoke();
+    assert.equal(first.selectedJobs, 0);
+    assert.match(first.runId, /^[0-9a-f-]{36}$/);
+    assert.equal(first.rows[0].availabilityProof.runId, first.runId);
+    assert.equal(first.rows[0].status, "text_with_question_indicators");
+    assert.equal(recommendNextSources(first.rows, new Set(), 100, first.runId).length, 1);
+    unlinkSync(original);
+    const missing = invoke();
+    assert.equal(missing.selectedJobs, 0);
+    assert.notEqual(missing.runId, first.runId);
+    assert.equal(missing.rows[0].status, "source_path_unavailable");
+    assert.equal(missing.rows[0].availabilityProof, undefined);
+    assert.equal(missing.recommendedNextAfterB3.length, 0);
+    assert.equal(missing.balancedNextAfterB3.length, 0);
+    assert.equal(missing.rows[0].source_sha256, HASH1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
