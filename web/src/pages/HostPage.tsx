@@ -14,6 +14,16 @@ function date(value: string | null): string {
   return value ? new Date(value).toLocaleDateString() : "Never";
 }
 
+type HostMutationExpectation =
+  | { kind: "role"; accountId: string; wanted: "admin" | "moderator" | "member"; query: string }
+  | { kind: "ai"; accountId: string; enabled: boolean; limit: number; query: string };
+
+function matchesHostMutation(account: OperatorAccount, expected: HostMutationExpectation): boolean {
+  if (account.user_id !== expected.accountId) return false;
+  return expected.kind === "role" ? account.role === (expected.wanted === "member" ? null : expected.wanted)
+    : account.ai_enabled === expected.enabled && account.ai_daily_limit === expected.limit;
+}
+
 type AccountSearchState = {
   query: string;
   status: "loading" | "ready" | "error";
@@ -39,6 +49,7 @@ function HostAccountPage() {
   // A lost acknowledgement is not proof that a role/AI/audit write was rolled back.
   const pendingReadbackVersion = useRef<number | null>(null);
   const mutationOutcome = useRef<{ success?: string; error?: string } | null>(null);
+  const mutationExpectation = useRef<HostMutationExpectation | null>(null);
   const refreshVersion = useRef(0);
   const requestRefresh = useCallback(() => {
     const next = ++refreshVersion.current;
@@ -59,14 +70,30 @@ function HostAccountPage() {
     setDashboard(undefined);
     if (!userId) { setLoading(false); return; }
     setLoading(true); setError("");
-    void loadOperatorDashboard(userId).then(value => {
+    void loadOperatorDashboard(userId).then(async value => {
       if (!alive) return;
       setDashboard(value);
       // Older focus/initial reads must never release a newer mutation barrier.
       if (pendingReadbackVersion.current !== null && refresh >= pendingReadbackVersion.current) {
+        const expected = mutationExpectation.current;
+        if (expected) {
+          // The dashboard lists only the most recent 100 accounts. Verify older
+          // targets through a second server-authorized lookup, never a guessed ID.
+          let account = value.accounts.find(item => item.user_id === expected.accountId);
+          if (!account && expected.query) {
+            const found = await searchOperatorAccounts(userId, expected.query);
+            if (!alive || pendingReadbackVersion.current === null || refresh < pendingReadbackVersion.current) return;
+            account = found.find(item => item.user_id === expected.accountId);
+          }
+          if (!account || !matchesHostMutation(account, expected)) {
+            setError("The server does not yet confirm the requested Host change. Retry Host to check again. No further change is permitted until it is verified.");
+            return;
+          }
+        }
         const result = mutationOutcome.current;
         pendingReadbackVersion.current = null;
         mutationOutcome.current = null;
+        mutationExpectation.current = null;
         mutationInFlight.current = false;
         setBusy(false);
         if (result?.success) setMessage(result.success);
@@ -112,9 +139,10 @@ function HostAccountPage() {
   }, [userId, canManageAccounts, loading, normalizedSearch, refresh, searchRetry]);
   const activeSearch = accountSearch?.query === normalizedSearch ? accountSearch : undefined;
   const accounts = normalizedSearch ? activeSearch?.status === "ready" ? activeSearch.accounts : [] : dashboard?.accounts ?? [];
-  async function change(fn: () => Promise<void>, success: string) {
+  async function change(fn: () => Promise<void>, success: string, expected?: HostMutationExpectation) {
     if (mutationInFlight.current || busy) return;
     mutationInFlight.current = true;
+    mutationExpectation.current = expected ?? null;
     setBusy(true); setError(""); setMessage("");
     try {
       await fn();
@@ -144,7 +172,8 @@ function HostAccountPage() {
         onClick={() => {
           const wanted = roleDrafts[account.user_id];
           if (!wanted) return;
-          void change(() => setOperatorRole(userId!, account.user_id, wanted, reason), "Role updated and audited.");
+          void change(() => setOperatorRole(userId!, account.user_id, wanted, reason), "Role updated and audited.",
+            { kind: "role", accountId: account.user_id, wanted, query: account.email ?? account.display_name ?? "" });
         }}>Apply role</GButton>}
       <label>Cloud AI
         <select value={draft.enabled ? "enabled" : "disabled"} disabled={!owner || busy}
@@ -161,7 +190,8 @@ function HostAccountPage() {
         onClick={() => {
           const limit = Number(draft.limit);
           if (!Number.isInteger(limit) || limit < 0 || limit > 1000) { setError("Quota must be 0 to 1000."); return; }
-          void change(() => setOperatorAI(userId!, account.user_id, draft.enabled, limit, reason), "AI policy saved and audited.");
+          void change(() => setOperatorAI(userId!, account.user_id, draft.enabled, limit, reason), "AI policy saved and audited.",
+            { kind: "ai", accountId: account.user_id, enabled: draft.enabled, limit, query: account.email ?? account.display_name ?? "" });
         }}>Apply AI policy</GButton>}
       {owner && <label className="host-change-reason">Reason for changing {account.display_name ?? "this account"}
         <textarea value={reason} minLength={8} maxLength={500} rows={2} disabled={busy} onChange={event => setReasons(current => ({ ...current, [account.user_id]: event.target.value }))} placeholder="Record why this access or allowance is changing." />
@@ -185,6 +215,7 @@ function HostAccountPage() {
       </nav>
     </div>
     {loading && <p role="status">Checking operator access…</p>}
+    {busy && !error && <p role="status">Checking the saved Host change against the server…</p>}
     {error && <div role="alert" className="host-warning"><p>{error}</p><GButton size="sm" disabled={loading || (busy && pendingReadbackVersion.current === null)} onClick={() => requestRefresh()}>Retry Host</GButton></div>}
     {message && <p role="status" className="sub">{message}</p>}
     {!userId && <GlassCard pad><PanelHeader title="Sign-in required" headingLevel={2} sub="Use your verified AXOM account to access host operations." /></GlassCard>}
