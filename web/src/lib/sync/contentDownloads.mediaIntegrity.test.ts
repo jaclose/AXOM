@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import { indexedDB, IDBKeyRange, IDBObjectStore as FakeIDBObjectStore } from "fake-indexeddb";
+import { ATTACHMENT_STORE_NAME } from "../localVault";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "../compressedText";
@@ -157,6 +158,41 @@ describe("explicit account source download preserves immutable local image ident
     await expect(pending).rejects.toThrow(/Account changed/i);
     expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: "synthetic-other-account-r23" })).toBeUndefined();
   });
+  it("does not replace a cross-tab image committed after the final missing-key read", async () => {
+    const { deferred, attachment } = await protectedDeferred();
+    await deleteQuestionAttachmentBlobs([attachment.blobKey], { accountId: owner });
+    const conflicting = new Blob([new Uint8Array([137, 80, 78, 71, 66, 55, 44, 33])], { type: "image/png" });
+    const originalGet = FakeIDBObjectStore.prototype.get;
+    let scopedReads = 0;
+    let raced = false;
+    // Create the competing write transaction DURING the final readonly
+    // get. IndexedDB queues it before the recovery writer's next readwrite
+    // transaction, reproducing a real tab interleaving without changing
+    // production code or depending on timing/sleep.
+    const get = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, key) {
+      const request = originalGet.call(this, key);
+      if (this.name === ATTACHMENT_STORE_NAME && Array.isArray(key) && key[2] === attachment.blobKey
+        && ++scopedReads === 2) {
+        raced = true;
+        const tx = this.transaction.db.transaction(ATTACHMENT_STORE_NAME, "readwrite");
+        tx.objectStore(ATTACHMENT_STORE_NAME).add({
+          questionId: deferred.deferredContent!.questions[0].id,
+          blob: conflicting, byteSize: conflicting.size, mimeType: attachment.mimeType, updatedAt: timestamp,
+        }, key);
+      }
+      return request;
+    });
+    try {
+      await expect(materializeState(deferred)).rejects.toThrow(/image.*(original|conflict)/i);
+    } finally {
+      get.mockRestore();
+    }
+    expect(raced).toBe(true);
+    const retained = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner });
+    expect(await retained!.blob.arrayBuffer()).toEqual(await conflicting.arrayBuffer());
+    expect(deferred.questions).toHaveLength(0);
+  });
+
   it("atomically preserves a competing tab's original and rejects a mismatched winner", async () => {
     const { deferred, attachment } = await protectedDeferred();
     await deleteQuestionAttachmentBlobs([attachment.blobKey], { accountId: owner });
