@@ -1,10 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyPdfText, isWithinRoot, parsePdfInfo, selectPdfJobs, mergePdfTriageRows, sourceRoots, summarizeTriage, recommendNextSources, recommendBalancedSources } from "./academic-pdf-triage.mjs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { classifyPdfText, isWithinRoot, parsePdfInfo, selectPdfJobs, mergePdfTriageRows, sourceRoots, summarizeTriage, recommendNextSources, recommendBalancedSources, verifyPdfSourceAvailability } from "./academic-pdf-triage.mjs";
 
 const HASH1 = "a".repeat(64);
 const HASH2 = "b".repeat(64);
 const HASH3 = "c".repeat(64);
+const syntheticAvailabilityProof = sha => ({ runId: "r19-synthetic-run", source_sha256: sha,
+  authorizedPathAvailable: true, checkedAt: "2026-11-10T20:10:00.000Z" });
 
 test("pdfinfo extracts page number and encryption without storing metadata text", () => {
   assert.deepEqual(parsePdfInfo("Title: Fictional\nPages: 49\nEncrypted: no\n"), { pages: 49, encrypted: false });
@@ -156,9 +162,11 @@ test("summary preserves denominators and meaningful unsupported/scan count", () 
 test("next-batch ranking excludes already-processed B3 fingerprints without asserting readiness", () => {
   const rows = [
     { source_sha256: HASH1, status: "text_with_question_indicators", document_type: "pq",
-      sampledQuestionHeadingIndicators: 8, sampledChoiceLineIndicators: 8, module: "NCRS", term: "T4", week: 3 },
+      sampledQuestionHeadingIndicators: 8, sampledChoiceLineIndicators: 8, module: "NCRS", term: "T4", week: 3,
+       availabilityProof: syntheticAvailabilityProof(HASH1) },
     { source_sha256: HASH2, status: "text_with_question_indicators", document_type: "imcq",
-      sampledQuestionHeadingIndicators: 3, sampledChoiceLineIndicators: 8, module: null, term: null, week: null },
+      sampledQuestionHeadingIndicators: 3, sampledChoiceLineIndicators: 8, module: null, term: null, week: null,
+       availabilityProof: syntheticAvailabilityProof(HASH2) },
     { source_sha256: HASH3, status: "source_volume_unmounted", document_type: "pq",
       sampledQuestionHeadingIndicators: 50, sampledChoiceLineIndicators: 20 },
   ];
@@ -167,6 +175,8 @@ test("next-batch ranking excludes already-processed B3 fingerprints without asse
   assert.deepEqual(next.map(x=>x.source_sha256),[HASH1,HASH2]);
   assert.ok(next.every(item=>item.reviewStatus==="source_prefilter_only_not_answer_validated"));
   assert.ok(next.every(item=>!Object.keys(item).includes("correctAnswer")));
+  assert.deepEqual(recommendNextSources(rows, new Set(), 5, "other-run"), []);
+  assert.deepEqual(recommendNextSources(rows, new Set(), 5, "r19-synthetic-run").map(item => item.source_sha256), [HASH1, HASH2]);
 });
 
 test("balanced next batch does not starve a lower-scoring supported term", () => {
@@ -176,10 +186,189 @@ test("balanced next batch does not starve a lower-scoring supported term", () =>
     term: idx < 30 ? "T1" : "T4", module: "NCRS",
     sampledQuestionHeadingIndicators: idx < 30 ? 10 : 1,
     sampledChoiceLineIndicators: 5,
+    availabilityProof: syntheticAvailabilityProof((idx + 1).toString(16).padStart(64, "0")),
   }));
   const result = recommendBalancedSources(rows, new Set(), 10);
   assert.equal(result.length, 10);
   assert.equal(new Set(result.map(x => x.source_sha256)).size, 10);
   assert.ok(result.some(x => x.term === "T4"));
   assert.ok(result.some(x => x.term === "T1"));
+});
+
+function fakePdfJob(sha, sourcePath, extra = {}) {
+  return { canonical_input_key: "byte:" + sha, input_mode: "pdf_original_extract_with_review",
+    source_path: sourcePath, document_type: "pq", term: "T1", module: "FTM", week: 2, ...extra };
+}
+
+function fakeReadyRow(job, stat, sourcePath = job.source_path) {
+  return { source_sha256: job.source_sha256, source_path: job.source_path,
+    resolved_path: sourcePath, bytes: stat.size, mtime_ms: stat.mtimeMs,
+    term: job.term, module: job.module, week: job.week,
+    status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 3,
+    sampledPagesMax: 3 };
+}
+
+test("R19 RED: a previously ready but removed original cannot be recommended on an incremental zero-inspection run", () => {
+  const absent = "/allowed/nonexistent-r19.pdf";
+  const [job] = selectPdfJobs([fakePdfJob(HASH1, absent)]);
+  const cached = { ...fakeReadyRow(job, { size: 120, mtimeMs: 1 }), reusedCache: true };
+  const merged = mergePdfTriageRows([cached], [], [job]);
+  assert.equal(recommendNextSources(merged).length, 0,
+    "cached positive source hints must not survive a missing original");
+});
+
+test("R19: first inspection and cached repeat both receive their own current-run path-only availability proof", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-"));
+  try {
+    const original = join(root, "synthetic.pdf");
+    writeFileSync(original, "%PDF synthetic test bytes, not real medical content");
+    const [job] = selectPdfJobs([fakePdfJob(HASH1, original)]);
+    const sourceStat = statSync(original);
+    const originalRow = fakeReadyRow(job, sourceStat);
+    const firstAt = "2026-11-10T20:10:00.000Z";
+    const [first] = verifyPdfSourceAvailability([originalRow], [job], [root],
+      { runId: "r19-first-run", runAt: firstAt, now: () => firstAt });
+    assert.equal(first.status, "text_with_question_indicators");
+    assert.deepEqual(first.availabilityProof, { runId: "r19-first-run",
+      source_sha256: HASH1, authorizedPathAvailable: true, checkedAt: firstAt });
+    assert.equal(first.source_sha_is_ledger_declared_not_rehashed, true);
+    const secondAt = "2026-11-10T20:11:00.000Z";
+    const [second] = verifyPdfSourceAvailability([first], [job], [root],
+      { runId: "r19-cached-run", runAt: secondAt, now: () => secondAt });
+    assert.equal(second.status, "text_with_question_indicators");
+    assert.equal(second.availabilityProof.runId, "r19-cached-run");
+    assert.equal(second.availabilityProof.checkedAt, secondAt);
+    assert.equal(recommendNextSources([second]).length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("R19: disconnected original outside processing slice loses prior ready status and prior-run proof", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-"));
+  try {
+    const original = join(root, "synthetic.pdf");
+    writeFileSync(original, "synthetic");
+    const [job] = selectPdfJobs([fakePdfJob(HASH2, original)]);
+    const cached = { ...fakeReadyRow(job, statSync(original)),
+      availabilityProof: { runId: "previous-run", source_sha256: HASH2,
+        authorizedPathAvailable: true, checkedAt: "2026-11-10T20:05:00.000Z" } };
+    unlinkSync(original);
+    const [missing] = verifyPdfSourceAvailability([cached], [job], [root],
+      { runId: "r19-incremental-run", runAt: "2026-11-10T20:20:00.000Z",
+        inspectedShas: new Set() });
+    assert.equal(missing.status, "source_path_unavailable");
+    assert.equal(missing.availabilityProof, undefined);
+    assert.equal(recommendNextSources([missing]).length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("R19: changed mtime or different authorized mirror never inherits stale sampled ready status", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-"));
+  try {
+    const original = join(root, "synthetic.pdf"), alias = join(root, "alias.pdf");
+    writeFileSync(original, "synthetic");
+    writeFileSync(alias, "different synthetic data");
+    const [job] = selectPdfJobs([fakePdfJob(HASH3, original, { equivalent_paths: [alias] })]);
+    const cached = fakeReadyRow(job, statSync(original));
+    utimesSync(original, new Date(10_000), new Date(10_000));
+    const [mtimeHeld] = verifyPdfSourceAvailability([cached], [job], [root],
+      { runId: "r19-modified-run", runAt: "2026-11-10T20:20:00.000Z", inspectedShas: new Set() });
+    assert.equal(mtimeHeld.status, "reader_failure_needs_review");
+    assert.equal(recommendNextSources([mtimeHeld]).length, 0);
+    unlinkSync(original);
+    const [aliasHeld] = verifyPdfSourceAvailability([cached], [job], [root],
+      { runId: "r19-mirror-run", runAt: "2026-11-10T20:21:00.000Z", inspectedShas: new Set() });
+    assert.equal(aliasHeld.status, "reader_failure_needs_review");
+    assert.equal(aliasHeld.resolved_path, alias);
+    assert.equal(aliasHeld.usedMirror, true);
+    assert.equal(recommendNextSources([aliasHeld]).length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("R19: scope-conflicted original remains held even when the source becomes unavailable", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-"));
+  try {
+    const [job] = selectPdfJobs([fakePdfJob(HASH1, join(root, "missing.pdf"),
+      { equivalent_paths: [] }), fakePdfJob(HASH1, join(root, "missing-mirror.pdf"), { week: 4 })]);
+    const [held] = verifyPdfSourceAvailability(mergePdfTriageRows([], [], [job]),
+      [job], [root], { runId: "r19-held-run", runAt: "2026-11-10T20:20:00.000Z",
+        inspectedShas: new Set() });
+    assert.equal(held.status, "academic_scope_conflict_review");
+    assert.equal(held.sourceAvailabilityStatus, "source_path_unavailable");
+    assert.equal(held.availabilityProof, undefined);
+    assert.equal(held.scope_evidence.length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("R19: symlink escaping the authorized source root cannot receive availability proof", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-root-"));
+  const outside = mkdtempSync(join(tmpdir(), "axom-pdf-r19-outside-"));
+  try {
+    const external = join(outside, "private.pdf"), link = join(root, "escaped.pdf");
+    writeFileSync(external, "synthetic");
+    symlinkSync(external, link);
+    const [job] = selectPdfJobs([fakePdfJob(HASH1, link)]);
+    const [held] = verifyPdfSourceAvailability(
+      [fakeReadyRow(job, statSync(external), external)], [job], [root],
+      { runId: "r19-symlink-run", runAt: "2026-11-10T20:20:00.000Z", inspectedShas: new Set() });
+    assert.equal(held.status, "source_path_unavailable");
+    assert.equal(held.availabilityProof, undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("R19: actual zero-inspection CLI refresh issues a new run ID, invalidates missing original, and writes no source bytes", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-cli-"));
+  try {
+    const original = join(root, "synthetic.pdf"), queuePath = join(root, "queue.json");
+    const reportPath = join(root, "report.json");
+    writeFileSync(original, "%PDF synthetic, never processed by Poppler");
+    const [job] = selectPdfJobs([fakePdfJob(HASH1, original)]);
+    writeFileSync(queuePath, JSON.stringify([fakePdfJob(HASH1, original)]));
+    writeFileSync(reportPath, JSON.stringify({ rows: [fakeReadyRow(job, statSync(original))] }));
+    const cliPath = new URL("./academic-pdf-triage.mjs", import.meta.url);
+    const invoke = () => {
+      const child = spawnSync(process.execPath, [cliPath.pathname, "--input", queuePath,
+        "--out", reportPath, "--start", "1", "--limit", "1", "--allow-root", root],
+        { encoding: "utf8", timeout: 10000 });
+      assert.equal(child.status, 0, child.stderr);
+      return JSON.parse(readFileSync(reportPath, "utf8"));
+    };
+    const first = invoke();
+    assert.equal(first.selectedJobs, 0);
+    assert.match(first.runId, /^[0-9a-f-]{36}$/);
+    assert.equal(first.rows[0].availabilityProof.runId, first.runId);
+    assert.equal(first.rows[0].status, "text_with_question_indicators");
+    assert.equal(recommendNextSources(first.rows, new Set(), 100, first.runId).length, 1);
+    unlinkSync(original);
+    const missing = invoke();
+    assert.equal(missing.selectedJobs, 0);
+    assert.notEqual(missing.runId, first.runId);
+    assert.equal(missing.rows[0].status, "source_path_unavailable");
+    assert.equal(missing.rows[0].availabilityProof, undefined);
+    assert.equal(missing.recommendedNextAfterB3.length, 0);
+    assert.equal(missing.balancedNextAfterB3.length, 0);
+    assert.equal(missing.rows[0].source_sha256, HASH1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("R19: unvisited queued originals outside an initial partial slice produce explicit held rows, not disappearing denominators", () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-pdf-r19-unvisited-"));
+  try {
+    const source = join(root, "unvisited.pdf");
+    writeFileSync(source, "%PDF synthetic unsampled text");
+    const [job] = selectPdfJobs([fakePdfJob(HASH2, source)]);
+    const [row] = verifyPdfSourceAvailability([], [job], [root], {
+      runId: "r19-unvisited-run", runAt: "2026-11-10T20:20:00.000Z",
+      now: () => "2026-11-10T20:20:01.000Z",
+    });
+    assert.equal(row.source_sha256, HASH2);
+    assert.equal(row.status, "reader_failure_needs_review");
+    assert.equal(row.inspectionRequired, true);
+    assert.match(row.reason, /no bounded PDF inspection/);
+    assert.equal(row.availabilityProof.runId, "r19-unvisited-run");
+    assert.equal(recommendNextSources([row], new Set(), 100, "r19-unvisited-run").length, 0);
+    assert.equal(summarizeTriage([row]).measuredPdfJobRows, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
