@@ -283,4 +283,20 @@ describe("explicit account source download preserves immutable local image ident
     expect(await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
   });
 
+  it("rejects an A→B→A transition while accountOperationClient is still awaiting the session", async () => {
+    const { deferred, attachment } = await protectedDeferred();
+    await deleteQuestionAttachmentBlobs([attachment.blobKey], { accountId: owner });
+    let resolveSession!: (operation: unknown) => void;
+    session.current = new Promise<unknown>(resolve => { resolveSession = resolve; });
+    const pending = materializeState(deferred);
+    // The local account has already switched twice when Auth returns A's
+    // previous token. A freshly captured scope after this await is unsafe.
+    setQuestionAttachmentAccount("synthetic-during-session-owner-r26");
+    setQuestionAttachmentAccount(owner);
+    resolveSession({ client, userId: owner, assertCurrent: async () => undefined });
+    await expect(pending).rejects.toThrow(/account changed/i);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
+    expect(deferred.questions).toHaveLength(0);
+  });
+
 });

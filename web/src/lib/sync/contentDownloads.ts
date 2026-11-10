@@ -20,10 +20,10 @@ export interface ContentSelection { questionIds?: string[]; documentIds?: string
 export async function materializeState(state: NoctyriumState, selection?: ContentSelection): Promise<NoctyriumState> {
   const deferred = readDeferredContent(state.deferredContent);
   if (!deferred) return state;
-  const { client, userId, assertCurrent } = await accountOperationClient();
-  // Pin the account generation before any cloud I/O. The authenticated
-  // session may be unchanged while the local attachment scope cycles A-B-A.
+  // Capture the initiating owner BEFORE the asynchronous session lookup.
+  // A → B → A while the SDK resolves must not rebind a stale download.
   const originalScope = getQuestionAttachmentScope();
+  const { client, userId, assertCurrent } = await accountOperationClient();
   const assertAccountGeneration = () => {
     if (originalScope.accountId !== userId || !isQuestionAttachmentScopeCurrent(originalScope)) {
       throw new Error("The account changed during original-file recovery. Reopen the course in its original account and retry.");
