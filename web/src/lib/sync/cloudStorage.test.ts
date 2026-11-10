@@ -100,6 +100,9 @@ describe("private cloud content and media", () => {
     operation.current = { client, userId: "account-a", assertCurrent: guard };
     await materializeState(deferred);
     operation.current = { client, userId: "account-b", assertCurrent: guard };
+    // A legitimate B session must also activate B's local attachment scope.
+    // Otherwise the new epoch guard fails before the remote-content isolation check.
+    setQuestionAttachmentAccount("account-b");
     const other = deferContent(split.workspace, "account-b", split.references, []);
     await expect(materializeState(other)).rejects.toThrow(/downloaded or verified/);
     expect(deferred.deferredContent?.sources).toEqual(split.references);
