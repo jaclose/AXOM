@@ -369,6 +369,9 @@ describe("Journal feedback when browser storage cannot be read", () => {
     const renamedBKey = `axom-journal-feedback-draft:${userIdFromName(after)}:account:${ownerB.id}`;
     const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Account A historic private feedback." });
     localStorage.setItem(ownerAKey, original);
+    // The observer is installed when the Journal route has opened once.
+    const firstVisit = render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+    firstVisit.unmount();
     useStore.getState().updateProfile({ name: after });
     render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
 
