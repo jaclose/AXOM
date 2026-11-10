@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "../compressedText";
 import { makeSeed } from "../seed";
-import { deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
+import { addQuestionAttachmentBlobIfAbsent, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
 import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../questionAttachmentScope";
 import { clearCloudContentCache, splitCloudContent, uploadCloudContent } from "./cloudContent";
 import { clearCloudMediaUploadCache, MEDIA_BUCKET, uploadCloudMedia } from "./cloudMedia";
@@ -72,10 +72,11 @@ beforeEach(() => {
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   setQuestionAttachmentAccount(owner);
+  const startedScope = getQuestionAttachmentScope();
   session.current = {
     client, userId: owner,
     assertCurrent: async () => {
-      if (getQuestionAttachmentScope().accountId !== owner) throw new Error("Account changed during content download.");
+      if (getQuestionAttachmentScope() !== startedScope) throw new Error("Account changed during content download.");
     },
   };
   objects.clear();
@@ -156,4 +157,54 @@ describe("explicit account source download preserves immutable local image ident
     await expect(pending).rejects.toThrow(/Account changed/i);
     expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: "synthetic-other-account-r23" })).toBeUndefined();
   });
+  it("atomically preserves a competing tab's original and rejects a mismatched winner", async () => {
+    const { deferred, attachment } = await protectedDeferred();
+    await deleteQuestionAttachmentBlobs([attachment.blobKey], { accountId: owner });
+    const wrong = new Blob([new Uint8Array([137, 80, 78, 71, 9, 9, 9, 9])], { type: "image/png" });
+    const record = {
+      questionId: deferred.deferredContent!.questions[0].id,
+      blob: wrong, byteSize: wrong.size, mimeType: "image/png", updatedAt: timestamp,
+    };
+    // Two same-account tabs can both decide a key is absent. Only add, never
+    // put, makes the concurrent winner permanent and observable by recovery.
+    const results = await Promise.all([
+      addQuestionAttachmentBlobIfAbsent(attachment.blobKey, record, { accountId: owner }),
+      addQuestionAttachmentBlobIfAbsent(attachment.blobKey, {
+        ...record, blob: original, byteSize: original.size,
+      }, { accountId: owner }),
+    ]);
+    expect([...results].sort()).toEqual(["exists", "inserted"]);
+    const winning = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner });
+    const bytes = await winning!.blob.arrayBuffer();
+    if (await sha256(new Uint8Array(bytes)) !== await sha256(new Uint8Array(await original.arrayBuffer()))) {
+      await expect(materializeState(deferred)).rejects.toThrow(/image.*(original|conflict)/i);
+      const after = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner });
+      expect(await after!.blob.arrayBuffer()).toEqual(bytes);
+    } else {
+      const restored = await materializeState(deferred);
+      expect(restored.questions).toHaveLength(1);
+    }
+  });
+
+  it("rejects an A to B to A epoch change while fetching missing original bytes", async () => {
+    const { deferred, attachment } = await protectedDeferred();
+    await deleteQuestionAttachmentBlobs([attachment.blobKey], { accountId: owner });
+    const originalDownload = download.getMockImplementation()!;
+    let started!: () => void;
+    const downloading = new Promise<void>(resolve => { started = resolve; });
+    let resume!: () => void;
+    const resumed = new Promise<void>(resolve => { resume = resolve; });
+    download.mockImplementation(async (bucket, path) => {
+      if (bucket === MEDIA_BUCKET) { started(); await resumed; }
+      return originalDownload(bucket, path);
+    });
+    const pending = materializeState(deferred);
+    await downloading;
+    setQuestionAttachmentAccount("synthetic-second-owner-r24");
+    setQuestionAttachmentAccount(owner);
+    resume();
+    await expect(pending).rejects.toThrow(/Account changed/i);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true, accountId: owner })).toBeUndefined();
+  });
+
 });

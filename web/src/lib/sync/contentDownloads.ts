@@ -1,6 +1,6 @@
 import { workspaceMedia, downloadCloudMediaAsset } from "./cloudMedia";
 import { sha256 } from "../compressedText";
-import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
+import { addQuestionAttachmentBlobIfAbsent, getQuestionAttachmentBlob } from "../questionAttachments";
 import { accountOperationClient } from "../account/supabase";
 import { useStore } from "../store";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
@@ -71,8 +71,8 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
       }
       const blob = await downloadCloudMediaAsset(client, userId, reference);
       await assertCurrent();
-      // Recheck after remote I/O to reject an original saved in the meantime.
-      // Atomic add-only writes are a separate residual cross-tab race guard.
+      // Recheck after remote I/O. The subsequent add-only transaction is
+      // essential: a second tab can still create the key after this read.
       const raced = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
       await assertCurrent();
       if (raced) {
@@ -84,7 +84,20 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
         await assertCurrent();
         continue;
       }
-      await putQuestionAttachmentBlob(blobKey, { ...attachment, questionId, blob }, { accountId: userId });
+      // A competing tab can win between the final read and this write.
+      // Never use a blind put: atomic add preserves the first saved original.
+      await addQuestionAttachmentBlobIfAbsent(blobKey, { ...attachment, questionId, blob }, { accountId: userId });
+      await assertCurrent();
+      // A successful add OR a lost race is not an integrity receipt. Confirm
+      // the exact bytes currently retained by this account before returning.
+      const retained = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
+      await assertCurrent();
+      if (!retained || retained.blob.size !== reference.byteSize || retained.byteSize !== reference.byteSize
+        || retained.mimeType !== attachment.mimeType
+        || await sha256(new Uint8Array(await retained.blob.arrayBuffer())) !== reference.hash) {
+        throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
+      }
+      await assertCurrent();
     }
   }));
   await assertCurrent();
