@@ -107,7 +107,8 @@ for (const width of [320, 390, 1440]) {
       expect.stringMatching(/^Term 2\//),
     ]);
     expect(new Set(both.tracker.map(row => row.id)).size).toBe(2);
-    expect(new Set(both.tracker.map(row => row.templateKey)).size).toBe(2);
+    // A lecture key may repeat across terms; the owner-scoped path must not.
+    expect(new Set(both.tracker.map(row => `${row.path}|${row.templateKey}`)).size).toBe(2);
     expect(both.questions.map(q => q.sourceId).sort()).toEqual([...sourceIds].sort());
     const firstQuestion = both.questions.find(q => q.sourceId === first.readyQuestionIdsByWeek[2][0])!;
     const secondQuestion = both.questions.find(q => q.sourceId === second.readyQuestionIdsByWeek[2][0])!;
