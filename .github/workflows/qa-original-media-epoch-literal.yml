@@ -1,0 +1,56 @@
+name: AXOM QA Original Media Epoch Literal
+
+on:
+  pull_request:
+    paths:
+      - "web/src/lib/sync/atomicMediaWrite.ts"
+      - "web/src/lib/sync/contentDownloads.ts"
+      - "web/src/lib/sync/contentDownloads.mediaIntegrity.test.ts"
+      - "web/src/lib/sync/contentDownloads.originalAccountEpoch.test.ts"
+      - "web/src/lib/questionAttachmentScope.ts"
+      - "web/src/lib/questionAttachments.ts"
+      - "web/src/lib/decode/sources.ts"
+      - ".github/workflows/qa-original-media-epoch-literal.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  original-media-epoch:
+    name: Synthetic R23/R25 original integrity and account epoch (literal source)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Assert literal QA head and pinned MOTHERSHIP source parent
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PINNED_SOURCE_SHA: bd59a2718e0c7ebf3dedcbca09a14abccebb1668
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          test -z "$EXPECTED_HEAD_SHA" || test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git rev-parse HEAD^)" = "$PINNED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+      - run: node scripts/toolchain.mjs
+      - run: npm --prefix web ci
+      - name: Assert both MOTHERSHIP source recovery suites are present and run
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f web/src/lib/sync/contentDownloads.mediaIntegrity.test.ts
+          test -f web/src/lib/sync/contentDownloads.originalAccountEpoch.test.ts
+          npm --prefix web run test -- \
+            src/lib/sync/contentDownloads.mediaIntegrity.test.ts \
+            src/lib/sync/contentDownloads.originalAccountEpoch.test.ts \
+            --reporter=verbose
