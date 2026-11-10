@@ -8,6 +8,8 @@ import { classifyPdfText, isWithinRoot, parsePdfInfo, selectPdfJobs, mergePdfTri
 const HASH1 = "a".repeat(64);
 const HASH2 = "b".repeat(64);
 const HASH3 = "c".repeat(64);
+const syntheticAvailabilityProof = sha => ({ runId: "r19-synthetic-run", source_sha256: sha,
+  authorizedPathAvailable: true, checkedAt: "2026-11-10T20:10:00.000Z" });
 
 test("pdfinfo extracts page number and encryption without storing metadata text", () => {
   assert.deepEqual(parsePdfInfo("Title: Fictional\nPages: 49\nEncrypted: no\n"), { pages: 49, encrypted: false });
@@ -159,9 +161,11 @@ test("summary preserves denominators and meaningful unsupported/scan count", () 
 test("next-batch ranking excludes already-processed B3 fingerprints without asserting readiness", () => {
   const rows = [
     { source_sha256: HASH1, status: "text_with_question_indicators", document_type: "pq",
-      sampledQuestionHeadingIndicators: 8, sampledChoiceLineIndicators: 8, module: "NCRS", term: "T4", week: 3 },
+      sampledQuestionHeadingIndicators: 8, sampledChoiceLineIndicators: 8, module: "NCRS", term: "T4", week: 3,
+       availabilityProof: syntheticAvailabilityProof(HASH1) },
     { source_sha256: HASH2, status: "text_with_question_indicators", document_type: "imcq",
-      sampledQuestionHeadingIndicators: 3, sampledChoiceLineIndicators: 8, module: null, term: null, week: null },
+      sampledQuestionHeadingIndicators: 3, sampledChoiceLineIndicators: 8, module: null, term: null, week: null,
+       availabilityProof: syntheticAvailabilityProof(HASH2) },
     { source_sha256: HASH3, status: "source_volume_unmounted", document_type: "pq",
       sampledQuestionHeadingIndicators: 50, sampledChoiceLineIndicators: 20 },
   ];
@@ -170,6 +174,8 @@ test("next-batch ranking excludes already-processed B3 fingerprints without asse
   assert.deepEqual(next.map(x=>x.source_sha256),[HASH1,HASH2]);
   assert.ok(next.every(item=>item.reviewStatus==="source_prefilter_only_not_answer_validated"));
   assert.ok(next.every(item=>!Object.keys(item).includes("correctAnswer")));
+  assert.deepEqual(recommendNextSources(rows, new Set(), 5, "other-run"), []);
+  assert.deepEqual(recommendNextSources(rows, new Set(), 5, "r19-synthetic-run").map(item => item.source_sha256), [HASH1, HASH2]);
 });
 
 test("balanced next batch does not starve a lower-scoring supported term", () => {
@@ -179,6 +185,7 @@ test("balanced next batch does not starve a lower-scoring supported term", () =>
     term: idx < 30 ? "T1" : "T4", module: "NCRS",
     sampledQuestionHeadingIndicators: idx < 30 ? 10 : 1,
     sampledChoiceLineIndicators: 5,
+    availabilityProof: syntheticAvailabilityProof((idx + 1).toString(16).padStart(64, "0")),
   }));
   const result = recommendBalancedSources(rows, new Set(), 10);
   assert.equal(result.length, 10);
@@ -219,14 +226,14 @@ test("R19: first inspection and cached repeat both receive their own current-run
     const originalRow = fakeReadyRow(job, sourceStat);
     const firstAt = "2026-11-10T20:10:00.000Z";
     const [first] = verifyPdfSourceAvailability([originalRow], [job], [root],
-      { runId: "r19-first-run", runAt: firstAt, inspectedShas: new Set([HASH1]) });
+      { runId: "r19-first-run", runAt: firstAt, now: () => firstAt });
     assert.equal(first.status, "text_with_question_indicators");
     assert.deepEqual(first.availabilityProof, { runId: "r19-first-run",
       source_sha256: HASH1, authorizedPathAvailable: true, checkedAt: firstAt });
     assert.equal(first.source_sha_is_ledger_declared_not_rehashed, true);
     const secondAt = "2026-11-10T20:11:00.000Z";
     const [second] = verifyPdfSourceAvailability([first], [job], [root],
-      { runId: "r19-cached-run", runAt: secondAt, inspectedShas: new Set() });
+      { runId: "r19-cached-run", runAt: secondAt, now: () => secondAt });
     assert.equal(second.status, "text_with_question_indicators");
     assert.equal(second.availabilityProof.runId, "r19-cached-run");
     assert.equal(second.availabilityProof.checkedAt, secondAt);
