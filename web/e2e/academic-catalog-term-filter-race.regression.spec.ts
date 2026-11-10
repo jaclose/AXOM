@@ -77,7 +77,7 @@ for (const width of [320, 390, 1440]) {
 
     const saved = await installedState(page, sourceIds);
     expect(saved.tracker).toHaveLength(1);
-    expect(saved.tracker[0].path).toMatch(/^Term 5\\//);
+    expect(saved.tracker[0].path.startsWith("Term 5/")).toBe(true);
     expect(saved.questions).toHaveLength(1);
     expect(saved.questions[0].sourceId).toBe(activeTerm.readyQuestionIdsByWeek[2][0]);
     expect(saved.questions[0].attempts).toHaveLength(1);
