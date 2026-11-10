@@ -22,7 +22,10 @@ vi.mock("./cloudOriginals", () => ({ downloadCloudOriginal: vi.fn() }));
 vi.mock("./cloudContent", () => ({
   hydrateCloudContent: vi.fn(), splitCloudContent: vi.fn(), mergeSourceFields: vi.fn(),
 }));
-vi.mock("./deferredContent", () => ({ readDeferredContent: vi.fn() }));
+vi.mock("./deferredContent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./deferredContent")>()),
+  readDeferredContent: vi.fn(),
+}));
 
 const account = "synthetic-original-owner-A";
 const other = "synthetic-original-owner-B";
