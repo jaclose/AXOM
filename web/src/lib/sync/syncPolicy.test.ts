@@ -93,9 +93,10 @@ describe("how often AXOM may upload", () => {
     expect(waitBeforeAutomatic(meta({ nextAttemptAt: "soon" }), NOW)).toBe(0);
   });
 
-  it("gives a slow connection time, within five minutes", () => {
-    expect(pushTimeout(0)).toBe(45_000);
-    expect(pushTimeout(1_000_000)).toBe(70_000);
+  it("outlives the 60-second database allowance even for a tiny delta, within five minutes", () => {
+    expect(pushTimeout(0)).toBe(75_000);
+    expect(pushTimeout(80_000)).toBe(75_000);
+    expect(pushTimeout(1_000_000)).toBe(75_000);
     expect(pushTimeout(9_600_000)).toBe(285_000);
     expect(pushTimeout(14_000_000)).toBe(300_000);
   });
