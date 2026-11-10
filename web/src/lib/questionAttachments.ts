@@ -230,33 +230,6 @@ export async function putQuestionAttachmentBlob(blobKey: string, record: Questio
   return key;
 }
 
-/** Insert a downloaded original without ever overwriting a concurrent local writer.
- * IndexedDB add is atomic across tabs sharing this database. An existing
- * key is an identity collision, NOT evidence the saved bytes match; callers
- * must read and verify the existing record before treating it as recovered.
- * All other storage errors, including quotas and account changes, propagate.
- */
-export async function addQuestionAttachmentBlobIfAbsent(
-  blobKey: string,
-  record: QuestionAttachmentBlobRecord,
-  options: AttachmentReadOptions = {},
-): Promise<"inserted" | "exists"> {
-  const scope = options.scope ?? getQuestionAttachmentScope();
-  assertScope(scope, options.accountId);
-  try {
-    await withAttachmentStore("readwrite", (store) => {
-      assertScope(scope, options.accountId);
-      return store.add(record, scopedBlobKey(scope, blobKey));
-    });
-  } catch (error) {
-    assertScope(scope, options.accountId);
-    if (attachmentErrorName(error) === "ConstraintError") return "exists";
-    throw error;
-  }
-  assertScope(scope, options.accountId);
-  return "inserted";
-}
-
 export type MissingAttachmentRestoreResult =
   | { status: "restored" }
   | { status: "rejected" | "exists" | "failed"; message: string };

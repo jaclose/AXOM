@@ -1,6 +1,7 @@
 import { workspaceMedia, downloadCloudMediaAsset } from "./cloudMedia";
 import { sha256 } from "../compressedText";
-import { addQuestionAttachmentBlobIfAbsent, getQuestionAttachmentBlob } from "../questionAttachments";
+import { getQuestionAttachmentBlob } from "../questionAttachments";
+import { addQuestionAttachmentBlobIfAbsent } from "./atomicMediaWrite";
 import { accountOperationClient } from "../account/supabase";
 import { useStore } from "../store";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
