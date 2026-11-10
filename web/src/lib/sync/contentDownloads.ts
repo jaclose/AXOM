@@ -1,4 +1,5 @@
 import { workspaceMedia, downloadCloudMediaAsset } from "./cloudMedia";
+import { sha256 } from "../compressedText";
 import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
 import { accountOperationClient } from "../account/supabase";
 import { useStore } from "../store";
@@ -50,13 +51,40 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
       const [blobKey, { questionId, attachment, checksum }] = figures[cursor++];
       await assertCurrent();
       const reference = media.get(blobKey);
-      if (checksum && reference?.hash !== checksum) throw new Error("This image does not match its immutable question source.");
-      const local = await getQuestionAttachmentBlob(blobKey);
-      if (local && local.blob.size === attachment.byteSize) continue;
-      if (!reference) throw new Error("This source has no protected image reference. Keep its original file and retry from a complete backup.");
+      if (!reference || reference.byteSize !== attachment.byteSize || reference.updatedAt !== attachment.updatedAt) {
+        throw new Error("This source has no matching protected image reference. Keep its original file and retry from a complete backup.");
+      }
+      if (checksum && reference.hash !== checksum) throw new Error("This image does not match its immutable question source.");
+      // The device's cached original is not an integrity receipt. A same-sized
+      // corrupt image must never be accepted as downloaded course content.
+      // Read only this account's current local store, not the lazy cloud loader.
+      const local = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
+      await assertCurrent();
+      if (local) {
+        if (local.blob.size !== reference.byteSize || local.byteSize !== reference.byteSize
+          || local.mimeType !== attachment.mimeType
+          || await sha256(new Uint8Array(await local.blob.arrayBuffer())) !== reference.hash) {
+          throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
+        }
+        await assertCurrent();
+        continue;
+      }
       const blob = await downloadCloudMediaAsset(client, userId, reference);
       await assertCurrent();
-      await putQuestionAttachmentBlob(blobKey, { ...attachment, questionId, blob });
+      // Recheck after remote I/O to reject an original saved in the meantime.
+      // Atomic add-only writes are a separate residual cross-tab race guard.
+      const raced = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
+      await assertCurrent();
+      if (raced) {
+        if (raced.blob.size !== reference.byteSize || raced.byteSize !== reference.byteSize
+          || raced.mimeType !== attachment.mimeType
+          || await sha256(new Uint8Array(await raced.blob.arrayBuffer())) !== reference.hash) {
+          throw new Error("A saved image conflicts with its protected original. AXOM did not replace the local image. Export your work and restore the original before retrying.");
+        }
+        await assertCurrent();
+        continue;
+      }
+      await putQuestionAttachmentBlob(blobKey, { ...attachment, questionId, blob }, { accountId: userId });
     }
   }));
   await assertCurrent();
