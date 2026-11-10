@@ -1,0 +1,236 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "release": "V2 Build011",
+  "date": "2026-11-10",
+  "parent": "V2 Build010",
+  "branch_type": "unmerged research-only; not production",
+  "chapter": "Infectious Diseases: Zoonoses, Mycoses, Parasitic and Neuroinvasive Infection",
+  "metrics": {
+    "previous_entries": 316,
+    "new_profiles": 14,
+    "total_entries": 330,
+    "detailed_profiles": 198,
+    "legacy_profiles": 132,
+    "cumulative_citation_records": 228,
+    "new_citation_records": 24,
+    "image_associations": 127,
+    "new_source_image_pages": 10,
+    "embedded_images": 0,
+    "pdf_pages": 275
+  },
+  "profiles": [
+    {
+      "id": "AXOM-INF-001",
+      "name": "Leprosy (Hansen disease)",
+      "distinction": "Hypoesthetic plaques and peripheral nerve thickening; Fite-Faraco AFB in tissue",
+      "sources": [
+        "ID-LEP-CDC25",
+        "ID-LEP-HRSA",
+        "ID-LEP-NCBI"
+      ],
+      "mondo_candidate": "MONDO:0005124",
+      "orphanet_candidate": "ORPHA:548",
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-002",
+      "name": "Syphilis (acquired Treponema pallidum infection)",
+      "distinction": "Stage-specific penicillin formulation; distinguish ocular/neuro disease",
+      "sources": [
+        "ID-SYP-CDC24",
+        "ID-SYP-NEURO"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-003",
+      "name": "Lyme borreliosis",
+      "distinction": "Clinical erythema migrans; 2-tier serology for other presentations",
+      "sources": [
+        "ID-LYME-CDC"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-004",
+      "name": "Brucellosis",
+      "distinction": "Undulating fever after unpasteurized dairy; warn lab about aerosol risk",
+      "sources": [
+        "ID-BRU-CDC26"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-005",
+      "name": "Leptospirosis (including Weil disease)",
+      "distinction": "Conjunctival suffusion, calf pain, AKI and jaundice after floodwater",
+      "sources": [
+        "ID-LEPTO-CDC26"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-006",
+      "name": "Histoplasmosis (pulmonary and disseminated)",
+      "distinction": "Intracellular narrow-budding yeasts; histoplasmoma often no treatment",
+      "sources": [
+        "ID-HISTO-CDC26",
+        "ID-HISTO-IDSA25",
+        "ID-HISTO-MEDGEN"
+      ],
+      "mondo_candidate": "MONDO:0018312",
+      "orphanet_candidate": "ORPHA:390",
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-007",
+      "name": "Coccidioidomycosis (Valley fever)",
+      "distinction": "Tissue spherules with endospores; endogenous dust exposures",
+      "sources": [
+        "ID-COCCI-CDC25",
+        "ID-COCCI-IDSA16"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-008",
+      "name": "Blastomycosis",
+      "distinction": "Broad-based budding thick-walled yeast; cutaneous or osteoarticular dissemination",
+      "sources": [
+        "ID-BLASTO-CDC26"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-009",
+      "name": "Invasive mucormycosis",
+      "distinction": "Vascular tissue necrosis with broad pauciseptate hyphae; surgical emergency",
+      "sources": [
+        "ID-MUCOR-CDC26"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-010",
+      "name": "Strongyloidiasis",
+      "distinction": "Autoinfection and steroid-triggered hyperinfection; ivermectin",
+      "sources": [
+        "ID-STRONG-CDC24",
+        "ID-STRONG-NCBI"
+      ],
+      "mondo_candidate": "MONDO:0005974",
+      "orphanet_candidate": "ORPHA:76",
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-011",
+      "name": "Toxoplasmosis",
+      "distinction": "Tissue cyst latency; necrotizing encephalitis in cellular immunodeficiency",
+      "sources": [
+        "ID-TOXO-CDC26"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-012",
+      "name": "Chagas disease (American trypanosomiasis)",
+      "distinction": "Conduction disease, apical aneurysm and GI megasyndromes",
+      "sources": [
+        "ID-CHAGAS-CDC24"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-013",
+      "name": "Visceral leishmaniasis (kala-azar)",
+      "distinction": "Massive splenomegaly and pancytopenia; kinetoplast-bearing marrow amastigotes",
+      "sources": [
+        "ID-VL-CDC24",
+        "ID-VL-WHO",
+        "ID-VL-NCBI"
+      ],
+      "mondo_candidate": "MONDO:0005445",
+      "orphanet_candidate": null,
+      "icd11": null
+    },
+    {
+      "id": "AXOM-INF-014",
+      "name": "Rabies encephalitis",
+      "distinction": "PEP before symptoms; Negri bodies supportive and not required",
+      "sources": [
+        "ID-RABIES-CDC26",
+        "ID-RABIES-YELLOW"
+      ],
+      "mondo_candidate": null,
+      "orphanet_candidate": null,
+      "icd11": null
+    }
+  ],
+  "source_urls": {
+    "ID-LEP-CDC25": "https://www.cdc.gov/leprosy/hcp/diagnosis-testing/",
+    "ID-LEP-HRSA": "https://www.hrsa.gov/hansens-disease/diagnosis/recommended-treatment",
+    "ID-LEP-NCBI": "https://www.ncbi.nlm.nih.gov/medgen/6049",
+    "ID-SYP-CDC24": "https://www.cdc.gov/std/treatment-guidelines/syphilis.htm",
+    "ID-SYP-NEURO": "https://www.cdc.gov/std/treatment-guidelines/neurosyphilis.htm",
+    "ID-LYME-CDC": "https://www.cdc.gov/lyme/treatment/index.html",
+    "ID-BRU-CDC26": "https://www.cdc.gov/brucellosis/hcp/clinical-overview/",
+    "ID-LEPTO-CDC26": "https://www.cdc.gov/leptospirosis/hcp/clinical-overview/index.html",
+    "ID-HISTO-CDC26": "https://www.cdc.gov/histoplasmosis/hcp/clinical-overview/index.html",
+    "ID-HISTO-IDSA25": "https://www.idsociety.org/~/link/09429686146d41318f20335460436375.aspx",
+    "ID-HISTO-MEDGEN": "https://www.ncbi.nlm.nih.gov/medgen/42468",
+    "ID-COCCI-CDC25": "https://www.cdc.gov/valley-fever/hcp/clinical-overview/index.html",
+    "ID-COCCI-IDSA16": "https://www.idsociety.org/practice-guideline/coccidioidomycosis",
+    "ID-BLASTO-CDC26": "https://www.cdc.gov/blastomycosis/hcp/clinical-overview/index.html",
+    "ID-MUCOR-CDC26": "https://www.cdc.gov/mucormycosis/hcp/clinical-overview/",
+    "ID-STRONG-CDC24": "https://www.cdc.gov/strongyloides/hcp/clinical-care/index.html",
+    "ID-STRONG-NCBI": "https://www.ncbi.nlm.nih.gov/medgen/20976",
+    "ID-TOXO-CDC26": "https://www.cdc.gov/toxoplasmosis/hcp/clinical-care/index.html",
+    "ID-CHAGAS-CDC24": "https://www.cdc.gov/chagas/hcp/clinical-care/",
+    "ID-VL-CDC24": "https://www.cdc.gov/leishmaniasis/hcp/clinical-care/index.html",
+    "ID-VL-WHO": "https://www.who.int/news-room/fact-sheets/detail/leishmaniasis/",
+    "ID-VL-NCBI": "https://www.ncbi.nlm.nih.gov/medgen/44098",
+    "ID-RABIES-CDC26": "https://www.cdc.gov/rabies/hcp/clinical-care/post-exposure-prophylaxis.html",
+    "ID-RABIES-YELLOW": "https://www.cdc.gov/yellow-book/hcp/travel-associated-infections-diseases/rabies.html"
+  },
+  "image_notes": "10 authentic individual file-page links with attribution and per-file license notes in source ZIP. None embedded; 2 labeled animal specimens; no artificial medical illustrations.",
+  "source_archive": {
+    "file": "AXOM_Disease_Atlas_V2_Run011_Source_Package.zip",
+    "sha256": "574d713fe1bf24d258875ef22238f5b47b8816d56810411b3c6b5a8b8c4da520",
+    "bytes": 2630011,
+    "docx_sha256": "6d66093e2edc57025652c56eed583fd99fb78875f7893d509adee28f95f03b80",
+    "pdf_sha256": "fdbdc23c9d614c31b4fd00e288a2f306633f469ae4ee5a7f02b25540d81b5b16",
+    "status": "not uploaded to GitHub or Drive; temporary conversation file only"
+  },
+  "QA": {
+    "structural_checks_pass": 14,
+    "structural_checks_failed": 0,
+    "accessibility_findings": 0,
+    "visual_PDF_pages_checked": "last 21 pages by contact montage",
+    "clinician_peer_review": "not completed",
+    "primary_MONDO_snapshot_imported": false,
+    "official_ICD11_crosswalk_imported": false,
+    "ontology_denominator": null,
+    "coverage_fraction": null
+  },
+  "persistence": "This GitHub JSON is durable research recovery metadata. The full 275-page authored manuscript remains only in conversation artifacts; Library upload AccessDeny. Earlier Build010 checkpoint present in parent branch.",
+  "image_license_policy": "Do not embed without binary-level provenance, original creator and individual commercial redistribution rights, specimen identity and privacy verification. Image file-page license transcriptions are pending full audit.",
+  "no_production_changes": true
+}
