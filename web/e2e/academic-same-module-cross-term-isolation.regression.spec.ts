@@ -124,6 +124,19 @@ for (const width of [320, 390, 1440]) {
 
     await reloadAfterSave(page);
     expect(await savedScope(page, sourceIds)).toEqual(completed);
+
+    // Once both identically titled modules exist, reopening Term 1 must still
+    // produce ONLY Term 1's source-bound question, not the most recent term.
+    const repeatCatalog = await catalogRegion(page);
+    await repeatCatalog.locator(`[data-course-id="${first.id}"]`).click();
+    const repeatPlan = page.getByRole("region", { name: "FTM 1 course plan" });
+    await repeatPlan.getByRole("button", { name: "Quiz week 2", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Question 1 of 1", exact: true })).toBeVisible();
+    const repeatPool = await page.evaluate(key => {
+      const active = JSON.parse(localStorage.getItem(key) ?? "null") as { poolIds?: string[] } | null;
+      return active?.poolIds ?? [];
+    }, STORAGE_KEYS.quizActiveSession);
+    expect(repeatPool).toEqual([firstQuestion.id]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);
   });
