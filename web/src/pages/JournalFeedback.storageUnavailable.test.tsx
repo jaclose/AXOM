@@ -253,4 +253,27 @@ describe("Journal feedback when browser storage cannot be read", () => {
     expect(localStorage.getItem(key)).toBe(unsupported);
     expect(writes.mock.calls.some(([storageKey]) => String(storageKey).startsWith(key))).toBe(false);
   });
+  it("never carries an account A retry announcement into account B's feedback dialog", async () => {
+    const ownerA = { id: "journal-retry-account-A", email: "a@example.test", displayName: "A", emailConfirmed: true };
+    const ownerB = { ...ownerA, id: "journal-retry-account-B", email: "b@example.test" };
+    useAccount.setState({ user: ownerA, phase: "signed-in", link: "linked" });
+    const oldGet = Storage.prototype.getItem;
+    const blocked = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith(`${key}:account:${ownerA.id}`))
+        throw new Error("Account A feedback reads unavailable");
+      return oldGet.call(this, storageKey);
+    });
+
+    render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    blocked.mockRestore();
+    await act(async () => { useAccount.setState({ user: ownerB }); });
+    expect(screen.queryByText("Saved feedback is readable again.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry reading saved feedback" })).toBeNull();
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    // No storage mutation or feedback submission in this synthetic identity handoff.
+  });
+
 });

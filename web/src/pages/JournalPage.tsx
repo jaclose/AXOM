@@ -1923,16 +1923,20 @@ function JournalFeedback({ onClose, sessionDrafts }: {
   const accountId = useAccount((state) => state.user?.id);
   const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
   const [selection, setSelection] = useState<{ ownerKey: string; key: string } | null>(null);
-  const [readRetry, setReadRetry] = useState(0);
+  const [readRetry, setReadRetry] = useState<{ ownerKey: string; selectedKey: string | null; count: number } | null>(null);
   const selectedKey = selection?.ownerKey === ownerKey ? selection.key : null;
+  const retryCount = readRetry?.ownerKey === ownerKey && readRetry.selectedKey === selectedKey ? readRetry.count : 0;
   return <JournalFeedbackForOwner
-    key={`${ownerKey}:${selectedKey ?? "latest"}:${readRetry}`}
+    key={`${ownerKey}:${selectedKey ?? "latest"}:${retryCount}`}
     draftKey={`axom-journal-feedback-draft:${ownerKey}`}
     sessionDrafts={sessionDrafts}
     selectedKey={selectedKey}
     onSelectCopy={(key) => setSelection({ ownerKey, key })}
-    onRetryRead={() => setReadRetry((count) => count + 1)}
-    retryAttempted={readRetry > 0}
+    onRetryRead={() => setReadRetry((previous) => ({
+      ownerKey, selectedKey,
+      count: previous?.ownerKey === ownerKey && previous.selectedKey === selectedKey ? previous.count + 1 : 1,
+    }))}
+    retryAttempted={retryCount > 0}
     onClose={onClose}
   />;
 }
