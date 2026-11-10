@@ -192,3 +192,76 @@ test('public asset scope follows a subdirectory installation without admitting p
     assert.equal(Boolean(response), expectedInterception, `incorrect service-worker scope for ${path}`);
   }
 });
+
+test('cache policy refuses protected responses even under an allowed public-looking asset path', async () => {
+  for (const headers of [
+    { 'cache-control': 'private, no-store' },
+    { 'cache-control': 'no-cache' },
+    { vary: 'Accept-Encoding, Cookie' },
+    { vary: 'Authorization' },
+    { vary: '*' },
+    { 'set-cookie': 'session=accountA' },
+  ]) {
+    let online = true;
+    const app = worker({ fetchResponse: async () => {
+      if (!online) throw new Error('offline');
+      return new Response('account-A-only', { headers: { 'content-type': 'image/png', ...headers } });
+    } });
+    const visit = async () => {
+      let response;
+      let lifetime;
+      app.events.get('fetch')({
+        request: { url: 'https://app.test/landing/user-avatar.png', method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { response = value; },
+        waitUntil: (value) => { lifetime = value; },
+      });
+      const result = await response;
+      if (lifetime) await lifetime;
+      return result.text();
+    };
+    assert.equal(await visit(), 'account-A-only');
+    online = false;
+    await assert.rejects(visit(), /offline/, 'private or authentication-varying response was replayed offline: ' + JSON.stringify(headers));
+  }
+});
+
+test('cache lookup ignores protected responses retained by an older worker', async () => {
+  const app = worker({ fetchResponse: async () =>
+    new Response('account-B-fresh', { headers: { 'content-type': 'image/png', 'cache-control': 'private' } }) });
+  await (await app.caches.open('axom-shell-older')).put(
+    'https://app.test/landing/user-avatar.png',
+    new Response('account-A-cached', { headers: { 'content-type': 'image/png', 'cache-control': 'private' } }),
+  );
+  let response;
+  let lifetime;
+  app.events.get('fetch')({
+    request: { url: 'https://app.test/landing/user-avatar.png', method: 'GET', mode: 'same-origin' },
+    respondWith: (value) => { response = value; },
+    waitUntil: (value) => { lifetime = value; },
+  });
+  assert.equal(await (await response).text(), 'account-B-fresh');
+  if (lifetime) await lifetime;
+});
+
+test('authenticated requests to a public-looking path bypass the shell cache entirely', () => {
+  const app = worker();
+  app.events.get('fetch')({
+    request: {
+      url: 'https://app.test/assets/private-preview.png', method: 'GET', mode: 'same-origin',
+      headers: new Headers({ Authorization: 'Bearer account-A' }),
+    },
+    respondWith: () => assert.fail('authorized request should not be intercepted or cached'),
+  });
+});
+
+
+test('request cache=no-store bypasses shell cache even for a shipped asset', () => {
+  const app = worker();
+  app.events.get('fetch')({
+    request: {
+      url: 'https://app.test/assets/app.png', method: 'GET', mode: 'same-origin',
+      cache: 'no-store',
+    },
+    respondWith: () => assert.fail('no-store request should not be intercepted'),
+  });
+});

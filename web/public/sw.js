@@ -6,7 +6,19 @@ const CACHE = CACHE_PREFIX + BUILD_ID;
 const PRECACHE = []; // __AXOM_PRECACHE__
 const CORE = [...new Set(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...PRECACHE])];
 
+// Cache Storage does not enforce HTTP Cache-Control on explicit cache.put.
+// A public-looking path may still return account-bound bytes; never persist or
+// replay a response that instructs caches not to store or share it.
+function cacheablePublicResponse(response) {
+  const control = response.headers.get("cache-control") || "";
+  const vary = response.headers.get("vary") || "";
+  return !/\b(?:private|no-store|no-cache)\b/i.test(control)
+    && !/(?:^|,)\s*(?:\*|cookie|authorization)\s*(?:,|$)/i.test(vary)
+    && !response.headers.has("set-cookie");
+}
+
 function cacheResponse(event, key, response) {
+  if (!cacheablePublicResponse(response)) return;
   const copy = response.clone();
   // A failed cache write must not turn a successful network response into a failed request.
   event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key, copy)).catch(() => {}));
@@ -18,6 +30,7 @@ async function cachedAppAsset(request) {
     const cache = await caches.open(name);
     const response = await cache.match(request);
     if (!response) continue;
+    if (!cacheablePublicResponse(response)) continue;
     if (response.headers.get("content-type")?.includes("text/html")) {
       // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
       await cache.delete(request);
@@ -54,6 +67,8 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
+  // Authorization-bearing requests must never share the origin-wide shell cache.
+  if (request.headers?.has?.("authorization") || request.cache === "no-store") return;
   if (/\/version\.json$/.test(url.pathname) || /\/api\//.test(url.pathname)) return;
 
   if (request.mode === "navigate") {
