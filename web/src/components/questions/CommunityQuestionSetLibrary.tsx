@@ -321,6 +321,24 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
             {question.citation && <small>Source: {question.citation}</small>}
+            <details className="qsl-preview-teaching">
+              <summary>Reveal recorded answer and teaching notes</summary>
+              <div className="stack gap8">
+                {question.correctKey
+                  ? <p><b>Submitted answer: {question.correctKey}</b> · {question.options.find(option => option.key.toUpperCase() === question.correctKey?.toUpperCase())?.text}</p>
+                  : <p>No recorded answer key. Do not infer one from the explanation.</p>}
+                {(question.explanation?.startsWith("AXOM AI-assisted explanation")
+                  || Object.values(question.choiceRationales ?? {}).some(rationale => rationale.startsWith("AXOM AI-assisted rationale")))
+                  && <p className="qsl-preview-ai-warning">AI-assisted teaching text. Model provenance is retained; verify the medical claims against the cited source.</p>}
+                {question.explanation && <p>{question.explanation}</p>}
+                {question.choiceRationales && <ul>{question.options.flatMap(option => {
+                  const rationale = question.choiceRationales?.[option.key];
+                  return rationale ? [<li key={option.key}><b>{option.key}. {option.text}</b> <span>{rationale}</span></li>] : [];
+                })}</ul>}
+                {!question.explanation && !question.choiceRationales
+                  && <p className="sub">No teaching rationale was included in this approved snapshot.</p>}
+              </div>
+            </details>
           </li>)}</ol>
           <GButton variant="primary" disabled={importing || imported} onClick={() => void add()}>
             <Download size={16} aria-hidden="true" /> {imported ? "Already in my AXOM" : importing ? "Saving…" : "Add to my AXOM"}

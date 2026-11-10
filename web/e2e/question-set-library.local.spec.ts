@@ -35,8 +35,13 @@ async function seedLocalSet(page: Page) {
     const result = dev.useStore.getState().addQuestion({
       id: "fixture-library-question", source: "manual", stem,
       options: [{ key: "A", text: "First synthetic label" }, { key: "B", text: "Second synthetic label" }],
-      correctKey: "B", explanation: "The synthetic source explicitly marks B.",
-      citation: "Synthetic review fixture, page 1", tags: ["synthetic"],
+      correctKey: "B",
+      explanation: "AXOM AI-assisted explanation (verify against source): The synthetic source explicitly marks B.",
+      choiceRationales: {
+        A: "AXOM AI-assisted rationale (verify against source): A conflicts with the synthetic source.",
+        B: "AXOM AI-assisted rationale (verify against source): B matches the synthetic source.",
+      },
+      citation: "Synthetic review fixture, page 1", tags: ["synthetic", "reviewed-synthetic-keyword"],
     });
     if (!result.ok || !result.id) throw new Error(result.errors.join(" "));
     dev.useStore.getState().addQuestionSet({
@@ -135,17 +140,31 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await card.getByRole("button", { name: "Preview set" }).click();
     const preview = other.getByRole("dialog", { name: TITLE });
     await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
+    const revealTeaching = preview.getByText("Reveal recorded answer and teaching notes");
+    await expect(revealTeaching).toBeVisible();
+    await revealTeaching.click();
+    await expect(preview.getByText(/Submitted answer: B/)).toBeVisible();
+    await expect(preview.getByText(/AI-assisted teaching text/)).toBeVisible();
+    await expect(preview.getByText(/The synthetic source explicitly marks B/)).toBeVisible();
+    await expect(preview.getByText(/A conflicts with the synthetic source/)).toBeVisible();
+    await expect(preview.getByText(/B matches the synthetic source/)).toBeVisible();
     await preview.getByRole("button", { name: "Add to my AXOM" }).click();
     await expect(preview.getByRole("button", { name: "Already in my AXOM" })).toBeDisabled();
     expect(await other.evaluate(async () => {
       const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => {
         questionSets: Array<{ title: string; importProvenance?: { shareId: string } }>;
-        questions: Array<{ stem: string }>;
+        questions: Array<{ stem: string; correctKey?: string; explanation?: string; choiceRationales?: Record<string, string>; tags: string[] }>;
       } } }> }).__AXOM_DEV__;
       const state = dev.useStore.getState();
-      return { importedSet: state.questionSets.some(set => set.title === "Synthetic source-checked set" && Boolean(set.importProvenance)),
-        importedQuestion: state.questions.some(question => question.stem === "Which synthetic label is the reviewed answer?") };
-    })).toEqual({ importedSet: true, importedQuestion: true });
+      const imported = state.questions.find(question => question.stem === "Which synthetic label is the reviewed answer?");
+      return {
+        importedSet: state.questionSets.some(set => set.title === "Synthetic source-checked set" && Boolean(set.importProvenance)),
+        importedKey: imported?.correctKey,
+        aiProvenance: imported?.explanation?.startsWith("AXOM AI-assisted explanation (verify against source):"),
+        choiceProvenance: ["A", "B"].every(key => imported?.choiceRationales?.[key]?.startsWith("AXOM AI-assisted rationale (verify against source):")),
+        reviewedKeyword: imported?.tags.includes("reviewed-synthetic-keyword"),
+      };
+    })).toEqual({ importedSet: true, importedKey: "B", aiProvenance: true, choiceProvenance: true, reviewedKeyword: true });
     console.info("Question Set Library fixture: second account previewed, liked and imported.");
     await other.setViewportSize({ width: 390, height: 844 });
     expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
