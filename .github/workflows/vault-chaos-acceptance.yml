@@ -5,6 +5,7 @@ on:
     paths:
       - "web/e2e/local-vault-persistence-chaos.spec.ts"
       - "web/e2e/local-save-account-journey.spec.ts"
+      - "web/e2e/local-vault-offline-lifecycle.spec.ts"
       - ".github/workflows/vault-chaos-acceptance.yml"
   workflow_dispatch:
 
@@ -28,7 +29,7 @@ jobs:
       - run: npm --prefix web ci
       - run: npm --prefix web exec -- playwright install --with-deps chromium
       - name: Real Chromium account UI, large-vault and quota chaos, three repeats
-        run: npm --prefix web run test:e2e -- e2e/local-vault-persistence-chaos.spec.ts e2e/local-save-account-journey.spec.ts --workers=1 --repeat-each=3
+        run: npm --prefix web run test:e2e -- e2e/local-vault-persistence-chaos.spec.ts e2e/local-save-account-journey.spec.ts e2e/local-vault-offline-lifecycle.spec.ts --workers=1 --repeat-each=3
       - name: Preserve synthetic browser failure evidence only
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
