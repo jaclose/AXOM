@@ -148,6 +148,34 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await expect(preview.getByText(/The synthetic source explicitly marks B/)).toBeVisible();
     await expect(preview.getByText(/A conflicts with the synthetic source/)).toBeVisible();
     await expect(preview.getByText(/B matches the synthetic source/)).toBeVisible();
+    // Identity may leave and return before React renders account B. A preview
+    // inspected in the old session must lose import permission even when the
+    // final account ID equals the ID that originally opened the modal.
+    await other.evaluate(async ({ memberId, ownerId }) => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useAccount: {
+          getState: () => { user: { id: string } | null };
+          setState: (patch: { user: { id: string } | null }) => void;
+        };
+      }> }).__AXOM_DEV__;
+      const original = dev.useAccount.getState().user;
+      if (original?.id !== memberId) throw new Error("Expected learner B before session epoch test");
+      dev.useAccount.setState({ user: { ...original, id: ownerId } });
+      dev.useAccount.setState({ user: original });
+    }, { memberId: member.id, ownerId: owner.id });
+    await expect(preview).toHaveCount(0);
+    expect(await other.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: { getState: () => {
+          questionSets: Array<{ importProvenance?: { shareId: string } }>;
+        } };
+      }> }).__AXOM_DEV__;
+      return dev.useStore.getState().questionSets.some(set => set.importProvenance);
+    })).toBe(false);
+    // Retain the unchanged public approval; a fresh learner inspection should
+    // be able to obtain a new revision-bound import grant.
+    await card.getByRole("button", { name: "Preview set" }).click();
+    await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
     await preview.getByRole("button", { name: "Add to my AXOM" }).click();
     await expect(preview.getByRole("button", { name: "Already in my AXOM" })).toBeDisabled();
     expect(await other.evaluate(async () => {
