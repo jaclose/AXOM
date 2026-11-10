@@ -524,3 +524,32 @@ test("per-source authorization evidence must bind the correct SHA, run, timestam
     assert.ok(result.blockers.some(message => message.includes("per-source availability")), JSON.stringify(result));
   }
 });
+
+test("R20 RED: PDF question-source coverage cannot be certified when its triage ledger is omitted", () => {
+  const result = run({ pdfTriage: undefined });
+  assert.equal(result.complete, false,
+    "Cloud question receipts do not prove the original PDF is currently accessible.");
+  assert.ok(result.blockers.some(message => message.includes("PDF question-source") && message.includes("availability")),
+    JSON.stringify(result.blockers));
+
+  const nonPdfInventory = fixture();
+  nonPdfInventory.entries[0] = { ...nonPdfInventory.entries[0],
+    path: "sources/IMCQ-1.txt", extension: "txt" };
+  nonPdfInventory.entries[1] = { ...nonPdfInventory.entries[1],
+    path: "sources/IMCQ-1-copy.txt", extension: "txt", duplicateOf: "sources/IMCQ-1.txt" };
+  const nonPdf = run({ inventory: nonPdfInventory, pdfTriage: undefined });
+  assert.equal(nonPdf.complete, true,
+    "Pure non-PDF source sets must not require a PDF availability ledger.");
+});
+
+test("R20 RED: unrelated present PDF triage SHA cannot substitute for the actual question source", () => {
+  const triage = completePdfTriage("text_with_question_indicators");
+  triage.rows = [{ ...triage.rows[0], source_sha256: b,
+    availabilityProof: { ...triage.rows[0].availabilityProof, source_sha256: b } }];
+  // SHA 'b' is in the inventory as a text Course Tracker template, not the PDF question original 'a'.
+  const result = run({ pdfTriage: triage });
+  assert.equal(result.complete, false,
+    "Matching row and queue denominators do not establish coverage of the PDF question-source SHA.");
+  assert.ok(result.blockers.some(message => message.includes("PDF question-source") && message.includes("missing")),
+    JSON.stringify(result.blockers));
+});
