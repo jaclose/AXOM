@@ -132,6 +132,54 @@ describe("Host page authorization and moderation", () => {
     expect(within(overview as HTMLElement).getAllByText("Restricted")).toHaveLength(2);
   });
 
+  it("single-flights two privileged clicks in the same React event batch", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<void>();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));
+    vi.mocked(resolveReport).mockReturnValue(pending.promise);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    // Both native events are delivered before React flushes its busy-state render.
+    act(() => { dismiss.click(); dismiss.click(); });
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve(); });
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+  });
+
+  it("does not prompt for a second destructive action while the first write is pending", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<void>();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));
+    vi.mocked(resolveReport).mockReturnValue(pending.promise);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    const remove = screen.getByRole("button", { name: "Remove post" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    act(() => { dismiss.click(); remove.click(); });
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+    await act(async () => { pending.resolve(); });
+    confirm.mockRestore();
+  });
+
+  it("unlocks a failed privileged write so an operator can retry safely", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));
+    vi.mocked(resolveReport)
+      .mockRejectedValueOnce(new Error("Connection lost"))
+      .mockResolvedValueOnce(undefined);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    await user.click(dismiss);
+    expect((await screen.findByRole("alert")).textContent).toContain("Connection lost");
+    await user.click(dismiss);
+    await waitFor(() => expect(resolveReport).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+  });
+
   it("requires a reason before a moderator can dismiss a reported post", async () => {
     const user = userEvent.setup();
     vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));

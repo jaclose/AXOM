@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BarChart3, CircleAlert, Crown, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import {
@@ -32,6 +32,9 @@ function HostAccountPage() {
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // React may batch two click events before the disabled state commits.
+  // The synchronous guard prevents duplicate privileged RPCs and audit writes.
+  const mutationInFlight = useRef(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -83,14 +86,15 @@ function HostAccountPage() {
   const activeSearch = accountSearch?.query === normalizedSearch ? accountSearch : undefined;
   const accounts = normalizedSearch ? activeSearch?.status === "ready" ? activeSearch.accounts : [] : dashboard?.accounts ?? [];
   async function change(fn: () => Promise<void>, success: string) {
-    if (busy) return;
+    if (mutationInFlight.current || busy) return;
+    mutationInFlight.current = true;
     setBusy(true); setError(""); setMessage("");
     try {
       await fn();
       setMessage(success);
       setRefresh(n => n + 1);
     } catch (e) { setError(e instanceof Error ? e.message : "The change was not saved."); }
-    finally { setBusy(false); }
+    finally { mutationInFlight.current = false; setBusy(false); }
   }
   function controlFor(account: OperatorAccount) {
     const draft = aiDrafts[account.user_id] ?? { enabled: account.ai_enabled, limit: String(account.ai_daily_limit) };
@@ -234,6 +238,8 @@ function HostAccountPage() {
             <div className="row wrap gap8"><GButton size="sm" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8}
               onClick={() => void change(() => resolveReport(userId!, report.post_id, "dismiss", reportReasons[report.post_id] ?? ""), "Report dismissed and audited.")}>Dismiss report</GButton>
               <GButton size="sm" variant="danger" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8} onClick={() => {
+                // Skip a second destructive prompt before React commits the busy state.
+                if (mutationInFlight.current || busy) return;
                 if (window.confirm("Remove this reported post? The author’s private workspace stays untouched."))
                   void change(() => resolveReport(userId!, report.post_id, "remove", reportReasons[report.post_id] ?? ""), "Reported post removed and audited.");
               }}>Remove post</GButton>
