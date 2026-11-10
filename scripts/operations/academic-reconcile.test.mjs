@@ -469,3 +469,48 @@ test("malformed PDF triage rows produce release errors without crashing reconcil
     assert.ok(result.errors.some(message => message.includes("source fingerprint") || message.includes("unknown status")));
   }
 });
+
+test("per-source availability proof blocks a stale carried-forward ready PDF despite a fresh report timestamp", () => {
+  const triage = completePdfTriage("text_with_question_indicators");
+  triage.runId = "synthetic-current-run";
+  triage.rows[0].availabilityProof = {
+    runId: "synthetic-previous-run", source_sha256: a,
+    checkedAt: new Date().toISOString(), authorizedPathAvailable: true,
+  };
+  const result = run({ pdfTriage: triage });
+  assert.equal(result.complete, false, "Prior-batch availability must not certify a new incremental run.");
+  assert.equal(result.counts.pdfUnverifiedCurrentAvailability, 1);
+  assert.ok(result.blockers.some(message => message.includes("per-source availability")), JSON.stringify(result.blockers));
+});
+
+test("a new runAt alone cannot renew an uninspected PDF source row", () => {
+  const triage = completePdfTriage("text_with_question_indicators");
+  triage.runId = "synthetic-new-run";
+  const result = run({ pdfTriage: triage });
+  assert.equal(result.complete, false);
+  assert.equal(result.counts.pdfUnverifiedCurrentAvailability, 1);
+});
+
+test("per-source authorization evidence must bind the correct SHA, run, timestamp and access", () => {
+  const triage = completePdfTriage("text_with_question_indicators");
+  triage.runId = "synthetic-current-run";
+  const now = new Date().toISOString();
+  triage.rows[0].availabilityProof = {
+    runId: triage.runId, source_sha256: a, checkedAt: now, authorizedPathAvailable: true,
+  };
+  assert.equal(run({ pdfTriage: triage }).complete, true);
+
+  const variants = [
+    { source_sha256: b }, { runId: "synthetic-old-run" },
+    { authorizedPathAvailable: false }, { checkedAt: "not-a-timestamp" },
+    { checkedAt: new Date(Date.now() - 26 * 3600_000).toISOString() },
+    { checkedAt: new Date(Date.now() + 11 * 60_000).toISOString() },
+  ];
+  for (const mutation of variants) {
+    const faulty = { ...triage, rows: [{ ...triage.rows[0],
+      availabilityProof: { ...triage.rows[0].availabilityProof, ...mutation } }] };
+    const result = run({ pdfTriage: faulty });
+    assert.equal(result.complete, false, JSON.stringify(mutation));
+    assert.ok(result.blockers.some(message => message.includes("per-source availability")), JSON.stringify(result));
+  }
+});
