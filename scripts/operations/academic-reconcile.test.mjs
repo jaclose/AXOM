@@ -561,3 +561,20 @@ test("R20 RED: unrelated present PDF triage SHA cannot substitute for the actual
   assert.ok(result.blockers.some(message => message.includes("PDF question-source") && message.includes("missing")),
     JSON.stringify(result.blockers));
 });
+
+test("R20: PDF aliases sharing a canonical question SHA still require explicit PDF proof", () => {
+  const inventory = fixture();
+  inventory.entries[0] = { ...inventory.entries[0],
+    path: "sources/IMCQ-1.bin", extension: "bin" };
+  inventory.entries[1] = { ...inventory.entries[1],
+    duplicateOf: "sources/IMCQ-1.bin" };
+  const withoutTriage = run({ inventory, pdfTriage: undefined });
+  assert.equal(withoutTriage.complete, false,
+    "A PDF duplicate alias must not be hidden by a non-PDF canonical path.");
+  assert.ok(withoutTriage.blockers.some(message => message.includes("PDF question-source")),
+    JSON.stringify(withoutTriage.blockers));
+  const withTriage = run({ inventory,
+    pdfTriage: completePdfTriage("text_with_question_indicators") });
+  assert.equal(withTriage.complete, true,
+    "The exact source SHA and current-run proof should still certify this synthetic alias.");
+});
