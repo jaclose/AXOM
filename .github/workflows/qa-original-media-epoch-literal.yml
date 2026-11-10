@@ -7,6 +7,7 @@ on:
       - "web/src/lib/sync/contentDownloads.ts"
       - "web/src/lib/sync/contentDownloads.mediaIntegrity.test.ts"
       - "web/src/lib/sync/contentDownloads.originalAccountEpoch.test.ts"
+      - "web/src/lib/sync/cloudStorage.test.ts"
       - "web/src/lib/questionAttachmentScope.ts"
       - "web/src/lib/questionAttachments.ts"
       - "web/src/lib/decode/sources.ts"
@@ -25,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 5
+          fetch-depth: 20
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -41,7 +42,26 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           test -z "$EXPECTED_HEAD_SHA" || test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          test "$(git rev-parse HEAD~4)" = "$PINNED_SOURCE_SHA"
+          git merge-base --is-ancestor "$PINNED_SOURCE_SHA" HEAD
+          # Only synthetic tests and this workflow may differ from the pinned source.
+          unexpected="$(git diff --name-only "$PINNED_SOURCE_SHA" HEAD | grep -Ev '^(\.github/workflows/qa-original-media-epoch-literal\.yml|web/src/lib/sync/(contentDownloads\.mediaIntegrity\.test\.ts|cloudStorage\.test\.ts))
+          test -z "$(git status --porcelain)"
+      - run: node scripts/toolchain.mjs
+      - run: npm --prefix web ci
+      - name: Assert both MOTHERSHIP source recovery suites are present and run
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f web/src/lib/sync/contentDownloads.mediaIntegrity.test.ts
+          test -f web/src/lib/sync/contentDownloads.originalAccountEpoch.test.ts
+          test -f web/src/lib/sync/cloudStorage.test.ts
+          npm --prefix web run test -- \
+            src/lib/sync/contentDownloads.mediaIntegrity.test.ts \
+            src/lib/sync/contentDownloads.originalAccountEpoch.test.ts \
+            src/lib/sync/cloudStorage.test.ts \
+            --reporter=verbose
+ || true)"
+          test -z "$unexpected"
           test -z "$(git status --porcelain)"
       - run: node scripts/toolchain.mjs
       - run: npm --prefix web ci
