@@ -110,6 +110,58 @@ describe("Journal feedback when browser storage cannot be read", () => {
     }
   });
 
+  for (const [caseName, aliasValue] of [
+    ["empty pointer", ""],
+    ["malformed pointer", "not-a-journal-owner"],
+    ["other-account pointer", "axom-journal-feedback-draft:foreign:account:other-account"],
+    ["pointer disappears after inventory", null],
+  ] as const) {
+    it(`keeps history recovery blocked when an enumerated alias has an ${caseName}`, () => {
+      clearFixtureCopies();
+      const oldName = "Journal R36 Older Saved Owner";
+      const currentName = "Journal R36 Current Saved Owner";
+      const oldKey = `axom-journal-feedback-draft:${userIdFromName(oldName)}`;
+      const currentKey = `axom-journal-feedback-draft:${userIdFromName(currentName)}`;
+      const aliasKey = `${currentKey}:name-alias:v1:${"a".repeat(32)}`;
+      const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Original R36 private feedback remains intact." });
+      useStore.getState().updateProfile({ name: currentName });
+      localStorage.setItem(oldKey, original);
+      localStorage.setItem(aliasKey, aliasValue === null ? oldKey : aliasValue);
+      const originalGet = Storage.prototype.getItem;
+      if (aliasValue === null) {
+        vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+          return this === window.localStorage && storageKey === aliasKey
+            ? null : originalGet.call(this, storageKey);
+        });
+      }
+      try {
+        render(<JournalPage />);
+        fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+        // A present but damaged/dropped alias is not proof that no older copy exists.
+        expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+        expect(screen.queryByText("Other saved feedback copies (1)")).toBeNull();
+        expect(originalGet.call(localStorage, oldKey)).toBe(original);
+        expect(originalGet.call(localStorage, aliasKey)).toBe(aliasValue === null ? oldKey : aliasValue);
+        // Repair only the corrupt test pointer. An explicit Retry must expose
+        // the unchanged historical draft without overwriting either owner.
+        vi.restoreAllMocks();
+        localStorage.setItem(aliasKey, oldKey);
+        fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+        expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+        fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+        fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+        expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+          .toBe("Original R36 private feedback remains intact.");
+        expect(localStorage.getItem(oldKey)).toBe(original);
+      } finally {
+        cleanup();
+        vi.restoreAllMocks();
+        localStorage.removeItem(oldKey);
+        localStorage.removeItem(aliasKey);
+      }
+    });
+  }
+
   it("recovers original feedback through 256 durable rename links but blocks a 257th", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 258 }, (_, index) => `Journal R35 Boundary Name ${index}`);

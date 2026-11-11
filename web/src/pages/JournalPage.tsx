@@ -2016,8 +2016,10 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
       for (const key of keys) {
         if (!key.startsWith(aliasPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(aliasPrefix.length))) continue;
         const previousKey = window.localStorage.getItem(key);
-        if (previousKey && journalFeedbackSameOwner(baseKey, previousKey) && !ownerKeys.includes(previousKey))
-          ownerKeys.push(previousKey);
+        // An enumerated alias with an invalid or vanished value cannot prove a complete history.
+        if (!previousKey || !journalFeedbackSameOwner(baseKey, previousKey))
+          throw new Error("An earlier saved feedback name link is invalid");
+        if (!ownerKeys.includes(previousKey)) ownerKeys.push(previousKey);
       }
     }
     for (const ownerKey of ownerKeys) {
