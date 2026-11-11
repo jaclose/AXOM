@@ -909,8 +909,13 @@ test("SQL withdrawal with a lost RPC response and failed readback revokes other-
     let committedWithdrawals = 0;
     await page.route(/\/rest\/v1\/rpc\/withdraw_question_set_library(?:\?.*)?$/, async route => {
       if (route.request().method() !== "POST") return route.fallback();
-      const committed = await route.fetch();
-      expect(committed.ok()).toBe(true);
+      // The .invalid origin is served entirely by the PGlite route fixture:
+      // route.fetch() would bypass that fixture and fail DNS resolution.
+      // Execute the exact intercepted RPC under the authenticated SQL role
+      // before delivering the deliberately lost-response status to the UI.
+      const body = route.request().postDataJSON() as { p_id?: string };
+      expect(body.p_id).toBe(first.id);
+      await database.rpc(owner.id, "withdraw_question_set_library", { p_id: body.p_id });
       committedWithdrawals += 1;
       await route.fulfill({
         status: 503,
