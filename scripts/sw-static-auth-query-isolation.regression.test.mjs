@@ -88,7 +88,7 @@ test('credential-bearing public image URL never persists synthetic account-A byt
   const first = await app.read(SENSITIVE);
   assert.ok(!first.intercepted || first.response?.status === 200,
     'the first network fetch may be browser-owned or worker-owned');
-  assert.equal(await (await app.cache()).match(SENSITIVE), undefined,
+  assert.equal(Boolean(await (await app.cache()).match(SENSITIVE)), false,
     'query-borne access_token must not remain in origin-wide CacheStorage');
 });
 
