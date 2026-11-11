@@ -1066,3 +1066,39 @@ test("Tracker inferred-week receipts require an actual numeric week", () => {
       `Legitimate ${basis} week filing should retain its prior semantics.`);
   }
 });
+
+
+test("expanded JSONL rejects malformed present SHA without inventing priority-missing counts", () => {
+  const sourceSummary = {
+    file_denominators: {
+      catalogued_document_and_asset_paths: 1,
+      sha256_hashed_paths: 0,
+      distinct_byte_sha256: 0,
+      eligible_priority_files_with_unresolved_sha: 0,
+    },
+    tracker_denominators: { parsed_activity_rows: 0 },
+  };
+  const reference = { original_path: "synthetic/unhashed-reference.txt", file_extension: ".txt" };
+  const reconcile = source_sha256 => {
+    const inventory = expandedSourceInventory([{ ...reference, source_sha256 }], sourceSummary);
+    const report = reconcileAcademicContent({
+      inventory, dispositions: { sources: [] }, receipts: { sources: [] }, tracker: { activities: [] },
+    });
+    return { inventory, report };
+  };
+  // A present but invalid digest is a corrupted producer receipt, not an
+  // intentionally un-hashed reference. The source census may otherwise match.
+  for (const invalid of ["bad-sha", "A".repeat(64), " ", 42, true, [], {}]) {
+    const { inventory, report } = reconcile(invalid);
+    assert.equal(inventory.invalidManifestRows, 1, `Malformed SHA ${String(invalid)} must be counted.`);
+    assert.equal(report.complete, false, `Malformed SHA ${String(invalid)} must not certify coverage.`);
+    assert.ok(report.errors.some(message => message.includes("malformed expanded source manifest")),
+      `Missing sanitized error for ${String(invalid)}: ${JSON.stringify(report.errors)}`);
+  }
+  // Canonical source-ledger.py uses null for intentionally deferred references.
+  for (const absent of [null, undefined, ""]) {
+    const { inventory, report } = reconcile(absent);
+    assert.equal(inventory.invalidManifestRows, 0);
+    assert.equal(report.complete, true, JSON.stringify(report));
+  }
+});
