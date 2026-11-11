@@ -300,6 +300,14 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   // This is a citation-presence count, never an academic verification score.
   const previewCitationTotal = activePreview?.snapshot.questions.length ?? 0;
   const previewCitationCount = activePreview?.snapshot.questions.filter(question => Boolean(question.citation?.trim())).length ?? 0;
+  // A general explanation is not evidence for every choice. Count only
+  // questions with an actual, nonblank rationale for each recorded option.
+  // This is presence metadata, not an assertion of medical correctness.
+  const previewCompleteRationaleCount = activePreview?.snapshot.questions.filter(question => {
+    const recorded = Object.entries(question.choiceRationales ?? {});
+    return question.options.length > 0 && question.options.every(option => recorded.some(([key, rationale]) =>
+      key.trim().toUpperCase() === option.key.trim().toUpperCase() && Boolean(rationale.trim())));
+  }).length ?? 0;
 
   function practiceImportedSet() {
     if (!activePreview || !onPractice || !imported || importing
@@ -360,6 +368,9 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
           <p className="sub">Preview the first three questions. Check their sources while studying.</p>
           {previewCitationCount < previewCitationTotal && <p className="qsl-preview-source-warning">
             Source citations recorded for {previewCitationCount} of {previewCitationTotal} questions. The first-three preview may not show every citation gap. A recorded citation does not establish medical accuracy.
+          </p>}
+          {previewCompleteRationaleCount < previewCitationTotal && <p className="qsl-preview-source-warning">
+            Choice-by-choice rationales recorded for all options in {previewCompleteRationaleCount} of {previewCitationTotal} questions. The first-three preview may not show every rationale gap. Recorded text is not a substitute for source verification.
           </p>}
           <ol>{activePreview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
             <b>{question.stem}</b>
