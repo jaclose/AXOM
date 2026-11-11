@@ -13,7 +13,7 @@ function withNetworkUrl(response, url) {
   return response;
 }
 
-function worker({ failCacheMatch = false, failCachePut = false, scope = 'https://app.test/', precache = [], shippedChunks = [], fetchResponse = async () => { throw new Error('offline'); } } = {}) {
+function worker({ failCacheMatch = false, failCachePut = false, onCachePut = async () => {}, scope = 'https://app.test/', precache = [], shippedChunks = [], fetchResponse = async () => { throw new Error('offline'); } } = {}) {
   const events = new Map();
   const stores = new Map();
   let activations = 0;
@@ -40,6 +40,7 @@ function worker({ failCacheMatch = false, failCachePut = false, scope = 'https:/
         delete: async (key) => values.delete(absolute(key)),
         put: async (key, value) => {
           if (failCachePut) throw new Error('cache quota exceeded');
+          await onCachePut(key);
           values.set(absolute(key), value.clone());
         },
       };
@@ -1157,4 +1158,59 @@ test('update verifier redacts arbitrary page, worker and network diagnostic text
   assert.ok(!JSON.stringify(visible).includes(secret), 'untrusted browser messages must not enter CI artifacts');
   for (let index = 0; index < 30; index++) recordBrowserError('worker-closed', secret);
   assert.equal(installBrowserErrors.length, 20, 'browser diagnostics remain bounded');
+});
+
+
+test('install caps concurrent CacheStorage writes without losing vetted assets or shell ordering', async () => {
+  const chunks = Array.from({ length: 24 }, (_, index) =>
+    `./assets/chunk-${String(index).padStart(8, '0')}.js`);
+  let inflight = 0;
+  let peak = 0;
+  let completed = 0;
+  const written = [];
+  const app = worker({
+    precache: chunks, shippedChunks: chunks,
+    fetchResponse: async (url) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('.js')) return new Response('public-chunk', {
+        headers: { 'content-type': 'text/javascript', 'cache-control': 'public, max-age=31536000' },
+      });
+      if (path.endsWith('.webmanifest')) return new Response('{}', {
+        headers: { 'content-type': 'application/manifest+json' },
+      });
+      if (path.endsWith('.png')) return new Response('icon', {
+        headers: { 'content-type': 'image/png' },
+      });
+      return new Response('<!doctype html>public', {
+        headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' },
+      });
+    },
+    onCachePut: async (key) => {
+      const path = new URL(key, 'https://app.test/').pathname;
+      if (path.endsWith('.js')) {
+        inflight++;
+        peak = Math.max(peak, inflight);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        } finally {
+          inflight--;
+        }
+        completed++;
+      }
+      written.push(path);
+    },
+  });
+  let install;
+  app.events.get('install')({ waitUntil: (task) => { install = task; } });
+  await install;
+  assert.equal(completed, chunks.length, 'each validated immutable chunk must finish caching');
+  assert.ok(peak > 1 && peak <= 4, `CacheStorage write fan-out must be 2–4, observed ${peak}`);
+  const cache = await app.caches.open('axom-shell-current');
+  for (const chunk of chunks) {
+    assert.equal(await (await cache.match(chunk))?.text(), 'public-chunk', chunk);
+  }
+  assert.ok(await cache.match('./index.html'), 'canonical offline shell must remain installed');
+  assert.ok(await cache.match('./'), 'root offline shell must remain installed');
+  assert.ok(await cache.match('./__axom-retained-public-chunks.json'), 'generation manifest must remain installed');
+  assert.equal(written.at(-1), '/index.html', 'canonical shell must be written last');
 });
