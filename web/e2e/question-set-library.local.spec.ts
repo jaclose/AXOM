@@ -800,7 +800,7 @@ test("SQL withdrawal readback outage requires a fresh rights and source attestat
     // for a failed withdrawal or permission to reuse old checkbox grants.
     let failNextStatusLookup = false;
     let injectedFailures = 0;
-    await page.route(/\\/rest\\/v1\\/rpc\\/my_question_set_library(?:\\?.*)?$/, async route => {
+    await page.route(/\/rest\/v1\/rpc\/my_question_set_library(?:\?.*)?$/, async route => {
       if (!failNextStatusLookup) return route.fallback();
       failNextStatusLookup = false;
       injectedFailures += 1;
