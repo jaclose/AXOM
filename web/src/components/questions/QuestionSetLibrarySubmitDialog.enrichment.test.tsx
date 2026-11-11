@@ -253,6 +253,33 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+
+  it("reports two optimistic drafts as unverified after durable storage fails, then safely retries", async () => {
+    const first = question();
+    const second = question({ id: "q-2", stem: "Which tunic is lined by endothelial cells?" });
+    const batchSet = { ...set, questionIds: [first.id, second.id] };
+    mocks.workspace.questions = [first, second];
+    mocks.workspace.questionSets = [batchSet];
+    mocks.assertWrites.mockImplementationOnce(() => { throw new Error("Local storage is full."); });
+    render(<QuestionSetLibrarySubmitDialog set={batchSet} questions={[first, second]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/2 AI drafts to inspect/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/Local storage is full.*2 of 2 draft explanations have an unverified local update.*Your drafts are still here/)).toBeTruthy();
+    expect(mocks.updateQuestion).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Reviewed explanations saved privately/)).toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect((mocks.workspace.questions as QuestionRecord[]).every(item => item.correctKey === "A")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/Reviewed explanations saved privately/)).toBeTruthy();
+    expect(mocks.updateQuestion).toHaveBeenCalledTimes(4);
+    expect(mocks.readVault).toHaveBeenCalledOnce();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(first.explanation).toBeUndefined();
+    expect(second.explanation).toBeUndefined();
+  });
+
   it("does not claim success when the persisted snapshot lacks the explanations", async () => {
     const source = question();
     mocks.workspace.questions = [source];
@@ -304,7 +331,7 @@ describe("Question Set draft explanation review", () => {
     render(<QuestionSetLibrarySubmitDialog set={batchSet} questions={[first, second]} autoDraft onClose={vi.fn()} />);
     expect(await screen.findByText(/2 AI drafts to inspect/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
-    expect(await screen.findByText(/source evidence changed during the batch save.*1 of 2 draft explanations have an unverified local update/)).toBeTruthy();
+    expect(await screen.findByText(/source evidence changed during the batch save.*1 of 2 draft explanations has an unverified local update/)).toBeTruthy();
     expect(mocks.updateQuestion).toHaveBeenCalledOnce();
     const untouched = (mocks.workspace.questions as QuestionRecord[]).find(item => item.id === second.id)!;
     expect(untouched.explanation).toBeUndefined();
@@ -315,7 +342,7 @@ describe("Question Set draft explanation review", () => {
     // An interrupted batch must be honest about the first optimistic update.
     // Retrying must fail closed while the independently changed source remains.
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
-    expect(await screen.findByText(/One or more questions changed.*1 of 2 draft explanations have an unverified local update/)).toBeTruthy();
+    expect(await screen.findByText(/One or more questions changed.*1 of 2 draft explanations has an unverified local update/)).toBeTruthy();
     expect(mocks.updateQuestion).toHaveBeenCalledOnce();
     expect(screen.getByText(/2 AI drafts to inspect/)).toBeTruthy();
     expect(mocks.submit).not.toHaveBeenCalled();
