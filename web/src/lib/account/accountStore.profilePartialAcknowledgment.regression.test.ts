@@ -90,6 +90,7 @@ describe("two-write profile rename partial acknowledgements", () => {
     expect(await useAccount.getState().updateDisplayName("Persisted despite error")).toBe(false);
     expect(upsert).toHaveBeenCalledTimes(1);
     expect(useAccount.getState().user?.displayName).toBe("Persisted despite error");
+    expect(useAccount.getState().error).toContain("Name saved to your profile");
     expect(useAccount.getState().error).toContain("Synthetic auth transport rejected");
     expect(useAccount.getState().message).not.toBe("Account name updated.");
   });
