@@ -84,10 +84,11 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   const unique = [...byHash.values()];
   if (inventory.expectedHashedPaths !== undefined && inventory.expectedHashedPaths !== inventory.entries.length) errors.push(`Expanded manifest has ${inventory.entries.length} hashed paths but source summary reports ${inventory.expectedHashedPaths}; rerun after inventory completes.`);
   if (inventory.expectedDistinctHashes !== undefined && inventory.expectedDistinctHashes !== unique.length) errors.push(`Expanded manifest has ${unique.length} unique hashes but source summary reports ${inventory.expectedDistinctHashes}; refresh the paired source inventory.`);
-  if (inventory.priorityMissingSha === null)
+  const priorityMissingSha = integer(inventory.priorityMissingSha) ? inventory.priorityMissingSha : null;
+  if (priorityMissingSha === null)
     blockers.push("Eligible priority missing-SHA denominator is absent or malformed; pair the source manifest with its verified source summary before certifying coverage.");
-  else if (integer(inventory.priorityMissingSha) && inventory.priorityMissingSha > 0)
-    blockers.push(`${inventory.priorityMissingSha} eligible academic sources have no verified SHA-256; source coverage is incomplete.`);
+  else if (priorityMissingSha > 0)
+    blockers.push(`${priorityMissingSha} eligible academic sources have no verified SHA-256; source coverage is incomplete.`);
   if (inventory.cataloguedPaths > inventory.entries.length) warnings.push(`${inventory.cataloguedPaths - inventory.entries.length} catalogued paths were not included in the hashed cohort; the eligibility scan must distinguish excluded references from the remaining priority files.`);
   if (inventory.summary.uniqueFiles !== unique.length) errors.push(`Inventory uniqueFiles ${inventory.summary.uniqueFiles} != ${unique.length} verified unique hashes`);
   if (inventory.summary.files !== inventory.entries.length) errors.push(`Inventory files ${inventory.summary.files} != ${inventory.entries.length} entries`);
@@ -355,7 +356,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   const counts = {
     inventoryFiles: inventory.entries.length, uniqueSourceFiles: unique.length, duplicateFiles: duplicateRecords.length,
     ...(inventory.cataloguedPaths !== undefined ? { cataloguedPaths: inventory.cataloguedPaths } : {}),
-    ...(inventory.priorityMissingSha !== undefined ? { priorityMissingSha: inventory.priorityMissingSha } : {}),
+    priorityMissingSha,
     explicitlyClassified: dmap.size, missingDisposition: missingDisposition.length,
     questionSources: questionSources.length, nonInstalledQuestionSources: pendingSources.length,
     detectedQuestions, readyQuestions, reviewQuestions, verifiedReadyQuestions,
