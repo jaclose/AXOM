@@ -1745,22 +1745,31 @@ function journalFeedbackRetryPendingNameAliases(ownerKey: string): void {
   const pending = journalInTabPendingNameAliasesByWindow.get(window);
   if (!pending) return;
   const seen = new Set<string>();
+  // Do not discard an already-written head link until the entire same-owner
+  // chain succeeds. Otherwise a second retry cannot reach a blocked tail.
+  const written: string[] = [];
   let key = ownerKey;
   for (let index = 0; index < JOURNAL_FEEDBACK_ALIAS_LIMIT; index += 1) {
     const link = pending.get(key);
-    if (!link || !journalFeedbackSameOwner(ownerKey, link.previous) || seen.has(key)) return;
+    if (!link) {
+      for (const completedKey of written) pending.delete(completedKey);
+      return;
+    }
+    if (!journalFeedbackSameOwner(ownerKey, link.previous) || seen.has(key)) return;
     try {
       window.localStorage.getItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
       // Stable suffix makes retry idempotent even after an ambiguous write.
       window.localStorage.setItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${link.suffix}`, link.previous);
-      pending.delete(key);
     } catch {
-      // Keep the link in memory and the dialog in a fail-closed retry state.
+      // Retain the whole retry path, including previously written links.
       return;
     }
+    written.push(key);
     seen.add(key);
     key = link.previous;
   }
+  // The bounded final link may end exactly at the traversal limit.
+  if (!pending.has(key)) for (const completedKey of written) pending.delete(completedKey);
 }
 
 
