@@ -76,13 +76,12 @@ beforeEach(() => {
   updateUser.mockReset().mockResolvedValue({
     data: { user: { id: "synthetic-a" } }, error: null,
   });
+  // Reset the observable owner to signed-out, so INITIAL_SESSION performs
+  // the actual identity transition and clears the previous test's confirmed
+  // profile name. The auth-subscription reset alone does not reset that closure.
   useAccount.setState({
-    phase: "signed-in",
-    user: {
-      id: "synthetic-a", email: "synthetic-a@example.test",
-      displayName: "Before", emailConfirmed: true,
-    },
-    link: "linked", protection: "protected", busy: false,
+    phase: "signed-out", user: null,
+    link: "unlinked", protection: "local-only", busy: false,
     message: "", error: "",
   });
 });
