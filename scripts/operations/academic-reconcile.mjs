@@ -57,7 +57,15 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
       malformedRows++;
       continue;
     }
-    if (!SHA256.test(row.source_sha256 ?? "")) continue;
+    // Canonical source-ledger.py represents deliberately deferred references
+    // with null. A present malformed checksum is corrupted producer evidence,
+    // not an intentionally unhashed reference that can be silently excluded.
+    const digest = row.source_sha256;
+    if (digest === null || digest === undefined || digest === "") continue;
+    if (typeof digest !== "string" || !SHA256.test(digest)) {
+      malformedRows++;
+      continue;
+    }
     const path = row.original_path ?? row.relative_path ?? row.source_id ?? "(unnamed)";
     const original = counted.get(row.source_sha256);
     entries.push({ path, sha256: row.source_sha256, extension: row.file_extension,
