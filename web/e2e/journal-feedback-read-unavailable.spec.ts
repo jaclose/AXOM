@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { expect, seedOnboarded, test } from "./fixtures";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "../src/lib/journalNotebook";
+import { userIdFromName } from "../src/lib/userIdentity";
 
 test("feedback remains locally recoverable when browser reads fail, then retries without replacing older bytes", async ({ page }) => {
   const browserIssues: string[] = [];
@@ -307,4 +308,115 @@ test("saved feedback from a prior display name remains explicitly recoverable af
   const unchanged = await page.evaluate((key) => localStorage.getItem(key), before.base);
   expect(unchanged).toBe(before.saved);
   // No feedback was submitted or migrated. Original writer and saved bytes remain.
+});
+
+
+test("two explicit retries after a partially recovered historical-name alias preserve the original copy", async ({ page }) => {
+  const browserIssues: string[] = [];
+  page.on("pageerror", (error) => browserIssues.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") browserIssues.push(`console: ${message.text()}`);
+  });
+  const firstName = "Journal R29 Original Feedback";
+  const middleName = "Journal R29 Middle Feedback";
+  const lastName = "Journal R29 Latest Feedback";
+  await seedOnboarded(page, {
+    name: firstName,
+    journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true },
+  });
+  // The Journal must mount once to install its same-tab rename observer.
+  await page.goto("/#journal", { waitUntil: "networkidle" });
+  const saved = await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => { profile: { userId: string } } };
+    }> }).__AXOM_DEV__;
+    const key = `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+    const raw = JSON.stringify({
+      rating: 4, liked: "Unchanged historical feedback after both retries",
+      wantMore: "", missing: "", painPoints: "", comment: "",
+    });
+    localStorage.setItem(key, raw);
+    return { key, raw };
+  });
+  const middleKey = `axom-journal-feedback-draft:${userIdFromName(middleName)}`;
+  const lastKey = `axom-journal-feedback-draft:${userIdFromName(lastName)}`;
+  expect(new Set([saved.key, middleKey, lastKey]).size).toBe(3);
+
+  // Deny only the intermediate owner-key read. C->B can persist while B->A
+  // remains unavailable. The test never clears storage or touches a real user.
+  await page.evaluate((blockedKey) => {
+    const nativeGet = Storage.prototype.getItem;
+    (window as Window & { __axomR29BlockMiddle?: boolean }).__axomR29BlockMiddle = true;
+    Storage.prototype.getItem = function (key: string) {
+      if (this === window.localStorage && key.startsWith(blockedKey)
+        && (window as Window & { __axomR29BlockMiddle?: boolean }).__axomR29BlockMiddle)
+        throw new Error("Synthetic intermediate-name read denied");
+      return nativeGet.call(this, key);
+    };
+  }, middleKey);
+  const currentKey = await page.evaluate(async ({ middleName: middle, lastName: last }) => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+      useStore: { getState: () => {
+        updateProfile: (value: { name: string }) => void;
+        profile: { userId: string };
+      } };
+    }> }).__AXOM_DEV__;
+    dev.useStore.getState().updateProfile({ name: middle });
+    dev.useStore.getState().updateProfile({ name: last });
+    return `axom-journal-feedback-draft:${dev.useStore.getState().profile.userId}`;
+  }, { middleName, lastName });
+  expect(currentKey).toBe(lastKey);
+
+  await page.getByRole("button", { name: "Feedback", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "How is the journal feeling?" });
+  const retry = dialog.getByRole("button", { name: "Retry reading saved feedback" });
+  await expect(retry).toBeVisible();
+  await retry.focus();
+  await retry.press("Enter");
+  // First retry must not discard the earlier blocked tail.
+  await expect(retry).toBeVisible();
+  const partial = await page.evaluate(({ priorKey, middle, current }) => ({
+    original: localStorage.getItem(priorKey),
+    middleLinks: Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .filter((key) => key?.startsWith(`${middle}:name-alias:v1:`)),
+    currentLinks: Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .filter((key) => key?.startsWith(`${current}:name-alias:v1:`)),
+  }), { priorKey: saved.key, middle: middleKey, current: lastKey });
+  expect(partial.original).toBe(saved.raw);
+  expect(partial.middleLinks).toHaveLength(0);
+  expect(partial.currentLinks).toHaveLength(1);
+
+  await page.evaluate(() => {
+    (window as Window & { __axomR29BlockMiddle?: boolean }).__axomR29BlockMiddle = false;
+  });
+  await retry.focus();
+  await retry.press("Enter");
+  await expect(dialog.getByText("Other saved feedback copies (1)")).toBeVisible();
+  await dialog.getByText("Other saved feedback copies (1)").click();
+  await dialog.getByRole("button", { name: "Open copy 1" }).click();
+  await expect(dialog.getByLabel("What do you like?"))
+    .toHaveValue("Unchanged historical feedback after both retries");
+  const recovered = await page.evaluate(({ priorKey, middle }) => ({
+    original: localStorage.getItem(priorKey),
+    middleLinks: Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .filter((key) => key?.startsWith(`${middle}:name-alias:v1:`)),
+  }), { priorKey: saved.key, middle: middleKey });
+  expect(recovered.original).toBe(saved.raw);
+  expect(recovered.middleLinks).toHaveLength(1);
+
+  for (const [width, theme] of [[320, "light"], [390, "dark"], [1440, "light"]] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.evaluate((mode) => { document.documentElement.dataset.theme = mode; }, theme);
+    await expect(dialog.getByLabel("What do you like?")).toBeVisible();
+    const size = await page.evaluate(() => ({
+      viewport: window.innerWidth,
+      page: document.documentElement.scrollWidth,
+      modal: document.querySelector(".journal-feedback-modal")?.getBoundingClientRect().width ?? 0,
+    }));
+    expect(size.page).toBeLessThanOrEqual(size.viewport + 1);
+    expect(size.modal).toBeLessThanOrEqual(width + 1);
+  }
+  expect(browserIssues).toEqual([]);
+  // No Send, account session, provider call, deletion or learner-data reset.
 });
