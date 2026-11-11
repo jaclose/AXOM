@@ -246,6 +246,12 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     if (!row.term || !row.module) errors.push(`Tracker activity ${row.activityId} lacks term/module`);
     if (!["explicit", "inferred", "unassigned"].includes(row.weekBasis)) errors.push(`Tracker activity ${row.activityId} has unknown weekBasis`);
     if (row.weekBasis === "explicit" && !integer(row.week)) errors.push(`Explicit tracker week is missing for ${row.activityId}`);
+    // All present week values must be valid week indexes.
+    if (row.week !== undefined && row.week !== null && !integer(row.week))
+      errors.push(`Tracker activity ${row.activityId} has invalid week; require a nonnegative integer.`);
+    // Unassigned means no week is filed, rather than a silent numeric scope.
+    if (row.weekBasis === "unassigned" && row.week !== undefined && row.week !== null)
+      errors.push(`Tracker activity ${row.activityId} unassigned receipt claims a week.`);
     if (row.installed !== true) blockers.push(`Tracker activity ${row.activityId} has no installation receipt`);
   }
   if (expectedTracker !== null && tmap.size !== expectedTracker) {
