@@ -52,6 +52,35 @@ afterEach(() => {
 });
 
 describe("Journal feedback when browser storage cannot be read", () => {
+  it("does not exhaust historical recovery slots on name-only edits without saved feedback", () => {
+    clearFixtureCopies();
+    const names = Array.from({ length: 21 }, (_, index) => `Journal R31 Empty Profile ${index}`);
+    const ownerKeys = names.map((name) => `axom-journal-feedback-draft:${userIdFromName(name)}`);
+    useStore.getState().updateProfile({ name: names[0] });
+    // Install the same name-change observer a real Journal visit installs.
+    const visit = render(<JournalPage />);
+    visit.unmount();
+
+    try {
+      for (const name of names.slice(1)) useStore.getState().updateProfile({ name });
+      const aliases = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+        .filter((item) => item?.includes(":name-alias:v1:")
+          && ownerKeys.some((owner) => item.startsWith(`${owner}:name-alias:v1:`)));
+      expect(aliases).toEqual([]);
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.queryByRole("button", { name: "Retry reading saved feedback" })).toBeNull();
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).readOnly).toBe(false);
+    } finally {
+      // Synthetic fixture cleanup, never a user/workspace data operation.
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const item = localStorage.key(index);
+        if (item && ownerKeys.some((owner) => item === owner || item.startsWith(`${owner}:`)))
+          localStorage.removeItem(item);
+      }
+    }
+  });
+
   it("lets the owner write and recover a volatile draft without overwriting unknown legacy bytes", () => {
     const originalGet = Storage.prototype.getItem;
     const blockedRead = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
