@@ -1706,6 +1706,23 @@ function journalFeedbackSameOwner(root: string, candidate: string): boolean {
   return Boolean(current && previous && current[2] === previous[2]);
 }
 
+// Do not spend a bounded historical owner slot on an empty display-name edit.
+// Treat any unavailable/ambiguous storage read as possibly containing feedback.
+function journalFeedbackMayHaveHistory(ownerKey: string): boolean {
+  try {
+    if (window.localStorage.getItem(ownerKey) !== null) return true;
+    const writerPrefix = `${ownerKey}:writer:`;
+    const aliasPrefix = `${ownerKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}`;
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key === null || key.startsWith(writerPrefix) || key.startsWith(aliasPrefix)) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 function journalFeedbackRecordNameAlias(oldKey: string, newKey: string, suffix: string): boolean {
   if (oldKey === newKey || !journalFeedbackSameOwner(newKey, oldKey)) return false;
   try {
@@ -1793,17 +1810,22 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
       const newOwner = accountId ? `${next.profile.userId}:account:${accountId}` : next.profile.userId;
       const oldKey = `axom-journal-feedback-draft:${oldOwner}`;
       const newKey = `axom-journal-feedback-draft:${newOwner}`;
-      const suffix = journalFeedbackRevision();
-      const aliasWritten = journalFeedbackRecordNameAlias(oldKey, newKey, suffix);
-      // A later rename can persist its own link while an earlier rename
-      // remains unreadable. Flush the earlier link if storage recovered.
-      if (aliasWritten) journalFeedbackRetryPendingNameAliases(oldKey);
-      // If it is still pending, keep the new destination in explicit retry
-      // state so the retry follows the full same-owner rename chain.
-      if (!aliasWritten || journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey)) {
-        const pendingAliases = journalInTabPendingNameAliases();
-        if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_LIMIT && !pendingAliases.has(newKey))
-          pendingAliases.set(newKey, { previous: oldKey, suffix });
+      // Volatile text moves below regardless. A durable old-name pointer is
+      // needed only for actual saved history or an unfinished recovery chain.
+      const hasPendingHistory = journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey) ?? false;
+      if (hasPendingHistory || journalFeedbackMayHaveHistory(oldKey)) {
+        const suffix = journalFeedbackRevision();
+        const aliasWritten = journalFeedbackRecordNameAlias(oldKey, newKey, suffix);
+        // A later rename can persist its own link while an earlier rename
+        // remains unreadable. Flush the earlier link if storage recovered.
+        if (aliasWritten) journalFeedbackRetryPendingNameAliases(oldKey);
+        // Keep the new destination in explicit retry state until every
+        // historical link is durable; never drop a blocked earlier name.
+        if (!aliasWritten || journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey)) {
+          const pendingAliases = journalInTabPendingNameAliases();
+          if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_LIMIT && !pendingAliases.has(newKey))
+            pendingAliases.set(newKey, { previous: oldKey, suffix });
+        }
       }
       const pending = tabDrafts.get(oldKey);
       // Transfer volatile ownership only when the destination is empty.
