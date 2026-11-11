@@ -598,6 +598,7 @@ export const useAccount = create<AccountState>((set, get) => {
         accountIdentityEpoch === initiatingEpoch + 1
         && !get().user && get().phase === "signed-out";
       const canSettle = () => sameSession() || sdkEndedThisSession();
+      let localRevocationWarning = "";
       const signedOut = await guarded("Signing out…", async () => {
         const supabase = await loadSupabase();
         // The SDK is global to the browser. A delayed load must never sign out
@@ -605,8 +606,16 @@ export const useAccount = create<AccountState>((set, get) => {
         if (!sameSession()) return false;
         if (!supabase && cloudConfigured()) throw new Error("The account service couldn’t load. Try again before signing out.");
         if (supabase) {
-          const { error } = await supabase.auth.signOut();
-          if (error) throw error;
+          // This action signs out only this device. Default Supabase scope is
+          // global, which would also revoke other devices' refresh tokens.
+          const { error } = await supabase.auth.signOut({ scope: "local" });
+          if (error) {
+            if (!sdkEndedThisSession()) throw error;
+            // Local scope clears this device before attempting server
+            // revocation. Complete app cleanup but do not claim that the
+            // remote token was revoked when the server request failed.
+            localRevocationWarning = `Signed out on this device, but server token revocation could not be confirmed. ${friendlyError(error)}`;
+          }
         }
         if (!canSettle()) return false;
         coordinator?.dispose();
@@ -625,7 +634,8 @@ export const useAccount = create<AccountState>((set, get) => {
         restoreOffer: undefined,
         pendingCodeEmail: undefined,
         pendingCodeKind: undefined,
-        message: "Signed out. This device’s workspace is still here.",
+        message: localRevocationWarning ? "" : "Signed out. This device’s workspace is still here.",
+        error: localRevocationWarning,
       });
     },
 
