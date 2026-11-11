@@ -12,7 +12,7 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
   // Keep image object URLs and the modal scoped to the exact attachment keys.
   // Imported questions may reuse IDs across accounts/workspaces with different bytes.
   const [loaded, setLoaded] = useState<{ signature: string; urls: Record<string, string | "missing" | "unavailable"> }>({ signature: "", urls: {} });
-  const [zoomed, setZoomed] = useState<{ signature: string; attachment: QuestionImageAttachment } | null>(null);
+  const [zoomed, setZoomed] = useState<{ signature: string; id: string } | null>(null);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   // A structured tuple array prevents delimiter collisions between distinct attachment IDs / blob keys.
@@ -20,7 +20,12 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
   const accountScope = useQuestionAttachmentScope();
   const signature = JSON.stringify([accountScope.owner, accountScope.generation, attachments.map(({ id, blobKey, updatedAt }) => [id, blobKey, updatedAt])]);
   const urls = loaded.signature === signature ? loaded.urls : Object.create(null) as Record<string, string | "missing" | "unavailable">;
-  const activeZoomed = zoomed?.signature === signature ? zoomed.attachment : null;
+  // Resolve the viewer against current metadata, never the object captured when
+  // it opened. Metadata-only edits must update the accessible name without
+  // reallocating private blob URLs or resetting the viewer zoom/focus.
+  const activeZoomed = zoomed?.signature === signature
+    ? attachments.find(attachment => attachment.id === zoomed.id) ?? null
+    : null;
   const zoomSignature = zoomed?.signature ?? null;
   const signatureRef = useRef(signature);
   signatureRef.current = signature;
@@ -75,7 +80,7 @@ export function QuestionExhibits({ attachments }: { attachments: readonly Questi
         return (
           <button key={attachment.id} type="button" className="question-exhibit" disabled={!url}
             aria-label={`Enlarge ${label}`}
-            onClick={(event) => { event.currentTarget.focus(); setZoomed({ signature, attachment }); }}>
+            onClick={(event) => { event.currentTarget.focus(); setZoomed({ signature, id: attachment.id }); }}>
             {url ? <img src={url} alt={label} width={attachment.width} height={attachment.height} /> : <span className="question-exhibit-loading" aria-hidden="true" />}
             <span className="question-exhibit-zoom" aria-hidden="true"><ZoomIn size={ICON_SIZE.body} /></span>
           </button>
