@@ -24,7 +24,10 @@ vi.mock("./supabase", () => ({
 
 let workspace = makeSeed();
 vi.mock("../store", () => ({ useStore: { getState: () => workspace } }));
-vi.mock("../backup", () => ({
+// Preserve the production portable serializer: SyncCoordinator's snapshot
+// preflight uses it before invoking the synthetic transport.
+vi.mock("../backup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../backup")>()),
   parseImport: (json: string) => JSON.parse(json),
   mergeStates: vi.fn(),
 }));
@@ -128,6 +131,9 @@ describe("manual account save receipt against real coordinator transport", () =>
 
     await useAccount.getState().syncNow();
 
+    // If the positive control never reaches transport, report whether a local
+    // preflight rejection was swallowed by the real coordinator.
+    expect(readSyncMetadata().lastError?.rejection).not.toBe("preparation-failed");
     expect(push).toHaveBeenCalledTimes(1);
     expect(useAccount.getState().protection).toBe("protected");
     expect(useAccount.getState().message).toBe("Protected just now.");
