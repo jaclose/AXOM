@@ -317,6 +317,56 @@ describe("Journal feedback when browser storage cannot be read", () => {
     }
   });
 
+  it("keeps a 257th unavailable name link visibly incomplete, including after later renames", () => {
+    clearFixtureCopies();
+    const names = Array.from({ length: 259 }, (_, index) => `Journal R39 Overflow Name ${index}`);
+    const owners = names.map((name) => `axom-journal-feedback-draft:${userIdFromName(name)}`);
+    expect(new Set(owners).size).toBe(owners.length);
+    const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R39 original private feedback unchanged." });
+    useStore.getState().updateProfile({ name: names[0] });
+    localStorage.setItem(owners[0], original);
+    const mounted = render(<JournalPage />);
+    mounted.unmount();
+    const originalGet = Storage.prototype.getItem;
+    const denied = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith("axom-journal-feedback-draft:"))
+        throw new Error("R39 feedback storage read outage");
+      return originalGet.call(this, storageKey);
+    });
+
+    try {
+      // All 257 edits occur while a durable name-link write cannot be verified.
+      // The 257th edge cannot fit in the 256-link in-tab retry chain.
+      for (const name of names.slice(1, 258)) useStore.getState().updateProfile({ name });
+      denied.mockRestore();
+      const first = render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      expect(screen.queryByText("Other saved feedback copies (1)")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      // A successful write of older pending links cannot reconstruct the
+      // missing 257th edge, so retry must not falsely report complete history.
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      expect(originalGet.call(localStorage, owners[0])).toBe(original);
+      first.unmount();
+
+      // Later name edits must carry the same fail-closed condition forward.
+      useStore.getState().updateProfile({ name: names[258] });
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      expect(originalGet.call(localStorage, owners[0])).toBe(original);
+    } finally {
+      cleanup();
+      denied.mockRestore();
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (key && owners.some((owner) => key === owner || key.startsWith(`${owner}:`)))
+          localStorage.removeItem(key);
+      }
+    }
+  });
+
   it("keeps a 20-rename recovery chain during denied storage reads until explicit retry", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 21 }, (_, index) => `Journal R33 Offline Rename ${index}`);
