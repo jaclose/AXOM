@@ -568,7 +568,13 @@ export const useAccount = create<AccountState>((set, get) => {
         set({ user: { ...current, displayName } });
         // Supabase can resolve { error } without rejecting its promise. A
         // partial write must never be reported as a fully completed rename.
-        const { error: authError } = await supabase.auth.updateUser({ data: { display_name: displayName } });
+        let authError: unknown;
+        try {
+          const response = await supabase.auth.updateUser({ data: { display_name: displayName } });
+          authError = response.error;
+        } catch (error) {
+          authError = error;
+        }
         assertOwner();
         if (authError) {
           throw new Error(`Name saved to your profile, but sign-in metadata was not updated. Retry saving your name to finish. ${friendlyError(authError)}`);
