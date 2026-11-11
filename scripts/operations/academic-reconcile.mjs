@@ -264,7 +264,11 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         && (scope.term === null || entry.term === scope.term));
       const weekly = matching.filter(entry => entry.week !== undefined);
       if (!weekly.length) {
-        warnings.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has no source-declared week; week membership is unverified.`);
+        if (matching.some(entry => entry.weekBasis === "explicit")) {
+          blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has invalid source-week evidence; explicit filing requires a numeric week.`);
+        } else {
+          warnings.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has no source-declared week; week membership is unverified.`);
+        }
         continue;
       }
       const ambiguous = !scope.term || templateEntries.some(entry =>
