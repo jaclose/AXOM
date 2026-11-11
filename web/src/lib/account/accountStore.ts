@@ -584,16 +584,28 @@ export const useAccount = create<AccountState>((set, get) => {
     },
 
     async syncNow() {
-      if (get().link !== "linked") return;
+      const user = get().user;
+      const syncEpoch = accountIdentityEpoch;
+      if (!user || get().link !== "linked") return;
+      const sameOwner = () => syncEpoch === accountIdentityEpoch && get().user?.id === user.id && get().link === "linked";
+      const assertSyncOwner = () => {
+        if (!sameOwner()) throw new Error("The signed-in account changed. Manual sync was stopped.");
+      };
       await guarded("Protecting now…", async () => {
         const status = await withCoordinator(async (active) => {
+          assertSyncOwner();
           active.queue();
           await active.flush("manual");
+          // Returning account A is not the same A session after A → B → A.
+          assertSyncOwner();
           return active.currentStatus();
         });
+        assertSyncOwner();
         set(protectionView(status));
-      });
-      // The card under the button explains a failure; the notice only confirms success.
+      }, sameOwner);
+      // An old account's completion may not overwrite the new account's badge,
+      // notices or recovery state, even when the final user ID is the same.
+      if (!sameOwner()) return;
       set({ message: get().protection === "protected" ? "Protected just now." : "" });
       void get().refresh();
     },
