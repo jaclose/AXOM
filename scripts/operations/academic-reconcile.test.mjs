@@ -408,6 +408,21 @@ test("Tracker source-week verification preserves repeated contributions and unkn
     "A source marked explicitly week-filed without a week number must not pass.");
   assert.ok(missingExplicitResult.blockers.some(message => message.includes("invalid source-week")));
 
+  const explicitUnknown = fixture();
+  explicitUnknown.summary.templates = [{ term: "T1", module: "FTM 1",
+    week: null, weekBasis: "unassigned", items: 2 }];
+  const explicitUnknownResult = run({ inventory: explicitUnknown, tracker: tracker() });
+  assert.equal(explicitUnknownResult.complete, true,
+    "JSON null with an unassigned source basis is unknown, not a forged week.");
+  assert.ok(explicitUnknownResult.warnings.some(message => message.includes("week membership")));
+
+  const explicitNull = fixture();
+  explicitNull.summary.templates = [{ term: "T1", module: "FTM 1",
+    week: null, weekBasis: "explicit", items: 2 }];
+  const explicitNullResult = run({ inventory: explicitNull, tracker: installed });
+  assert.equal(explicitNullResult.complete, false);
+  assert.ok(explicitNullResult.blockers.some(message => message.includes("invalid source-week")));
+
   const unassigned = fixture();
   unassigned.summary.templates = [{ term: "T1", module: "FTM 1", items: 2 }];
   const unknownResult = run({ inventory: unassigned, tracker: tracker() });
