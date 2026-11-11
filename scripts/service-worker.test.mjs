@@ -685,3 +685,71 @@ test('redirects and mismatched final URLs cannot persist manifest-listed lazy sc
     await assert.rejects(visit(), /offline/, scenario.name + ': unsafe bytes replayed offline');
   }
 });
+
+test('installed worker persists immutable chunk inventory for future upgrades', async () => {
+  const app = worker({
+    precache: ['./assets/checkpoint-12345678.js', './assets/nohash.js'],
+    shippedChunks: ['./assets/oldLazy-abcdefgh.css', './private/secret-12345678.js'],
+    fetchResponse: async () => new Response('<!doctype html>shell', { headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' } }),
+  });
+  let task;
+  app.events.get('install')({ waitUntil: (p) => { task = p; } });
+  await task;
+  const record = await (await app.caches.open('axom-shell-current')).match('./__axom-retained-public-chunks.json');
+  assert.ok(record);
+  assert.deepEqual(await record.json(), { version: 1, chunks: ['./assets/checkpoint-12345678.js', './assets/oldLazy-abcdefgh.css'] });
+});
+
+test('new generation replays prior manifest-listed immutable JS/CSS with restrictive host headers', async () => {
+  const app = worker();
+  const prior = await app.caches.open('axom-shell-previous');
+  const paths = [
+    ['/assets/checkpoint-12345678.js', 'text/javascript', 'no-store'],
+    ['/assets/oldLazy-abcdefgh.css', 'text/css', 'no-cache'],
+  ];
+  await prior.put('./__axom-retained-public-chunks.json', new Response(
+    JSON.stringify({ version: 1, chunks: paths.map(([url]) => `.${url}`) }),
+    { headers: { 'content-type': 'application/json' } },
+  ));
+  for (const [path, mime, directive] of paths) {
+    await prior.put(path, withNetworkUrl(new Response('older-public-code', {
+      headers: { 'content-type': mime, 'cache-control': directive },
+    }), `https://app.test${path}`));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.equal(await (await pending).text(), 'older-public-code', `retained ${path}`);
+  }
+});
+
+test('retained snapshot never authorizes private, substituted or unlisted offline code', async () => {
+  const asset = '/assets/checkpoint-12345678.js';
+  const snapshot = { version: 1, chunks: [`.${asset}`] };
+  const cases = [
+    ['absent snapshot', null, asset, { 'cache-control': 'no-store', 'content-type': 'text/javascript' }, null],
+    ['wrong asset', { version: 1, chunks: ['./assets/other-12345678.js'] }, asset, { 'cache-control': 'no-store', 'content-type': 'text/javascript' }, null],
+    ['invalid version', { version: 2, chunks: [`.${asset}`] }, asset, { 'cache-control': 'no-store', 'content-type': 'text/javascript' }, null],
+    ['private', snapshot, asset, { 'cache-control': 'private, no-store', 'content-type': 'text/javascript' }, null],
+    ['authorization vary', snapshot, asset, { 'cache-control': 'no-store', 'content-type': 'text/javascript', vary: 'Authorization' }, null],
+    ['cookie', snapshot, asset, { 'cache-control': 'no-store', 'content-type': 'text/javascript', 'set-cookie': 'sid=A' }, null],
+    ['HTML rewrite', snapshot, asset, { 'cache-control': 'no-store', 'content-type': 'text/html' }, null],
+    ['substituted final URL', snapshot, asset, { 'cache-control': 'no-store', 'content-type': 'text/javascript' }, 'https://app.test/api/account'],
+  ];
+  for (const [label, manifest, path, headers, finalUrl] of cases) {
+    const app = worker({ fetchResponse: async () => { throw new Error('offline'); } });
+    const prior = await app.caches.open('axom-shell-previous');
+    if (manifest) await prior.put('./__axom-retained-public-chunks.json',
+      new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } }));
+    await prior.put(path, withNetworkUrl(new Response('must-not-replay', { headers }), finalUrl || `https://app.test${path}`));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: `https://app.test${path}`, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    await assert.rejects(pending, /offline/, label);
+  }
+});

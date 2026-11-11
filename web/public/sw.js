@@ -8,6 +8,12 @@ const PRECACHE = []; // __AXOM_PRECACHE__
 // Injection does not add optional games to install-time PRECACHE.
 const SHIPPED_CHUNKS = []; // __AXOM_SHIPPED_CHUNKS__
 const CORE = [...new Set(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...PRECACHE])];
+// A later worker cannot infer a predecessor's immutable chunk identities from
+// its own manifest. Bind those identities to the cache generation at install.
+const RETAINED_MANIFEST_KEY = "./__axom-retained-public-chunks.json";
+const immutableChunkPath = (path) => typeof path === "string"
+  && /^\.\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(path);
+const RETAINED_CHUNKS = [...new Set([...PRECACHE, ...SHIPPED_CHUNKS].filter(immutableChunkPath))];
 
 // Cache Storage does not enforce HTTP Cache-Control on explicit cache.put.
 // A public-looking path may still return account-bound bytes; never persist or
@@ -71,6 +77,30 @@ function shippedPublicBuildAsset(request, response) {
   });
 }
 
+// Retained no-store/no-cache code may be replayed only with its own
+// build's recorded identity, strict MIME/header checks and original URL.
+// Caches predating the manifest deliberately fail closed.
+async function retainedGenerationAsset(cache, request, response) {
+  if (!matchesRequestedResource(request, response) || response.headers.has("set-cookie")) return false;
+  const control = (response.headers.get("cache-control") || "").trim().toLowerCase();
+  if (control !== "no-store" && control !== "no-cache") return false;
+  if (/(?:^|,)\s*(?:\*|cookie|authorization)\s*(?:,|$)/i.test(response.headers.get("vary") || "")) return false;
+  const pathname = new URL(request.url).pathname;
+  const mime = (response.headers.get("content-type") || "").trim();
+  try {
+    const stored = await cache.match(RETAINED_MANIFEST_KEY);
+    if (!stored || !stored.ok || !/^application\/json(?:;|$)/i.test(stored.headers.get("content-type") || "")) return false;
+    const manifest = await stored.json();
+    if (manifest?.version !== 1 || !Array.isArray(manifest.chunks) || manifest.chunks.length > 4096) return false;
+    return manifest.chunks.some((path) => immutableChunkPath(path)
+      && new URL(path, self.registration.scope).pathname === pathname
+      && (path.endsWith(".css") ? /^text\/css(?:;|$)/i.test(mime)
+        : /^(?:text|application)\/javascript(?:;|$)/i.test(mime)));
+  } catch {
+    return false;
+  }
+}
+
 // HTML MIME types are ASCII case-insensitive. An HTML deployment rewrite
 // must never be treated as JavaScript/CSS/media, even with mixed-case headers.
 function isHtmlResponse(response) {
@@ -126,6 +156,11 @@ async function installPublicShell() {
   }));
   const cache = await caches.open(CACHE);
   await cache.addAll(CORE.filter((path) => !routes.includes(path)));
+  // A quota-limited metadata write must not prevent a valid update installing.
+  await cache.put(RETAINED_MANIFEST_KEY,
+    new Response(JSON.stringify({ version: 1, chunks: RETAINED_CHUNKS }), {
+      headers: { "content-type": "application/json" },
+    })).catch(() => {});
   for (const { path, response } of validated) await cache.put(path, response);
 }
 
@@ -157,7 +192,8 @@ async function cachedAppAsset(request) {
     // have it and must match their original origin/path before replay.
     if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) continue;
     if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)
-      && !shippedPublicBuildAsset(request, response)) continue;
+      && !shippedPublicBuildAsset(request, response)
+      && !(name !== CACHE && await retainedGenerationAsset(cache, request, response))) continue;
     if (isHtmlResponse(response)) {
       // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
       await cache.delete(request);
