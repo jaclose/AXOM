@@ -860,6 +860,73 @@ describe("Question Set draft explanation review", () => {
     expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
   });
 
+  it("requires new attestations after an unknown submit with no server row, including after status retry", async () => {
+    const source = question({ explanation: "Tunica media smooth muscle regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    // No row is found following a lost RPC response. This does NOT prove
+    // the earlier attestations cover a safe retry of the original submission.
+    mocks.submissions.mockReset().mockResolvedValue([]);
+    mocks.submit.mockReset().mockRejectedValueOnce(new Error("Network outcome unknown"));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    fireEvent.click(rights);
+    fireEvent.click(answers);
+    await waitFor(() => expect(send.disabled).toBe(false));
+    const epochBefore = readCommunityPublicationEpoch();
+    fireEvent.click(send);
+
+    expect(await screen.findByText(/Network outcome unknown/)).toBeTruthy();
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledTimes(2));
+    expect(readCommunityPublicationEpoch()).toBe(epochBefore);
+    expect(rights.checked).toBe(false);
+    expect(answers.checked).toBe(false);
+    expect(send.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry status check" }));
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledTimes(3));
+    expect(rights.checked).toBe(false);
+    expect(answers.checked).toBe(false);
+    expect(send.disabled).toBe(true);
+    fireEvent.click(rights);
+    expect(send.disabled).toBe(true);
+    fireEvent.click(answers);
+    await waitFor(() => expect(send.disabled).toBe(false));
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(source.correctKey).toBe("A");
+  });
+
+  it("retains a failed submit error but revokes grants when its status readback also fails", async () => {
+    const source = question({ explanation: "Tunica media smooth muscle regulates vascular resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockReset()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("Status service unavailable"))
+      .mockResolvedValueOnce([]);
+    mocks.submit.mockReset().mockRejectedValueOnce(new Error("Submit response lost"));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    fireEvent.click(rights);
+    fireEvent.click(answers);
+    await waitFor(() => expect(send.disabled).toBe(false));
+    const epochBefore = readCommunityPublicationEpoch();
+    fireEvent.click(send);
+
+    expect(await screen.findByText(/Submit response lost/)).toBeTruthy();
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledTimes(2));
+    expect(rights.checked).toBe(false);
+    expect(answers.checked).toBe(false);
+    expect(readCommunityPublicationEpoch()).toBe(epochBefore);
+    fireEvent.click(screen.getByRole("button", { name: "Retry status check" }));
+    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledTimes(3));
+    expect(send.disabled).toBe(true);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(source.correctKey).toBe("A");
+  });
+
   it("revokes local grants but does not signal a publication for unknown submit result with rejected readback", async () => {
     const source = question({ explanation: "Tunica media smooth muscle regulates arterial caliber and resistance." });
     mocks.workspace.questions = [source];
