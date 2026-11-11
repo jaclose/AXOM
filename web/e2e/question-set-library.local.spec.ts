@@ -583,6 +583,8 @@ test("withdrawn publication cannot be imported from an already-open learner prev
       const state = dev.useStore.getState();
       return { questions: state.questions.length, sets: state.questionSets.length };
     })).toEqual(privateBefore);
+    await learner.getByRole("dialog", { name: "Question Set preview" })
+      .getByRole("button", { name: "Close" }).click();
     await library.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(card).toHaveCount(0);
   } finally {
