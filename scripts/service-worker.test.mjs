@@ -506,6 +506,76 @@ test('cache lookup ignores protected responses retained by an older worker', asy
   if (lifetime) await lifetime;
 });
 
+test('signed or unknown asset queries cannot enter shared cache, even from a retained generation', async () => {
+  let online = true;
+  const app = worker({ fetchResponse: async () => {
+    if (!online) throw new Error('offline');
+    return new Response('synthetic A-only image', { headers: {
+      'content-type': 'image/png', 'cache-control': 'public, max-age=600',
+    } });
+  } });
+  const old = await app.caches.open('axom-shell-older');
+  const paths = [
+    '/landing/hero.png?access_token=SYNTHETIC_A',
+    '/landing/hero.png?token=SYNTHETIC_A',
+    '/landing/hero.png?X-Amz-Signature=SYNTHETIC_A',
+    '/landing/hero.png?v=build-20261111&access_token=SYNTHETIC_A',
+    '/landing/hero.png?sig=SYNTHETIC_A',
+    '/landing/hero.png?nonce=synthetic-session',
+    '/landing/hero.png?v=build-20261111&v=build-20261112',
+    '/landing/hero.png?v=sk_synthetic_account_token',
+  ];
+  for (const path of paths) {
+    // Older workers may already contain this query-keyed entry; never replay it.
+    await old.put(path, new Response('legacy account A bytes', {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public' },
+    }));
+    let response;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { response = value; },
+    });
+    assert.equal(response, undefined, 'sensitive URL intercepted: ' + path);
+    assert.equal(await (await app.caches.open('axom-shell-current')).match(path), undefined,
+      'sensitive URL was written to current shared shell cache: ' + path);
+  }
+  online = false;
+  let response;
+  app.events.get('fetch')({
+    request: { url: 'https://app.test' + paths[0], method: 'GET', mode: 'same-origin' },
+    respondWith: (value) => { response = value; },
+  });
+  assert.equal(response, undefined, 'offline worker must not replay older signed URL');
+});
+
+test('bounded public version-only image URLs still cache and recover offline', async () => {
+  let online = true;
+  const app = worker({ fetchResponse: async () => {
+    if (!online) throw new Error('offline');
+    return new Response('public image', { headers: {
+      'content-type': 'image/png', 'cache-control': 'public, max-age=600',
+    } });
+  } });
+  for (const path of ['/landing/hero.png?v=build-20261111', '/landing/hero.png?v=1.2.3']) {
+    const read = async () => {
+      let task; let lifetime;
+      app.events.get('fetch')({
+        request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { task = value; },
+        waitUntil: (value) => { lifetime = value; },
+      });
+      assert.ok(task, 'public version query should be intercepted: ' + path);
+      const response = await task;
+      if (lifetime) await lifetime;
+      return response.text();
+    };
+    online = true;
+    assert.equal(await read(), 'public image');
+    online = false;
+    assert.equal(await read(), 'public image');
+  }
+});
+
 test('authenticated requests to a public-looking path bypass the shell cache entirely', () => {
   const app = worker();
   app.events.get('fetch')({
