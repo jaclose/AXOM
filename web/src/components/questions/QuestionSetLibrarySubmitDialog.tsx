@@ -310,8 +310,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     const applied = drafts.filter(draft => {
       const receipt = draftSaveRevisions.current.get(draft.questionId);
       const current = liveQuestions.find(question => question.id === draft.questionId);
-      return receipt?.source === draft.sourceFingerprint && Boolean(current)
-        && questionExplanationFingerprint(current!) === receipt.applied;
+      if (!receipt || !current || receipt.source !== draft.sourceFingerprint) return false;
+      return questionExplanationFingerprint(current) === receipt.applied;
     }).length;
     if (applied) return ` ${applied} of ${drafts.length} draft explanation${applied === 1 ? " has" : "s have"} an unverified local update. The complete batch has not been confirmed in durable storage.`;
     return drafts.some(draft => draftSaveRevisions.current.has(draft.questionId))
