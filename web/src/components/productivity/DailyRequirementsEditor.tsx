@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { CalendarDays, Check, Plus, RotateCcw, SlidersHorizontal, Trash2 } from "lucide-react";
 import { localDateKey } from "../../lib/dailyRollover";
 import { evaluateDailySuccess, makeDailyRequirement } from "../../lib/dailySuccess";
@@ -10,7 +11,7 @@ import { GButton, Tag } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 
 const STANDARD: Array<{
-  kind: DailySuccessSource["kind"];
+  kind: Exclude<QuickGoalKind, "custom">;
   label: string;
   target: number;
   unit: string;
@@ -21,7 +22,15 @@ const STANDARD: Array<{
   { kind: "journal-closeout", label: "Daily closeout", target: 1, unit: "closeout" },
 ];
 
-export function DailyRequirementsEditor() {
+type QuickGoalKind = "study-minutes" | "cards-reviewed" | "practice-questions" | "journal-closeout" | "custom";
+const QUICK_GOAL_LABELS: Record<Exclude<QuickGoalKind, "custom">, string> = {
+  "study-minutes": "Study time",
+  "cards-reviewed": "Cards reviewed",
+  "practice-questions": "Practice questions",
+  "journal-closeout": "Daily closeout",
+};
+
+export function DailyRequirementsEditor({ onFillActivity }: { onFillActivity?: (label: string, unit: string) => void } = {}) {
   const store = useStore();
   const [customName, setCustomName] = useState("");
   const [customTarget, setCustomTarget] = useState("1");
@@ -29,6 +38,20 @@ export function DailyRequirementsEditor() {
   const [customSchedule, setCustomSchedule] = useState<DailySuccessSchedule>({ kind: "daily" });
   const [customCompletion, setCustomCompletion] = useState<"manual" | "activity" | "habit">("manual");
   const [customAliases, setCustomAliases] = useState("");
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickKind, setQuickKind] = useState<QuickGoalKind>("custom");
+  const [quickName, setQuickName] = useState("");
+  const [quickAmount, setQuickAmount] = useState("1");
+  const [quickUnit, setQuickUnit] = useState("times");
+  const [quickRecording, setQuickRecording] = useState<"manual" | "activity">("manual");
+  const [quickSchedule, setQuickSchedule] = useState<DailySuccessSchedule>({ kind: "daily" });
+  const [quickError, setQuickError] = useState("");
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState("1");
+  const [editSchedule, setEditSchedule] = useState<DailySuccessSchedule>({ kind: "daily" });
+  const [editError, setEditError] = useState("");
+
+
   const config = store.profile.dailySuccess;
   const today = store.activeDayKey || localDateKey();
   const shown = useMemo(() => config?.requirements ?? legacyPreview(store.profile.dailyMinuteTarget, store.profile.dailyCardTarget, today), [config, store.profile.dailyCardTarget, store.profile.dailyMinuteTarget, today]);
@@ -74,6 +97,93 @@ export function DailyRequirementsEditor() {
         ? { kind: "manual" as const }
         : requirement.source;
     update(requirement.id, { aliases, source });
+  }
+
+  function openQuickGoal() {
+    const available = STANDARD.find((template) => !activeKinds.has(template.kind));
+    setQuickKind(available ? available.kind : "custom");
+    setQuickAmount(String(available?.target ?? 1));
+    setQuickName("");
+    setQuickUnit("times");
+    setQuickRecording("manual");
+    setQuickSchedule({ kind: "daily" });
+    setQuickError("");
+    setQuickOpen(true);
+  }
+
+  function chooseQuickKind(kind: QuickGoalKind) {
+    setQuickKind(kind);
+    const template = STANDARD.find((item) => item.kind === kind);
+    setQuickAmount(String(template?.target ?? 1));
+    setQuickError("");
+  }
+
+  function addQuickGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amount = Number(quickAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isInteger(amount)) {
+      setQuickError("Enter a positive whole-number goal.");
+      return;
+    }
+    if (quickKind !== "custom") {
+      const template = STANDARD.find((item) => item.kind === quickKind);
+      if (!template || activeKinds.has(template.kind)) {
+        setQuickError("This goal already exists. Edit it below or choose another type.");
+        return;
+      }
+      save([...shown, makeDailyRequirement({
+        id: `daily-${template.kind}`,
+        label: template.label,
+        source: { kind: template.kind } as DailySuccessSource,
+        target: amount,
+        unit: template.unit,
+        schedule: quickSchedule,
+        trackingStartsAt: today,
+      }, today)]);
+    } else {
+      const name = quickName.trim().replace(/\s+/g, " ").slice(0, 80);
+      if (!name) {
+        setQuickError("Name the goal before saving.");
+        return;
+      }
+      const unit = quickUnit.trim() || "times";
+      save([...shown, makeDailyRequirement({
+        id: `daily-quick-${crypto.randomUUID()}`,
+        label: name,
+        source: { kind: quickRecording === "activity" ? "activity-alias" : "manual" },
+        aliases: quickRecording === "activity" ? [name] : undefined,
+        target: amount,
+        unit,
+        schedule: quickSchedule,
+        trackingStartsAt: today,
+      }, today)]);
+    }
+    setQuickOpen(false);
+    setQuickError("");
+  }
+
+  function beginQuickEdit(requirement: DailySuccessRequirement) {
+    setEditingGoalId(requirement.id);
+    setEditAmount(String(requirement.target));
+    setEditSchedule(requirement.schedule);
+    setEditError("");
+  }
+
+  function saveQuickEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const requirement = shown.find((item) => item.id === editingGoalId);
+    if (!requirement) return;
+    const amount = Number(editAmount);
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+      setEditError("Enter a positive whole-number goal.");
+      return;
+    }
+    const patch: Partial<DailySuccessRequirement> = {};
+    if (amount !== requirement.target) patch.target = amount;
+    if (JSON.stringify(editSchedule) !== JSON.stringify(requirement.schedule)) patch.schedule = editSchedule;
+    if (Object.keys(patch).length) update(requirement.id, patch);
+    setEditingGoalId(null);
+    setEditError("");
   }
 
   function addStandard(template: typeof STANDARD[number]) {
@@ -237,7 +347,159 @@ export function DailyRequirementsEditor() {
   }
 
   return (
-    <details className="daily-requirements-editor" data-tour="requirements">
+    <>
+      <section className="quick-goals" aria-label="Your daily goals">
+        <header className="quick-goals-head">
+          <div>
+            <h4>Your goals</h4>
+            <p>Choose what counts. Progress uses your recorded activity or check-offs, not a guessed score.</p>
+          </div>
+          <GButton size="sm" onClick={() => quickOpen ? setQuickOpen(false) : openQuickGoal()}
+            aria-expanded={quickOpen} aria-controls="quick-goal-form">
+            <Plus size={ICON_SIZE.body} /> {quickOpen ? "Close goal form" : "Add a goal"}
+          </GButton>
+        </header>
+        {shown.filter((requirement) => requirement.enabled).length > 0 ? (
+          <div className="quick-goals-list">
+            {shown.filter((requirement) => requirement.enabled).slice(-4).reverse().map((requirement) => {
+              const progress = resultById.get(requirement.id);
+              const current = progress?.current ?? 0;
+              const manual = requirement.source.kind === "manual" && !requirement.aliases?.length;
+              const checked = progress?.status === "met";
+              return <div className="quick-goal-entry" key={requirement.id}><div className="quick-goal-row">
+                <div className="quick-goal-copy">
+                  <b>{requirement.label}</b>
+                  <span>{progress?.eligible
+                    ? `${formatGoalNumber(current)} / ${formatGoalNumber(progress.target)} ${requirement.unit}`
+                    : `Not scheduled today · ${scheduleDescription(requirement.schedule)}`}</span>
+                  <div className="quick-goal-track"
+                    role="progressbar" aria-label={`${requirement.label} progress`}
+                    aria-valuemin={0} aria-valuemax={100}
+                    aria-valuenow={Math.round((progress?.ratio ?? 0) * 100)}>
+                    <i style={{ width: `${Math.round((progress?.ratio ?? 0) * 100)}%` }} />
+                  </div>
+                </div>
+                {manual && progress?.eligible && (
+                  requirement.target <= 1
+                    ? <GButton size="sm" onClick={() => setManualValue(requirement, checked ? 0 : requirement.target)}>
+                        {checked ? "Undo" : "Complete"} {requirement.label}
+                      </GButton>
+                    : <div className="quick-goal-adjust">
+                        <button type="button" aria-label={`Decrease ${requirement.label}`} disabled={current <= 0}
+                          onClick={() => setManualValue(requirement, Math.max(0, current - 1))}>−</button>
+                        <button type="button" aria-label={`Increase ${requirement.label}`}
+                          onClick={() => setManualValue(requirement, current + 1)}>+</button>
+                      </div>
+                )}
+                {requirement.source.kind === "activity-alias" && onFillActivity && (
+                  <GButton size="sm" type="button" aria-label={`Use ${requirement.label} in self-report`}
+                    onClick={() => onFillActivity(requirement.aliases?.[0] ?? requirement.label, requirement.unit)}>
+                    Use in log
+                  </GButton>
+                )}
+                {!manual && requirement.source.kind !== "activity-alias" && (
+                  <small className="quick-goal-origin">{completionSourceDescription(requirement)}</small>
+                )}
+                <button type="button" className="quick-goal-edit-trigger" aria-label={`Edit ${requirement.label} goal`}
+                  aria-expanded={editingGoalId === requirement.id}
+                  onClick={() => editingGoalId === requirement.id ? setEditingGoalId(null) : beginQuickEdit(requirement)}>Edit</button>
+              </div>
+              {editingGoalId === requirement.id && (
+                <form className="quick-goal-edit-form" onSubmit={saveQuickEdit} aria-label={`Edit ${requirement.label}`}>
+                  <label><span>Amount</span><input className="field" type="number" min="1" step="1"
+                    aria-label="Change goal amount" value={editAmount} onChange={(event) => setEditAmount(event.target.value)} /></label>
+                  <label><span>Schedule</span><select className="field" aria-label="Change goal schedule"
+                    value={editSchedule.kind} onChange={(event) => setEditSchedule(scheduleFromKind(event.target.value))}>
+                    <option value="daily">Every day</option>
+                    <option value="weekdays">Monday to Friday</option>
+                    <option value="times-per-week">Times per week</option>
+                  </select></label>
+                  {editSchedule.kind === "times-per-week" && (
+                    <label><span>Days per week</span><input className="field" type="number" min="1" max="7"
+                      aria-label="Change days per week" value={editSchedule.times}
+                      onChange={(event) => setEditSchedule({
+                        kind: "times-per-week", times: Math.max(1, Math.min(7, Math.round(Number(event.target.value) || 1))), weekStartsOn: 1,
+                      })} /></label>
+                  )}
+                  <p className="quick-goal-guide">Changes start today. Earlier activity and recorded goal results remain available.</p>
+                  {editError && <p className="quick-goal-error" role="alert">{editError}</p>}
+                  <div className="quick-goal-actions">
+                    <GButton size="sm" variant="primary" type="submit">Update goal</GButton>
+                    <GButton size="sm" type="button" onClick={() => setEditingGoalId(null)}>Cancel edit</GButton>
+                  </div>
+                </form>
+              )}
+              </div>;
+            })}
+            {shown.filter((requirement) => requirement.enabled).length > 4 && (
+              <p className="quick-goal-overflow">Additional goals are available in Choose targets below.</p>
+            )}
+          </div>
+        ) : <p className="quick-goals-empty">No goals selected. Add one to start, or just log your work.</p>}
+        {quickOpen && (
+          <form id="quick-goal-form" className="quick-goal-form" onSubmit={addQuickGoal}>
+            <label>
+              <span>Goal type</span>
+              <select className="field" aria-label="Goal type" value={quickKind}
+                onChange={(event) => chooseQuickKind(event.target.value as QuickGoalKind)}>
+                {STANDARD.map((template) => (
+                  <option key={template.kind} value={template.kind} disabled={activeKinds.has(template.kind)}>
+                    {QUICK_GOAL_LABELS[template.kind as Exclude<QuickGoalKind, "custom">]}
+                    {activeKinds.has(template.kind) ? " (already set)" : ""}
+                  </option>
+                ))}
+                <option value="custom">Custom goal</option>
+              </select>
+            </label>
+            {quickKind === "custom" && (
+              <label className="quick-goal-name"><span>Goal name</span>
+                <input className="field" aria-label="Goal name" placeholder="e.g. Read anatomy, pray, practice piano"
+                  maxLength={80} value={quickName} onChange={(event) => setQuickName(event.target.value)} />
+              </label>
+            )}
+            <label><span>Amount</span><input className="field" aria-label="Goal amount" type="number" min="1" step="1"
+              value={quickAmount} onChange={(event) => setQuickAmount(event.target.value)} /></label>
+            {quickKind === "custom" && <>
+              <label><span>Unit</span><select className="field" aria-label="Goal unit" value={quickUnit}
+                onChange={(event) => setQuickUnit(event.target.value)}>
+                <option value="times">Times</option>
+                <option value="minutes">Minutes</option>
+                <option value="pages">Pages</option>
+                <option value="questions">Questions</option>
+                <option value="cards">Cards</option>
+              </select></label>
+              <label><span>How progress is recorded</span>
+                <select className="field" aria-label="How progress is recorded" value={quickRecording}
+                  onChange={(event) => setQuickRecording(event.target.value as "manual" | "activity")}>
+                  <option value="manual">I check it off here</option>
+                  <option value="activity">My self-reported activities</option>
+                </select>
+              </label>
+            </>}
+            <label><span>Schedule</span><select className="field" aria-label="Goal schedule" value={quickSchedule.kind}
+              onChange={(event) => setQuickSchedule(scheduleFromKind(event.target.value))}>
+              <option value="daily">Every day</option>
+              <option value="weekdays">Monday to Friday</option>
+              <option value="times-per-week">Times per week</option>
+            </select></label>
+            {quickSchedule.kind === "times-per-week" && (
+              <label><span>Days per week</span><input className="field" type="number" min="1" max="7" step="1"
+                value={quickSchedule.times} onChange={(event) => setQuickSchedule({
+                  kind: "times-per-week", times: Math.max(1, Math.min(7, Math.round(Number(event.target.value) || 1))), weekStartsOn: 1,
+                })} /></label>
+            )}
+            <p className="quick-goal-guide">{quickKind === "custom" && quickRecording === "activity"
+              ? "Activities with this exact name will update the goal when you log them. Time or quantity follows the unit you chose."
+              : "A new goal starts today. Earlier dates are not rescored."}</p>
+            {quickError && <p className="quick-goal-error" role="alert">{quickError}</p>}
+            <div className="quick-goal-actions">
+              <GButton size="sm" variant="primary" type="submit"><Check size={ICON_SIZE.body} /> Save goal</GButton>
+              <GButton size="sm" type="button" onClick={() => { setQuickOpen(false); setQuickError(""); }}>Cancel</GButton>
+            </div>
+          </form>
+        )}
+      </section>
+      <details className="daily-requirements-editor" data-tour="requirements">
       <summary><SlidersHorizontal size={ICON_SIZE.body} aria-hidden="true" /> Choose targets <span>{shown.length}</span></summary>
       <div className="daily-requirements-body">
         <p>
@@ -380,8 +642,13 @@ export function DailyRequirementsEditor() {
           </div>
         </details>
       </div>
-    </details>
+      </details>
+    </>
   );
+}
+
+function formatGoalNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
 }
 
 function legacyPreview(minutes: number, cards: number, today: string): DailySuccessRequirement[] {
