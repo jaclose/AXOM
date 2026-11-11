@@ -557,7 +557,15 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     await page.getByRole("button", { name: "Submit to library", exact: true }).click();
     const existing = page.getByRole("dialog", { name: `Submit ${TITLE}` });
     await expect(existing.getByText("This set is searchable now.", { exact: true })).toBeVisible();
-    await existing.getByRole("button", { name: "Withdraw submission" }).click();
+    // Playwright auto-dismisses native confirms when no listener is attached.
+    // A dismissed confirm is a cancelled withdrawal, not a server failure.
+    const confirmationEvent = page.waitForEvent("dialog");
+    const withdrawalClick = existing.getByRole("button", { name: "Withdraw submission" }).click();
+    const confirmation = await confirmationEvent;
+    expect(confirmation.type()).toBe("confirm");
+    expect(confirmation.message()).toContain("Withdraw this Question Set from the shared library?");
+    await confirmation.accept();
+    await withdrawalClick;
     await expect(existing.getByText("The submission was withdrawn from the library.", { exact: true })).toBeVisible();
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
 
