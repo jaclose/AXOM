@@ -92,6 +92,39 @@ test("a block in progress comes back after a reload as it was left", async ({ pa
   expect(saved.quizSessions[0]).toMatchObject({ mode: "exam", endedEarly: true, score: { correct: 1, scored: 2, total: 3 } });
 });
 
+test("a missing tab-specific run cannot reopen another tab's legacy practice snapshot", async ({ page, context }) => {
+  await openSeededSet(page, 1);
+  const setup = page.getByRole("dialog", { name: "Set up a tutor block" });
+  await setup.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(setup).toHaveCount(0);
+
+  const key = STORAGE_KEYS.quizActiveSession;
+  // A browser context's localStorage is shared across tabs, whereas
+  // sessionStorage and its run pointer are isolated to each tab.
+  await page.evaluate((storageKey) => {
+    sessionStorage.setItem(`${storageKey}:run-id`, "tab-one");
+  }, key);
+  const secondTab = await context.newPage();
+  await secondTab.goto("/", { waitUntil: "domcontentloaded" });
+  const anotherRun = {
+    mode: "exam", runId: "tab-two", poolIds: ["block-save-1"], index: 0,
+    answers: [], picked: "B", revealed: false, startedAt: new Date().toISOString(),
+    timed: false, filters: { count: 1, status: "all", ordered: true },
+  };
+  await secondTab.evaluate(({ storageKey, snapshot }) => {
+    sessionStorage.setItem(`${storageKey}:run-id`, "tab-two");
+    localStorage.setItem(storageKey, JSON.stringify(snapshot));
+  }, { storageKey: key, snapshot: anotherRun });
+
+  expect(await page.evaluate((storageKey) => sessionStorage.getItem(`${storageKey}:run-id`), key)).toBe("tab-one");
+  expect(await secondTab.evaluate((storageKey) => sessionStorage.getItem(`${storageKey}:run-id`), key)).toBe("tab-two");
+  await page.getByRole("button", { name: "Practice Block save set", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Set up a tutor block" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Exam · 1 of 1" })).toHaveCount(0);
+  expect(await page.evaluate((storageKey) => JSON.parse(localStorage.getItem(storageKey) ?? "null")?.runId, key)).toBe("tab-two");
+  await secondTab.close();
+});
+
 interface SavedQuestion {
   attempts: Array<{ status: string; answerKey?: string; quizSessionId?: string }>;
 }
