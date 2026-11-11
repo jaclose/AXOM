@@ -47,7 +47,16 @@ function indexUnique(list, key, errors, label) {
  */
 export function expandedSourceInventory(manifestRows, sourceSummary) {
   const counted = new Map(), entries = [];
-  for (const row of manifestRows) {
+  // Expanded JSONL is externally produced. A non-array ledger or malformed
+  // row is not an empty academic source set, even when supplied denominators
+  // coincidentally match the remaining valid entries.
+  const manifestRowsValid = Array.isArray(manifestRows);
+  let malformedRows = manifestRowsValid ? 0 : null;
+  for (const row of manifestRowsValid ? manifestRows : []) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      malformedRows++;
+      continue;
+    }
     if (!SHA256.test(row.source_sha256 ?? "")) continue;
     const path = row.original_path ?? row.relative_path ?? row.source_id ?? "(unnamed)";
     const original = counted.get(row.source_sha256);
@@ -56,6 +65,7 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
     if (!original) counted.set(row.source_sha256, path);
   }
   return {
+    invalidManifestRows: malformedRows,
     summary: {
       files: entries.length, uniqueFiles: counted.size,
       duplicateFiles: entries.length - counted.size,
@@ -78,6 +88,11 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   if (!inventory || !Array.isArray(inventory.entries) || !inventory.summary) {
     return { complete: false, errors: ["Source inventory has no entries and summary."], blockers: [], warnings: [], counts: {} };
   }
+  // Preserve producer shape failures as auditable, sanitized coverage errors.
+  // Older direct JSON inventories have no adapter-specific flag.
+  if (inventory.invalidManifestRows !== undefined &&
+    (!integer(inventory.invalidManifestRows) || inventory.invalidManifestRows > 0))
+    errors.push("Expanded source manifest contains malformed expanded source manifest rows or a non-array ledger; source coverage is not verified.");
   const byHash = new Map(), duplicateRecords = [];
   for (const [index, file] of inventory.entries.entries()) {
     if (!file || typeof file !== "object" || Array.isArray(file)) {
