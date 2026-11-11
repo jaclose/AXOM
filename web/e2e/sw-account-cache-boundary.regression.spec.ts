@@ -39,6 +39,11 @@ for (const width of [320, 390, 1440]) {
     });
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null, { timeout: 30_000 });
+    // Let Vite finish loading its app modules while the development server is online.
+    // Its later lazy imports cannot be fetched once the browser is intentionally
+    // offline; that is not a service-worker CacheStorage privacy signal.
+    await page.waitForLoadState("networkidle");
+    expect(pageErrors).toEqual([]);
 
     const seeded = await page.evaluate(async ({ predecessor, icon, publicPath, privatePath, currentBytes, publicBytes, accountBytes }) => {
       const keys = await caches.keys();
@@ -98,7 +103,6 @@ for (const width of [320, 390, 1440]) {
       expect(result.noStorePublicPath).toMatchObject({ rejected: true });
       expect(result.oldStillRetained).toBe(true);
       expect(result.accountFixtureStillPresent).toBe(true);
-      expect(pageErrors).toEqual([]);
     } finally {
       await context.setOffline(false);
     }
