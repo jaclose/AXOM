@@ -295,6 +295,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
 
   const activePreview = accountId && previewAccountId === accountId
     && useAccount.getState().user?.id === accountId ? preview : undefined;
+  // The modal shows only three questions, but source coverage must reflect
+  // the entire reviewed publication, including questions not shown below.
+  // This is a citation-presence count, never an academic verification score.
+  const previewCitationTotal = activePreview?.snapshot.questions.length ?? 0;
+  const previewCitationCount = activePreview?.snapshot.questions.filter(question => Boolean(question.citation?.trim())).length ?? 0;
 
   function practiceImportedSet() {
     if (!activePreview || !onPractice || !imported || importing
@@ -353,6 +358,9 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
         {activePreview && <>
           <p>{activePreview.snapshot.questions.length} {activePreview.snapshot.questions.length === 1 ? "question" : "questions"} · {topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
           <p className="sub">Preview the first three questions. Check their sources while studying.</p>
+          {previewCitationCount < previewCitationTotal && <p className="qsl-preview-source-warning">
+            Source citations recorded for {previewCitationCount} of {previewCitationTotal} questions. The first-three preview may not show every citation gap. A recorded citation does not establish medical accuracy.
+          </p>}
           <ol>{activePreview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>

@@ -469,6 +469,41 @@ describe("Community Question Set Library", () => {
     expect(payload.snapshot.questions[0].correctKey).toBe("B");
   });
 
+  it("discloses uncited questions beyond the first three without rewriting reviewed evidence", async () => {
+    const questions = Array.from({ length: 4 }, (_, index) => ({
+      ...snapshot.questions[0],
+      id: `shared-question-${index + 1}`,
+      stem: `Synthetic question number ${index + 1} with recorded answer B?`,
+      citation: index === 3 ? undefined : `Synthetic source page ${index + 1}`,
+    }));
+    const approved = {
+      ...snapshot,
+      orderedQuestionIds: questions.map(question => question.id),
+      questions,
+    };
+    const reviewed = {
+      id: summary.id, snapshot: approved, contentDigest: "d".repeat(64),
+      status: "approved" as const, reviewRevision: 9,
+    };
+    mock.search.mockResolvedValueOnce([{ ...summary, questionCount: 4 }]);
+    mock.preview.mockResolvedValueOnce(reviewed);
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    expect(await screen.findByText(/Source citations recorded for 3 of 4 questions/)).toBeTruthy();
+    expect(screen.getByText("Synthetic question number 3 with recorded answer B?")).toBeTruthy();
+    expect(screen.queryByText("Synthetic question number 4 with recorded answer B?")).toBeNull();
+    expect(screen.queryByText(/No source citation is included for this question/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(approved);
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      contentDigest: "d".repeat(64), reviewRevision: 9,
+    });
+    expect(approved.questions[3].correctKey).toBe("B");
+    expect(approved.questions[3].citation).toBeUndefined();
+  });
+
   it("discloses absent source citations and missing distractor rationales without changing approved evidence", async () => {
     const approved = {
       ...snapshot,
