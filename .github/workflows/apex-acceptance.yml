@@ -52,7 +52,7 @@ jobs:
       - name: Academic acceptance path coverage regressions
         run: node --test scripts/operations/academic-acceptance-paths.test.mjs
       - name: Academic source reconciliation and PDF triage regressions
-        run: node --test scripts/operations/academic-reconcile.test.mjs scripts/operations/academic-pdf-triage.test.mjs scripts/operations/academic-pdf-bridge.test.mjs
+        run: node --test scripts/operations/academic-reconcile.test.mjs scripts/operations/academic-pdf-triage.test.mjs scripts/operations/academic-pdf-bridge.test.mjs scripts/operations/academic-tracker-identity.test.mjs
       - name: Install isolated browser runtime
         run: npm --prefix web exec -- playwright install --with-deps chromium
       - name: Complete web integration gate (no live-account credentials)
