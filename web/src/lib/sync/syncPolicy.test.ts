@@ -93,11 +93,24 @@ describe("how often AXOM may upload", () => {
     expect(waitBeforeAutomatic(meta({ nextAttemptAt: "soon" }), NOW)).toBe(0);
   });
 
-  it("outlives the 60-second database allowance even for a tiny delta, within five minutes", () => {
+  it("budgets slow upload before 60s server processing and caps the total at five minutes", () => {
+    // The old 75s floor missed 800 KB (20s uplink + 60s database) by 5s.
     expect(pushTimeout(0)).toBe(75_000);
-    expect(pushTimeout(80_000)).toBe(75_000);
-    expect(pushTimeout(1_000_000)).toBe(75_000);
-    expect(pushTimeout(9_600_000)).toBe(285_000);
+    expect(pushTimeout(80_000)).toBe(77_000);
+    expect(pushTimeout(800_000)).toBe(95_000);
+    expect(pushTimeout(1_000_000)).toBe(100_000);
+    expect(pushTimeout(8_000_000)).toBe(275_000);
+    expect(pushTimeout(9_000_000)).toBe(300_000);
+    for (const bytes of [0, 80_000, 800_000, 1_000_000, 8_000_000, 9_000_000]) {
+      // Virtual-clock model: transmit all wire bytes at 40 bytes/ms, then
+      // let the database use its entire 60s budget, plus 15s response margin.
+      const modeledRoundTripMs = Math.ceil(bytes / 40) + 60_000 + 15_000;
+      expect(pushTimeout(bytes)).toBeGreaterThanOrEqual(modeledRoundTripMs);
+    }
+    // Explicit resource trade-off: above 9 MB the five-minute cap wins.
+    // An ambiguous cancellation is still handled by the existing retry path.
+    expect(pushTimeout(9_600_000)).toBe(300_000);
+    expect(pushTimeout(9_600_000)).toBeLessThan(75_000 + 9_600_000 / 40);
     expect(pushTimeout(14_000_000)).toBe(300_000);
   });
 });
