@@ -71,6 +71,12 @@ function shippedPublicBuildAsset(request, response) {
   });
 }
 
+// HTML MIME types are ASCII case-insensitive. An HTML deployment rewrite
+// must never be treated as JavaScript/CSS/media, even with mixed-case headers.
+function isHtmlResponse(response) {
+  return /^text\/html(?:\s*;|$)/i.test((response.headers.get("content-type") || "").trim());
+}
+
 function cacheResponse(event, key, response) {
   if (!matchesRequestedResource(event.request, response)) return;
   if (!cacheablePublicResponse(response) && !shippedPublicBuildAsset(event.request, response)) return;
@@ -95,7 +101,7 @@ async function cachedAppAsset(request) {
     if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) continue;
     if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)
       && !shippedPublicBuildAsset(request, response)) continue;
-    if (response.headers.get("content-type")?.includes("text/html")) {
+    if (isHtmlResponse(response)) {
       // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
       await cache.delete(request);
       continue;
@@ -139,7 +145,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith((async () => {
       try {
         const response = await fetch(request, { cache: "no-store" });
-        if (response.ok && response.headers.get("content-type")?.includes("text/html")) {
+        if (response.ok && isHtmlResponse(response)) {
           cacheResponse(event, "./index.html", response);
           return response;
         }
@@ -168,7 +174,7 @@ self.addEventListener("fetch", (event) => {
     const freshUrl = new URL(request.url);
     freshUrl.searchParams.set("__axom_revalidate", String(Date.now()));
     const response = await fetch(freshUrl.href, { cache: "no-store" });
-    const isHtml = response.headers.get("content-type")?.includes("text/html");
+    const isHtml = isHtmlResponse(response);
     if (response.ok && !isHtml) {
       cacheResponse(event, request, response);
     }

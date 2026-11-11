@@ -106,6 +106,55 @@ test('current public assets win over retained generations; newest safe fallback 
   assert.equal(await oldest.match('/assets/shared-12345678.js'), undefined, 'stale cached HTML must still be evicted');
 });
 
+test('mixed-case HTML asset rewrites are rejected online and evicted from retained cache', async () => {
+  const path = '/assets/poison-12345678.js';
+  let online = true;
+  const app = worker({ fetchResponse: async () => {
+    if (!online) throw new Error('offline');
+    return new Response('<!doctype html>online rewrite', { headers: { 'content-type': 'TeXt/HtMl; charset=UTF-8' } });
+  } });
+  const previous = await app.caches.open('axom-shell-previous');
+  const current = await app.caches.open('axom-shell-current');
+  await previous.put(path, new Response('<!doctype html>retained rewrite', {
+    headers: { 'content-type': 'TEXT/HTML; charset=UTF-8' },
+  }));
+  const request = async () => {
+    let result;
+    const tasks = [];
+    app.events.get('fetch')({
+      request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+      respondWith: (promise) => { result = promise; },
+      waitUntil: (promise) => { tasks.push(promise); },
+    });
+    const response = await result;
+    await Promise.all(tasks);
+    return response;
+  };
+  assert.equal((await request()).status, 0, 'HTML asset rewrite must be rejected');
+  assert.equal(await previous.match(path), undefined, 'older HTML rewrite must be evicted');
+  assert.equal(await current.match(path), undefined, 'HTML rewrite must not enter current cache');
+  online = false;
+  await assert.rejects(request(), /offline/, 'offline must not replay bad HTML');
+});
+
+test('navigation with mixed-case HTML content type refreshes offline shell', async () => {
+  const html = '<!doctype html><title>new shell</title>';
+  const app = worker({ fetchResponse: async () =>
+    new Response(html, { headers: { 'content-type': 'TEXT/HTML; charset=UTF-8' } }) });
+  let pending;
+  let task;
+  app.events.get('fetch')({
+    request: { url: 'https://app.test/', method: 'GET', mode: 'navigate' },
+    respondWith: (value) => { pending = value; },
+    waitUntil: (value) => { task = value; },
+  });
+  assert.equal(await (await pending).text(), html);
+  assert.ok(task, 'valid HTML navigation must be cached');
+  await task;
+  const current = await app.caches.open('axom-shell-current');
+  assert.equal(await (await current.match('./index.html')).text(), html);
+});
+
 test('version and API requests bypass caches; missing JS never returns HTML', async () => {
   const app = worker();
   for (const path of ['/version.json?t=1', '/api/data/me']) {
