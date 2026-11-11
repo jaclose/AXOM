@@ -194,6 +194,56 @@ test("expanded corpus adaptor deduplicates SHA by bytes and retains unhashed pri
   assert.ok(output.blockers.some(x => x.includes("eligible academic sources have no verified SHA-256")));
 });
 
+test("expanded inventory without a verified missing-SHA denominator cannot certify source coverage", () => {
+  const manifest = [
+    { source_sha256: a, original_path: "one.txt", file_extension: ".txt" },
+    { source_sha256: null, original_path: "unhashed-priority.pdf", file_extension: ".pdf" },
+  ];
+  const evaluate = sourceSummary => reconcileAcademicContent({
+    inventory: expandedSourceInventory(manifest, sourceSummary),
+    dispositions: { sources: [dispositions().sources[0]] },
+    receipts: receipts(), tracker: { activities: [] },
+  });
+
+  // The former adapter silently skipped the PDF and fabricated zero unresolved
+  // priorities when the paired source summary was missing, yielding complete=true.
+  const missing = evaluate(undefined);
+  assert.equal(missing.complete, false);
+  assert.equal(missing.counts.priorityMissingSha, null);
+  assert.ok(missing.blockers.some(x => x.includes("missing-SHA denominator")));
+
+  for (const count of [-1, 0.5, "0", Number.MAX_SAFE_INTEGER + 1]) {
+    const malformed = evaluate({ file_denominators: {
+      eligible_priority_files_with_unresolved_sha: count,
+    } });
+    assert.equal(malformed.complete, false, `Unverified denominator ${String(count)} must hold.`);
+    assert.ok(malformed.blockers.some(x => x.includes("missing-SHA denominator")));
+  }
+
+  const paired = evaluate({
+    file_denominators: { eligible_priority_files_with_unresolved_sha: 1,
+      catalogued_document_and_asset_paths: 2, sha256_hashed_paths: 1,
+      distinct_byte_sha256: 1 },
+    tracker_denominators: { parsed_activity_rows: 0 },
+  });
+  assert.equal(paired.complete, false);
+  assert.equal(paired.counts.priorityMissingSha, 1);
+  assert.ok(paired.blockers.some(x => x.includes("eligible academic sources have no verified SHA-256")));
+
+  // An explicit, internally consistent all-hashed source cohort remains valid.
+  const readyInventory = expandedSourceInventory([manifest[0]], {
+    file_denominators: { eligible_priority_files_with_unresolved_sha: 0,
+      catalogued_document_and_asset_paths: 1, sha256_hashed_paths: 1,
+      distinct_byte_sha256: 1 },
+    tracker_denominators: { parsed_activity_rows: 0 },
+  });
+  const ready = reconcileAcademicContent({ inventory: readyInventory,
+    dispositions: { sources: [dispositions().sources[0]] },
+    receipts: receipts(), tracker: { activities: [] } });
+  assert.equal(ready.complete, true, JSON.stringify(ready.blockers));
+  assert.equal(ready.counts.priorityMissingSha, 0);
+});
+
 test("inconsistent expanded source summary cannot certify a rolling inventory", () => {
   const inv = expandedSourceInventory([
     { source_sha256: a, original_path: "one.pdf" },
