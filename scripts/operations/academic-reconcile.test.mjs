@@ -96,6 +96,30 @@ test("Course Tracker template baseline denominator is required and strictly coun
   assert.ok(shortfall.blockers.some(message => message.includes("Tracker ledger has 2 unique activities")));
 });
 
+test("expanded source adapter cannot invent zero Tracker activities for an absent summary", () => {
+  const rows = [{ source_sha256: a, original_path: "sources/nonmedical.txt", file_extension: "txt" }];
+  const sourceSummary = { file_denominators: {
+    eligible_priority_files_with_unresolved_sha: 0, catalogued_document_and_asset_paths: 1,
+    sha256_hashed_paths: 1, distinct_byte_sha256: 1,
+  } };
+  const check = summary => reconcileAcademicContent({
+    inventory: expandedSourceInventory(rows, summary),
+    dispositions: { sources: [{ sha256: a, kind: "reference", status: "excluded",
+      reason: "synthetic non-question source" }] },
+    receipts: { sources: [] }, tracker: { activities: [] },
+  });
+
+  const unknown = check(sourceSummary);
+  assert.equal(unknown.complete, false, "No tracker summary cannot imply zero baseline activities.");
+  assert.equal(unknown.counts.expectedBaselineTrackerActivities, null);
+  assert.ok(unknown.blockers.some(message => message.includes("template activity denominator")));
+
+  const explicitZero = check({ ...sourceSummary,
+    tracker_denominators: { parsed_activity_rows: 0 } });
+  assert.equal(explicitZero.complete, true, JSON.stringify(explicitZero.blockers));
+  assert.equal(explicitZero.counts.expectedBaselineTrackerActivities, 0);
+});
+
 test("complete requires source identities, dispositions, verified receipts, and tracker records", () => {
   const r = run();
   assert.equal(r.complete, true, JSON.stringify(r.blockers));
