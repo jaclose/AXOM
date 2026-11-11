@@ -845,8 +845,8 @@ test('valid code MIME with charset remains available offline', async () => {
 test('wrong-MIME fonts and webmanifest are returned online but never cached', async () => {
   for (const [path, mime] of [
     ['/fonts/interface.woff2', 'application/json'],
-    ['/fonts/interface.woff', 'text/html'],
-    ['/manifest.webmanifest', 'text/html'],
+    ['/fonts/interface.woff', 'application/json'],
+    ['/manifest.webmanifest', 'text/plain'],
   ]) {
     let online = true;
     const app = worker({ fetchResponse: async () => {
@@ -876,8 +876,8 @@ test('wrong-MIME fonts and webmanifest are returned online but never cached', as
 test('legacy cached wrong-MIME fonts and webmanifest are evicted before replay', async () => {
   for (const [path, mime] of [
     ['/fonts/interface.woff2', 'application/json'],
-    ['/fonts/interface.woff', 'text/html'],
-    ['/manifest.webmanifest', 'text/html'],
+    ['/fonts/interface.woff', 'application/json'],
+    ['/manifest.webmanifest', 'text/plain'],
   ]) {
     const url = 'https://app.test' + path;
     const app = worker();
