@@ -548,6 +548,33 @@ test('signed or unknown asset queries cannot enter shared cache, even from a ret
   assert.equal(response, undefined, 'offline worker must not replay older signed URL');
 });
 
+test('opaque version hints cannot replay retained shared-cache entries', async () => {
+  const app = worker({ fetchResponse: async () => new Response('synthetic A-only image', {
+    headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+  }) });
+  const retained = await app.caches.open('axom-shell-previous');
+  const current = await app.caches.open('axom-shell-current');
+  for (const path of [
+    '/landing/hero.png?v=deadbeef',
+    '/landing/hero.png?v=01ab23cd45ef',
+    '/landing/hero.png?v=1234567890',
+    '/landing/hero.png?v=00000001',
+  ]) {
+    const url = 'https://app.test' + path;
+    await retained.put(url, withNetworkUrl(new Response('synthetic account-A-only bytes', {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+    }), url));
+    let intercepted = false;
+    app.events.get('fetch')({
+      request: { url, method: 'GET', mode: 'same-origin' },
+      respondWith: () => { intercepted = true; },
+      waitUntil: () => {},
+    });
+    assert.equal(intercepted, false, 'opaque session-like version reached shared cache: ' + path);
+    assert.equal(await current.match(url), undefined, 'opaque asset copied to current cache: ' + path);
+  }
+});
+
 test('bounded public version-only image URLs still cache and recover offline', async () => {
   let online = true;
   const app = worker({ fetchResponse: async () => {
