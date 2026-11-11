@@ -50,11 +50,14 @@ vi.mock("../sync/syncMetadata", () => ({
 // immediate coordinator flush. No real accounts or persisted content are used.
 let holdSyncFlush = false;
 let releaseSyncFlush: (() => void) | undefined;
+// R36: a previous Protected badge must not confirm a later failed upload.
+let rejectSyncFlush = false;
 vi.mock("../sync/syncCoordinator", () => ({
   SyncCoordinator: class {
     queue = vi.fn();
     flush = vi.fn(async () => {
       if (holdSyncFlush) await new Promise<void>((resolve) => { releaseSyncFlush = resolve; });
+      if (rejectSyncFlush) throw new Error("Synthetic account upload failed");
     });
     currentStatus = () => "protected";
     dispose = vi.fn();
@@ -110,6 +113,7 @@ beforeEach(() => {
   releaseMedia = undefined;
   holdSyncFlush = false;
   releaseSyncFlush = undefined;
+  rejectSyncFlush = false;
   localStorage.clear();
   useAccount.setState({
     phase: "signed-in",
@@ -193,5 +197,18 @@ describe("manual syncNow account-identity generation boundary", () => {
     expect(useAccount.getState().protection).toBe("protected");
     expect(useAccount.getState().message).toBe("Protected just now.");
     expect(useAccount.getState().error).toBe("");
+  });
+  // MOTHERSHIP R36 additional failure-acknowledgement test; independent QA
+  // A→B→A and same-owner cases above are preserved byte-for-byte.
+  it("does not report Protected just now when the current manual flush fails", async () => {
+    await startAuthFeed();
+    // A previous successful backup is not proof this new attempt succeeded.
+    useAccount.setState({ protection: "protected", message: "Previously protected" });
+    rejectSyncFlush = true;
+    await useAccount.getState().syncNow();
+
+    expect(useAccount.getState().user?.id).toBe("synthetic-a");
+    expect(useAccount.getState().message).not.toBe("Protected just now.");
+    expect(useAccount.getState().error).not.toBe("");
   });
 });

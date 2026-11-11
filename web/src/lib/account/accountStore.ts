@@ -591,7 +591,7 @@ export const useAccount = create<AccountState>((set, get) => {
       const assertSyncOwner = () => {
         if (!sameOwner()) throw new Error("The signed-in account changed. Manual sync was stopped.");
       };
-      await guarded("Protecting now…", async () => {
+      const completedStatus = await guarded("Protecting now…", async () => {
         const status = await withCoordinator(async (active) => {
           assertSyncOwner();
           active.queue();
@@ -602,11 +602,12 @@ export const useAccount = create<AccountState>((set, get) => {
         });
         assertSyncOwner();
         set(protectionView(status));
+        return status;
       }, sameOwner);
-      // An old account's completion may not overwrite the new account's badge,
-      // notices or recovery state, even when the final user ID is the same.
+      // A prior Protected badge is not a receipt for this attempt. A failed
+      // flush must never announce that it just protected new changes.
       if (!sameOwner()) return;
-      set({ message: get().protection === "protected" ? "Protected just now." : "" });
+      set({ message: completedStatus === "protected" ? "Protected just now." : "" });
       void get().refresh();
     },
 
