@@ -103,6 +103,8 @@ for (const width of [320, 390, 1440]) {
       expect(result.noStorePublicPath).toMatchObject({ rejected: true });
       expect(result.oldStillRetained).toBe(true);
       expect(result.accountFixtureStillPresent).toBe(true);
+      // Keep the strict unexpected-error gate after the offline fetch journey.
+      expect(pageErrors).toEqual([]);
     } finally {
       await context.setOffline(false);
     }
