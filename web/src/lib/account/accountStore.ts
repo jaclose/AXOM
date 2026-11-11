@@ -584,17 +584,30 @@ export const useAccount = create<AccountState>((set, get) => {
     },
 
     async syncNow() {
-      if (get().link !== "linked") return;
-      await guarded("Protecting now…", async () => {
+      const user = get().user;
+      const syncEpoch = accountIdentityEpoch;
+      if (!user || get().link !== "linked") return;
+      const sameOwner = () => syncEpoch === accountIdentityEpoch && get().user?.id === user.id && get().link === "linked";
+      const assertSyncOwner = () => {
+        if (!sameOwner()) throw new Error("The signed-in account changed. Manual sync was stopped.");
+      };
+      const completedStatus = await guarded("Protecting now…", async () => {
         const status = await withCoordinator(async (active) => {
+          assertSyncOwner();
           active.queue();
           await active.flush("manual");
+          // Returning account A is not the same A session after A → B → A.
+          assertSyncOwner();
           return active.currentStatus();
         });
+        assertSyncOwner();
         set(protectionView(status));
-      });
-      // The card under the button explains a failure; the notice only confirms success.
-      set({ message: get().protection === "protected" ? "Protected just now." : "" });
+        return status;
+      }, sameOwner);
+      // A prior Protected badge is not a receipt for this attempt. A failed
+      // flush must never announce that it just protected new changes.
+      if (!sameOwner()) return;
+      set({ message: completedStatus === "protected" ? "Protected just now." : "" });
       void get().refresh();
     },
 

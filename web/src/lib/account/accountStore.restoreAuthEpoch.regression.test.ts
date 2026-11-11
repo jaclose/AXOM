@@ -46,9 +46,19 @@ vi.mock("../sync/syncMetadata", () => ({
   read: () => ({ accountUserId: "synthetic-a", baseRevision: 4 }),
   write: vi.fn(),
 }));
+// Hold only a manual sync operation; other account-recovery tests retain their
+// immediate coordinator flush. No real accounts or persisted content are used.
+let holdSyncFlush = false;
+let releaseSyncFlush: (() => void) | undefined;
+// R36: a previous Protected badge must not confirm a later failed upload.
+let rejectSyncFlush = false;
 vi.mock("../sync/syncCoordinator", () => ({
   SyncCoordinator: class {
-    flush = vi.fn(async () => undefined);
+    queue = vi.fn();
+    flush = vi.fn(async () => {
+      if (holdSyncFlush) await new Promise<void>((resolve) => { releaseSyncFlush = resolve; });
+      if (rejectSyncFlush) throw new Error("Synthetic account upload failed");
+    });
     currentStatus = () => "protected";
     dispose = vi.fn();
   },
@@ -101,6 +111,9 @@ beforeEach(() => {
   replaceAll.mockClear();
   emitAuth = undefined;
   releaseMedia = undefined;
+  holdSyncFlush = false;
+  releaseSyncFlush = undefined;
+  rejectSyncFlush = false;
   localStorage.clear();
   useAccount.setState({
     phase: "signed-in",
@@ -150,5 +163,52 @@ describe("restoreRevision account-identity generation boundary", () => {
     expect(replaceAll).toHaveBeenCalledTimes(1);
     expect(replaceAll).toHaveBeenCalledWith({ syntheticAccountAOnly: "old-session-revision" }, "synthetic-a");
     expect(useAccount.getState().error).toBe("");
+  });
+});
+
+describe("manual syncNow account-identity generation boundary", () => {
+  it("does not replace the new session's save status with stale A completion after A -> B -> A", async () => {
+    await startAuthFeed();
+    holdSyncFlush = true;
+    const oldSync = useAccount.getState().syncNow();
+    await vi.waitFor(() => expect(releaseSyncFlush).toBeTypeOf("function"));
+
+    // The final account ID is A, but this completion belongs to the old A epoch.
+    emitAuth!("SIGNED_IN", sessionFor("synthetic-b"));
+    emitAuth!("SIGNED_IN", sessionFor("synthetic-a"));
+    useAccount.setState({ protection: "saved-locally", message: "New session has not synced" });
+    releaseSyncFlush!();
+    await oldSync;
+
+    expect(useAccount.getState().user?.id).toBe("synthetic-a");
+    expect(useAccount.getState().protection).toBe("saved-locally");
+    expect(useAccount.getState().message).toBe("New session has not synced");
+  });
+
+  it("preserves a legitimate same-owner TOKEN_REFRESHED manual-sync success", async () => {
+    await startAuthFeed();
+    holdSyncFlush = true;
+    const sameOwnerSync = useAccount.getState().syncNow();
+    await vi.waitFor(() => expect(releaseSyncFlush).toBeTypeOf("function"));
+    emitAuth!("TOKEN_REFRESHED", sessionFor("synthetic-a"));
+    releaseSyncFlush!();
+    await sameOwnerSync;
+
+    expect(useAccount.getState().protection).toBe("protected");
+    expect(useAccount.getState().message).toBe("Protected just now.");
+    expect(useAccount.getState().error).toBe("");
+  });
+  // MOTHERSHIP R36 additional failure-acknowledgement test; independent QA
+  // A→B→A and same-owner cases above are preserved byte-for-byte.
+  it("does not report Protected just now when the current manual flush fails", async () => {
+    await startAuthFeed();
+    // A previous successful backup is not proof this new attempt succeeded.
+    useAccount.setState({ protection: "protected", message: "Previously protected" });
+    rejectSyncFlush = true;
+    await useAccount.getState().syncNow();
+
+    expect(useAccount.getState().user?.id).toBe("synthetic-a");
+    expect(useAccount.getState().message).not.toBe("Protected just now.");
+    expect(useAccount.getState().error).not.toBe("");
   });
 });
