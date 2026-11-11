@@ -1214,3 +1214,43 @@ test('install caps concurrent CacheStorage writes without losing vetted assets o
   assert.ok(await cache.match('./__axom-retained-public-chunks.json'), 'generation manifest must remain installed');
   assert.equal(written.at(-1), '/index.html', 'canonical shell must be written last');
 });
+
+test('R53 install phase probe reports deferred CacheStorage write without exposing URLs or account markers', async () => {
+  let unblock, entered;
+  const blocked = new Promise((resolve) => { unblock = resolve; });
+  const reached = new Promise((resolve) => { entered = resolve; });
+  const asset = './assets/bootstrap-12345678.js';
+  const app = worker({
+    precache: [asset],
+    fetchResponse: async (url) => new Response(url.endsWith('.js') ? 'export const ready = true;' : '<!doctype html>public', {
+      headers: {
+        'content-type': url.endsWith('.js') ? 'text/javascript' : 'text/html',
+        'cache-control': url.endsWith('.js') ? 'no-store' : 'no-cache',
+      },
+    }),
+    onCachePut: async (key) => { if (key === asset) { entered(); await blocked; } },
+  });
+  const progress = () => {
+    let response;
+    app.events.get('message')({ data: { type: 'AXOM_QUERY_INSTALL_PROGRESS', access_token: 'must-not-leak' },
+      ports: [{ postMessage: (value) => { response = value; } }] });
+    return response;
+  };
+  assert.equal(progress().phase, 'idle');
+  let install;
+  app.events.get('install')({ waitUntil: (promise) => { install = promise; } });
+  await reached;
+  const stalled = progress();
+  assert.deepEqual(Object.keys(stalled).sort(), ['phase', 'shells', 'assetsTotal', 'assetsChecked', 'assetsWritten'].sort());
+  assert.equal(stalled.phase, 'assets-write');
+  assert.equal(stalled.shells, 2);
+  assert.equal(stalled.assetsTotal, 3);
+  assert.equal(stalled.assetsChecked, 3);
+  assert.equal(stalled.assetsWritten, 0);
+  assert.equal(JSON.stringify(stalled).includes('must-not-leak'), false);
+  assert.equal(JSON.stringify(stalled).includes('bootstrap'), false);
+  unblock();
+  await install;
+  assert.equal(progress().phase, 'complete');
+  assert.equal(progress().assetsWritten, 1);
+});
