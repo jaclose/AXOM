@@ -287,7 +287,9 @@ function hasOnlyPublicAssetVersion(url) {
   if (!url.search) return true;
   const params = [...url.searchParams];
   if (params.length !== 1 || params[0][0] !== "v") return false;
-  return /^(?:build-\d{8}|\d{1,10}(?:\.\d{1,4}){0,3}|[a-f0-9]{8,16})$/i.test(params[0][1]);
+  // Opaque hex or bare numeric strings can be account/session identifiers.
+  // Preserve only recognizable public build dates and dotted semantic versions.
+  return /^(?:build-\d{8}|\d{1,4}(?:\.\d{1,4}){1,3})$/.test(params[0][1]);
 }
 
 self.addEventListener("fetch", (event) => {
