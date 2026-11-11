@@ -769,3 +769,89 @@ test("same-owner tabs revoke stale attestations across SQL submission and withdr
     await database.close();
   }
 });
+
+test("SQL withdrawal readback outage requires a fresh rights and source attestation after recovery", async ({ page, baseURL }) => {
+  test.setTimeout(240_000);
+  const database = await createPlatformDatabase();
+  const [owner, learner] = PLATFORM_USERS;
+  try {
+    const unexpected = await database.attach(page, 0);
+    await page.goto(`${baseURL}/#questions`);
+    await seedLocalWorkspace(page);
+    await seedLocalSet(page);
+    await openLocalSets(page);
+    await page.getByRole("button", { name: "Submit to library", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: `Submit ${TITLE}` });
+    await dialog.getByRole("checkbox", { name: /permission to distribute every question/ }).check();
+    await dialog.getByRole("checkbox", { name: /checked every answer against its source/ }).check();
+    await dialog.getByRole("button", { name: "Send for review" }).click();
+    await expect(dialog.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+
+    const [first] = await database.rpc(owner.id, "my_question_set_library") as
+      Array<{ id: string; status: string }>;
+    expect(first.status).toBe("pending");
+    const original = await database.rpc(owner.id, "get_question_set_library", { p_id: first.id }) as {
+      snapshot_payload: { questions: Array<{ correctKey: string }> };
+    };
+    expect(original.snapshot_payload.questions[0].correctKey).toBe("B");
+
+    // The withdrawal RPC commits in real fixture SQL, but the immediate
+    // authenticated status readback fails once. This must not be mistaken
+    // for a failed withdrawal or permission to reuse old checkbox grants.
+    let failNextStatusLookup = false;
+    let injectedFailures = 0;
+    await page.route(/\\/rest\\/v1\\/rpc\\/my_question_set_library(?:\\?.*)?$/, async route => {
+      if (!failNextStatusLookup) return route.fallback();
+      failNextStatusLookup = false;
+      injectedFailures += 1;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "*" },
+        body: JSON.stringify({ code: "PGRST503", message: "Synthetic readback outage" }),
+      });
+    });
+    failNextStatusLookup = true;
+    const confirmationEvent = page.waitForEvent("dialog");
+    const withdrawalClick = dialog.getByRole("button", { name: "Withdraw submission" }).click();
+    const confirmation = await confirmationEvent;
+    expect(confirmation.type()).toBe("confirm");
+    await confirmation.accept();
+    await withdrawalClick;
+    await expect(dialog.locator(".qsl-error")).toContainText(/submissions could not be loaded/i);
+    expect(injectedFailures).toBe(1);
+    // SQL already removed the publication despite the failed status readback.
+    expect(await database.rpc(owner.id, "my_question_set_library")).toEqual([]);
+    expect(await database.rpc(learner.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+
+    // Recovery only after an authenticated retry clears the stale status.
+    await dialog.getByRole("button", { name: "Retry status check" }).click();
+    const rights = dialog.getByRole("checkbox", { name: /permission to distribute every question/ });
+    const answers = dialog.getByRole("checkbox", { name: /checked every answer against its source/ });
+    const send = dialog.getByRole("button", { name: "Send for review" });
+    await expect(rights).toBeVisible();
+    await expect(rights).not.toBeChecked();
+    await expect(answers).not.toBeChecked();
+    await expect(send).toBeDisabled();
+    expect(await database.rpc(owner.id, "my_question_set_library")).toEqual([]);
+    await rights.check();
+    await expect(send).toBeDisabled();
+    await answers.check();
+    await expect(send).toBeEnabled();
+    await send.click();
+    await expect(dialog.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+
+    const [replacement] = await database.rpc(owner.id, "my_question_set_library") as
+      Array<{ id: string; status: string }>;
+    expect(replacement.status).toBe("pending");
+    expect(replacement.id).not.toBe(first.id);
+    const replacementEvidence = await database.rpc(owner.id, "get_question_set_library", { p_id: replacement.id }) as
+      typeof original;
+    expect(replacementEvidence.snapshot_payload.questions).toEqual(original.snapshot_payload.questions);
+    expect(replacementEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(await database.rpc(learner.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+    expect(unexpected).toEqual([]);
+  } finally {
+    await database.close();
+  }
+});
