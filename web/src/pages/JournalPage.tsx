@@ -1776,7 +1776,12 @@ function journalFeedbackRetryPendingNameAliases(ownerKey: string): void {
       for (const completedKey of written) pending.delete(completedKey);
       return;
     }
-    if (!journalFeedbackSameOwner(ownerKey, link.previous) || seen.has(key)) return;
+    if (!journalFeedbackSameOwner(ownerKey, link.previous)) return;
+    if (seen.has(key)) {
+      // All links in the cycle were written successfully during this retry.
+      for (const completedKey of written) pending.delete(completedKey);
+      return;
+    }
     try {
       window.localStorage.getItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
       // Stable suffix makes retry idempotent even after an ambiguous write.
@@ -1790,7 +1795,7 @@ function journalFeedbackRetryPendingNameAliases(ownerKey: string): void {
     key = link.previous;
   }
   // The bounded final link may end exactly at the traversal limit.
-  if (!pending.has(key)) for (const completedKey of written) pending.delete(completedKey);
+  if (!pending.has(key) || seen.has(key)) for (const completedKey of written) pending.delete(completedKey);
 }
 
 

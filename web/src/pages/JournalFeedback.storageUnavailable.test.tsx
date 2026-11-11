@@ -52,6 +52,64 @@ afterEach(() => {
 });
 
 describe("Journal feedback when browser storage cannot be read", () => {
+  it("keeps a name-cycle retry blocked until both A→B→A links are durably written", () => {
+    clearFixtureCopies();
+    const nameA = "Journal R34 Original Owner";
+    const nameB = "Journal R34 Temporary Name";
+    const aKey = `axom-journal-feedback-draft:${userIdFromName(nameA)}`;
+    const bKey = `axom-journal-feedback-draft:${userIdFromName(nameB)}`;
+    const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R34 original private draft unchanged." });
+    useStore.getState().updateProfile({ name: nameA });
+    localStorage.setItem(aKey, original);
+    const initial = render(<JournalPage />);
+    initial.unmount();
+
+    const originalGet = Storage.prototype.getItem;
+    const originalSet = Storage.prototype.setItem;
+    const blockedReads = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith("axom-journal-feedback-draft:"))
+        throw new Error("Feedback browser storage temporarily unavailable");
+      return originalGet.call(this, storageKey);
+    });
+
+    try {
+      useStore.getState().updateProfile({ name: nameB });
+      useStore.getState().updateProfile({ name: nameA });
+      blockedReads.mockRestore();
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+
+      // Even a fully persisted cycle must not clear an unwritten tail.
+      const blockedWrites = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, storageKey: string, value: string) {
+        if (this === window.localStorage && storageKey.startsWith(`${bKey}:name-alias:v1:`))
+          throw new Error("The second historical pointer is still unwritable");
+        return originalSet.call(this, storageKey, value);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      blockedWrites.mockRestore();
+
+      // On retry, both same-owner links are now durable. The cycle must
+      // terminate without keeping an imaginary missing pointer.
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.queryByRole("button", { name: "Retry reading saved feedback" })).toBeNull();
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("R34 original private draft unchanged.");
+      expect(originalGet.call(localStorage, aKey)).toBe(original);
+      const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
+      expect(keys.filter((key) => key?.startsWith(`${aKey}:name-alias:v1:`))).toHaveLength(1);
+      expect(keys.filter((key) => key?.startsWith(`${bKey}:name-alias:v1:`))).toHaveLength(1);
+    } finally {
+      vi.restoreAllMocks();
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const item = localStorage.key(index);
+        if (item && (item === aKey || item.startsWith(`${aKey}:`) || item === bKey || item.startsWith(`${bKey}:`)))
+          localStorage.removeItem(item);
+      }
+    }
+  });
+
   it("keeps a 20-rename recovery chain during denied storage reads until explicit retry", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 21 }, (_, index) => `Journal R33 Offline Rename ${index}`);
