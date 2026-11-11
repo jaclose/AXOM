@@ -56,6 +56,7 @@ vi.mock("../sync/syncCoordinator", () => ({
 
 let releaseMedia: (() => void) | undefined;
 const prepareMediaCache = vi.fn(() => new Promise<void>((resolve) => { releaseMedia = resolve; }));
+const summaries = vi.fn(async (): Promise<RevisionSummary[]> => []);
 const revision = vi.fn(async () => ({
   payload: { syntheticAccountAOnly: "old-session-revision" },
   contentHash: "a".repeat(64),
@@ -64,7 +65,7 @@ vi.mock("../sync/supabaseTransport", () => ({
   SupabaseSyncTransport: class {
     revision = revision;
     prepareMediaCache = prepareMediaCache;
-    summaries = vi.fn(async () => []);
+    summaries = summaries;
     devices = vi.fn(async () => []);
     latestRevision = vi.fn(async () => 7);
   },
@@ -94,6 +95,8 @@ beforeEach(() => {
   resetAccountInitForTests();
   onAuthStateChange.mockClear();
   prepareMediaCache.mockClear();
+  summaries.mockReset();
+  summaries.mockResolvedValue([]);
   revision.mockClear();
   replaceAll.mockClear();
   emitAuth = undefined;
@@ -121,6 +124,20 @@ describe("restoreRevision account-identity generation boundary", () => {
     expect(useAccount.getState().user?.id).toBe("synthetic-a");
     expect(replaceAll).not.toHaveBeenCalled();
     expect(useAccount.getState().message).not.toMatch(/^Restored\./);
+  });
+
+  it("does not apply a stale merge from account A after A -> B -> A during protected media preparation", async () => {
+    await startAuthFeed();
+    summaries.mockResolvedValueOnce([syntheticRevision]);
+    const pendingMerge = useAccount.getState().mergeWithAccount();
+    await waitUntilMediaPrepare();
+    // The final ID is A again, but this download belongs to the earlier A session.
+    emitAuth!("SIGNED_IN", sessionFor("synthetic-b"));
+    emitAuth!("SIGNED_IN", sessionFor("synthetic-a"));
+    releaseMedia!();
+    await pendingMerge;
+    expect(useAccount.getState().user?.id).toBe("synthetic-a");
+    expect(replaceAll).not.toHaveBeenCalled();
   });
 
   it("still permits an unchanged-owner restore after a TOKEN_REFRESHED event", async () => {
