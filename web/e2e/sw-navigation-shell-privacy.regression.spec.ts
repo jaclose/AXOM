@@ -83,11 +83,14 @@ for (const width of [320, 390, 1440]) {
         const body = await response.clone().text();
         const cache = await caches.open(name);
         await cache.put(key, response);
-        return { url: response.url, status: response.status, body };
+        const retained = await cache.match(key);
+        return { url: response.url, status: response.status, body, retainedBody: await retained?.text() };
       }, { name: originalShell.name, id: fixture.id, key: SHELL_ENTRY });
       expect(seeded.status).toBe(200);
       expect(new URL(seeded.url).pathname).toBe("/index.html");
       expect(seeded.body).toContain(fixture.marker);
+      // Verify the tainted entry genuinely exists before testing rejection.
+      expect(seeded.retainedBody).toContain(fixture.marker);
 
       await context.setOffline(true);
       let observedBody = "";
