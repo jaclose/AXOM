@@ -28,7 +28,10 @@ function fixture(rpc: ReturnType<typeof vi.fn>) {
   });
   const chain = {
     select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data: null, error: null, status: 200 })),
-    single: vi.fn(async () => ({
+    single: vi.fn(async (): Promise<{
+      data: { id: string; revision: number; content_hash: string; reason: string } | null;
+      error: { message: string } | null; status: number;
+    }> => ({
       data: { id: "revision-id", revision: 72, content_hash: hash, reason: "manual" }, error: null, status: 200,
     })),
   };
@@ -156,5 +159,130 @@ describe("cloud RPC abort and receipt boundaries", () => {
     });
     expect(x.chain.single).not.toHaveBeenCalled();
     expect(saveSyncBaseline).not.toHaveBeenCalled();
+  });
+
+  it("reconciles overlapping legacy requests under one key without treating newer edits as protected", async () => {
+    const updatedHash = "b".repeat(64);
+    let commitFirst!: () => void;
+    const firstCommit = new Promise<void>(resolve => { commitFirst = resolve; });
+    let requests = 0;
+    const originalResponse = { ...accepted, data: { ...accepted.data, idempotent: false } };
+    const replayResponse = { ...accepted, data: { ...accepted.data, idempotent: true } };
+    const updatedResponse = {
+      ...accepted,
+      data: { ...accepted.data, revision: 73, revision_id: "revision-new", content_hash: updatedHash, idempotent: false },
+    };
+    // The first request keeps running on the server after the client times out.
+    // The retry waits behind the server's owner lock, then replays that first revision.
+    const rpc = vi.fn((_name: string, _args: Record<string, unknown>) => {
+      requests += 1;
+      if (requests === 1) return firstCommit.then(() => originalResponse);
+      if (requests === 2) return firstCommit.then(() => replayResponse);
+      return Promise.resolve(updatedResponse);
+    });
+    const x = fixture(rpc);
+    x.chain.single.mockImplementation(async () => ({
+      data: requests === 3
+        ? { id: "revision-new", revision: 73, content_hash: updatedHash, reason: "manual" }
+        : { id: "revision-id", revision: 72, content_hash: hash, reason: "manual" },
+      error: null, status: 200,
+    }));
+    vi.useFakeTimers();
+    try {
+      const first = new SupabaseSyncTransport().push(x.envelope);
+      const timedOut = expect(first).rejects.toMatchObject({
+        failure: { kind: "network", status: 0, phase: "revision", reason: "request-timeout" },
+      });
+      await vi.waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(76_000);
+      await timedOut;
+      expect(x.chain.single).not.toHaveBeenCalled();
+      expect(saveSyncBaseline).not.toHaveBeenCalled();
+
+      // Local edits change the attempted hash, not the already-sent retry key.
+      const edited: SnapshotEnvelope = {
+        ...x.envelope, contentHash: updatedHash,
+        packed: { ...x.envelope.packed!, content: JSON.stringify({ fixture: "edited while acknowledgement was missing" }) },
+      };
+      const retry = new SupabaseSyncTransport().push(edited);
+      await vi.waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+      expect(x.chain.single).not.toHaveBeenCalled();
+      commitFirst();
+      const replayed = await retry;
+      expect(replayed).toMatchObject({
+        status: "accepted", revision: 72, idempotent: true, contentHash: hash,
+      });
+      expect(rpc.mock.calls[1][1].p_idempotency_key).toBe(rpc.mock.calls[0][1].p_idempotency_key);
+      expect(x.chain.single).toHaveBeenCalledTimes(1);
+      // The first receipt verifies the OLD server hash, not the newer local state.
+      expect(saveSyncBaseline).not.toHaveBeenCalled();
+
+      // The separately tested coordinator issues a fresh key after a stale replay.
+      // Only its new receipt may protect the newer content.
+      const newest = await new SupabaseSyncTransport().push({
+        ...edited, baseRevision: 72, idempotencyKey: "fixture-new-edit-key",
+      });
+      expect(newest).toMatchObject({
+        status: "accepted", revision: 73, idempotent: false, contentHash: updatedHash,
+      });
+      expect(rpc.mock.calls[2][1].p_idempotency_key).not.toBe(rpc.mock.calls[1][1].p_idempotency_key);
+      expect(x.chain.single).toHaveBeenCalledTimes(2);
+      expect(saveSyncBaseline).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(saveSyncBaseline).mock.calls[0][1].contentHash).toBe(updatedHash);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a late committed write unconfirmed until a same-key retry passes owner-scoped receipt readback", async () => {
+    let commit!: () => void;
+    const firstCommit = new Promise<void>(resolve => { commit = resolve; });
+    let calls = 0;
+    const rpc = vi.fn((_name: string, _args: Record<string, unknown>) => {
+      const requestNumber = ++calls;
+      return firstCommit.then(() => ({
+        ...accepted, data: { ...accepted.data, idempotent: requestNumber !== 1 },
+      }));
+    });
+    const x = fixture(rpc);
+    x.chain.single
+      .mockResolvedValueOnce({ data: null, error: { message: "synthetic receipt read unavailable" }, status: 503 })
+      .mockResolvedValueOnce({
+        data: { id: "revision-id", revision: 72, content_hash: hash, reason: "manual" },
+        error: null, status: 200,
+      });
+    vi.useFakeTimers();
+    try {
+      const pending = new SupabaseSyncTransport().push(x.envelope);
+      const timedOut = expect(pending).rejects.toMatchObject({
+        failure: { kind: "network", phase: "revision", reason: "request-timeout" },
+      });
+      await vi.waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(76_000);
+      await timedOut;
+      expect(x.chain.single).not.toHaveBeenCalled();
+      expect(saveCloudMediaIndex).not.toHaveBeenCalled();
+
+      const firstRetry = new SupabaseSyncTransport().push(x.envelope);
+      await vi.waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+      commit();
+      await expect(firstRetry).rejects.toMatchObject({
+        failure: { kind: "server", phase: "receipt", status: 503 },
+      });
+      expect(saveCloudMediaIndex).not.toHaveBeenCalled();
+      expect(saveSyncBaseline).not.toHaveBeenCalled();
+
+      const verifiedRetry = await new SupabaseSyncTransport().push(x.envelope);
+      expect(verifiedRetry).toMatchObject({
+        status: "accepted", idempotent: true, revision: 72, contentHash: hash,
+      });
+      expect(rpc).toHaveBeenCalledTimes(3);
+      expect(new Set(rpc.mock.calls.map(call => call[1].p_idempotency_key)).size).toBe(1);
+      expect(x.chain.single).toHaveBeenCalledTimes(2);
+      expect(saveCloudMediaIndex).toHaveBeenCalledOnce();
+      expect(saveSyncBaseline).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

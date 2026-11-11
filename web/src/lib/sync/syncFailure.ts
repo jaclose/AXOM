@@ -30,7 +30,7 @@ export function classifyPushFailure(error: { message?: string; code?: string }, 
   return { ...base, kind: "server" };
 }
 
-/** Anything thrown on the way to the account that is not already sorted never reached it. */
+/** Unclassified transport errors have no confirmed response; the request may still have reached the account. */
 export function failureOf(error: unknown): FailureDetails {
   if (error instanceof SyncPushError) return error.failure;
   if (error && typeof error === "object") {
