@@ -500,14 +500,32 @@ export const useAccount = create<AccountState>((set, get) => {
     async updateDisplayName(name) {
       const displayName = name.trim().slice(0, 80);
       const user = get().user;
+      const profileEpoch = accountIdentityEpoch;
       if (!user || !displayName) return false;
+      // The same ID after A → B → A is not the same authenticated session.
+      // An earlier profile write may complete after the SDK has switched users.
+      const sameOwner = () => profileEpoch === accountIdentityEpoch && get().user?.id === user.id;
+      const assertOwner = () => {
+        if (!sameOwner()) throw new Error("The signed-in account changed during the profile update.");
+      };
       const result = await guarded("Saving your name…", async () => {
-        const { error } = await (await client()).from("account_profiles").upsert({ user_id: user.id, display_name: displayName, updated_at: new Date().toISOString() });
+        const supabase = await client();
+        assertOwner();
+        const { error } = await supabase.from("account_profiles").upsert({
+          user_id: user.id, display_name: displayName, updated_at: new Date().toISOString(),
+        });
         if (error) throw error;
-        await (await client()).auth.updateUser({ data: { display_name: displayName } });
-        set({ user: { ...user, displayName } });
+        // Never start the auth-metadata write under a later account session.
+        assertOwner();
+        await supabase.auth.updateUser({ data: { display_name: displayName } });
+        assertOwner();
+        const current = get().user;
+        if (!current) throw new Error("The signed-in account changed during the profile update.");
+        set({ user: { ...current, displayName } });
         return true;
-      });
+      }, sameOwner);
+      // A late A request cannot reinstate A's name, busy state or notice on B.
+      if (!sameOwner()) return false;
       if (result) set({ message: "Account name updated." });
       return Boolean(result);
     },
