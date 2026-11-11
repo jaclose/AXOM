@@ -1040,3 +1040,29 @@ test("Tracker receipts reject contradictory unassigned weeks and malformed week 
       `valid Tracker week receipt rejected: ${JSON.stringify(changes)}`);
   }
 });
+// R36: an inferred week is still a concrete numeric placement, not an alias
+// for source-unassigned/unknown. The source template has no authority to
+// fabricate it, but the receipt cannot certify a nonexistent inferred week.
+test("Tracker inferred-week receipts require an actual numeric week", () => {
+  assert.equal(run().complete, true, "Baseline source-unassigned receipt remains valid.");
+  for (const [label, edits] of [
+    ["missing", {}],
+    ["null", { week: null }],
+  ]) {
+    const changed = tracker();
+    changed.activities[1].weekBasis = "inferred";
+    delete changed.activities[1].week;
+    Object.assign(changed.activities[1], edits);
+    const report = run({ tracker: changed });
+    assert.equal(report.complete, false, `Inferred ${label} week cannot satisfy Tracker coverage.`);
+    assert.ok(report.errors.some(message => message.includes("Inferred tracker week is missing")),
+      `Missing explicit inferred-week error: ${JSON.stringify(report.errors)}`);
+  }
+  for (const [basis, week] of [["inferred", 3], ["explicit", 3], ["unassigned", null]]) {
+    const changed = tracker();
+    changed.activities[1].weekBasis = basis;
+    changed.activities[1].week = week;
+    assert.equal(run({ tracker: changed }).complete, true,
+      `Legitimate ${basis} week filing should retain its prior semantics.`);
+  }
+});
