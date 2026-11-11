@@ -15,13 +15,26 @@ const stage = await mkdtemp(join(tmpdir(), 'axom-update-browser-'));
 const builds = [join(stage, 'a'), join(stage, 'b')];
 let active = builds[0];
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
+// Match the deployed canonical public HTML policy without relaxing privacy for
+// hashed assets or any noncanonical request in this two-build update fixture.
+function cacheControlForPathname(pathname) {
+  return pathname === '/' || pathname === '/index.html' ? 'no-cache' : 'no-store';
+}
+
+// Fast assertions run before any build or browser setup, so a fixture regression
+// cannot silently turn the service-worker installation test into a timeout.
+for (const pathname of ['/', '/index.html']) assert.equal(cacheControlForPathname(pathname), 'no-cache');
+for (const pathname of ['/assets/main-abcdefgh.js', '/private/account.html', '/api/account', '/other/index.html']) {
+  assert.equal(cacheControlForPathname(pathname), 'no-store');
+}
+
 const server = createServer(async (req, res) => {
   try {
     const pathname = new URL(req.url, 'http://localhost').pathname;
     const path = resolve(active, '.' + (pathname === '/' ? '/index.html' : pathname));
     if (!path.startsWith(active + '/')) throw new Error('path');
     const data = await readFile(path);
-    res.writeHead(200, { 'Content-Type': types[extname(path)] ?? 'application/octet-stream', 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': types[extname(path)] ?? 'application/octet-stream', 'Cache-Control': cacheControlForPathname(pathname) });
     res.end(data);
   } catch { res.writeHead(404); res.end(); }
 });
@@ -52,7 +65,26 @@ try {
   await page.goto(`${origin}/?app=1`, { waitUntil: 'networkidle' });
   await completeSetup(page, 'Update persistence check');
   await deferPromisePrompt(page);
-  await page.evaluate(async () => { await navigator.serviceWorker.ready; localStorage.setItem('axom.theme', 'light'); });
+  await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    let timeout;
+    try {
+      await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => {
+          timeout = window.setTimeout(() => reject(new Error(`SW_READY_TIMEOUT after 20s: ${JSON.stringify({
+            installing: registration?.installing?.state ?? null,
+            waiting: registration?.waiting?.state ?? null,
+            active: registration?.active?.state ?? null,
+            controlled: Boolean(navigator.serviceWorker.controller),
+          })}`)), 20_000);
+        }),
+      ]);
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    localStorage.setItem('axom.theme', 'light');
+  });
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   const oldEntry = await page.locator('script[type="module"][src]').getAttribute('src');
