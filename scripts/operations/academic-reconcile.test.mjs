@@ -120,6 +120,51 @@ test("expanded source adapter cannot invent zero Tracker activities for an absen
   assert.equal(explicitZero.counts.expectedBaselineTrackerActivities, 0);
 });
 
+test("expanded JSONL source-cohort path and hash totals cannot silently default to observed entries", () => {
+  const rows = [{ source_sha256: a, original_path: "sources/known.txt", file_extension: "txt" }];
+  const fileCounts = {
+    eligible_priority_files_with_unresolved_sha: 0,
+    catalogued_document_and_asset_paths: 1,
+    sha256_hashed_paths: 1,
+    distinct_byte_sha256: 1,
+  };
+  const check = file_denominators => reconcileAcademicContent({
+    inventory: expandedSourceInventory(rows, {
+      file_denominators, tracker_denominators: { parsed_activity_rows: 0 },
+    }),
+    dispositions: { sources: [{ sha256: a, kind: "reference", status: "excluded",
+      reason: "synthetic non-PDF reference" }] },
+    receipts: { sources: [] }, tracker: { activities: [] },
+  });
+  assert.equal(check(fileCounts).complete, true,
+    "An explicitly enumerated, matching source census remains valid.");
+
+  for (const field of [
+    "catalogued_document_and_asset_paths", "sha256_hashed_paths", "distinct_byte_sha256",
+  ]) {
+    for (const bad of [undefined, null, "1", -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const candidate = { ...fileCounts, [field]: bad };
+      if (bad === undefined) delete candidate[field];
+      const r = check(candidate);
+      assert.equal(r.complete, false, `Unverified ${field}=${String(bad)} must HOLD.`);
+      assert.ok(r.errors.some(message => message.includes("summary") || message.includes("manifest")),
+        JSON.stringify(r.errors));
+    }
+  }
+  for (const [field, count] of [
+    ["catalogued_document_and_asset_paths", 0],
+    ["sha256_hashed_paths", 0],
+    ["distinct_byte_sha256", 0],
+  ]) {
+    const r = check({ ...fileCounts, [field]: count });
+    assert.equal(r.complete, false, `Underreported ${field} must not certify corpus coverage.`);
+  }
+  // A catalogued count may include legitimately excluded/unhashed references.
+  const extraReferences = check({ ...fileCounts, catalogued_document_and_asset_paths: 2 });
+  assert.equal(extraReferences.complete, true, JSON.stringify(extraReferences.errors));
+  assert.ok(extraReferences.warnings.some(message => message.includes("not included in the hashed cohort")));
+});
+
 test("complete requires source identities, dispositions, verified receipts, and tracker records", () => {
   const r = run();
   assert.equal(r.complete, true, JSON.stringify(r.blockers));

@@ -63,9 +63,11 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
     },
     priorityMissingSha: integer(sourceSummary?.file_denominators?.eligible_priority_files_with_unresolved_sha)
       ? sourceSummary.file_denominators.eligible_priority_files_with_unresolved_sha : null,
-    cataloguedPaths: sourceSummary?.file_denominators?.catalogued_document_and_asset_paths ?? entries.length,
-    expectedHashedPaths: sourceSummary?.file_denominators?.sha256_hashed_paths,
-    expectedDistinctHashes: sourceSummary?.file_denominators?.distinct_byte_sha256,
+    // Expanded JSONL must carry an independently declared cohort census.
+    // Unknown totals cannot be inferred from the filtered manifest rows.
+    cataloguedPaths: sourceSummary?.file_denominators?.catalogued_document_and_asset_paths ?? null,
+    expectedHashedPaths: sourceSummary?.file_denominators?.sha256_hashed_paths ?? null,
+    expectedDistinctHashes: sourceSummary?.file_denominators?.distinct_byte_sha256 ?? null,
     entries,
   };
 }
@@ -83,14 +85,21 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     else byHash.set(file.sha256, file);
   }
   const unique = [...byHash.values()];
-  if (inventory.expectedHashedPaths !== undefined && inventory.expectedHashedPaths !== inventory.entries.length) errors.push(`Expanded manifest has ${inventory.entries.length} hashed paths but source summary reports ${inventory.expectedHashedPaths}; rerun after inventory completes.`);
-  if (inventory.expectedDistinctHashes !== undefined && inventory.expectedDistinctHashes !== unique.length) errors.push(`Expanded manifest has ${unique.length} unique hashes but source summary reports ${inventory.expectedDistinctHashes}; refresh the paired source inventory.`);
+  if (inventory.expectedHashedPaths !== undefined
+    && (!integer(inventory.expectedHashedPaths) || inventory.expectedHashedPaths !== inventory.entries.length))
+    errors.push(`Expanded manifest has ${inventory.entries.length} hashed paths but source summary reports ${inventory.expectedHashedPaths}; require an explicit valid hashed-path count.`);
+  if (inventory.expectedDistinctHashes !== undefined
+    && (!integer(inventory.expectedDistinctHashes) || inventory.expectedDistinctHashes !== unique.length))
+    errors.push(`Expanded manifest has ${unique.length} unique hashes but source summary reports ${inventory.expectedDistinctHashes}; require an explicit valid distinct-hash count.`);
+  if (inventory.cataloguedPaths !== undefined
+    && (!integer(inventory.cataloguedPaths) || inventory.cataloguedPaths < inventory.entries.length))
+    errors.push(`Source summary catalogued path count ${inventory.cataloguedPaths} is missing, invalid or smaller than ${inventory.entries.length} hashed manifest paths.`);
   const priorityMissingSha = integer(inventory.priorityMissingSha) ? inventory.priorityMissingSha : null;
   if (priorityMissingSha === null)
     blockers.push("Eligible priority missing-SHA denominator is absent or malformed; pair the source manifest with its verified source summary before certifying coverage.");
   else if (priorityMissingSha > 0)
     blockers.push(`${priorityMissingSha} eligible academic sources have no verified SHA-256; source coverage is incomplete.`);
-  if (inventory.cataloguedPaths > inventory.entries.length) warnings.push(`${inventory.cataloguedPaths - inventory.entries.length} catalogued paths were not included in the hashed cohort; the eligibility scan must distinguish excluded references from the remaining priority files.`);
+  if (integer(inventory.cataloguedPaths) && inventory.cataloguedPaths > inventory.entries.length) warnings.push(`${inventory.cataloguedPaths - inventory.entries.length} catalogued paths were not included in the hashed cohort; the eligibility scan must distinguish excluded references from the remaining priority files.`);
   if (inventory.summary.uniqueFiles !== unique.length) errors.push(`Inventory uniqueFiles ${inventory.summary.uniqueFiles} != ${unique.length} verified unique hashes`);
   if (inventory.summary.files !== inventory.entries.length) errors.push(`Inventory files ${inventory.summary.files} != ${inventory.entries.length} entries`);
   if (inventory.summary.duplicateFiles !== duplicateRecords.length) errors.push(`Inventory duplicateFiles ${inventory.summary.duplicateFiles} != ${duplicateRecords.length} duplicates`);
