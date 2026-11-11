@@ -50,7 +50,9 @@ function deferProfileRead() {
   let resolve!: (value: ProfileResponse) => void;
   const pending = new Promise<ProfileResponse>((finish) => { resolve = finish; });
   reads.push(() => pending);
-  return (name: string) => resolve({ data: { display_name: name }, error: null });
+  return (name: string | null) => resolve({
+    data: name === null ? null : { display_name: name }, error: null,
+  });
 }
 
 async function startAuthFeed() {
@@ -144,6 +146,26 @@ describe("profile name reads cannot overtake acknowledged writes", () => {
     finishEarlier("Earlier stale");
     await drainProfileResponse();
     expect(useAccount.getState().user?.displayName).toBe("Later authoritative");
+  });
+
+  it("treats a newer successful no-row SELECT as authoritative over an older name", async () => {
+    await startAuthFeed();
+    const finishEarlier = deferProfileRead();
+    emitAuth!("INITIAL_SESSION", sessionFor("synthetic-a", "SDK fallback"));
+    await vi.waitFor(() => expect(maybeSingle).toHaveBeenCalledTimes(1));
+
+    const finishLater = deferProfileRead();
+    emitAuth!("TOKEN_REFRESHED", sessionFor("synthetic-a", "SDK fallback"));
+    await vi.waitFor(() => expect(maybeSingle).toHaveBeenCalledTimes(2));
+    expect(useAccount.getState().user?.displayName).toBe("SDK fallback");
+
+    // A valid no-row is different from a thrown request or PostgREST error:
+    // it must invalidate the earlier response, without inventing a profile.
+    finishLater(null);
+    await drainProfileResponse();
+    finishEarlier("Removed historical profile");
+    await drainProfileResponse();
+    expect(useAccount.getState().user?.displayName).toBe("SDK fallback");
   });
 
   it("still permits a pending profile read after a failed rename", async () => {
