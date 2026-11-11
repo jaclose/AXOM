@@ -1,5 +1,15 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
+// Enable real BFCache for this isolated acceptance spec. Playwright normally
+// adds --disable-back-forward-cache; a history reload must never masquerade
+// as a persisted pageshow restoration.
+test.use({
+  launchOptions: {
+    ignoreDefaultArgs: ["--disable-back-forward-cache"],
+    args: ["--enable-features=BackForwardCache"],
+  },
+});
+
 /**
  * Offline and real navigation lifecycle: synthetic same-origin HTML, Chromium
  * with actual browser IndexedDB. No AXOM sign-in or learner data is accessed.
@@ -117,7 +127,9 @@ test("actual navigation retires unpersisted quota-only saved badge but keeps wor
   // Browser cache eligibility varies; do not claim BFCache was used unless
   // pageshow.persisted was observed as true.
   await page.goto(path + "?detour=1");
-  await page.goBack();
+  // A BFCache restore does not fire a new load event. Waiting for load here
+  // would hang on exactly the behavior this test must accept.
+  await page.goBack({ waitUntil: "commit" });
   const restored = await page.evaluate(async () => {
     const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
     const storage = await import("/src/lib/localVault.ts");
@@ -150,7 +162,7 @@ test("actual navigation retires unpersisted quota-only saved badge but keeps wor
   // assertions but is NOT BFCache acceptance.
   expect(
     restored.pageshowPersisted,
-    `BFCache was not observed (pagehide.persisted=${restored.pagehidePersisted}, pageshow.persisted=${restored.pageshowPersisted}, navigationType=${restored.navigationType}, notRestoredReasonCodes=${JSON.stringify(restored.notRestoredReasonCodes)}); a passing history navigation is not BFCache coverage. Default Playwright launches disable BFCache; this may be a harness limitation, not an AXOM defect.`,
+    `BFCache was not observed (pagehide.persisted=${restored.pagehidePersisted}, pageshow.persisted=${restored.pageshowPersisted}, navigationType=${restored.navigationType}, notRestoredReasonCodes=${JSON.stringify(restored.notRestoredReasonCodes)}); a passing history navigation is not BFCache coverage. The isolated harness enables BFCache, but environment-specific ineligibility can still occur.`,
   ).toBe("true");
 });
 
