@@ -579,6 +579,54 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     expect(withdrawnResult.rows).toEqual([]);
     expect(approvedEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
 
+    // The author can resubmit the *identical* source snapshot, but withdrawal
+    // must terminate the old attestations and approval. This creates a distinct
+    // publication identity and requires a new academic decision.
+    const freshRights = existing.getByRole("checkbox", { name: /permission to distribute every question/ });
+    const freshAnswers = existing.getByRole("checkbox", { name: /checked every answer against its source/ });
+    const freshSend = existing.getByRole("button", { name: "Send for review" });
+    await expect(freshRights).not.toBeChecked();
+    await expect(freshAnswers).not.toBeChecked();
+    await expect(freshSend).toBeDisabled();
+    await freshRights.check();
+    await expect(freshSend).toBeDisabled();
+    await freshAnswers.check();
+    await freshSend.click();
+    await expect(existing.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+
+    const [resubmitted] = await database.rpc(owner.id, "my_question_set_library") as
+      Array<{ id: string; status: string }>;
+    expect(resubmitted.status).toBe("pending");
+    expect(resubmitted.id).not.toBe(pending.id);
+    const newPending = await database.rpc(owner.id, "get_question_set_library", { p_id: resubmitted.id }) as
+      typeof approvedEvidence;
+    expect(newPending.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
+    expect(newPending.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+
+    await page.goto(`${baseURL}/#host`);
+    const newQueue = page.locator(".qsl-review-queue");
+    await expect(newQueue.getByRole("heading", { name: "Question Set Library review" })).toBeVisible();
+    await newQueue.getByRole("button", { name: "Inspect" }).click();
+    const newReview = page.getByRole("dialog", { name: `Review ${TITLE}` });
+    await expect(newReview.getByText(STEM, { exact: true })).toBeVisible();
+    await newReview.getByRole("textbox", { name: "Review note" })
+      .fill("Independently rechecked identical synthetic source and distribution rights for this new submission.");
+    await newReview.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
+    await newReview.getByRole("button", { name: "Approve for library" }).click();
+    await expect(newQueue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
+    const newApproval = await database.rpc(member.id, "get_question_set_library", { p_id: resubmitted.id }) as
+      typeof approvedEvidence;
+    expect(newApproval.status).toBe("approved");
+    expect(newApproval.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
+    expect(newApproval.review_revision).toBeGreaterThan(newPending.review_revision);
+    const relisted = await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 }) as
+      Array<{ id: string }>;
+    expect(relisted.map(item => item.id)).toEqual([resubmitted.id]);
+    expect((await database.db.query(
+      "select id from public.question_set_library_entries where id = $1", [pending.id],
+    )).rows).toEqual([]);
+
     // A previously inspected snapshot is not a durable import grant.
     await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
     await preview.getByRole("button", { name: "Add to my AXOM" }).click();
@@ -594,7 +642,30 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     await learner.getByRole("dialog", { name: "Question Set preview" })
       .getByRole("button", { name: "Close" }).click();
     await library.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(card).toHaveCount(0);
+    await expect(card).toBeVisible();
+    await card.getByRole("button", { name: "Preview set" }).click();
+    const newPreview = learner.getByRole("dialog", { name: TITLE });
+    await expect(newPreview.getByText(STEM, { exact: true })).toBeVisible();
+    await newPreview.getByRole("button", { name: "Add to my AXOM" }).click();
+    await expect(newPreview.getByRole("button", { name: "Already in my AXOM" })).toBeDisabled();
+    const privateAfter = await learner.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: { getState: () => {
+          questions: Array<{ stem: string; correctKey?: string }>;
+          questionSets: Array<{ importProvenance?: { shareId: string } }>;
+        } };
+      }> }).__AXOM_DEV__;
+      const state = dev.useStore.getState();
+      return {
+        key: state.questions.find(question => question.stem === "Which synthetic label is the reviewed answer?")?.correctKey,
+        importedShareIds: state.questionSets.map(set => set.importProvenance?.shareId).filter(Boolean),
+      };
+    });
+    expect(privateAfter).toEqual({ key: "B", importedShareIds: [resubmitted.id] });
+    const afterImport = await database.rpc(member.id, "get_question_set_library", { p_id: resubmitted.id }) as
+      typeof newApproval;
+    expect(afterImport.snapshot_payload).toEqual(newApproval.snapshot_payload);
+    expect(afterImport.review_revision).toBe(newApproval.review_revision);
   } finally {
     await learnerContext.close();
     await database.close();
