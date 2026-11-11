@@ -25,7 +25,17 @@ function worker({ failCacheMatch = false, failCachePut = false, scope = 'https:/
       if (!stores.has(name)) stores.set(name, new Map());
       const values = stores.get(name);
       return {
-        addAll: async (keys) => { assert.equal(new Set(keys).size, keys.length); },
+        addAll: async (keys) => {
+          assert.equal(new Set(keys).size, keys.length);
+          // Model the browser's Cache.addAll, which writes successful
+          // responses regardless of HTTP no-store/private directives.
+          for (const key of keys) {
+            const url = new URL(key, scope).href;
+            const response = withNetworkUrl(await fetchResponse(url), url);
+            if (!response.ok || response.status !== 200) throw new Error('precache fetch failed');
+            values.set(absolute(key), response.clone());
+          }
+        },
         match: async (key) => values.get(absolute(key))?.clone(),
         delete: async (key) => values.delete(absolute(key)),
         put: async (key, value) => {
@@ -926,4 +936,88 @@ test('genuine font and webmanifest MIME stays available offline', async () => {
     online = false;
     assert.equal(await visit(), 'valid-resource', path + ': legitimate resource blocked');
   }
+});
+
+test('install never stores protected or wrong-MIME mandatory precache responses', async () => {
+  const chunk = './assets/critical-12345678.js';
+  for (const [label, codeHeaders] of [
+    ['private', { 'content-type': 'text/javascript', 'cache-control': 'private, no-store' }],
+    ['auth-varying', { 'content-type': 'text/javascript', vary: 'Cookie' }],
+    ['HTML rewrite', { 'content-type': 'text/html', 'cache-control': 'public, max-age=600' }],
+    ['JSON rewrite', { 'content-type': 'application/json', 'cache-control': 'public, max-age=600' }],
+  ]) {
+    const app = worker({
+      precache: [chunk], shippedChunks: [chunk],
+      fetchResponse: async (url) => new URL(url).pathname.endsWith('.js')
+        ? new Response('protected-bundle', { headers: codeHeaders })
+        : new Response('<!doctype html>public', {
+          headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' },
+        }),
+    });
+    let install;
+    app.events.get('install')({ waitUntil: (task) => { install = task; } });
+    await assert.rejects(install, /Unsafe install asset/i, label);
+    const cache = await app.caches.open('axom-shell-current');
+    assert.equal(await cache.match(chunk), undefined, label + ': protected bytes persisted during install');
+    assert.equal(await cache.match('./index.html'), undefined, label + ': invalid install must not install shell');
+  }
+});
+
+test('install skips nonessential protected manifest/icon but preserves canonical shell', async () => {
+  const app = worker({
+    fetchResponse: async (url) => {
+      const path = new URL(url).pathname;
+      if (path === '/manifest.webmanifest') {
+        return new Response('private-manifest', {
+          headers: { 'content-type': 'application/manifest+json', 'cache-control': 'private, no-store' },
+        });
+      }
+      if (path === '/icon-192.png') {
+        return new Response('private-icon', {
+          headers: { 'content-type': 'image/png', 'cache-control': 'private, no-store' },
+        });
+      }
+      return new Response('<!doctype html>public', { headers: {
+        'content-type': 'text/html', 'cache-control': 'no-cache',
+      } });
+    },
+  });
+  let install;
+  app.events.get('install')({ waitUntil: (task) => { install = task; } });
+  await install;
+  const cache = await app.caches.open('axom-shell-current');
+  assert.equal(await cache.match('./manifest.webmanifest'), undefined);
+  assert.equal(await cache.match('./icon-192.png'), undefined);
+  assert.ok(await cache.match('./index.html'), 'public shell remains available');
+});
+
+test('install retains exact manifest-listed hashed JS/CSS despite no-store/no-cache', async () => {
+  const chunks = ['./assets/critical-12345678.js', './assets/critical-12345678.css'];
+  const app = worker({
+    precache: chunks, shippedChunks: chunks,
+    fetchResponse: async (url) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('.js') || path.endsWith('.css')) {
+        return new Response('immutable-build-code', { headers: {
+          'content-type': path.endsWith('.js') ? 'text/javascript' : 'text/css',
+          'cache-control': path.endsWith('.js') ? 'no-store' : 'no-cache',
+        } });
+      }
+      if (path.endsWith('.webmanifest')) {
+        return new Response('{}', { headers: { 'content-type': 'application/manifest+json' } });
+      }
+      if (path.endsWith('.png')) {
+        return new Response('icon', { headers: { 'content-type': 'image/png' } });
+      }
+      return new Response('<!doctype html>public', { headers: {
+        'content-type': 'text/html', 'cache-control': 'no-cache',
+      } });
+    },
+  });
+  let install;
+  app.events.get('install')({ waitUntil: (task) => { install = task; } });
+  await install;
+  const cache = await app.caches.open('axom-shell-current');
+  for (const chunk of chunks) assert.equal(await (await cache.match(chunk)).text(), 'immutable-build-code', chunk);
+  assert.ok(await cache.match('./index.html'));
 });
