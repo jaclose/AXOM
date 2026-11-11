@@ -262,7 +262,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     for (const scope of declaredScopes.values()) {
       const matching = templateEntries.filter(entry => entry.module === scope.module
         && (scope.term === null || entry.term === scope.term));
-      const weekly = matching.filter(entry => entry.week !== undefined);
+      const weekly = matching.filter(entry => entry.week !== undefined && entry.week !== null);
       if (!weekly.length) {
         if (matching.some(entry => entry.weekBasis === "explicit")) {
           blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has invalid source-week evidence; explicit filing requires a numeric week.`);
