@@ -257,7 +257,7 @@ export function JournalPage({ registerAppTransitionGuard, hasAccountWorkspaceRec
   const accountId = useAccount((state) => state.phase === "signed-in" ? state.user?.id ?? null : null);
   const workspaceReady = accountId === null || Boolean(hasAccountWorkspaceReceipt?.(accountId, s.journal));
   const sessionDraftsRef = useRef(new Map<string, JournalSessionDraft>());
-  const feedbackSessionDraftsRef = useRef(new Map<string, JournalExperienceFeedbackInput>());
+  const feedbackSessionDraftsRef = useRef(journalInTabFeedbackDrafts());
   const writerIdentityRef = useRef({
     profile: s.profile, journal: s.journal, accountId, epoch: 0, workspaceEpoch: 0,
     pendingJournal: workspaceReady ? null : s.journal as JournalEntry[] | null,
@@ -1693,6 +1693,121 @@ function JournalWelcome({ initial, initialReminders, onComplete }: {
   );
 }
 
+// Name-only profile edits change the legacy feedback key. Keep original
+// feedback bytes where they are; record append-only, same-owner lookup links.
+// A link never crosses authenticated accounts or local/account boundaries.
+const JOURNAL_FEEDBACK_BASE_PATTERN = /^axom-journal-feedback-draft:([a-z0-9_-]+)(?::account:([a-zA-Z0-9_-]+))?$/;
+const JOURNAL_FEEDBACK_ALIAS_TOKEN = ":name-alias:v1:";
+const JOURNAL_FEEDBACK_ALIAS_LIMIT = 16;
+
+function journalFeedbackSameOwner(root: string, candidate: string): boolean {
+  const current = JOURNAL_FEEDBACK_BASE_PATTERN.exec(root);
+  const previous = JOURNAL_FEEDBACK_BASE_PATTERN.exec(candidate);
+  return Boolean(current && previous && current[2] === previous[2]);
+}
+
+function journalFeedbackRecordNameAlias(oldKey: string, newKey: string): boolean {
+  if (oldKey === newKey || !journalFeedbackSameOwner(newKey, oldKey)) return false;
+  try {
+    // If reads are blocked, do not claim to have durable rename metadata.
+    window.localStorage.getItem(`${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
+    window.localStorage.setItem(
+      `${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${journalFeedbackRevision()}`, oldKey,
+    );
+    return true;
+  } catch {
+    // Keep the original saved bytes unchanged, and retain a bounded
+    // same-tab link until the owner explicitly retries after the outage.
+    return false;
+  }
+}
+
+// Browser storage outages leave feedback only in volatile memory. Retain it
+// through SPA route unmount/remount in the same tab, never across tabs or reload.
+// Keys already include workspace and authenticated account; a successful save
+// clears the matching in-memory copy. Older stored bytes are not touched.
+const journalInTabFeedbackDraftsByWindow = new WeakMap<Window, Map<string, JournalExperienceFeedbackInput>>();
+const journalInTabFeedbackRenameObservers = new WeakSet<Window>();
+// These pointers contain only storage owner keys, never feedback text. An
+// unwritten link cannot survive reload; do not present it as a durable copy.
+const journalInTabPendingNameAliasesByWindow = new WeakMap<Window, Map<string, { previous: string; suffix: string }>>();
+
+function journalInTabPendingNameAliases(): Map<string, { previous: string; suffix: string }> {
+  let pending = journalInTabPendingNameAliasesByWindow.get(window);
+  if (!pending) {
+    pending = new Map();
+    journalInTabPendingNameAliasesByWindow.set(window, pending);
+  }
+  return pending;
+}
+
+function journalFeedbackRetryPendingNameAliases(ownerKey: string): void {
+  const pending = journalInTabPendingNameAliasesByWindow.get(window);
+  if (!pending) return;
+  const seen = new Set<string>();
+  let key = ownerKey;
+  for (let index = 0; index < JOURNAL_FEEDBACK_ALIAS_LIMIT; index += 1) {
+    const link = pending.get(key);
+    if (!link || !journalFeedbackSameOwner(ownerKey, link.previous) || seen.has(key)) return;
+    try {
+      window.localStorage.getItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
+      // Stable suffix makes retry idempotent even after an ambiguous write.
+      window.localStorage.setItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${link.suffix}`, link.previous);
+      pending.delete(key);
+    } catch {
+      // Keep the link in memory and the dialog in a fail-closed retry state.
+      return;
+    }
+    seen.add(key);
+    key = link.previous;
+  }
+}
+
+
+function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInput> {
+  let drafts = journalInTabFeedbackDraftsByWindow.get(window);
+  if (!drafts) {
+    drafts = new Map<string, JournalExperienceFeedbackInput>();
+    journalInTabFeedbackDraftsByWindow.set(window, drafts);
+  }
+  if (!journalInTabFeedbackRenameObservers.has(window)) {
+    journalInTabFeedbackRenameObservers.add(window);
+    // Name-only profile edits can happen after the Journal route unmounts.
+    // The name-derived workspace ID changes, but the private writing owner does
+    // not. Move only an existing volatile draft, never saved browser bytes.
+    const tabDrafts = drafts;
+    useStore.subscribe((next, previous) => {
+      if (!isNameOnlyJournalRename(previous.profile, next.profile, previous.journal === next.journal)) return;
+      const account = useAccount.getState();
+      const accountId = account.phase === "signed-in" ? account.user?.id ?? null : null;
+      const oldOwner = accountId ? `${previous.profile.userId}:account:${accountId}` : previous.profile.userId;
+      const newOwner = accountId ? `${next.profile.userId}:account:${accountId}` : next.profile.userId;
+      const oldKey = `axom-journal-feedback-draft:${oldOwner}`;
+      const newKey = `axom-journal-feedback-draft:${newOwner}`;
+      const aliasWritten = journalFeedbackRecordNameAlias(oldKey, newKey);
+      // A later rename can persist its own link while an earlier rename
+      // remains unreadable. Flush the earlier link if storage recovered.
+      if (aliasWritten) journalFeedbackRetryPendingNameAliases(oldKey);
+      // If it is still pending, keep the new destination in explicit retry
+      // state so the retry follows the full same-owner rename chain.
+      if (!aliasWritten || journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey)) {
+        const pendingAliases = journalInTabPendingNameAliases();
+        if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_LIMIT && !pendingAliases.has(newKey))
+          pendingAliases.set(newKey, { previous: oldKey, suffix: journalFeedbackRevision() });
+      }
+      const pending = tabDrafts.get(oldKey);
+      // Transfer volatile ownership only when the destination is empty.
+      // Never overwrite another pending draft; clear the old volatile alias
+      // so a later rename cannot resurrect an already-saved stale copy.
+      if (pending && !tabDrafts.has(newKey)) {
+        tabDrafts.set(newKey, pending);
+        tabDrafts.delete(oldKey);
+      }
+    });
+  }
+  return drafts;
+}
+
 const JOURNAL_FEEDBACK_EMPTY: JournalExperienceFeedbackInput = {
   rating: 0, liked: "", wantMore: "", missing: "", painPoints: "", comment: "",
 };
@@ -1838,31 +1953,62 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
 } {
   const legacy = readJournalFeedbackDraft(baseKey);
   const copies: JournalFeedbackCopy[] = [{ key: baseKey, stored: legacy, savedAt: 0, baseFingerprint: null }];
-  const writerPrefix = `${baseKey}:writer:`;
   try {
-    // The legacy key is read-only. Each mounted editor writes its own key, so
-    // independent tabs cannot overwrite each other's private feedback bytes.
+    // A known missing rename link means inventory is incomplete even if
+    // ordinary reads have recovered. Require an explicit persistence retry.
+    if (journalInTabPendingNameAliasesByWindow.get(window)?.has(baseKey))
+      throw new Error("An earlier saved feedback name link is not durable");
+    // Collect the bounded key inventory once. Previous-name lookup is
+    // restricted to append-only links for the SAME account/local owner.
+    const keys: string[] = [];
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
-      if (!key?.startsWith(writerPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(writerPrefix.length))) continue;
-      const stored = readJournalFeedbackDraft(key);
-      let savedAt = 0;
-      let baseFingerprint: string | null = null;
-      if (stored.raw && !stored.unreadable) {
-        const record = JSON.parse(stored.raw) as Record<string, unknown>;
-        savedAt = typeof record.__axomSavedAt === "number" ? record.__axomSavedAt : 0;
-        baseFingerprint = typeof record.__axomBaseFingerprint === "string" ? record.__axomBaseFingerprint : null;
+      if (key) keys.push(key);
+    }
+    const ownerKeys = [baseKey];
+    for (let ownerIndex = 0; ownerIndex < ownerKeys.length; ownerIndex += 1) {
+      if (ownerIndex >= JOURNAL_FEEDBACK_ALIAS_LIMIT)
+        throw new Error("Too many historical feedback owners");
+      const aliasPrefix = `${ownerKeys[ownerIndex]}${JOURNAL_FEEDBACK_ALIAS_TOKEN}`;
+      for (const key of keys) {
+        if (!key.startsWith(aliasPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(aliasPrefix.length))) continue;
+        const previousKey = window.localStorage.getItem(key);
+        if (previousKey && journalFeedbackSameOwner(baseKey, previousKey) && !ownerKeys.includes(previousKey))
+          ownerKeys.push(previousKey);
       }
-      copies.push({ key, stored, savedAt, baseFingerprint });
+    }
+    for (const ownerKey of ownerKeys) {
+      if (ownerKey !== baseKey) {
+        const old = readJournalFeedbackDraft(ownerKey);
+        if (old.unreadable) throw new Error("An older feedback copy cannot be read");
+        if (old.raw !== null)
+          copies.push({ key: ownerKey, stored: old, savedAt: 0, baseFingerprint: null });
+      }
+      const writerPrefix = `${ownerKey}:writer:`;
+      for (const key of keys) {
+        if (!key.startsWith(writerPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(writerPrefix.length))) continue;
+        const stored = readJournalFeedbackDraft(key);
+        let savedAt = 0;
+        let baseFingerprint: string | null = null;
+        if (stored.raw && !stored.unreadable) {
+          const record = JSON.parse(stored.raw) as Record<string, unknown>;
+          savedAt = typeof record.__axomSavedAt === "number" ? record.__axomSavedAt : 0;
+          baseFingerprint = typeof record.__axomBaseFingerprint === "string" ? record.__axomBaseFingerprint : null;
+        }
+        copies.push({ key, stored, savedAt, baseFingerprint });
+      }
     }
   } catch {
-    // An incomplete key inventory cannot prove that another draft is absent.
+    // An incomplete inventory cannot prove that a newer or older draft is absent.
     return {
       selected: { key: baseKey, stored: { ...legacy, unreadable: true }, savedAt: 0, baseFingerprint: null },
       others: [], legacyRaw: legacy.raw,
     };
   }
-  const newest = copies.slice(1).filter((copy) => !copy.stored.acknowledged && !copy.stored.unreadable)
+  // Never automatically replace the current owner's selection with an older
+  // display-name copy. Expose historical records as explicit recoverable copies.
+  const newest = copies.slice(1).filter((copy) => copy.key.startsWith(`${baseKey}:writer:`)
+    && !copy.stored.acknowledged && !copy.stored.unreadable)
     .sort((a, b) => b.savedAt - a.savedAt || b.key.localeCompare(a.key))[0];
   const legacyChangedSinceNewest = newest && legacy.raw !== null
     && newest.baseFingerprint !== journalFeedbackFingerprint(legacy.raw);
@@ -1880,30 +2026,51 @@ function JournalFeedback({ onClose, sessionDrafts }: {
   // another owner's localStorage key. Do not migrate legacy authenticated
   // drafts automatically because the old keys did not identify an account.
   const workspaceId = useStore((state) => state.profile.userId);
-  const accountId = useAccount((state) => state.user?.id);
+  const accountId = useAccount((state) => state.phase === "signed-in" ? state.user?.id : undefined);
   const ownerKey = accountId ? `${workspaceId}:account:${accountId}` : workspaceId;
   const [selection, setSelection] = useState<{ ownerKey: string; key: string } | null>(null);
   const selectedKey = selection?.ownerKey === ownerKey ? selection.key : null;
+  // A prior retry must not steal focus or announce recovery after A -> B -> A.
+  // A visit changes whenever the owner or selected saved copy changes.
+  const retryVisitRef = useRef(0);
+  useEffect(() => { retryVisitRef.current += 1; }, [ownerKey, selectedKey]);
+  const [readRetry, setReadRetry] = useState<{ ownerKey: string; selectedKey: string | null; visit: number; count: number } | null>(null);
+  const retryCount = readRetry?.ownerKey === ownerKey && readRetry.selectedKey === selectedKey
+    && readRetry.visit === retryVisitRef.current ? readRetry.count : 0;
   return <JournalFeedbackForOwner
-    key={`${ownerKey}:${selectedKey ?? "latest"}`}
+    key={`${ownerKey}:${selectedKey ?? "latest"}:${retryCount}`}
     draftKey={`axom-journal-feedback-draft:${ownerKey}`}
     sessionDrafts={sessionDrafts}
     selectedKey={selectedKey}
     onSelectCopy={(key) => setSelection({ ownerKey, key })}
+    onRetryRead={() => {
+      journalFeedbackRetryPendingNameAliases(`axom-journal-feedback-draft:${ownerKey}`);
+      setReadRetry((previous) => ({
+        ownerKey, selectedKey, visit: retryVisitRef.current,
+        count: previous?.ownerKey === ownerKey && previous.selectedKey === selectedKey
+          && previous.visit === retryVisitRef.current ? previous.count + 1 : 1,
+      }));
+    }}
+    retryAttempted={retryCount > 0}
     onClose={onClose}
   />;
 }
 
-function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, sessionDrafts }: {
+function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy, onRetryRead, retryAttempted, sessionDrafts }: {
   onClose: () => void;
   draftKey: string;
   selectedKey: string | null;
   onSelectCopy: (key: string) => void;
+  onRetryRead: () => void;
+  retryAttempted: boolean;
   sessionDrafts: Map<string, JournalExperienceFeedbackInput>;
 }) {
-  const user = useAccount((state) => state.user);
+  const user = useAccount((state) => state.phase === "signed-in" ? state.user : null);
   const [savedCopies] = useState(() => readJournalFeedbackCopies(draftKey, selectedKey));
   const loaded = savedCopies.selected.stored;
+  // If reading fails, permit in-tab writing and export without claiming a
+  // durable save or overwriting an unknown older draft. Corrupt bytes remain locked.
+  const canWriteInTab = loaded.unreadable && loaded.raw === null;
   const [draft, setDraft] = useState(() => sessionDrafts.get(draftKey) ?? loaded.draft);
   const [savedFingerprint, setSavedFingerprint] = useState(() => journalFeedbackFingerprint(loaded.draft));
   const persistedRevisionRef = useRef(loaded.revision);
@@ -1930,12 +2097,25 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
       ? "Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing."
       : loaded.unreadable
         ? loaded.raw === null
-          ? "AXOM could not read saved feedback in this browser. No draft was replaced. Close feedback and try again."
+          ? "AXOM cannot read saved feedback. You can write in this tab, but nothing will save until storage returns. Download before refreshing or closing this tab. Older saved drafts were not changed."
           : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
         : "",
   );
   const submittedReceiptRef = useRef<{ key: string; value: string } | null>(null);
   const [saveRetryToken, setSaveRetryToken] = useState(0);
+
+  // Retry remounts this owner to re-read browser storage. The shared Modal
+  // initially focuses Close, so restore the relevant keyboard target here.
+  useEffect(() => {
+    if (!retryAttempted) return;
+    const dialogs = document.querySelectorAll<HTMLElement>('.journal-feedback-modal[role="dialog"]');
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return;
+    const target = loaded.unreadable
+      ? dialog.querySelector<HTMLButtonElement>('[data-journal-feedback-retry="true"]')
+      : dialog.querySelector<HTMLTextAreaElement>('textarea:not([readonly])');
+    (target ?? dialog).focus();
+  }, [retryAttempted, loaded.unreadable]);
 
   function changeDraft(next: JournalExperienceFeedbackInput) {
     // A failed browser write must survive an account handoff in this tab.
@@ -2057,15 +2237,15 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
         <fieldset className="journal-rating-fieldset">
           <legend>Overall experience</legend>
           <div className="journal-rating-choices">
-            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || loaded.unreadable} onClick={() => changeDraft({ ...draft, rating: value })}>{value}</button>)}
+            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending || (loaded.unreadable && !canWriteInTab)} onClick={() => changeDraft({ ...draft, rating: value })}>{value}</button>)}
           </div>
         </fieldset>
         <div className="journal-feedback-fields">
-          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, liked: event.target.value })} />
-          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, wantMore: event.target.value })} />
-          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, missing: event.target.value })} />
-          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || loaded.unreadable} maxLength={1000} onChange={(event) => changeDraft({ ...draft, painPoints: event.target.value })} />
-          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || loaded.unreadable} maxLength={2000} onChange={(event) => changeDraft({ ...draft, comment: event.target.value })} />
+          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, liked: event.target.value })} />
+          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, wantMore: event.target.value })} />
+          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, missing: event.target.value })} />
+          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={1000} onChange={(event) => changeDraft({ ...draft, painPoints: event.target.value })} />
+          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending || (loaded.unreadable && !canWriteInTab)} maxLength={2000} onChange={(event) => changeDraft({ ...draft, comment: event.target.value })} />
         </div>
         {savedCopies.others.length > 0 && (
           <details className="journal-feedback-note">
@@ -2088,6 +2268,8 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
         )}
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
+        {retryAttempted && !loaded.unreadable && <p className="journal-feedback-note" role="status">Saved feedback is readable again.</p>}
+        {loaded.unreadable && <GButton size="sm" data-journal-feedback-retry="true" onClick={onRetryRead}>Retry reading saved feedback</GButton>}
         {storageError && !loaded.unreadable && !conflicted && <GButton size="sm" onClick={() => setSaveRetryToken((token) => token + 1)}>Retry draft save</GButton>}
         {error && <p className="journal-feedback-note" role="alert">{error}</p>}
       </>}

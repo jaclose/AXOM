@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAccount, resumeLinkedWorkspaceAfterHydration } from "../lib/account/accountStore";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "../lib/journalNotebook";
 import { flushLocalVaultWrites, localVaultStorage } from "../lib/localVault";
-import { dayKey } from "../lib/scoring";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { read, write } from "../lib/sync/syncMetadata";
@@ -17,12 +16,15 @@ const owner = { id: "journal-boot-owner", email: "boot@example.invalid", display
 const other = { ...owner, id: "journal-other-owner" };
 
 beforeEach(async () => {
+  // Reproduce the UTC midnight to 04:00 boundary that made legacy dayKey() fixtures disagree with activeDayKey.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-11T00:05:00Z"));
   await useStore.persist.rehydrate();
   const seed = makeSeed();
   useStore.setState({
     ...seed, questions: [], documents: [], dayPlans: [], tasks: [], logs: [],
     profile: { ...seed.profile, journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true } },
-    journal: [{ id: "persisted-boot-page", date: `${dayKey()}T12:00:00`, today: "A saved day", tomorrow: "", blockers: "",
+    journal: [{ id: "persisted-boot-page", date: `${seed.activeDayKey}T12:00:00`, today: "A saved day", tomorrow: "", blockers: "",
       energy: "Medium", rating: "Useful", freeWriting: "Private writing loaded from the persisted vault.", notebookStatus: "draft" }],
   });
   await flushLocalVaultWrites();
@@ -34,6 +36,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   useAccount.setState({ phase: "signed-out", user: null, link: "unlinked" });
   recordWorkspaceHydration(undefined, []);
@@ -51,6 +54,11 @@ async function pendingVaultHydration() {
 }
 
 describe("Journal linked device boot hydration", () => {
+  it("seeds the persisted page for the active day used by Open today’s page", () => {
+    const state = useStore.getState();
+    expect(state.journal[0].date.slice(0, 10)).toBe(state.activeDayKey);
+  });
+
   it("opens the existing owner's persisted page only after actual vault hydration succeeds", async () => {
     const vault = await pendingVaultHydration();
     const activation = resumeLinkedWorkspaceAfterHydration();
