@@ -77,6 +77,43 @@ function isHtmlResponse(response) {
   return /^text\/html(?:\s*;|$)/i.test((response.headers.get("content-type") || "").trim());
 }
 
+// Offline navigation must not replay account-specific, malformed or foreign
+// HTML from a legacy/current shell cache. Cached browser fetches retain URL.
+function safeOfflineShell(response) {
+  if (!response?.ok || response.status !== 200 || response.redirected
+    || !isHtmlResponse(response) || !cacheablePublicResponse(response)) return false;
+  try {
+    const scope = new URL(self.registration.scope);
+    const finalUrl = new URL(response.url);
+    return finalUrl.origin === scope.origin && finalUrl.pathname.startsWith(scope.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function offlineShell() {
+  const cache = await caches.open(CACHE);
+  const response = await cache.match("./index.html");
+  if (!response) return undefined;
+  if (safeOfflineShell(response)) return response;
+  // Delete only the invalid shell entry; never clear older build or learner data.
+  await cache.delete("./index.html");
+  return undefined;
+}
+
+async function installPublicShell() {
+  const routes = ["./", "./index.html"];
+  // Validate both navigation entrypoints before writing either response.
+  const validated = await Promise.all(routes.map(async (path) => {
+    const response = await fetch(new URL(path, self.registration.scope).href, { cache: "no-store" });
+    if (!safeOfflineShell(response)) throw new Error(`Unsafe offline shell: ${path}`);
+    return { path, response };
+  }));
+  const cache = await caches.open(CACHE);
+  await cache.addAll(CORE.filter((path) => !routes.includes(path)));
+  for (const { path, response } of validated) await cache.put(path, response);
+}
+
 function cacheResponse(event, key, response) {
   if (!matchesRequestedResource(event.request, response)) return;
   if (!cacheablePublicResponse(response) && !shippedPublicBuildAsset(event.request, response)) return;
@@ -112,7 +149,7 @@ async function cachedAppAsset(request) {
 }
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(CORE)));
+  event.waitUntil(installPublicShell());
   // No skipWaiting: a ready update must not interrupt an open workspace.
 });
 
@@ -149,9 +186,9 @@ self.addEventListener("fetch", (event) => {
           cacheResponse(event, "./index.html", response);
           return response;
         }
-        return (await caches.open(CACHE).then((cache) => cache.match("./index.html")).catch(() => undefined)) || response;
+        return (await offlineShell().catch(() => undefined)) || response;
       } catch {
-        return (await caches.open(CACHE).then((cache) => cache.match("./index.html")).catch(() => undefined)) || Response.error();
+        return (await offlineShell().catch(() => undefined)) || Response.error();
       }
     })());
     return;

@@ -52,7 +52,8 @@ function worker({ failCacheMatch = false, failCachePut = false, scope = 'https:/
 }
 
 test('worker stages an update without forcing activation; only consent activates', async () => {
-  const app = worker();
+  const app = worker({ fetchResponse: async () =>
+    new Response('<!doctype html>public', { headers: { 'content-type': 'text/html' } }) });
   let task;
   app.events.get('install')({ waitUntil: (value) => { task = value; } });
   await task;
@@ -64,11 +65,61 @@ test('worker stages an update without forcing activation; only consent activates
 
 test('offline navigation uses current shell rather than older retained shell', async () => {
   const app = worker();
-  await (await app.caches.open('axom-shell-old')).put('./index.html', new Response('old'));
-  await (await app.caches.open('axom-shell-current')).put('./index.html', new Response('current'));
+  const shell = (text) => withNetworkUrl(new Response(text, {
+    headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+  }), 'https://app.test/index.html');
+  await (await app.caches.open('axom-shell-old')).put('./index.html', shell('old'));
+  await (await app.caches.open('axom-shell-current')).put('./index.html', shell('current'));
   let response;
   app.events.get('fetch')({ request: { url: 'https://app.test/', method: 'GET', mode: 'navigate' }, respondWith: (value) => { response = value; } });
   assert.equal(await (await response).text(), 'current');
+});
+
+test('offline navigation rejects and evicts protected, malformed or foreign cached shells', async () => {
+  const cases = [
+    ['private no-store', { 'content-type': 'text/html', 'cache-control': 'private, no-store' }, 'https://app.test/index.html'],
+    ['auth-vary', { 'content-type': 'text/html', vary: 'Accept-Encoding, Cookie' }, 'https://app.test/index.html'],
+    ['non-html', { 'content-type': 'text/plain' }, 'https://app.test/index.html'],
+    ['foreign origin', { 'content-type': 'text/html' }, 'https://elsewhere.test/index.html'],
+  ];
+  for (const [name, headers, url] of cases) {
+    const app = worker();
+    const cache = await app.caches.open('axom-shell-current');
+    await cache.put('./index.html', withNetworkUrl(new Response('must-not-replay', { headers }), url));
+    await app.caches.open('other-app');
+    let pending;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test/', method: 'GET', mode: 'navigate' },
+      respondWith: (value) => { pending = value; },
+    });
+    assert.equal((await pending).status, 0, name);
+    assert.equal(await cache.match('./index.html'), undefined, `${name}: remove unsafe shell only`);
+    assert.ok((await app.caches.keys()).includes('other-app'), 'preserve unrelated caches');
+  }
+});
+
+test('install never stores protected shell and retains public HTML for offline use', async () => {
+  for (const headers of [
+    { 'content-type': 'text/html', 'cache-control': 'private, no-store' },
+    { 'content-type': 'text/html', vary: 'Cookie' },
+    { 'content-type': 'text/plain' },
+  ]) {
+    const app = worker({ fetchResponse: async () => new Response('unsafe-shell', { headers }) });
+    let task;
+    app.events.get('install')({ waitUntil: (value) => { task = value; } });
+    await assert.rejects(task, /unsafe offline shell/i);
+    const cache = await app.caches.open('axom-shell-current');
+    assert.equal(await cache.match('./index.html'), undefined, 'install must not write the protected shell');
+    assert.equal(await cache.match('./'), undefined, 'install must not write the protected navigation root');
+  }
+  const app = worker({ fetchResponse: async () =>
+    new Response('<!doctype html>public-shell', { headers: { 'content-type': 'TEXT/HTML; charset=UTF-8', 'cache-control': 'public, max-age=0' } }) });
+  let task;
+  app.events.get('install')({ waitUntil: (value) => { task = value; } });
+  await task;
+  const cache = await app.caches.open('axom-shell-current');
+  assert.equal(await (await cache.match('./index.html')).text(), '<!doctype html>public-shell');
+  assert.equal(await (await cache.match('./')).text(), '<!doctype html>public-shell');
 });
 
 test('current public assets win over retained generations; newest safe fallback survives offline', async () => {
