@@ -306,8 +306,17 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   // fails. Surface the exact in-memory progress without calling it durable;
   // never hide partial writes behind a generic retry prompt.
   const unverifiedDraftProgress = () => {
-    const count = drafts.filter(draft => draftSaveRevisions.current.has(draft.questionId)).length;
-    return count ? ` ${count} of ${drafts.length} draft explanation${count === 1 ? " has" : "s have"} an unverified local update. The complete batch has not been confirmed in durable storage.` : "";
+    const liveQuestions = useStore.getState().questions ?? [];
+    const applied = drafts.filter(draft => {
+      const receipt = draftSaveRevisions.current.get(draft.questionId);
+      const current = liveQuestions.find(question => question.id === draft.questionId);
+      return receipt?.source === draft.sourceFingerprint && Boolean(current)
+        && questionExplanationFingerprint(current!) === receipt.applied;
+    }).length;
+    if (applied) return ` ${applied} of ${drafts.length} draft explanation${applied === 1 ? " has" : "s have"} an unverified local update. The complete batch has not been confirmed in durable storage.`;
+    return drafts.some(draft => draftSaveRevisions.current.has(draft.questionId))
+      ? " An earlier optimistic draft update may have been superseded by newer work. No complete batch save has been confirmed."
+      : "";
   };
 
   async function saveReviewedDrafts() {
