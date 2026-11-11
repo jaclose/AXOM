@@ -63,6 +63,39 @@ test("direct JSON inventory must declare a verified nonnegative missing-SHA deno
   assert.ok(actuallyMissing.blockers.some(x => x.includes("eligible academic sources have no verified SHA-256")));
 });
 
+test("Course Tracker template baseline denominator is required and strictly counted", () => {
+  const malformed = [
+    ["omitted", undefined], ["null", null], ["string", "2"], ["object", {}],
+    ["missing item count", [{}]], ["string item count", [{ items: "2" }]],
+    ["negative", [{ items: -1 }]], ["fraction", [{ items: 0.5 }]],
+    ["unsafe count", [{ items: Number.MAX_SAFE_INTEGER + 1 }]],
+    ["aggregate overflow", [{ items: Number.MAX_SAFE_INTEGER }, { items: 1 }]],
+  ];
+  for (const [label, candidate] of malformed) {
+    const inventory = fixture();
+    if (label === "omitted") delete inventory.summary.templates;
+    else inventory.summary.templates = candidate;
+    const r = run({ inventory });
+    assert.equal(r.complete, false, `Unverified Tracker denominator ${label} must hold.`);
+    assert.equal(r.counts.expectedBaselineTrackerActivities, null);
+    assert.ok(r.blockers.some(message => message.includes("template activity denominator")),
+      `Missing denominator hold for ${label}: ${JSON.stringify(r.blockers)}`);
+  }
+
+  const explicitEmpty = fixture();
+  explicitEmpty.summary.templates = [];
+  const empty = run({ inventory: explicitEmpty, tracker: { activities: [] } });
+  assert.equal(empty.complete, true, JSON.stringify(empty.blockers));
+  assert.equal(empty.counts.expectedBaselineTrackerActivities, 0);
+
+  const positive = fixture();
+  positive.summary.templates = [{ module: "FTM 1", items: 3 }];
+  const shortfall = run({ inventory: positive });
+  assert.equal(shortfall.complete, false);
+  assert.equal(shortfall.counts.expectedBaselineTrackerActivities, 3);
+  assert.ok(shortfall.blockers.some(message => message.includes("Tracker ledger has 2 unique activities")));
+});
+
 test("complete requires source identities, dispositions, verified receipts, and tracker records", () => {
   const r = run();
   assert.equal(r.complete, true, JSON.stringify(r.blockers));
