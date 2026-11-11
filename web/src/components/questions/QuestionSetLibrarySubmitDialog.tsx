@@ -523,6 +523,16 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           setError("");
           setMessage("Your submission is in the library review queue."
             + (otherTabsNotified ? "" : " Other open tabs may need to refresh their publication review."));
+        } else if (recovered?.status === "rejected") {
+          // A rejected row may predate the failed RPC: authenticated readback
+          // cannot establish that this attempt committed. Do not signal a
+          // publication change or claim success, but fail closed on the local
+          // rights/answer grants before exposing a retry.
+          rightsEpoch.current = null;
+          answersEpoch.current = null;
+          setRights(false);
+          setAnswers(false);
+          setMessage("A rejected version is on record. This submission was not confirmed. Review the set and reconfirm both attestations before retrying.");
         }
       } catch { /* The original error remains visible. */ }
     } finally { setBusy(false); }
