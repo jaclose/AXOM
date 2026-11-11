@@ -841,3 +841,89 @@ test('valid code MIME with charset remains available offline', async () => {
     assert.equal(await visit(), 'valid-code', path + ': correct MIME rejected');
   }
 });
+
+test('wrong-MIME fonts and webmanifest are returned online but never cached', async () => {
+  for (const [path, mime] of [
+    ['/fonts/interface.woff2', 'application/json'],
+    ['/fonts/interface.woff', 'text/html'],
+    ['/manifest.webmanifest', 'text/html'],
+  ]) {
+    let online = true;
+    const app = worker({ fetchResponse: async () => {
+      if (!online) throw new Error('offline');
+      return new Response('wrong-resource-mime', {
+        headers: { 'content-type': mime, 'cache-control': 'public, max-age=600' },
+      });
+    } });
+    const visit = async () => {
+      let pending;
+      const lifetime = [];
+      app.events.get('fetch')({
+        request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { pending = value; },
+        waitUntil: (value) => lifetime.push(value),
+      });
+      const response = await pending;
+      await Promise.all(lifetime);
+      return response.text();
+    };
+    assert.equal(await visit(), 'wrong-resource-mime', path + ': online response unchanged');
+    online = false;
+    await assert.rejects(visit(), /offline/, path + ': invalid MIME persisted');
+  }
+});
+
+test('legacy cached wrong-MIME fonts and webmanifest are evicted before replay', async () => {
+  for (const [path, mime] of [
+    ['/fonts/interface.woff2', 'application/json'],
+    ['/fonts/interface.woff', 'text/html'],
+    ['/manifest.webmanifest', 'text/html'],
+  ]) {
+    const url = 'https://app.test' + path;
+    const app = worker();
+    const cache = await app.caches.open('axom-shell-previous');
+    await cache.put(url, withNetworkUrl(new Response('invalid-legacy-resource', {
+      headers: { 'content-type': mime, 'cache-control': 'public, max-age=600' },
+    }), url));
+    let pending;
+    app.events.get('fetch')({
+      request: { url, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    await assert.rejects(pending, /offline/, path + ': invalid cached resource replayed');
+    assert.equal(await cache.match(url), undefined, path + ': invalid cache entry retained');
+  }
+});
+
+test('genuine font and webmanifest MIME stays available offline', async () => {
+  for (const [path, mime] of [
+    ['/fonts/interface.woff2', 'font/woff2; charset=utf-8'],
+    ['/fonts/interface.woff', 'font/woff'],
+    ['/manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
+    ['/manifest.webmanifest', 'application/json'],
+  ]) {
+    let online = true;
+    const app = worker({ fetchResponse: async () => {
+      if (!online) throw new Error('offline');
+      return new Response('valid-resource', {
+        headers: { 'content-type': mime, 'cache-control': 'public, max-age=600' },
+      });
+    } });
+    const visit = async () => {
+      let pending;
+      const lifetime = [];
+      app.events.get('fetch')({
+        request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { pending = value; },
+        waitUntil: (value) => lifetime.push(value),
+      });
+      const response = await pending;
+      await Promise.all(lifetime);
+      return response.text();
+    };
+    assert.equal(await visit(), 'valid-resource');
+    online = false;
+    assert.equal(await visit(), 'valid-resource', path + ': legitimate resource blocked');
+  }
+});
