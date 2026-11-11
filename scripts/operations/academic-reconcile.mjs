@@ -58,7 +58,8 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
     summary: {
       files: entries.length, uniqueFiles: counted.size,
       duplicateFiles: entries.length - counted.size,
-      templates: [{ items: sourceSummary?.tracker_denominators?.parsed_activity_rows ?? 0 }],
+      // An absent tracker summary is unknown coverage, never a verified zero.
+      templates: [{ items: sourceSummary?.tracker_denominators?.parsed_activity_rows }],
     },
     priorityMissingSha: integer(sourceSummary?.file_denominators?.eligible_priority_files_with_unresolved_sha)
       ? sourceSummary.file_denominators.eligible_priority_files_with_unresolved_sha : null,
@@ -198,9 +199,17 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     if (!reviewCountMatches) errors.push(`Review/stored mismatch ${hash.slice(0, 12)}: ${row.reviewCount ?? "unknown"} review, ${receipt.reviewCount ?? "unknown"} stored`);
     if (readyCountMatches && reviewCountMatches) verifiedReadyQuestions += receipt.questionCount;
   }
-  const expectedTracker = Array.isArray(inventory.summary.templates)
-    ? inventory.summary.templates.reduce((sum, entry) => sum + (entry.items ?? 0), 0)
+  // A missing or malformed template denominator is unknown, not an empty
+  // curriculum. Certify Tracker activity coverage only from explicit counts.
+  const templateEntries = inventory.summary.templates;
+  const templateCountsVerified = Array.isArray(templateEntries)
+    && templateEntries.every(entry => entry && integer(entry.items));
+  const trackerTotal = templateCountsVerified
+    ? templateEntries.reduce((sum, entry) => sum + entry.items, 0)
     : null;
+  const expectedTracker = integer(trackerTotal) ? trackerTotal : null;
+  if (expectedTracker === null)
+    blockers.push("Course Tracker template activity denominator is absent or malformed; require explicit per-template nonnegative counts before certifying coverage.");
   const trackerRows = tracker?.activities;
   if (!Array.isArray(trackerRows)) blockers.push("Agent 4 installed-tracker ledger is absent; curriculum installation and progress integrity remain unverified.");
   const tmap = indexUnique(trackerRows ?? [], "activityId", errors, "tracker activity");

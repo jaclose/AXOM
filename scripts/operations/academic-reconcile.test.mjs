@@ -63,6 +63,63 @@ test("direct JSON inventory must declare a verified nonnegative missing-SHA deno
   assert.ok(actuallyMissing.blockers.some(x => x.includes("eligible academic sources have no verified SHA-256")));
 });
 
+test("Course Tracker template baseline denominator is required and strictly counted", () => {
+  const malformed = [
+    ["omitted", undefined], ["null", null], ["string", "2"], ["object", {}],
+    ["missing item count", [{}]], ["string item count", [{ items: "2" }]],
+    ["negative", [{ items: -1 }]], ["fraction", [{ items: 0.5 }]],
+    ["unsafe count", [{ items: Number.MAX_SAFE_INTEGER + 1 }]],
+    ["aggregate overflow", [{ items: Number.MAX_SAFE_INTEGER }, { items: 1 }]],
+  ];
+  for (const [label, candidate] of malformed) {
+    const inventory = fixture();
+    if (label === "omitted") delete inventory.summary.templates;
+    else inventory.summary.templates = candidate;
+    const r = run({ inventory });
+    assert.equal(r.complete, false, `Unverified Tracker denominator ${label} must hold.`);
+    assert.equal(r.counts.expectedBaselineTrackerActivities, null);
+    assert.ok(r.blockers.some(message => message.includes("template activity denominator")),
+      `Missing denominator hold for ${label}: ${JSON.stringify(r.blockers)}`);
+  }
+
+  const explicitEmpty = fixture();
+  explicitEmpty.summary.templates = [];
+  const empty = run({ inventory: explicitEmpty, tracker: { activities: [] } });
+  assert.equal(empty.complete, true, JSON.stringify(empty.blockers));
+  assert.equal(empty.counts.expectedBaselineTrackerActivities, 0);
+
+  const positive = fixture();
+  positive.summary.templates = [{ module: "FTM 1", items: 3 }];
+  const shortfall = run({ inventory: positive });
+  assert.equal(shortfall.complete, false);
+  assert.equal(shortfall.counts.expectedBaselineTrackerActivities, 3);
+  assert.ok(shortfall.blockers.some(message => message.includes("Tracker ledger has 2 unique activities")));
+});
+
+test("expanded source adapter cannot invent zero Tracker activities for an absent summary", () => {
+  const rows = [{ source_sha256: a, original_path: "sources/nonmedical.txt", file_extension: "txt" }];
+  const sourceSummary = { file_denominators: {
+    eligible_priority_files_with_unresolved_sha: 0, catalogued_document_and_asset_paths: 1,
+    sha256_hashed_paths: 1, distinct_byte_sha256: 1,
+  } };
+  const check = summary => reconcileAcademicContent({
+    inventory: expandedSourceInventory(rows, summary),
+    dispositions: { sources: [{ sha256: a, kind: "reference", status: "excluded",
+      reason: "synthetic non-question source" }] },
+    receipts: { sources: [] }, tracker: { activities: [] },
+  });
+
+  const unknown = check(sourceSummary);
+  assert.equal(unknown.complete, false, "No tracker summary cannot imply zero baseline activities.");
+  assert.equal(unknown.counts.expectedBaselineTrackerActivities, null);
+  assert.ok(unknown.blockers.some(message => message.includes("template activity denominator")));
+
+  const explicitZero = check({ ...sourceSummary,
+    tracker_denominators: { parsed_activity_rows: 0 } });
+  assert.equal(explicitZero.complete, true, JSON.stringify(explicitZero.blockers));
+  assert.equal(explicitZero.counts.expectedBaselineTrackerActivities, 0);
+});
+
 test("complete requires source identities, dispositions, verified receipts, and tracker records", () => {
   const r = run();
   assert.equal(r.complete, true, JSON.stringify(r.blockers));
