@@ -4,6 +4,10 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 // adds --disable-back-forward-cache; a history reload must never masquerade
 // as a persisted pageshow restoration.
 test.use({
+  // The installed Chrome channel preserves real BFCache in isolated acceptance
+  // where Playwright's bundled Chromium reports masked not-restored reasons.
+  // Do not weaken the pageshow.persisted gate.
+  channel: "chrome",
   launchOptions: {
     ignoreDefaultArgs: ["--disable-back-forward-cache"],
     args: ["--enable-features=BackForwardCache"],
