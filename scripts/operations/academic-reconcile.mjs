@@ -58,7 +58,8 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
     summary: {
       files: entries.length, uniqueFiles: counted.size,
       duplicateFiles: entries.length - counted.size,
-      templates: [{ items: sourceSummary?.tracker_denominators?.parsed_activity_rows ?? 0 }],
+      // An absent tracker summary is unknown coverage, never a verified zero.
+      templates: [{ items: sourceSummary?.tracker_denominators?.parsed_activity_rows }],
     },
     priorityMissingSha: integer(sourceSummary?.file_denominators?.eligible_priority_files_with_unresolved_sha)
       ? sourceSummary.file_denominators.eligible_priority_files_with_unresolved_sha : null,
