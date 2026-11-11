@@ -30,7 +30,8 @@ const sample = (array, max = 12) => array.slice(0, max);
 
 function indexUnique(list, key, errors, label) {
   const indexed = new Map();
-  for (const item of list) {
+  // Malformed producer ledgers are coverage holds, not uncaught exceptions.
+  for (const item of Array.isArray(list) ? list : []) {
     const id = item?.[key];
     if (typeof id !== "string" || !id.trim()) { errors.push(`${label} entry lacks ${key}`); continue; }
     if (indexed.has(id)) errors.push(`Duplicate ${label} identity: ${id}`);
@@ -78,7 +79,11 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     return { complete: false, errors: ["Source inventory has no entries and summary."], blockers: [], warnings: [], counts: {} };
   }
   const byHash = new Map(), duplicateRecords = [];
-  for (const file of inventory.entries) {
+  for (const [index, file] of inventory.entries.entries()) {
+    if (!file || typeof file !== "object" || Array.isArray(file)) {
+      errors.push(`Invalid source inventory row at index ${index}; require an object with a canonical source checksum.`);
+      continue;
+    }
     if (!SHA256.test(file.sha256 ?? "")) { errors.push(`Invalid source checksum: ${file.path ?? "(unnamed)"}`); continue; }
     if (file.duplicateOf) { duplicateRecords.push(file); continue; }
     if (byHash.has(file.sha256)) errors.push(`Non-duplicate entries share checksum ${file.sha256.slice(0, 12)}`);
