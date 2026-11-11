@@ -1706,17 +1706,19 @@ function journalFeedbackSameOwner(root: string, candidate: string): boolean {
   return Boolean(current && previous && current[2] === previous[2]);
 }
 
-function journalFeedbackRecordNameAlias(oldKey: string, newKey: string) {
-  if (oldKey === newKey || !journalFeedbackSameOwner(newKey, oldKey)) return;
+function journalFeedbackRecordNameAlias(oldKey: string, newKey: string): boolean {
+  if (oldKey === newKey || !journalFeedbackSameOwner(newKey, oldKey)) return false;
   try {
     // If reads are blocked, do not claim to have durable rename metadata.
     window.localStorage.getItem(`${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
     window.localStorage.setItem(
       `${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${journalFeedbackRevision()}`, oldKey,
     );
+    return true;
   } catch {
-    // During an outage the existing in-tab fallback remains exportable.
-    // Nothing overwrites or removes the original saved draft or alias.
+    // Keep the original saved bytes unchanged, and retain a bounded
+    // same-tab link until the owner explicitly retries after the outage.
+    return false;
   }
 }
 
@@ -1726,6 +1728,41 @@ function journalFeedbackRecordNameAlias(oldKey: string, newKey: string) {
 // clears the matching in-memory copy. Older stored bytes are not touched.
 const journalInTabFeedbackDraftsByWindow = new WeakMap<Window, Map<string, JournalExperienceFeedbackInput>>();
 const journalInTabFeedbackRenameObservers = new WeakSet<Window>();
+// These pointers contain only storage owner keys, never feedback text. An
+// unwritten link cannot survive reload; do not present it as a durable copy.
+const journalInTabPendingNameAliasesByWindow = new WeakMap<Window, Map<string, { previous: string; suffix: string }>>();
+
+function journalInTabPendingNameAliases(): Map<string, { previous: string; suffix: string }> {
+  let pending = journalInTabPendingNameAliasesByWindow.get(window);
+  if (!pending) {
+    pending = new Map();
+    journalInTabPendingNameAliasesByWindow.set(window, pending);
+  }
+  return pending;
+}
+
+function journalFeedbackRetryPendingNameAliases(ownerKey: string): void {
+  const pending = journalInTabPendingNameAliasesByWindow.get(window);
+  if (!pending) return;
+  const seen = new Set<string>();
+  let key = ownerKey;
+  for (let index = 0; index < JOURNAL_FEEDBACK_ALIAS_LIMIT; index += 1) {
+    const link = pending.get(key);
+    if (!link || !journalFeedbackSameOwner(ownerKey, link.previous) || seen.has(key)) return;
+    try {
+      window.localStorage.getItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
+      // Stable suffix makes retry idempotent even after an ambiguous write.
+      window.localStorage.setItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${link.suffix}`, link.previous);
+      pending.delete(key);
+    } catch {
+      // Keep the link in memory and the dialog in a fail-closed retry state.
+      return;
+    }
+    seen.add(key);
+    key = link.previous;
+  }
+}
+
 
 function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInput> {
   let drafts = journalInTabFeedbackDraftsByWindow.get(window);
@@ -1747,7 +1784,11 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
       const newOwner = accountId ? `${next.profile.userId}:account:${accountId}` : next.profile.userId;
       const oldKey = `axom-journal-feedback-draft:${oldOwner}`;
       const newKey = `axom-journal-feedback-draft:${newOwner}`;
-      journalFeedbackRecordNameAlias(oldKey, newKey);
+      if (!journalFeedbackRecordNameAlias(oldKey, newKey)) {
+        const pendingAliases = journalInTabPendingNameAliases();
+        if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_LIMIT && !pendingAliases.has(newKey))
+          pendingAliases.set(newKey, { previous: oldKey, suffix: journalFeedbackRevision() });
+      }
       const pending = tabDrafts.get(oldKey);
       // Transfer volatile ownership only when the destination is empty.
       // Never overwrite another pending draft; clear the old volatile alias
@@ -1907,6 +1948,10 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
   const legacy = readJournalFeedbackDraft(baseKey);
   const copies: JournalFeedbackCopy[] = [{ key: baseKey, stored: legacy, savedAt: 0, baseFingerprint: null }];
   try {
+    // A known missing rename link means inventory is incomplete even if
+    // ordinary reads have recovered. Require an explicit persistence retry.
+    if (journalInTabPendingNameAliasesByWindow.get(window)?.has(baseKey))
+      throw new Error("An earlier saved feedback name link is not durable");
     // Collect the bounded key inventory once. Previous-name lookup is
     // restricted to append-only links for the SAME account/local owner.
     const keys: string[] = [];
@@ -1992,11 +2037,14 @@ function JournalFeedback({ onClose, sessionDrafts }: {
     sessionDrafts={sessionDrafts}
     selectedKey={selectedKey}
     onSelectCopy={(key) => setSelection({ ownerKey, key })}
-    onRetryRead={() => setReadRetry((previous) => ({
-      ownerKey, selectedKey, visit: retryVisitRef.current,
-      count: previous?.ownerKey === ownerKey && previous.selectedKey === selectedKey
-        && previous.visit === retryVisitRef.current ? previous.count + 1 : 1,
-    }))}
+    onRetryRead={() => {
+      journalFeedbackRetryPendingNameAliases(`axom-journal-feedback-draft:${ownerKey}`);
+      setReadRetry((previous) => ({
+        ownerKey, selectedKey, visit: retryVisitRef.current,
+        count: previous?.ownerKey === ownerKey && previous.selectedKey === selectedKey
+          && previous.visit === retryVisitRef.current ? previous.count + 1 : 1,
+      }));
+    }}
     retryAttempted={retryCount > 0}
     onClose={onClose}
   />;
