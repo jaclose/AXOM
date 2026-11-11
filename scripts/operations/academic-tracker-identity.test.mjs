@@ -141,12 +141,15 @@ test("malformed source weeks and non-source-based inferred originals fail closed
 });
 
 test("invalid source SHAs, absent IDs and malformed rows cannot disappear", () => {
-  for (const changed of [{ sourceSha256: "invalid" }, { sourceSha256: null },
+  for (const changed of [{ sourceSha256: "invalid" }, { sourceSha256: null }, { sourceSha256: [A] },
     { activityId: "" }, { activityId: " space " }]) {
     const f = fixture();
     Object.assign(f.source.activities[0], changed);
     assert.ok(incomplete(f, "Malformed source").errors.some(x => x.includes("Invalid source")));
   }
+  const masquerade = fixture();
+  masquerade.readback.activities[0].sourceSha256 = [A];
+  assert.ok(incomplete(masquerade, "Coercible installed SHA").errors.some(x => x.includes("Invalid installed")));
   for (const bad of [null, [], 42]) {
     const f = fixture();
     f.readback.activities[1] = bad;
