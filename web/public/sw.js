@@ -287,7 +287,7 @@ function hasOnlyPublicAssetVersion(url) {
   if (!url.search) return true;
   const params = [...url.searchParams];
   if (params.length !== 1 || params[0][0] !== "v") return false;
-  return /^(?:build-\\d{8}|\\d{1,10}(?:\\.\\d{1,4}){0,3}|[a-f0-9]{8,16})$/i.test(params[0][1]);
+  return /^(?:build-\d{8}|\d{1,10}(?:\.\d{1,4}){0,3}|[a-f0-9]{8,16})$/i.test(params[0][1]);
 }
 
 self.addEventListener("fetch", (event) => {
