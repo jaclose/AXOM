@@ -98,6 +98,47 @@ test('offline navigation rejects and evicts protected, malformed or foreign cach
   }
 });
 
+test('offline navigation evicts public-marked shells fetched from noncanonical routes', async () => {
+  for (const path of ['/private/owner-account', '/api/account', '/questions']) {
+    const app = worker();
+    const cache = await app.caches.open('axom-shell-current');
+    await cache.put('./index.html', withNetworkUrl(new Response('misfiled-route-shell', {
+      headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+    }), 'https://app.test' + path));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test/', method: 'GET', mode: 'navigate' },
+      respondWith: (value) => { pending = value; },
+    });
+    assert.equal((await pending).status, 0, path + ': never replay a noncanonical shell');
+    assert.equal(await cache.match('./index.html'), undefined, path + ': evict only misfiled shell');
+  }
+});
+
+test('online deep-route navigation cannot replace the canonical offline shell', async () => {
+  const original = withNetworkUrl(new Response('canonical-shell', {
+    headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+  }), 'https://app.test/index.html');
+  const app = worker({ fetchResponse: async () => new Response('route-html', {
+    headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+  }) });
+  const cache = await app.caches.open('axom-shell-current');
+  await cache.put('./index.html', original);
+  for (const path of ['/private/owner-account', '/questions']) {
+    let pending;
+    const tasks = [];
+    app.events.get('fetch')({
+      request: { url: 'https://app.test' + path, method: 'GET', mode: 'navigate' },
+      respondWith: (value) => { pending = value; },
+      waitUntil: (value) => tasks.push(value),
+    });
+    assert.equal(await (await pending).text(), 'route-html', path + ': online route must render');
+    await Promise.all(tasks);
+    assert.equal(await (await cache.match('./index.html')).text(), 'canonical-shell',
+      path + ': noncanonical navigation must not replace offline shell');
+  }
+});
+
 test('install never stores protected shell and retains public HTML for offline use', async () => {
   for (const headers of [
     { 'content-type': 'text/html', 'cache-control': 'private, no-store' },

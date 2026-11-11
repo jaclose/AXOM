@@ -85,7 +85,12 @@ function safeOfflineShell(response) {
   try {
     const scope = new URL(self.registration.scope);
     const finalUrl = new URL(response.url);
-    return finalUrl.origin === scope.origin && finalUrl.pathname.startsWith(scope.pathname);
+    // Only the shipped SPA entrypoints may provide an offline shell. Deep
+    // navigation (including future account-specific routes) renders online,
+    // but must never replace the shared offline index.html cache entry.
+    return finalUrl.origin === scope.origin && !finalUrl.search
+      && (finalUrl.pathname === scope.pathname
+        || finalUrl.pathname === new URL("./index.html", scope).pathname);
   } catch {
     return false;
   }
@@ -183,7 +188,9 @@ self.addEventListener("fetch", (event) => {
       try {
         const response = await fetch(request, { cache: "no-store" });
         if (response.ok && isHtmlResponse(response)) {
-          cacheResponse(event, "./index.html", response);
+          // Deep SPA routes may render successfully, but are not canonical
+          // public shell resources and must not overwrite offline index.html.
+          if (safeOfflineShell(response)) cacheResponse(event, "./index.html", response);
           return response;
         }
         return (await offlineShell().catch(() => undefined)) || response;
