@@ -60,6 +60,7 @@ beforeEach(() => {
   emitAuth = undefined;
   otherDeviceSessionValid = true;
   onAuthStateChange.mockClear();
+  useAccount.getState().attachCoordinator(null);
   signOut.mockReset().mockImplementation(async (options?: SignOutOptions) => {
     if (!options || options.scope === "global") otherDeviceSessionValid = false;
     emitAuth?.("SIGNED_OUT", null);
@@ -101,8 +102,10 @@ describe("sign out only the current device's authentication session", () => {
     expect(useAccount.getState().message).not.toContain("Signed out");
   });
 
-  it("does not announce full success after local SDK logout reports a remote revocation error", async () => {
+  it("cleans up local sync despite a failed remote token revocation after SDK logout", async () => {
     await startAsA();
+    const dispose = vi.fn();
+    useAccount.getState().attachCoordinator({ dispose } as never);
     signOut.mockImplementationOnce(async (options?: SignOutOptions) => {
       if (!options || options.scope === "global") otherDeviceSessionValid = false;
       emitAuth?.("SIGNED_OUT", null);
@@ -113,6 +116,8 @@ describe("sign out only the current device's authentication session", () => {
     expect(otherDeviceSessionValid).toBe(true);
     expect(useAccount.getState().phase).toBe("signed-out");
     expect(useAccount.getState().message).not.toBe("Signed out. This device’s workspace is still here.");
+    expect(useAccount.getState().error).toContain("Signed out on this device, but server token revocation could not be confirmed");
     expect(useAccount.getState().error).toContain("Synthetic remote token revocation failed");
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 });
