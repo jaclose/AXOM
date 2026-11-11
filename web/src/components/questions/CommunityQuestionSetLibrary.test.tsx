@@ -675,6 +675,22 @@ describe("Community Question Set Library", () => {
     });
   });
 
+  it("does not mistake an empty rationale map for source-reviewed teaching evidence", async () => {
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: {
+        ...snapshot,
+        questions: [{ ...snapshot.questions[0], explanation: undefined, choiceRationales: {} }],
+      },
+      contentDigest: "d".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.getByText("No teaching rationale was included in this approved snapshot.")).toBeTruthy();
+    expect(screen.queryByText(/AI-assisted teaching text/)).toBeNull();
+  });
+
   it("does not invent an answer key or rationale in a legacy preview without evidence", async () => {
     mock.preview.mockResolvedValue({
       id: summary.id,
