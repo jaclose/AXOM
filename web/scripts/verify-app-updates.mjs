@@ -14,6 +14,16 @@ const web = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = await mkdtemp(join(tmpdir(), 'axom-update-browser-'));
 const builds = [join(stage, 'a'), join(stage, 'b')];
 let active = builds[0];
+// Preserve bounded, path-only HTTP diagnostics. The ready promise alone cannot
+// distinguish slow fetches, cache writes and failed worker installs.
+const installHttp = { started: 0, finished: 0, pending: new Map(), httpErrors: [], recent: [] };
+const installBrowserErrors = [];
+const recordBrowserError = (kind, detail) => {
+  if (installBrowserErrors.length < 20) installBrowserErrors.push({ kind, detail: String(detail).slice(0, 240) });
+};
+const safePath = (value) => {
+  try { return new URL(value, 'http://localhost').pathname; } catch { return '<invalid path>'; }
+};
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 // Match the deployed canonical public HTML policy without relaxing privacy for
 // hashed assets or any noncanonical request in this two-build update fixture.
@@ -38,6 +48,23 @@ const server = createServer(async (req, res) => {
     res.end(data);
   } catch { res.writeHead(404); res.end(); }
 });
+server.on('request', (req, res) => {
+  const path = safePath(req.url);
+  installHttp.started++;
+  installHttp.pending.set(req, path);
+  const done = () => {
+    if (!installHttp.pending.delete(req)) return;
+    installHttp.finished++;
+    installHttp.recent.push({ path, status: res.statusCode });
+    if (installHttp.recent.length > 16) installHttp.recent.shift();
+    if (res.statusCode >= 400) {
+      installHttp.httpErrors.push({ path, status: res.statusCode });
+      if (installHttp.httpErrors.length > 16) installHttp.httpErrors.shift();
+    }
+  };
+  res.once('finish', done);
+  res.once('close', done);
+});
 let browser;
 try {
   for (const [index, folder] of builds.entries()) {
@@ -59,13 +86,27 @@ try {
   // Reduced motion skips the startup intro film. Browsers that can play it keep
   // the app inert for up to 1.8 s, and fill() into an inert input is a no-op.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
+  context.on('serviceworker', (worker) => {
+    worker.on('console', (message) => {
+      if (message.type() === 'error') recordBrowserError('worker-console', message.text());
+    });
+    worker.on('close', () => recordBrowserError('worker-closed', safePath(worker.url())));
+  });
   const page = await context.newPage();
+  page.on('pageerror', (error) => recordBrowserError('page-error', error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') recordBrowserError('page-console', message.text());
+  });
+  page.on('requestfailed', (request) => recordBrowserError(
+    'request-failed', `${safePath(request.url())}: ${request.failure()?.errorText || 'unknown'}`,
+  ));
   page.setDefaultTimeout(120_000);
   page.setDefaultNavigationTimeout(120_000);
   await page.goto(`${origin}/?app=1`, { waitUntil: 'networkidle' });
   await completeSetup(page, 'Update persistence check');
   await deferPromisePrompt(page);
-  await page.evaluate(async () => {
+  try {
+    await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.getRegistration();
     let timeout;
     try {
@@ -84,7 +125,18 @@ try {
       window.clearTimeout(timeout);
     }
     localStorage.setItem('axom.theme', 'light');
-  });
+    });
+  } catch (error) {
+    // Never print URL queries, account headers or response bodies.
+    throw new Error(`SW install failed: ${error.message}; diagnostics=${JSON.stringify({
+      httpStarted: installHttp.started,
+      httpFinished: installHttp.finished,
+      httpPending: [...installHttp.pending.values()].slice(0, 16),
+      httpErrors: installHttp.httpErrors,
+      recentHttp: installHttp.recent,
+      browserErrors: installBrowserErrors,
+    })}`, { cause: error });
+  }
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   const oldEntry = await page.locator('script[type="module"][src]').getAttribute('src');
