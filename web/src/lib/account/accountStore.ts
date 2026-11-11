@@ -588,17 +588,31 @@ export const useAccount = create<AccountState>((set, get) => {
     },
 
     async signOut() {
+      const initiatingUserId = get().user?.id;
+      const initiatingEpoch = accountIdentityEpoch;
+      const sameSession = () =>
+        accountIdentityEpoch === initiatingEpoch && get().user?.id === initiatingUserId;
+      // Supabase can emit SIGNED_OUT before auth.signOut() resolves. Accept
+      // only that direct A → signed-out transition, not A → B or A → B → A.
+      const sdkEndedThisSession = () =>
+        accountIdentityEpoch === initiatingEpoch + 1
+        && !get().user && get().phase === "signed-out";
+      const canSettle = () => sameSession() || sdkEndedThisSession();
       const signedOut = await guarded("Signing out…", async () => {
         const supabase = await loadSupabase();
+        // The SDK is global to the browser. A delayed load must never sign out
+        // B when this request was started by A.
+        if (!sameSession()) return false;
         if (!supabase && cloudConfigured()) throw new Error("The account service couldn’t load. Try again before signing out.");
         if (supabase) {
           const { error } = await supabase.auth.signOut();
           if (error) throw error;
         }
+        if (!canSettle()) return false;
         coordinator?.dispose();
         return true;
-      });
-      if (!signedOut) return;
+      }, canSettle);
+      if (!signedOut || !canSettle()) return;
       clearAccountUploadCaches();
       clearAccountSync();
       set({
