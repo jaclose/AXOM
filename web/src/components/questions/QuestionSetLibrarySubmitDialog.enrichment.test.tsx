@@ -860,6 +860,32 @@ describe("Question Set draft explanation review", () => {
     expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
   });
 
+  it("revokes same-tab rights and answer grants after an acknowledged submission returns rejected", async () => {
+    const source = question({ explanation: "The arterial tunica media contains smooth muscle that controls lumen diameter and vascular resistance." });
+    mocks.workspace.questions = [source];
+    // A rejection may be discovered on immediate authenticated readback. The
+    // original submission was acknowledged, so its consent cannot be reused.
+    mocks.submissions.mockResolvedValueOnce([]).mockResolvedValueOnce([{ ...publishedSubmission, status: "rejected" }]);
+    mocks.submit.mockReset().mockResolvedValueOnce(publishedSubmission.id);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    fireEvent.click(send);
+    expect(await screen.findByText(/This version was already rejected/)).toBeTruthy();
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const retrySend = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    expect(rights.checked).toBe(false);
+    expect(answers.checked).toBe(false);
+    expect(retrySend.disabled).toBe(true);
+    fireEvent.click(rights);
+    expect(retrySend.disabled).toBe(true);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(source.correctKey).toBe("A");
+  });
+
   it("requires fresh rights and answer attestations after a confirmed withdrawal", async () => {
     const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
     mocks.workspace.questions = [source];
