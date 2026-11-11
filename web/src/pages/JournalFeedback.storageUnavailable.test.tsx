@@ -246,6 +246,32 @@ describe("Journal feedback when browser storage cannot be read", () => {
     });
   }
 
+  it("accepts a valid saved-writer receipt marker without mistaking it for a damaged writer key", () => {
+    clearFixtureCopies();
+    const currentName = "Journal R38 Receipt Workspace";
+    const currentKey = `axom-journal-feedback-draft:${userIdFromName(currentName)}`;
+    const writerKey = `${currentKey}:writer:${"c".repeat(32)}`;
+    const savedBytes = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R38 valid writer receipt coexistence." });
+    useStore.getState().updateProfile({ name: currentName });
+    localStorage.setItem(currentKey, oldDraft);
+    localStorage.setItem(writerKey, savedBytes);
+    localStorage.setItem(`${writerKey}:submitted`, "intentionally-not-matching-the-draft-revision");
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.queryByRole("button", { name: "Retry reading saved feedback" })).toBeNull();
+      expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+      expect(localStorage.getItem(writerKey)).toBe(savedBytes);
+      expect(localStorage.getItem(`${writerKey}:submitted`))
+        .toBe("intentionally-not-matching-the-draft-revision");
+    } finally {
+      cleanup();
+      localStorage.removeItem(currentKey);
+      localStorage.removeItem(writerKey);
+      localStorage.removeItem(`${writerKey}:submitted`);
+    }
+  });
+
   it("recovers original feedback through 256 durable rename links but blocks a 257th", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 258 }, (_, index) => `Journal R35 Boundary Name ${index}`);
