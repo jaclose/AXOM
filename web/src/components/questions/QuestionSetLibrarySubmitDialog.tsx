@@ -504,6 +504,9 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     try {
       await withdrawQuestionSetSubmission(accountId, withdrawingId);
       withdrawalAcknowledged = true;
+      // An acknowledged retry supersedes any previously uncertain result.
+      // Do not emit a second cross-tab invalidation at status readback.
+      uncertainWithdrawal.current = null;
       // Notify other same-origin tabs even when the status readback times out.
       const otherTabsNotified = signalCommunityPublicationChange();
       const remaining = await refresh();
