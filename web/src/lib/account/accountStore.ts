@@ -247,9 +247,11 @@ export const useAccount = create<AccountState>((set, get) => {
   let profileReadOrder = 0;
   let profileAppliedReadOrder = 0;
   let profileWriteOrder = 0;
-  // Keep profile-table and auth-metadata writes sequential within this store.
-  // A second Save must not interleave the two independent acknowledgements.
-  let profileRenameQueue: Promise<void> = Promise.resolve();
+  // Serialize profile/auth receipts only within the same owner, not across
+  // different accounts in a shared store. A stuck A upload must not stall B.
+  // Keep an earlier A turn pending across A -> B -> A: same-owner writes may
+  // otherwise race with an already-issued A request at the server.
+  const profileRenameQueues = new Map<string, Promise<void>>();
   let confirmedProfileName: { userId: string; epoch: number; name: string } | undefined;
   // Keep the SDK-derived fallback separate from an authoritative profile name.
   // A successful no-row read must not retain a removed profile's cached name.
@@ -557,9 +559,10 @@ export const useAccount = create<AccountState>((set, get) => {
       // Reserve this mutation's turn immediately, before any await.
       // Queueing the full pair avoids a completed later profile write being
       // contradicted by an earlier auth-metadata acknowledgement (or vice versa).
-      const previousRename = profileRenameQueue;
+      const previousRename = profileRenameQueues.get(user.id) ?? Promise.resolve();
       let releaseRename!: () => void;
-      profileRenameQueue = new Promise<void>((resolve) => { releaseRename = resolve; });
+      const currentRename = new Promise<void>((resolve) => { releaseRename = resolve; });
+      profileRenameQueues.set(user.id, currentRename);
       await previousRename;
       try {
         // A queued request must not begin writes after A → B → A.
@@ -600,6 +603,11 @@ export const useAccount = create<AccountState>((set, get) => {
         return Boolean(result);
       } finally {
         releaseRename();
+        // Only remove the tail if no newer same-account save reserved a turn.
+        // Different account queues remain independent throughout.
+        if (profileRenameQueues.get(user.id) === currentRename) {
+          profileRenameQueues.delete(user.id);
+        }
       }
     },
 
