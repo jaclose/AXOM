@@ -855,3 +855,137 @@ test("SQL withdrawal readback outage requires a fresh rights and source attestat
     await database.close();
   }
 });
+
+
+test("SQL withdrawal with a lost RPC response and failed readback revokes other-tab consent only after recovery", async ({ page, baseURL }) => {
+  test.setTimeout(240_000);
+  const database = await createPlatformDatabase();
+  const [owner, learner] = PLATFORM_USERS;
+  const second = await page.context().newPage();
+  try {
+    const primaryUnexpected = await database.attach(page, 0);
+    await page.goto(`${baseURL}/#questions`);
+    await seedLocalWorkspace(page);
+    await seedLocalSet(page);
+
+    const secondUnexpected = await database.attach(second, 0);
+    await second.goto(`${baseURL}/#questions`);
+    await seedLocalWorkspace(second);
+    await openLocalSets(second);
+    await second.getByRole("button", { name: "Submit to library", exact: true }).click();
+    const otherTab = second.getByRole("dialog", { name: `Submit ${TITLE}` });
+    const otherRights = otherTab.getByRole("checkbox", { name: /permission to distribute every question/ });
+    const otherAnswers = otherTab.getByRole("checkbox", { name: /checked every answer against its source/ });
+    const otherSend = otherTab.getByRole("button", { name: "Send for review" });
+    await otherRights.check();
+    await otherAnswers.check();
+    await expect(otherSend).toBeEnabled();
+
+    await openLocalSets(page);
+    await page.getByRole("button", { name: "Submit to library", exact: true }).click();
+    const author = page.getByRole("dialog", { name: `Submit ${TITLE}` });
+    await author.getByRole("checkbox", { name: /permission to distribute every question/ }).check();
+    await author.getByRole("checkbox", { name: /checked every answer against its source/ }).check();
+    await author.getByRole("button", { name: "Send for review" }).click();
+    await expect(author.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+    const [first] = await database.rpc(owner.id, "my_question_set_library") as
+      Array<{ id: string; status: string }>;
+    expect(first.status).toBe("pending");
+    const original = await database.rpc(owner.id, "get_question_set_library", { p_id: first.id }) as {
+      snapshot_payload: { questions: Array<{ correctKey: string }> };
+    };
+    expect(original.snapshot_payload.questions[0].correctKey).toBe("B");
+
+    // The acknowledged submission invalidates tab B's first set of grants.
+    // Tab B then renews both, leaving an intentionally stale pair for withdrawal.
+    await expect(otherRights).not.toBeChecked();
+    await expect(otherAnswers).not.toBeChecked();
+    await otherRights.check();
+    await otherAnswers.check();
+    await expect(otherSend).toBeEnabled();
+
+    // A real PostgreSQL withdrawal commits, but the intercepted HTTP response
+    // is replaced with a transport-like 503. Do not fake success at the RPC.
+    let committedWithdrawals = 0;
+    await page.route(/\/rest\/v1\/rpc\/withdraw_question_set_library(?:\?.*)?$/, async route => {
+      if (route.request().method() !== "POST") return route.fallback();
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
+      committedWithdrawals += 1;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "*" },
+        body: JSON.stringify({ code: "PGRST503", message: "Synthetic withdrawal response lost after SQL commit" }),
+      });
+    });
+    let failFirstReadback = true;
+    let statusFailures = 0;
+    await page.route(/\/rest\/v1\/rpc\/my_question_set_library(?:\?.*)?$/, async route => {
+      if (!failFirstReadback) return route.fallback();
+      failFirstReadback = false;
+      statusFailures += 1;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "*" },
+        body: JSON.stringify({ code: "PGRST503", message: "Synthetic status readback outage" }),
+      });
+    });
+
+    const confirmationEvent = page.waitForEvent("dialog");
+    const withdrawalClick = author.getByRole("button", { name: "Withdraw submission" }).click();
+    const confirmation = await confirmationEvent;
+    expect(confirmation.type()).toBe("confirm");
+    await confirmation.accept();
+    await withdrawalClick;
+    await expect(author.locator(".qsl-error")).toContainText(/withdrawal response lost/i);
+    expect(committedWithdrawals).toBe(1);
+    expect(statusFailures).toBe(1);
+    expect(await database.rpc(owner.id, "my_question_set_library")).toEqual([]);
+    expect(await database.rpc(learner.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+
+    // The status lookup failed. No browser-only consent revocation is evidence
+    // of success until an authenticated readback actually establishes removal.
+    await expect(otherRights).toBeChecked();
+    await expect(otherAnswers).toBeChecked();
+    await expect(otherSend).toBeEnabled();
+    await expect(author.getByRole("button", { name: "Retry status check" })).toBeVisible();
+
+    await author.getByRole("button", { name: "Retry status check" }).click();
+    const freshRights = author.getByRole("checkbox", { name: /permission to distribute every question/ });
+    const freshAnswers = author.getByRole("checkbox", { name: /checked every answer against its source/ });
+    await expect(freshRights).not.toBeChecked();
+    await expect(freshAnswers).not.toBeChecked();
+    await expect(author.getByRole("button", { name: "Send for review" })).toBeDisabled();
+
+    // The retry must emit a genuine cross-tab publication change event and
+    // invalidate both stale authorizations, not merely update tab A's modal.
+    await expect(otherRights).not.toBeChecked();
+    await expect(otherAnswers).not.toBeChecked();
+    await expect(otherSend).toBeDisabled();
+    await expect(otherTab.getByText(/Another Question Set publication changed/)).toBeVisible();
+    await otherRights.check();
+    await expect(otherSend).toBeDisabled();
+    await otherAnswers.check();
+    await expect(otherSend).toBeEnabled();
+    await otherSend.click();
+    await expect(otherTab.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+
+    const [replacement] = await database.rpc(owner.id, "my_question_set_library") as
+      Array<{ id: string; status: string }>;
+    expect(replacement.status).toBe("pending");
+    expect(replacement.id).not.toBe(first.id);
+    const newEvidence = await database.rpc(owner.id, "get_question_set_library", { p_id: replacement.id }) as
+      typeof original;
+    expect(newEvidence.snapshot_payload.questions).toEqual(original.snapshot_payload.questions);
+    expect(newEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(await database.rpc(learner.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+    expect(committedWithdrawals).toBe(1);
+    expect(primaryUnexpected).toEqual([]);
+    expect(secondUnexpected).toEqual([]);
+  } finally {
+    await second.close();
+    await database.close();
+  }
+});
