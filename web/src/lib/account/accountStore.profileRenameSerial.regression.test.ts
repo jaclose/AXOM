@@ -183,10 +183,9 @@ describe("profile rename receipt serialization within one account store", () => 
       await vi.waitFor(() => expect(profileWrites).toHaveLength(2), { timeout: 350 });
       bStartedWithoutA = true;
     } catch {
-      // Original store-wide queue waits for A. Settle both to cleanly report RED.
-    } finally {
-      profileWrites[0].finish();
+      // Original store-wide queue waits for A. Unblock it to cleanly report RED.
     }
+    if (!bStartedWithoutA) profileWrites[0].finish();
 
     await vi.waitFor(() => expect(profileWrites).toHaveLength(2));
     expect(profileWrites[1].name).toBe("New B");
@@ -194,11 +193,14 @@ describe("profile rename receipt serialization within one account store", () => 
     await vi.waitFor(() => expect(authWrites).toHaveLength(1));
     expect(authWrites[0].name).toBe("New B");
     authWrites[0].finish();
-    expect(await previousA).toBe(false);
     expect(await currentB).toBe(true);
+    // On GREEN, the old A transport is *still* pending after B's full receipt.
+    if (bStartedWithoutA) profileWrites[0].finish();
+    expect(await previousA).toBe(false);
     expect(authWrites).toHaveLength(1);
     expect(useAccount.getState().user?.id).toBe("synthetic-b");
     expect(useAccount.getState().user?.displayName).toBe("New B");
+    expect(useAccount.getState().message).toBe("Account name updated.");
     expect(bStartedWithoutA).toBe(true);
   });
 });
