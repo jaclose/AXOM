@@ -241,9 +241,11 @@ export const useAccount = create<AccountState>((set, get) => {
   // Identity generations also distinguish A → B → A, where checking only the
   // final account ID would admit stale asynchronous responses from the first A.
   let accountIdentityEpoch = 0;
-  // A profile SELECT may finish after a successful local rename, or an older
-  // SELECT may finish after a newer one. Neither can undo acknowledged state.
+  // A profile SELECT may finish after a successful local rename. Among
+  // overlapping SELECTs, only successful authoritative reads supersede older
+  // results: a failed later request must not suppress a valid earlier one.
   let profileReadOrder = 0;
+  let profileAppliedReadOrder = 0;
   let profileWriteOrder = 0;
   let confirmedProfileName: { userId: string; epoch: number; name: string } | undefined;
   function clearAccountUploadCaches() {
@@ -316,11 +318,17 @@ export const useAccount = create<AccountState>((set, get) => {
     const readOrder = ++profileReadOrder;
     const writeOrder = profileWriteOrder;
     try {
-      const { data } = await (await client()).from("account_profiles").select("display_name").eq("user_id", userId).maybeSingle();
-      const name = (data as { display_name?: string } | null)?.display_name;
+      const { data, error } = await (await client()).from("account_profiles").select("display_name").eq("user_id", userId).maybeSingle();
+      // A PostgREST error response is not an authoritative profile read.
+      // Success with no row, however, must supersede older in-flight results
+      // without fabricating or restoring a deleted profile name.
+      if (error) return;
       const user = get().user;
-      if (epoch === accountIdentityEpoch && readOrder === profileReadOrder
-        && writeOrder === profileWriteOrder && name && user && user.id === userId) {
+      if (epoch !== accountIdentityEpoch || readOrder <= profileAppliedReadOrder
+        || writeOrder !== profileWriteOrder || !user || user.id !== userId) return;
+      profileAppliedReadOrder = readOrder;
+      const name = (data as { display_name?: string } | null)?.display_name;
+      if (name) {
         confirmedProfileName = { userId, epoch, name };
         set({ user: { ...user, displayName: name } });
       }
