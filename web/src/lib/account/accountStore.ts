@@ -241,6 +241,11 @@ export const useAccount = create<AccountState>((set, get) => {
   // Identity generations also distinguish A → B → A, where checking only the
   // final account ID would admit stale asynchronous responses from the first A.
   let accountIdentityEpoch = 0;
+  // A profile SELECT may finish after a successful local rename, or an older
+  // SELECT may finish after a newer one. Neither can undo acknowledged state.
+  let profileReadOrder = 0;
+  let profileWriteOrder = 0;
+  let confirmedProfileName: { userId: string; epoch: number; name: string } | undefined;
   function clearAccountUploadCaches() {
     clearCloudContentCache();
     clearCloudMediaUploadCache();
@@ -271,10 +276,17 @@ export const useAccount = create<AccountState>((set, get) => {
     const ownerChanged = current?.id !== next.user?.id;
     if (ownerChanged || !next.user) {
       accountIdentityEpoch += 1;
+      confirmedProfileName = undefined;
       clearAccountUploadCaches();
     }
-    if (next.user && !ownerChanged && current?.displayName && !session?.user?.user_metadata?.display_name) {
-      next.user = { ...next.user, displayName: current.displayName };
+    const confirmedName = confirmedProfileName;
+    if (next.user && !ownerChanged && current?.displayName) {
+      // An SDK refresh may carry stale auth metadata after the profile table
+      // acknowledged a newer name. A fresh profile SELECT can still replace it.
+      const name = confirmedName?.epoch === accountIdentityEpoch && confirmedName.userId === next.user.id
+        ? confirmedName.name
+        : !session?.user?.user_metadata?.display_name ? current.displayName : undefined;
+      if (name) next.user = { ...next.user, displayName: name };
     }
     // Zustand's set() is shallow: omitting these fields retains A's private
     // history/devices/restore candidate under B, even with no network.
@@ -301,11 +313,17 @@ export const useAccount = create<AccountState>((set, get) => {
 
   async function loadProfileName(userId: string) {
     const epoch = accountIdentityEpoch;
+    const readOrder = ++profileReadOrder;
+    const writeOrder = profileWriteOrder;
     try {
       const { data } = await (await client()).from("account_profiles").select("display_name").eq("user_id", userId).maybeSingle();
       const name = (data as { display_name?: string } | null)?.display_name;
       const user = get().user;
-      if (epoch === accountIdentityEpoch && name && user && user.id === userId) set({ user: { ...user, displayName: name } });
+      if (epoch === accountIdentityEpoch && readOrder === profileReadOrder
+        && writeOrder === profileWriteOrder && name && user && user.id === userId) {
+        confirmedProfileName = { userId, epoch, name };
+        set({ user: { ...user, displayName: name } });
+      }
     } catch {
       // Profile names are cosmetic; the account still works.
     }
@@ -521,6 +539,10 @@ export const useAccount = create<AccountState>((set, get) => {
         assertOwner();
         const current = get().user;
         if (!current) throw new Error("The signed-in account changed during the profile update.");
+        // Any in-flight SELECT began before this acknowledged mutation and
+        // must not restore an obsolete name after the success notice.
+        profileWriteOrder += 1;
+        confirmedProfileName = { userId: user.id, epoch: profileEpoch, name: displayName };
         set({ user: { ...current, displayName } });
         return true;
       }, sameOwner);
