@@ -52,6 +52,50 @@ afterEach(() => {
 });
 
 describe("Journal feedback when browser storage cannot be read", () => {
+  it("keeps a 20-rename recovery chain during denied storage reads until explicit retry", () => {
+    clearFixtureCopies();
+    const names = Array.from({ length: 21 }, (_, index) => `Journal R33 Offline Rename ${index}`);
+    const ownerKeys = names.map((name) => `axom-journal-feedback-draft:${userIdFromName(name)}`);
+    const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R33 original private feedback." });
+    useStore.getState().updateProfile({ name: names[0] });
+    localStorage.setItem(ownerKeys[0], original);
+    const visit = render(<JournalPage />);
+    visit.unmount();
+    const originalGet = Storage.prototype.getItem;
+    const denied = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith("axom-journal-feedback-draft:"))
+        throw new Error("Transient feedback storage read outage");
+      return originalGet.call(this, storageKey);
+    });
+
+    try {
+      // Storage cannot prove an intermediate owner is empty or persist a
+      // rename probe. Pending links must not be silently dropped at link 17.
+      for (const name of names.slice(1)) useStore.getState().updateProfile({ name });
+      denied.mockRestore();
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+      fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+      fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("R33 original private feedback.");
+      expect(originalGet.call(localStorage, ownerKeys[0])).toBe(original);
+      const durable = ownerKeys.slice(1).map((owner) =>
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+          .filter((key) => key?.startsWith(`${owner}:name-alias:v1:`)));
+      expect(durable.every((keys) => keys.length === 1)).toBe(true);
+    } finally {
+      denied.mockRestore();
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (key && ownerKeys.some((owner) => key === owner || key.startsWith(`${owner}:`)))
+          localStorage.removeItem(key);
+      }
+    }
+  });
+
   it("recovers one original saved copy after 20 later display-name edits", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 21 }, (_, index) => `Journal R32 Saved Rename ${index}`);
