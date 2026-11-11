@@ -4,6 +4,19 @@ on:
   pull_request:
     paths:
       - 'web/src/lib/course-engine/**'
+      - 'web/src/lib/academicLibrary/**'
+      - 'web/src/lib/questions*'
+      - 'web/src/lib/quiz*'
+      - 'web/src/components/questions/**'
+      - 'web/src/components/tracker/**'
+      - 'web/src/pages/CourseTrackerPage*.tsx'
+      - 'web/src/pages/QuestionWorkspacePage*.tsx'
+      - 'web/e2e/*academic*'
+      - 'web/e2e/*course*'
+      - 'web/e2e/*question*'
+      - 'web/e2e/*exam*'
+      - 'web/e2e/*quiz*'
+      - 'web/e2e/*tracker*'
       - 'scripts/operations/academic-*.mjs'
       - '.github/workflows/apex-acceptance.yml'
   workflow_dispatch:
@@ -36,6 +49,8 @@ jobs:
       - run: npm --prefix web ci
       - name: Repository regression tests and hygiene
         run: npm run test:repo && npm run repo:check
+      - name: Academic acceptance path coverage regressions
+        run: node --test scripts/operations/academic-acceptance-paths.test.mjs
       - name: Academic source reconciliation and PDF triage regressions
         run: node --test scripts/operations/academic-reconcile.test.mjs scripts/operations/academic-pdf-triage.test.mjs scripts/operations/academic-pdf-bridge.test.mjs
       - name: Install isolated browser runtime
