@@ -944,3 +944,65 @@ test("R20: PDF aliases sharing a canonical question SHA still require explicit P
   assert.equal(withTriage.complete, true,
     "The exact source SHA and current-run proof should still certify this synthetic alias.");
 });
+
+
+test("expanded JSONL rejects malformed ledger containers and malformed rows without throwing", () => {
+  const sourceSummary = {
+    file_denominators: {
+      eligible_priority_files_with_unresolved_sha: 0,
+      catalogued_document_and_asset_paths: 0,
+      sha256_hashed_paths: 0,
+      distinct_byte_sha256: 0,
+    },
+    tracker_denominators: { parsed_activity_rows: 0 },
+  };
+  const check = rows => {
+    const inventory = expandedSourceInventory(rows, sourceSummary);
+    return reconcileAcademicContent({
+      inventory, dispositions: { sources: [] }, receipts: { sources: [] },
+      tracker: { activities: [] },
+    });
+  };
+  const baseline = check([]);
+  assert.equal(baseline.complete, true, JSON.stringify(baseline));
+  for (const [label, malformed] of [
+    ["null ledger", null], ["object ledger", {}], ["string ledger", "oops"],
+    ["null row", [null]], ["boolean row", [false]], ["array row", [[]]],
+    ["string row", ["invalid"]],
+  ]) {
+    let result;
+    assert.doesNotThrow(() => { result = check(malformed); }, label);
+    assert.equal(result.complete, false, `${label} must not certify source coverage`);
+    assert.ok(result.errors.some(message => message.includes("malformed expanded source manifest")),
+      `${label} must be diagnosed explicitly: ${JSON.stringify(result)}`);
+  }
+});
+
+test("expanded JSONL malformed row cannot disappear beside a valid SHA source", () => {
+  const sourceSummary = {
+    file_denominators: {
+      eligible_priority_files_with_unresolved_sha: 0,
+      catalogued_document_and_asset_paths: 2,
+      sha256_hashed_paths: 1,
+      distinct_byte_sha256: 1,
+    },
+    tracker_denominators: { parsed_activity_rows: 0 },
+  };
+  const validRow = { source_sha256: a, original_path: "sources/known.txt", file_extension: "txt" };
+  const receipt = rows => reconcileAcademicContent({
+    inventory: expandedSourceInventory(rows, sourceSummary),
+    dispositions: { sources: [{ sha256: a, kind: "reference", status: "excluded",
+      reason: "synthetic non-question source" }] },
+    receipts: { sources: [] }, tracker: { activities: [] },
+  });
+  const legitimateUnhashedReference = receipt([validRow, { original_path: "refs/unsigned.txt" }]);
+  assert.equal(legitimateUnhashedReference.complete, true,
+    "An explicitly non-priority unhashed reference must remain supported.");
+  for (const row of [null, false, "bad", []]) {
+    let result;
+    assert.doesNotThrow(() => { result = receipt([validRow, row]); });
+    assert.equal(result.complete, false, "Structurally invalid rows cannot be silently skipped.");
+    assert.ok(result.errors.some(message => message.includes("malformed expanded source manifest")),
+      JSON.stringify(result.errors));
+  }
+});
