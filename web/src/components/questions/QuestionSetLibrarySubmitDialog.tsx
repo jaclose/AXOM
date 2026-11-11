@@ -363,6 +363,22 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     try {
       for (const draft of drafts) {
         if (!stillCurrent()) return;
+        // The preflight validates the entire batch, but a synchronous store
+        // subscriber can edit another question while the preceding update
+        // notifies listeners. Recheck the exact live source before EACH write.
+        // Never apply a previously reviewed AI proposal to newer evidence.
+        const latestWorkspace = useStore.getState();
+        const latestQuestion = latestWorkspace.questions?.find(question => question.id === draft.questionId);
+        const latestFingerprint = latestQuestion && questionExplanationFingerprint(latestQuestion);
+        const previousSave = draftSaveRevisions.current.get(draft.questionId);
+        const unchanged = latestQuestion && latestFingerprint === draft.sourceFingerprint
+          && eligibleForExplanationDraft(latestQuestion);
+        const ownRetry = previousSave?.source === draft.sourceFingerprint
+          && latestFingerprint === previousSave.applied;
+        if (!sameCommunitySetReviewRevision(set, latestWorkspace.questionSets?.find(item => item.id === set.id))
+          || !latestQuestion || (!unchanged && !ownRetry)) {
+          throw new Error("A question or its source evidence changed during the batch save. Reopen the set before retrying.");
+        }
         const patch = {
           // Teaching prose remains visibly model-assisted after sharing/import.
           explanation: `${AI_EXPLANATION_PREFIX}${draft.explanation.trim()}`,
