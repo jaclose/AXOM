@@ -161,4 +161,46 @@ describe("profile rename receipt serialization within one account store", () => 
     expect(durableAuth).toBe("Current");
     expect(useAccount.getState().user?.displayName).toBe("Current");
   });
+
+  it("does not block a new B rename behind an unresolved previous A upload", async () => {
+    useAccount.getState().init();
+    await vi.waitFor(() => expect(onAuthStateChange).toHaveBeenCalledTimes(1));
+    emitAuth!("INITIAL_SESSION", sessionFor("synthetic-a"));
+    await vi.waitFor(() => expect(useAccount.getState().user?.id).toBe("synthetic-a"));
+
+    const previousA = useAccount.getState().updateDisplayName("Old A");
+    await vi.waitFor(() => expect(profileWrites).toHaveLength(1));
+    expect(profileWrites[0].name).toBe("Old A");
+
+    emitAuth!("SIGNED_IN", sessionFor("synthetic-b"));
+    await vi.waitFor(() => expect(useAccount.getState().user?.id).toBe("synthetic-b"));
+    const currentB = useAccount.getState().updateDisplayName("New B");
+
+    // The old A transport is intentionally unresolved. Do not make the
+    // assertion itself leave an unhandled write hanging on an expected RED.
+    let bStartedWithoutA = false;
+    try {
+      await vi.waitFor(() => expect(profileWrites).toHaveLength(2), { timeout: 350 });
+      bStartedWithoutA = true;
+    } catch {
+      // Original store-wide queue waits for A. Unblock it to cleanly report RED.
+    }
+    if (!bStartedWithoutA) profileWrites[0].finish();
+
+    await vi.waitFor(() => expect(profileWrites).toHaveLength(2));
+    expect(profileWrites[1].name).toBe("New B");
+    profileWrites[1].finish();
+    await vi.waitFor(() => expect(authWrites).toHaveLength(1));
+    expect(authWrites[0].name).toBe("New B");
+    authWrites[0].finish();
+    expect(await currentB).toBe(true);
+    // On GREEN, the old A transport is *still* pending after B's full receipt.
+    if (bStartedWithoutA) profileWrites[0].finish();
+    expect(await previousA).toBe(false);
+    expect(authWrites).toHaveLength(1);
+    expect(useAccount.getState().user?.id).toBe("synthetic-b");
+    expect(useAccount.getState().user?.displayName).toBe("New B");
+    expect(useAccount.getState().message).toBe("Account name updated.");
+    expect(bStartedWithoutA).toBe(true);
+  });
 });
