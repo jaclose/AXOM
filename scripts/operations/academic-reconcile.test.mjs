@@ -1006,3 +1006,37 @@ test("expanded JSONL malformed row cannot disappear beside a valid SHA source", 
       JSON.stringify(result.errors));
   }
 });
+
+// R35: an unassigned Tracker receipt cannot simultaneously claim a numbered
+// week, and any present week must be a nonnegative integer. Unknown source
+// filing is preserved; this validates receipt shape, not invented source weeks.
+test("Tracker receipts reject contradictory unassigned weeks and malformed week values", () => {
+  const original = run();
+  assert.equal(original.complete, true, JSON.stringify(original));
+  for (const [label, changes, expectedMessage] of [
+    ["unassigned positive week", { weekBasis: "unassigned", week: 3 }, "unassigned receipt claims a week"],
+    ["unassigned zero week", { weekBasis: "unassigned", week: 0 }, "unassigned receipt claims a week"],
+    ["unassigned negative week", { weekBasis: "unassigned", week: -1 }, "invalid week"],
+    ["inferred string week", { weekBasis: "inferred", week: "3" }, "invalid week"],
+    ["inferred fractional week", { weekBasis: "inferred", week: 2.5 }, "invalid week"],
+    ["inferred negative week", { weekBasis: "inferred", week: -1 }, "invalid week"],
+  ]) {
+    const changed = tracker();
+    Object.assign(changed.activities[1], changes);
+    const report = run({ tracker: changed });
+    assert.equal(report.complete, false, `${label} must fail closed: ${JSON.stringify(report)}`);
+    assert.ok(report.errors.some(message => message.includes(expectedMessage)),
+      `${label} has no explicit week-shape error: ${JSON.stringify(report.errors)}`);
+  }
+  for (const changes of [
+    { weekBasis: "unassigned" },
+    { weekBasis: "unassigned", week: null },
+    { weekBasis: "inferred", week: 3 },
+    { weekBasis: "explicit", week: 3 },
+  ]) {
+    const changed = tracker();
+    Object.assign(changed.activities[1], changes);
+    assert.equal(run({ tracker: changed }).complete, true,
+      `valid Tracker week receipt rejected: ${JSON.stringify(changes)}`);
+  }
+});
