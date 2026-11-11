@@ -202,7 +202,17 @@ async function installPublicShell() {
   }));
   // Fetch concurrently as Cache.addAll did, but write only after every required
   // asset has passed validation. A failed install never persists partial assets.
-  await Promise.all(assets.filter(Boolean).map(({ path, response }) => cache.put(path, response)));
+  // Chromium serializes work within a CacheStorage cache; unbounded concurrent
+  // writes can leave a large shell install pending past the update acceptance
+  // deadline even after every HTTP response has finished.
+  const validatedAssets = assets.filter(Boolean);
+  let nextAsset = 0;
+  await Promise.all(Array.from({ length: Math.min(4, validatedAssets.length) }, async () => {
+    while (nextAsset < validatedAssets.length) {
+      const { path, response } = validatedAssets[nextAsset++];
+      await cache.put(path, response);
+    }
+  }));
   // A quota-limited metadata write must not prevent a valid update installing.
   await cache.put(RETAINED_MANIFEST_KEY,
     new Response(JSON.stringify({ version: 1, chunks: RETAINED_CHUNKS }), {
