@@ -1706,13 +1706,13 @@ function journalFeedbackSameOwner(root: string, candidate: string): boolean {
   return Boolean(current && previous && current[2] === previous[2]);
 }
 
-function journalFeedbackRecordNameAlias(oldKey: string, newKey: string): boolean {
+function journalFeedbackRecordNameAlias(oldKey: string, newKey: string, suffix: string): boolean {
   if (oldKey === newKey || !journalFeedbackSameOwner(newKey, oldKey)) return false;
   try {
     // If reads are blocked, do not claim to have durable rename metadata.
     window.localStorage.getItem(`${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
     window.localStorage.setItem(
-      `${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${journalFeedbackRevision()}`, oldKey,
+      `${newKey}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${suffix}`, oldKey,
     );
     return true;
   } catch {
@@ -1793,7 +1793,8 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
       const newOwner = accountId ? `${next.profile.userId}:account:${accountId}` : next.profile.userId;
       const oldKey = `axom-journal-feedback-draft:${oldOwner}`;
       const newKey = `axom-journal-feedback-draft:${newOwner}`;
-      const aliasWritten = journalFeedbackRecordNameAlias(oldKey, newKey);
+      const suffix = journalFeedbackRevision();
+      const aliasWritten = journalFeedbackRecordNameAlias(oldKey, newKey, suffix);
       // A later rename can persist its own link while an earlier rename
       // remains unreadable. Flush the earlier link if storage recovered.
       if (aliasWritten) journalFeedbackRetryPendingNameAliases(oldKey);
@@ -1802,7 +1803,7 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
       if (!aliasWritten || journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey)) {
         const pendingAliases = journalInTabPendingNameAliases();
         if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_LIMIT && !pendingAliases.has(newKey))
-          pendingAliases.set(newKey, { previous: oldKey, suffix: journalFeedbackRevision() });
+          pendingAliases.set(newKey, { previous: oldKey, suffix });
       }
       const pending = tabDrafts.get(oldKey);
       // Transfer volatile ownership only when the destination is empty.
