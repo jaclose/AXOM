@@ -77,7 +77,7 @@ describe("sign out only the current device's authentication session", () => {
   it("passes explicit local scope and keeps a second device's refresh session intact", async () => {
     await startAsA();
     await useAccount.getState().signOut();
-    expect(signOut).toHaveBeenCalledExactlyOnceWith({ scope: "local" });
+    expect(signOut.mock.calls).toEqual([[{ scope: "local" }]]);
     expect(otherDeviceSessionValid).toBe(true);
     expect(useAccount.getState().phase).toBe("signed-out");
     expect(useAccount.getState().user).toBeNull();
@@ -92,7 +92,7 @@ describe("sign out only the current device's authentication session", () => {
       return pending.promise;
     });
     const logoutA = useAccount.getState().signOut();
-    await vi.waitFor(() => expect(signOut).toHaveBeenCalledExactlyOnceWith({ scope: "local" }));
+    await vi.waitFor(() => expect(signOut.mock.calls).toEqual([[{ scope: "local" }]]));
     emitAuth!("SIGNED_IN", sessionFor("device-b"));
     pending.finish({ error: null });
     await logoutA;
@@ -112,7 +112,7 @@ describe("sign out only the current device's authentication session", () => {
       return { error: new Error("Synthetic remote token revocation failed") };
     });
     await useAccount.getState().signOut();
-    expect(signOut).toHaveBeenCalledExactlyOnceWith({ scope: "local" });
+    expect(signOut.mock.calls).toEqual([[{ scope: "local" }]]);
     expect(otherDeviceSessionValid).toBe(true);
     expect(useAccount.getState().phase).toBe("signed-out");
     expect(useAccount.getState().message).not.toBe("Signed out. This device’s workspace is still here.");
