@@ -274,6 +274,7 @@ describe("Question Set draft explanation review", () => {
     mocks.workspace.questions = [{ ...(mocks.workspace.questions[0] as QuestionRecord), explanation: "Newer independently edited source explanation" }];
     await act(async () => { finishFlush(); });
     expect(await screen.findByText(/saved explanations could not be verified/)).toBeTruthy();
+    expect(screen.getByText(/An earlier optimistic draft update may have been superseded by newer work/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
     expect(await screen.findByText(/avoid overwriting newer work/)).toBeTruthy();
     expect(mocks.updateQuestion).toHaveBeenCalledOnce();
