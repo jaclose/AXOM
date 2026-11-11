@@ -1,0 +1,353 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "release": "V2 Build012",
+  "date": "2026-11-11",
+  "parent": "V2 Build011",
+  "chapter": "Gynecologic Pathology: Müllerian Precursors, Tumors, Endometriosis and Trophoblastic Disease",
+  "branch_type": "unmerged independent research work; no production merge/deploy",
+  "metrics": {
+    "parent_unique_registry_entries": 330,
+    "new_unique_diseases": 12,
+    "existing_legacy_entries_deepened_without_new_ids": 5,
+    "new_or_expanded_deep_profiles": 17,
+    "total_internal_entries": 342,
+    "deep_profiles": 215,
+    "remaining_concise_entries": 127,
+    "new_source_records": 16,
+    "total_source_records": 244,
+    "new_individual_image_source_pages": 10,
+    "total_image_associations": 137,
+    "distinct_image_source_pages": 136,
+    "medical_image_binary_embedded": 0,
+    "pdf_pages": 299,
+    "structural_QA_passed": 16,
+    "structural_QA_failed": 0,
+    "Word_a11y_high": 0,
+    "Word_a11y_medium": 0,
+    "Word_a11y_low": 0
+  },
+  "profiles": [
+    {
+      "id": "LEGACY-104",
+      "name": "Endometrial endometrioid carcinoma",
+      "change": "deepened",
+      "discriminator": "Abnormal uterine bleeding; malignant endometrioid glands; POLE/MMRd/p53abn/NSMP modify prognosis and FIGO 2023 staging",
+      "source_ids": [
+        "GYN-NCI-ENDO25",
+        "GYN-FIGO-ENDO23"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "LEGACY-103",
+      "name": "Cervical squamous carcinoma",
+      "change": "deepened",
+      "discriminator": "Persistent oncogenic HPV E6/E7 activity and p16 block staining; stromal invasion distinguishes cancer from HSIL",
+      "source_ids": [
+        "GYN-NCI-CERV25",
+        "GYN-NCI-HPV25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "LEGACY-108",
+      "name": "Ovarian serous carcinoma, high grade",
+      "change": "deepened",
+      "discriminator": "TP53 abnormality frequent; fallopian fimbrial STIC common precursor; distinguish low-grade MAPK-driven tumors",
+      "source_ids": [
+        "GYN-NCI-OV25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "LEGACY-106",
+      "name": "Endometriosis",
+      "change": "deepened",
+      "discriminator": "Ectopic endometrial-like tissue, cyclical pain; normal ultrasound does not exclude superficial peritoneal disease",
+      "source_ids": [
+        "GYN-NICE-ENDO24"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "LEGACY-105",
+      "name": "Uterine leiomyoma",
+      "change": "deepened",
+      "discriminator": "Well-circumscribed whorled benign smooth-muscle nodules; no presumption of inevitable progression to leiomyosarcoma",
+      "source_ids": [
+        "GYN-NICE-HMB26",
+        "GYN-LMS-REV26"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-001",
+      "name": "Endometrial intraepithelial neoplasia / atypical endometrial hyperplasia",
+      "change": "new",
+      "discriminator": "Clonal premalignant gland crowding; exclude concurrent carcinoma before fertility-sparing progestins",
+      "source_ids": [
+        "GYN-ACOG-EIN23"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-002",
+      "name": "Endometrial serous carcinoma",
+      "change": "new",
+      "discriminator": "Often atrophic endometrium with aggressive p53-abnormal high-grade tumor even when superficial",
+      "source_ids": [
+        "GYN-NCI-ENDO25",
+        "GYN-FIGO-ENDO23"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-003",
+      "name": "HPV-associated endocervical adenocarcinoma",
+      "change": "new",
+      "discriminator": "HPV-associated glandular cervical cancer; p16 block/apical mitoses, unlike HPV-independent gastric-type",
+      "source_ids": [
+        "GYN-NCI-CERV25",
+        "GYN-NCI-HPV25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-004",
+      "name": "Ovarian clear cell carcinoma",
+      "change": "new",
+      "discriminator": "Endometriosis-associated; ARID1A/PIK3CA; hobnail cells and hyaline cores",
+      "source_ids": [
+        "GYN-NCI-OV25",
+        "GYN-OCCC-REV25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-005",
+      "name": "Adult-type ovarian granulosa cell tumor",
+      "change": "new",
+      "discriminator": "FOXL2 p.C134W supports tumor class; estrogenic effects and very late recurrence",
+      "source_ids": [
+        "GYN-FOXL2-2010"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-006",
+      "name": "Ovarian dysgerminoma",
+      "change": "new",
+      "discriminator": "OCT4, SALL4, PLAP, CD117 positive germ-cell neoplasm; generally platinum sensitive",
+      "source_ids": [
+        "GYN-NCI-GERM25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-007",
+      "name": "Adenomyosis",
+      "change": "new",
+      "discriminator": "Endometrial glands and stroma in myometrium; heavy painful menses; junctional-zone changes",
+      "source_ids": [
+        "GYN-NICE-HMB26"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-008",
+      "name": "Uterine leiomyosarcoma",
+      "change": "new",
+      "discriminator": "Atypia, mitotic activity and tumor-cell necrosis; imaging cannot categorically exclude malignancy in presumed fibroids",
+      "source_ids": [
+        "GYN-NCI-SARC25",
+        "GYN-LMS-REV26"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-009",
+      "name": "Complete hydatidiform mole",
+      "change": "new",
+      "discriminator": "Often androgenetic diploidy; diffuse trophoblastic hyperplasia, absent villous p57 with positive internal controls",
+      "source_ids": [
+        "GYN-NCI-GTD25",
+        "GYN-MOLE-GEN24"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-010",
+      "name": "Gestational choriocarcinoma",
+      "change": "new",
+      "discriminator": "Cytotrophoblast and syncytiotrophoblast without chorionic villi; marked hCG; early hematogenous metastases",
+      "source_ids": [
+        "GYN-NCI-GTD25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-011",
+      "name": "Cervical high-grade squamous intraepithelial lesion (HSIL/CIN3)",
+      "change": "new",
+      "discriminator": "High-grade noninvasive squamous dysplasia; p16 positivity alone does not establish invasion",
+      "source_ids": [
+        "GYN-ASCCP26",
+        "GYN-NCI-HPV25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    },
+    {
+      "id": "AXOM-GYN-012",
+      "name": "Ovarian low-grade serous carcinoma",
+      "change": "new",
+      "discriminator": "Often KRAS/BRAF/MAPK-driven low-grade nuclei; relative reduced response to standard cytotoxic chemotherapy",
+      "source_ids": [
+        "GYN-NCI-OV25"
+      ],
+      "clinical_status": "source-anchored education draft; independent gynecologic pathology review pending"
+    }
+  ],
+  "source_registry_delta": {
+    "GYN-ACOG-EIN23": "https://www.acog.org/clinical/clinical-guidance/clinical-consensus/articles/2023/09/management-of-endometrial-intraepithelial-neoplasia-or-atypical-endometrial-hyperplasia",
+    "GYN-NCI-ENDO25": "https://www.cancer.gov/types/uterine/hp/endometrial-treatment-pdq",
+    "GYN-FIGO-ENDO23": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10482588/",
+    "GYN-NCI-CERV25": "https://www.cancer.gov/types/cervical/hp/cervical-treatment-pdq",
+    "GYN-NCI-HPV25": "https://www.cancer.gov/types/cervical/hp/cervical-prevention-pdq",
+    "GYN-ASCCP26": "https://www.asccp.org/management-guidelines",
+    "GYN-NCI-OV25": "https://www.cancer.gov/types/ovarian/hp/ovarian-epithelial-treatment-pdq",
+    "GYN-OCCC-REV25": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11756325/",
+    "GYN-FOXL2-2010": "https://www.nature.com/articles/modpathol2010145",
+    "GYN-NCI-GERM25": "https://www.cancer.gov/types/ovarian/hp/ovarian-germ-cell-treatment-pdq",
+    "GYN-NICE-ENDO24": "https://www.nice.org.uk/guidance/ng73/chapter/Recommendations",
+    "GYN-NICE-HMB26": "https://www.nice.org.uk/guidance/ng88/chapter/Recommendations",
+    "GYN-NCI-SARC25": "https://www.cancer.gov/types/uterine/hp/uterine-sarcoma-treatment-pdq",
+    "GYN-LMS-REV26": "https://www.mdpi.com/2227-9059/14/2/285",
+    "GYN-NCI-GTD25": "https://www.cancer.gov/types/gestational-trophoblastic/hp/gtd-treatment-pdq",
+    "GYN-MOLE-GEN24": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11354253/"
+  },
+  "image_provenance_delta": [
+    {
+      "disease_id": "AXOM-GYN-001",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Histopathology_of_endometrial_intraepithelial_neoplasia_(EIN).jpg",
+      "creator": "Mikael Häggström, MD",
+      "license": "CC0 1.0",
+      "modality": "H&E",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "LEGACY-104",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Histopathology_of_endometrioid_cancer,_grade_1,_nuclear_grade_2.jpg",
+      "creator": "Mikael Häggström, MD",
+      "license": "CC0 1.0",
+      "modality": "H&E",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "LEGACY-103",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Invasive_cervical_squamous_cell_carcinoma_on_H&E_histopathology_and_Ki-67_immunohistochemistry.jpg",
+      "creator": "Mikael Häggström, MD",
+      "license": "CC0 1.0",
+      "modality": "H&E and Ki-67 IHC",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "LEGACY-106",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Endometrioma1.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "modality": "H&E",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "LEGACY-105",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Histopathology_of_uterine_leiomyoma.jpg",
+      "creator": "Mikael Häggström, MD",
+      "license": "CC0 1.0",
+      "modality": "H&E",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "AXOM-GYN-004",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Ovarian_clear_cell_carcinoma_-_very_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "modality": "high-power H&E",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "AXOM-GYN-007",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Histopathology_of_adenomyosis.jpg",
+      "creator": "Mikael Häggström, MD",
+      "license": "CC0 1.0",
+      "modality": "H&E",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "AXOM-GYN-009",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Vesicular_Mole_20x.jpg",
+      "creator": "Department of Pathology, Calicut Medical College",
+      "license": "CC BY-SA 4.0",
+      "modality": "H&E, source mole type unresolved",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "AXOM-GYN-011",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Histopathology_of_CIN_3.jpg",
+      "creator": "Mikael Häggström, MD",
+      "license": "CC0 1.0",
+      "modality": "H&E",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    },
+    {
+      "disease_id": "AXOM-GYN-011",
+      "source_url": "https://commons.wikimedia.org/wiki/File:High_grade_squamous_intraepithelial_lesion_-_2_-_ki67_--_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 4.0",
+      "modality": "Ki-67 IHC",
+      "embedded": false,
+      "diagnostic_rights_status": "source-page labeled; individual specimen review/privacy context outstanding; license only verified from file page"
+    }
+  ],
+  "official_ontology": {
+    "MONDO_pinned_snapshot_imported": false,
+    "ICD11_crosswalk_pinned": false,
+    "Orphanet_crosswalk_pinned": false,
+    "verified_new_primary_ids": 0,
+    "official_denominator": null,
+    "coverage_fraction": null,
+    "notes": "Prior official selective MedGen mappings retained from Build011; secondary provisional MONDO:0010888 for adenomyosis not promoted to validated identity."
+  },
+  "package": {
+    "file": "AXOM_Disease_Atlas_V2_Run012_Source_Package.zip",
+    "bytes": 4620251,
+    "sha256": "81f44ee2ec7d6d68b9551e6492cd1eb4bf1023b4a9b40aa55048440aea3ee778",
+    "full_binary_durable_status": "not uploaded to GitHub; persistent Library upload denied"
+  },
+  "master_docx": {
+    "bytes": 323170,
+    "sha256": "a6a21825e1b0ca6d41f2405372809b6c0390bcd0b905bd935c7629d72899ff0d"
+  },
+  "master_pdf": {
+    "pages": 299,
+    "bytes": 3116614,
+    "sha256": "64493e2cbd9508b3e8f033c2a28e09abe0296f01e867e4df1a73540f8974c4a3"
+  },
+  "qa_notes": [
+    "All 330 previous IDs retained, 12 genuinely new IDs, 5 legacy records promoted in place",
+    "Inherited duplicate URL accounts for 137 associations/136 distinct page URLs; all 10 newly added pages unique and absent from prior URL set",
+    "No synthetic medical images; original pixels not downloaded and not embedded",
+    "All 17 profiles contain 15 detailed fields with citations in cumulative DOCX",
+    "DOCX 299-page PDF tested and visual sample pages 276-280 and 296-299 inspected",
+    "Missing complete CAP/WHO IARC classification reconciliation and independent peer review"
+  ],
+  "editorial_status": "educational research draft; verify local practice guidance, approvals and rights before publication"
+}
