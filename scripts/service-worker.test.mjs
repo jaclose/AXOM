@@ -1033,3 +1033,31 @@ test('install retains exact manifest-listed hashed JS/CSS despite no-store/no-ca
   for (const chunk of chunks) assert.equal(await (await cache.match(chunk)).text(), 'immutable-build-code', chunk);
   assert.ok(await cache.match('./index.html'));
 });
+
+
+test('update verifier redacts arbitrary page, worker and network diagnostic text', () => {
+  const source = readFileSync(new URL('../web/scripts/verify-app-updates.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('const installBrowserErrors = [];');
+  const end = source.indexOf('const safePath =', start);
+  assert.ok(start >= 0 && end > start, 'find the actual harness diagnostics block');
+  const sandbox = vm.createContext({});
+  vm.runInContext(source.slice(start, end) + '\nglobalThis.diagnostics = { recordBrowserError, installBrowserErrors };', sandbox);
+  const { recordBrowserError, installBrowserErrors } = sandbox.diagnostics;
+  const secret = 'SYNTHETIC_QUERY_SECRET_R47';
+  recordBrowserError('page-console', `TypeError: failed to fetch https://app.test/path?access_token=${secret}`);
+  recordBrowserError('worker-console', `QuotaExceededError: bearer ${secret}`);
+  recordBrowserError('page-error', `SyntaxError: cookie=${secret}`);
+  recordBrowserError('request-failed', `net::ERR_NAME_NOT_RESOLVED /api/?token=${secret}`);
+  recordBrowserError(`untrusted-${secret}`, `unknown error with ${secret}`);
+  const visible = JSON.parse(JSON.stringify(installBrowserErrors));
+  assert.deepEqual(visible, [
+    { kind: 'page-console', category: 'network' },
+    { kind: 'worker-console', category: 'cache-quota' },
+    { kind: 'page-error', category: 'script' },
+    { kind: 'request-failed', category: 'network' },
+    { kind: 'other', category: 'other' },
+  ]);
+  assert.ok(!JSON.stringify(visible).includes(secret), 'untrusted browser messages must not enter CI artifacts');
+  for (let index = 0; index < 30; index++) recordBrowserError('worker-closed', secret);
+  assert.equal(installBrowserErrors.length, 20, 'browser diagnostics remain bounded');
+});
