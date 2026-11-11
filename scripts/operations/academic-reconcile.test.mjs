@@ -385,6 +385,20 @@ test("Tracker source-week verification preserves repeated contributions and unkn
   assert.equal(run({ inventory: sameWeek, tracker: installed }).complete, true,
     "Multiple source templates may contribute to one explicitly documented week.");
 
+  const explicitAndUnassigned = fixture();
+  explicitAndUnassigned.summary.templates = [
+    { term: "T1", module: "FTM 1", week: 2, items: 1 },
+    { term: "T1", module: "FTM 1", week: null, weekBasis: "unassigned", items: 1 },
+  ];
+  assert.equal(run({ inventory: explicitAndUnassigned, tracker: tracker() }).complete, true,
+    "A source-declared unassigned activity must coexist with an explicitly filed week.");
+  const wronglyFiled = tracker();
+  wronglyFiled.activities[1] = { ...wronglyFiled.activities[1], week: 3, weekBasis: "inferred" };
+  const wronglyFiledResult = run({ inventory: explicitAndUnassigned, tracker: wronglyFiled });
+  assert.equal(wronglyFiledResult.complete, false,
+    "A source-unassigned activity cannot be refiled into an inferred week and still certify coverage.");
+  assert.ok(wronglyFiledResult.blockers.some(message => message.includes("source-unassigned")));
+
   const partial = fixture();
   partial.summary.templates = [
     { term: "T1", module: "FTM 1", week: 2, items: 1 },
