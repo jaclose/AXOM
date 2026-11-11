@@ -69,6 +69,36 @@ async function inspectInstallCache(page) {
     globalThis.clearTimeout(timer);
   }
 }
+// Failure-only installing-worker progress; whitelist phases and bounded counts.
+// Neither request metadata nor private content appears in CI logs.
+async function inspectInstallProgress(page) {
+  let outerTimer;
+  try {
+    return await Promise.race([
+      page.evaluate(async () => {
+        const installing = (await navigator.serviceWorker.getRegistration())?.installing;
+        if (!installing) return { state: 'unavailable' };
+        return new Promise((resolve) => {
+          const channel = new globalThis.MessageChannel();
+          const timer = globalThis.setTimeout(() => resolve({ state: 'timed-out' }), 1200);
+          channel.port1.onmessage = (event) => {
+            globalThis.clearTimeout(timer);
+            channel.port1.close();
+            const value = event.data || {};
+            const phases = new Set(['idle', 'shell-fetch', 'assets-fetch', 'assets-write', 'manifest-write', 'shell-write', 'complete']);
+            if (!phases.has(value.phase)) return resolve({ state: 'invalid' });
+            const bounded = (n) => Number.isInteger(n) && n >= 0 && n <= 4096 ? n : null;
+            resolve({ state: 'ok', phase: value.phase, shells: bounded(value.shells),
+              assetsTotal: bounded(value.assetsTotal), assetsChecked: bounded(value.assetsChecked),
+              assetsWritten: bounded(value.assetsWritten) });
+          };
+          installing.postMessage({ type: 'AXOM_QUERY_INSTALL_PROGRESS' }, [channel.port2]);
+        });
+      }).catch(() => ({ state: 'unavailable' })),
+      new Promise((resolve) => { outerTimer = globalThis.setTimeout(() => resolve({ state: 'timed-out' }), 1500); }),
+    ]);
+  } finally { globalThis.clearTimeout(outerTimer); }
+}
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 // Match the deployed canonical public HTML policy without relaxing privacy for
 // hashed assets or any noncanonical request in this two-build update fixture.
@@ -174,9 +204,11 @@ try {
   } catch (error) {
     // Only aggregate cache state is recorded; never print cache keys or bodies.
     const installCache = await inspectInstallCache(page);
+    const installProgress = await inspectInstallProgress(page);
     // Never print URL queries, account headers or response bodies.
     throw new Error(`SW install failed: ${error.message}; diagnostics=${JSON.stringify({
       installCache,
+      installProgress,
       httpStarted: installHttp.started,
       httpFinished: installHttp.finished,
       httpPending: [...installHttp.pending.values()].slice(0, 16),
