@@ -19,6 +19,8 @@ export function verifyTrackerIdentity({source, readback, now = new Date()} = {})
     readback: "axom-academic-tracker-installed-readback-v1",
   };
   const integer = n => Number.isSafeInteger(n) && n >= 0;
+  // Source-stated curriculum weeks are one-based; zero is a count, never Week 0.
+  const validWeek = n => Number.isSafeInteger(n) && n >= 1;
   const validName = v => typeof v === "string" && v.length > 0 && v.trim() === v;
   const sourceRows = Array.isArray(source?.activities) ? source.activities : [];
   const installedRows = Array.isArray(readback?.activities) ? readback.activities : [];
@@ -50,7 +52,7 @@ export function verifyTrackerIdentity({source, readback, now = new Date()} = {})
         || !["explicit", "unassigned", ...(kind === "installed" ? ["inferred"] : [])].includes(row.weekBasis)
         || (row.weekBasis === "unassigned"
           ? (row.week !== null && row.week !== undefined)
-          : !integer(row.week))) {
+          : !validWeek(row.week))) {
         errors.push(`Invalid ${kind} activity identity/source SHA/module/week evidence.`);
         continue;
       }
