@@ -128,8 +128,16 @@ function rememberQuizRun(runId: string): boolean {
 function readActiveQuiz(): ActiveQuizSnapshot | undefined {
   try {
     const remembered = rememberedQuizRunId();
-    const scoped = remembered ? parseActiveQuiz(localStorage.getItem(activeQuizRunKey(remembered))) : undefined;
-    if (scoped) return scoped;
+    if (remembered) {
+      const scoped = parseActiveQuiz(localStorage.getItem(activeQuizRunKey(remembered)));
+      if (scoped?.runId === remembered) return scoped;
+      // localStorage belongs to the origin, not to this browser tab. A missing
+      // scoped copy must never fall through to a different tab's legacy mirror.
+      // Older builds may have saved only the legacy key, so permit an exact run
+      // identity match without silently adopting any other run.
+      const legacy = parseActiveQuiz(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
+      return legacy?.runId === remembered ? legacy : undefined;
+    }
     const legacy = parseActiveQuiz(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
     if (legacy?.runId) rememberQuizRun(legacy.runId);
     return legacy;

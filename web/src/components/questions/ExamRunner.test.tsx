@@ -995,6 +995,57 @@ describe("ExamRunner keeps what was answered", () => {
   });
 });
 
+describe("ExamRunner tab-bound recovery", () => {
+  const pointerKey = `${STORAGE_KEYS.quizActiveSession}:run-id`;
+
+  function savedSnapshot(runId: string) {
+    return {
+      mode: "exam", runId, poolIds: [question.id], index: 0, answers: [],
+      picked: "B", revealed: false, startedAt: "2026-07-10T01:00:00.000Z",
+      timed: false, filters: { count: 1, status: "all", ordered: true },
+    };
+  }
+
+  it("does not hijack another tab's legacy recovery when this tab's run mirror is absent", () => {
+    setStore();
+    const otherTab = savedSnapshot("run-other-tab");
+    sessionStorage.setItem(pointerKey, "run-this-tab");
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(otherTab));
+
+    render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start tutor block" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Exam · 1 of 1" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!)).toEqual(otherTab);
+    expect(sessionStorage.getItem(pointerKey)).toBe("run-this-tab");
+  });
+
+  it("rejects a scoped recovery whose embedded run identity differs from this tab's pointer", () => {
+    setStore();
+    const otherTab = savedSnapshot("run-other-tab");
+    sessionStorage.setItem(pointerKey, "run-this-tab");
+    localStorage.setItem(`${STORAGE_KEYS.quizActiveSession}:run:run-this-tab`, JSON.stringify(otherTab));
+
+    render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start tutor block" })).toBeTruthy();
+    expect(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:run-this-tab`)).toBe(JSON.stringify(otherTab));
+  });
+
+  it("still recovers an exact matching legacy run if the scoped mirror is unavailable", () => {
+    setStore();
+    const ownRun = savedSnapshot("run-this-tab");
+    sessionStorage.setItem(pointerKey, ownRun.runId);
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(ownRun));
+
+    render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("heading", { name: "Exam · 1 of 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "B. Beta" }).getAttribute("aria-pressed")).toBe("true");
+    expect(sessionStorage.getItem(pointerKey)).toBe(ownRun.runId);
+  });
+});
+
 describe("ExamRunner durable finalization", () => {
   it("keeps the recovery snapshot until the exact workspace write is confirmed", async () => {
     setStore();
