@@ -11,6 +11,7 @@ import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
 import { hasMainExplanation } from "../../lib/questionExplanationCoverage";
+import { COMMUNITY_PUBLICATION_EPOCH_KEY, readCommunityPublicationEpoch, signalCommunityPublicationChange } from "../../lib/sharing/communityPublicationEpoch";
 import { prepareCurrentCommunityQuestionSetSubmission, sameCommunitySetReviewRevision } from "../../lib/sharing/communitySetPublicationGuard";
 import { mergeReviewedCommunityKeywords } from "../../lib/sharing/communityReviewedKeywords";
 import {
@@ -57,6 +58,11 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const [busy, setBusy] = useState(false);
   const [rights, setRights] = useState(false);
   const [answers, setAnswers] = useState(false);
+  // Grants are valid only for the same-origin publication epoch at which each
+  // checkbox was checked. Another tab can publish+withdraw while this modal
+  // remains open and its initial submission lookup still appears empty.
+  const rightsEpoch = useRef<string | null>(null);
+  const answersEpoch = useRef<string | null>(null);
   // Keep the identity of the learner who actually made these attestations.
   // Account-store changes may render before the reset effect has committed.
   const [attestationAccount, setAttestationAccount] = useState(accountId);
@@ -118,6 +124,20 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     const unsubscribe = useAccount.subscribe(state => revoke(state.user?.id));
     revoke(useAccount.getState().user?.id);
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const onOtherTabPublication = (event: StorageEvent) => {
+      if (event.key !== COMMUNITY_PUBLICATION_EPOCH_KEY) return;
+      if (rightsEpoch.current === null && answersEpoch.current === null) return;
+      rightsEpoch.current = null;
+      answersEpoch.current = null;
+      setRights(false);
+      setAnswers(false);
+      setMessage("Another Question Set publication changed. Reconfirm distribution rights and source-checked answers before submitting.");
+    };
+    window.addEventListener("storage", onOtherTabPublication);
+    return () => window.removeEventListener("storage", onOtherTabPublication);
   }, []);
 
   async function refresh() {
@@ -391,6 +411,17 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       || !attestationsForAccount || !rights || !answers || checking || busy || generating || draftSaveOperation.current || drafts.length
       || unresolved || withMedia || missingExplanations
       || (submission && submission.status !== "rejected")) return;
+    // Re-read synchronously at the actual click, not just on the storage event:
+    // a suspended tab may resume before a queued cross-tab event is delivered.
+    const publicationEpoch = readCommunityPublicationEpoch();
+    if (publicationEpoch === null || rightsEpoch.current !== publicationEpoch || answersEpoch.current !== publicationEpoch) {
+      rightsEpoch.current = null;
+      answersEpoch.current = null;
+      setRights(false);
+      setAnswers(false);
+      setMessage("Publication state changed or browser storage is unavailable. Reconfirm both attestations before submitting.");
+      return;
+    }
     setBusy(true); setError(""); setMessage("");
     try {
       // Bind the publisher's attestations to the exact latest local set, including
@@ -403,14 +434,18 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit, {
         rightsConfirmed: rights, answersConfirmed: answers,
       });
+      // Signal acknowledged mutations before any potentially failing readback.
+      // This prevents a second same-origin tab from silently reusing old grants.
+      const otherTabsNotified = signalCommunityPublicationChange();
       // Account-operation RPCs also assert the current session. Avoid an old
       // account's follow-up query/confirmation if it changed while awaiting.
       if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
       const result = await refresh();
       if (!result || result.id !== id) throw new Error("The submission could not be read back. Check its status before retrying.");
-      setMessage(result?.status === "rejected"
+      setMessage((result?.status === "rejected"
         ? "This version was already rejected. Revise the questions before submitting again."
-        : "Submission received. It will appear in search after an academic reviewer approves it.");
+        : "Submission received. It will appear in search after an academic reviewer approves it.")
+        + (otherTabsNotified ? "" : " Other open tabs may need to refresh their publication review."));
     } catch (cause) {
       if (useAccount.getState().user?.id !== accountId) return;
       setError(cause instanceof Error ? cause.message : "The submission could not be confirmed. Your local set is unchanged.");
@@ -439,6 +474,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     setBusy(true); setError(""); setMessage("");
     try {
       await withdrawQuestionSetSubmission(accountId, withdrawingId);
+      // Notify other same-origin tabs even when the status readback times out.
+      const otherTabsNotified = signalCommunityPublicationChange();
       const remaining = await refresh();
       // An RPC returning without error does not establish that the record was
       // removed. Do not show a false success while the same submission remains.
@@ -450,7 +487,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       // to attest distribution rights and source-checked answers again.
       setRights(false);
       setAnswers(false);
-      setMessage("The submission was withdrawn from the library.");
+      setMessage("The submission was withdrawn from the library."
+        + (otherTabsNotified ? "" : " Other open tabs may need to refresh their publication review."));
     } catch (cause) {
       if (useAccount.getState().user?.id === accountId) {
         setError(cause instanceof Error ? cause.message : "Withdrawal could not be confirmed.");
@@ -528,9 +566,17 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         <label className="qsl-field">Public credit (optional)
           <input className="field" value={attestationsForAccount ? credit : ""} maxLength={80} disabled={busy || !attestationsForAccount} onChange={event => setCredit(event.target.value)} placeholder="Name to show beside this set" />
         </label>
-        <label className="qsl-check"><input type="checkbox" checked={attestationsForAccount && rights} disabled={busy || !attestationsForAccount} onChange={event => setRights(event.target.checked)} />
+        <label className="qsl-check"><input type="checkbox" checked={attestationsForAccount && rights} disabled={busy || !attestationsForAccount} onChange={event => {
+            const epoch = event.target.checked ? readCommunityPublicationEpoch() : null;
+            rightsEpoch.current = epoch;
+            setRights(event.target.checked && epoch !== null);
+          }} />
           <span>I own this content or have permission to distribute every question, answer and explanation.</span></label>
-        <label className="qsl-check"><input type="checkbox" checked={attestationsForAccount && answers} disabled={busy || !attestationsForAccount} onChange={event => setAnswers(event.target.checked)} />
+        <label className="qsl-check"><input type="checkbox" checked={attestationsForAccount && answers} disabled={busy || !attestationsForAccount} onChange={event => {
+            const epoch = event.target.checked ? readCommunityPublicationEpoch() : null;
+            answersEpoch.current = epoch;
+            setAnswers(event.target.checked && epoch !== null);
+          }} />
           <span>I checked every answer against its source, verified every explanation, and resolved source-key conflicts.</span></label>
         <GButton variant="primary" disabled={!sessionActive || busy || checking || statusIdentity !== `${accountId}:${set.id}` || !attestationsForAccount || generating || drafts.length > 0 || !rights || !answers || unresolved > 0 || withMedia > 0 || missingExplanations > 0 || Boolean(error && !submission)} onClick={() => void submit()}>
           <ShieldCheck size={16} aria-hidden="true" /> {busy ? "Submitting…" : "Send for review"}
