@@ -301,6 +301,24 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     void generateExplanations();
   }, [autoDraft, accountId, set.id, statusIdentity, checking, submission, provider, draftable.length, generateExplanations, sessionActive]);
 
+  // A multi-question save can stop after one optimistic update if a later
+  // question changes in a synchronous store subscriber or vault persistence
+  // fails. Surface the exact in-memory progress without calling it durable;
+  // never hide partial writes behind a generic retry prompt.
+  const unverifiedDraftProgress = () => {
+    const liveQuestions = useStore.getState().questions ?? [];
+    const applied = drafts.filter(draft => {
+      const receipt = draftSaveRevisions.current.get(draft.questionId);
+      const current = liveQuestions.find(question => question.id === draft.questionId);
+      if (!receipt || !current || receipt.source !== draft.sourceFingerprint) return false;
+      return questionExplanationFingerprint(current) === receipt.applied;
+    }).length;
+    if (applied) return ` ${applied} of ${drafts.length} draft explanation${applied === 1 ? " has" : "s have"} an unverified local update. The complete batch has not been confirmed in durable storage.`;
+    return drafts.some(draft => draftSaveRevisions.current.has(draft.questionId))
+      ? " An earlier optimistic draft update may have been superseded by newer work. No complete batch save has been confirmed."
+      : "";
+  };
+
   async function saveReviewedDrafts() {
     if (!sessionActive || sessionRevoked.current || generating || !accountId || statusIdentity !== `${accountId}:${set.id}`
       || draftSaveOperation.current || !drafts.length || useAccount.getState().user?.id !== accountId) return;
@@ -310,7 +328,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // ownership context without touching any question's updatedAt.
     const liveSet = (bank.questionSets ?? []).find(item => item.id === set.id);
     if (!sameCommunitySetReviewRevision(set, liveSet)) {
-      setGenerationError("The Question Set changed during explanation review. Reopen it before saving drafts.");
+      setGenerationError(`The Question Set changed during explanation review. Reopen it before saving drafts.${unverifiedDraftProgress()}`);
       return;
     }
     const current = new Map((bank.questions ?? []).map(question => [question.id, question]));
@@ -321,7 +339,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       const original = question && fingerprint === draft.sourceFingerprint && eligibleForExplanationDraft(question);
       const ownRetry = previousSave?.source === draft.sourceFingerprint && fingerprint === previousSave.applied;
       if (!question || (!original && !ownRetry) || !set.questionIds.includes(question.id)) {
-        setGenerationError("One or more questions changed. Reopen the set to avoid overwriting newer work.");
+        setGenerationError(`One or more questions changed. Reopen the set to avoid overwriting newer work.${unverifiedDraftProgress()}`);
         return;
       }
     }
@@ -424,7 +442,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       setGenerationProgress("");
       setMessage("Reviewed explanations saved privately. They still require a source check before publication.");
     } catch (cause) {
-      if (stillCurrent()) setGenerationError(`${cause instanceof Error ? cause.message : "The local save could not be confirmed."} Your drafts are still here. Retry when storage is available; reopen the set if its questions changed.`);
+      if (stillCurrent()) setGenerationError(`${cause instanceof Error ? cause.message : "The local save could not be confirmed."}${unverifiedDraftProgress()} Your drafts are still here. Retry when storage is available; reopen the set if its questions changed.`);
     } finally {
       unsubscribe();
       if (draftSaveOperation.current === operation) {
