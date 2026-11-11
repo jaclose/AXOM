@@ -178,7 +178,28 @@ async function installPublicShell() {
     return { path, response };
   }));
   const cache = await caches.open(CACHE);
-  await cache.addAll(CORE.filter((path) => !routes.includes(path)));
+  // Cache.addAll bypasses the response-policy checks below and stores even
+  // private/no-store data. Validate every fetched asset before any cache.put.
+  // Keep manifest-listed immutable JS/CSS available across host deployments.
+  for (const path of CORE.filter((candidate) => !routes.includes(candidate))) {
+    const url = new URL(path, self.registration.scope).href;
+    const request = { url };
+    const response = await fetch(url, { cache: "no-store" });
+    const safe = response.ok && response.status === 200
+      && matchesRequestedResource(request, response)
+      && matchesPublicCodeMime(request, response)
+      && !isHtmlResponse(response)
+      && (cacheablePublicResponse(response)
+        || pinnedPublicBuildAsset(request, response)
+        || shippedPublicBuildAsset(request, response));
+    if (!safe) {
+      // These cosmetic/static entries are not required to open the app offline.
+      // Do not persist them if the host marks them protected or misserves them.
+      if (path === "./manifest.webmanifest" || path === "./icon-192.png") continue;
+      throw new Error(`Unsafe install asset: ${path}`);
+    }
+    await cache.put(path, response);
+  }
   // A quota-limited metadata write must not prevent a valid update installing.
   await cache.put(RETAINED_MANIFEST_KEY,
     new Response(JSON.stringify({ version: 1, chunks: RETAINED_CHUNKS }), {
