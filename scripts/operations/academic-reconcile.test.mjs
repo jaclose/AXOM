@@ -348,6 +348,116 @@ test("source-declared Tracker module/term scope holds foreign substitutions at a
   assert.equal(run({ inventory: unscoped }).complete, true);
 });
 
+test("source-declared Tracker weeks reject same-module wrong-week and basis substitutions", () => {
+  const inventory = fixture();
+  inventory.summary.templates = [
+    { term: "T1", module: "FTM 1", week: 2, items: 1 },
+    { term: "T1", module: "FTM 1", week: 3, items: 1 },
+  ];
+  const installed = tracker();
+  installed.activities[1] = { ...installed.activities[1], week: 3, weekBasis: "explicit" };
+  assert.equal(run({ inventory, tracker: installed }).complete, true,
+    "Two explicitly filed source weeks must reconcile to their correct installed cohorts.");
+
+  for (const [label, change] of [
+    ["wrong week in same module", { week: 4 }],
+    ["inferred instead of explicit filing", { weekBasis: "inferred" }],
+    ["unassigned instead of source week", { weekBasis: "unassigned" }],
+  ]) {
+    const mutated = { activities: installed.activities.map(item => ({ ...item })) };
+    Object.assign(mutated.activities[1], change);
+    const result = run({ inventory, tracker: mutated });
+    assert.equal(result.complete, false, label);
+    assert.ok(result.blockers.some(message => message.includes("Tracker source week")
+      && message.includes("T1/FTM 1") && message.includes("3")),
+      `${label}: ${JSON.stringify(result.blockers)}`);
+  }
+});
+
+test("Tracker source-week verification preserves repeated contributions and unknown source filing", () => {
+  const sameWeek = fixture();
+  sameWeek.summary.templates = [
+    { term: "T1", module: "FTM 1", week: 2, items: 1 },
+    { term: "T1", module: "FTM 1", week: 2, items: 1 },
+  ];
+  const installed = tracker();
+  installed.activities[1] = { ...installed.activities[1], week: 2, weekBasis: "explicit" };
+  assert.equal(run({ inventory: sameWeek, tracker: installed }).complete, true,
+    "Multiple source templates may contribute to one explicitly documented week.");
+
+  const explicitAndUnassigned = fixture();
+  explicitAndUnassigned.summary.templates = [
+    { term: "T1", module: "FTM 1", week: 2, items: 1 },
+    { term: "T1", module: "FTM 1", week: null, weekBasis: "unassigned", items: 1 },
+  ];
+  assert.equal(run({ inventory: explicitAndUnassigned, tracker: tracker() }).complete, true,
+    "A source-declared unassigned activity must coexist with an explicitly filed week.");
+  const wronglyFiled = tracker();
+  wronglyFiled.activities[1] = { ...wronglyFiled.activities[1], week: 3, weekBasis: "inferred" };
+  const wronglyFiledResult = run({ inventory: explicitAndUnassigned, tracker: wronglyFiled });
+  assert.equal(wronglyFiledResult.complete, false,
+    "A source-unassigned activity cannot be refiled into an inferred week and still certify coverage.");
+  assert.ok(wronglyFiledResult.blockers.some(message => message.includes("source-unassigned")));
+
+  const carriedWeek = tracker();
+  carriedWeek.activities[1] = { ...carriedWeek.activities[1], week: 3 };
+  const carriedWeekResult = run({ inventory: explicitAndUnassigned, tracker: carriedWeek });
+  assert.equal(carriedWeekResult.complete, false,
+    "Source-unassigned receipts cannot carry a competing numeric week.");
+  assert.ok(carriedWeekResult.blockers.some(message => message.includes("source-unassigned")));
+
+  const partial = fixture();
+  partial.summary.templates = [
+    { term: "T1", module: "FTM 1", week: 2, items: 1 },
+    { term: "T1", module: "FTM 1", items: 1 },
+  ];
+  const partialResult = run({ inventory: partial, tracker: installed });
+  assert.equal(partialResult.complete, false,
+    "A partial source-week census must not certify an entire module's week membership.");
+  assert.ok(partialResult.blockers.some(message => message.includes("partial source-week")));
+
+  const malformed = fixture();
+  malformed.summary.templates = [{ term: "T1", module: "FTM 1", week: "2", items: 2 }];
+  const malformedResult = run({ inventory: malformed, tracker: installed });
+  assert.equal(malformedResult.complete, false);
+  assert.ok(malformedResult.blockers.some(message => message.includes("invalid source-week")));
+
+  const missingExplicit = fixture();
+  missingExplicit.summary.templates = [{ term: "T1", module: "FTM 1", weekBasis: "explicit", items: 2 }];
+  const missingExplicitResult = run({ inventory: missingExplicit, tracker: installed });
+  assert.equal(missingExplicitResult.complete, false,
+    "A source marked explicitly week-filed without a week number must not pass.");
+  assert.ok(missingExplicitResult.blockers.some(message => message.includes("invalid source-week")));
+
+  const explicitUnknown = fixture();
+  explicitUnknown.summary.templates = [{ term: "T1", module: "FTM 1",
+    week: null, weekBasis: "unassigned", items: 2 }];
+  const fullyUnassigned = tracker();
+  fullyUnassigned.activities[0] = { ...fullyUnassigned.activities[0],
+    week: null, weekBasis: "unassigned" };
+  const explicitUnknownResult = run({ inventory: explicitUnknown, tracker: fullyUnassigned });
+  assert.equal(explicitUnknownResult.complete, true,
+    "JSON null with an unassigned source basis certifies only genuinely unassigned receipts.");
+  const incorrectlyScheduled = run({ inventory: explicitUnknown, tracker: tracker() });
+  assert.equal(incorrectlyScheduled.complete, false,
+    "A source-declared unassigned cohort cannot silently include explicit week placements.");
+  assert.ok(incorrectlyScheduled.blockers.some(message => message.includes("source-unassigned")));
+
+  const explicitNull = fixture();
+  explicitNull.summary.templates = [{ term: "T1", module: "FTM 1",
+    week: null, weekBasis: "explicit", items: 2 }];
+  const explicitNullResult = run({ inventory: explicitNull, tracker: installed });
+  assert.equal(explicitNullResult.complete, false);
+  assert.ok(explicitNullResult.blockers.some(message => message.includes("invalid source-week")));
+
+  const unassigned = fixture();
+  unassigned.summary.templates = [{ term: "T1", module: "FTM 1", items: 2 }];
+  const unknownResult = run({ inventory: unassigned, tracker: tracker() });
+  assert.equal(unknownResult.complete, true,
+    "An unknown source week is not the same as a verified incorrect filing.");
+  assert.ok(unknownResult.warnings.some(message => message.includes("week membership")));
+});
+
 test("duplicate paths must refer to the exact known canonical bytes", () => {
   const inv = fixture();
   inv.entries[1].duplicateOf = "sources/something-else.pdf";

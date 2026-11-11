@@ -257,6 +257,55 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     }
     if (templateEntries.some(entry => typeof entry.module !== "string" || !entry.module.trim()))
       warnings.push("Some Tracker template rows lack source-declared module scope; only their aggregate activity count is verifiable.");
+    // Only a complete, explicitly source-filed term/module cohort can certify
+    // exact source-week membership. Do not infer weeks from installed receipts.
+    for (const scope of declaredScopes.values()) {
+      const matching = templateEntries.filter(entry => entry.module === scope.module
+        && (scope.term === null || entry.term === scope.term));
+      const weekly = matching.filter(entry => entry.week !== undefined && entry.week !== null);
+      // Explicitly source-unassigned rows are a distinct, testable cohort.
+      // Missing week *and* missing filing basis is merely unknown.
+      const sourceUnassigned = matching.filter(entry => (entry.week === undefined || entry.week === null)
+        && entry.weekBasis === "unassigned");
+      if (!weekly.length && !sourceUnassigned.length) {
+        if (matching.some(entry => entry.weekBasis === "explicit")) {
+          blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has invalid source-week evidence; explicit filing requires a numeric week.`);
+        } else {
+          warnings.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has no source-declared week; week membership is unverified.`);
+        }
+        continue;
+      }
+      const ambiguous = !scope.term || templateEntries.some(entry =>
+        !entry.module || (entry.module === scope.module && (!entry.term || !String(entry.term).trim())));
+      if (ambiguous || weekly.length + sourceUnassigned.length !== matching.length) {
+        blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has a partial source-week census; cannot certify exact week membership.`);
+        continue;
+      }
+      if (weekly.some(entry => !integer(entry.week)
+        || (entry.weekBasis !== undefined && entry.weekBasis !== "explicit"))) {
+        blockers.push(`Tracker source scope ${scope.term}/${scope.module} has invalid source-week evidence; require explicit nonnegative week numbers and source-based filing.`);
+        continue;
+      }
+      const declaredWeeks = new Map();
+      for (const entry of weekly) declaredWeeks.set(entry.week, (declaredWeeks.get(entry.week) ?? 0) + entry.items);
+      for (const [week, expected] of declaredWeeks) {
+        const actual = [...tmap.values()].filter(row =>
+          row.term === scope.term && row.module === scope.module
+          && row.weekBasis === "explicit" && row.week === week).length;
+        if (actual !== expected) {
+          blockers.push(`Tracker source week ${scope.term}/${scope.module}/${week} has ${actual}/${expected} explicitly filed activity identities; source-week membership is not verified.`);
+        }
+      }
+      if (sourceUnassigned.length) {
+        const expected = sourceUnassigned.reduce((sum, entry) => sum + entry.items, 0);
+        const actual = [...tmap.values()].filter(row =>
+          row.term === scope.term && row.module === scope.module
+          && row.weekBasis === "unassigned" && (row.week === undefined || row.week === null)).length;
+        if (actual !== expected) {
+          blockers.push(`Tracker source-unassigned cohort ${scope.term}/${scope.module} has ${actual}/${expected} activity identities; source-week membership is not verified.`);
+        }
+      }
+    }
   }
   if (production !== undefined) {
     if (!production || typeof production !== "object" || typeof production.projectId !== "string"
