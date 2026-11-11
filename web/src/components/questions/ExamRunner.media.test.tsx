@@ -101,6 +101,9 @@ beforeEach(() => {
   Object.defineProperty(URL, "createObjectURL", { value: vi.fn(() => "blob:synthetic"), configurable: true });
   Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), configurable: true });
   values.clear();
+  // Each test represents a fresh tab. Its session-scoped run pointer must not
+  // inherit an unfinished run from the previous test's browser context.
+  sessionStorage.clear();
   mocked.media.clear();
   mocked.store = {
     questions: [source], questionSets: [], documents: [], quizSessions: [], quizBlocks: [], tracker: [],
