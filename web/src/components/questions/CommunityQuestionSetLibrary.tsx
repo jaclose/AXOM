@@ -379,6 +379,10 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
                 })}</ul>}
                 {question.explanation && (!question.choiceRationales || Object.keys(question.choiceRationales).length === 0)
                   && <p className="sub">No choice-by-choice rationales were included. Check each distractor against the original source.</p>}
+                {question.explanation && question.choiceRationales && Object.keys(question.choiceRationales).length > 0
+                  && question.options.some(option => !Object.keys(question.choiceRationales ?? {})
+                    .some(key => key.trim().toUpperCase() === option.key.trim().toUpperCase()))
+                  && <p className="sub">Some answer choices lack recorded rationales. Check those choices against the original source.</p>}
                 {!question.explanation && (!question.choiceRationales || Object.keys(question.choiceRationales).length === 0)
                   && <p className="sub">No teaching rationale was included in this approved snapshot.</p>}
               </div>
