@@ -347,9 +347,13 @@ export function readPushResult(data: unknown, status = 200): PushResult {
   throw new SyncPushError({ kind: "rejected", rejection: "refused", status }, "The account answered in a way this version of AXOM does not understand.");
 }
 
-/** Allow for a slow uplink (about 40 KB a second) on top of the account's own time, up to five minutes. */
+/**
+ * Allow a 60s server RPC after the modeled 40 KB/s wire upload, with 15s for
+ * network/response overhead. The five-minute cap is intentional: very large
+ * slow transfers can still time out and must remain retryable, never protected.
+ */
 export function pushTimeout(payloadBytes: number): number {
-  return Math.min(300_000, 45_000 + Math.round(payloadBytes / 40));
+  return Math.min(300_000, 75_000 + Math.ceil(payloadBytes / 40));
 }
 
 function timeoutSignal(ms: number): AbortSignal | undefined {
