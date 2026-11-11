@@ -1185,3 +1185,32 @@ test("one-sided optional proof fails closed; a truly empty explicit Tracker scop
   assert.equal(zero.complete, true, JSON.stringify(zero));
   assert.equal(zero.counts.trackerIdentityVerified, true);
 });
+
+
+test("one-based source weeks reject Week 0 without inventing a numbered curriculum placement", () => {
+  const source = fixture();
+  source.summary.templates = [{ term: "T1", module: "FTM 1", week: 0, items: 2 }];
+  const installed = tracker();
+  for (const row of installed.activities) { row.weekBasis = "explicit"; row.week = 0; }
+  const invalid = run({ inventory: source, tracker: installed });
+  assert.equal(invalid.complete, false, "Matching Week 0 cohorts cannot certify a source-stated week.");
+  assert.ok(invalid.blockers.some(message => message.includes("invalid source-week"))
+    || invalid.errors.some(message => message.includes("invalid week")), JSON.stringify(invalid));
+
+  const inferred = tracker();
+  inferred.activities[0].weekBasis = "inferred";
+  inferred.activities[0].week = 0;
+  const inferredResult = run({ tracker: inferred });
+  assert.equal(inferredResult.complete, false, "Week 0 is not a valid inferred week.");
+  assert.ok(inferredResult.errors.some(message => message.includes("week")), JSON.stringify(inferredResult));
+
+  for (const week of [1, 60]) {
+    const declared = fixture();
+    declared.summary.templates = [{ term: "T1", module: "FTM 1", week, items: 2 }];
+    const actual = tracker();
+    for (const row of actual.activities) { row.weekBasis = "explicit"; row.week = week; }
+    const valid = run({ inventory: declared, tracker: actual });
+    assert.equal(valid.complete, true, `Source Week ${week} must remain valid: ${JSON.stringify(valid)}`);
+  }
+  assert.equal(run().complete, true, "Unassigned unknown weeks must remain supported.");
+});

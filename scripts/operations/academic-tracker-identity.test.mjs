@@ -178,3 +178,27 @@ test("absent source/readback ledgers are coverage failures, not empty fixtures",
   assert.ok(r.errors.length > 0);
   assert.ok(r.blockers.length > 0);
 });
+
+
+test("source-extracted and installed week numbers are one-based; unknown stays unassigned", () => {
+  for (const recordSide of ["source", "readback"]) {
+    const f = fixture();
+    f[recordSide].activities[0].week = 0;
+    const result = audit(f);
+    assert.equal(result.complete, false, `${recordSide} Week 0 must not certify original curriculum membership.`);
+    assert.ok(result.errors.some(message => message.includes("Invalid")),
+      `${recordSide} invalid week must be an explicit audit error.`);
+  }
+  for (const week of [1, 60]) {
+    const f = fixture();
+    f.source.activities[0].week = week;
+    f.readback.activities[0].week = week;
+    assert.equal(audit(f).complete, true, `Valid source Week ${week} must remain accepted.`);
+  }
+  const f = fixture();
+  for (const row of [f.source.activities[0], f.readback.activities[0]]) {
+    row.weekBasis = "unassigned";
+    row.week = null;
+  }
+  assert.equal(audit(f).complete, true, "Unknown source week must remain explicitly unassigned.");
+});
