@@ -356,7 +356,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
           <ol>{activePreview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
-            {question.citation && <small>Source: {question.citation}</small>}
+            {question.citation ? <small>Source: {question.citation}</small>
+              : <small className="qsl-preview-source-warning">No source citation is included for this question. Verify its answer and teaching notes against the original material.</small>}
             <VisualIntentNote tags={question.tags} />
             <details className="qsl-preview-teaching">
               <summary>Reveal recorded answer and teaching notes</summary>
@@ -376,6 +377,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
                     .find(([key]) => key.trim().toUpperCase() === option.key.trim().toUpperCase())?.[1];
                   return rationale ? [<li key={option.key}><b>{option.key}. {option.text}</b> <span>{rationale}</span></li>] : [];
                 })}</ul>}
+                {question.explanation && (!question.choiceRationales || Object.keys(question.choiceRationales).length === 0)
+                  && <p className="sub">No choice-by-choice rationales were included. Check each distractor against the original source.</p>}
                 {!question.explanation && !question.choiceRationales
                   && <p className="sub">No teaching rationale was included in this approved snapshot.</p>}
               </div>
