@@ -25,6 +25,11 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
     // updating legacy stem/options or the question timestamp. Such revisions
     // invalidate any previously prepared private AI explanation.
     question.id, question.updatedAt, question.stem, question.options, question.content ?? null,
+    // Image attachment metadata and source-derived teaching analyses can change
+    // without touching the question timestamp or legacy text. A prior proposal
+    // (including an optimistic failed-save retry) must not survive that edit.
+    // This receipt stays private: it never becomes part of a public snapshot.
+    question.attachments ?? null, question.analyses ?? null,
     question.correctKey, question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
     question.source, question.createdAt, question.sourceFile ?? null,
     question.sourceDocumentId ?? null, question.sourcePage ?? null, question.questionNumber ?? null,

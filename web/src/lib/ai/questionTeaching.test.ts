@@ -123,6 +123,36 @@ describe("review-gated explanation drafting", () => {
     expect(questionExplanationFingerprint({ ...original, content: rich })).toBe(fingerprint);
   });
 
+  it("invalidates previously applied AI drafts when source analyses or note media change without a timestamp bump", () => {
+    // This is the optimistic retry state after a private draft was applied but
+    // its vault receipt was not confirmed. Existing explanatory prose means
+    // the normal eligibility gate is false; retry relies on its fingerprint.
+    const applied = question({
+      explanation: "AXOM AI-assisted explanation (verify against source): Synthetic first-pass mechanism.",
+      choiceRationales: { A: "AXOM AI-assisted rationale: synthetic first-pass evidence." },
+    });
+    const appliedReceipt = questionExplanationFingerprint(applied);
+    const mediaRevision = {
+      ...applied,
+      attachments: [{ assetId: "synthetic-new-image-exhibit" }] as never,
+    };
+    const teachingRevision = {
+      ...applied,
+      analyses: [{ sourceEvidence: "Synthetic reviewed source analysis was changed." }] as never,
+    };
+    expect(mediaRevision.updatedAt).toBe(applied.updatedAt);
+    expect(teachingRevision.updatedAt).toBe(applied.updatedAt);
+    expect(questionExplanationFingerprint(mediaRevision)).not.toBe(appliedReceipt);
+    expect(questionExplanationFingerprint(teachingRevision)).not.toBe(appliedReceipt);
+    // The same metadata must also invalidate a draft prepared before saving.
+    const original = question();
+    expect(questionExplanationFingerprint({ ...original, attachments: mediaRevision.attachments }))
+      .not.toBe(questionExplanationFingerprint(original));
+    expect(questionExplanationFingerprint({ ...original, analyses: teachingRevision.analyses }))
+      .not.toBe(questionExplanationFingerprint(original));
+    expect(eligibleForExplanationDraft({ ...original, attachments: mediaRevision.attachments })).toBe(false);
+  });
+
   it("detects changed questions before accepting AI-generated explanations", () => {
     const original = question();
     const fingerprint = questionExplanationFingerprint(original);
