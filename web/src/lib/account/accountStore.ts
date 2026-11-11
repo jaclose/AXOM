@@ -639,28 +639,49 @@ export const useAccount = create<AccountState>((set, get) => {
 
     async restoreRevision(summary) {
       const user = get().user;
+      const restoreEpoch = accountIdentityEpoch;
       if (!user) return;
       await guarded("Restoring the protected version…", async () => {
         const previousState = useStore.getState();
+        // Account ID alone is insufficient: A → B → A can finish with the
+        // same ID while an earlier A restore is still downloading.
+        const assertRestoreOwner = () => {
+          if (restoreEpoch !== accountIdentityEpoch || get().user?.id !== user.id) {
+            throw new Error("The signed-in account changed. Restore was stopped.");
+          }
+        };
+        const assertRestoreWorkspace = () => {
+          assertRestoreOwner();
+          if (useStore.getState() !== previousState) {
+            throw new Error("Your workspace changed while downloading. Try the restore again after finishing your edit.");
+          }
+        };
         const revision = await transport.revision(summary.id);
-        if (get().user?.id !== user.id || useStore.getState() !== previousState) throw new Error("Your account or workspace changed while downloading. Try the restore again after finishing your edit.");
+        assertRestoreWorkspace();
         const next = parseImport(JSON.stringify(await retainDownloadedContent(revision.payload, previousState)));
-        await createLocalBackup(useStore.getState().schemaVersion);
+        assertRestoreWorkspace();
+        await createLocalBackup(previousState.schemaVersion);
+        assertRestoreWorkspace();
         await transport.prepareMediaCache(revision, user.id);
-        if (get().user?.id !== user.id || useStore.getState() !== previousState) throw new Error("Your account or workspace changed while downloading. Try the restore again after finishing your edit.");
+        assertRestoreWorkspace();
         const checkpoint = getVaultWriteCheckpoint();
+        // Last synchronous guard before the first destructive workspace write.
+        assertRestoreWorkspace();
         useStore.getState().replaceAll(next, user.id);
         await flushLocalVaultWrites();
         assertVaultWritesSince(checkpoint);
-        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Restore was stopped.");
+        assertRestoreOwner();
         recordRestoreEvent({ kind: "account-restore", detail: `Protected version #${summary.revision} from ${new Date(summary.createdAt).toLocaleString()}` });
         const latest = await transport.latestRevision().catch(() => summary.revision);
-        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Restore was stopped.");
+        assertRestoreOwner();
         write({ ...read(), accountUserId: user.id, baseRevision: latest, conflictServerRevision: undefined, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
         const status = await withCoordinator(async (active) => {
+          assertRestoreOwner();
           await active.flush("restore");
+          assertRestoreOwner();
           return active.currentStatus();
         });
+        assertRestoreOwner();
         set({
           link: "linked",
           ...protectionView(status),
