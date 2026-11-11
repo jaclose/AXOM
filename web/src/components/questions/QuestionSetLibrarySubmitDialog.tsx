@@ -126,6 +126,15 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     const owned = await listMyQuestionSetSubmissions(accountId);
     if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) throw new Error("The account changed during submission lookup.");
     const found = owned.find(item => item.sourceId === set.id);
+    // A withdrawal RPC can succeed even if its immediate status readback
+    // fails. When a later authenticated lookup confirms that the previously
+    // displayed publication is gone, revoke its old source/rights grants
+    // before enabling another submission. Do not revoke on a failed lookup
+    // or when the original listing is still present.
+    if (!found && submission?.sourceId === set.id && statusIdentity === `${accountId}:${set.id}`) {
+      setRights(false);
+      setAnswers(false);
+    }
     setSubmission(found);
     setStatusIdentity(`${accountId}:${set.id}`);
     setChecking(false);
