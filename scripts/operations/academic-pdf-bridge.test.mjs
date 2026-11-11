@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,7 +26,7 @@ function fixture() {
   }]);
   const stat = statSync(original);
   const inspected = {
-    source_sha256: PDF_SHA, source_path: original, resolved_path: original,
+    source_sha256: PDF_SHA, source_path: original, resolved_path: realpathSync(original),
     bytes: stat.size, mtime_ms: stat.mtimeMs, term: "T1", module: "FTM", week: 2,
     document_type: "pq", status: "text_with_question_indicators",
     sampledQuestionHeadingIndicators: 2,
