@@ -488,6 +488,55 @@ describe("Journal feedback when browser storage cannot be read", () => {
     }
   });
 
+  it("retains the latest rename retry until an older blocked alias is recovered", () => {
+    clearFixtureCopies();
+    const firstName = "Journal R28 Earlier Feedback";
+    const middleName = "Journal R28 Intermediate Feedback";
+    const lastName = "Journal R28 Current Feedback";
+    useStore.getState().updateProfile({ name: firstName });
+    const firstKey = `axom-journal-feedback-draft:${userIdFromName(firstName)}`;
+    const middleKey = `axom-journal-feedback-draft:${userIdFromName(middleName)}`;
+    const lastKey = `axom-journal-feedback-draft:${userIdFromName(lastName)}`;
+    const saved = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Unchanged R28 historical draft." });
+    localStorage.setItem(firstKey, saved);
+    const before = render(<JournalPage />);
+    before.unmount();
+
+    const originalGet = Storage.prototype.getItem;
+    const blocked = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, item: string) {
+      if (this === window.localStorage && item.startsWith(middleKey))
+        throw new Error("Intermediate rename link is still blocked");
+      return originalGet.call(this, item);
+    });
+    useStore.getState().updateProfile({ name: middleName });
+    useStore.getState().updateProfile({ name: lastName });
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+
+    // Retry first succeeds for C→B, but B→A is still inaccessible.
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .some((item) => item?.startsWith(`${middleKey}:name-alias:v1:`))).toBe(false);
+    expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+
+    // A second explicit retry from C must continue the whole chain.
+    blocked.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+    fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Unchanged R28 historical draft.");
+    expect(originalGet.call(localStorage, firstKey)).toBe(saved);
+    expect(Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      .some((item) => item?.startsWith(`${middleKey}:name-alias:v1:`))).toBe(true);
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const item = localStorage.key(index);
+      if (item?.startsWith(firstKey) || item?.startsWith(middleKey) || item?.startsWith(lastKey))
+        localStorage.removeItem(item);
+    }
+  });
+
   it("never exposes account A's pending rename link to account B during recovery", async () => {
     clearFixtureCopies();
     const before = "Journal R27 Account A Before";
