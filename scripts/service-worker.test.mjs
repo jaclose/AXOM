@@ -228,12 +228,12 @@ test('current public assets win over retained generations; newest safe fallback 
   const oldest = await app.caches.open('axom-shell-oldest');
   const previous = await app.caches.open('axom-shell-previous');
   const current = await app.caches.open('axom-shell-current');
-  const image = (text) => new Response(text, { headers: { 'content-type': 'image/png' } });
+  const image = (text, mime = 'image/png') => new Response(text, { headers: { 'content-type': mime } });
   await oldest.put('/icon-192.png', image('oldest-icon'));
   await previous.put('/icon-192.png', image('previous-icon'));
   await current.put('/icon-192.png', image('current-icon'));
-  await oldest.put('/landing/splash.webp', image('oldest-splash'));
-  await previous.put('/landing/splash.webp', image('previous-splash'));
+  await oldest.put('/landing/splash.webp', image('oldest-splash', 'image/webp'));
+  await previous.put('/landing/splash.webp', image('previous-splash', 'image/webp'));
   await oldest.put('/assets/retained-12345678.js',
     new Response('previous-only-chunk', { headers: { 'content-type': 'text/javascript' } }));
   await oldest.put('/assets/shared-12345678.js',
@@ -395,9 +395,11 @@ test('worker does not intercept account-specific same-origin image-shaped URLs',
 test('known shipped public icon URLs still cache for offline reuse', async () => {
   let online = true;
   const app = worker({
-    fetchResponse: async () => {
+    fetchResponse: async (request) => {
       if (!online) throw new Error('offline');
-      return new Response('shipped-icon', { headers: { 'content-type': 'image/png' } });
+      const path = new URL(typeof request === 'string' ? request : request.url).pathname;
+      const mime = path.endsWith('.webp') ? 'image/webp' : 'image/png';
+      return new Response('shipped-icon', { headers: { 'content-type': mime } });
     },
   });
   for (const path of ['/icon-192.png', '/assets/app.png', '/landing/splash.webp']) {
