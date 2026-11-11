@@ -110,6 +110,14 @@ function matchesPublicCodeMime(request, response) {
   const mime = (response.headers.get("content-type") || "").trim();
   if (/\.m?js$/i.test(pathname)) return /^(?:text|application)\/javascript(?:\s*;|$)/i.test(mime);
   if (/\.css$/i.test(pathname)) return /^text\/css(?:\s*;|$)/i.test(mime);
+  // The origin-wide cache must never retain or replay JSON/HTML (including
+  // rewritten SPA responses) at public image URLs. Verify actual image MIME;
+  // the path and a public Cache-Control header alone are not sufficient.
+  if (/\.png$/i.test(pathname)) return /^image\/png(?:\s*;|$)/i.test(mime);
+  if (/\.jpe?g$/i.test(pathname)) return /^image\/jpeg(?:\s*;|$)/i.test(mime);
+  if (/\.webp$/i.test(pathname)) return /^image\/webp(?:\s*;|$)/i.test(mime);
+  if (/\.svg$/i.test(pathname)) return /^image\/svg\+xml(?:\s*;|$)/i.test(mime);
+  if (/\.ico$/i.test(pathname)) return /^image\/(?:x-icon|vnd\.microsoft\.icon)(?:\s*;|$)/i.test(mime);
   return true;
 }
 
