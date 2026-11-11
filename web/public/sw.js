@@ -181,7 +181,7 @@ async function installPublicShell() {
   // Cache.addAll bypasses the response-policy checks below and stores even
   // private/no-store data. Validate every fetched asset before any cache.put.
   // Keep manifest-listed immutable JS/CSS available across host deployments.
-  for (const path of CORE.filter((candidate) => !routes.includes(candidate))) {
+  const assets = await Promise.all(CORE.filter((candidate) => !routes.includes(candidate)).map(async (path) => {
     const url = new URL(path, self.registration.scope).href;
     const request = { url };
     const response = await fetch(url, { cache: "no-store" });
@@ -195,11 +195,14 @@ async function installPublicShell() {
     if (!safe) {
       // These cosmetic/static entries are not required to open the app offline.
       // Do not persist them if the host marks them protected or misserves them.
-      if (path === "./manifest.webmanifest" || path === "./icon-192.png") continue;
+      if (path === "./manifest.webmanifest" || path === "./icon-192.png") return null;
       throw new Error(`Unsafe install asset: ${path}`);
     }
-    await cache.put(path, response);
-  }
+    return { path, response };
+  }));
+  // Fetch concurrently as Cache.addAll did, but write only after every required
+  // asset has passed validation. A failed install never persists partial assets.
+  await Promise.all(assets.filter(Boolean).map(({ path, response }) => cache.put(path, response)));
   // A quota-limited metadata write must not prevent a valid update installing.
   await cache.put(RETAINED_MANIFEST_KEY,
     new Response(JSON.stringify({ version: 1, chunks: RETAINED_CHUNKS }), {
