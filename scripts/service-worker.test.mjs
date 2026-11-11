@@ -702,7 +702,19 @@ test('installed worker persists immutable chunk inventory for future upgrades', 
   const app = worker({
     precache: ['./assets/checkpoint-12345678.js', './assets/nohash.js'],
     shippedChunks: ['./assets/oldLazy-abcdefgh.css', './private/secret-12345678.js'],
-    fetchResponse: async () => new Response('<!doctype html>shell', { headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' } }),
+    fetchResponse: async (url) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('.js')) return new Response('export const ready = true;', {
+        headers: { 'content-type': 'text/javascript', 'cache-control': 'public, max-age=3600' },
+      });
+      if (path.endsWith('.webmanifest')) return new Response('{}', {
+        headers: { 'content-type': 'application/manifest+json' },
+      });
+      if (path.endsWith('.png')) return new Response('icon', { headers: { 'content-type': 'image/png' } });
+      return new Response('<!doctype html>shell', {
+        headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' },
+      });
+    },
   });
   let task;
   app.events.get('install')({ waitUntil: (p) => { task = p; } });
