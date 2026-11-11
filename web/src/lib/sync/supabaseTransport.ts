@@ -230,6 +230,9 @@ export class SupabaseSyncTransport implements SyncTransport {
       }
     }
     if (revision.media !== undefined && !revision.payload.deferredContent) validateWorkspaceMedia(revision.payload, revision.media);
+    // Decoding and integrity checks are asynchronous. Refuse an old account's
+    // protected payload if its initiating session changed before handoff.
+    await assertCurrent();
     return revision;
   }
 
