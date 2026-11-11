@@ -263,7 +263,11 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       const matching = templateEntries.filter(entry => entry.module === scope.module
         && (scope.term === null || entry.term === scope.term));
       const weekly = matching.filter(entry => entry.week !== undefined && entry.week !== null);
-      if (!weekly.length) {
+      // Explicitly source-unassigned rows are a distinct, testable cohort.
+      // Missing week *and* missing filing basis is merely unknown.
+      const sourceUnassigned = matching.filter(entry => (entry.week === undefined || entry.week === null)
+        && entry.weekBasis === "unassigned");
+      if (!weekly.length && !sourceUnassigned.length) {
         if (matching.some(entry => entry.weekBasis === "explicit")) {
           blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has invalid source-week evidence; explicit filing requires a numeric week.`);
         } else {
@@ -273,7 +277,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       }
       const ambiguous = !scope.term || templateEntries.some(entry =>
         !entry.module || (entry.module === scope.module && (!entry.term || !String(entry.term).trim())));
-      if (ambiguous || weekly.length !== matching.length) {
+      if (ambiguous || weekly.length + sourceUnassigned.length !== matching.length) {
         blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has a partial source-week census; cannot certify exact week membership.`);
         continue;
       }
@@ -290,6 +294,15 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
           && row.weekBasis === "explicit" && row.week === week).length;
         if (actual !== expected) {
           blockers.push(`Tracker source week ${scope.term}/${scope.module}/${week} has ${actual}/${expected} explicitly filed activity identities; source-week membership is not verified.`);
+        }
+      }
+      if (sourceUnassigned.length) {
+        const expected = sourceUnassigned.reduce((sum, entry) => sum + entry.items, 0);
+        const actual = [...tmap.values()].filter(row =>
+          row.term === scope.term && row.module === scope.module
+          && row.weekBasis === "unassigned" && (row.week === undefined || row.week === null)).length;
+        if (actual !== expected) {
+          blockers.push(`Tracker source-unassigned cohort ${scope.term}/${scope.module} has ${actual}/${expected} activity identities; source-week membership is not verified.`);
         }
       }
     }
