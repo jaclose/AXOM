@@ -1103,7 +1103,7 @@ test("expanded JSONL rejects malformed present SHA without inventing priority-mi
   }
 });
 
- 
+
 // R39: strict convergence must prove original Tracker IDs, not merely cohorts.
 const identityProof = () => {
   const source = {
