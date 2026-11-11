@@ -432,10 +432,16 @@ test("Tracker source-week verification preserves repeated contributions and unkn
   const explicitUnknown = fixture();
   explicitUnknown.summary.templates = [{ term: "T1", module: "FTM 1",
     week: null, weekBasis: "unassigned", items: 2 }];
-  const explicitUnknownResult = run({ inventory: explicitUnknown, tracker: tracker() });
+  const fullyUnassigned = tracker();
+  fullyUnassigned.activities[0] = { ...fullyUnassigned.activities[0],
+    week: null, weekBasis: "unassigned" };
+  const explicitUnknownResult = run({ inventory: explicitUnknown, tracker: fullyUnassigned });
   assert.equal(explicitUnknownResult.complete, true,
-    "JSON null with an unassigned source basis is unknown, not a forged week.");
-  assert.ok(explicitUnknownResult.warnings.some(message => message.includes("week membership")));
+    "JSON null with an unassigned source basis certifies only genuinely unassigned receipts.");
+  const incorrectlyScheduled = run({ inventory: explicitUnknown, tracker: tracker() });
+  assert.equal(incorrectlyScheduled.complete, false,
+    "A source-declared unassigned cohort cannot silently include explicit week placements.");
+  assert.ok(incorrectlyScheduled.blockers.some(message => message.includes("source-unassigned")));
 
   const explicitNull = fixture();
   explicitNull.summary.templates = [{ term: "T1", module: "FTM 1",
