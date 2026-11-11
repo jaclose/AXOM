@@ -504,6 +504,40 @@ describe("Community Question Set Library", () => {
     expect(approved.questions[3].citation).toBeUndefined();
   });
 
+  it("discloses missing option rationales beyond the first three without altering reviewed questions", async () => {
+    const questions = Array.from({ length: 4 }, (_, index) => ({
+      ...snapshot.questions[0],
+      id: `shared-question-${index + 1}`,
+      stem: `Synthetic rationale question ${index + 1}?`,
+      // Existing reviewed keys are never inferred from rationales.
+      choiceRationales: index === 3
+        ? { A: "The source excludes option A." }
+        : { " a ": "The source excludes option A.", b: "The source confirms option B." },
+    }));
+    const approved = {
+      ...snapshot,
+      orderedQuestionIds: questions.map(question => question.id),
+      questions,
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: approved, contentDigest: "e".repeat(64),
+      status: "approved", reviewRevision: 11,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    expect(await screen.findByText(/Choice-by-choice rationales recorded for all options in 3 of 4 questions/)).toBeTruthy();
+    expect(screen.queryByText("Synthetic rationale question 4?")).toBeNull();
+    expect(screen.queryByText(/Some answer choices lack recorded rationales/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(approved);
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      contentDigest: "e".repeat(64), reviewRevision: 11,
+    });
+    expect(approved.questions[3].correctKey).toBe("B");
+    expect(approved.questions[3].choiceRationales).toEqual({ A: "The source excludes option A." });
+  });
+
   it("discloses absent source citations and missing distractor rationales without changing approved evidence", async () => {
     const approved = {
       ...snapshot,
