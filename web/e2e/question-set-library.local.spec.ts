@@ -490,3 +490,105 @@ test("four-question SQL-approved set discloses unseen citation and distractor ga
     await database.close();
   }
 });
+
+test("withdrawn publication cannot be imported from an already-open learner preview", async ({ page, browser, baseURL }) => {
+  test.setTimeout(210_000);
+  const database = await createPlatformDatabase();
+  const [owner, member] = PLATFORM_USERS;
+  const learnerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const learner = await learnerContext.newPage();
+  try {
+    await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [owner.id]);
+    await database.attach(page, 0);
+    await database.attach(learner, 1);
+    for (const target of [page, learner]) {
+      await target.goto(`${baseURL}/#questions`);
+      await seedLocalWorkspace(target);
+    }
+    await seedLocalSet(page);
+    await openLocalSets(page);
+    await page.getByRole("button", { name: "Submit to library", exact: true }).click();
+    const submit = page.getByRole("dialog", { name: `Submit ${TITLE}` });
+    await submit.getByRole("checkbox", { name: /permission to distribute every question/ }).check();
+    await submit.getByRole("checkbox", { name: /checked every answer against its source/ }).check();
+    await submit.getByRole("button", { name: "Send for review" }).click();
+    await expect(submit.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+
+    const [pending] = await database.rpc(owner.id, "my_question_set_library") as Array<{ id: string; status: string }>;
+    expect(pending.status).toBe("pending");
+    await page.goto(`${baseURL}/#host`);
+    const queue = page.locator(".qsl-review-queue");
+    await expect(queue.getByRole("heading", { name: "Question Set Library review" })).toBeVisible();
+    await queue.getByRole("button", { name: "Inspect" }).click();
+    const review = page.getByRole("dialog", { name: `Review ${TITLE}` });
+    await review.getByRole("textbox", { name: "Review note" }).fill("Synthetic source and distribution rights verified for this fixture.");
+    await review.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
+    await review.getByRole("button", { name: "Approve for library" }).click();
+    await expect(queue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
+
+    const approvedEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as {
+      status: string; review_revision: number;
+      snapshot_payload: { questions: Array<{ correctKey: string }> };
+    };
+    expect(approvedEvidence.status).toBe("approved");
+    expect(approvedEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
+    await openSharedLibrary(learner);
+    const library = learner.locator(".qsl-library");
+    await library.getByRole("button", { name: "Refresh", exact: true }).click();
+    const card = library.locator(".qsl-card").filter({ hasText: TITLE });
+    await expect(card).toBeVisible();
+    await card.getByRole("button", { name: "Preview set" }).click();
+    const preview = learner.getByRole("dialog", { name: TITLE });
+    await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
+    await expect(preview.getByRole("button", { name: "Add to my AXOM" })).toBeEnabled();
+
+    const privateBefore = await learner.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: { getState: () => { questions: unknown[]; questionSets: unknown[] } };
+      }> }).__AXOM_DEV__;
+      const state = dev.useStore.getState();
+      return { questions: state.questions.length, sets: state.questionSets.length };
+    });
+
+    // The contributor withdraws *after* the learner has inspected an
+    // approved snapshot, but before the learner's import RPC. The UI may
+    // still display stale content; it must never treat that as authority.
+    await openLocalSets(page);
+    await page.getByRole("button", { name: "Submit to library", exact: true }).click();
+    const existing = page.getByRole("dialog", { name: `Submit ${TITLE}` });
+    await expect(existing.getByText("This set is searchable now.", { exact: true })).toBeVisible();
+    await existing.getByRole("button", { name: "Withdraw submission" }).click();
+    await expect(existing.getByText("The submission was withdrawn from the library.", { exact: true })).toBeVisible();
+    expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+
+    // Withdrawal changes authorization, not the protected teaching evidence.
+    const withdrawnResult = await database.db.query(
+      "select status, review_revision, snapshot_payload from public.question_set_library_entries where id = $1",
+      [pending.id],
+    );
+    const withdrawn = withdrawnResult.rows[0] as {
+      status: string; review_revision: number; snapshot_payload: typeof approvedEvidence.snapshot_payload;
+    };
+    expect(withdrawn.status).not.toBe("approved");
+    expect(withdrawn.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
+    expect(withdrawn.review_revision).toBeGreaterThanOrEqual(approvedEvidence.review_revision);
+
+    // A previously inspected snapshot is not a durable import grant.
+    await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
+    await preview.getByRole("button", { name: "Add to my AXOM" }).click();
+    await expect(learner.locator(".qsl-error")).toContainText(/changed or was withdrawn/i);
+    await expect(learner.getByRole("button", { name: "Add to my AXOM" })).toHaveCount(0);
+    expect(await learner.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: { getState: () => { questions: unknown[]; questionSets: unknown[] } };
+      }> }).__AXOM_DEV__;
+      const state = dev.useStore.getState();
+      return { questions: state.questions.length, sets: state.questionSets.length };
+    })).toEqual(privateBefore);
+    await library.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(card).toHaveCount(0);
+  } finally {
+    await learnerContext.close();
+    await database.close();
+  }
+});
