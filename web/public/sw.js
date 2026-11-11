@@ -118,6 +118,11 @@ function matchesPublicCodeMime(request, response) {
   if (/\.webp$/i.test(pathname)) return /^image\/webp(?:\s*;|$)/i.test(mime);
   if (/\.svg$/i.test(pathname)) return /^image\/svg\+xml(?:\s*;|$)/i.test(mime);
   if (/\.ico$/i.test(pathname)) return /^image\/(?:x-icon|vnd\.microsoft\.icon)(?:\s*;|$)/i.test(mime);
+  // Web fonts and the install manifest share this origin-wide cache. An HTML
+  // rewrite or JSON error at a font URL must not survive into offline replay.
+  if (/\.woff2$/i.test(pathname)) return /^font\/woff2(?:\s*;|$)/i.test(mime);
+  if (/\.woff$/i.test(pathname)) return /^font\/woff(?:\s*;|$)/i.test(mime);
+  if (/\.webmanifest$/i.test(pathname)) return /^application\/(?:manifest\+)?json(?:\s*;|$)/i.test(mime);
   return true;
 }
 
