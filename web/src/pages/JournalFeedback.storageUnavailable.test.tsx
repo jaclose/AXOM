@@ -342,8 +342,12 @@ describe("Journal feedback when browser storage cannot be read", () => {
       const first = render(<JournalPage />);
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      // Even after storage returns, the missing link remains unrecoverable.
+      // Do not tell the owner to wait for a storage outage that has already ended.
+      expect(screen.getByRole("alert").textContent).toContain("this draft cannot save while recovery is incomplete");
       expect(screen.queryByText("Other saved feedback copies (1)")).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.getByRole("alert").textContent).toContain("this draft cannot save while recovery is incomplete");
       // A successful write of older pending links cannot reconstruct the
       // missing 257th edge, so retry must not falsely report complete history.
       expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
