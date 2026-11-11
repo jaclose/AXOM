@@ -1333,3 +1333,59 @@ test('R54 fetch backpressure: installation drains validated streamed assets befo
   assert.ok(await cache.match('./index.html'), 'offline shell installed');
   assert.ok(await cache.match('./__axom-retained-public-chunks.json'), 'retained build inventory installed');
 });
+
+test('R55 retained cached Response.url credentials and wrong build versions are evicted', async () => {
+  const image = 'https://app.test/landing/hero.png';
+  const badCases = [
+    [image, image + '?access_token=SYNTHETIC_ACCOUNT_A_ONLY'],
+    [image + '?v=build-20261111', image + '?v=build-20261109&__axom_revalidate=123'],
+    [image, image + '?__axom_revalidate=123&sig=SYNTHETIC_SIGNATURE'],
+    [image, image + '?__axom_revalidate=123&__axom_revalidate=456'],
+  ];
+  for (const [key, finalUrl] of badCases) {
+    const app = worker();
+    const legacy = await app.caches.open('axom-shell-legacy');
+    await legacy.put(key, withNetworkUrl(new Response('SYNTHETIC_PRIVATE_BYTES', {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+    }), finalUrl));
+    await legacy.put('https://app.test/landing/unrelated.png', withNetworkUrl(
+      new Response('keep-unrelated', { headers: { 'content-type': 'image/png' } }),
+      'https://app.test/landing/unrelated.png'));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: key, method: 'GET', mode: 'same-origin', cache: 'default', headers: new Headers() },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending, 'shipped public resource must be intercepted');
+    await assert.rejects(pending, /offline/, 'unsafe final URL must never replay');
+    assert.equal(await legacy.match(key), undefined, 'evict only the unsafe cached key');
+    assert.equal(await (await legacy.match('https://app.test/landing/unrelated.png')).text(),
+      'keep-unrelated', 'retain unrelated public assets');
+  }
+});
+
+test('R55 matching public query provenance keeps offline cache and internal revalidation', async () => {
+  const image = 'https://app.test/landing/hero.png';
+  const validCases = [
+    [image, image],
+    [image, image + '?__axom_revalidate=123'],
+    [image + '?v=build-20261111', image + '?v=build-20261111&__axom_revalidate=123'],
+  ];
+  for (const [key, finalUrl] of validCases) {
+    const app = worker();
+    const legacy = await app.caches.open('axom-shell-legacy');
+    await legacy.put(key, withNetworkUrl(new Response('public-image', {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+    }), finalUrl));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: key, method: 'GET', mode: 'same-origin', cache: 'default', headers: new Headers() },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending);
+    assert.equal(await (await pending).text(), 'public-image');
+    assert.ok(await legacy.match(key), 'valid public response remains available offline');
+  }
+});

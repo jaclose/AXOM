@@ -35,13 +35,21 @@ function cacheablePublicResponse(response) {
 // no-store as its sole cache directive, never private/auth-varying responses.
 // Browser-fetched responses carry a final URL. A manifest-listed request must
 // never authorize a redirected response or bytes from another asset/origin.
-// Ignore the query: asset fetches add __axom_revalidate for stale-host recovery.
+// A cached response's final URL is independent of its CacheStorage key.
+// Bind both origin/path AND public query provenance; the worker may add only
+// one numeric __axom_revalidate cache-buster to live fetches. This protects
+// retained generations whose older workers accepted signed response URLs.
 function matchesRequestedResource(request, response) {
   if (response.redirected || response.status !== 200 || !response.url) return false;
   try {
     const requested = new URL(request.url);
     const resolved = new URL(response.url);
-    return requested.origin === resolved.origin && requested.pathname === resolved.pathname;
+    if (requested.origin !== resolved.origin || requested.pathname !== resolved.pathname) return false;
+    const revalidation = resolved.searchParams.getAll("__axom_revalidate");
+    if (revalidation.length > 1 || (revalidation.length === 1
+      && !/^\d{1,17}$/.test(revalidation[0]))) return false;
+    resolved.searchParams.delete("__axom_revalidate");
+    return resolved.search === requested.search;
   } catch {
     return false;
   }
@@ -273,9 +281,14 @@ async function cachedAppAsset(request) {
     const cache = await caches.open(name);
     const response = await cache.match(request);
     if (!response) continue;
-    // Legacy synthetic cache fixtures can omit URL; browser-fetched entries
-    // have it and must match their original origin/path before replay.
-    if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) continue;
+    // Older generations can hold a safe-looking key with a signed or
+    // mismatched final Response.url. Evict that entry alone, never its cache.
+    // Synthetic historical fixtures may omit Response.url; validate any
+    // final URL that is actually available.
+    if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) {
+      await cache.delete(request);
+      continue;
+    }
     if (!matchesPublicCodeMime(request, response)) {
       // Evict only invalid code bytes retained by an older worker.
       await cache.delete(request);
