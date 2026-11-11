@@ -247,15 +247,20 @@ export const useAccount = create<AccountState>((set, get) => {
     clearCloudOriginalUploadCache();
   }
 
-  async function guarded<T>(label: string, run: () => Promise<T>): Promise<T | undefined> {
+  async function guarded<T>(
+    label: string,
+    run: () => Promise<T>,
+    isCurrent: () => boolean = () => true,
+  ): Promise<T | undefined> {
     set({ busy: true, error: "", message: label });
     try {
       return await run();
     } catch (error) {
-      set({ error: friendlyError(error), message: "" });
+      // A completed request must never overwrite the next account's notices.
+      if (isCurrent()) set({ error: friendlyError(error), message: "" });
       return undefined;
     } finally {
-      set({ busy: false });
+      if (isCurrent()) set({ busy: false });
     }
   }
 
@@ -274,7 +279,11 @@ export const useAccount = create<AccountState>((set, get) => {
     // Zustand's set() is shallow: omitting these fields retains A's private
     // history/devices/restore candidate under B, even with no network.
     set(ownerChanged || !next.user
-      ? { ...next, history: [], devices: [], restoreOffer: undefined }
+      ? { ...next, history: [], devices: [], restoreOffer: undefined,
+        busy: false, applyingRemote: false, message: "", error: "",
+        // A code's destination is private account-entry state. Clear it on
+        // genuine identity transitions, not redundant signed-out SDK events.
+        ...(ownerChanged ? { pendingCodeEmail: undefined, pendingCodeKind: undefined } : {}) }
       : next);
     if (next.user) void loadProfileName(next.user.id);
   }
@@ -525,6 +534,8 @@ export const useAccount = create<AccountState>((set, get) => {
         history: [],
         devices: [],
         restoreOffer: undefined,
+        pendingCodeEmail: undefined,
+        pendingCodeKind: undefined,
         message: "Signed out. This device’s workspace is still here.",
       });
     },
@@ -589,9 +600,13 @@ export const useAccount = create<AccountState>((set, get) => {
 
     async pullLatest() {
       const user = get().user;
+      const pullEpoch = accountIdentityEpoch;
       const meta = read();
       if (!user || get().link !== "linked" || get().busy || get().applyingRemote || meta.pending || meta.conflictServerRevision !== undefined || !meta.lastHash) return;
       const before = useStore.getState();
+      const sameOwner = () => pullEpoch === accountIdentityEpoch && get().user?.id === user.id;
+      const unchanged = () => sameOwner() && useStore.getState() === before
+        && !read().pending && read().baseRevision === meta.baseRevision;
       try {
         const current = await snapshotWorkspace(before, { deviceId: deviceId(), baseRevision: meta.baseRevision, reason: "automatic" });
         if (current.contentHash !== meta.lastHash && (await transport.prepare(current)).contentHash !== meta.lastHash) return;
@@ -599,7 +614,6 @@ export const useAccount = create<AccountState>((set, get) => {
         if (!latest || latest.revision <= meta.baseRevision) return;
         const revision = await transport.revision(latest.id);
         const next = parseImport(JSON.stringify(await retainDownloadedContent(revision.payload, before)));
-        const unchanged = () => get().user?.id === user.id && useStore.getState() === before && !read().pending && read().baseRevision === meta.baseRevision;
         if (!unchanged()) return;
         await createLocalBackup(before.schemaVersion);
         if (!unchanged()) return;
@@ -607,18 +621,26 @@ export const useAccount = create<AccountState>((set, get) => {
         if (!unchanged()) return;
         const checkpoint = getVaultWriteCheckpoint();
         set({ applyingRemote: true });
-        try { useStore.getState().replaceAll(next, user.id); } finally { set({ applyingRemote: false }); }
+        try {
+          // The final account ID may again be A after an intervening B session.
+          if (!unchanged()) return;
+          useStore.getState().replaceAll(next, user.id);
+        } finally {
+          if (sameOwner()) set({ applyingRemote: false });
+        }
+        if (!sameOwner()) return;
         const applied = useStore.getState();
         write({ ...read(), baseRevision: latest.revision, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
         await flushLocalVaultWrites();
+        if (!sameOwner()) return;
         assertVaultWritesSince(checkpoint);
-        if (get().user?.id !== user.id) return;
         const changed = useStore.getState() !== applied;
+        if (!sameOwner()) return;
         write({ ...read(), baseRevision: latest.revision, lastHash: revision.contentHash, lastProtectedAt: latest.createdAt,
           pending: changed, pendingIdempotencyKey: changed ? crypto.randomUUID() : undefined, attempt: 0, lastError: undefined, nextAttemptAt: undefined });
-        set({ ...protectionView(restingStatus(read())), error: "" });
+        if (sameOwner()) set({ ...protectionView(restingStatus(read())), error: "" });
       } catch (error) {
-        if (get().user?.id === user.id) set({ error: friendlyError(error), applyingRemote: false });
+        if (sameOwner()) set({ error: friendlyError(error), applyingRemote: false });
       }
     },
 
@@ -687,8 +709,8 @@ export const useAccount = create<AccountState>((set, get) => {
           ...protectionView(status),
           message: "Restored. A safety snapshot of the previous device state was saved first, and the restore is recorded as a new version.",
         });
-      });
-      void get().refresh();
+      }, () => restoreEpoch === accountIdentityEpoch && get().user?.id === user.id);
+      if (restoreEpoch === accountIdentityEpoch && get().user?.id === user.id) void get().refresh();
     },
 
     async keepThisDevice() {
@@ -707,37 +729,54 @@ export const useAccount = create<AccountState>((set, get) => {
 
     async mergeWithAccount() {
       const user = get().user;
+      const mergeEpoch = accountIdentityEpoch;
       if (!user) return;
+      const sameOwner = () => mergeEpoch === accountIdentityEpoch && get().user?.id === user.id;
+      const assertMergeOwner = () => {
+        if (!sameOwner()) throw new Error("The signed-in account changed. Merge was stopped.");
+      };
       await guarded("Merging this device with your account…", async () => {
         const [latest] = await transport.summaries(1);
+        assertMergeOwner();
         if (!latest) throw new Error("No account version is available to merge with yet.");
         const revision = await transport.revision(latest.id);
-        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Merge was stopped.");
+        assertMergeOwner();
         const server = parseImport(JSON.stringify(revision.payload));
         await createLocalBackup(useStore.getState().schemaVersion);
+        assertMergeOwner();
         await transport.prepareMediaCache(revision, user.id);
-        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Merge was stopped.");
-        // Merge only after all downloads, so edits made while waiting survive.
-        const merged = mergeStates(useStore.getState(), server);
+        assertMergeOwner();
+        // Keep edits made while downloading, but never replace a workspace
+        // that changes again after the final synchronous merge calculation.
+        const beforeMerge = useStore.getState();
+        const merged = mergeStates(beforeMerge, server);
         const checkpoint = getVaultWriteCheckpoint();
+        assertMergeOwner();
+        if (useStore.getState() !== beforeMerge) {
+          throw new Error("Your workspace changed while merging. Try again after finishing your edit.");
+        }
         useStore.getState().replaceAll(merged, user.id);
+        assertMergeOwner();
         await flushLocalVaultWrites();
+        assertMergeOwner();
         assertVaultWritesSince(checkpoint);
-        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Merge was stopped.");
         set({ restoreOffer: undefined });
         recordRestoreEvent({ kind: "account-merge", detail: `Merged with protected version #${latest.revision}` });
         write({ ...read(), accountUserId: user.id, baseRevision: latest.revision, conflictServerRevision: undefined, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
         const status = await withCoordinator(async (active) => {
+          assertMergeOwner();
           await active.flush("manual");
+          assertMergeOwner();
           return active.currentStatus();
         });
+        assertMergeOwner();
         set({
           link: "linked",
           ...protectionView(status),
           message: "Merged. Both devices’ records are combined (newer copies win, nothing deleted) and saved as a new version. A safety snapshot was taken first.",
         });
-      });
-      void get().refresh();
+      }, sameOwner);
+      if (sameOwner()) void get().refresh();
     },
 
     async adoptAccountVersion() {

@@ -76,6 +76,7 @@ beforeEach(() => {
     conflictServerRevision: 12,
     history: [aRevision], devices: [aDevice], restoreOffer: aRevision,
     busy: false, message: "", error: "",
+    pendingCodeEmail: undefined, pendingCodeKind: undefined,
   });
 });
 
@@ -118,6 +119,47 @@ describe("account identity generation protects cloud metadata", () => {
     expect(state.snapshotBytes).toBeUndefined();
     expect(state.conflictServerRevision).toBeUndefined();
     expect(state.link).not.toBe("linked");
+  });
+
+  it("removes A's pending recovery address and code kind on SDK A → B → signed-out", async () => {
+    await subscribe();
+    useAccount.setState({ pendingCodeEmail: "a-private@example.test", pendingCodeKind: "recovery" });
+    emitAuth!("SIGNED_IN", sessionFor("synthetic-b"));
+    expect(useAccount.getState()).toMatchObject({
+      phase: "signed-in", user: expect.objectContaining({ id: "synthetic-b" }),
+      pendingCodeEmail: undefined, pendingCodeKind: undefined,
+    });
+    // Simulate a second code request belonging to B before B signs out.
+    useAccount.setState({ pendingCodeEmail: "b-private@example.test", pendingCodeKind: "sign-in" });
+    emitAuth!("SIGNED_OUT", null);
+    expect(useAccount.getState()).toMatchObject({
+      phase: "signed-out", user: null, pendingCodeEmail: undefined, pendingCodeKind: undefined,
+    });
+    // AuthCard receives pendingCodeEmail from this exact account state. The
+    // previous owner's email can no longer appear in its signed-out OTP label.
+    expect(JSON.stringify({
+      email: useAccount.getState().pendingCodeEmail,
+      kind: useAccount.getState().pendingCodeKind,
+    })).not.toContain("private@example.test");
+  });
+
+  it("preserves a valid code through same-owner refresh and redundant signed-out SDK events", async () => {
+    await subscribe();
+    useAccount.setState({ pendingCodeEmail: "a-current@example.test", pendingCodeKind: "recovery" });
+    emitAuth!("TOKEN_REFRESHED", sessionFor("synthetic-a"));
+    expect(useAccount.getState()).toMatchObject({
+      pendingCodeEmail: "a-current@example.test", pendingCodeKind: "recovery",
+    });
+    emitAuth!("SIGNED_OUT", null);
+    expect(useAccount.getState().pendingCodeEmail).toBeUndefined();
+    // A fresh code requested while already signed out must not be lost when
+    // the SDK replays an INITIAL_SESSION null notification.
+    useAccount.setState({ pendingCodeEmail: "new-login@example.test", pendingCodeKind: "sign-in" });
+    emitAuth!("INITIAL_SESSION", null);
+    expect(useAccount.getState()).toMatchObject({
+      phase: "signed-out", pendingCodeEmail: "new-login@example.test",
+      pendingCodeKind: "sign-in",
+    });
   });
 
   it("still admits a current-account refresh and protects existing linked account metadata", async () => {
