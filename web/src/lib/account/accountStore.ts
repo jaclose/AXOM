@@ -280,7 +280,10 @@ export const useAccount = create<AccountState>((set, get) => {
     // history/devices/restore candidate under B, even with no network.
     set(ownerChanged || !next.user
       ? { ...next, history: [], devices: [], restoreOffer: undefined,
-        busy: false, applyingRemote: false, message: "", error: "" }
+        busy: false, applyingRemote: false, message: "", error: "",
+        // A code's destination is private account-entry state. Clear it on
+        // genuine identity transitions, not redundant signed-out SDK events.
+        ...(ownerChanged ? { pendingCodeEmail: undefined, pendingCodeKind: undefined } : {}) }
       : next);
     if (next.user) void loadProfileName(next.user.id);
   }
@@ -531,6 +534,8 @@ export const useAccount = create<AccountState>((set, get) => {
         history: [],
         devices: [],
         restoreOffer: undefined,
+        pendingCodeEmail: undefined,
+        pendingCodeKind: undefined,
         message: "Signed out. This device’s workspace is still here.",
       });
     },
