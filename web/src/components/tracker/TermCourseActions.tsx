@@ -11,6 +11,32 @@ import { GButton } from "../ui/primitives";
 
 interface DownloadFailure { id: string; title: string; reason: string }
 
+const STORAGE_QUOTA_RECOVERY = "This course was not confirmed. Do not clear AXOM site data. Keep your existing work, free browser or device storage safely, then retry this term.";
+
+/** A safety-backup failure can wrap the original browser quota exception in
+ * AggregateError. Distinguish local storage exhaustion from remote API quotas;
+ * neither case authorizes discarding any saved academic data. */
+function isBrowserStorageQuotaFailure(error: unknown): boolean {
+  const pending: unknown[] = [error];
+  const seen = new Set<unknown>();
+  while (pending.length && seen.size < 16) {
+    const current = pending.pop();
+    if (current == null || seen.has(current)) continue;
+    seen.add(current);
+    const record = typeof current === "object" ? current as {
+      name?: unknown; message?: unknown; cause?: unknown; errors?: unknown;
+    } : undefined;
+    const name = typeof record?.name === "string" ? record.name : "";
+    const message = typeof record?.message === "string" ? record.message
+      : typeof current === "string" ? current : "";
+    if (name === "QuotaExceededError"
+      || /QuotaExceededError|(?:browser|device|disk)\s+(?:storage\s+)?(?:is\s+)?full|(?:workspace|storage|backup)\s+exceeded\s+(?:the\s+)?quota/i.test(message)) return true;
+    if (record?.cause != null) pending.push(record.cause);
+    if (Array.isArray(record?.errors)) pending.push(...record.errors);
+  }
+  return false;
+}
+
 /** Term downloads share the single-course installer and its durable account receipt.
  * Stop finishes the current course so a retry can safely skip it. */
 export function TermCourseActions({ term, accountId, courses, disabled, onBusyChange }: {
@@ -57,6 +83,7 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
     let completed = 0;
     let skipped = 0;
     let failed = 0;
+    let pausedForStorage = false;
     try {
       const allCourses = await listTermCourses(term, accountId, {
         shouldStop: () => stopped.current, assertCurrent: scope.assertCurrent,
@@ -78,11 +105,18 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
           // An account change ends the whole operation, never another account's course.
           scope.assertCurrent();
           failed += 1;
+          const storageFull = isBrowserStorageQuotaFailure(cause);
           if (mounted.current) setFailures(current => [...current, { id: course.id, title: course.title === course.module ? course.module : `${course.module}: ${course.title}`,
-            reason: cause instanceof Error ? cause.message : "This course could not be downloaded. Try again when connected." }]);
+            reason: storageFull ? STORAGE_QUOTA_RECOVERY
+              : cause instanceof Error ? cause.message : "This course could not be downloaded. Try again when connected." }]);
+          // Retrying another large course cannot restore browser capacity.
+          // Keep the earlier durable installs and leave later courses untouched.
+          if (storageFull) { pausedForStorage = true; break; }
         }
       }
-      if (mounted.current) setMessage(`${stopped.current ? "Download stopped" : "Download complete"}. ${completed} downloaded, ${skipped} already on this device${failed ? `, ${failed} failed` : ""}.`);
+      if (mounted.current) setMessage(pausedForStorage
+        ? `Download paused: browser storage is full. ${completed} downloaded, ${skipped} already on this device. Later courses were not attempted.`
+        : `${stopped.current ? "Download stopped" : "Download complete"}. ${completed} downloaded, ${skipped} already on this device${failed ? `, ${failed} failed` : ""}.`);
     } catch (cause) {
       if (mounted.current) {
         if (stopped.current && (cause instanceof DOMException || cause instanceof Error) && cause.name === "AbortError") setMessage("Download stopped. Download this term again to continue.");
