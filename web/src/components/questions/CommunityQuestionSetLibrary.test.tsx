@@ -469,6 +469,87 @@ describe("Community Question Set Library", () => {
     expect(payload.snapshot.questions[0].correctKey).toBe("B");
   });
 
+  it("discloses absent source citations and missing distractor rationales without changing approved evidence", async () => {
+    const approved = {
+      ...snapshot,
+      questions: [{
+        ...snapshot.questions[0],
+        citation: undefined,
+        explanation: "The synthetic review includes a general explanation but no option-specific evidence.",
+        choiceRationales: undefined,
+      }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: approved, contentDigest: "f".repeat(64),
+      status: "approved", reviewRevision: 7,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    expect(screen.getByText(/No source citation is included for this question/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.getByText(/No choice-by-choice rationales were included/)).toBeTruthy();
+    expect(screen.queryByText(/AI-assisted teaching text/)).toBeNull();
+    expect(screen.getByText(/Submitted answer: B/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0]).toEqual(approved.questions[0]);
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      reviewRevision: 7, contentDigest: "f".repeat(64),
+    });
+  });
+
+  it("flags partially supported choices without inventing a missing correct-answer rationale", async () => {
+    const partial = {
+      ...snapshot,
+      questions: [{
+        ...snapshot.questions[0],
+        explanation: "A general synthetic explanation was submitted for the selected option.",
+        choiceRationales: { A: "Only the distractor A was explained." },
+      }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: partial, contentDigest: "1".repeat(64),
+      status: "approved", reviewRevision: 4,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.getByText(/Some answer choices lack recorded rationales/)).toBeTruthy();
+    expect(screen.getByText("Only the distractor A was explained.")).toBeTruthy();
+    expect(screen.queryByText(/No choice-by-choice rationales were included/)).toBeNull();
+    expect(screen.queryByText(/AI-assisted teaching text/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0]).toEqual(partial.questions[0]);
+    expect(mock.authorize.mock.calls[0][1].reviewRevision).toBe(4);
+  });
+
+  it("does not warn about missing evidence when a submitted citation and individual rationales exist", async () => {
+    const approved = {
+      ...snapshot,
+      questions: [{
+        ...snapshot.questions[0],
+        explanation: "The selected synthetic option is supported by the recorded synthetic citation.",
+        choiceRationales: { A: "The source rules out A.", B: "The source supports B." },
+      }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: approved, contentDigest: "e".repeat(64),
+      status: "approved", reviewRevision: 2,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    expect(screen.queryByText(/No source citation is included/)).toBeNull();
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.queryByText(/No choice-by-choice rationales were included/)).toBeNull();
+    expect(screen.getByText("The source rules out A.")).toBeTruthy();
+    expect(screen.getByText("The source supports B.")).toBeTruthy();
+  });
+
   it("shows recorded choice rationales when reviewed option and rationale key casing differ", async () => {
     // Both spellings are accepted by the snapshot validator. They must map
     // to the same reviewed choices without fabricating any missing rationale.
@@ -619,6 +700,22 @@ describe("Community Question Set Library", () => {
     expect(mock.authorize.mock.calls[0][1]).toMatchObject({
       reviewRevision: 2, contentDigest: "d".repeat(64),
     });
+  });
+
+  it("does not mistake an empty rationale map for source-reviewed teaching evidence", async () => {
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: {
+        ...snapshot,
+        questions: [{ ...snapshot.questions[0], explanation: undefined, choiceRationales: {} }],
+      },
+      contentDigest: "d".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.getByText("No teaching rationale was included in this approved snapshot.")).toBeTruthy();
+    expect(screen.queryByText(/AI-assisted teaching text/)).toBeNull();
   });
 
   it("does not invent an answer key or rationale in a legacy preview without evidence", async () => {
