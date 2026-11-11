@@ -162,6 +162,49 @@ describe("Journal feedback when browser storage cannot be read", () => {
     });
   }
 
+  for (const [description, suffix] of [
+    ["truncated", "a".repeat(31)],
+    ["non-hex", "g".repeat(32)],
+  ] as const) {
+    it(`does not silently hide older saved feedback when a name-link key has a ${description} suffix`, () => {
+      clearFixtureCopies();
+      const previousName = "Journal R37 Previous Workspace Name";
+      const currentName = "Journal R37 Current Workspace Name";
+      const previousKey = `axom-journal-feedback-draft:${userIdFromName(previousName)}`;
+      const currentKey = `axom-journal-feedback-draft:${userIdFromName(currentName)}`;
+      const invalidKey = `${currentKey}:name-alias:v1:${suffix}`;
+      const repairedKey = `${currentKey}:name-alias:v1:${"b".repeat(32)}`;
+      const savedBytes = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R37 original words stay intact." });
+      useStore.getState().updateProfile({ name: currentName });
+      localStorage.setItem(previousKey, savedBytes);
+      localStorage.setItem(invalidKey, previousKey);
+      try {
+        render(<JournalPage />);
+        fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+        expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+        expect(screen.queryByText("Other saved feedback copies (1)")).toBeNull();
+        expect(localStorage.getItem(previousKey)).toBe(savedBytes);
+        expect(localStorage.getItem(invalidKey)).toBe(previousKey);
+
+        // A repair changes only the test pointer, never the saved draft.
+        localStorage.removeItem(invalidKey);
+        localStorage.setItem(repairedKey, previousKey);
+        fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+        expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+        fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+        fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+        expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+          .toBe("R37 original words stay intact.");
+        expect(localStorage.getItem(previousKey)).toBe(savedBytes);
+      } finally {
+        cleanup();
+        localStorage.removeItem(previousKey);
+        localStorage.removeItem(invalidKey);
+        localStorage.removeItem(repairedKey);
+      }
+    });
+  }
+
   it("recovers original feedback through 256 durable rename links but blocks a 257th", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 258 }, (_, index) => `Journal R35 Boundary Name ${index}`);

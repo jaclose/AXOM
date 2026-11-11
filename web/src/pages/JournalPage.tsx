@@ -2014,7 +2014,11 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
         throw new Error("Too many historical feedback owners");
       const aliasPrefix = `${ownerKeys[ownerIndex]}${JOURNAL_FEEDBACK_ALIAS_TOKEN}`;
       for (const key of keys) {
-        if (!key.startsWith(aliasPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(aliasPrefix.length))) continue;
+        if (!key.startsWith(aliasPrefix)) continue;
+        // A truncated or malformed alias key cannot establish a complete
+        // historical inventory. Do not silently hide a previously saved copy.
+        if (!/^[a-f0-9]{32}$/.test(key.slice(aliasPrefix.length)))
+          throw new Error("An earlier saved feedback name link key is invalid");
         const previousKey = window.localStorage.getItem(key);
         // An enumerated alias with an invalid or vanished value cannot prove a complete history.
         if (!previousKey || !journalFeedbackSameOwner(baseKey, previousKey))
