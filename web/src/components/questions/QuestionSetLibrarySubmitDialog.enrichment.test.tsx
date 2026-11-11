@@ -890,13 +890,19 @@ describe("Question Set draft explanation review", () => {
       expect(screen.queryByText(/Checking your existing submission/)).toBeNull();
       expect(screen.queryByText(/Network outcome unknown/)).toBeNull();
     });
-    expect(rights.checked).toBe(false);
-    expect(answers.checked).toBe(false);
-    expect(send.disabled).toBe(true);
-    fireEvent.click(rights);
-    expect(send.disabled).toBe(true);
-    fireEvent.click(answers);
-    await waitFor(() => expect(send.disabled).toBe(false));
+    // Retry temporarily unmounts the submit form while checking status.
+    // Exercise the *current* interactive elements, not detached DOM references
+    // captured before retry, or this test can report a false consent failure.
+    const retryRights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const retryAnswers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const retrySend = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    expect(retryRights.checked).toBe(false);
+    expect(retryAnswers.checked).toBe(false);
+    expect(retrySend.disabled).toBe(true);
+    fireEvent.click(retryRights);
+    expect(retrySend.disabled).toBe(true);
+    fireEvent.click(retryAnswers);
+    await waitFor(() => expect(retrySend.disabled).toBe(false));
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(source.correctKey).toBe("A");
   });
@@ -930,7 +936,12 @@ describe("Question Set draft explanation review", () => {
       expect(screen.queryByText(/Checking your existing submission/)).toBeNull();
       expect(screen.queryByText(/Submit response lost/)).toBeNull();
     });
-    expect(send.disabled).toBe(true);
+    const retryRights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const retryAnswers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const retrySend = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    expect(retryRights.checked).toBe(false);
+    expect(retryAnswers.checked).toBe(false);
+    expect(retrySend.disabled).toBe(true);
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(source.correctKey).toBe("A");
   });
