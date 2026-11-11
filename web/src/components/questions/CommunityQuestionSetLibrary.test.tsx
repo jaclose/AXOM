@@ -527,6 +527,40 @@ describe("Community Question Set Library", () => {
     expect(mock.authorize.mock.calls[0][1].reviewRevision).toBe(4);
   });
 
+  it("discloses partial rationale-only teaching without inventing a general explanation", async () => {
+    const rationaleOnly = {
+      ...snapshot,
+      questions: [{
+        ...snapshot.questions[0],
+        explanation: undefined,
+        choiceRationales: {
+          A: "AXOM AI-assisted rationale (verify against source): A is unsupported by the synthetic source.",
+        },
+      }],
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: rationaleOnly, contentDigest: "2".repeat(64),
+      status: "approved", reviewRevision: 8,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(screen.getByText(/No general explanation was included/)).toBeTruthy();
+    expect(screen.getByText(/Some answer choices lack recorded rationales/)).toBeTruthy();
+    expect(screen.getByText(/AI-assisted teaching text/)).toBeTruthy();
+    expect(screen.getByText(/A is unsupported by the synthetic source/)).toBeTruthy();
+    expect(screen.queryByText(/No teaching rationale was included/)).toBeNull();
+    expect(screen.queryByText(/No choice-by-choice rationales were included/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0]).toEqual(rationaleOnly.questions[0]);
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      reviewRevision: 8, contentDigest: "2".repeat(64),
+    });
+  });
+
   it("does not warn about missing evidence when a submitted citation and individual rationales exist", async () => {
     const approved = {
       ...snapshot,

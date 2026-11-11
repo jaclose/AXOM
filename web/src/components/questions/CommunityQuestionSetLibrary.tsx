@@ -377,14 +377,16 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
                     .find(([key]) => key.trim().toUpperCase() === option.key.trim().toUpperCase())?.[1];
                   return rationale ? [<li key={option.key}><b>{option.key}. {option.text}</b> <span>{rationale}</span></li>] : [];
                 })}</ul>}
-                {question.explanation && (!question.choiceRationales || Object.keys(question.choiceRationales).length === 0)
-                  && <p className="sub">No choice-by-choice rationales were included. Check each distractor against the original source.</p>}
-                {question.explanation && question.choiceRationales && Object.keys(question.choiceRationales).length > 0
+                {!question.explanation && question.choiceRationales && Object.keys(question.choiceRationales).length > 0
+                  && <p className="sub">No general explanation was included; only recorded choice rationales are available.</p>}
+                {(!question.choiceRationales || Object.keys(question.choiceRationales).length === 0)
+                  && <p className="sub">{question.explanation
+                    ? "No choice-by-choice rationales were included. Check each distractor against the original source."
+                    : "No teaching rationale was included in this approved snapshot."}</p>}
+                {question.choiceRationales && Object.keys(question.choiceRationales).length > 0
                   && question.options.some(option => !Object.keys(question.choiceRationales ?? {})
                     .some(key => key.trim().toUpperCase() === option.key.trim().toUpperCase()))
                   && <p className="sub">Some answer choices lack recorded rationales. Check those choices against the original source.</p>}
-                {!question.explanation && (!question.choiceRationales || Object.keys(question.choiceRationales).length === 0)
-                  && <p className="sub">No teaching rationale was included in this approved snapshot.</p>}
               </div>
             </details>
           </li>)}</ol>
