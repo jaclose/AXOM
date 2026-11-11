@@ -45,7 +45,7 @@ export function verifyTrackerIdentity({source, readback, now = new Date()} = {})
         continue;
       }
       const id = row.activityId;
-      if (!validName(id) || !sha.test(row.sourceSha256)
+      if (!validName(id) || typeof row.sourceSha256 !== "string" || !sha.test(row.sourceSha256)
         || !validName(row.term) || !validName(row.module)
         || !["explicit", "unassigned", ...(kind === "installed" ? ["inferred"] : [])].includes(row.weekBasis)
         || (row.weekBasis === "unassigned"
