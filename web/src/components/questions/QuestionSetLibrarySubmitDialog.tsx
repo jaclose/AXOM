@@ -436,6 +436,11 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (remaining?.id === withdrawingId) {
         throw new Error("Withdrawal could not be confirmed. The submission is still listed; check its status before retrying.");
       }
+      // Withdrawal ends the old publication authorization. Even when the
+      // local questions are identical, a new submission requires the owner
+      // to attest distribution rights and source-checked answers again.
+      setRights(false);
+      setAnswers(false);
       setMessage("The submission was withdrawn from the library.");
     } catch (cause) {
       if (useAccount.getState().user?.id === accountId) {
