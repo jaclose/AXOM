@@ -92,7 +92,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   // Older direct JSON inventories have no adapter-specific flag.
   if (inventory.invalidManifestRows !== undefined &&
     (!integer(inventory.invalidManifestRows) || inventory.invalidManifestRows > 0))
-    errors.push("Expanded source manifest contains malformed expanded source manifest rows or a non-array ledger; source coverage is not verified.");
+    errors.push("Detected malformed expanded source manifest ledger or row; source coverage is not verified.");
   const byHash = new Map(), duplicateRecords = [];
   for (const [index, file] of inventory.entries.entries()) {
     if (!file || typeof file !== "object" || Array.isArray(file)) {
