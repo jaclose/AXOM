@@ -278,6 +278,18 @@ self.addEventListener("activate", (event) => {
   })());
 });
 
+// The shell cache is shared across logins and outlives account changes.
+// Never touch even a retained-generation entry for a signed/unknown query URL.
+// A limited public build-version hint is the sole query exception; all other
+// query-bearing assets are browser/network-owned (including auth/token/sig URLs).
+// A version value must be short and structured, not an arbitrary opaque token.
+function hasOnlyPublicAssetVersion(url) {
+  if (!url.search) return true;
+  const params = [...url.searchParams];
+  if (params.length !== 1 || params[0][0] !== "v") return false;
+  return /^(?:build-\\d{8}|\\d{1,10}(?:\\.\\d{1,4}){0,3}|[a-f0-9]{8,16})$/i.test(params[0][1]);
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -303,6 +315,9 @@ self.addEventListener("fetch", (event) => {
     })());
     return;
   }
+
+  // Query-string access tokens and signatures must never reach shared cache reads.
+  if (!hasOnlyPublicAssetVersion(url)) return;
 
   // Cache only shipped public application assets. Extension alone is not a
   // privacy boundary: account-specific same-origin image URLs could otherwise
