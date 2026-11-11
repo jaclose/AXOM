@@ -686,17 +686,22 @@ describe("Question Set draft explanation review", () => {
     expect(await screen.findByText(/was withdrawn from the library/)).toBeTruthy();
     expect(mocks.withdraw).toHaveBeenCalledWith("owner-1", publishedSubmission.id);
 
+    // Submission-status UI unmounts the form. Reacquire newly mounted
+    // inputs rather than inspecting detached DOM nodes from the first grant.
+    const freshRights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const freshAnswers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const freshSend = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
     // The same source questions are still ready. The preceding attestations,
     // however, must not silently authorize a second publication.
     await waitFor(() => {
-      expect(rights.checked).toBe(false);
-      expect(answers.checked).toBe(false);
-      expect(send.disabled).toBe(true);
+      expect(freshRights.checked).toBe(false);
+      expect(freshAnswers.checked).toBe(false);
+      expect(freshSend.disabled).toBe(true);
     });
-    fireEvent.click(rights);
-    expect(send.disabled).toBe(true);
-    fireEvent.click(answers);
-    expect(send.disabled).toBe(false);
+    fireEvent.click(freshRights);
+    expect(freshSend.disabled).toBe(true);
+    fireEvent.click(freshAnswers);
+    expect(freshSend.disabled).toBe(false);
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
   });
