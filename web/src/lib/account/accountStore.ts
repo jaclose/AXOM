@@ -247,6 +247,9 @@ export const useAccount = create<AccountState>((set, get) => {
   let profileReadOrder = 0;
   let profileAppliedReadOrder = 0;
   let profileWriteOrder = 0;
+  // Keep profile-table and auth-metadata writes sequential within this store.
+  // A second Save must not interleave the two independent acknowledgements.
+  let profileRenameQueue: Promise<void> = Promise.resolve();
   let confirmedProfileName: { userId: string; epoch: number; name: string } | undefined;
   // Keep the SDK-derived fallback separate from an authoritative profile name.
   // A successful no-row read must not retain a removed profile's cached name.
@@ -551,40 +554,53 @@ export const useAccount = create<AccountState>((set, get) => {
       const assertOwner = () => {
         if (!sameOwner()) throw new Error("The signed-in account changed during the profile update.");
       };
-      const result = await guarded("Saving your name…", async () => {
-        const supabase = await client();
-        assertOwner();
-        const { error } = await supabase.from("account_profiles").upsert({
-          user_id: user.id, display_name: displayName, updated_at: new Date().toISOString(),
-        });
-        if (error) throw error;
-        // The profile upsert is already acknowledged. Preserve its name even
-        // if the separate auth-metadata update fails, and fence stale SELECTs.
-        assertOwner();
-        const current = get().user;
-        if (!current) throw new Error("The signed-in account changed during the profile update.");
-        profileWriteOrder += 1;
-        confirmedProfileName = { userId: user.id, epoch: profileEpoch, name: displayName };
-        set({ user: { ...current, displayName } });
-        // Supabase can resolve { error } without rejecting its promise. A
-        // partial write must never be reported as a fully completed rename.
-        let authError: unknown;
-        try {
-          const response = await supabase.auth.updateUser({ data: { display_name: displayName } });
-          authError = response.error;
-        } catch (error) {
-          authError = error;
-        }
-        assertOwner();
-        if (authError) {
-          throw new Error(`Name saved to your profile, but sign-in metadata was not updated. Retry saving your name to finish. ${friendlyError(authError)}`);
-        }
-        return true;
-      }, sameOwner);
-      // A late A request cannot reinstate A's name, busy state or notice on B.
-      if (!sameOwner()) return false;
-      if (result) set({ message: "Account name updated." });
-      return Boolean(result);
+      // Reserve this mutation's turn immediately, before any await.
+      // Queueing the full pair avoids a completed later profile write being
+      // contradicted by an earlier auth-metadata acknowledgement (or vice versa).
+      const previousRename = profileRenameQueue;
+      let releaseRename!: () => void;
+      profileRenameQueue = new Promise<void>((resolve) => { releaseRename = resolve; });
+      await previousRename;
+      try {
+        // A queued request must not begin writes after A → B → A.
+        if (!sameOwner()) return false;
+        const result = await guarded("Saving your name…", async () => {
+          const supabase = await client();
+          assertOwner();
+          const { error } = await supabase.from("account_profiles").upsert({
+            user_id: user.id, display_name: displayName, updated_at: new Date().toISOString(),
+          });
+          if (error) throw error;
+          // The profile upsert is already acknowledged. Preserve its name even
+          // if the separate auth-metadata update fails, and fence stale SELECTs.
+          assertOwner();
+          const current = get().user;
+          if (!current) throw new Error("The signed-in account changed during the profile update.");
+          profileWriteOrder += 1;
+          confirmedProfileName = { userId: user.id, epoch: profileEpoch, name: displayName };
+          set({ user: { ...current, displayName } });
+          // Supabase can resolve { error } without rejecting its promise. A
+          // partial write must never be reported as a fully completed rename.
+          let authError: unknown;
+          try {
+            const response = await supabase.auth.updateUser({ data: { display_name: displayName } });
+            authError = response.error;
+          } catch (error) {
+            authError = error;
+          }
+          assertOwner();
+          if (authError) {
+            throw new Error(`Name saved to your profile, but sign-in metadata was not updated. Retry saving your name to finish. ${friendlyError(authError)}`);
+          }
+          return true;
+        }, sameOwner);
+        // A late A request cannot reinstate A's name, busy state or notice on B.
+        if (!sameOwner()) return false;
+        if (result) set({ message: "Account name updated." });
+        return Boolean(result);
+      } finally {
+        releaseRename();
+      }
     },
 
     async signOut() {
