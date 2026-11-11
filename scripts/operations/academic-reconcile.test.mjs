@@ -401,6 +401,13 @@ test("Tracker source-week verification preserves repeated contributions and unkn
   assert.equal(malformedResult.complete, false);
   assert.ok(malformedResult.blockers.some(message => message.includes("invalid source-week")));
 
+  const missingExplicit = fixture();
+  missingExplicit.summary.templates = [{ term: "T1", module: "FTM 1", weekBasis: "explicit", items: 2 }];
+  const missingExplicitResult = run({ inventory: missingExplicit, tracker: installed });
+  assert.equal(missingExplicitResult.complete, false,
+    "A source marked explicitly week-filed without a week number must not pass.");
+  assert.ok(missingExplicitResult.blockers.some(message => message.includes("invalid source-week")));
+
   const unassigned = fixture();
   unassigned.summary.templates = [{ term: "T1", module: "FTM 1", items: 2 }];
   const unknownResult = run({ inventory: unassigned, tracker: tracker() });
