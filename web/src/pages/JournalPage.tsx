@@ -2035,7 +2035,15 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
       }
       const writerPrefix = `${ownerKey}:writer:`;
       for (const key of keys) {
-        if (!key.startsWith(writerPrefix) || !/^[a-f0-9]{32}$/.test(key.slice(writerPrefix.length))) continue;
+        if (!key.startsWith(writerPrefix)) continue;
+        const writerSuffix = key.slice(writerPrefix.length);
+        // A valid writer's receipt marker is not another draft. Keep it
+        // without falsely treating normal acknowledgements as corruption.
+        if (/^[a-f0-9]{32}:submitted$/.test(writerSuffix)) continue;
+        // A damaged writer identifier cannot establish a complete inventory.
+        // Preserve its bytes and require explicit retry after recovery.
+        if (!/^[a-f0-9]{32}$/.test(writerSuffix))
+          throw new Error("A saved feedback writer key is invalid");
         const stored = readJournalFeedbackDraft(key);
         let savedAt = 0;
         let baseFingerprint: string | null = null;
