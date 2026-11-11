@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 
 // Independent R48 integration contract. Real Zustand accountStore, mocked only
 // external Supabase calls. No credentials, production DB, or learner records.
-type ProfileResult = { data: { display_name: string } | null; error: null };
+type ProfileResult = { data: { display_name: string } | null; error: { message: string } | null };
 let emitAuth: ((event: string, session: Session | null) => void) | undefined;
 const onAuthStateChange = vi.fn((handler: (event: string, session: Session | null) => void) => {
   emitAuth = handler;
@@ -50,7 +50,7 @@ function deferredRead() {
   readQueue.push(() => pending);
   return {
     succeed: (name: string) => resolve({ data: { display_name: name }, error: null }),
-    missing: () => resolve({ data: null, error: null }),
+    failResponse: () => resolve({ data: null, error: { message: "Synthetic Supabase SELECT error" } }),
     fail: () => reject(new Error("Synthetic profile SELECT failure")),
   };
 }
@@ -100,9 +100,9 @@ describe("same-owner profile read fallback when a newer SELECT is unsuccessful",
       expect(useAccount.getState().user?.displayName).toBe("Server-authoritative A"));
   });
 
-  it("does not discard an earlier valid server response when the later SELECT returns no row", async () => {
+  it("uses an earlier valid server response if the later SELECT returns an explicit error", async () => {
     const { earlier, later } = await startTwoReads();
-    later.missing();
+    later.failResponse();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     earlier.succeed("Existing server profile");
     await vi.waitFor(() =>
