@@ -248,6 +248,9 @@ export const useAccount = create<AccountState>((set, get) => {
   let profileAppliedReadOrder = 0;
   let profileWriteOrder = 0;
   let confirmedProfileName: { userId: string; epoch: number; name: string } | undefined;
+  // Keep the SDK-derived fallback separate from an authoritative profile name.
+  // A successful no-row read must not retain a removed profile's cached name.
+  let latestAuthFallback: { userId: string; epoch: number; name: string } | undefined;
   function clearAccountUploadCaches() {
     clearCloudContentCache();
     clearCloudMediaUploadCache();
@@ -279,8 +282,14 @@ export const useAccount = create<AccountState>((set, get) => {
     if (ownerChanged || !next.user) {
       accountIdentityEpoch += 1;
       confirmedProfileName = undefined;
+      latestAuthFallback = undefined;
       clearAccountUploadCaches();
     }
+    // Capture the current session's metadata BEFORE applying a cached name.
+    // Later reads can safely return to this fallback when the row is absent.
+    if (next.user) latestAuthFallback = {
+      userId: next.user.id, epoch: accountIdentityEpoch, name: next.user.displayName,
+    };
     const confirmedName = confirmedProfileName;
     if (next.user && !ownerChanged && current?.displayName) {
       // An SDK refresh may carry stale auth metadata after the profile table
@@ -331,6 +340,14 @@ export const useAccount = create<AccountState>((set, get) => {
       if (name) {
         confirmedProfileName = { userId, epoch, name };
         set({ user: { ...user, displayName: name } });
+      } else {
+        // An authoritative no-row result means the previous server profile
+        // has disappeared. Do not carry its confirmed name into SDK refreshes.
+        confirmedProfileName = undefined;
+        const fallback = latestAuthFallback?.userId === userId && latestAuthFallback.epoch === epoch
+          ? latestAuthFallback.name
+          : user.email.split("@")[0] || "Learner";
+        set({ user: { ...user, displayName: fallback } });
       }
     } catch {
       // Profile names are cosmetic; the account still works.
