@@ -18,9 +18,11 @@ export type ProtectionStatus =
   | "conflict";
 
 /**
- * Why the last upload failed. "network" never reached the account, "server"
- * reached it and it could not answer, "auth" needs a fresh session, and
- * "rejected" is a refusal: the same upload would be refused again.
+ * Why an upload could not be confirmed. "network" means no usable HTTP answer
+ * arrived: an in-flight request may still have reached or committed to the
+ * account (especially after a client-only timeout). "server" means an HTTP
+ * failure was returned, "auth" needs a valid session, and "rejected" is a
+ * refusal. Neither "network" nor "server" proves that no write occurred.
  */
 export type SyncFailureKind = "network" | "server" | "auth" | "rejected";
 
