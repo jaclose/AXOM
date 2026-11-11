@@ -860,6 +860,38 @@ describe("Question Set draft explanation review", () => {
     expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
   });
 
+  it("revokes local grants but does not signal a publication for unknown submit result with rejected readback", async () => {
+    const source = question({ explanation: "Tunica media smooth muscle regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    // A rejected row could predate the failed request. Readback proves neither
+    // a newly committed publication nor that the old consent is safe to reuse.
+    mocks.submissions.mockReset().mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...publishedSubmission, status: "rejected" }]);
+    mocks.submit.mockReset().mockRejectedValueOnce(new Error("Network timeout; commit unknown"));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    const previousEpoch = readCommunityPublicationEpoch();
+    fireEvent.click(send);
+
+    expect(await screen.findByText(/Network timeout; commit unknown/)).toBeTruthy();
+    expect(screen.getByText(/A rejected version is on record.*submission was not confirmed/)).toBeTruthy();
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const retry = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    expect(rights.checked).toBe(false);
+    expect(answers.checked).toBe(false);
+    expect(retry.disabled).toBe(true);
+    fireEvent.click(rights);
+    expect(retry.disabled).toBe(true);
+    expect(readCommunityPublicationEpoch()).toBe(previousEpoch);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.submissions).toHaveBeenCalledTimes(2);
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
   it("revokes same-tab rights and answer grants after an acknowledged submission returns rejected", async () => {
     const source = question({ explanation: "The arterial tunica media contains smooth muscle that controls lumen diameter and vascular resistance." });
     mocks.workspace.questions = [source];
