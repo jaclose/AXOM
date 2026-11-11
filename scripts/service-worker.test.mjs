@@ -1254,3 +1254,82 @@ test('R53 install phase probe reports deferred CacheStorage write without exposi
   assert.equal(progress().phase, 'complete');
   assert.equal(progress().assetsWritten, 1);
 });
+
+test('R54 fetch backpressure: installation drains validated streamed assets before caching', async () => {
+  const chunks = Array.from({ length: 24 }, (_, i) => './assets/fetch-' + String(i).padStart(8, '0') + '.js');
+  let occupied = 0;
+  let peak = 0;
+  let drained = 0;
+  let earlyWrites = 0;
+  const waiting = [];
+  const app = worker({
+    precache: chunks,
+    shippedChunks: chunks,
+    fetchResponse: async (url) => {
+      const path = new URL(url).pathname;
+      if (!path.endsWith('.js')) {
+        if (path.endsWith('.webmanifest')) {
+          return new Response('{}', { headers: { 'content-type': 'application/manifest+json' } });
+        }
+        if (path.endsWith('.png')) {
+          return new Response('icon', { headers: { 'content-type': 'image/png' } });
+        }
+        return new Response('<!doctype html>public', {
+          headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' },
+        });
+      }
+      // Model a connection pool that cannot serve more responses until one
+      // existing response body has been consumed. Old unbounded Promise.all
+      // reaches this limit without entering the CacheStorage write stage.
+      if (occupied >= 3) await new Promise((resolve) => { waiting.push(resolve); });
+      occupied++;
+      peak = Math.max(peak, occupied);
+      const response = new Response('public-streamed-chunk', {
+        headers: { 'content-type': 'text/javascript', 'cache-control': 'no-store' },
+      });
+      const originalClone = response.clone.bind(response);
+      let released = false;
+      response.clone = () => {
+        const clone = originalClone();
+        const originalBlob = clone.blob.bind(clone);
+        clone.blob = async () => {
+          const blob = await originalBlob();
+          if (!released) {
+            released = true;
+            occupied--;
+            drained++;
+            waiting.shift()?.();
+          }
+          return blob;
+        };
+        return clone;
+      };
+      return response;
+    },
+    onCachePut: async (path) => {
+      if (path.endsWith('.js') && drained !== chunks.length) earlyWrites++;
+    },
+  });
+  let install;
+  app.events.get('install')({ waitUntil: (promise) => { install = promise; } });
+  let timer;
+  try {
+    await Promise.race([
+      install,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('asset fetch stalled on unread response bodies')), 3000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+  assert.equal(drained, chunks.length, 'all public network bodies must drain before caching');
+  assert.ok(peak >= 1 && peak <= 3, 'simulated concurrent response budget respected');
+  assert.equal(earlyWrites, 0, 'no cache writes before all public assets validated and drained');
+  const cache = await app.caches.open('axom-shell-current');
+  for (const path of chunks) {
+    assert.equal(await (await cache.match(path))?.text(), 'public-streamed-chunk', path);
+  }
+  assert.ok(await cache.match('./index.html'), 'offline shell installed');
+  assert.ok(await cache.match('./__axom-retained-public-chunks.json'), 'retained build inventory installed');
+});

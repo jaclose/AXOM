@@ -188,25 +188,40 @@ async function installPublicShell() {
   // Keep manifest-listed immutable JS/CSS available across host deployments.
   const assetPaths = CORE.filter((candidate) => !routes.includes(candidate));
   installProgress.assetsTotal = assetPaths.length;
-  const assets = await Promise.all(assetPaths.map(async (path) => {
-    const url = new URL(path, self.registration.scope).href;
-    const request = { url };
-    const response = await fetch(url, { cache: "no-store" });
-    const safe = response.ok && response.status === 200
-      && matchesRequestedResource(request, response)
-      && matchesPublicCodeMime(request, response)
-      && !isHtmlResponse(response)
-      && (cacheablePublicResponse(response)
-        || pinnedPublicBuildAsset(request, response)
-        || shippedPublicBuildAsset(request, response));
-    installProgress.assetsChecked += 1;
-    if (!safe) {
-      // These cosmetic/static entries are not required to open the app offline.
-      // Do not persist them if the host marks them protected or misserves them.
-      if (path === "./manifest.webmanifest" || path === "./icon-192.png") return null;
-      throw new Error(`Unsafe install asset: ${path}`);
+  // The browser can stall when many fetch Responses keep their bodies unread.
+  // Bound active fetches and drain each validated clone before starting another,
+  // while retaining the original URL-bearing response for the later cache.put.
+  // Required assets are still validated before the first cache write.
+  const assets = new Array(assetPaths.length);
+  let nextFetch = 0;
+  await Promise.all(Array.from({ length: Math.min(4, assetPaths.length) }, async () => {
+    while (nextFetch < assetPaths.length) {
+      const index = nextFetch++;
+      const path = assetPaths[index];
+      const url = new URL(path, self.registration.scope).href;
+      const request = { url };
+      const response = await fetch(url, { cache: "no-store" });
+      const safe = response.ok && response.status === 200
+        && matchesRequestedResource(request, response)
+        && matchesPublicCodeMime(request, response)
+        && !isHtmlResponse(response)
+        && (cacheablePublicResponse(response)
+          || pinnedPublicBuildAsset(request, response)
+          || shippedPublicBuildAsset(request, response));
+      installProgress.assetsChecked += 1;
+      if (!safe) {
+        // Nonessential visual assets must never invalidate the offline shell.
+        if (path === "./manifest.webmanifest" || path === "./icon-192.png") {
+          assets[index] = null;
+          continue;
+        }
+        throw new Error(`Unsafe install asset: ${path}`);
+      }
+      // The clone is consumed; the original retains its verified response URL.
+      // This releases the network stream without changing the cache identity.
+      await response.clone().blob();
+      assets[index] = { path, response };
     }
-    return { path, response };
   }));
   // Fetch concurrently as Cache.addAll did, but write only after every required
   // asset has passed validation. A failed install never persists partial assets.
