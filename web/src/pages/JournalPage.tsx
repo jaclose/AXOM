@@ -1752,6 +1752,19 @@ const journalInTabFeedbackRenameObservers = new WeakSet<Window>();
 // These pointers contain only storage owner keys, never feedback text. An
 // unwritten link cannot survive reload; do not present it as a durable copy.
 const journalInTabPendingNameAliasesByWindow = new WeakMap<Window, Map<string, { previous: string; suffix: string }>>();
+// A lost link cannot be inferred from newer durable aliases. Keep a bounded
+// in-tab fail-closed marker for the current name of each affected owner.
+// Like pending links, the marker cannot survive a full browser reload.
+const journalInTabFeedbackOverflowByWindow = new WeakMap<Window, Set<string>>();
+
+function journalFeedbackMarkNameHistoryOverflow(ownerKey: string): void {
+  let overflow = journalInTabFeedbackOverflowByWindow.get(window);
+  if (!overflow) {
+    overflow = new Set();
+    journalInTabFeedbackOverflowByWindow.set(window, overflow);
+  }
+  overflow.add(ownerKey);
+}
 
 function journalInTabPendingNameAliases(): Map<string, { previous: string; suffix: string }> {
   let pending = journalInTabPendingNameAliasesByWindow.get(window);
@@ -1822,6 +1835,8 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
       // Volatile text moves below regardless. A durable old-name pointer is
       // needed only for actual saved history or an unfinished recovery chain.
       const hasPendingHistory = journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey) ?? false;
+      const previousOverflow = journalInTabFeedbackOverflowByWindow.get(window);
+      const hasLostHistory = previousOverflow?.has(oldKey) ?? false;
       if (hasPendingHistory || journalFeedbackMayHaveHistory(oldKey)) {
         const suffix = journalFeedbackRevision();
         const aliasWritten = journalFeedbackRecordNameAlias(oldKey, newKey, suffix);
@@ -1832,9 +1847,20 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
         // historical link is durable; never drop a blocked earlier name.
         if (!aliasWritten || journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey)) {
           const pendingAliases = journalInTabPendingNameAliases();
-          if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_PENDING_LIMIT && !pendingAliases.has(newKey))
+          const previousLink = pendingAliases.get(newKey);
+          if (!previousLink && pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_PENDING_LIMIT)
             pendingAliases.set(newKey, { previous: oldKey, suffix });
+          else if (!previousLink || previousLink.previous !== oldKey)
+            // The bounded retry map cannot represent this additional edge.
+            // Do not report complete history when the missing edge disappears.
+            journalFeedbackMarkNameHistoryOverflow(newKey);
         }
+      }
+      if (hasLostHistory && journalFeedbackSameOwner(newKey, oldKey)) {
+        // Carry the irrecoverable gap through later name edits even after
+        // storage recovers and the older pending links flush successfully.
+        previousOverflow?.delete(oldKey);
+        previousOverflow?.add(newKey);
       }
       const pending = tabDrafts.get(oldKey);
       // Transfer volatile ownership only when the destination is empty.
@@ -1999,6 +2025,8 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
     // ordinary reads have recovered. Require an explicit persistence retry.
     if (journalInTabPendingNameAliasesByWindow.get(window)?.has(baseKey))
       throw new Error("An earlier saved feedback name link is not durable");
+    if (journalInTabFeedbackOverflowByWindow.get(window)?.has(baseKey))
+      throw new Error("An earlier saved feedback name link exceeded the recovery limit");
     // Collect the bounded key inventory once. Previous-name lookup is
     // restricted to append-only links for the SAME account/local owner.
     const keys: string[] = [];
