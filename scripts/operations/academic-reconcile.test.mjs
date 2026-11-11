@@ -4,6 +4,7 @@ import { reconcileAcademicContent, expandedSourceInventory } from "./academic-re
 
 const a = "a".repeat(64), b = "b".repeat(64), c = "c".repeat(64);
 const fixture = () => ({
+  priorityMissingSha: 0,
   summary: { files: 4, uniqueFiles: 3, duplicateFiles: 1, templates: [{ module: "FTM 1", items: 2 }] },
   entries: [
     { path: "sources/IMCQ-1.pdf", sha256: a, extension: "pdf" },
@@ -37,11 +38,36 @@ const run = (input = {}) => reconcileAcademicContent({
   pdfTriage: completePdfTriage("text_with_question_indicators"), ...input,
 });
 
+test("direct JSON inventory must declare a verified nonnegative missing-SHA denominator", () => {
+  const complete = run();
+  assert.equal(complete.complete, true, JSON.stringify(complete.blockers));
+  assert.equal(complete.counts.priorityMissingSha, 0);
+
+  const missingField = fixture();
+  delete missingField.priorityMissingSha;
+  const omitted = run({ inventory: missingField });
+  assert.equal(omitted.complete, false, "Omitting a direct inventory count must not certify source coverage.");
+  assert.equal(omitted.counts.priorityMissingSha, null);
+  assert.ok(omitted.blockers.some(x => x.includes("missing-SHA denominator")));
+
+  for (const invalid of [undefined, null, "0", "", true, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const result = run({ inventory: { ...fixture(), priorityMissingSha: invalid } });
+    assert.equal(result.complete, false, `Unverified direct inventory count ${String(invalid)} must hold.`);
+    assert.equal(result.counts.priorityMissingSha, null);
+    assert.ok(result.blockers.some(x => x.includes("missing-SHA denominator")));
+  }
+
+  const actuallyMissing = run({ inventory: { ...fixture(), priorityMissingSha: 2 } });
+  assert.equal(actuallyMissing.complete, false);
+  assert.equal(actuallyMissing.counts.priorityMissingSha, 2);
+  assert.ok(actuallyMissing.blockers.some(x => x.includes("eligible academic sources have no verified SHA-256")));
+});
+
 test("complete requires source identities, dispositions, verified receipts, and tracker records", () => {
   const r = run();
   assert.equal(r.complete, true, JSON.stringify(r.blockers));
   assert.deepEqual(r.counts, {
-    inventoryFiles: 4, uniqueSourceFiles: 3, duplicateFiles: 1,
+    inventoryFiles: 4, uniqueSourceFiles: 3, duplicateFiles: 1, priorityMissingSha: 0,
     explicitlyClassified: 3, missingDisposition: 0,
     questionSources: 1, nonInstalledQuestionSources: 0,
     detectedQuestions: 2, readyQuestions: 2, reviewQuestions: 0, verifiedReadyQuestions: 2,
