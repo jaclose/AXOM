@@ -1,0 +1,191 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "build": "013",
+  "date": "2026-11-11",
+  "parent": "Build012",
+  "branch_scope": "independent research, no merge/deploy",
+  "chapter": "Renal and Urinary Pathology: Glomerular, Tubulointerstitial, Infectious and Neoplastic Mechanisms",
+  "metrics": {
+    "parent_entries": 342,
+    "new_unique": 4,
+    "existing_profiles_expanded": 12,
+    "profiles_completed_this_build": 16,
+    "unique_total": 346,
+    "deep_profiles": 231,
+    "concise_profiles": 115,
+    "sources_total": 259,
+    "new_sources": 15,
+    "image_associations_total": 146,
+    "new_original_image_pages": 9,
+    "unique_image_pages": 145,
+    "images_embedded": 0,
+    "pdf_pages": 322,
+    "structural_QA_passed": 18,
+    "structural_QA_failed": 0,
+    "official_ontology_denominator": null,
+    "measured_ontology_coverage": null
+  },
+  "profiles": [
+    {
+      "id": "LEGACY-046",
+      "name": "Poststreptococcal glomerulonephritis",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "postinfectious nephritic syndrome; complement C3; granular IgG/C3; subepithelial humps",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-047",
+      "name": "IgA nephropathy",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "mesangial IgA deposits; hematuria; four-hit IgA1 pathogenesis; MEST-C",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-048",
+      "name": "Minimal change disease",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "diffuse podocyte foot-process effacement; bland light microscopy; steroid responsiveness",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-049",
+      "name": "Focal segmental glomerulosclerosis",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "focal and segmental sclerosis is a lesion pattern; primary versus adaptive/genetic/viral",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-050",
+      "name": "Membranous nephropathy",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "antigen-associated subepithelial immune deposits; PLA2R/THSD7A; granular capillary wall staining",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-051",
+      "name": "Membranoproliferative GN pattern",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "double-contour capillary walls; distinguish immunoglobulin-complex from complement-mediated disease",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-052",
+      "name": "Rapidly progressive/crescentic GN",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "crescentic glomerular injury; anti-GBM, ANCA pauci-immune, immune complex etiologies",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-053",
+      "name": "Diabetic kidney disease",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "diabetic glomerulosclerosis, mesangial expansion, basement membrane thickening; variable albuminuria",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-054",
+      "name": "Acute tubular injury/necrosis",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "loss of tubular epithelial polarity and brush border; pigmented granular casts; AKI",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-055",
+      "name": "Pyelonephritis",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "ascending bacterial upper urinary tract infection; neutrophilic tubulitis; exclude obstruction in sepsis",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-056",
+      "name": "Renal cell carcinoma, clear-cell",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "VHL-HIF oncogenic axis; clear cytoplasm vascularized nests; staging and systemic therapy",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "LEGACY-057",
+      "name": "Urothelial carcinoma",
+      "change": "existing entry expanded without ID duplication",
+      "distinguishing_features": "urothelial neoplasia; depth of lamina propria versus muscularis propria invasion determines stage",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "AXOM-REN-029",
+      "name": "BK polyomavirus-associated nephropathy",
+      "change": "new unique entry",
+      "distinguishing_features": "transplant-related viral tubular injury; SV40 large-T immunohistochemistry; reduce immunosuppression",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "AXOM-REN-030",
+      "name": "Light-chain deposition disease of kidney",
+      "change": "new unique entry",
+      "distinguishing_features": "monoclonal immunoglobulin nonamyloid basement membrane deposits; Congo-red negative; clone therapy",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "AXOM-REN-031",
+      "name": "Oxalate nephropathy",
+      "change": "new unique entry",
+      "distinguishing_features": "birefringent intratubular calcium oxalate crystals; genetic, enteric or toxic hyperoxaluria",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    },
+    {
+      "id": "AXOM-REN-032",
+      "name": "SMARCB1-deficient renal medullary carcinoma",
+      "change": "new unique entry",
+      "distinguishing_features": "aggressive HbS-associated carcinoma; loss of INI1/SMARCB1; platinum-based therapy in specialist center",
+      "clinical_review": "source-anchored educational draft; nephrology/uropathology specialist review pending"
+    }
+  ],
+  "key_references": [
+    {
+      "name": "KDIGO_IgAN_2025",
+      "url": "https://kdigo.org/guidelines/iga-nephropathy/"
+    },
+    {
+      "name": "KDIGO_GN_2021",
+      "url": "https://kdigo.org/guidelines/gd/"
+    },
+    {
+      "name": "KDIGO_CKD_2024",
+      "url": "https://kdigo.org/guidelines/ckd-evaluation-and-management/"
+    },
+    {
+      "name": "KDIGO_Diabetes_CKD_2022",
+      "url": "https://kdigo.org/guidelines/diabetes-ckd/"
+    },
+    {
+      "name": "BK_Consensus_2024",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11335089/"
+    },
+    {
+      "name": "NCI_RMC",
+      "url": "https://www.cancer.gov/pediatric-adult-rare-tumor/rare-tumors/rare-kidney-tumors/renal-medullary-carcinoma"
+    },
+    {
+      "name": "NCI_RCC",
+      "url": "https://www.cancer.gov/types/kidney/hp/kidney-treatment-pdq"
+    },
+    {
+      "name": "NCI_Medgen_RMC",
+      "url": "https://www.ncbi.nlm.nih.gov/medgen/1817235"
+    }
+  ],
+  "ontology": {
+    "new_primary_verified_mondo": 0,
+    "icd11": 0,
+    "orphanet": 0,
+    "provisional_secondary_mapping": {
+      "id": "AXOM-REN-032",
+      "mondo": "MONDO:0100534",
+      "source": "https://www.ncbi.nlm.nih.gov/medgen/1817235",
+      "not_confirmed_against_official_mondo_release": true
+    }
+  },
+  "image_provenance": "9 authentic individually source-page-attributed Commons Nephron histopathology file pages, with CC BY-SA 3.0/4.0 asserted on original pages; individual specimen diagnosis, patient privacy, and binary integrity NOT yet independently cleared; 0 embedded.",
+  "package_SHA256": "b8efde6df1cf2b8d165047f3fcead07afd52b3b0f969f74c4221d17f7c469100",
+  "persistence_limit": "The full 6.7 MB source ZIP, DOCX and PDF could not be uploaded to persistent Library (AccessDeny). This GitHub checkpoint is a structured recovery record only; it is not the full manuscript.",
+  "qa": "18 structural checks passed, 0 failed, PDF 322 pages, editable DOCX and complete local ZIP rendered. Independent clinical peer review not yet completed."
+}
