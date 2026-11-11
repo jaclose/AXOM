@@ -1699,6 +1699,10 @@ function JournalWelcome({ initial, initialReminders, onComplete }: {
 const JOURNAL_FEEDBACK_BASE_PATTERN = /^axom-journal-feedback-draft:([a-z0-9_-]+)(?::account:([a-zA-Z0-9_-]+))?$/;
 const JOURNAL_FEEDBACK_ALIAS_TOKEN = ":name-alias:v1:";
 const JOURNAL_FEEDBACK_ALIAS_LIMIT = 16;
+// Stored, append-only rename pointers may outlive a browser tab. Use a larger,
+// still finite reader bound than the 16-link same-tab retry queue so a single
+// saved copy is not hidden behind ordinary later display-name edits.
+const JOURNAL_FEEDBACK_ALIAS_READ_LIMIT = 256;
 
 function journalFeedbackSameOwner(root: string, candidate: string): boolean {
   const current = JOURNAL_FEEDBACK_BASE_PATTERN.exec(root);
@@ -1999,7 +2003,7 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
     }
     const ownerKeys = [baseKey];
     for (let ownerIndex = 0; ownerIndex < ownerKeys.length; ownerIndex += 1) {
-      if (ownerIndex >= JOURNAL_FEEDBACK_ALIAS_LIMIT)
+      if (ownerIndex >= JOURNAL_FEEDBACK_ALIAS_READ_LIMIT)
         throw new Error("Too many historical feedback owners");
       const aliasPrefix = `${ownerKeys[ownerIndex]}${JOURNAL_FEEDBACK_ALIAS_TOKEN}`;
       for (const key of keys) {
