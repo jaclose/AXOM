@@ -8,6 +8,8 @@ const PRECACHE = []; // __AXOM_PRECACHE__
 // Injection does not add optional games to install-time PRECACHE.
 const SHIPPED_CHUNKS = []; // __AXOM_SHIPPED_CHUNKS__
 const CORE = [...new Set(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...PRECACHE])];
+// Fixed, aggregate install phases only. No URLs, headers, bodies or account data.
+const installProgress = { phase: "idle", shells: 0, assetsTotal: 0, assetsChecked: 0, assetsWritten: 0 };
 // A later worker cannot infer a predecessor's immutable chunk identities from
 // its own manifest. Bind those identities to the cache generation at install.
 const RETAINED_MANIFEST_KEY = "./__axom-retained-public-chunks.json";
@@ -170,6 +172,7 @@ async function offlineShell() {
 }
 
 async function installPublicShell() {
+  installProgress.phase = "shell-fetch";
   const routes = ["./", "./index.html"];
   // Validate both navigation entrypoints before writing either response.
   const validated = await Promise.all(routes.map(async (path) => {
@@ -177,11 +180,15 @@ async function installPublicShell() {
     if (!safeOfflineShell(response)) throw new Error(`Unsafe offline shell: ${path}`);
     return { path, response };
   }));
+  installProgress.shells = validated.length;
+  installProgress.phase = "assets-fetch";
   const cache = await caches.open(CACHE);
   // Cache.addAll bypasses the response-policy checks below and stores even
   // private/no-store data. Validate every fetched asset before any cache.put.
   // Keep manifest-listed immutable JS/CSS available across host deployments.
-  const assets = await Promise.all(CORE.filter((candidate) => !routes.includes(candidate)).map(async (path) => {
+  const assetPaths = CORE.filter((candidate) => !routes.includes(candidate));
+  installProgress.assetsTotal = assetPaths.length;
+  const assets = await Promise.all(assetPaths.map(async (path) => {
     const url = new URL(path, self.registration.scope).href;
     const request = { url };
     const response = await fetch(url, { cache: "no-store" });
@@ -192,6 +199,7 @@ async function installPublicShell() {
       && (cacheablePublicResponse(response)
         || pinnedPublicBuildAsset(request, response)
         || shippedPublicBuildAsset(request, response));
+    installProgress.assetsChecked += 1;
     if (!safe) {
       // These cosmetic/static entries are not required to open the app offline.
       // Do not persist them if the host marks them protected or misserves them.
@@ -206,19 +214,24 @@ async function installPublicShell() {
   // writes can leave a large shell install pending past the update acceptance
   // deadline even after every HTTP response has finished.
   const validatedAssets = assets.filter(Boolean);
+  installProgress.phase = "assets-write";
   let nextAsset = 0;
   await Promise.all(Array.from({ length: Math.min(4, validatedAssets.length) }, async () => {
     while (nextAsset < validatedAssets.length) {
       const { path, response } = validatedAssets[nextAsset++];
       await cache.put(path, response);
+      installProgress.assetsWritten += 1;
     }
   }));
+  installProgress.phase = "manifest-write";
   // A quota-limited metadata write must not prevent a valid update installing.
   await cache.put(RETAINED_MANIFEST_KEY,
     new Response(JSON.stringify({ version: 1, chunks: RETAINED_CHUNKS }), {
       headers: { "content-type": "application/json" },
     })).catch(() => {});
+  installProgress.phase = "shell-write";
   for (const { path, response } of validated) await cache.put(path, response);
+  installProgress.phase = "complete";
 }
 
 function cacheResponse(event, key, response) {
@@ -272,6 +285,10 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "AXOM_QUERY_INSTALL_PROGRESS") {
+    event.ports?.[0]?.postMessage({ ...installProgress });
+    return;
+  }
   if (event.data?.type === "AXOM_ACTIVATE_UPDATE") event.waitUntil(self.skipWaiting());
 });
 
