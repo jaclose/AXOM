@@ -79,8 +79,8 @@ test('cached public WOFF2 URL cannot replay synthetic JSON and is evicted', asyn
   await current.put('/fonts/axom-ui.woff2',
     response('SYNTHETIC_OTHER_ACCOUNT_JSON', 'application/json'));
 
-  const result = await app.read();
-  assert.equal(result.status, 0, 'offline font fallback must reject JSON, not return HTTP 200');
+  await assert.rejects(app.read(), /offline/,
+    'an invalid cached font must fall through to the failing network, not return HTTP 200');
   assert.equal(await current.match('/fonts/axom-ui.woff2'), undefined,
     'remove only poisoned font entry');
   assert.equal(await (await unrelated.match('/keep')).text(), 'unrelated',
