@@ -2182,7 +2182,7 @@ function JournalFeedbackForOwner({ onClose, draftKey, selectedKey, onSelectCopy,
       ? "Feedback was received, but your latest answers were not saved in this browser. Download submitted copy before closing."
       : loaded.unreadable
         ? loaded.raw === null
-          ? "AXOM cannot read saved feedback. You can write in this tab, but nothing will save until storage returns. Download before refreshing or closing this tab. Older saved drafts were not changed."
+          ? "AXOM cannot verify saved feedback. You can write in this tab, but this draft cannot save while recovery is incomplete. Download before refreshing or closing this tab. Older saved drafts were not changed."
           : "AXOM could not read this saved feedback draft. Its original data is still here. Download the saved copy before editing."
         : "",
   );
