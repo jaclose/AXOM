@@ -397,4 +397,91 @@ describe("Journal feedback when browser storage cannot be read", () => {
   });
 
 
+  it("restores an older saved draft after a rename during a temporary storage read outage and explicit retry", () => {
+    clearFixtureCopies();
+    const before = "Journal R27 Saved Before Outage";
+    const after = "Journal R27 Renamed During Outage";
+    useStore.getState().updateProfile({ name: before });
+    const priorKey = `axom-journal-feedback-draft:${userIdFromName(before)}`;
+    const nextKey = `axom-journal-feedback-draft:${userIdFromName(after)}`;
+    const savedRaw = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Never overwrite this pre-rename feedback." });
+    localStorage.setItem(priorKey, savedRaw);
+    const first = render(<JournalPage />);
+    first.unmount();
+
+    const originalGet = Storage.prototype.getItem;
+    const denied = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith(nextKey))
+        throw new Error("Transient browser storage read outage during rename");
+      return originalGet.call(this, storageKey);
+    });
+    useStore.getState().updateProfile({ name: after });
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+    expect(originalGet.call(localStorage, priorKey)).toBe(savedRaw);
+    expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .some((item) => item?.startsWith(`${nextKey}:name-alias:v1:`))).toBe(false);
+
+    denied.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+    fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Never overwrite this pre-rename feedback.");
+    expect(originalGet.call(localStorage, priorKey)).toBe(savedRaw);
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const item = localStorage.key(index);
+      if (item?.startsWith(priorKey) || item?.startsWith(nextKey)) localStorage.removeItem(item);
+    }
+  });
+
+  it("never exposes account A's pending rename link to account B during recovery", async () => {
+    clearFixtureCopies();
+    const before = "Journal R27 Account A Before";
+    const after = "Journal R27 Account A After";
+    const accountA = { id: "journal-r27-account-a", email: "a@example.test", displayName: "A", emailConfirmed: true };
+    const accountB = { ...accountA, id: "journal-r27-account-b", email: "b@example.test" };
+    useAccount.setState({ user: accountA, phase: "signed-in", link: "linked" });
+    useStore.getState().updateProfile({ name: before });
+    const priorKey = `axom-journal-feedback-draft:${userIdFromName(before)}:account:${accountA.id}`;
+    const nextAKey = `axom-journal-feedback-draft:${userIdFromName(after)}:account:${accountA.id}`;
+    const nextBKey = `axom-journal-feedback-draft:${userIdFromName(after)}:account:${accountB.id}`;
+    const savedRaw = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Only A may recover this." });
+    localStorage.setItem(priorKey, savedRaw);
+    const first = render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+    first.unmount();
+
+    const originalGet = Storage.prototype.getItem;
+    const denied = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      if (this === window.localStorage && storageKey.startsWith(nextAKey))
+        throw new Error("Account A read blocked during rename");
+      return originalGet.call(this, storageKey);
+    });
+    useStore.getState().updateProfile({ name: after });
+    denied.mockRestore();
+    render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+    await act(async () => { useAccount.setState({ user: accountB }); });
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value).toBe("");
+    expect(screen.queryByText(/Other saved feedback copies/)).toBeNull();
+    expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .some((item) => item?.startsWith(`${nextBKey}:name-alias:v1:`))).toBe(false);
+
+    await act(async () => { useAccount.setState({ user: accountA }); });
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+    fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Only A may recover this.");
+    expect(originalGet.call(localStorage, priorKey)).toBe(savedRaw);
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const item = localStorage.key(index);
+      if (item?.startsWith(priorKey) || item?.startsWith(nextAKey) || item?.startsWith(nextBKey))
+        localStorage.removeItem(item);
+    }
+  });
+
 });
