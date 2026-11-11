@@ -1784,7 +1784,13 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
       const newOwner = accountId ? `${next.profile.userId}:account:${accountId}` : next.profile.userId;
       const oldKey = `axom-journal-feedback-draft:${oldOwner}`;
       const newKey = `axom-journal-feedback-draft:${newOwner}`;
-      if (!journalFeedbackRecordNameAlias(oldKey, newKey)) {
+      const aliasWritten = journalFeedbackRecordNameAlias(oldKey, newKey);
+      // A later rename can persist its own link while an earlier rename
+      // remains unreadable. Flush the earlier link if storage recovered.
+      if (aliasWritten) journalFeedbackRetryPendingNameAliases(oldKey);
+      // If it is still pending, keep the new destination in explicit retry
+      // state so the retry follows the full same-owner rename chain.
+      if (!aliasWritten || journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey)) {
         const pendingAliases = journalInTabPendingNameAliases();
         if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_LIMIT && !pendingAliases.has(newKey))
           pendingAliases.set(newKey, { previous: oldKey, suffix: journalFeedbackRevision() });
