@@ -32,6 +32,9 @@ function fixture() {
     sampledQuestionHeadingIndicators: 2,
   };
   const inventory = {
+    // Every original in this synthetic single-source cohort has a declared SHA.
+    // The direct-inventory contract must never infer this denominator as zero.
+    priorityMissingSha: 0,
     summary: { files: 1, uniqueFiles: 1, duplicateFiles: 0, templates: [] },
     entries: [{ path: original, sha256: PDF_SHA, extension: "pdf" }],
   };
