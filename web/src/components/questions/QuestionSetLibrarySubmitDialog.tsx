@@ -452,8 +452,19 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       try {
         const recovered = await refresh();
         if (recovered?.status === "pending" || recovered?.status === "approved") {
+          if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
+          // The RPC may have committed even when its response was lost. Once
+          // authenticated readback confirms a live publication, revoke the
+          // prior cross-tab grants exactly as for an acknowledged response.
+          // Never signal on an inconclusive or failed readback.
+          const otherTabsNotified = signalCommunityPublicationChange();
+          rightsEpoch.current = null;
+          answersEpoch.current = null;
+          setRights(false);
+          setAnswers(false);
           setError("");
-          setMessage("Your submission is in the library review queue.");
+          setMessage("Your submission is in the library review queue."
+            + (otherTabsNotified ? "" : " Other open tabs may need to refresh their publication review."));
         }
       } catch { /* The original error remains visible. */ }
     } finally { setBusy(false); }
