@@ -281,6 +281,61 @@ describe("Question Set draft explanation review", () => {
     expect(screen.getByText(/1 AI draft/)).toBeTruthy();
   });
 
+  it.each([
+    ["image attachment", { attachments: [{ assetId: "synthetic-image-edit" }] as never }],
+    ["source teaching analysis", { analyses: [{ sourceEvidence: "Newly amended source teaching evidence." }] as never }],
+  ])("rejects a %s introduced by a store subscriber midway through a two-question AI batch", async (_kind, revision) => {
+    const first = question();
+    const second = question({ id: "q-2", stem: "Which tunic is lined by endothelial cells?" });
+    const batchSet = { ...set, questionIds: [first.id, second.id] };
+    mocks.workspace.questions = [first, second];
+    mocks.workspace.questionSets = [batchSet];
+    // Zustand subscribers run synchronously. An independent editor may change
+    // the second question while the first optimistic update notifies listeners.
+    // Preflight-only validation must not overwrite this newly changed source.
+    mocks.updateQuestion.mockImplementation((id: string, patch: Partial<QuestionRecord>) => {
+      mocks.workspace.questions = mocks.workspace.questions.map(item => {
+        const current = item as QuestionRecord;
+        if (current.id === id) return { ...current, ...patch, updatedAt: "2026-11-09T12:00:00.000Z" };
+        return id === first.id && current.id === second.id ? { ...current, ...revision } : current;
+      });
+    });
+    render(<QuestionSetLibrarySubmitDialog set={batchSet} questions={[first, second]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/2 AI drafts to inspect/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/source evidence changed during the batch save/)).toBeTruthy();
+    expect(mocks.updateQuestion).toHaveBeenCalledOnce();
+    const untouched = (mocks.workspace.questions as QuestionRecord[]).find(item => item.id === second.id)!;
+    expect(untouched.explanation).toBeUndefined();
+    expect(untouched.correctKey).toBe("A");
+    expect(untouched.updatedAt).toBe(second.updatedAt);
+    expect(screen.getByText(/2 AI drafts to inspect/)).toBeTruthy();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["image attachment", { attachments: [{ assetId: "later-image-exhibit" }] as never }],
+    ["source teaching analysis", { analyses: [{ sourceEvidence: "Reviewed source analysis changed." }] as never }],
+  ])("preserves an intervening %s edit during an unconfirmed private save and its retry", async (_kind, revision) => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    let finishFlush!: () => void;
+    mocks.flush.mockImplementationOnce(() => new Promise<void>(resolve => { finishFlush = resolve; }));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save inspected explanations to my QBank" }));
+    await waitFor(() => expect(mocks.updateQuestion).toHaveBeenCalledOnce());
+    const applied = mocks.workspace.questions[0] as QuestionRecord;
+    mocks.workspace.questions = [{ ...applied, ...revision }]; // unchanged updatedAt
+    await act(async () => { finishFlush(); });
+    expect(await screen.findByText(/saved explanations could not be verified/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/avoid overwriting newer work/)).toBeTruthy();
+    expect(mocks.updateQuestion).toHaveBeenCalledOnce();
+    expect((mocks.workspace.questions[0] as QuestionRecord).updatedAt).toBe(applied.updatedAt);
+    expect(screen.getByText(/1 AI draft to inspect/)).toBeTruthy();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("never confirms a pending save after an account switch, even when the original account returns", async () => {
     const source = question();
     mocks.workspace.questions = [source];
