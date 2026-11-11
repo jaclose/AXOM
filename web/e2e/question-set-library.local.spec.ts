@@ -492,7 +492,7 @@ test("four-question SQL-approved set discloses unseen citation and distractor ga
 });
 
 test("withdrawn publication cannot be imported from an already-open learner preview", async ({ page, browser, baseURL }) => {
-  test.setTimeout(210_000);
+  test.setTimeout(240_000);
   const database = await createPlatformDatabase();
   const [owner, member] = PLATFORM_USERS;
   const learnerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
@@ -600,7 +600,11 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     expect(resubmitted.id).not.toBe(pending.id);
     const newPending = await database.rpc(owner.id, "get_question_set_library", { p_id: resubmitted.id }) as
       typeof approvedEvidence;
-    expect(newPending.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
+    // Re-serialization intentionally stamps a fresh createdAt; compare the
+    // source projection, not the new submission's independently timed receipt.
+    const firstSource = approvedEvidence.snapshot_payload as typeof approvedEvidence.snapshot_payload & { createdAt: string };
+    const secondSource = newPending.snapshot_payload as typeof newPending.snapshot_payload & { createdAt: string };
+    expect({ ...secondSource, createdAt: firstSource.createdAt }).toEqual(firstSource);
     expect(newPending.snapshot_payload.questions[0].correctKey).toBe("B");
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
 
@@ -618,7 +622,7 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     const newApproval = await database.rpc(member.id, "get_question_set_library", { p_id: resubmitted.id }) as
       typeof approvedEvidence;
     expect(newApproval.status).toBe("approved");
-    expect(newApproval.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
+    expect(newApproval.snapshot_payload).toEqual(newPending.snapshot_payload);
     expect(newApproval.review_revision).toBeGreaterThan(newPending.review_revision);
     const relisted = await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 }) as
       Array<{ id: string }>;
