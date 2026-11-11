@@ -108,7 +108,7 @@ describe("manual account save receipt against real coordinator transport", () =>
 
   it("keeps a failed permission response distinct from an earlier successful protection", async () => {
     const push = vi.fn<SyncTransport["push"]>().mockRejectedValue(
-      new SyncPushError(classifyPushFailure({ status: 403, message: "Access denied" }, 403), "Synthetic 403"),
+      new SyncPushError(classifyPushFailure({ message: "Access denied" }, 403), "Synthetic 403"),
     );
     attachActualCoordinator(push);
 
