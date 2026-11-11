@@ -1,0 +1,204 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "build": "014",
+  "date": "2026-11-11",
+  "parent": "Build013 / docs/disease-atlas-v2-run013-20261111-renal",
+  "scope": "isolated research branch only; no merge, migration or production deployment",
+  "chapter": "Neurology and Neuropathology: vascular, neurodegenerative, demyelinating, molecular CNS tumors",
+  "metrics": {
+    "previous_unique": 346,
+    "new_unique": 6,
+    "legacy_promotions": 8,
+    "completed_detailed_this_build": 14,
+    "unique_total": 352,
+    "detailed_total": 245,
+    "concise_remaining": 107,
+    "source_records_total": 277,
+    "source_records_new": 18,
+    "image_associations_total": 155,
+    "new_individual_image_pages": 9,
+    "images_embedded": 0,
+    "pdf_pages": 351,
+    "structural_checks_passed": 23,
+    "structural_checks_failed": 0,
+    "word_accessibility_findings": 0,
+    "official_ontology_denominator": null,
+    "measured_coverage": null
+  },
+  "new_profiles": [
+    [
+      "AXOM-NEU-017",
+      "Cerebral venous thrombosis",
+      "MR/CT venography; headache/seizure; therapeutic anticoagulation despite typical venous hemorrhagic infarct absent special contraindications",
+      "NEU14-AHA-CVT24"
+    ],
+    [
+      "AXOM-NEU-018",
+      "Cerebral amyloid angiopathy",
+      "strictly lobar microbleeds; cortical superficial siderosis; Boston 2.0; recurrent lobar ICH",
+      "NEU14-CAA22"
+    ],
+    [
+      "AXOM-NEU-019",
+      "Reversible cerebral vasoconstriction syndrome",
+      "recurrent thunderclap headache; segmental arterial constriction and interval resolution; avoid routine glucocorticoids",
+      "NEU14-RCVS17"
+    ],
+    [
+      "AXOM-NEU-020",
+      "Astrocytoma, IDH-mutant",
+      "IDH mutation and absent whole-arm 1p/19q codeletion; grades 2–4; CDKN2A/B deletion can define grade 4; FDA grade 2 vorasidenib",
+      "NEU14-WHO-CNS21;NEU14-FDA-VORA24"
+    ],
+    [
+      "AXOM-NEU-021",
+      "Oligodendroglioma, IDH-mutant and 1p/19q-codeleted",
+      "both IDH variant and whole-arm 1p/19q deletion REQUIRED; grades 2/3; RT-PCV or selected FDA grade 2 vorasidenib",
+      "NEU14-WHO-CNS21;NEU14-EANO-GLI21;NEU14-FDA-VORA24"
+    ],
+    [
+      "AXOM-NEU-022",
+      "Primary central nervous system lymphoma",
+      "angiocentric CD20-positive DLBCL; high-dose methotrexate backbone; avoid steroids before biopsy if clinically safe",
+      "NEU14-EANO-PCNSL22;NEU14-NCI-PCNSL25"
+    ]
+  ],
+  "promoted": [
+    [
+      "LEGACY-082",
+      "Ischemic cerebral infarction",
+      "2026 AHA/ASA; salvageable penumbra; IV thrombolysis and selected thrombectomy"
+    ],
+    [
+      "LEGACY-083",
+      "Intracerebral hemorrhage",
+      "2022 AHA/ASA; expansion, anticoagulation reversal, hypertensive vs amyloid"
+    ],
+    [
+      "LEGACY-084",
+      "Subarachnoid hemorrhage",
+      "2023 AHA/ASA; urgent aneurysm securing, nimodipine and delayed cerebral ischemia"
+    ],
+    [
+      "LEGACY-085",
+      "Alzheimer disease",
+      "tau and amyloid pathology; anti-amyloid ARIA safety and FDA 2025 lecanemab earlier MRI recommendation"
+    ],
+    [
+      "LEGACY-086",
+      "Parkinson disease",
+      "nigral alpha-synuclein; levodopa when QoL-limiting motor symptoms; agonist impulse-control risk"
+    ],
+    [
+      "LEGACY-087",
+      "Multiple sclerosis",
+      "2024 McDonald revisions published 2025; optic nerve fifth site, biomarkers and safety of DMT"
+    ],
+    [
+      "LEGACY-088",
+      "Glioblastoma",
+      "WHO CNS5 IDH-wildtype; distinguish IDH-mutant astrocytoma grade 4"
+    ],
+    [
+      "LEGACY-089",
+      "Meningioma",
+      "WHO CNS grades 1–3; TERT promoter or CDKN2A/B molecular grade 3; surgery/surveillance/RT"
+    ]
+  ],
+  "source_urls": {
+    "NEU14-AHA-AIS26": "https://www.ahajournals.org/doi/10.1161/STR.0000000000000513",
+    "NEU14-AHA-ICH22": "https://www.ahajournals.org/doi/10.1161/STR.0000000000000407",
+    "NEU14-AHA-SAH23": "https://www.ahajournals.org/doi/10.1161/STR.0000000000000436",
+    "NEU14-AHA-CVT24": "https://pubmed.ncbi.nlm.nih.gov/38284265/",
+    "NEU14-CAA22": "https://pubmed.ncbi.nlm.nih.gov/35841910/",
+    "NEU14-AD-FDA25": "https://www.fda.gov/drugs/drug-safety-communications/fda-recommend-additional-earlier-mri-monitoring-patients-alzheimers-disease-taking-leqembi-lecanemab",
+    "NEU14-AD-DON24": "https://www.fda.gov/drugs/news-events-human-drugs/fda-approves-treatment-adults-alzheimers-disease",
+    "NEU14-PD-NICE": "https://www.nice.org.uk/guidance/ng71/chapter/Recommendations",
+    "NEU14-MS25": "https://doi.org/10.1016/S1474-4422(25)00270-4",
+    "NEU14-NCI-CNS25": "https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq",
+    "NEU14-WHO-CNS21": "https://doi.org/10.1001/jamaoncol.2022.2844",
+    "NEU14-EANO-GLI21": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7904519/",
+    "NEU14-FDA-VORA24": "https://www.fda.gov/drugs/resources-information-approved-drugs/fda-approves-vorasidenib-grade-2-astrocytoma-or-oligodendroglioma-susceptible-idh1-or-idh2-mutation",
+    "NEU14-RCVS17": "https://pubmed.ncbi.nlm.nih.gov/28456915/",
+    "NEU14-CAA-EAN22": "https://www.ean.org/research/resources/neurology-updates/detail/boston-criteria-20-for-cerebral-amyloid-angiopathy",
+    "NEU14-EANO-PCNSL22": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9825335/",
+    "NEU14-NCI-PCNSL25": "https://www.cancer.gov/types/lymphoma/hp/primary-cns-lymphoma-treatment-pdq",
+    "NEU14-EANO-MEN21": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8563316/"
+  },
+  "image_pages": [
+    [
+      "LEGACY-082",
+      "https://commons.wikimedia.org/wiki/File:CT_and_MR_perfusion_of_cerebral_infarction.png",
+      "Shazia Mirza and Sankalp Gokhale",
+      "CC BY 4.0"
+    ],
+    [
+      "LEGACY-083",
+      "https://commons.wikimedia.org/wiki/File:Intracerebral_hemorrage_(CT_scan).jpg",
+      "Glitzy queen00, Commons history also PhilippN",
+      "Public domain dedication, patient context outstanding"
+    ],
+    [
+      "LEGACY-084",
+      "https://commons.wikimedia.org/wiki/File:CT_of_subarachnoid_hemorrhage.png",
+      "Shazia Mirza and Sankalp Gokhale",
+      "CC BY 4.0"
+    ],
+    [
+      "LEGACY-085",
+      "https://commons.wikimedia.org/wiki/File:Histopathology_of_neurofibrillary_tangles_in_Alzheimer%27s_disease.jpg",
+      "Mikael Häggström",
+      "CC0 1.0"
+    ],
+    [
+      "LEGACY-086",
+      "https://commons.wikimedia.org/wiki/File:Lewy_body_in_the_substantia_nigra_from_a_person_with_Parkinson%27s_disease.jpg",
+      "Tulemo",
+      "CC BY-SA 4.0"
+    ],
+    [
+      "LEGACY-088",
+      "https://commons.wikimedia.org/wiki/File:Glioblastoma_-_high_mag.jpg",
+      "Nephron",
+      "CC BY-SA 3.0, IDH status of historical specimen not validated"
+    ],
+    [
+      "AXOM-NEU-018",
+      "https://commons.wikimedia.org/wiki/File:Cerebral_amyloid_angiopathy_-_very_high_mag.jpg",
+      "Nephron",
+      "CC BY-SA 3.0"
+    ],
+    [
+      "AXOM-NEU-018",
+      "https://commons.wikimedia.org/wiki/File:Amyloidangiopathie_Kongorot.jpg",
+      "Marvin 101",
+      "CC BY-SA 3.0"
+    ],
+    [
+      "AXOM-NEU-021",
+      "https://commons.wikimedia.org/wiki/File:Oligodendroglioma1_high_mag.jpg",
+      "Nephron",
+      "CC BY-SA 3.0, molecular identity not confirmed"
+    ]
+  ],
+  "source_archive": {
+    "zip_sha256": "d898c6fed17e55a3606aecc2707d0939f23f082fb8034c625610b7e210fcf6eb",
+    "docx_sha256": "",
+    "pdf_sha256": "",
+    "files_local": [
+      "data/registry_v2_run014.csv",
+      "data/coverage_manifest_v2_run014.json",
+      "data/sources_run014.json",
+      "data/image_provenance_v2_run014.csv",
+      "data/neurology_deep_profiles_run014.json",
+      "deliverables/AXOM_Disease_Pathology_Atlas_V2_Run014.docx",
+      "deliverables/AXOM_Disease_Pathology_Atlas_V2_Run014.pdf"
+    ]
+  },
+  "limitations": [
+    "Attempted full ZIP/DOCX/PDF/manifest persistent Library upload failed AccessDeny; only summary checkpoint persisted in GitHub, full binaries not remotely available.",
+    "Official pinned MONDO/ICD-11/Orphanet ontologies not imported, coverage percent unmeasured.",
+    "Individual medical image specimen-level diagnostic and patient privacy review outstanding; no original images embedded.",
+    "Specialist clinical and pathology validation, and full latest drug labeling audits pending."
+  ]
+}
