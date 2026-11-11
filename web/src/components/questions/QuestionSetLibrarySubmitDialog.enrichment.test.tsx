@@ -868,6 +868,72 @@ describe("Question Set draft explanation review", () => {
     expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
   });
 
+  it("recovers a committed withdrawal when its network reply is lost, without reusing grants", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValueOnce([]).mockResolvedValueOnce([publishedSubmission]).mockResolvedValueOnce([]);
+    mocks.submit.mockResolvedValueOnce(publishedSubmission.id);
+    mocks.withdraw.mockRejectedValueOnce(new Error("Connection lost after withdrawal committed"));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    fireEvent.click(send);
+    expect(await screen.findByText(/Submission received/)).toBeTruthy();
+
+    const epochBefore = readCommunityPublicationEpoch();
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw submission" }));
+    expect(await screen.findByText(/withdrawn from the library after status recovery/)).toBeTruthy();
+    expect(readCommunityPublicationEpoch()).not.toBe(epochBefore);
+    expect(mocks.withdraw).toHaveBeenCalledOnce();
+    expect(mocks.submissions).toHaveBeenCalledTimes(3);
+    const freshRights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const freshAnswers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const freshSend = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    expect(freshRights.checked).toBe(false);
+    expect(freshAnswers.checked).toBe(false);
+    expect(freshSend.disabled).toBe(true);
+    fireEvent.click(freshRights);
+    expect(freshSend.disabled).toBe(true);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
+  it("retains unknown withdrawal until a later authenticated status retry confirms its disappearance", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValueOnce([publishedSubmission])
+      .mockRejectedValueOnce(new Error("Temporary status readback outage"))
+      .mockResolvedValueOnce([]);
+    mocks.withdraw.mockRejectedValueOnce(new Error("Withdrawal response lost"));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+    const epochBefore = readCommunityPublicationEpoch();
+    fireEvent.click(withdraw);
+    expect(await screen.findByText("Withdrawal response lost")).toBeTruthy();
+    expect(readCommunityPublicationEpoch()).toBe(epochBefore);
+    expect(screen.getByRole("button", { name: "Withdraw submission" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send for review" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry status check" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Withdraw submission" })).toBeNull());
+    expect(readCommunityPublicationEpoch()).not.toBe(epochBefore);
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    const send = screen.getByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    expect(rights.checked).toBe(false);
+    expect(answers.checked).toBe(false);
+    expect(send.disabled).toBe(true);
+    expect(mocks.submissions).toHaveBeenCalledTimes(3);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
   it("does not unlock resubmission when the withdrawal RPC rejects", async () => {
     const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
     mocks.workspace.questions = [source];
