@@ -437,6 +437,57 @@ describe("Journal feedback when browser storage cannot be read", () => {
     }
   });
 
+  it("recovers a pending historical link after a second rename succeeds during a partial storage outage", () => {
+    clearFixtureCopies();
+    const originalName = "Journal R27 Two Step Original";
+    const middleName = "Journal R27 Two Step Middle";
+    const finalName = "Journal R27 Two Step Final";
+    useStore.getState().updateProfile({ name: originalName });
+    const originalKey = `axom-journal-feedback-draft:${userIdFromName(originalName)}`;
+    const middleKey = `axom-journal-feedback-draft:${userIdFromName(middleName)}`;
+    const finalKey = `axom-journal-feedback-draft:${userIdFromName(finalName)}`;
+    const savedRaw = JSON.stringify({ ...JSON.parse(oldDraft), liked: "Keep the unchanged first-name draft." });
+    localStorage.setItem(originalKey, savedRaw);
+    const first = render(<JournalPage />);
+    first.unmount();
+
+    const originalGet = Storage.prototype.getItem;
+    const denied = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+      // The first rename cannot write its link. The second rename can write
+      // its own link, but the earlier link is still unreadable during handoff.
+      if (this === window.localStorage && storageKey.startsWith(middleKey))
+        throw new Error("First historical-name link still unavailable");
+      return originalGet.call(this, storageKey);
+    });
+    useStore.getState().updateProfile({ name: middleName });
+    useStore.getState().updateProfile({ name: finalName });
+    const finalAliases = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .filter((item): item is string => Boolean(item?.startsWith(`${finalKey}:name-alias:v1:`)));
+    expect(finalAliases).toHaveLength(1);
+    expect(originalGet.call(localStorage, originalKey)).toBe(savedRaw);
+
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+    // A still-blocked intermediate pointer must keep the final destination
+    // in an explicit retry state, not silently hide the earlier saved copy.
+    expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+    denied.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+    expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+    fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+    expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+      .toBe("Keep the unchanged first-name draft.");
+    expect(originalGet.call(localStorage, originalKey)).toBe(savedRaw);
+    expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .some((item) => item?.startsWith(`${middleKey}:name-alias:v1:`))).toBe(true);
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const item = localStorage.key(index);
+      if (item?.startsWith(originalKey) || item?.startsWith(middleKey) || item?.startsWith(finalKey))
+        localStorage.removeItem(item);
+    }
+  });
+
   it("never exposes account A's pending rename link to account B during recovery", async () => {
     clearFixtureCopies();
     const before = "Journal R27 Account A Before";
