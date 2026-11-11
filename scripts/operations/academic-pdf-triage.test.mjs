@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyPdfText, isWithinRoot, parsePdfInfo, selectPdfJobs, mergePdfTriageRows, sourceRoots, summarizeTriage, recommendNextSources, recommendBalancedSources, verifyPdfSourceAvailability } from "./academic-pdf-triage.mjs";
@@ -201,8 +201,12 @@ function fakePdfJob(sha, sourcePath, extra = {}) {
 }
 
 function fakeReadyRow(job, stat, sourcePath = job.source_path) {
+  // A real inspected row stores a canonical realpath, even if the queue uses
+  // a symlinked macOS path such as /var rather than /private/var.
+  let resolvedPath = sourcePath;
+  try { resolvedPath = realpathSync(sourcePath); } catch { /* missing-original fixture */ }
   return { source_sha256: job.source_sha256, source_path: job.source_path,
-    resolved_path: sourcePath, bytes: stat.size, mtime_ms: stat.mtimeMs,
+    resolved_path: resolvedPath, bytes: stat.size, mtime_ms: stat.mtimeMs,
     term: job.term, module: job.module, week: job.week,
     status: "text_with_question_indicators", sampledQuestionHeadingIndicators: 3,
     sampledPagesMax: 3 };
@@ -278,7 +282,7 @@ test("R19: changed mtime or different authorized mirror never inherits stale sam
     const [aliasHeld] = verifyPdfSourceAvailability([cached], [job], [root],
       { runId: "r19-mirror-run", runAt: "2026-11-10T20:21:00.000Z", inspectedShas: new Set() });
     assert.equal(aliasHeld.status, "reader_failure_needs_review");
-    assert.equal(aliasHeld.resolved_path, alias);
+    assert.equal(aliasHeld.resolved_path, realpathSync(alias));
     assert.equal(aliasHeld.usedMirror, true);
     assert.equal(recommendNextSources([aliasHeld]).length, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -371,4 +375,39 @@ test("R19: unvisited queued originals outside an initial partial slice produce e
     assert.equal(recommendNextSources([row], new Set(), 100, "r19-unvisited-run").length, 0);
     assert.equal(summarizeTriage([row]).measuredPdfJobRows, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("R23: canonical symlinked authorization root permits originals but never symlink escapes", () => {
+  const actualRoot = mkdtempSync(join(tmpdir(), "axom-r23-authorized-real-"));
+  const aliasParent = mkdtempSync(join(tmpdir(), "axom-r23-authorized-alias-"));
+  const authorizedAlias = join(aliasParent, "authorized");
+  try {
+    symlinkSync(actualRoot, authorizedAlias, "dir");
+    const original = join(authorizedAlias, "approved.pdf");
+    writeFileSync(original, "%PDF synthetic original, no real medical data");
+    const [job] = selectPdfJobs([fakePdfJob(HASH1, original)]);
+    const row = fakeReadyRow(job, statSync(original), realpathSync(original));
+    const [verified] = verifyPdfSourceAvailability([row], [job], [authorizedAlias], {
+      runId: "r23-authorized-alias", runAt: "2026-11-11T03:00:00.000Z",
+    });
+    assert.equal(verified.status, "text_with_question_indicators");
+    assert.equal(verified.availabilityProof?.authorizedPathAvailable, true);
+    assert.equal(verified.resolved_path, realpathSync(original));
+
+    const external = join(aliasParent, "outside.pdf");
+    writeFileSync(external, "%PDF synthetic outside authorized directory");
+    const escapedAlias = join(authorizedAlias, "escape.pdf");
+    symlinkSync(external, escapedAlias);
+    const [escapedJob] = selectPdfJobs([fakePdfJob(HASH2, escapedAlias)]);
+    const [blocked] = verifyPdfSourceAvailability(
+      [fakeReadyRow(escapedJob, statSync(external), realpathSync(external))],
+      [escapedJob], [authorizedAlias], {
+        runId: "r23-escape-held", runAt: "2026-11-11T03:00:00.000Z",
+      });
+    assert.equal(blocked.status, "source_path_unavailable");
+    assert.equal(blocked.availabilityProof, undefined);
+  } finally {
+    rmSync(aliasParent, { recursive: true, force: true });
+    rmSync(actualRoot, { recursive: true, force: true });
+  }
 });

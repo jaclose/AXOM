@@ -208,16 +208,29 @@ function existingReport(path) {
 }
 
 function scopedAvailableFile(job, roots) {
+  // An explicitly authorized root can itself be a filesystem alias (macOS
+  // /var -> /private/var, or a symlinked academic folder). Compare resolved
+  // source paths only against the resolved form of those SAME authorized
+  // directories, never against an expanded or inferred parent directory.
+  const canonicalRoots = roots.flatMap(root => {
+    if (typeof root !== "string" || !isAbsolute(root)) return [];
+    try {
+      const canonical = realpathSync(root);
+      return statSync(canonical).isDirectory() ? [canonical] : [];
+    } catch { return []; }
+  });
   const candidates = [job.source_path, ...job.equivalent_paths];
   for (const location of candidates) {
+    // Require the presented path to be within the originally granted root,
+    // then separately contain the final realpath within its canonical target.
     if (typeof location !== "string" || !isWithinRoot(location, roots)) continue;
     try {
       if (!existsSync(location)) continue;
       const actual = realpathSync(location);
-      if (!isWithinRoot(actual, roots) || !statSync(actual).isFile()) continue;
+      if (!isWithinRoot(actual, canonicalRoots) || !statSync(actual).isFile()) continue;
       // Reject externally supplied symlink aliases resolving into unrelated
       // personal directories or credential-bearing application folders.
-      if (lstatSync(location).isSymbolicLink() && !isWithinRoot(actual, roots)) continue;
+      if (lstatSync(location).isSymbolicLink() && !isWithinRoot(actual, canonicalRoots)) continue;
       return { path: actual, usedMirror: location !== job.source_path };
     } catch { continue; }
   }
