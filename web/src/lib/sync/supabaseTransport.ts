@@ -117,10 +117,26 @@ export class SupabaseSyncTransport implements SyncTransport {
     let requestBytes = 0;
     const send = async (delta: boolean) => {
       const args = delta ? { ...common, p_base_hash: baseline!.contentHash, p_changes: changes! } : { ...common, p_snapshot_payload: payload };
-      requestBytes += new TextEncoder().encode(JSON.stringify(args)).length;
+      const attemptBytes = new TextEncoder().encode(JSON.stringify(args)).length;
+      requestBytes += attemptBytes; // Diagnostics count all attempts, but each has its own deadline.
       const request = client.rpc(delta ? "push_workspace_delta_v2" : "push_workspace_revision_v2", args);
-      const signal = timeoutSignal(pushTimeout(requestBytes));
-      return signal && typeof request.abortSignal === "function" ? request.abortSignal(signal) : request;
+      const deadline = pushTimeout(attemptBytes);
+      const signal = typeof request.abortSignal === "function" ? timeoutSignal(deadline) : undefined;
+      if (signal) return request.abortSignal(signal);
+      // Older request builders may not expose abortSignal. Still bound the UI
+      // wait; a late server acceptance is ignored and the original key retries.
+      // The underlying HTTP request may remain in flight until it settles.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          request,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new DOMException("Cloud upload timed out.", "TimeoutError")), deadline);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     };
     let response = await atPhase("revision", () => send(Boolean(useDelta)));
     if (useDelta && ["PT428", "PGRST202"].includes(response.error?.code ?? "")) {
