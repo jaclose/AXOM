@@ -325,6 +325,8 @@ describe("Journal feedback when browser storage cannot be read", () => {
   });
 
   it("recovers previously saved feedback after a name-only rename and remount without editing its bytes", () => {
+    // Do not let the default legacy fixture appear as an unrelated older name.
+    clearFixtureCopies();
     const before = "Journal R24 Previous Display Name";
     const after = "Journal R24 Updated Display Name";
     useStore.getState().updateProfile({ name: before });
