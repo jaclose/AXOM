@@ -506,6 +506,14 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         + (otherTabsNotified ? "" : " Other open tabs may need to refresh their publication review."));
     } catch (cause) {
       if (useAccount.getState().user?.id !== accountId) return;
+      // A lost submission response has no reliable outcome. Even an empty
+      // authenticated readback (or a subsequent successful status retry)
+      // cannot authorize reusing the previous source/rights confirmations.
+      // Revoke immediately, including when the readback itself fails.
+      rightsEpoch.current = null;
+      answersEpoch.current = null;
+      setRights(false);
+      setAnswers(false);
       setError(cause instanceof Error ? cause.message : "The submission could not be confirmed. Your local set is unchanged.");
       try {
         const recovered = await refresh();
@@ -524,15 +532,13 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           setMessage("Your submission is in the library review queue."
             + (otherTabsNotified ? "" : " Other open tabs may need to refresh their publication review."));
         } else if (recovered?.status === "rejected") {
-          // A rejected row may predate the failed RPC: authenticated readback
-          // cannot establish that this attempt committed. Do not signal a
-          // publication change or claim success, but fail closed on the local
-          // rights/answer grants before exposing a retry.
-          rightsEpoch.current = null;
-          answersEpoch.current = null;
-          setRights(false);
-          setAnswers(false);
+          // A rejected row may predate the failed RPC. The original grants
+          // were already revoked above; never signal an unconfirmed change.
           setMessage("A rejected version is on record. This submission was not confirmed. Review the set and reconfirm both attestations before retrying.");
+        } else {
+          // No matching row is not proof that the previous RPC never committed.
+          // Keep its transport error visible and require new attestations.
+          setMessage("No submission was confirmed. Reconfirm distribution rights and source-checked answers before retrying.");
         }
       } catch { /* The original error remains visible. */ }
     } finally { setBusy(false); }
