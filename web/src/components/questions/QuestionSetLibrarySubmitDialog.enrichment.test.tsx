@@ -242,7 +242,7 @@ describe("Question Set draft explanation review", () => {
     mocks.assertWrites.mockImplementationOnce(() => { throw new Error("Local storage is full."); });
     render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Save inspected explanations to my QBank" }));
-    expect(await screen.findByText(/Local storage is full.*Your drafts are still here/)).toBeTruthy();
+    expect(await screen.findByText(/Local storage is full.*1 of 1 draft explanation has an unverified local update.*Your drafts are still here/)).toBeTruthy();
     expect(screen.getByText(/1 AI draft/)).toBeTruthy();
     expect(screen.queryByText(/Reviewed explanations saved privately/)).toBeNull();
     expect((mocks.workspace.questions[0] as QuestionRecord).explanation).toContain("AXOM AI-assisted explanation");
@@ -303,12 +303,19 @@ describe("Question Set draft explanation review", () => {
     render(<QuestionSetLibrarySubmitDialog set={batchSet} questions={[first, second]} autoDraft onClose={vi.fn()} />);
     expect(await screen.findByText(/2 AI drafts to inspect/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
-    expect(await screen.findByText(/source evidence changed during the batch save/)).toBeTruthy();
+    expect(await screen.findByText(/source evidence changed during the batch save.*1 of 2 draft explanations have an unverified local update/)).toBeTruthy();
     expect(mocks.updateQuestion).toHaveBeenCalledOnce();
     const untouched = (mocks.workspace.questions as QuestionRecord[]).find(item => item.id === second.id)!;
     expect(untouched.explanation).toBeUndefined();
     expect(untouched.correctKey).toBe("A");
     expect(untouched.updatedAt).toBe(second.updatedAt);
+    const alreadyApplied = (mocks.workspace.questions as QuestionRecord[]).find(item => item.id === first.id)!;
+    expect(alreadyApplied.explanation).toContain("AXOM AI-assisted explanation");
+    // An interrupted batch must be honest about the first optimistic update.
+    // Retrying must fail closed while the independently changed source remains.
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/One or more questions changed.*1 of 2 draft explanations have an unverified local update/)).toBeTruthy();
+    expect(mocks.updateQuestion).toHaveBeenCalledOnce();
     expect(screen.getByText(/2 AI drafts to inspect/)).toBeTruthy();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
