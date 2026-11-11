@@ -753,3 +753,89 @@ test('retained snapshot never authorizes private, substituted or unlisted offlin
     await assert.rejects(pending, /offline/, label);
   }
 });
+
+test('wrong-MIME script/style responses are returned online but never cached', async () => {
+  for (const [path, mime] of [
+    ['/assets/app-12345678.js', 'application/json'],
+    ['/assets/app-12345678.mjs', 'text/plain'],
+    ['/assets/app-12345678.css', 'application/json'],
+  ]) {
+    let online = true;
+    const app = worker({ fetchResponse: async () => {
+      if (!online) throw new Error('offline');
+      return new Response('wrong-code-mime', {
+        headers: { 'content-type': mime, 'cache-control': 'public, max-age=600' },
+      });
+    } });
+    const visit = async () => {
+      let pending;
+      const lifetime = [];
+      app.events.get('fetch')({
+        request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { pending = value; },
+        waitUntil: (value) => lifetime.push(value),
+      });
+      const response = await pending;
+      await Promise.all(lifetime);
+      return response.text();
+    };
+    assert.equal(await visit(), 'wrong-code-mime', path + ': preserve online response');
+    online = false;
+    await assert.rejects(visit(), /offline/, path + ': wrong MIME persisted');
+  }
+});
+
+test('wrong-MIME legacy script/style cache entries are evicted before replay', async () => {
+  for (const cacheName of ['axom-shell-previous', 'axom-shell-current']) {
+    for (const [path, mime] of [
+      ['/assets/app-12345678.js', 'application/json'],
+      ['/assets/app-12345678.css', 'text/plain'],
+    ]) {
+      const app = worker();
+      const url = 'https://app.test' + path;
+      const cache = await app.caches.open(cacheName);
+      await cache.put(url, withNetworkUrl(new Response('invalid-legacy-code', {
+        headers: { 'content-type': mime, 'cache-control': 'public, max-age=600' },
+      }), url));
+      let pending;
+      app.events.get('fetch')({
+        request: { url, method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { pending = value; },
+        waitUntil: () => {},
+      });
+      await assert.rejects(pending, /offline/, cacheName + ' ' + path + ': bad code replayed');
+      assert.equal(await cache.match(url), undefined, cacheName + ' ' + path + ': invalid entry retained');
+    }
+  }
+});
+
+test('valid code MIME with charset remains available offline', async () => {
+  for (const [path, mime] of [
+    ['/assets/app-12345678.js', 'TEXT/JAVASCRIPT; charset=utf-8'],
+    ['/assets/app-12345678.mjs', 'application/javascript; charset=utf-8'],
+    ['/assets/app-12345678.css', 'TEXT/CSS; charset=utf-8'],
+  ]) {
+    let online = true;
+    const app = worker({ fetchResponse: async () => {
+      if (!online) throw new Error('offline');
+      return new Response('valid-code', {
+        headers: { 'content-type': mime, 'cache-control': 'public, max-age=600' },
+      });
+    } });
+    const visit = async () => {
+      let pending;
+      const lifetime = [];
+      app.events.get('fetch')({
+        request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+        respondWith: (value) => { pending = value; },
+        waitUntil: (value) => lifetime.push(value),
+      });
+      const response = await pending;
+      await Promise.all(lifetime);
+      return response.text();
+    };
+    assert.equal(await visit(), 'valid-code');
+    online = false;
+    assert.equal(await visit(), 'valid-code', path + ': correct MIME rejected');
+  }
+});

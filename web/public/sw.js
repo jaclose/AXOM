@@ -103,6 +103,16 @@ async function retainedGenerationAsset(cache, request, response) {
 
 // HTML MIME types are ASCII case-insensitive. An HTML deployment rewrite
 // must never be treated as JavaScript/CSS/media, even with mixed-case headers.
+// Do not persist or replay non-HTML rewrites as scripts or styles.
+// The browser refuses those MIME types, but an offline cache would pin them.
+function matchesPublicCodeMime(request, response) {
+  const pathname = new URL(request.url).pathname;
+  const mime = (response.headers.get("content-type") || "").trim();
+  if (/\.m?js$/i.test(pathname)) return /^(?:text|application)\/javascript(?:\s*;|$)/i.test(mime);
+  if (/\.css$/i.test(pathname)) return /^text\/css(?:\s*;|$)/i.test(mime);
+  return true;
+}
+
 function isHtmlResponse(response) {
   return /^text\/html(?:\s*;|$)/i.test((response.headers.get("content-type") || "").trim());
 }
@@ -165,7 +175,7 @@ async function installPublicShell() {
 }
 
 function cacheResponse(event, key, response) {
-  if (!matchesRequestedResource(event.request, response)) return;
+  if (!matchesRequestedResource(event.request, response) || !matchesPublicCodeMime(event.request, response)) return;
   // The no-cache exception applies only to a verified canonical navigation
   // shell, never other routes or public-looking JS/CSS/media responses.
   const canonicalNavigationShell = key === "./index.html"
@@ -191,6 +201,11 @@ async function cachedAppAsset(request) {
     // Legacy synthetic cache fixtures can omit URL; browser-fetched entries
     // have it and must match their original origin/path before replay.
     if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) continue;
+    if (!matchesPublicCodeMime(request, response)) {
+      // Evict only invalid code bytes retained by an older worker.
+      await cache.delete(request);
+      continue;
+    }
     if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)
       && !shippedPublicBuildAsset(request, response)
       && !(name !== CACHE && await retainedGenerationAsset(cache, request, response))) continue;
