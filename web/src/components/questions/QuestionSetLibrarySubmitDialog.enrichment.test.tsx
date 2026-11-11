@@ -726,6 +726,50 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("revokes cross-tab grants when a lost submit response is recovered as pending", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
+    mocks.workspace.questions = [source];
+    // The server committed before its network response was lost. Only the
+    // subsequent authenticated status lookup establishes that publication.
+    mocks.submissions.mockResolvedValueOnce([]).mockResolvedValueOnce([publishedSubmission]);
+    mocks.submit.mockRejectedValueOnce(new Error("Connection lost after commit"));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    const epochBefore = readCommunityPublicationEpoch();
+    fireEvent.click(send);
+
+    expect(await screen.findByText(/Your submission is in the library review queue/)).toBeTruthy();
+    expect(readCommunityPublicationEpoch()).not.toBe(epochBefore);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.submissions).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "Withdraw submission" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send for review" })).toBeNull();
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
+  it("does not signal publication change when a failed submit has no confirmed server row", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValue([]);
+    mocks.submit.mockRejectedValueOnce(new Error("Server rejected the submission"));
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    const epochBefore = readCommunityPublicationEpoch();
+    fireEvent.click(send);
+
+    expect(await screen.findByText(/Server rejected the submission/)).toBeTruthy();
+    expect(readCommunityPublicationEpoch()).toBe(epochBefore);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.submissions).toHaveBeenCalledTimes(2);
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
   it("requires fresh rights and answer attestations after a confirmed withdrawal", async () => {
     const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
     mocks.workspace.questions = [source];
