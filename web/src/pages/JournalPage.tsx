@@ -1698,11 +1698,11 @@ function JournalWelcome({ initial, initialReminders, onComplete }: {
 // A link never crosses authenticated accounts or local/account boundaries.
 const JOURNAL_FEEDBACK_BASE_PATTERN = /^axom-journal-feedback-draft:([a-z0-9_-]+)(?::account:([a-zA-Z0-9_-]+))?$/;
 const JOURNAL_FEEDBACK_ALIAS_TOKEN = ":name-alias:v1:";
-const JOURNAL_FEEDBACK_ALIAS_LIMIT = 16;
-// Stored, append-only rename pointers may outlive a browser tab. Use a larger,
-// still finite reader bound than the 16-link same-tab retry queue so a single
-// saved copy is not hidden behind ordinary later display-name edits.
+// Both the volatile retry chain and the persisted reader need room for
+// ordinary name edits during an extended browser storage outage. Keep the
+// same finite cap so a missing alias is not silently hidden at link 17.
 const JOURNAL_FEEDBACK_ALIAS_READ_LIMIT = 256;
+const JOURNAL_FEEDBACK_ALIAS_PENDING_LIMIT = JOURNAL_FEEDBACK_ALIAS_READ_LIMIT;
 
 function journalFeedbackSameOwner(root: string, candidate: string): boolean {
   const current = JOURNAL_FEEDBACK_BASE_PATTERN.exec(root);
@@ -1770,7 +1770,7 @@ function journalFeedbackRetryPendingNameAliases(ownerKey: string): void {
   // chain succeeds. Otherwise a second retry cannot reach a blocked tail.
   const written: string[] = [];
   let key = ownerKey;
-  for (let index = 0; index < JOURNAL_FEEDBACK_ALIAS_LIMIT; index += 1) {
+  for (let index = 0; index < JOURNAL_FEEDBACK_ALIAS_PENDING_LIMIT; index += 1) {
     const link = pending.get(key);
     if (!link) {
       for (const completedKey of written) pending.delete(completedKey);
@@ -1827,7 +1827,7 @@ function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInpu
         // historical link is durable; never drop a blocked earlier name.
         if (!aliasWritten || journalInTabPendingNameAliasesByWindow.get(window)?.has(oldKey)) {
           const pendingAliases = journalInTabPendingNameAliases();
-          if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_LIMIT && !pendingAliases.has(newKey))
+          if (pendingAliases.size < JOURNAL_FEEDBACK_ALIAS_PENDING_LIMIT && !pendingAliases.has(newKey))
             pendingAliases.set(newKey, { previous: oldKey, suffix });
         }
       }
