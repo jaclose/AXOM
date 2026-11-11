@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // R41 owner-owned tests; preserve the independent R50 RED regression unchanged.
-const upsert = vi.fn(async () => ({ error: null as { message: string } | null }));
+const upsert = vi.fn(async (_row: { user_id: string; display_name: string; updated_at: string }) => ({ error: null as { message: string } | null }));
 const updateUser = vi.fn(async () => ({
   data: { user: { id: "synthetic-a" } },
   error: null as { message: string } | null,
