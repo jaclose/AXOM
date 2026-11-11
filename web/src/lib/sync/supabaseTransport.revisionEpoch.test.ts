@@ -15,10 +15,6 @@ vi.mock("./cloudSnapshot", () => ({
   decodeCloudSnapshot: vi.fn(),
   contentCheckpointHash: vi.fn(),
 }));
-vi.mock("./deferredContent", () => ({
-  deferContent: vi.fn((state: unknown) => state),
-}));
-
 const accountA = "11111111-1111-4111-8111-111111111111";
 const hash = "a".repeat(64);
 
@@ -42,7 +38,7 @@ function fixture() {
     client, userId: accountA, assertCurrent,
     resumable: { endpoint: "https://example.invalid/storage/v1/upload/resumable", headers: { authorization: "fixture", apikey: "fixture" } },
   });
-  vi.mocked(decodeCloudSnapshot).mockResolvedValue({ payload: makeSeed(), sources: [], hashFormat: 2 });
+  vi.mocked(decodeCloudSnapshot).mockResolvedValue({ payload: { ...makeSeed(), questions: [], documents: [] }, sources: [], hashFormat: 2 });
   vi.mocked(contentCheckpointHash).mockResolvedValue(hash);
   return { assertCurrent, chain, switchAccount: () => { switched = true; } };
 }
