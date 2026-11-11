@@ -79,9 +79,19 @@ function isHtmlResponse(response) {
 
 // Offline navigation must not replay account-specific, malformed or foreign
 // HTML from a legacy/current shell cache. Cached browser fetches retain URL.
+function cacheableCanonicalOfflineShell(response) {
+  if (cacheablePublicResponse(response)) return true;
+  // Production's canonical index.html is marked no-cache: retain this public
+  // shell for offline startup without permitting private/no-store/auth data.
+  // safeOfflineShell() independently checks exact canonical URL and HTML MIME.
+  return (response.headers.get("cache-control") || "").trim().toLowerCase() === "no-cache"
+    && !response.headers.has("set-cookie")
+    && !/(?:^|,)\s*(?:\*|cookie|authorization)\s*(?:,|$)/i.test(response.headers.get("vary") || "");
+}
+
 function safeOfflineShell(response) {
   if (!response?.ok || response.status !== 200 || response.redirected
-    || !isHtmlResponse(response) || !cacheablePublicResponse(response)) return false;
+    || !isHtmlResponse(response) || !cacheableCanonicalOfflineShell(response)) return false;
   try {
     const scope = new URL(self.registration.scope);
     const finalUrl = new URL(response.url);
@@ -121,7 +131,12 @@ async function installPublicShell() {
 
 function cacheResponse(event, key, response) {
   if (!matchesRequestedResource(event.request, response)) return;
-  if (!cacheablePublicResponse(response) && !shippedPublicBuildAsset(event.request, response)) return;
+  // The no-cache exception applies only to a verified canonical navigation
+  // shell, never other routes or public-looking JS/CSS/media responses.
+  const canonicalNavigationShell = key === "./index.html"
+    && event.request.mode === "navigate" && safeOfflineShell(response);
+  if (!cacheablePublicResponse(response) && !shippedPublicBuildAsset(event.request, response)
+    && !canonicalNavigationShell) return;
   const copy = response.clone();
   // A failed cache write must not turn a successful network response into a failed request.
   event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key, copy)).catch(() => {}));

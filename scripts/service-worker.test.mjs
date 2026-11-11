@@ -163,6 +163,66 @@ test('install never stores protected shell and retains public HTML for offline u
   assert.equal(await (await cache.match('./')).text(), '<!doctype html>public-shell');
 });
 
+test('canonical production no-cache shell installs and reloads fully offline', async () => {
+  // vercel.json and the build _headers both declare no-cache for /index.html.
+  let online = true;
+  const app = worker({ fetchResponse: async () => {
+    if (!online) throw new Error('offline');
+    return new Response('<!doctype html>production-shell', {
+      headers: { 'content-type': 'text/html; charset=UTF-8', 'cache-control': 'no-cache' },
+    });
+  } });
+  let task;
+  app.events.get('install')({ waitUntil: (value) => { task = value; } });
+  await task;
+  const cache = await app.caches.open('axom-shell-current');
+  assert.equal(await (await cache.match('./index.html')).text(), '<!doctype html>production-shell');
+  assert.equal(await (await cache.match('./')).text(), '<!doctype html>production-shell');
+  online = false;
+  let result;
+  app.events.get('fetch')({
+    request: { url: 'https://app.test/', method: 'GET', mode: 'navigate' },
+    respondWith: (value) => { result = value; },
+  });
+  assert.equal(await (await result).text(), '<!doctype html>production-shell');
+});
+
+test('no-cache canonical navigation refreshes offline shell, protected variants remain excluded', async () => {
+  const app = worker({ fetchResponse: async () => new Response('updated-shell', {
+    headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' },
+  }) });
+  const cache = await app.caches.open('axom-shell-current');
+  await cache.put('./index.html', withNetworkUrl(new Response('old-shell', {
+    headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+  }), 'https://app.test/index.html'));
+  let pending;
+  const tasks = [];
+  app.events.get('fetch')({
+    request: { url: 'https://app.test/index.html', method: 'GET', mode: 'navigate' },
+    respondWith: (value) => { pending = value; },
+    waitUntil: (value) => tasks.push(value),
+  });
+  assert.equal(await (await pending).text(), 'updated-shell');
+  await Promise.all(tasks);
+  assert.equal(await (await cache.match('./index.html')).text(), 'updated-shell');
+
+  for (const forbidden of [
+    { 'cache-control': 'private, no-cache' },
+    { 'cache-control': 'no-store, no-cache' },
+    { 'cache-control': 'no-cache', vary: 'Cookie' },
+    { 'cache-control': 'no-cache', vary: 'Authorization' },
+    { 'cache-control': 'no-cache', 'set-cookie': 'sid=secret' },
+  ]) {
+    const protectedApp = worker({ fetchResponse: async () =>
+      new Response('private', { headers: { 'content-type': 'text/html', ...forbidden } }) });
+    let install;
+    protectedApp.events.get('install')({ waitUntil: (value) => { install = value; } });
+    await assert.rejects(install, /unsafe offline shell/i, JSON.stringify(forbidden));
+    assert.equal(await (await protectedApp.caches.open('axom-shell-current')).match('./index.html'),
+      undefined, JSON.stringify(forbidden));
+  }
+});
+
 test('current public assets win over retained generations; newest safe fallback survives offline', async () => {
   const app = worker();
   const oldest = await app.caches.open('axom-shell-oldest');
