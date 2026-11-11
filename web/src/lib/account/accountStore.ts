@@ -605,7 +605,9 @@ export const useAccount = create<AccountState>((set, get) => {
         if (!sameSession()) return false;
         if (!supabase && cloudConfigured()) throw new Error("The account service couldn’t load. Try again before signing out.");
         if (supabase) {
-          const { error } = await supabase.auth.signOut();
+          // This action signs out only this device. Default Supabase scope is
+          // global, which would also revoke other devices' refresh tokens.
+          const { error } = await supabase.auth.signOut({ scope: "local" });
           if (error) throw error;
         }
         if (!canSettle()) return false;
