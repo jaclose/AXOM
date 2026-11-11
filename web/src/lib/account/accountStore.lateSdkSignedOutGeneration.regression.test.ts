@@ -82,11 +82,12 @@ describe("a delayed SDK SIGNED_OUT must not erase an independently verified newe
     expect(useAccount.getState().user?.id).toBe("synthetic-b");
     expect((await supabase.auth.getSession()).data.session?.user.id).toBe("synthetic-b");
     emitAuth!("SIGNED_OUT", null);
-
-    expect(useAccount.getState().phase).toBe("signed-in");
-    expect(useAccount.getState().user?.id).toBe("synthetic-b");
+    // Always settle the old transport before asserting, even when intentionally
+    // RED, so no unresolved promise leaks into the following test.
     pending.finish({ error: null });
     await oldLogout;
+
+    expect(useAccount.getState().phase).toBe("signed-in");
     expect(useAccount.getState().user?.id).toBe("synthetic-b");
   });
 
