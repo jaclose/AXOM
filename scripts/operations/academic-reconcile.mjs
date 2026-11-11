@@ -27,6 +27,8 @@ const pdfAvailabilityStatuses = new Set([
   "academic_scope_conflict_review", "academic_scope_changed_review",
 ]);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
+// Unlike activity counts, a source-stated or inferred curriculum week starts at 1.
+const validWeek = value => Number.isSafeInteger(value) && value >= 1;
 const sample = (array, max = 12) => array.slice(0, max);
 
 function indexUnique(list, key, errors, label) {
@@ -256,12 +258,12 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   for (const row of tmap.values()) {
     if (!row.term || !row.module) errors.push(`Tracker activity ${row.activityId} lacks term/module`);
     if (!["explicit", "inferred", "unassigned"].includes(row.weekBasis)) errors.push(`Tracker activity ${row.activityId} has unknown weekBasis`);
-    if (row.weekBasis === "explicit" && !integer(row.week)) errors.push(`Explicit tracker week is missing for ${row.activityId}`);
+    if (row.weekBasis === "explicit" && !validWeek(row.week)) errors.push(`Explicit tracker week is missing for ${row.activityId}`);
     // Inferred filing also denotes an actual numeric week; absent/null is unknown, not an inference.
-    if (row.weekBasis === "inferred" && !integer(row.week)) errors.push(`Inferred tracker week is missing for ${row.activityId}`);
+    if (row.weekBasis === "inferred" && !validWeek(row.week)) errors.push(`Inferred tracker week is missing for ${row.activityId}`);
     // All present week values must be valid week indexes.
-    if (row.week !== undefined && row.week !== null && !integer(row.week))
-      errors.push(`Tracker activity ${row.activityId} has invalid week; require a nonnegative integer.`);
+    if (row.week !== undefined && row.week !== null && !validWeek(row.week))
+      errors.push(`Tracker activity ${row.activityId} has invalid week; require a positive integer.`);
     // Unassigned means no week is filed, rather than a silent numeric scope.
     if (row.weekBasis === "unassigned" && row.week !== undefined && row.week !== null)
       errors.push(`Tracker activity ${row.activityId} unassigned receipt claims a week.`);
@@ -315,9 +317,9 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has a partial source-week census; cannot certify exact week membership.`);
         continue;
       }
-      if (weekly.some(entry => !integer(entry.week)
+      if (weekly.some(entry => !validWeek(entry.week)
         || (entry.weekBasis !== undefined && entry.weekBasis !== "explicit"))) {
-        blockers.push(`Tracker source scope ${scope.term}/${scope.module} has invalid source-week evidence; require explicit nonnegative week numbers and source-based filing.`);
+        blockers.push(`Tracker source scope ${scope.term}/${scope.module} has invalid source-week evidence; require explicit positive week numbers and source-based filing.`);
         continue;
       }
       const declaredWeeks = new Map();
