@@ -1102,3 +1102,86 @@ test("expanded JSONL rejects malformed present SHA without inventing priority-mi
     assert.equal(report.complete, true, JSON.stringify(report));
   }
 });
+
+
+// R39: strict convergence must prove original Tracker IDs, not merely cohorts.
+const identityProof = () => {
+  const source = {
+    schema: "axom-academic-tracker-source-membership-v1",
+    expectedActivityCount: 2, originalReadbackVerified: true,
+    activities: tracker().activities.map(row => ({
+      activityId: row.activityId, sourceSha256: b, term: row.term, module: row.module,
+      weekBasis: row.weekBasis, ...(row.week !== undefined ? { week: row.week } : {}),
+    })),
+  };
+  const readback = {
+    schema: "axom-academic-tracker-installed-readback-v1",
+    reportedActivityCount: 2, ownerAuthenticated: true, cloudReadbackVerified: true,
+    observedAt: new Date().toISOString(),
+    activities: source.activities.map(row => ({ ...row, installed: true })),
+  };
+  return { trackerSourceMembership: source, trackerInstalledReadback: readback };
+};
+
+test("strict reconciliation holds same-count Tracker coverage until original-ID and cloud proof both arrive", () => {
+  const result = run({ requireTrackerIdentity: true });
+  assert.equal(result.complete, false);
+  assert.ok(result.blockers.some(x => x.includes("Tracker activity identity")));
+  assert.equal(result.counts.trackerIdentityVerified, false);
+});
+
+test("strict reconciliation accepts separately attested exact original and installed IDs", () => {
+  const result = run({ requireTrackerIdentity: true, ...identityProof() });
+  assert.equal(result.complete, true, JSON.stringify(result));
+  assert.equal(result.counts.trackerIdentityVerified, true);
+  assert.equal(result.counts.trackerIdentityDeclared, 2);
+  assert.equal(result.counts.trackerIdentityReadback, 2);
+  assert.ok(result.warnings.some(x => x.includes("attestation")));
+});
+
+test("same-week foreign activity substitution fails with unchanged activity and scope counts", () => {
+  const pair = identityProof();
+  pair.trackerInstalledReadback.activities[1].activityId = "SYNTHETIC-FOREIGN-SAME-WEEK";
+  const result = run({ requireTrackerIdentity: true, ...pair });
+  assert.equal(result.counts.reportedTrackerActivities, 2);
+  assert.equal(result.complete, false);
+  assert.ok(result.blockers.some(x => x.includes("Tracker activity identity")));
+  assert.equal(JSON.stringify(result).includes("SYNTHETIC-FOREIGN-SAME-WEEK"), false);
+});
+
+test("stale or non-owner readback and changed source SHA fail strict reconciliation", () => {
+  for (const mutate of [
+    pair => { pair.trackerInstalledReadback.ownerAuthenticated = false; },
+    pair => { pair.trackerInstalledReadback.observedAt = "2024-01-01T00:00:00Z"; },
+    pair => { pair.trackerInstalledReadback.activities[0].sourceSha256 = c; },
+    pair => { pair.trackerSourceMembership.originalReadbackVerified = false; },
+  ]) {
+    const pair = identityProof();
+    mutate(pair);
+    const result = run({ requireTrackerIdentity: true, ...pair });
+    assert.equal(result.complete, false, JSON.stringify(result));
+    assert.equal(result.counts.trackerIdentityVerified, false);
+  }
+});
+
+test("proof ledgers must match the actual Tracker reconciliation cohort, not another valid installation", () => {
+  const pair = identityProof();
+  const different = tracker();
+  different.activities[1].activityId = "SYNTHETIC-ALTERNATE-ID";
+  const result = run({ requireTrackerIdentity: true, tracker: different, ...pair });
+  assert.equal(result.complete, false);
+  assert.ok(result.blockers.some(x => x.includes("Tracker readback does not match")));
+  assert.equal(JSON.stringify(result).includes("SYNTHETIC-ALTERNATE-ID"), false);
+});
+
+test("one-sided optional proof fails closed; a truly empty explicit Tracker scope needs no fabricated IDs", () => {
+  const pair = identityProof();
+  const incomplete = run({ trackerSourceMembership: pair.trackerSourceMembership });
+  assert.equal(incomplete.complete, false);
+  assert.ok(incomplete.blockers.some(x => x.includes("Tracker activity identity")));
+  const empty = fixture();
+  empty.summary.templates = [];
+  const zero = run({ inventory: empty, tracker: { activities: [] }, requireTrackerIdentity: true });
+  assert.equal(zero.complete, true, JSON.stringify(zero));
+  assert.equal(zero.counts.trackerIdentityVerified, true);
+});

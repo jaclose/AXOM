@@ -11,6 +11,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { verifyTrackerIdentity } from "./academic-tracker-identity.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const supportedKinds = new Set(["question-source", "answer-key", "course-template", "reference", "asset", "other", "excluded"]);
@@ -91,7 +92,9 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
   };
 }
 
-export function reconcileAcademicContent({ inventory, dispositions, receipts, tracker, production, pdfTriage, corpusAudit }) {
+export function reconcileAcademicContent({ inventory, dispositions, receipts, tracker,
+  trackerSourceMembership, trackerInstalledReadback, requireTrackerIdentity = false,
+  production, pdfTriage, corpusAudit }) {
   const errors = [], blockers = [], warnings = [];
   if (!inventory || !Array.isArray(inventory.entries) || !inventory.summary) {
     return { complete: false, errors: ["Source inventory has no entries and summary."], blockers: [], warnings: [], counts: {} };
@@ -338,6 +341,42 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       }
     }
   }
+  // The historical source-week census checks aggregate cardinality, not
+  // immutable original activity IDs. Strict convergence now requires a distinct
+  // original-source membership ledger and an owner-authenticated cloud readback.
+  // Both must also match the *actual* Tracker ledger being reconciled; a valid
+  // but unrelated readback must not certify this report's activities.
+  const hasIdentityInput = trackerSourceMembership !== undefined || trackerInstalledReadback !== undefined;
+  let trackerIdentityVerified = expectedTracker === 0 && tmap.size === 0;
+  let trackerIdentityDeclared = null, trackerIdentityReadback = null;
+  if (hasIdentityInput || (requireTrackerIdentity && expectedTracker !== 0)) {
+    const identity = verifyTrackerIdentity({
+      source: trackerSourceMembership, readback: trackerInstalledReadback,
+    });
+    trackerIdentityDeclared = identity.counts.declared;
+    trackerIdentityReadback = identity.counts.readback;
+    if (!identity.complete) {
+      blockers.push("Tracker activity identity is not verified against original-source and authenticated cloud evidence.");
+      errors.push(...identity.errors.map(reason => `Tracker identity: ${reason}`));
+      blockers.push(...identity.blockers.map(reason => `Tracker identity: ${reason}`));
+    } else {
+      const audited = new Map(trackerInstalledReadback.activities.map(row => [row.activityId, row]));
+      let disagreements = Math.abs(audited.size - tmap.size);
+      for (const [id, row] of tmap) {
+        const verified = audited.get(id);
+        if (!verified || row.term !== verified.term || row.module !== verified.module
+          || row.weekBasis !== verified.weekBasis
+          || (row.week ?? null) !== (verified.week ?? null)
+          || row.installed !== verified.installed) disagreements++;
+      }
+      if (disagreements)
+        blockers.push(`Tracker readback does not match ${disagreements} activity identity/scope observations in the reconciliation ledger.`);
+      else trackerIdentityVerified = true;
+    }
+    warnings.push("Tracker identity verification checks supplied source/cloud attestations only; it does not independently prove their authenticity, publication rights, or hosted user access.");
+  } else if (expectedTracker !== 0) {
+    warnings.push("Tracker activity ID membership has not been independently audited; template cohort counts are not source-ID identity acceptance.");
+  }
   if (production !== undefined) {
     if (!production || typeof production !== "object" || typeof production.projectId !== "string"
       || typeof production.observedAt !== "string" || !Number.isFinite(Date.parse(production.observedAt))) {
@@ -487,6 +526,9 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     detectedQuestions, readyQuestions, reviewQuestions, verifiedReadyQuestions,
     expectedBaselineTrackerActivities: expectedTracker, reportedTrackerActivities: tmap.size,
     installedTrackerActivities: [...tmap.values()].filter(item => item.installed === true).length,
+    ...(requireTrackerIdentity || hasIdentityInput ? {
+      trackerIdentityVerified, trackerIdentityDeclared, trackerIdentityReadback,
+    } : {}),
     cloudReceiptSources: rmap.size,
     ...(pdfTriageMetrics ?? {}),
     ...(b4AuditMetrics ?? {}),
@@ -509,7 +551,7 @@ function parseArgs(args) {
   const options = { strict: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--strict") { options.strict = true; continue; }
-    if (!["--inventory", "--inventory-jsonl", "--source-summary", "--dispositions", "--receipts", "--tracker", "--production-snapshot", "--pdf-triage", "--corpus-audit", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
+    if (!["--inventory", "--inventory-jsonl", "--source-summary", "--dispositions", "--receipts", "--tracker", "--tracker-source-membership", "--tracker-installed-readback", "--production-snapshot", "--pdf-triage", "--corpus-audit", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
     if (!args[i + 1]) throw new Error(`Missing path after ${args[i]}`);
     options[args[i].slice(2)] = args[++i];
   }
@@ -530,7 +572,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       : readJsonIfPresent(inventoryPath);
     const report = reconcileAcademicContent({ inventory,
       dispositions: readJsonIfPresent(a.dispositions), receipts: readJsonIfPresent(a.receipts),
-      tracker: readJsonIfPresent(a.tracker), production: readJsonIfPresent(a["production-snapshot"]),
+      tracker: readJsonIfPresent(a.tracker),
+      trackerSourceMembership: readJsonIfPresent(a["tracker-source-membership"]),
+      trackerInstalledReadback: readJsonIfPresent(a["tracker-installed-readback"]),
+      requireTrackerIdentity: a.strict,
+      production: readJsonIfPresent(a["production-snapshot"]),
       pdfTriage: readJsonIfPresent(a["pdf-triage"]), corpusAudit: readJsonIfPresent(a["corpus-audit"]) });
     const destination = resolve(a.out ?? "artifacts/qbank-6way-20261014/reconciliation.json");
     mkdirSync(dirname(destination), { recursive: true });
