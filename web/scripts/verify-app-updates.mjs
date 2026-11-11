@@ -46,10 +46,10 @@ async function inspectInstallCache(page) {
   try {
     return await Promise.race([
       page.evaluate(async () => {
-        const names = (await caches.keys()).filter((name) => name.startsWith('axom-shell-'));
+        const names = (await globalThis.caches.keys()).filter((name) => name.startsWith('axom-shell-'));
         const generations = [];
         for (const name of names.slice(-3)) {
-          const requests = await (await caches.open(name)).keys();
+          const requests = await (await globalThis.caches.open(name)).keys();
           const paths = requests.map((request) => new URL(request.url).pathname);
           generations.push({
             entries: requests.length,
@@ -62,11 +62,11 @@ async function inspectInstallCache(page) {
         return { state: 'ok', generationsFound: names.length, generations };
       }).catch(() => ({ state: 'unavailable' })),
       new Promise((resolve) => {
-        timer = setTimeout(() => resolve({ state: 'timed-out' }), 1500);
+        timer = globalThis.setTimeout(() => resolve({ state: 'timed-out' }), 1500);
       }),
     ]);
   } finally {
-    clearTimeout(timer);
+    globalThis.clearTimeout(timer);
   }
 }
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
