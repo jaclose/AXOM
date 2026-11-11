@@ -1,0 +1,269 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology",
+  "build": "015",
+  "date": "2026-11-11",
+  "parent": "Build014, docs/disease-atlas-v2-run014-20261111-neuropathology, commit 704e592126d1b58962ee8820054e413eb6f20792",
+  "chapter": "Musculoskeletal, Joint and Bone Pathology: Degenerative, Autoimmune, Infectious, Metabolic and Neoplastic",
+  "scope": "Independent research branch; no merge, PR, deploy or production mutation; source-anchored educational draft and not peer-reviewed",
+  "metrics": {
+    "previous_unique": 352,
+    "unique_added": 8,
+    "prior_entries_promoted_to_deep": 6,
+    "deep_completed_this_build": 14,
+    "total_unique_entries": 360,
+    "total_detailed_profiles": 259,
+    "remaining_legacy_short": 101,
+    "evidence_source_total": 294,
+    "evidence_sources_added": 17,
+    "image_associations_total": 163,
+    "individual_image_sources_added": 8,
+    "original_images_embedded": 0,
+    "pdf_pages": 378,
+    "qa_checks_passed": 26,
+    "qa_checks_failed": 0,
+    "word_accessibility_findings": 0,
+    "measured_ontology_coverage": null,
+    "official_ontology_denominator": null
+  },
+  "promoted": [
+    [
+      "LEGACY-097",
+      "Osteoarthritis",
+      "Whole-joint degeneration; mechanical pain, brief morning stiffness, osteophytes and cartilage fibrillation",
+      "MSK15-ACR-OA20"
+    ],
+    [
+      "LEGACY-098",
+      "Rheumatoid arthritis",
+      "Persistent autoimmune symmetric synovitis, pannus, anti-CCP/RF; treat-to-target methotrexate-based care",
+      "MSK15-ACR-RA21"
+    ],
+    [
+      "LEGACY-099",
+      "Gout",
+      "Needle-shaped negatively birefringent MSU crystals; allopurinol with urate goal below 6 mg/dL",
+      "MSK15-ACR-GOUT20"
+    ],
+    [
+      "LEGACY-100",
+      "Osteomyelitis",
+      "Bone infection, sequestrum/involucrum, biopsy cultures; vertebral stable versus unstable treatment distinction",
+      "MSK15-IDSA-OSTEO15"
+    ],
+    [
+      "LEGACY-101",
+      "Osteosarcoma",
+      "Malignant osteoid, conventional high-grade disease, sarcoma planned biopsy and neoadjuvant MAP-type chemotherapy",
+      "MSK15-NCI-OS"
+    ],
+    [
+      "LEGACY-102",
+      "Ewing sarcoma",
+      "Fusion-associated small round cell sarcoma, CD99 not specific, VDC/IE plus appropriate local control",
+      "MSK15-NCI-EWING"
+    ]
+  ],
+  "new": [
+    [
+      "AXOM-MSK-001",
+      "Septic arthritis of a native joint",
+      "Hot joint with painful passive motion; urgent aspirate, cultures, antimicrobial therapy and joint drainage",
+      "MSK15-EBJIS-SANJO23"
+    ],
+    [
+      "AXOM-MSK-002",
+      "Osteonecrosis of femoral head",
+      "MRI before collapse; ischemic empty osteocyte lacunae, subchondral collapse and stage-dependent surgery",
+      "MSK15-AAOS-ONFH"
+    ],
+    [
+      "AXOM-MSK-003",
+      "Age-related osteoporosis",
+      "Low bone quantity with preserved mineralization, fragility fracture, DXA and fracture-risk-guided therapy",
+      "MSK15-NOGG24"
+    ],
+    [
+      "AXOM-MSK-004",
+      "Osteomalacia due to impaired mineralization",
+      "Excess unmineralized osteoid with pseudofracture and vitamin D/phosphate pathway work-up",
+      "MSK15-OSTEOMALACIA"
+    ],
+    [
+      "AXOM-MSK-005",
+      "Paget disease of bone",
+      "Excess disorganized bone turnover, enlarged trabeculae, mosaic cement lines, symptom-guided bisphosphonate",
+      "MSK15-PAGET19"
+    ],
+    [
+      "AXOM-MSK-006",
+      "Conventional central chondrosarcoma",
+      "Infiltrative cartilage malignancy requiring radiologic/histologic grading; surgery primary treatment",
+      "MSK15-IARC-BONE20"
+    ],
+    [
+      "AXOM-MSK-007",
+      "Giant cell tumor of bone",
+      "H3F3A-mutant stromal cells express RANKL and recruit osteoclast-type giant cells; curettage versus resection/selected denosumab",
+      "MSK15-GCTB-2025"
+    ],
+    [
+      "AXOM-MSK-008",
+      "Osteochondroma (solitary osteocartilaginous exostosis)",
+      "Cortical-medullary continuity and cartilage cap; adult growth or new pain prompts malignant transformation evaluation",
+      "MSK15-AAOS-EXOSTOSIS"
+    ]
+  ],
+  "evidence_sources_added": [
+    [
+      "MSK15-ACR-OA20",
+      "https://pmc.ncbi.nlm.nih.gov/articles/PMC10518852/"
+    ],
+    [
+      "MSK15-ACR-RA21",
+      "https://pmc.ncbi.nlm.nih.gov/articles/PMC9273041/"
+    ],
+    [
+      "MSK15-ACR-GOUT20",
+      "https://pmc.ncbi.nlm.nih.gov/articles/PMC10563586/"
+    ],
+    [
+      "MSK15-IDSA-OSTEO15",
+      "https://www.idsociety.org/practice-guideline/vertebral-osteomyelitis/"
+    ],
+    [
+      "MSK15-EBJIS-SANJO23",
+      "https://pmc.ncbi.nlm.nih.gov/articles/PMC9901514/"
+    ],
+    [
+      "MSK15-NCI-OS",
+      "https://www.cancer.gov/types/bone/hp/osteosarcoma-treatment-pdq"
+    ],
+    [
+      "MSK15-NCI-EWING",
+      "https://www.cancer.gov/types/bone/hp/ewing-treatment-pdq"
+    ],
+    [
+      "MSK15-IARC-BONE20",
+      "https://publications.iarc.who.int/Book-And-Report-Series/Who-Classification-Of-Tumours/Soft-Tissue-And-Bone-Tumours-2020"
+    ],
+    [
+      "MSK15-AAOS-ONFH",
+      "https://www.orthoinfo.org/bodypart/hip-thigh/osteonecrosis-of-the-hip/"
+    ],
+    [
+      "MSK15-NOGG24",
+      "https://www.nogg.org.uk/full-guideline"
+    ],
+    [
+      "MSK15-PAGET19",
+      "https://paget.org.uk/health-and-research-professionals/clinical-guideline/"
+    ],
+    [
+      "MSK15-ES-PAGET14",
+      "https://www.endocrine.org/clinical-practice-guidelines/pagets-disease-of-bone"
+    ],
+    [
+      "MSK15-AAOS-EXOSTOSIS",
+      "https://www.orthoinfo.org/en/diseases--conditions/osteochondroma/"
+    ],
+    [
+      "MSK15-XGEVA-LABEL",
+      "https://www.drugs.com/pro/xgeva.html"
+    ],
+    [
+      "MSK15-GCTB-2025",
+      "https://pubmed.ncbi.nlm.nih.gov/40317378/"
+    ],
+    [
+      "MSK15-CHONDRO",
+      "https://publications.iarc.fr/Book-And-Report-Series/Who-Classification-Of-Tumours/Soft-Tissue-And-Bone-Tumours-2020"
+    ],
+    [
+      "MSK15-OSTEOMALACIA",
+      "https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/"
+    ]
+  ],
+  "images_source_linked_not_embedded": [
+    {
+      "id": "LEGACY-099",
+      "file": "Gout - Tophus.jpg",
+      "creator": "Y. Rosen, MD",
+      "license": "CC BY-SA 2.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Gout_-_Tophus.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    },
+    {
+      "id": "LEGACY-101",
+      "file": "Osteosarcoma - high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Osteosarcoma_-_high_mag.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    },
+    {
+      "id": "LEGACY-101",
+      "file": "Osteosarcoma - very high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Osteosarcoma_-_very_high_mag.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    },
+    {
+      "id": "LEGACY-102",
+      "file": "Ewing sarcoma - PAS - high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Ewing_sarcoma_-_PAS_-_high_mag.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    },
+    {
+      "id": "AXOM-MSK-005",
+      "file": "Paget's disease R coxal.jpg",
+      "creator": "Jmarchn",
+      "license": "CC BY-SA 3.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Paget's_disease_R_coxal.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    },
+    {
+      "id": "AXOM-MSK-007",
+      "file": "Giant cell tumour of bone - low mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Giant_cell_tumour_of_bone_-_low_mag.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    },
+    {
+      "id": "AXOM-MSK-007",
+      "file": "Giant cell tumour of bone - high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Giant_cell_tumour_of_bone_-_high_mag.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    },
+    {
+      "id": "AXOM-MSK-007",
+      "file": "Giant cell tumour of bone - very high mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_file_page": "https://commons.wikimedia.org/wiki/File:Giant_cell_tumour_of_bone_-_very_high_mag.jpg",
+      "status": "source-labeled specimen only; no full clinical identity, privacy, original binary or licensing packaging audit; link only"
+    }
+  ],
+  "artifact_checksums_sha256": {
+    "cumulative_docx": "0872e40878d8011744fbc79037bbfa264fe5333aef8296e2bd0a03ca58f9eafb",
+    "cumulative_pdf": "25a095d29d2b238d1141c8ac6eddd8d84eaceaf4dbe0249b8f13c96dd4824d91",
+    "cumulative_zip": "862d64a9d0b88c58555869b882aeb3a8f164850ba9263760abb888797edcc8e8"
+  },
+  "persistence": {
+    "github": "This checkpoint persists on separate research branch; unlike zip, checkpoint is not the full 378-page manuscript",
+    "library": "Create folder and upload denied AccessDeny",
+    "drive": "Direct connector upload rejected BLOCKED_FILE_REFERENCE; full binaries only currently in conversation downloads"
+  },
+  "methods": {
+    "disease_identity": "Exact canonical MONDO/ICD-11/Orphanet release maps pending, no fabricated external IDs",
+    "pathology": "WHO/IARC classification publication 2020 source listing checked; full licensed text not reproduced",
+    "treatment": "Authoritative guidelines and NCI PDQ summarized, full regulatory labels not independently verified",
+    "original_image_rights": "File-page creators and licenses checked, specimen/patient privacy not independently cleared, zero embeddings"
+  },
+  "followup": "Independent specialist review; import frozen official disease ontologies; validate 8 image specimens/rights; persist entire DOCX PDF ZIP to approved durable store; do not merge/deploy."
+}
