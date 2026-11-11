@@ -80,13 +80,12 @@ beforeEach(() => {
   emitAuth = undefined;
   onAuthStateChange.mockClear();
   maybeSingle.mockClear();
+  // Begin each test outside account A. The real auth transition then clears
+  // closure-scoped confirmed profile names and establishes a fresh identity epoch.
+  // resetAccountInitForTests() resets only the subscription, not these values.
   useAccount.setState({
-    phase: "signed-in",
-    user: {
-      id: "synthetic-a", email: "synthetic-a@example.test",
-      displayName: "Stale SDK", emailConfirmed: true,
-    },
-    link: "linked", protection: "protected", busy: false, error: "", message: "",
+    phase: "signed-out", user: null,
+    link: "unlinked", protection: "local-only", busy: false, error: "", message: "",
   });
 });
 
