@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
+import { COMMUNITY_PUBLICATION_EPOCH_KEY, readCommunityPublicationEpoch, signalCommunityPublicationChange } from "../../lib/sharing/communityPublicationEpoch";
 
 const mocks = vi.hoisted(() => ({
   accountId: "owner-1",
@@ -660,6 +661,69 @@ describe("Question Set draft explanation review", () => {
 
     fireEvent.click(withdraw);
     expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stale tab's checked attestations after another tab submits and withdraws, even before a storage event", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submit.mockResolvedValue("fresh-publication-id");
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    fireEvent.click(rights);
+    fireEvent.click(answers);
+    await waitFor(() => expect(send.disabled).toBe(false));
+
+    // A second same-origin tab submitted and withdrew this source. Its two
+    // acknowledged RPCs advance the opaque publication marker, but this tab
+    // has not yet received the browser's queued "storage" notification.
+    expect(signalCommunityPublicationChange()).toBe(true);
+    expect(signalCommunityPublicationChange()).toBe(true);
+    fireEvent.click(send);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(rights.checked).toBe(false);
+      expect(answers.checked).toBe(false);
+      expect(send.disabled).toBe(true);
+    });
+    expect(screen.getByText(/Publication state changed or browser storage is unavailable/)).toBeTruthy();
+
+    // Checking only one box after revocation cannot send the original grant.
+    fireEvent.click(rights);
+    expect(send.disabled).toBe(true);
+    fireEvent.click(answers);
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
+  it("revokes checked source and rights grants on the cross-tab publication storage event", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
+    mocks.workspace.questions = [source];
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    fireEvent.click(rights);
+    fireEvent.click(answers);
+    await waitFor(() => expect(send.disabled).toBe(false));
+
+    const oldEpoch = readCommunityPublicationEpoch();
+    expect(signalCommunityPublicationChange()).toBe(true);
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: COMMUNITY_PUBLICATION_EPOCH_KEY, oldValue: oldEpoch, newValue: readCommunityPublicationEpoch(),
+      }));
+    });
+    await waitFor(() => {
+      expect(rights.checked).toBe(false);
+      expect(answers.checked).toBe(false);
+      expect(send.disabled).toBe(true);
+    });
+    expect(screen.getByText(/Another Question Set publication changed/)).toBeTruthy();
+    expect(mocks.submit).not.toHaveBeenCalled();
   });
 
   it("requires fresh rights and answer attestations after a confirmed withdrawal", async () => {
