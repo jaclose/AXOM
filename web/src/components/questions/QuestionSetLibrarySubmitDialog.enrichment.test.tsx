@@ -885,7 +885,11 @@ describe("Question Set draft explanation review", () => {
     expect(send.disabled).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Retry status check" }));
-    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledTimes(3));
+    await waitFor(() => {
+      expect(mocks.submissions).toHaveBeenCalledTimes(3);
+      expect(screen.queryByText(/Checking your existing submission/)).toBeNull();
+      expect(screen.queryByText(/Network outcome unknown/)).toBeNull();
+    });
     expect(rights.checked).toBe(false);
     expect(answers.checked).toBe(false);
     expect(send.disabled).toBe(true);
@@ -921,7 +925,11 @@ describe("Question Set draft explanation review", () => {
     expect(answers.checked).toBe(false);
     expect(readCommunityPublicationEpoch()).toBe(epochBefore);
     fireEvent.click(screen.getByRole("button", { name: "Retry status check" }));
-    await waitFor(() => expect(mocks.submissions).toHaveBeenCalledTimes(3));
+    await waitFor(() => {
+      expect(mocks.submissions).toHaveBeenCalledTimes(3);
+      expect(screen.queryByText(/Checking your existing submission/)).toBeNull();
+      expect(screen.queryByText(/Submit response lost/)).toBeNull();
+    });
     expect(send.disabled).toBe(true);
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(source.correctKey).toBe("A");
