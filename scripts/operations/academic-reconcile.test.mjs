@@ -302,6 +302,52 @@ test("template omission blocks completion even if all questions are verified", (
   assert.ok(r.blockers.some(s => s.includes("has 1 unique activities")));
 });
 
+test("Tracker reconciliation rejects extra installed activity identities beyond the explicit template census", () => {
+  const expanded = tracker();
+  expanded.activities.push({
+    activityId: "FTM1:foreign", term: "T2", module: "Other", week: 1,
+    weekBasis: "explicit", installed: true,
+  });
+  const result = run({ tracker: expanded });
+  assert.equal(result.counts.expectedBaselineTrackerActivities, 2);
+  assert.equal(result.counts.reportedTrackerActivities, 3);
+  assert.equal(result.complete, false, "Unexpected installed activities cannot certify exact source coverage.");
+  assert.ok(result.blockers.some(message =>
+    message.includes("Tracker ledger has 3 unique activities") && message.includes("baseline templates have 2")));
+});
+
+test("source-declared Tracker module/term scope holds foreign substitutions at an otherwise matching total", () => {
+  const inventory = fixture();
+  inventory.summary.templates = [{ term: "T1", module: "FTM 1", items: 2 }];
+  assert.equal(run({ inventory }).complete, true, "Unchanged explicit source scope remains accepted.");
+
+  for (const [label, override] of [
+    ["foreign module", { module: "Other" }],
+    ["foreign term", { term: "T2" }],
+  ]) {
+    const altered = tracker();
+    altered.activities[1] = { ...altered.activities[1], ...override };
+    const result = run({ inventory, tracker: altered });
+    assert.equal(result.counts.reportedTrackerActivities, 2, label);
+    assert.equal(result.complete, false, label);
+    assert.ok(result.blockers.some(message =>
+      message.includes("FTM 1") && message.includes("1/2")), JSON.stringify(result.blockers));
+  }
+
+  // Multiple source templates may intentionally contribute activities to one scope.
+  const grouped = fixture();
+  grouped.summary.templates = [
+    { term: "T1", module: "FTM 1", items: 1 },
+    { term: "T1", module: "FTM 1", items: 1 },
+  ];
+  assert.equal(run({ inventory: grouped }).complete, true, "Declared scope counts aggregate exactly.");
+
+  // A source summary with no term/module evidence cannot fabricate a module mapping.
+  const unscoped = fixture();
+  unscoped.summary.templates = [{ items: 2 }];
+  assert.equal(run({ inventory: unscoped }).complete, true);
+});
+
 test("duplicate paths must refer to the exact known canonical bytes", () => {
   const inv = fixture();
   inv.entries[1].duplicateOf = "sources/something-else.pdf";

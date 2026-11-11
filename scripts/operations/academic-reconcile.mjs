@@ -233,8 +233,30 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     if (row.weekBasis === "explicit" && !integer(row.week)) errors.push(`Explicit tracker week is missing for ${row.activityId}`);
     if (row.installed !== true) blockers.push(`Tracker activity ${row.activityId} has no installation receipt`);
   }
-  if (expectedTracker !== null && tmap.size < expectedTracker) {
+  if (expectedTracker !== null && tmap.size !== expectedTracker) {
     blockers.push(`Tracker ledger has ${tmap.size} unique activities; baseline templates have ${expectedTracker}. Coverage is not verified.`);
+  }
+  // Exact totals do not prove exact source scope. Where a source template names
+  // its module (and optionally term), require its activity cohort to match.
+  // A summary with no module assignment cannot authorize an invented mapping.
+  if (templateCountsVerified) {
+    const declaredScopes = new Map();
+    for (const template of templateEntries) {
+      if (typeof template.module !== "string" || !template.module.trim()) continue;
+      const term = typeof template.term === "string" && template.term.trim() ? template.term : null;
+      const key = JSON.stringify([term, template.module]);
+      const prior = declaredScopes.get(key);
+      declaredScopes.set(key, { term, module: template.module, items: (prior?.items ?? 0) + template.items });
+    }
+    for (const scope of declaredScopes.values()) {
+      const actual = [...tmap.values()].filter(row =>
+        row.module === scope.module && (scope.term === null || row.term === scope.term)).length;
+      if (actual !== scope.items) {
+        blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has ${actual}/${scope.items} activity identities; source-template membership is not verified.`);
+      }
+    }
+    if (templateEntries.some(entry => typeof entry.module !== "string" || !entry.module.trim()))
+      warnings.push("Some Tracker template rows lack source-declared module scope; only their aggregate activity count is verifiable.");
   }
   if (production !== undefined) {
     if (!production || typeof production !== "object" || typeof production.projectId !== "string"
