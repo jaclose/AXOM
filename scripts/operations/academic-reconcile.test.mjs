@@ -38,6 +38,38 @@ const run = (input = {}) => reconcileAcademicContent({
   pdfTriage: completePdfTriage("text_with_question_indicators"), ...input,
 });
 
+test("malformed source inventory rows produce a deterministic report instead of crashing reconciliation", () => {
+  const healthy = run();
+  assert.equal(healthy.complete, true, JSON.stringify(healthy));
+  for (const invalid of [null, undefined, false, 0, "", []]) {
+    const inventory = fixture();
+    inventory.entries[0] = invalid;
+    const result = run({ inventory });
+    assert.equal(result.complete, false, `Invalid inventory entry ${String(invalid)} must fail closed.`);
+    assert.ok(result.errors.some(error => error.includes("Invalid source inventory row at index 0")),
+      `Missing row error for ${String(invalid)}: ${JSON.stringify(result)}`);
+  }
+});
+
+test("non-array disposition, cloud receipt, and tracker ledgers hold without throwing", () => {
+  for (const [label, key, shape] of [
+    ["disposition object", "dispositions", { sources: {} }],
+    ["disposition string", "dispositions", { sources: "not-an-array" }],
+    ["disposition null", "dispositions", { sources: null }],
+    ["receipt object", "receipts", { sources: {} }],
+    ["receipt string", "receipts", { sources: "not-an-array" }],
+    ["receipt null", "receipts", { sources: null }],
+    ["tracker object", "tracker", { activities: {} }],
+    ["tracker string", "tracker", { activities: "not-an-array" }],
+    ["tracker null", "tracker", { activities: null }],
+  ]) {
+    const result = run({ [key]: shape });
+    assert.equal(result.complete, false, `${label} must not certify acceptance.`);
+    assert.ok(result.blockers.length > 0, `${label} must leave an actionable coverage hold.`);
+  }
+  assert.equal(run().complete, true, "Well-formed baseline remains valid.");
+});
+
 test("direct JSON inventory must declare a verified nonnegative missing-SHA denominator", () => {
   const complete = run();
   assert.equal(complete.complete, true, JSON.stringify(complete.blockers));
