@@ -52,6 +52,39 @@ afterEach(() => {
 });
 
 describe("Journal feedback when browser storage cannot be read", () => {
+  it("recovers one original saved copy after 20 later display-name edits", () => {
+    clearFixtureCopies();
+    const names = Array.from({ length: 21 }, (_, index) => `Journal R32 Saved Rename ${index}`);
+    const ownerKeys = names.map((name) => `axom-journal-feedback-draft:${userIdFromName(name)}`);
+    const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R32 original saved feedback is unchanged." });
+    useStore.getState().updateProfile({ name: names[0] });
+    localStorage.setItem(ownerKeys[0], original);
+    const initialVisit = render(<JournalPage />);
+    initialVisit.unmount();
+
+    try {
+      // Only the first display name has feedback. Intermediate aliases must
+      // remain traversable without exhausting the reader's small retry limit.
+      for (const name of names.slice(1)) useStore.getState().updateProfile({ name });
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.queryByRole("button", { name: "Retry reading saved feedback" })).toBeNull();
+      expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+      fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+      fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("R32 original saved feedback is unchanged.");
+      expect(localStorage.getItem(ownerKeys[0])).toBe(original);
+    } finally {
+      // Clean up only synthetic test keys, never real learner data.
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (key && ownerKeys.some((owner) => key === owner || key.startsWith(`${owner}:`)))
+          localStorage.removeItem(key);
+      }
+    }
+  });
+
   it("does not exhaust historical recovery slots on name-only edits without saved feedback", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 21 }, (_, index) => `Journal R31 Empty Profile ${index}`);
