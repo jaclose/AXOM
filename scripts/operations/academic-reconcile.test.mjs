@@ -399,6 +399,13 @@ test("Tracker source-week verification preserves repeated contributions and unkn
     "A source-unassigned activity cannot be refiled into an inferred week and still certify coverage.");
   assert.ok(wronglyFiledResult.blockers.some(message => message.includes("source-unassigned")));
 
+  const carriedWeek = tracker();
+  carriedWeek.activities[1] = { ...carriedWeek.activities[1], week: 3 };
+  const carriedWeekResult = run({ inventory: explicitAndUnassigned, tracker: carriedWeek });
+  assert.equal(carriedWeekResult.complete, false,
+    "Source-unassigned receipts cannot carry a competing numeric week.");
+  assert.ok(carriedWeekResult.blockers.some(message => message.includes("source-unassigned")));
+
   const partial = fixture();
   partial.summary.templates = [
     { term: "T1", module: "FTM 1", week: 2, items: 1 },
