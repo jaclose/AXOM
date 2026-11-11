@@ -662,6 +662,45 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.withdraw).not.toHaveBeenCalled();
   });
 
+  it("requires fresh rights and answer attestations after a confirmed withdrawal", async () => {
+    const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
+    mocks.workspace.questions = [source];
+    mocks.submissions.mockResolvedValueOnce([]).mockResolvedValueOnce([publishedSubmission]).mockResolvedValueOnce([]);
+    mocks.submit.mockResolvedValue(publishedSubmission.id);
+    mocks.withdraw.mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    fireEvent.click(rights);
+    fireEvent.click(answers);
+    await waitFor(() => expect(send.disabled).toBe(false));
+    fireEvent.click(send);
+    expect(await screen.findByText(/Submission received/)).toBeTruthy();
+    expect(mocks.submit).toHaveBeenCalledOnce();
+
+    const withdraw = await screen.findByRole("button", { name: "Withdraw submission" });
+    fireEvent.click(withdraw);
+    expect(await screen.findByText(/was withdrawn from the library/)).toBeTruthy();
+    expect(mocks.withdraw).toHaveBeenCalledWith("owner-1", publishedSubmission.id);
+
+    // The same source questions are still ready. The preceding attestations,
+    // however, must not silently authorize a second publication.
+    await waitFor(() => {
+      expect(rights.checked).toBe(false);
+      expect(answers.checked).toBe(false);
+      expect(send.disabled).toBe(true);
+    });
+    fireEvent.click(rights);
+    expect(send.disabled).toBe(true);
+    fireEvent.click(answers);
+    expect(send.disabled).toBe(false);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
   it("does not report successful withdrawal if the same submission is still returned", async () => {
     const source = question({ explanation: "The tunica media contains smooth muscle that regulates arterial caliber and resistance." });
     mocks.workspace.questions = [source];
