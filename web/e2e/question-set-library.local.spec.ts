@@ -675,3 +675,97 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     await database.close();
   }
 });
+
+test("same-owner tabs revoke stale attestations across SQL submission and withdrawal", async ({ page, baseURL }) => {
+  test.setTimeout(240_000);
+  const database = await createPlatformDatabase();
+  const [owner, learner] = PLATFORM_USERS;
+  // Both pages intentionally share a browser context and owner account. This
+  // exercises the real storage event, not a synthetic event dispatched by a test.
+  const second = await page.context().newPage();
+  try {
+    const ownerUnexpected = await database.attach(page, 0);
+    await page.goto(`${baseURL}/#questions`);
+    await seedLocalWorkspace(page);
+    await seedLocalSet(page);
+
+    const secondUnexpected = await database.attach(second, 0);
+    await second.goto(`${baseURL}/#questions`);
+    await seedLocalWorkspace(second);
+    await openLocalSets(second);
+    await second.getByRole("button", { name: "Submit to library", exact: true }).click();
+    const staleTab = second.getByRole("dialog", { name: `Submit ${TITLE}` });
+    await expect(staleTab).toBeVisible();
+    const staleRights = staleTab.getByRole("checkbox", { name: /permission to distribute every question/ });
+    const staleAnswers = staleTab.getByRole("checkbox", { name: /checked every answer against its source/ });
+    const staleSend = staleTab.getByRole("button", { name: "Send for review" });
+    await staleRights.check();
+    await staleAnswers.check();
+    await expect(staleSend).toBeEnabled();
+
+    // Tab A publishes the reviewed synthetic key. Tab B was already holding
+    // both unchecked-by-server, browser-only attestations before that change.
+    await openLocalSets(page);
+    await page.getByRole("button", { name: "Submit to library", exact: true }).click();
+    const authorTab = page.getByRole("dialog", { name: `Submit ${TITLE}` });
+    await authorTab.getByRole("checkbox", { name: /permission to distribute every question/ }).check();
+    await authorTab.getByRole("checkbox", { name: /checked every answer against its source/ }).check();
+    await authorTab.getByRole("button", { name: "Send for review" }).click();
+    await expect(authorTab.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+    const [first] = await database.rpc(owner.id, "my_question_set_library") as
+      Array<{ id: string; status: string }>;
+    expect(first.status).toBe("pending");
+    const firstEvidence = await database.rpc(owner.id, "get_question_set_library", { p_id: first.id }) as {
+      review_revision: number;
+      snapshot_payload: { questions: Array<{ correctKey: string }> };
+    };
+    expect(firstEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
+    // This must be a genuine cross-page storage event. No manual event injection.
+    await expect(staleRights).not.toBeChecked();
+    await expect(staleAnswers).not.toBeChecked();
+    await expect(staleSend).toBeDisabled();
+    await expect(staleTab.getByText(/Another Question Set publication changed/)).toBeVisible();
+    await staleRights.check();
+    await staleAnswers.check();
+    await expect(staleSend).toBeEnabled();
+
+    // Tab A withdraws while tab B holds a second set of stale checkmarks.
+    // SQL withdrawal deletes the original row; no old approval survives.
+    const confirmationEvent = page.waitForEvent("dialog");
+    const withdrawalClick = authorTab.getByRole("button", { name: "Withdraw submission" }).click();
+    const confirmation = await confirmationEvent;
+    expect(confirmation.type()).toBe("confirm");
+    await confirmation.accept();
+    await withdrawalClick;
+    await expect(authorTab.getByText(/was withdrawn from the library/)).toBeVisible();
+    expect(await database.rpc(owner.id, "my_question_set_library")).toEqual([]);
+    expect(await database.rpc(learner.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+
+    await expect(staleRights).not.toBeChecked();
+    await expect(staleAnswers).not.toBeChecked();
+    await expect(staleSend).toBeDisabled();
+    // A single renewed grant must never be sufficient for resubmission.
+    await staleRights.check();
+    await expect(staleSend).toBeDisabled();
+    await staleAnswers.check();
+    await expect(staleSend).toBeEnabled();
+    await staleSend.click();
+    await expect(staleTab.getByText(/Submission received.*academic reviewer approves it/)).toBeVisible();
+
+    const [replacement] = await database.rpc(owner.id, "my_question_set_library") as
+      Array<{ id: string; status: string }>;
+    expect(replacement.status).toBe("pending");
+    expect(replacement.id).not.toBe(first.id);
+    const freshEvidence = await database.rpc(owner.id, "get_question_set_library", { p_id: replacement.id }) as
+      typeof firstEvidence;
+    expect(freshEvidence.snapshot_payload.questions).toEqual(firstEvidence.snapshot_payload.questions);
+    expect(freshEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
+    expect(freshEvidence.review_revision).toBeGreaterThan(0);
+    expect(await database.rpc(learner.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+    expect(ownerUnexpected).toEqual([]);
+    expect(secondUnexpected).toEqual([]);
+  } finally {
+    await second.close();
+    await database.close();
+  }
+});
