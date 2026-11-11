@@ -558,17 +558,21 @@ export const useAccount = create<AccountState>((set, get) => {
           user_id: user.id, display_name: displayName, updated_at: new Date().toISOString(),
         });
         if (error) throw error;
-        // Never start the auth-metadata write under a later account session.
-        assertOwner();
-        await supabase.auth.updateUser({ data: { display_name: displayName } });
+        // The profile upsert is already acknowledged. Preserve its name even
+        // if the separate auth-metadata update fails, and fence stale SELECTs.
         assertOwner();
         const current = get().user;
         if (!current) throw new Error("The signed-in account changed during the profile update.");
-        // Any in-flight SELECT began before this acknowledged mutation and
-        // must not restore an obsolete name after the success notice.
         profileWriteOrder += 1;
         confirmedProfileName = { userId: user.id, epoch: profileEpoch, name: displayName };
         set({ user: { ...current, displayName } });
+        // Supabase can resolve { error } without rejecting its promise. A
+        // partial write must never be reported as a fully completed rename.
+        const { error: authError } = await supabase.auth.updateUser({ data: { display_name: displayName } });
+        assertOwner();
+        if (authError) {
+          throw new Error(`Name saved to your profile, but sign-in metadata was not updated. Retry saving your name to finish. ${friendlyError(authError)}`);
+        }
         return true;
       }, sameOwner);
       // A late A request cannot reinstate A's name, busy state or notice on B.
