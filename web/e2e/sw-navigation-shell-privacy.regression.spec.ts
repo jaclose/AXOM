@@ -43,9 +43,32 @@ for (const width of [320, 390, 1440]) {
     });
 
     await page.goto(APP, { waitUntil: "domcontentloaded" });
+    // A failed install leaves serviceWorker.ready pending indefinitely. Bound it
+    // so hosted CI reports the failed install rather than a 150-second page hang.
+    // Do not skip the worker or relax the offline/privacy assertions.
     await page.evaluate(async () => {
-      await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-      await navigator.serviceWorker.ready;
+      let registration: ServiceWorkerRegistration | undefined;
+      let watchdog: number | undefined;
+      try {
+        await Promise.race([
+          (async () => {
+            registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+            return navigator.serviceWorker.ready;
+          })(),
+          new Promise<never>((_, reject) => {
+            watchdog = window.setTimeout(() => reject(new Error(
+              `SW_READY_TIMEOUT: offline-shell service worker did not activate within 15s; ` +
+              `installing=${registration?.installing?.state ?? "none"}; ` +
+              `waiting=${registration?.waiting?.state ?? "none"}; ` +
+              `active=${registration?.active?.state ?? "none"}; ` +
+              `controller=${navigator.serviceWorker.controller?.scriptURL ?? "none"}. ` +
+              `Inspect install event rejection and canonical /index.html response headers.`,
+            )), 15_000);
+          }),
+        ]);
+      } finally {
+        if (watchdog !== undefined) window.clearTimeout(watchdog);
+      }
     });
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null, { timeout: 30_000 });
