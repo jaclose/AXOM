@@ -53,6 +53,10 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   const [sessionInvalidated, setSessionInvalidated] = useState(false);
   const sessionActive = !sessionRevoked.current && !sessionInvalidated && accountId === openingAccount.current;
   const [submission, setSubmission] = useState<LibrarySubmission>();
+  // A withdrawal can commit even if its RPC reply is lost. Keep this
+  // account/publication-bound recovery marker until a status read succeeds;
+  // never infer success from a transport error alone.
+  const uncertainWithdrawal = useRef<{ accountId: string; publicationId: string } | null>(null);
   const [checking, setChecking] = useState(true);
   const [statusIdentity, setStatusIdentity] = useState("");
   const [busy, setBusy] = useState(false);
@@ -116,6 +120,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       setKeywordEdits({});
       setApprovedKeywordIds({});
       setGenerationProgress("");
+      uncertainWithdrawal.current = null;
       setRights(false);
       setAnswers(false);
       setCredit("");
@@ -146,12 +151,24 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     const owned = await listMyQuestionSetSubmissions(accountId);
     if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) throw new Error("The account changed during submission lookup.");
     const found = owned.find(item => item.sourceId === set.id);
+    const uncertain = uncertainWithdrawal.current;
+    if (uncertain && uncertain.accountId === accountId && statusIdentity === `${accountId}:${set.id}`) {
+      // Only an authenticated readback of the exact prior publication can
+      // settle an unknown RPC result. A confirmed disappearance invalidates
+      // other same-origin tabs; an unchanged row must not signal success.
+      if (found?.id !== uncertain.publicationId && submission?.id === uncertain.publicationId) {
+        signalCommunityPublicationChange();
+      }
+      uncertainWithdrawal.current = null;
+    }
     // A withdrawal RPC can succeed even if its immediate status readback
     // fails. When a later authenticated lookup confirms that the previously
     // displayed publication is gone, revoke its old source/rights grants
     // before enabling another submission. Do not revoke on a failed lookup
     // or when the original listing is still present.
     if (!found && submission?.sourceId === set.id && statusIdentity === `${accountId}:${set.id}`) {
+      rightsEpoch.current = null;
+      answersEpoch.current = null;
       setRights(false);
       setAnswers(false);
     }
@@ -483,8 +500,10 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
 
     const withdrawingId = submission.id;
     setBusy(true); setError(""); setMessage("");
+    let withdrawalAcknowledged = false;
     try {
       await withdrawQuestionSetSubmission(accountId, withdrawingId);
+      withdrawalAcknowledged = true;
       // Notify other same-origin tabs even when the status readback times out.
       const otherTabsNotified = signalCommunityPublicationChange();
       const remaining = await refresh();
@@ -501,8 +520,21 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       setMessage("The submission was withdrawn from the library."
         + (otherTabsNotified ? "" : " Other open tabs may need to refresh their publication review."));
     } catch (cause) {
-      if (useAccount.getState().user?.id === accountId) {
-        setError(cause instanceof Error ? cause.message : "Withdrawal could not be confirmed.");
+      if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
+      setError(cause instanceof Error ? cause.message : "Withdrawal could not be confirmed.");
+      if (!withdrawalAcknowledged) {
+        // A rejected promise may mean a lost response after a committed SQL
+        // withdrawal. Keep the modal locked while status is unknown; a retry
+        // can settle this marker after a temporary lookup outage.
+        uncertainWithdrawal.current = { accountId, publicationId: withdrawingId };
+        try {
+          const remaining = await refresh();
+          if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
+          if (remaining?.id !== withdrawingId) {
+            setError("");
+            setMessage("The submission was withdrawn from the library after status recovery. Reconfirm both attestations before publishing again.");
+          }
+        } catch { /* Keep the original error and allow authenticated status retry. */ }
       }
     }
     finally { setBusy(false); }
