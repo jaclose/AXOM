@@ -561,17 +561,15 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     await expect(existing.getByText("The submission was withdrawn from the library.", { exact: true })).toBeVisible();
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
 
-    // Withdrawal changes authorization, not the protected teaching evidence.
+    // The installed withdrawal RPC deletes the owner's listing rather
+    // than rewriting an approved snapshot. A deleted approval cannot be
+    // used as authority by an already-open learner preview.
     const withdrawnResult = await database.db.query(
-      "select status, review_revision, snapshot_payload from public.question_set_library_entries where id = $1",
+      "select id from public.question_set_library_entries where id = $1",
       [pending.id],
     );
-    const withdrawn = withdrawnResult.rows[0] as {
-      status: string; review_revision: number; snapshot_payload: typeof approvedEvidence.snapshot_payload;
-    };
-    expect(withdrawn.status).not.toBe("approved");
-    expect(withdrawn.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
-    expect(withdrawn.review_revision).toBeGreaterThanOrEqual(approvedEvidence.review_revision);
+    expect(withdrawnResult.rows).toEqual([]);
+    expect(approvedEvidence.snapshot_payload.questions[0].correctKey).toBe("B");
 
     // A previously inspected snapshot is not a durable import grant.
     await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
