@@ -488,6 +488,13 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       // Signal acknowledged mutations before any potentially failing readback.
       // This prevents a second same-origin tab from silently reusing old grants.
       const otherTabsNotified = signalCommunityPublicationChange();
+      // The storage event only reaches OTHER tabs. Revoke this tab's grants too:
+      // a later rejected-status readback can expose the same form again, and
+      // the original rights/source attestations must never authorize a retry.
+      rightsEpoch.current = null;
+      answersEpoch.current = null;
+      setRights(false);
+      setAnswers(false);
       // Account-operation RPCs also assert the current session. Avoid an old
       // account's follow-up query/confirmation if it changed while awaiting.
       if (sessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
