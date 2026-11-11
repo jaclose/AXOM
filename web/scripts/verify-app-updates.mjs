@@ -53,7 +53,7 @@ async function inspectInstallCache(page) {
           const paths = requests.map((request) => new URL(request.url).pathname);
           generations.push({
             entries: requests.length,
-            immutableCode: paths.filter((path) => /\\/assets\\/[^/]+\\.(?:js|css)$/i.test(path)).length,
+            immutableCode: paths.filter((path) => path.startsWith('/assets/') && (path.endsWith('.js') || path.endsWith('.css'))).length,
             retainedManifest: paths.some((path) => path.endsWith('/__axom-retained-public-chunks.json')),
             indexHtml: paths.some((path) => path.endsWith('/index.html')),
             rootShell: paths.includes('/'),
