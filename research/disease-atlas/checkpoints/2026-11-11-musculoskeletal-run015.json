@@ -19,7 +19,7 @@
     "individual_image_sources_added": 8,
     "original_images_embedded": 0,
     "pdf_pages": 378,
-    "qa_checks_passed": 26,
+    "qa_checks_passed": 27,
     "qa_checks_failed": 0,
     "word_accessibility_findings": 0,
     "measured_ontology_coverage": null,
@@ -176,7 +176,7 @@
     ],
     [
       "MSK15-CHONDRO",
-      "https://publications.iarc.fr/Book-And-Report-Series/Who-Classification-Of-Tumours/Soft-Tissue-And-Bone-Tumours-2020"
+      "https://pmc.ncbi.nlm.nih.gov/articles/PMC10095313/"
     ],
     [
       "MSK15-OSTEOMALACIA",
@@ -250,9 +250,9 @@
     }
   ],
   "artifact_checksums_sha256": {
-    "cumulative_docx": "0872e40878d8011744fbc79037bbfa264fe5333aef8296e2bd0a03ca58f9eafb",
-    "cumulative_pdf": "25a095d29d2b238d1141c8ac6eddd8d84eaceaf4dbe0249b8f13c96dd4824d91",
-    "cumulative_zip": "862d64a9d0b88c58555869b882aeb3a8f164850ba9263760abb888797edcc8e8"
+    "cumulative_docx": "5246ccffa3c439787b1a3beef66e9940ea55d176b04ad68d0648a8c99fa2a1ce",
+    "cumulative_pdf": "8b521941253692e125794459c3aa12d12cd1edef2e17510b79b8ac961430a729",
+    "cumulative_zip": "e37b504dcb19ed13e60344e8b8c3cfce6683479978a2abe361cf7d2089307753"
   },
   "persistence": {
     "github": "This checkpoint persists on separate research branch; unlike zip, checkpoint is not the full 378-page manuscript",
@@ -263,7 +263,8 @@
     "disease_identity": "Exact canonical MONDO/ICD-11/Orphanet release maps pending, no fabricated external IDs",
     "pathology": "WHO/IARC classification publication 2020 source listing checked; full licensed text not reproduced",
     "treatment": "Authoritative guidelines and NCI PDQ summarized, full regulatory labels not independently verified",
-    "original_image_rights": "File-page creators and licenses checked, specimen/patient privacy not independently cleared, zero embeddings"
+    "original_image_rights": "File-page creators and licenses checked, specimen/patient privacy not independently cleared, zero embeddings",
+    "duplicate_evidence_hygiene": "17 unique new source URLs; chondrosarcoma 2023 open clinical review distinct from IARC WHO classification catalogue."
   },
   "followup": "Independent specialist review; import frozen official disease ontologies; validate 8 image specimens/rights; persist entire DOCX PDF ZIP to approved durable store; do not merge/deploy."
 }
