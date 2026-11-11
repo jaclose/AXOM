@@ -38,6 +38,37 @@ const recordBrowserError = (kind, detail) => {
 const safePath = (value) => {
   try { return new URL(value, 'http://localhost').pathname; } catch { return '<invalid path>'; }
 };
+// Failure-only CacheStorage inspection distinguishes pre-cache blocking from
+// slow write completion. Never return cache names, request URLs or responses.
+// The timeout limits inspection; it cannot suppress the original install error.
+async function inspectInstallCache(page) {
+  let timer;
+  try {
+    return await Promise.race([
+      page.evaluate(async () => {
+        const names = (await caches.keys()).filter((name) => name.startsWith('axom-shell-'));
+        const generations = [];
+        for (const name of names.slice(-3)) {
+          const requests = await (await caches.open(name)).keys();
+          const paths = requests.map((request) => new URL(request.url).pathname);
+          generations.push({
+            entries: requests.length,
+            immutableCode: paths.filter((path) => /\\/assets\\/[^/]+\\.(?:js|css)$/i.test(path)).length,
+            retainedManifest: paths.some((path) => path.endsWith('/__axom-retained-public-chunks.json')),
+            indexHtml: paths.some((path) => path.endsWith('/index.html')),
+            rootShell: paths.includes('/'),
+          });
+        }
+        return { state: 'ok', generationsFound: names.length, generations };
+      }).catch(() => ({ state: 'unavailable' })),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ state: 'timed-out' }), 1500);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 // Match the deployed canonical public HTML policy without relaxing privacy for
 // hashed assets or any noncanonical request in this two-build update fixture.
@@ -141,8 +172,11 @@ try {
     localStorage.setItem('axom.theme', 'light');
     });
   } catch (error) {
+    // Only aggregate cache state is recorded; never print cache keys or bodies.
+    const installCache = await inspectInstallCache(page);
     // Never print URL queries, account headers or response bodies.
     throw new Error(`SW install failed: ${error.message}; diagnostics=${JSON.stringify({
+      installCache,
       httpStarted: installHttp.started,
       httpFinished: installHttp.finished,
       httpPending: [...installHttp.pending.values()].slice(0, 16),
