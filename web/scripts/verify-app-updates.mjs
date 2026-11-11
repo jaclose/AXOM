@@ -18,8 +18,22 @@ let active = builds[0];
 // distinguish slow fetches, cache writes and failed worker installs.
 const installHttp = { started: 0, finished: 0, pending: new Map(), httpErrors: [], recent: [] };
 const installBrowserErrors = [];
+// Browser console and exception text is untrusted and may embed URL queries,
+// credentials, or account content. Never persist the raw text in CI diagnostics.
+const browserErrorKinds = new Set(['worker-console', 'worker-closed', 'page-error', 'page-console', 'request-failed']);
+function classifyBrowserError(detail) {
+  const message = String(detail);
+  if (/quotaexceedederror|quota exceeded/i.test(message)) return 'cache-quota';
+  if (/net::err_|failed to fetch|networkerror/i.test(message)) return 'network';
+  if (/syntaxerror|referenceerror|typeerror/i.test(message)) return 'script';
+  return 'other';
+}
 const recordBrowserError = (kind, detail) => {
-  if (installBrowserErrors.length < 20) installBrowserErrors.push({ kind, detail: String(detail).slice(0, 240) });
+  if (installBrowserErrors.length >= 20) return;
+  installBrowserErrors.push({
+    kind: browserErrorKinds.has(kind) ? kind : 'other',
+    category: classifyBrowserError(detail),
+  });
 };
 const safePath = (value) => {
   try { return new URL(value, 'http://localhost').pathname; } catch { return '<invalid path>'; }
