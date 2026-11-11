@@ -189,6 +189,19 @@ type ProtectionView = Pick<AccountState, "protection" | "lastProtectedAt" | "con
 
 /** What the account UI shows about protection: a status plus the stored times and the last failure. */
 export function protectionView(status: ProtectionStatus): ProtectionView {
+  // An unlinked or signed-out viewer must not inherit the previous linked
+  // account's cloud receipt or failure details. Keep durable sync metadata
+  // untouched so its original owner can recover it after signing back in.
+  if (status === "local-only") {
+    return {
+      protection: "local-only",
+      lastProtectedAt: undefined,
+      conflictServerRevision: undefined,
+      syncFailure: undefined,
+      nextAttemptAt: undefined,
+      snapshotBytes: undefined,
+    };
+  }
   const meta = read();
   return {
     protection: status,
@@ -225,6 +238,9 @@ async function client(): Promise<SupabaseClient> {
 }
 
 export const useAccount = create<AccountState>((set, get) => {
+  // Identity generations also distinguish A → B → A, where checking only the
+  // final account ID would admit stale asynchronous responses from the first A.
+  let accountIdentityEpoch = 0;
   function clearAccountUploadCaches() {
     clearCloudContentCache();
     clearCloudMediaUploadCache();
@@ -247,11 +263,19 @@ export const useAccount = create<AccountState>((set, get) => {
     const next = sessionState(session);
     // Keep a display name the profile table already supplied for this user.
     const current = get().user;
-    if (current?.id !== next.user?.id) clearAccountUploadCaches();
-    if (next.user && current?.id === next.user.id && current.displayName && !session?.user?.user_metadata?.display_name) {
+    const ownerChanged = current?.id !== next.user?.id;
+    if (ownerChanged || !next.user) {
+      accountIdentityEpoch += 1;
+      clearAccountUploadCaches();
+    }
+    if (next.user && !ownerChanged && current?.displayName && !session?.user?.user_metadata?.display_name) {
       next.user = { ...next.user, displayName: current.displayName };
     }
-    set(next);
+    // Zustand's set() is shallow: omitting these fields retains A's private
+    // history/devices/restore candidate under B, even with no network.
+    set(ownerChanged || !next.user
+      ? { ...next, history: [], devices: [], restoreOffer: undefined }
+      : next);
     if (next.user) void loadProfileName(next.user.id);
   }
 
@@ -267,11 +291,12 @@ export const useAccount = create<AccountState>((set, get) => {
   }
 
   async function loadProfileName(userId: string) {
+    const epoch = accountIdentityEpoch;
     try {
       const { data } = await (await client()).from("account_profiles").select("display_name").eq("user_id", userId).maybeSingle();
       const name = (data as { display_name?: string } | null)?.display_name;
       const user = get().user;
-      if (name && user && user.id === userId) set({ user: { ...user, displayName: name } });
+      if (epoch === accountIdentityEpoch && name && user && user.id === userId) set({ user: { ...user, displayName: name } });
     } catch {
       // Profile names are cosmetic; the account still works.
     }
@@ -286,6 +311,7 @@ export const useAccount = create<AccountState>((set, get) => {
    */
   async function welcomeBack(): Promise<void> {
     const user = get().user;
+    const epoch = accountIdentityEpoch;
     if (!user || linkStateFor(user.id) !== "unlinked") return;
     let latest: RevisionSummary | undefined;
     try {
@@ -293,14 +319,16 @@ export const useAccount = create<AccountState>((set, get) => {
     } catch {
       return; // Offline or service trouble: the Account page still offers every option.
     }
-    if (!latest) return;
+    if (!latest || epoch !== accountIdentityEpoch || get().user?.id !== user.id) return;
     const state = useStore.getState();
     if (state.deferredContent?.sources.length || deviceHasOwnWork({ ...state, userSounds: 0 })) {
       set({ restoreOffer: latest, message: "" });
       return;
     }
     await get().restoreRevision(latest);
-    if (!get().error) set({ message: `Welcome back. Your AXOM from ${new Date(latest.createdAt).toLocaleDateString(undefined, { month: "long", day: "numeric" })} is on this device.` });
+    if (epoch === accountIdentityEpoch && get().user?.id === user.id && !get().error) {
+      set({ message: `Welcome back. Your AXOM from ${new Date(latest.createdAt).toLocaleDateString(undefined, { month: "long", day: "numeric" })} is on this device.` });
+    }
   }
 
   // A saved, refreshable session is shown immediately (no wait for the SDK
@@ -336,7 +364,10 @@ export const useAccount = create<AccountState>((set, get) => {
             && isQuestionAttachmentScopeCurrent(initialScope)
             && session?.user.id === bootLinkedAccountId;
           if (event === "PASSWORD_RECOVERY") {
-            set({ phase: "recovering-password", user: toUser(session), message: "Choose a new password to finish recovery." });
+            // Recovery is also an auth identity event. Never retain an earlier
+            // account's history, devices or cloud receipt through this path.
+            applySession(session);
+            set({ phase: "recovering-password", message: "Choose a new password to finish recovery." });
             return;
           }
           applySession(session);
@@ -593,15 +624,16 @@ export const useAccount = create<AccountState>((set, get) => {
 
     async refresh() {
       const userId = get().user?.id;
+      const epoch = accountIdentityEpoch;
       if (!userId) return;
       try {
         const [history, devices] = await Promise.all([
           transport.summaries(30),
           transport.devices(deviceId()).catch(() => [] as AccountDevice[]),
         ]);
-        if (get().user?.id === userId) set({ history, devices });
+        if (epoch === accountIdentityEpoch && get().user?.id === userId) set({ history, devices });
       } catch (error) {
-        if (get().user?.id === userId) set({ error: friendlyError(error) });
+        if (epoch === accountIdentityEpoch && get().user?.id === userId) set({ error: friendlyError(error) });
       }
     },
 
