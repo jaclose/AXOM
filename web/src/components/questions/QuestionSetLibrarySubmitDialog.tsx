@@ -313,7 +313,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (!receipt || !current || receipt.source !== draft.sourceFingerprint) return false;
       return questionExplanationFingerprint(current) === receipt.applied;
     }).length;
-    if (applied) return ` ${applied} of ${drafts.length} draft explanation${applied === 1 ? " has" : "s have"} an unverified local update. The complete batch has not been confirmed in durable storage.`;
+    if (applied) return ` ${applied} of ${drafts.length} draft explanation${drafts.length === 1 ? "" : "s"} ${applied === 1 ? "has" : "have"} an unverified local update. The complete batch has not been confirmed in durable storage.`;
     return drafts.some(draft => draftSaveRevisions.current.has(draft.questionId))
       ? " An earlier optimistic draft update may have been superseded by newer work. No complete batch save has been confirmed."
       : "";
