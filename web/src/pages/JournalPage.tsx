@@ -2008,7 +2008,9 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
     }
     const ownerKeys = [baseKey];
     for (let ownerIndex = 0; ownerIndex < ownerKeys.length; ownerIndex += 1) {
-      if (ownerIndex >= JOURNAL_FEEDBACK_ALIAS_READ_LIMIT)
+      // The cap counts historical links. N links have N + 1 owner nodes,
+      // including the current name, so the last valid owner must be readable.
+      if (ownerIndex > JOURNAL_FEEDBACK_ALIAS_READ_LIMIT)
         throw new Error("Too many historical feedback owners");
       const aliasPrefix = `${ownerKeys[ownerIndex]}${JOURNAL_FEEDBACK_ALIAS_TOKEN}`;
       for (const key of keys) {

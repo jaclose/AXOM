@@ -110,6 +110,51 @@ describe("Journal feedback when browser storage cannot be read", () => {
     }
   });
 
+  it("recovers original feedback through 256 durable rename links but blocks a 257th", () => {
+    clearFixtureCopies();
+    const names = Array.from({ length: 258 }, (_, index) => `Journal R35 Boundary Name ${index}`);
+    const ownerKeys = names.map((name) => `axom-journal-feedback-draft:${userIdFromName(name)}`);
+    expect(new Set(ownerKeys).size).toBe(ownerKeys.length);
+    const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R35 original feedback bytes survive." });
+    useStore.getState().updateProfile({ name: names[256] });
+    localStorage.setItem(ownerKeys[0], original);
+    // 256 historical edges require 257 owner nodes including the current name.
+    for (let index = 1; index <= 256; index += 1) {
+      localStorage.setItem(
+        `${ownerKeys[index]}:name-alias:v1:${index.toString(16).padStart(32, "0")}`,
+        ownerKeys[index - 1],
+      );
+    }
+
+    try {
+      const valid = render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.queryByRole("button", { name: "Retry reading saved feedback" })).toBeNull();
+      expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+      fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+      fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("R35 original feedback bytes survive.");
+      expect(localStorage.getItem(ownerKeys[0])).toBe(original);
+      valid.unmount();
+
+      // The next rename crosses the bounded reader, so the inventory must
+      // remain explicitly unavailable instead of silently omitting old text.
+      useStore.getState().updateProfile({ name: names[257] });
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      expect(localStorage.getItem(ownerKeys[0])).toBe(original);
+    } finally {
+      cleanup();
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (key && ownerKeys.some((owner) => key === owner || key.startsWith(`${owner}:`)))
+          localStorage.removeItem(key);
+      }
+    }
+  });
+
   it("keeps a 20-rename recovery chain during denied storage reads until explicit retry", () => {
     clearFixtureCopies();
     const names = Array.from({ length: 21 }, (_, index) => `Journal R33 Offline Rename ${index}`);
