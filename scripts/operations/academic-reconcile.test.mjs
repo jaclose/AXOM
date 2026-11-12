@@ -28,8 +28,8 @@ const receipt = (overrides = {}) => ({
 });
 const receipts = () => ({ sources: [receipt()] });
 const tracker = () => ({ activities: [
-  { activityId: "FTM1:L1", sourceSha256: b, term: "T1", module: "FTM 1", week: 2, weekBasis: "explicit", installed: true },
-  { activityId: "FTM1:IMCQ1", sourceSha256: b, term: "T1", module: "FTM 1", weekBasis: "unassigned", installed: true },
+  { activityId: "FTM1:L1", sourceSha256: b, courseId: "synthetic-course-A", term: "T1", module: "FTM 1", week: 2, weekBasis: "explicit", installed: true },
+  { activityId: "FTM1:IMCQ1", sourceSha256: b, courseId: "synthetic-course-A", term: "T1", module: "FTM 1", weekBasis: "unassigned", installed: true },
 ] });
 const run = (input = {}) => reconcileAcademicContent({
   // The default synthetic PDF receipt is explicit: source coverage is no longer
@@ -1110,7 +1110,7 @@ const identityProof = () => {
     schema: "axom-academic-tracker-source-membership-v1",
     expectedActivityCount: 2, originalReadbackVerified: true,
     activities: tracker().activities.map(row => ({
-      activityId: row.activityId, sourceSha256: b, term: row.term, module: row.module,
+      activityId: row.activityId, sourceSha256: b, courseId: row.courseId, term: row.term, module: row.module,
       weekBasis: row.weekBasis, ...(row.week !== undefined ? { week: row.week } : {}),
     })),
   };
@@ -1382,4 +1382,27 @@ test("academic producer timestamps require explicit timezone and actual calendar
     "Explicit-offset current production readback remains valid.");
   assert.equal(run({ corpusAudit: canonicalB4Audit({ generatedAt: offset }) }).complete, true,
     "Explicit-offset B4 source audit remains valid.");
+});
+
+test("R44 RED: independently observed Tracker course must agree with the source-authenticated course", () => {
+  const pair = identityProof();
+  for (const changed of ["synthetic-course-B", undefined, null, ["synthetic-course-A"], ""]) {
+    const observed = tracker();
+    observed.activities[0].courseId = changed;
+    const result = run({ tracker: observed, requireTrackerIdentity: true, ...pair });
+    assert.equal(result.complete, false, "Tracker course substitution cannot certify source matching.");
+    assert.equal(result.counts.trackerIdentityVerified, false);
+    assert.ok(result.blockers.some(message => message.includes("Tracker readback does not match")));
+    assert.ok(!JSON.stringify(result).includes("synthetic-course-B"), "Private course ID must not enter diagnostics.");
+  }
+});
+
+test("R44 RED: matching original and cloud course proof cannot be transplanted into another Tracker course", () => {
+  const pair = identityProof();
+  for (const row of pair.trackerSourceMembership.activities) row.courseId = "synthetic-course-B";
+  for (const row of pair.trackerInstalledReadback.activities) row.courseId = "synthetic-course-B";
+  const result = run({ requireTrackerIdentity: true, ...pair });
+  assert.equal(result.complete, false);
+  assert.equal(result.counts.trackerIdentityVerified, false);
+  assert.ok(result.blockers.some(message => message.includes("Tracker readback does not match")));
 });
