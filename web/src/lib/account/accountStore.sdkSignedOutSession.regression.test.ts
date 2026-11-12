@@ -11,7 +11,7 @@ const onAuthStateChange = vi.fn((handler: (event: string, session: Session | nul
   return { data: { subscription: { unsubscribe: vi.fn() } } };
 });
 const signOut = vi.fn(async (_options?: { scope: "local" }) => ({ error: null as Error | null }));
-const getSession = vi.fn(async () => ({ data: { session: sdkCurrentSession }, error: null }));
+const getSession = vi.fn(async () => ({ data: { session: sdkCurrentSession }, error: null as Error | null }));
 const supabase = {
   auth: { onAuthStateChange, signOut, getSession },
   from: (table: string) => {
