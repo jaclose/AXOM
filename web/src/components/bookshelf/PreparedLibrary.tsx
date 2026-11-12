@@ -15,6 +15,7 @@ import {
 import { hasStoredSourceOriginal, readSourceOriginal } from "../../lib/decode/sources";
 import { MAX_SNAPSHOT_BYTES } from "../../lib/sync/syncPolicy";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
+import { preparedSourcePresentation } from "../../lib/privateLibrary/sourceDisplay";
 import type { QuestionRecord } from "../../lib/questions";
 import type { SourceDocument } from "../../lib/library";
 import type { ImportPackage } from "../../lib/question-content/package";
@@ -247,6 +248,14 @@ export function PreparedLibrary() {
   }, [parsed.catalogs]);
   const hasCatalog = parsed.catalogs.length > 0;
   const reviews = documents.filter(d => d.fileType === PRIVATE_REVIEW_DOCUMENT);
+  const sourcePresentations = useMemo(() => {
+    const reviewTexts = new Map(documents
+      .filter(document => document.fileType === PRIVATE_REVIEW_DOCUMENT && document.id.startsWith("private-review-"))
+      .map(document => [document.id.slice("private-review-".length), document.rawText]));
+    return new Map(collection.sources.map(({ source }) => [
+      source.checksum, preparedSourcePresentation(source, reviewTexts.get(source.checksum)),
+    ]));
+  }, [collection.sources, documents]);
   const originalDocumentsByChecksum = useMemo(() => {
     const originals = new Map<string, SourceDocument>();
     for (const document of documents) {
@@ -317,9 +326,11 @@ export function PreparedLibrary() {
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Source could not be opened."); }
   }
-  const sources = useMemo(() => collection.sources.filter(({ source }) => (
-    `${source.name} ${source.module ?? ""} ${source.status}`.toLowerCase().includes(query.toLowerCase())
-  )), [collection.sources, query]);
+  const sources = useMemo(() => collection.sources.filter(({ source }) => {
+    const presentation = sourcePresentations.get(source.checksum);
+    return `${presentation?.title ?? ""} ${presentation?.scope ?? ""} ${source.name} ${source.module ?? ""} ${source.status}`
+      .toLowerCase().includes(query.toLowerCase());
+  }), [collection.sources, sourcePresentations, query]);
   const sourceStats = useMemo(() => {
     const stats = new Map<string, { stored: number; ready: number; review: number }>();
     for (const question of questions) {
@@ -408,6 +419,7 @@ export function PreparedLibrary() {
       <ul className="prepared-source-list">{sources.slice(0, 40).map(entry => {
         const source = entry.source;
         const local = sourceStats.get(source.checksum) ?? { stored: 0, ready: 0, review: 0 };
+        const presentation = sourcePresentations.get(source.checksum) ?? preparedSourcePresentation(source);
         const originalState = source.originalFile ? (originalAvailability[source.checksum] ?? "checking") : undefined;
         const originalLabel = originalState === "stored" ? "Original stored on this device; verified when opened"
           : originalState === "missing" ? "Original listed but missing on this device"
@@ -415,7 +427,7 @@ export function PreparedLibrary() {
           : /local-only|remains local/i.test(source.reason) ? "Original remains outside this AXOM collection"
           : "No original included in this package";
         return <li key={source.checksum}>
-        <div><strong>{source.name}</strong><span>{source.module ?? "Unfiled"} · {local.ready} locally answer-ready · {local.review} stored for review · {source.review} held in source · {source.status === "prepared" ? "Prepared package" : source.status}</span><small>{source.reason} · {originalLabel}</small></div>
+        <div><strong>{presentation.title}</strong><span>{presentation.scope} · {local.ready} locally answer-ready · {local.review} stored for review · {source.review} held in source · {source.status === "prepared" ? "Prepared package" : source.status}</span><small>{presentation.title !== source.name ? `Original source: ${source.name} · ` : ""}{source.reason} · {originalLabel}</small></div>
         {reviews.some(d => d.id === `private-review-${source.checksum}`) && <GButton onClick={() => void review(entry)}>Review source</GButton>}
         {source.originalFile && <GButton disabled={originalState !== "stored"} onClick={() => void original(source.checksum, source.name)}>Open original</GButton>}
       </li>; })}</ul>
