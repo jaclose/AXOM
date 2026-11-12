@@ -1812,6 +1812,30 @@ function journalFeedbackRetryPendingNameAliases(ownerKey: string): void {
 }
 
 
+// Once the bounded rename chain overflows, the current name has no durable
+// path back to its predecessors. Retain that failure marker, but after an
+// explicit successful retry do not let its 256 otherwise valid pending links
+// consume recovery capacity for unrelated owner histories in this tab.
+// Check every write before dropping any volatile pointer; a partial outage
+// keeps the complete retry set for a later attempt.
+function journalFeedbackRetryOverflowBacklog(ownerKey: string): void {
+  if (!journalInTabFeedbackOverflowByWindow.get(window)?.has(ownerKey)) return;
+  const pending = journalInTabPendingNameAliasesByWindow.get(window);
+  if (!pending) return;
+  const ownLinks = [...pending.entries()].filter(([key]) => journalFeedbackSameOwner(ownerKey, key));
+  if (!ownLinks.every(([, link]) => journalFeedbackSameOwner(ownerKey, link.previous))) return;
+  try {
+    for (const [key, link] of ownLinks) {
+      window.localStorage.getItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}probe`);
+      window.localStorage.setItem(`${key}${JOURNAL_FEEDBACK_ALIAS_TOKEN}${link.suffix}`, link.previous);
+    }
+  } catch {
+    return;
+  }
+  for (const [key] of ownLinks) pending.delete(key);
+  // Do NOT clear the overflow marker: the missing link was never captured.
+}
+
 function journalInTabFeedbackDrafts(): Map<string, JournalExperienceFeedbackInput> {
   let drafts = journalInTabFeedbackDraftsByWindow.get(window);
   if (!drafts) {
@@ -2130,6 +2154,7 @@ function JournalFeedback({ onClose, sessionDrafts }: {
     onSelectCopy={(key) => setSelection({ ownerKey, key })}
     onRetryRead={() => {
       journalFeedbackRetryPendingNameAliases(`axom-journal-feedback-draft:${ownerKey}`);
+      journalFeedbackRetryOverflowBacklog(`axom-journal-feedback-draft:${ownerKey}`);
       setReadRetry((previous) => ({
         ownerKey, selectedKey, visit: retryVisitRef.current,
         count: previous?.ownerKey === ownerKey && previous.selectedKey === selectedKey
