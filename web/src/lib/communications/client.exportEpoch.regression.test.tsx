@@ -93,6 +93,53 @@ describe("account export request epoch fences", () => {
     expect(mocks.listeners.size).toBe(0);
   });
 
+  it("rejects an A export-link download after A -> B -> A while the SDK loads", async () => {
+    const load = deferred<ReturnType<typeof client>>();
+    mocks.sdk.mockReturnValue(load.promise);
+    const request = communicationsRequest<{ url: string }>("export-link", { id: "export-a" });
+    expect(mocks.listeners.size).toBe(1);
+    transition("owner-b");
+    transition("owner-a");
+    load.resolve(client());
+    await expect(request).rejects.toThrow(/account changed/i);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.listeners.size).toBe(0);
+  });
+
+  it("never returns a signed A download link to B after a late backend response", async () => {
+    const completion = deferred<{ data: { url: string }; error: null }>();
+    mocks.invoke.mockReturnValue(completion.promise);
+    const request = communicationsRequest<{ url: string }>("export-link", { id: "export-a" });
+    await Promise.resolve();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    transition("owner-b");
+    completion.resolve({ data: { url: "https://downloads.example.invalid/owner-a" }, error: null });
+    await expect(request).rejects.toThrow(/account changed/i);
+    expect(mocks.listeners.size).toBe(0);
+  });
+
+  it("returns the signed link when the initiating account remains active", async () => {
+    mocks.invoke.mockResolvedValue({
+      data: { url: "https://downloads.example.invalid/owner-a" },
+      error: null,
+    });
+    await expect(communicationsRequest<{ url: string }>("export-link", { id: "export-a" }))
+      .resolves.toEqual({ url: "https://downloads.example.invalid/owner-a" });
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "communications?action=export-link", { body: { id: "export-a" } },
+    );
+    expect(mocks.listeners.size).toBe(0);
+  });
+
+  it("rejects signed-out export-link requests without loading the SDK", async () => {
+    transition(null);
+    await expect(communicationsRequest("export-link", { id: "export-a" }))
+      .rejects.toThrow(/account changed/i);
+    expect(mocks.sdk).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.listeners.size).toBe(0);
+  });
+
   it("keeps settings (read-only) functional without account-export fencing", async () => {
     transition(null);
     await expect(communicationsRequest<{ requested: boolean }>("settings")).resolves.toEqual({ requested: true });
