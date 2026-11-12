@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SGU_CURRICULUM, buildCurriculum } from "../curricula";
+import { courseQuizSelection } from "../course-engine/quizLaunch";
 import type { QuestionSet } from "../library";
 import { readManifest } from "../question-content/packageJson";
 import type { QuestionRecord } from "../questions";
@@ -167,6 +168,43 @@ describe("loading a course book", () => {
 });
 
 describe("question bank books", () => {
+  it("holds all colliding original set IDs across source weeks while unrelated sets remain playable", () => {
+    const a = { ...set("collision", "Source A", "ER", 1, ["a"]), sourceDocumentIds: ["source-a"] };
+    const b = { ...set("collision", "Source B", "ER", 2, ["b"]), sourceDocumentIds: ["source-b"] };
+    const distinct = set("safe", "Verified independent", "ER", 1, ["safe"]);
+    const questions = [question("a", "ER", 1, "collision"), question("b", "ER", 2, "collision"), question("safe", "ER", 1, "safe")];
+    const before = JSON.stringify({ sets: [a, b, distinct], questions });
+    for (const sets of [[a, b, distinct], [b, a, distinct]]) {
+      const book = buildQuestionBankBooks({ terms: [], courses: [], sets, questions })[0];
+      const collections = book.weeks.flatMap((week) => week.collections);
+      const disputed = collections.filter((collection) => collection.setId === "collision");
+      expect(disputed).toHaveLength(2);
+      expect(new Set(disputed.map((collection) => collection.id)).size).toBe(2);
+      expect(disputed.every((collection) => collection.ready === 0 && collection.status === "awaiting-review" && /duplicate original set id/i.test(collection.note ?? ""))).toBe(true);
+      expect(book.ready).toBe(1);
+      const firstWeek = book.weeks.find((week) => week.week === 1)!;
+      expect(practiceSelection(book, firstWeek, firstWeek.collections.map((collection) => collection.id), 10))
+        .toMatchObject({ setIds: ["safe"], count: 1 });
+      expect(courseQuizSelection(book).questionIds).toEqual(["safe"]);
+      expect(courseQuizSelection(book).setIds).toEqual(["safe"]);
+    }
+    expect(JSON.stringify({ sets: [a, b, distinct], questions })).toBe(before);
+  });
+
+  it("holds secondary references to a collided source set even when their review-set ID is unique", () => {
+    const original = set("source", "First original", "ER", 1, ["q"]);
+    const conflicting = { ...original, title: "Second source", sourceDocumentIds: ["different-origin"] };
+    const secondary = set("review", "Secondary review", "ER", 1, ["q"]);
+    const safe = set("independent", "Independent", "ER", 1, ["ok"]);
+    const book = buildQuestionBankBooks({ terms: [], courses: [], sets: [original, conflicting, secondary, safe],
+      questions: [question("q", "ER", 1, "source"), question("ok", "ER", 1, "independent")] })[0];
+    const collections = book.weeks.flatMap((week) => week.collections);
+    expect(collections.find((collection) => collection.setId === "review"))
+      .toMatchObject({ ready: 0, status: "awaiting-review", readyQuestionIds: [] });
+    expect(book.ready).toBe(1);
+    expect(courseQuizSelection(book).questionIds).toEqual(["ok"]);
+  });
+
   it("keeps unfiled, mixed-module and loose imported questions discoverable", () => {
     const unfiled = question("old", "", 1, "legacy", { module: undefined, week: undefined });
     const mixed = [question("er", "ER", 1, undefined), question("dm", "DM", 2, undefined)];
