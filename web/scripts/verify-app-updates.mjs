@@ -14,16 +14,131 @@ const web = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = await mkdtemp(join(tmpdir(), 'axom-update-browser-'));
 const builds = [join(stage, 'a'), join(stage, 'b')];
 let active = builds[0];
+// Preserve bounded, path-only HTTP diagnostics. The ready promise alone cannot
+// distinguish slow fetches, cache writes and failed worker installs.
+const installHttp = { started: 0, finished: 0, pending: new Map(), httpErrors: [], recent: [] };
+const installBrowserErrors = [];
+// Browser console and exception text is untrusted and may embed URL queries,
+// credentials, or account content. Never persist the raw text in CI diagnostics.
+const browserErrorKinds = new Set(['worker-console', 'worker-closed', 'page-error', 'page-console', 'request-failed']);
+function classifyBrowserError(detail) {
+  const message = String(detail);
+  if (/quotaexceedederror|quota exceeded/i.test(message)) return 'cache-quota';
+  if (/net::err_|failed to fetch|networkerror/i.test(message)) return 'network';
+  if (/syntaxerror|referenceerror|typeerror/i.test(message)) return 'script';
+  return 'other';
+}
+const recordBrowserError = (kind, detail) => {
+  if (installBrowserErrors.length >= 20) return;
+  installBrowserErrors.push({
+    kind: browserErrorKinds.has(kind) ? kind : 'other',
+    category: classifyBrowserError(detail),
+  });
+};
+const safePath = (value) => {
+  try { return new URL(value, 'http://localhost').pathname; } catch { return '<invalid path>'; }
+};
+// Failure-only CacheStorage inspection distinguishes pre-cache blocking from
+// slow write completion. Never return cache names, request URLs or responses.
+// The timeout limits inspection; it cannot suppress the original install error.
+async function inspectInstallCache(page) {
+  let timer;
+  try {
+    return await Promise.race([
+      page.evaluate(async () => {
+        const names = (await globalThis.caches.keys()).filter((name) => name.startsWith('axom-shell-'));
+        const generations = [];
+        for (const name of names.slice(-3)) {
+          const requests = await (await globalThis.caches.open(name)).keys();
+          const paths = requests.map((request) => new URL(request.url).pathname);
+          generations.push({
+            entries: requests.length,
+            immutableCode: paths.filter((path) => path.startsWith('/assets/') && (path.endsWith('.js') || path.endsWith('.css'))).length,
+            retainedManifest: paths.some((path) => path.endsWith('/__axom-retained-public-chunks.json')),
+            indexHtml: paths.some((path) => path.endsWith('/index.html')),
+            rootShell: paths.includes('/'),
+          });
+        }
+        return { state: 'ok', generationsFound: names.length, generations };
+      }).catch(() => ({ state: 'unavailable' })),
+      new Promise((resolve) => {
+        timer = globalThis.setTimeout(() => resolve({ state: 'timed-out' }), 1500);
+      }),
+    ]);
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+// Failure-only installing-worker progress; whitelist phases and bounded counts.
+// Neither request metadata nor private content appears in CI logs.
+async function inspectInstallProgress(page) {
+  let outerTimer;
+  try {
+    return await Promise.race([
+      page.evaluate(async () => {
+        const installing = (await navigator.serviceWorker.getRegistration())?.installing;
+        if (!installing) return { state: 'unavailable' };
+        return new Promise((resolve) => {
+          const channel = new globalThis.MessageChannel();
+          const timer = globalThis.setTimeout(() => resolve({ state: 'timed-out' }), 1200);
+          channel.port1.onmessage = (event) => {
+            globalThis.clearTimeout(timer);
+            channel.port1.close();
+            const value = event.data || {};
+            const phases = new Set(['idle', 'shell-fetch', 'assets-fetch', 'assets-write', 'manifest-write', 'shell-write', 'complete']);
+            if (!phases.has(value.phase)) return resolve({ state: 'invalid' });
+            const bounded = (n) => Number.isInteger(n) && n >= 0 && n <= 4096 ? n : null;
+            resolve({ state: 'ok', phase: value.phase, shells: bounded(value.shells),
+              assetsTotal: bounded(value.assetsTotal), assetsChecked: bounded(value.assetsChecked),
+              assetsWritten: bounded(value.assetsWritten) });
+          };
+          installing.postMessage({ type: 'AXOM_QUERY_INSTALL_PROGRESS' }, [channel.port2]);
+        });
+      }).catch(() => ({ state: 'unavailable' })),
+      new Promise((resolve) => { outerTimer = globalThis.setTimeout(() => resolve({ state: 'timed-out' }), 1500); }),
+    ]);
+  } finally { globalThis.clearTimeout(outerTimer); }
+}
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
+// Match the deployed canonical public HTML policy without relaxing privacy for
+// hashed assets or any noncanonical request in this two-build update fixture.
+function cacheControlForPathname(pathname) {
+  return pathname === '/' || pathname === '/index.html' ? 'no-cache' : 'no-store';
+}
+
+// Fast assertions run before any build or browser setup, so a fixture regression
+// cannot silently turn the service-worker installation test into a timeout.
+for (const pathname of ['/', '/index.html']) assert.equal(cacheControlForPathname(pathname), 'no-cache');
+for (const pathname of ['/assets/main-abcdefgh.js', '/private/account.html', '/api/account', '/other/index.html']) {
+  assert.equal(cacheControlForPathname(pathname), 'no-store');
+}
+
 const server = createServer(async (req, res) => {
   try {
     const pathname = new URL(req.url, 'http://localhost').pathname;
     const path = resolve(active, '.' + (pathname === '/' ? '/index.html' : pathname));
     if (!path.startsWith(active + '/')) throw new Error('path');
     const data = await readFile(path);
-    res.writeHead(200, { 'Content-Type': types[extname(path)] ?? 'application/octet-stream', 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': types[extname(path)] ?? 'application/octet-stream', 'Cache-Control': cacheControlForPathname(pathname) });
     res.end(data);
   } catch { res.writeHead(404); res.end(); }
+});
+server.on('request', (req, res) => {
+  const path = safePath(req.url);
+  installHttp.started++;
+  installHttp.pending.set(req, path);
+  const done = () => {
+    if (!installHttp.pending.delete(req)) return;
+    installHttp.finished++;
+    installHttp.recent.push({ path, status: res.statusCode });
+    if (installHttp.recent.length > 16) installHttp.recent.shift();
+    if (res.statusCode >= 400) {
+      installHttp.httpErrors.push({ path, status: res.statusCode });
+      if (installHttp.httpErrors.length > 16) installHttp.httpErrors.shift();
+    }
+  };
+  res.once('finish', done);
+  res.once('close', done);
 });
 let browser;
 try {
@@ -46,13 +161,62 @@ try {
   // Reduced motion skips the startup intro film. Browsers that can play it keep
   // the app inert for up to 1.8 s, and fill() into an inert input is a no-op.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
+  context.on('serviceworker', (worker) => {
+    worker.on('console', (message) => {
+      if (message.type() === 'error') recordBrowserError('worker-console', message.text());
+    });
+    worker.on('close', () => recordBrowserError('worker-closed', safePath(worker.url())));
+  });
   const page = await context.newPage();
+  page.on('pageerror', (error) => recordBrowserError('page-error', error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') recordBrowserError('page-console', message.text());
+  });
+  page.on('requestfailed', (request) => recordBrowserError(
+    'request-failed', `${safePath(request.url())}: ${request.failure()?.errorText || 'unknown'}`,
+  ));
   page.setDefaultTimeout(120_000);
   page.setDefaultNavigationTimeout(120_000);
   await page.goto(`${origin}/?app=1`, { waitUntil: 'networkidle' });
   await completeSetup(page, 'Update persistence check');
   await deferPromisePrompt(page);
-  await page.evaluate(async () => { await navigator.serviceWorker.ready; localStorage.setItem('axom.theme', 'light'); });
+  try {
+    await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    let timeout;
+    try {
+      await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => {
+          timeout = window.setTimeout(() => reject(new Error(`SW_READY_TIMEOUT after 20s: ${JSON.stringify({
+            installing: registration?.installing?.state ?? null,
+            waiting: registration?.waiting?.state ?? null,
+            active: registration?.active?.state ?? null,
+            controlled: Boolean(navigator.serviceWorker.controller),
+          })}`)), 20_000);
+        }),
+      ]);
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    localStorage.setItem('axom.theme', 'light');
+    });
+  } catch (error) {
+    // Only aggregate cache state is recorded; never print cache keys or bodies.
+    const installCache = await inspectInstallCache(page);
+    const installProgress = await inspectInstallProgress(page);
+    // Never print URL queries, account headers or response bodies.
+    throw new Error(`SW install failed: ${error.message}; diagnostics=${JSON.stringify({
+      installCache,
+      installProgress,
+      httpStarted: installHttp.started,
+      httpFinished: installHttp.finished,
+      httpPending: [...installHttp.pending.values()].slice(0, 16),
+      httpErrors: installHttp.httpErrors,
+      recentHttp: installHttp.recent,
+      browserErrors: installBrowserErrors,
+    })}`, { cause: error });
+  }
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   const oldEntry = await page.locator('script[type="module"][src]').getAttribute('src');

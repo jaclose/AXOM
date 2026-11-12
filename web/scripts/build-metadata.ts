@@ -87,10 +87,17 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
       Object.keys(manifest)
         .filter((key) => /^src\/pages\/[^/]+Page\.tsx$/.test(key) && !OPTIONAL.test(key))
         .forEach(collect);
+      // Precise Vite-manifest identity for shipped but optional hashed code.
+      // These paths are not added to install-time precache.
+      const shippedChunks = [...new Set(Object.values(manifest)
+        .flatMap((entry) => [entry.file, ...(entry.css ?? [])])
+        .filter((file) => /^assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(file))
+        .map((file) => `./${file}`))];
       const precache = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...assets];
       const sw = resolve(dist, "sw.js");
       writeFileSync(sw, readFileSync(sw, "utf8").replaceAll("__AXOM_BUILD_ID__", metadata.buildId)
-        .replace('const PRECACHE = []; // __AXOM_PRECACHE__', `const PRECACHE = ${JSON.stringify([...new Set(precache)])};`));
+        .replace('const PRECACHE = []; // __AXOM_PRECACHE__', `const PRECACHE = ${JSON.stringify([...new Set(precache)])};`)
+        .replace('const SHIPPED_CHUNKS = []; // __AXOM_SHIPPED_CHUNKS__', `const SHIPPED_CHUNKS = ${JSON.stringify(shippedChunks)};`));
       // Plain static hosts can use these headers; Vercel config mirrors them.
       writeFileSync(resolve(dist, "_headers"), "/sw.js\n  Cache-Control: no-cache\n/version.json\n  Cache-Control: no-store\n/index.html\n  Cache-Control: no-cache\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n");
       const entries = readdirSync(dist, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
