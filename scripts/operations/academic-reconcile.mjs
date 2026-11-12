@@ -37,7 +37,7 @@ function indexUnique(list, key, errors, label) {
   for (const item of Array.isArray(list) ? list : []) {
     const id = item?.[key];
     if (typeof id !== "string" || !id.trim()) { errors.push(`${label} entry lacks ${key}`); continue; }
-    if (indexed.has(id)) errors.push(`Duplicate ${label} identity: ${id}`);
+    if (indexed.has(id)) errors.push(`Duplicate ${label} identity; original identifier omitted from report.`);
     else indexed.set(id, item);
   }
   return indexed;
@@ -112,7 +112,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       errors.push(`Invalid source inventory row at index ${index}; require an object with a canonical source checksum.`);
       continue;
     }
-    if (!SHA256.test(file.sha256 ?? "")) { errors.push(`Invalid source checksum: ${file.path ?? "(unnamed)"}`); continue; }
+    if (!SHA256.test(file.sha256 ?? "")) { errors.push(`Invalid source checksum at inventory row ${index}; original path omitted.`); continue; }
     if (file.duplicateOf) { duplicateRecords.push(file); continue; }
     if (byHash.has(file.sha256)) errors.push(`Non-duplicate entries share checksum ${file.sha256.slice(0, 12)}`);
     else byHash.set(file.sha256, file);
@@ -138,7 +138,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   if (inventory.summary.duplicateFiles !== duplicateRecords.length) errors.push(`Inventory duplicateFiles ${inventory.summary.duplicateFiles} != ${duplicateRecords.length} duplicates`);
   for (const entry of duplicateRecords) {
     if (!unique.some(first => first.path === entry.duplicateOf && first.sha256 === entry.sha256)) {
-      errors.push(`Duplicate ${entry.path ?? "(unnamed)"} does not point to a matching canonical source`);
+      errors.push("Duplicate source alias does not point to a matching canonical source; original path omitted.");
     }
   }
   const dispositionRows = dispositions?.sources;
@@ -148,8 +148,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   if (missingDisposition.length) blockers.push(`${missingDisposition.length} unique source files have no explicit kind/disposition; cannot claim source coverage.`);
   for (const [hash, row] of dmap) {
     if (!byHash.has(hash)) errors.push(`Disposition checksum absent from current inventory: ${hash.slice(0, 12)}`);
-    if (!supportedKinds.has(row.kind)) errors.push(`Unknown source kind for ${hash.slice(0, 12)}: ${row.kind}`);
-    if (!supportedStates.has(row.status)) errors.push(`Unknown disposition for ${hash.slice(0, 12)}: ${row.status}`);
+    if (!supportedKinds.has(row.kind)) errors.push(`Unknown source kind for ${hash.slice(0, 12)}; unrecognized producer value omitted.`);
+    if (!supportedStates.has(row.status)) errors.push(`Unknown disposition for ${hash.slice(0, 12)}; unrecognized producer value omitted.`);
     for (const key of ["questionCount", "readyCount", "reviewCount", "rejectedCount"]) {
       if (row[key] !== undefined && !integer(row[key])) errors.push(`Invalid ${key} for ${hash.slice(0, 12)}`);
     }
@@ -256,18 +256,18 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   if (!Array.isArray(trackerRows)) blockers.push("Agent 4 installed-tracker ledger is absent; curriculum installation and progress integrity remain unverified.");
   const tmap = indexUnique(trackerRows ?? [], "activityId", errors, "tracker activity");
   for (const row of tmap.values()) {
-    if (!row.term || !row.module) errors.push(`Tracker activity ${row.activityId} lacks term/module`);
-    if (!["explicit", "inferred", "unassigned"].includes(row.weekBasis)) errors.push(`Tracker activity ${row.activityId} has unknown weekBasis`);
-    if (row.weekBasis === "explicit" && !validWeek(row.week)) errors.push(`Explicit tracker week is missing for ${row.activityId}`);
+    if (!row.term || !row.module) errors.push("Tracker activity lacks term/module; original ID omitted.");
+    if (!["explicit", "inferred", "unassigned"].includes(row.weekBasis)) errors.push("Tracker activity has unknown weekBasis; original ID omitted.");
+    if (row.weekBasis === "explicit" && !validWeek(row.week)) errors.push("Explicit tracker week is missing; original activity ID omitted.");
     // Inferred filing also denotes an actual numeric week; absent/null is unknown, not an inference.
-    if (row.weekBasis === "inferred" && !validWeek(row.week)) errors.push(`Inferred tracker week is missing for ${row.activityId}`);
+    if (row.weekBasis === "inferred" && !validWeek(row.week)) errors.push("Inferred tracker week is missing; original activity ID omitted.");
     // All present week values must be valid week indexes.
     if (row.week !== undefined && row.week !== null && !validWeek(row.week))
-      errors.push(`Tracker activity ${row.activityId} has invalid week; require a positive integer.`);
+      errors.push("Tracker activity has invalid week; require a positive integer. Original ID omitted.");
     // Unassigned means no week is filed, rather than a silent numeric scope.
     if (row.weekBasis === "unassigned" && row.week !== undefined && row.week !== null)
-      errors.push(`Tracker activity ${row.activityId} unassigned receipt claims a week.`);
-    if (row.installed !== true) blockers.push(`Tracker activity ${row.activityId} has no installation receipt`);
+      errors.push("Tracker unassigned activity receipt claims a week; original ID omitted.");
+    if (row.installed !== true) blockers.push("Tracker activity has no installation receipt; original ID omitted.");
   }
   if (expectedTracker !== null && tmap.size !== expectedTracker) {
     blockers.push(`Tracker ledger has ${tmap.size} unique activities; baseline templates have ${expectedTracker}. Coverage is not verified.`);
@@ -433,7 +433,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         seenPdf.add(entry.source_sha256);
         if (!byHash.has(entry.source_sha256)) errors.push(`PDF availability SHA ${entry.source_sha256.slice(0, 12)} is not in the source manifest.`);
         if (!pdfAvailabilityStatuses.has(entry.status)) {
-          errors.push(`PDF availability SHA ${entry.source_sha256.slice(0, 12)} has unknown status: ${String(entry.status)}`);
+          errors.push(`PDF availability SHA ${entry.source_sha256.slice(0, 12)} has unknown status; raw status omitted.`);
           continue;
         }
         byStatus[entry.status] = (byStatus[entry.status] ?? 0) + 1;
@@ -544,8 +544,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     complete: errors.length === 0 && blockers.length === 0,
     errors, blockers, warnings,
     counts,
-    samples: { unclassifiedFiles: sample(missingDisposition.map(x => x.path ?? x.sha256)),
-      pendingQuestionSources: sample(pendingSources.map(([h, row]) => ({ source: h.slice(0, 12), status: row.status, reason: row.reason ?? null }))) },
+    samples: { unclassifiedFiles: sample(missingDisposition.map(x => SHA256.test(x.sha256) ? x.sha256.slice(0, 12) : "invalid-checksum")),
+      pendingQuestionSources: sample(pendingSources.map(([h, row]) => ({ source: h.slice(0, 12), status: supportedStates.has(row.status) ? row.status : "invalid", reason: row.reason ? "[redacted: consult private disposition]" : null }))) },
   };
 }
 
