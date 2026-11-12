@@ -140,6 +140,35 @@ describe("account export request epoch fences", () => {
     expect(mocks.listeners.size).toBe(0);
   });
 
+  it.each(["owner-b", "owner-a"])(
+    "hides a delayed A export-link error after switching to %s during JSON decoding",
+    async (finalAccount) => {
+      const parsed = deferred<{ error: string }>();
+      const response = new Response("{}", { status: 403, headers: { "Content-Type": "application/json" } });
+      vi.spyOn(response, "json").mockReturnValue(parsed.promise);
+      mocks.invoke.mockResolvedValue({ data: null, error: { context: response } });
+      const request = communicationsRequest("export-link", { id: "export-a" });
+      await vi.waitFor(() => expect(response.json).toHaveBeenCalledOnce());
+      transition("owner-b");
+      if (finalAccount === "owner-a") transition("owner-a");
+      parsed.resolve({ error: "owner-a export record not ready" });
+      await expect(request).rejects.toThrow(/account changed/i);
+      expect(mocks.listeners.size).toBe(0);
+    },
+  );
+
+  it("retains the backend error for a same-owner export-link failure", async () => {
+    const parsed = deferred<{ error: string }>();
+    const response = new Response("{}", { status: 403, headers: { "Content-Type": "application/json" } });
+    vi.spyOn(response, "json").mockReturnValue(parsed.promise);
+    mocks.invoke.mockResolvedValue({ data: null, error: { context: response } });
+    const request = communicationsRequest("export-link", { id: "export-a" });
+    await vi.waitFor(() => expect(response.json).toHaveBeenCalledOnce());
+    parsed.resolve({ error: "owner-a export record not ready" });
+    await expect(request).rejects.toThrow("owner-a export record not ready");
+    expect(mocks.listeners.size).toBe(0);
+  });
+
   it("keeps settings (read-only) functional without account-export fencing", async () => {
     transition(null);
     await expect(communicationsRequest<{ requested: boolean }>("settings")).resolves.toEqual({ requested: true });
