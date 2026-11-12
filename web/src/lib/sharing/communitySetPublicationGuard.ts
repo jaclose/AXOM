@@ -47,6 +47,11 @@ function sourceReceipt(question: QuestionRecord): string {
     question.courseId, question.module, question.week, question.bank, question.setId,
     question.objective, question.taxonomy,
     question.extraction, question.needsReview, question.ai,
+    // Source-derived teaching analyses can be re-reviewed, rejected or
+    // re-linked to a different page without updating the public projection
+    // or question timestamp. An older rights/answer confirmation must not
+    // authorize publishing after that private evidence changes.
+    question.analyses ?? null,
   ]);
 }
 
