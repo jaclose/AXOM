@@ -410,7 +410,15 @@ test('activation preserves other application caches and old clients', async () =
   app.context.self.clients.matchAll = async () => [{}];
   app.events.get('activate')({ waitUntil: (value) => { task = value; } });
   await task;
-  assert.deepEqual(await app.caches.keys(), ['other-app', 'axom-shell-previous', 'axom-shell-current']);
+  assert.deepEqual(await app.caches.keys(), [
+    'other-app', 'axom-shell-oldest', 'axom-shell-previous', 'axom-shell-current',
+  ], 'one surviving client can still be running the oldest build');
+  app.context.self.clients.matchAll = async () => [];
+  app.events.get('activate')({ waitUntil: (value) => { task = value; } });
+  await task;
+  assert.deepEqual(await app.caches.keys(), [
+    'other-app', 'axom-shell-previous', 'axom-shell-current',
+  ], 'with no open client, prune obsolete app generation without other cache deletion');
 });
 
 test('activation retains an old live page generation across two staged upgrades', async () => {
