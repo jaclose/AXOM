@@ -21,59 +21,59 @@ function bearerSubject(token: string): string | null {
   }
 }
 export async function communicationsRequest<T>(action: string, body: object = {}): Promise<T> {
-  // Both scheduling an export and retrieving its signed download URL belong
-  // to the initiating account. SDK loading or a late response must not
-  // transfer a private link to whichever account becomes active next.
+  // Private settings/history/admin reads and export operations belong to the
+  // initiating account. SDK loading or late responses must not retarget data.
   const isAccountExport = action === "request-export" || action === "export-link";
-  const initiatingUserId = isAccountExport ? useAccount.getState().user?.id : undefined;
+  const isAccountBound = isAccountExport || action === "settings";
+  const initiatingUserId = isAccountBound ? useAccount.getState().user?.id : undefined;
   // Capture *before* the lazy SDK await, including a possible auth refresh.
   // A stale or foreign persisted credential cannot authorize the UI intent.
-  const initiatingSession = isAccountExport ? readStoredSession() : null;
+  const initiatingSession = isAccountBound ? readStoredSession() : null;
   const initiatingBearer = initiatingSession?.access_token ?? "";
   let accountChanged = false;
   // Observe intermediate A -> B -> A transitions, not only the final ID.
   // The account store is synchronous; subscribe before the first await.
-  const unsubscribe = isAccountExport && typeof useAccount.subscribe === "function"
+  const unsubscribe = isAccountBound && typeof useAccount.subscribe === "function"
     ? useAccount.subscribe(state => {
       if (state.user?.id !== initiatingUserId) accountChanged = true;
     })
     : () => {};
-  const assertExportOwner = () => {
-    if (isAccountExport && (!initiatingUserId || accountChanged || useAccount.getState().user?.id !== initiatingUserId ||
+  const assertBoundOwner = () => {
+    if (isAccountBound && (!initiatingUserId || accountChanged || useAccount.getState().user?.id !== initiatingUserId ||
         !initiatingSession || initiatingSession.user.id.toLowerCase() !== initiatingUserId.toLowerCase() ||
         bearerSubject(initiatingBearer) !== initiatingUserId.toLowerCase() ||
         readStoredSession()?.access_token !== initiatingBearer)) {
-      throw new Error("Your account changed. Request the export again from the active account.");
+      throw new Error("Your account changed. Refresh private account data from the active account.");
     }
   };
   try {
-    assertExportOwner();
+    assertBoundOwner();
     const client = await loadSupabase();
-    assertExportOwner();
+    assertBoundOwner();
     if (!client) throw new Error("Connect an AXOM account to manage email delivery. Local previews remain available.");
     let options: { body: object; headers?: { Authorization: string } } = { body };
-    if (isAccountExport) {
-      // The shared SDK may be signed in as B while Zustand still renders A.
-      // Do not let the SDK silently choose B's token during functions.invoke().
+    if (isAccountBound) {
+      // The shared SDK may be B while Zustand renders A. Pin the verified
+      // initiating bearer; Edge independently authenticates and scopes it.
       const { data: { session }, error: sessionError } = await client.auth.getSession();
-      assertExportOwner();
+      assertBoundOwner();
       if (sessionError || !session || session.user.id.toLowerCase() !== initiatingUserId!.toLowerCase() ||
           session.access_token !== initiatingBearer ||
           bearerSubject(session.access_token) !== initiatingUserId!.toLowerCase()) {
-        throw new Error("Your account session changed. Sign in again before requesting a private export.");
+        throw new Error("Your account session changed. Sign in again before accessing private account data.");
       }
       options = { body, headers: { Authorization: `Bearer ${initiatingBearer}` } };
     }
     const { data, error } = await client.functions.invoke(`communications?action=${encodeURIComponent(action)}`, options);
     // A response under the old owner cannot report success after a handoff.
     // A request already dispatched is not cancelled by this client-side guard.
-    assertExportOwner();
+    assertBoundOwner();
     if (error) {
       if ("context" in error && error.context instanceof Response) {
         const response = await error.context.json().catch(() => null) as { error?: string } | null;
         // Parsing is another asynchronous boundary: A may switch to B, or A -> B -> A,
         // while the error body is consumed. Never surface A's server text to B.
-        assertExportOwner();
+        assertBoundOwner();
         if (response?.error) throw new Error(response.error);
       }
       throw new Error("Communications could not be reached. Check your connection and try again.");
@@ -83,19 +83,55 @@ export async function communicationsRequest<T>(action: string, body: object = {}
     unsubscribe();
   }
 }
+type OwnedSettings = { userId: string; generation: number; value: CommunicationsSettings };
+type OwnedStatus = { userId: string; generation: number; request: number; loading: boolean; error: string };
 export function useCommunications() {
   const userId = useAccount(s => s.user?.id);
-  const [ownedData, setOwnedData] = useState<{ userId: string; value: CommunicationsSettings } | null>(null);
-  const account = useRef(userId); account.current = userId;
-  const [loading, setLoading] = useState(false); const [error, setError] = useState("");
+  // Account identity is a generation, not just a string: A -> B -> A must
+  // never revive data from the first A. Refreshes in one generation are ordered.
+  const owner = useRef({ userId, generation: 0 });
+  if (owner.current.userId !== userId) {
+    owner.current = { userId, generation: owner.current.generation + 1 };
+  }
+  const generation = owner.current.generation;
+  const requestOrder = useRef(0);
+  const [ownedData, setOwnedData] = useState<OwnedSettings | null>(null);
+  const [ownedStatus, setOwnedStatus] = useState<OwnedStatus | null>(null);
   const reload = useCallback(async () => {
-    if (!userId) { setOwnedData(null); setError("Sign in to manage email delivery. You can preview your local reports below."); return; }
-    setLoading(true); setError("");
-    try { const result = await communicationsRequest<CommunicationsSettings>("settings"); if (account.current === userId) setOwnedData({ userId, value: result }); } catch (e) { if (account.current === userId) setError(e instanceof Error ? e.message : "Unable to load communications."); } finally { if (account.current === userId) setLoading(false); }
-  }, [userId]);
-  useEffect(() => { setOwnedData(null); void reload(); }, [reload]);
-  // Account changes render before the clearing effect runs. Bind every result
-  // to the account that fetched it so a prior account can never flash onscreen.
-  const data = ownedData && ownedData.userId === userId ? ownedData.value : null;
-  return { data, loading, error, reload };
+    // A stale callback cannot start a reload after an account handoff.
+    if (owner.current.userId !== userId || owner.current.generation !== generation) return;
+    const request = ++requestOrder.current;
+    // An old admin grant must disappear immediately when revalidation starts,
+    // including when the new request fails or the network becomes unavailable.
+    setOwnedData(null);
+    if (!userId) { setOwnedStatus(null); return; }
+    const current = () => owner.current.userId === userId &&
+      owner.current.generation === generation && requestOrder.current === request;
+    setOwnedStatus({ userId, generation, request, loading: true, error: "" });
+    try {
+      const value = await communicationsRequest<CommunicationsSettings>("settings");
+      if (current()) {
+        setOwnedData({ userId, generation, value });
+        setOwnedStatus({ userId, generation, request, loading: false, error: "" });
+      }
+    } catch (e) {
+      if (current()) setOwnedStatus({ userId, generation, request, loading: false,
+        error: e instanceof Error ? e.message : "Unable to load communications." });
+    }
+  }, [userId, generation]);
+  useEffect(() => { void reload(); }, [reload]);
+  // Bind both the data and pending/error UI to the current account generation.
+  // A different account cannot briefly observe old permissions before effects.
+  const data = userId && ownedData?.userId === userId && ownedData.generation === generation
+    ? ownedData.value : null;
+  const status = userId && ownedStatus?.userId === userId &&
+    ownedStatus.generation === generation && ownedStatus.request === requestOrder.current
+    ? ownedStatus : null;
+  return {
+    data,
+    loading: status?.loading ?? false,
+    error: userId ? (status?.error ?? "") :
+      "Sign in to manage email delivery. You can preview your local reports below.",
+    reload,
+  };
 }
