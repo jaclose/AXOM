@@ -158,6 +158,19 @@ describe("prepared private library installation", () => {
     expect(retained).toHaveLength(4);
     expect(priorKeys.every(key => retained.some(summary => summary.key === key))).toBe(true);
   });
+  it("does not multiply identical full-workspace backups when a damaged import is retried", async () => {
+    const b = await bundle();
+    b.files.set("templates/test.txt", encode("synthetic damaged template"));
+    const prior = await refreshLocalBackupSummaries();
+    await expect(installPrivateLibrary(b.read)).rejects.toThrow(/integrity/i);
+    const first = await refreshLocalBackupSummaries();
+    expect(first).toHaveLength(prior.length + 1);
+    await expect(installPrivateLibrary(b.read)).rejects.toThrow(/integrity/i);
+    const retry = await refreshLocalBackupSummaries();
+    expect(retry.map((backup) => backup.key)).toEqual(first.map((backup) => backup.key));
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
+
   it("rejects damaged templates before declaring installation complete, and resumes missing banks", async () => {
     const b = await bundle();
     const original = b.files.get("templates/test.txt")!;

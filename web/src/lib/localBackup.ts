@@ -6,6 +6,7 @@ import {
   DB_NAME,
   DB_VERSION as VAULT_DB_VERSION,
   ensureVaultStores,
+  getVaultWriteCheckpoint,
   STORE_NAME as VAULT_STORE_NAME,
 } from "./localVault";
 
@@ -82,10 +83,44 @@ export function resetLocalBackupRuntimeForTests(): void {
   lastBackupEpoch = 0;
 }
 
+function exactRecordMatch(left: Record<string, string>, right: Record<string, string>): boolean {
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && left[key] === right[key]);
+}
+
+function identicalRecoveryPayload(previous: LocalBackupSnapshot, current: LocalBackupSnapshot): boolean {
+  if (!previous.indexedDb || !current.indexedDb) return false;
+  return previous.schemaVersion === current.schemaVersion
+    && previous.oldSchemaVersion === current.oldSchemaVersion
+    && JSON.stringify(previous.build) === JSON.stringify(current.build)
+    && exactRecordMatch(previous.localStorage, current.localStorage)
+    && previous.indexedDb.dbName === current.indexedDb.dbName
+    && previous.indexedDb.storeName === current.indexedDb.storeName
+    && exactRecordMatch(previous.indexedDb.records, current.indexedDb.records);
+}
+
+async function findEquivalentReadableBackup(snapshot: LocalBackupSnapshot): Promise<string | undefined> {
+  try {
+    const latest = (await refreshLocalBackupSummaries())[0];
+    if (!latest || latest.oldSchemaVersion !== snapshot.oldSchemaVersion) return undefined;
+    const previous = await readLocalBackup(latest.key);
+    return previous && identicalRecoveryPayload(previous, snapshot) ? latest.key : undefined;
+  } catch {
+    // If a previous backup cannot be fully verified, retain the existing
+    // normal create/backup-failure behavior rather than claiming coverage.
+    return undefined;
+  }
+}
+
 export async function createLocalBackup(
   oldSchemaVersion: number,
   backupLimit = DEFAULT_BACKUP_LIMIT,
+  options: { reuseEquivalent?: boolean } = {},
 ): Promise<string | null> {
+  // Only an opt-in importer can reuse an existing checkpoint. Independent
+  // migration/manual backups continue to create a fresh historical record.
+  const writeCheckpoint = options.reuseEquivalent ? getVaultWriteCheckpoint() : undefined;
   let savedAt = nextBackupSavedAt();
   const snapshot: LocalBackupSnapshot = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -102,6 +137,15 @@ export async function createLocalBackup(
 
   if (Object.keys(snapshot.localStorage).length === 0 && !snapshot.indexedDb) {
     return null;
+  }
+
+  if (options.reuseEquivalent && snapshot.indexedDb) {
+    // Repeated failed imports can take a full-size backup of identical bytes
+    // each time. Reuse only an independently readable, byte-equivalent vault
+    // snapshot and only while the workspace write epoch remains unchanged.
+    // No existing backup is deleted or rewritten on this path.
+    const equivalent = await findEquivalentReadableBackup(snapshot);
+    if (equivalent && getVaultWriteCheckpoint() === writeCheckpoint) return equivalent;
   }
 
   const storage = getLocalStorage();
