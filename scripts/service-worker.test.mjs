@@ -1469,3 +1469,72 @@ test('R56 encoded public versions still reject substituted or credential-bearing
     assert.equal(await legacy.match(key), undefined, 'evict only invalid final provenance');
   }
 });
+
+test('R58 install ignores rejected optional manifest/icon fetches but requires public code', async () => {
+  const js = '/assets/core-12345678.js';
+  const publicResponse = (pathname) => {
+    const type = pathname === js ? 'application/javascript'
+      : pathname.endsWith('.webmanifest') ? 'application/manifest+json'
+      : pathname.endsWith('.png') ? 'image/png' : 'text/html';
+    return new Response('public shell or asset', {
+      headers: { 'content-type': type, 'cache-control': 'public, max-age=600' },
+    });
+  };
+  for (const optional of ['/manifest.webmanifest', '/icon-192.png']) {
+    const app = worker({
+      precache: ['./assets/core-12345678.js'],
+      fetchResponse: async (url) => {
+        const path = new URL(url).pathname;
+        if (path === optional) throw new Error('optional public asset offline');
+        return publicResponse(path);
+      },
+    });
+    let pending;
+    app.events.get('install')({ waitUntil: (task) => { pending = task; } });
+    await pending;
+    const cache = await app.caches.open('axom-shell-current');
+    assert.ok(await cache.match('./index.html'), 'valid offline shell installed');
+    assert.ok(await cache.match('./assets/core-12345678.js'), 'required JS still installed');
+    assert.equal(await cache.match('.' + optional), undefined, 'failed optional asset omitted');
+  }
+});
+
+test('R58 rejected optional body drain is tolerated, but required fetch failure remains fatal', async () => {
+  const js = '/assets/core-12345678.js';
+  const publicResponse = (pathname) => new Response('public shell or asset', {
+    headers: {
+      'content-type': pathname === js ? 'application/javascript'
+        : pathname.endsWith('.webmanifest') ? 'application/manifest+json'
+        : pathname.endsWith('.png') ? 'image/png' : 'text/html',
+      'cache-control': 'public, max-age=600',
+    },
+  });
+  const brokenIcon = () => new Response(new ReadableStream({
+    start(controller) { controller.error(new Error('broken optional stream')); },
+  }), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' } });
+  const optionalApp = worker({
+    precache: ['./assets/core-12345678.js'],
+    fetchResponse: async (url) => new URL(url).pathname === '/icon-192.png'
+      ? brokenIcon() : publicResponse(new URL(url).pathname),
+  });
+  let task;
+  optionalApp.events.get('install')({ waitUntil: (value) => { task = value; } });
+  await task;
+  const installed = await optionalApp.caches.open('axom-shell-current');
+  assert.ok(await installed.match('./index.html'));
+  assert.ok(await installed.match('./assets/core-12345678.js'));
+  assert.equal(await installed.match('./icon-192.png'), undefined);
+
+  const requiredApp = worker({
+    precache: ['./assets/core-12345678.js'],
+    fetchResponse: async (url) => {
+      if (new URL(url).pathname === js) throw new Error('required JS fetch failed');
+      return publicResponse(new URL(url).pathname);
+    },
+  });
+  let requiredTask;
+  requiredApp.events.get('install')({ waitUntil: (value) => { requiredTask = value; } });
+  await assert.rejects(requiredTask, /required JS fetch failed/);
+  const held = await requiredApp.caches.open('axom-shell-current');
+  assert.equal(await held.match('./index.html'), undefined, 'no partial offline shell');
+});

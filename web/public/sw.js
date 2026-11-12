@@ -212,27 +212,29 @@ async function installPublicShell() {
       const path = assetPaths[index];
       const url = new URL(path, self.registration.scope).href;
       const request = { url };
-      const response = await fetch(url, { cache: "no-store" });
-      const safe = response.ok && response.status === 200
-        && matchesRequestedResource(request, response)
-        && matchesPublicCodeMime(request, response)
-        && !isHtmlResponse(response)
-        && (cacheablePublicResponse(response)
-          || pinnedPublicBuildAsset(request, response)
-          || shippedPublicBuildAsset(request, response));
-      installProgress.assetsChecked += 1;
-      if (!safe) {
-        // Nonessential visual assets must never invalidate the offline shell.
-        if (path === "./manifest.webmanifest" || path === "./icon-192.png") {
-          assets[index] = null;
-          continue;
-        }
-        throw new Error(`Unsafe install asset: ${path}`);
+      // Optional manifest/icon failures must not abort a valid shell install,
+      // including rejected fetches and failed response-body drains.
+      const optionalVisual = path === "./manifest.webmanifest" || path === "./icon-192.png";
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        const safe = response.ok && response.status === 200
+          && matchesRequestedResource(request, response)
+          && matchesPublicCodeMime(request, response)
+          && !isHtmlResponse(response)
+          && (cacheablePublicResponse(response)
+            || pinnedPublicBuildAsset(request, response)
+            || shippedPublicBuildAsset(request, response));
+        if (!safe) throw new Error(`Unsafe install asset: ${path}`);
+        // The clone is consumed; the original retains its verified response URL.
+        // This releases the network stream without changing the cache identity.
+        await response.clone().blob();
+        assets[index] = { path, response };
+      } catch (error) {
+        if (!optionalVisual) throw error;
+        assets[index] = null;
+      } finally {
+        installProgress.assetsChecked += 1;
       }
-      // The clone is consumed; the original retains its verified response URL.
-      // This releases the network stream without changing the cache identity.
-      await response.clone().blob();
-      assets[index] = { path, response };
     }
   }));
   // Fetch concurrently as Cache.addAll did, but write only after every required
