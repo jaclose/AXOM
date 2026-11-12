@@ -83,19 +83,55 @@ export async function communicationsRequest<T>(action: string, body: object = {}
     unsubscribe();
   }
 }
+type OwnedSettings = { userId: string; generation: number; value: CommunicationsSettings };
+type OwnedStatus = { userId: string; generation: number; request: number; loading: boolean; error: string };
 export function useCommunications() {
   const userId = useAccount(s => s.user?.id);
-  const [ownedData, setOwnedData] = useState<{ userId: string; value: CommunicationsSettings } | null>(null);
-  const account = useRef(userId); account.current = userId;
-  const [loading, setLoading] = useState(false); const [error, setError] = useState("");
+  // Account identity is a generation, not just a string: A -> B -> A must
+  // never revive data from the first A. Refreshes in one generation are ordered.
+  const owner = useRef({ userId, generation: 0 });
+  if (owner.current.userId !== userId) {
+    owner.current = { userId, generation: owner.current.generation + 1 };
+  }
+  const generation = owner.current.generation;
+  const requestOrder = useRef(0);
+  const [ownedData, setOwnedData] = useState<OwnedSettings | null>(null);
+  const [ownedStatus, setOwnedStatus] = useState<OwnedStatus | null>(null);
   const reload = useCallback(async () => {
-    if (!userId) { setOwnedData(null); setError("Sign in to manage email delivery. You can preview your local reports below."); return; }
-    setLoading(true); setError("");
-    try { const result = await communicationsRequest<CommunicationsSettings>("settings"); if (account.current === userId) setOwnedData({ userId, value: result }); } catch (e) { if (account.current === userId) setError(e instanceof Error ? e.message : "Unable to load communications."); } finally { if (account.current === userId) setLoading(false); }
-  }, [userId]);
-  useEffect(() => { setOwnedData(null); void reload(); }, [reload]);
-  // Account changes render before the clearing effect runs. Bind every result
-  // to the account that fetched it so a prior account can never flash onscreen.
-  const data = ownedData && ownedData.userId === userId ? ownedData.value : null;
-  return { data, loading, error, reload };
+    // A stale callback cannot start a reload after an account handoff.
+    if (owner.current.userId !== userId || owner.current.generation !== generation) return;
+    const request = ++requestOrder.current;
+    // An old admin grant must disappear immediately when revalidation starts,
+    // including when the new request fails or the network becomes unavailable.
+    setOwnedData(null);
+    if (!userId) { setOwnedStatus(null); return; }
+    const current = () => owner.current.userId === userId &&
+      owner.current.generation === generation && requestOrder.current === request;
+    setOwnedStatus({ userId, generation, request, loading: true, error: "" });
+    try {
+      const value = await communicationsRequest<CommunicationsSettings>("settings");
+      if (current()) {
+        setOwnedData({ userId, generation, value });
+        setOwnedStatus({ userId, generation, request, loading: false, error: "" });
+      }
+    } catch (e) {
+      if (current()) setOwnedStatus({ userId, generation, request, loading: false,
+        error: e instanceof Error ? e.message : "Unable to load communications." });
+    }
+  }, [userId, generation]);
+  useEffect(() => { void reload(); }, [reload]);
+  // Bind both the data and pending/error UI to the current account generation.
+  // A different account cannot briefly observe old permissions before effects.
+  const data = userId && ownedData?.userId === userId && ownedData.generation === generation
+    ? ownedData.value : null;
+  const status = userId && ownedStatus?.userId === userId &&
+    ownedStatus.generation === generation && ownedStatus.request === requestOrder.current
+    ? ownedStatus : null;
+  return {
+    data,
+    loading: status?.loading ?? false,
+    error: userId ? (status?.error ?? "") :
+      "Sign in to manage email delivery. You can preview your local reports below.",
+    reload,
+  };
 }
