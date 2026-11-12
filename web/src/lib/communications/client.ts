@@ -8,13 +8,41 @@ export interface CommunicationsSettings {
   privacy: PrivacyRequest[]; admin: boolean; deliveryMode: string; deletionEnabled: boolean; hasProtectedCopy: boolean;
 }
 export async function communicationsRequest<T>(action: string, body: object = {}): Promise<T> {
-  const client = await loadSupabase(); if (!client) throw new Error("Connect an AXOM account to manage email delivery. Local previews remain available.");
-  const { data, error } = await client.functions.invoke(`communications?action=${encodeURIComponent(action)}`, { body });
-  if (error) {
-    if ("context" in error && error.context instanceof Response) { const response = await error.context.json().catch(() => null) as { error?: string } | null; if (response?.error) throw new Error(response.error); }
-    throw new Error("Communications could not be reached. Check your connection and try again.");
+  // An export is initiated by one signed-in account. SDK loading may finish
+  // after that account signs out or another learner signs in. Never retarget
+  // the already-clicked request to the account that happens to be current.
+  const isAccountExport = action === "request-export";
+  const initiatingUserId = isAccountExport ? useAccount.getState().user?.id : undefined;
+  let accountChanged = false;
+  // Observe intermediate A -> B -> A transitions, not only the final ID.
+  // The account store is synchronous; subscribe before the first await.
+  const unsubscribe = isAccountExport && typeof useAccount.subscribe === "function"
+    ? useAccount.subscribe(state => {
+      if (state.user?.id !== initiatingUserId) accountChanged = true;
+    })
+    : () => {};
+  const assertExportOwner = () => {
+    if (isAccountExport && (!initiatingUserId || accountChanged || useAccount.getState().user?.id !== initiatingUserId)) {
+      throw new Error("Your account changed. Request the export again from the active account.");
+    }
+  };
+  try {
+    assertExportOwner();
+    const client = await loadSupabase();
+    assertExportOwner();
+    if (!client) throw new Error("Connect an AXOM account to manage email delivery. Local previews remain available.");
+    const { data, error } = await client.functions.invoke(`communications?action=${encodeURIComponent(action)}`, { body });
+    // A response under the old owner cannot report success after a handoff.
+    // A request already dispatched is not cancelled by this client-side guard.
+    assertExportOwner();
+    if (error) {
+      if ("context" in error && error.context instanceof Response) { const response = await error.context.json().catch(() => null) as { error?: string } | null; if (response?.error) throw new Error(response.error); }
+      throw new Error("Communications could not be reached. Check your connection and try again.");
+    }
+    if (data?.error) throw new Error(String(data.error)); return data as T;
+  } finally {
+    unsubscribe();
   }
-  if (data?.error) throw new Error(String(data.error)); return data as T;
 }
 export function useCommunications() {
   const userId = useAccount(s => s.user?.id);
