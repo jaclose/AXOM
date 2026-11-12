@@ -9,13 +9,28 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
 }));
 
-vi.mock("../account/accountStore", () => ({
-  useAccount: (selector: (state: { user: { id: string } | null }) => unknown) => selector({ user: mocks.userId ? { id: mocks.userId } : null }),
-}));
+vi.mock("../account/accountStore", () => {
+  const state = () => ({ user: mocks.userId ? { id: mocks.userId } : null });
+  return { useAccount: Object.assign(
+    (selector: (state: ReturnType<typeof state>) => unknown) => selector(state()),
+    { getState: state, subscribe: () => () => {} },
+  ) };
+});
 
-vi.mock("../account/supabase", () => ({
-  loadSupabase: async () => ({ functions: { invoke: mocks.invoke } }),
-}));
+vi.mock("../account/supabase", () => {
+  const session = () => {
+    const id = mocks.userId;
+    const payload = btoa(JSON.stringify({ sub: id })).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+    return { user: { id }, access_token: `e30.${payload}.synthetic-test-only`, refresh_token: "synthetic-test-only" };
+  };
+  return {
+    readStoredSession: session,
+    loadSupabase: async () => ({
+      auth: { getSession: async () => ({ data: { session: session() }, error: null }) },
+      functions: { invoke: mocks.invoke },
+    }),
+  };
+});
 
 function settingsFor(userId: string): CommunicationsSettings {
   return {
