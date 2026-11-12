@@ -242,7 +242,7 @@ describe("Host page authorization and moderation", () => {
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("Report dismissed and audited.")).toBeNull();
     expect((await screen.findByRole("alert")).textContent).toContain("did not confirm");
-    expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Dismiss report" }) as HTMLButtonElement).disabled).toBe(true);
     expect(resolveReport).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole("button", { name: "Retry Host" }));
     expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
