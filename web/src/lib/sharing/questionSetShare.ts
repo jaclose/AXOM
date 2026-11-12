@@ -464,7 +464,7 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
   };
 }
 
-function hasPrivateDeviceCitation(citation: string | undefined): boolean {
+export function hasPrivateDeviceCitation(citation: string | undefined): boolean {
   if (!citation) return false;
   // Reject recognizable absolute device paths, but preserve web URLs, DOIs
   // and ordinary bibliographic citations. Do not rewrite historical imports.
