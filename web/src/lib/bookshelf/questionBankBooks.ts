@@ -129,6 +129,13 @@ interface Draft {
 
 export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBook[] {
   const sourceOf = input.sourceOf ?? defaultSourceOf;
+  // Check the raw input before Map construction loses conflicting originals.
+  // Never assign a new source ID to disguise a collision: hold every affected
+  // collection, including review sets that reference a collided primary set.
+  const setIdCounts = new Map<string, number>();
+  for (const set of input.sets) setIdCounts.set(set.id, (setIdCounts.get(set.id) ?? 0) + 1);
+  const collidedSetIds = new Set([...setIdCounts].filter(([, count]) => count > 1).map(([id]) => id));
+  const hasCollidedPrimarySet = (question: QuestionRecord): boolean => Boolean(question.setId && collidedSetIds.has(question.setId));
   const setsById = new Map(input.sets.map((set) => [set.id, set]));
   const questionsById = new Map(input.questions.map((question) => [question.id, question]));
   const drafts = new Map<string, Draft>();
@@ -148,28 +155,37 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
   };
 
   const inSet = new Set<string>();
-  for (const set of input.sets) {
+  for (const [sourceIndex, set] of input.sets.entries()) {
     const members = set.questionIds.flatMap((id) => (questionsById.has(id) ? [questionsById.get(id)!] : []));
-    const scopes = members.map((question) => questionScope(question, setsById));
+    const collidedOriginal = collidedSetIds.has(set.id);
+    const disputedProvenance = collidedOriginal || members.some(hasCollidedPrimarySet);
+    const verifiedMembers = disputedProvenance ? [] : members.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2);
+    const scopes = members.map((question) => questionScope(question, collidedOriginal || hasCollidedPrimarySet(question) ? undefined : setsById));
     // Older imports and mixed sets have no single module. Keep them visible
     // under the same unfiled branch used by the week browser.
     const module = (set.scope?.module ?? same(scopes.map((scope) => scope.module))) || "Unfiled & mixed";
     const draft = draftFor(module, set.scope?.courseId ?? same(scopes.map((scope) => scope.courseId)));
     const week = set.scope?.week ?? same(scopes.map((scope) => scope.week));
-    const awaiting = members.filter((question) => questionMappingStatus(question) !== "ready").length;
+    const awaiting = members.filter((question) => disputedProvenance || questionMappingStatus(question) !== "ready").length;
     weekFor(draft, week).collections.push({
-      id: `set:${set.id}`,
+      // View-only discriminators keep both conflicting originals visible to review;
+      // the immutable source set ID is never rewritten or made launchable.
+      id: collidedOriginal ? `conflicting-set:${set.id}:${sourceIndex + 1}` : `set:${set.id}`,
       title: set.title,
       source: sourceOf(set),
       ...(week !== undefined ? { week } : {}),
       questions: members.length,
       questionIds: members.map((question) => question.id),
-      readyQuestionIds: members.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).map((question) => question.id),
-      ready: members.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).length,
+      readyQuestionIds: verifiedMembers.map((question) => question.id),
+      ready: verifiedMembers.length,
       attempted: members.filter((question) => question.attempts.length > 0).length,
       awaitingReview: awaiting,
-      status: awaiting > 0 ? "awaiting-review" : "imported",
-      ...(awaiting > 0 ? { note: `${countWords.one(awaiting, "question")} to confirm before ${awaiting === 1 ? "it counts" : "they count"} as ready.` } : {}),
+      status: disputedProvenance || awaiting > 0 ? "awaiting-review" : "imported",
+      ...(collidedOriginal
+        ? { note: "Duplicate original set ID; verify source identity before practice." }
+        : disputedProvenance
+          ? { note: "A question refers to a duplicate original set ID; verify its source before practice." }
+          : awaiting > 0 ? { note: `${countWords.one(awaiting, "question")} to confirm before ${awaiting === 1 ? "it counts" : "they count"} as ready.` } : {}),
       setId: set.id,
     });
     for (const question of members) {
@@ -182,7 +198,7 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
   const looseByScope = new Map<string, { module: string; week?: number; courseId?: string; questions: QuestionRecord[] }>();
   for (const question of input.questions) {
     if (inSet.has(question.id)) continue;
-    const scope = questionScope(question, setsById);
+    const scope = questionScope(question, hasCollidedPrimarySet(question) ? undefined : setsById);
     const module = scope.module || "Unfiled & mixed";
     const key = `${scope.courseId ?? ""}|${moduleKey(module)}|${scope.week ?? ""}`;
     const entry = looseByScope.get(key) ?? { module, courseId: scope.courseId, ...(scope.week !== undefined ? { week: scope.week } : {}), questions: [] };
@@ -191,7 +207,7 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
   }
   for (const [key, entry] of looseByScope) {
     const draft = draftFor(entry.module, entry.courseId);
-    const awaiting = entry.questions.filter((question) => questionMappingStatus(question) !== "ready").length;
+    const awaiting = entry.questions.filter((question) => questionMappingStatus(question) !== "ready" || hasCollidedPrimarySet(question)).length;
     weekFor(draft, entry.week).collections.push({
       id: `loose:${key}`,
       title: "Questions in no set",
@@ -199,8 +215,8 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
       ...(entry.week !== undefined ? { week: entry.week } : {}),
       questions: entry.questions.length,
       questionIds: entry.questions.map((question) => question.id),
-      readyQuestionIds: entry.questions.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).map((question) => question.id),
-      ready: entry.questions.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).length,
+      readyQuestionIds: entry.questions.filter((question) => !hasCollidedPrimarySet(question) && questionMappingStatus(question) === "ready" && question.options.length >= 2).map((question) => question.id),
+      ready: entry.questions.filter((question) => !hasCollidedPrimarySet(question) && questionMappingStatus(question) === "ready" && question.options.length >= 2).length,
       attempted: entry.questions.filter((question) => question.attempts.length > 0).length,
       awaitingReview: awaiting,
       status: awaiting > 0 ? "awaiting-review" : "imported",
@@ -276,7 +292,9 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
         term,
         ...(course ? { courseId: course.id, courseCode: course.code } : place ? { courseCode: place.code } : {}),
         weeks,
-        ready: members.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).length,
+        // A question can be indexed but not safely eligible for practice when
+        // its original source-set ID is disputed. Reflect collection gates.
+        ready: new Set(weeks.flatMap((week) => week.collections.flatMap((collection) => collection.readyQuestionIds ?? []))).size,
         attempted: members.filter((question) => question.attempts.length > 0).length,
       },
     });

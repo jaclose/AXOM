@@ -191,6 +191,19 @@ describe("question bank books", () => {
     expect(JSON.stringify({ sets: [a, b, distinct], questions })).toBe(before);
   });
 
+  it("never inherits a disputed source week from a last-write-wins set lookup", () => {
+    const unfiled = { ...set("dup", "Unfiled original", "", 1, ["held"]), scope: undefined };
+    const refiling = { ...set("dup", "Other scope", "ER", 6, ["held"]), sourceDocumentIds: ["other-source"] };
+    const q = question("held", "", 1, "dup", { module: undefined, week: undefined });
+    const books = buildQuestionBankBooks({ terms: [], courses: [], sets: [unfiled, refiling], questions: [q] });
+    expect(books.find((book) => book.module === "Unfiled & mixed")?.weeks[0])
+      .toMatchObject({ label: "No single week", ready: 0 });
+    expect(books.flatMap((book) => book.weeks.flatMap((week) => week.collections))
+      .filter((collection) => collection.setId === "dup"))
+      .toHaveLength(2);
+    expect(books.every((book) => book.ready === 0)).toBe(true);
+  });
+
   it("holds secondary references to a collided source set even when their review-set ID is unique", () => {
     const original = set("source", "First original", "ER", 1, ["q"]);
     const conflicting = { ...original, title: "Second source", sourceDocumentIds: ["different-origin"] };
