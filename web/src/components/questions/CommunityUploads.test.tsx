@@ -363,7 +363,9 @@ describe("Community Uploads", () => {
     expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Browse approved Question Sets" })).toBeNull();
     const card = (await screen.findByText("NCRS")).closest("article")!;
-    fireEvent.click(within(card).getByRole("button", { name: "Open revision for review" }));
+    const importConfirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(within(card).getByRole("button", { name: "Import into my library for review" }));
+    expect(importConfirm).toHaveBeenCalledOnce();
     const approve = await within(card).findByRole("button", { name: /Approve for official catalog/ }) as HTMLButtonElement;
     expect(approve.disabled).toBe(true);
     fireEvent.click(within(card).getByRole("checkbox", { name: /inspected this exact revision/ }));
@@ -373,14 +375,34 @@ describe("Community Uploads", () => {
     await waitFor(() => expect(reviewed).toHaveBeenCalledOnce());
     expect(mocks.submit).not.toHaveBeenCalled();
     expect(mocks.upload).not.toHaveBeenCalled();
+    importConfirm.mockRestore();
+  });
+
+  it("keeps Host preview read-only and requires explicit consent before writing to the reviewer's private library", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    render(<CommunityUploads reviewOnly onOpenLibrary={vi.fn()} />);
+    const card = (await screen.findByText("NCRS")).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Preview course" }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledOnce());
+    expect(mocks.saveReference).not.toHaveBeenCalled();
+    expect(mocks.download).not.toHaveBeenCalled();
+
+    const confirmImport = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(within(card).getByRole("button", { name: "Import into my library for review" }));
+    expect(confirmImport).toHaveBeenCalledOnce();
+    expect(mocks.saveReference).not.toHaveBeenCalled();
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+    confirmImport.mockRestore();
   });
 
   it("Host never offers approval to an operator without independent academic reviewer permission", async () => {
     mocks.reviewer.mockResolvedValue(false);
     render(<CommunityUploads reviewOnly onOpenLibrary={vi.fn()} />);
     const card = (await screen.findByText("NCRS")).closest("article")!;
-    fireEvent.click(within(card).getByRole("button", { name: "Open revision for review" }));
-    await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+    const importButton = within(card).getByRole("button", { name: "Import into my library for review" }) as HTMLButtonElement;
+    expect(importButton.disabled).toBe(true);
+    expect(mocks.download).not.toHaveBeenCalled();
     expect(within(card).queryByRole("button", { name: /Approve for official catalog/ })).toBeNull();
     expect(screen.getByText(/Host owner access does not confer medical-content review permission/)).toBeTruthy();
     expect(mocks.review).not.toHaveBeenCalled();
@@ -393,8 +415,10 @@ describe("Community Uploads", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledTimes(2));
     const card = (await screen.findByText("NCRS")).closest("article")!;
-    fireEvent.click(within(card).getByRole("button", { name: "Open revision for review" }));
+    const importConfirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(within(card).getByRole("button", { name: "Import into my library for review" }));
     expect(await within(card).findByRole("button", { name: /Approve for official catalog/ })).toBeTruthy();
+    importConfirm.mockRestore();
   });
 
 });
