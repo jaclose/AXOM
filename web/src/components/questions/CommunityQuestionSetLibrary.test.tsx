@@ -157,6 +157,36 @@ describe("Community Question Set Library", () => {
     });
   });
 
+  it("keeps answer and topic disclosures keyboard-reachable after import disables its only action", async () => {
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await user.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Already in my AXOM" }).hasAttribute("disabled")).toBe(true));
+
+    const close = screen.getByRole("button", { name: "Close" });
+    const answer = screen.getByText("Reveal recorded answer and teaching notes");
+    const topics = screen.getByText("Reveal set topic tags");
+    expect(answer.closest("details")?.open).toBe(false);
+    expect(topics.closest("details")?.open).toBe(false);
+
+    // Modal only enumerates buttons, inputs and [tabindex] for its focus trap.
+    // A disabled import button must not strand keyboard learners on Close.
+    close.focus();
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(answer);
+    // jsdom does not implement native <summary> Enter activation; verify
+    // focus traversal here and the disclosure's toggle via its click default.
+    fireEvent.click(answer);
+    expect(answer.closest("details")?.open).toBe(true);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(topics);
+    fireEvent.click(topics);
+    expect(topics.closest("details")?.open).toBe(true);
+    expect(mock.commit).toHaveBeenCalledOnce();
+  });
+
   it("revokes delayed search results after an A to B to A account round trip", async () => {
     let resolveSearch!: (value: typeof summary[]) => void;
     mock.search.mockImplementationOnce(() => new Promise(resolve => { resolveSearch = resolve; }));
