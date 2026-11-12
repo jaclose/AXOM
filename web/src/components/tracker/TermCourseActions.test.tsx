@@ -54,6 +54,52 @@ describe("term course actions", () => {
     expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["CPR"]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
+  it("pauses on browser quota exhaustion, preserves completed courses, and resumes without duplicates", async () => {
+    mocks.download.mockImplementation(async (entry: AcademicCourse) => {
+      if (entry.id === "CPR") throw new DOMException("Browser storage quota exceeded", "QuotaExceededError");
+      mocks.downloaded.add(entry.id);
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText(/Download paused: browser storage is full/);
+    expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["GOER", "CPR"]);
+    expect(mocks.downloaded.has("GOER")).toBe(true);
+    expect(mocks.downloaded.has("RHPS")).toBe(false);
+    expect(screen.getByRole("alert").textContent).toMatch(/do not clear AXOM site data/i);
+    expect(screen.getByRole("alert").textContent).not.toMatch(/QuotaExceededError/i);
+
+    mocks.download.mockClear();
+    mocks.download.mockImplementation(async (entry: AcademicCourse) => { mocks.downloaded.add(entry.id); });
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Download complete. 2 downloaded, 1 already on this device.");
+    expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["CPR", "RHPS"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("stops after a nested backup quota failure before attempting any subsequent course", async () => {
+    mocks.download.mockRejectedValueOnce(new AggregateError([
+      new Error("IndexedDB backup unavailable"),
+      new DOMException("Browser fallback full", "QuotaExceededError"),
+    ], "AXOM could not save a safety backup."));
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText(/Download paused: browser storage is full/);
+    expect(mocks.download).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).not.toMatch(/IndexedDB backup unavailable|QuotaExceededError/i);
+    expect(mocks.downloaded.size).toBe(0);
+  });
+
+  it("continues through unrelated remote request-quota errors", async () => {
+    mocks.download.mockImplementation(async (entry: AcademicCourse) => {
+      if (entry.id === "CPR") throw new Error("Provider request quota reached.");
+      mocks.downloaded.add(entry.id);
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Download complete. 2 downloaded, 0 already on this device, 1 failed.");
+    expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["GOER", "CPR", "RHPS"]);
+  });
+
   it("finishes the current course on Stop, starts no later course, and resumes", async () => {
     const active = deferred();
     mocks.download.mockImplementation(async (entry: AcademicCourse) => { await active.promise; mocks.downloaded.add(entry.id); });
