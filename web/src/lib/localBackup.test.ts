@@ -65,6 +65,38 @@ describe("automatic local migration backups", () => {
     expect(listLocalBackups()).toHaveLength(1);
   });
 
+  it("reuses a verified identical safety backup on an unchanged import retry", async () => {
+    const stateKey = STORAGE_KEYS.persistedState;
+    const initial = JSON.stringify({ state: { questions: [{ id: "prior-question", stem: "Preserved before retry" }] }, version: 35 });
+    await localVaultStorage.setItem(stateKey, initial);
+    const first = await createLocalBackup(35, 8, { reuseEquivalent: true });
+    expect(first).toBeTruthy();
+    const reused = await createLocalBackup(35, 8, { reuseEquivalent: true });
+    expect(reused).toBe(first);
+    expect(listLocalBackups()).toHaveLength(1);
+    expect((await readLocalBackup(first!))?.indexedDb?.records[stateKey]).toBe(initial);
+
+    const changed = JSON.stringify({ state: { questions: [
+      { id: "prior-question", stem: "Preserved before retry" },
+      { id: "learner-edit", stem: "New work must be protected" },
+    ] }, version: 35 });
+    await localVaultStorage.setItem(stateKey, changed);
+    const next = await createLocalBackup(35, 8, { reuseEquivalent: true });
+    expect(next).not.toBe(first);
+    expect(listLocalBackups()).toHaveLength(2);
+    expect((await readLocalBackup(next!))?.indexedDb?.records[stateKey]).toBe(changed);
+    expect((await readLocalBackup(first!))?.indexedDb?.records[stateKey]).toBe(initial);
+  });
+
+  it("keeps explicit and cross-schema backups independent even when the workspace is unchanged", async () => {
+    await localVaultStorage.setItem(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "unchanged" }] }, version: 35 }));
+    const automatic = await createLocalBackup(35, 8, { reuseEquivalent: true });
+    const manual = await createLocalBackup(35);
+    const differentSchema = await createLocalBackup(34, 8, { reuseEquivalent: true });
+    expect(new Set([automatic, manual, differentSchema]).size).toBe(3);
+    expect(listLocalBackups()).toHaveLength(3);
+  });
+
   it("keeps a successful IndexedDB backup recoverable when the rich localStorage marker exceeds quota", async () => {
     const persisted = JSON.stringify({
       state: { profile: { userId: "jd" }, questions: [{ id: "q1", stem: "marker quota payload" }] },
