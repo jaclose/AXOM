@@ -410,7 +410,14 @@ test('activation preserves other application caches and old clients', async () =
   app.context.self.clients.matchAll = async () => [{}];
   app.events.get('activate')({ waitUntil: (value) => { task = value; } });
   await task;
-  assert.deepEqual(await app.caches.keys(), ['other-app', 'axom-shell-previous', 'axom-shell-current']);
+  assert.deepEqual(await app.caches.keys(),
+    ['other-app', 'axom-shell-oldest', 'axom-shell-previous', 'axom-shell-current'],
+    'a single surviving tab may still depend on the oldest build');
+  app.context.self.clients.matchAll = async () => [];
+  app.events.get('activate')({ waitUntil: (value) => { task = value; } });
+  await task;
+  assert.deepEqual(await app.caches.keys(), ['other-app', 'axom-shell-previous', 'axom-shell-current'],
+    'only a zero-client activation can safely prune superseded generations');
 });
 
 test('R79 one surviving legacy window retains its A-only lazy chunk across B and C caches', async () => {
