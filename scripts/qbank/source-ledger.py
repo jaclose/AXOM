@@ -766,6 +766,12 @@ def parse_templates(rows):
             a["source_association_status"] = "requires_original_id_review"
     return [a for a in acts if id(a) not in withheld]
 
+def verified_source_revision(row):
+    # A scanned path or source ID does not establish byte-verifiable evidence.
+    sha = row.get("source_sha256")
+    return type(sha) is str and re.fullmatch(r"[0-9a-f]{64}", sha) is not None
+
+
 def coverage_matrix(acts, rows):
     groups = collections.defaultdict(list)
     for a in acts:
@@ -775,49 +781,60 @@ def coverage_matrix(acts, rows):
         if r["document_type"] in {"imcq", "esoft", "pq", "small_group", "case", "review_questions"}:
             available[(r["academic_term"], r["module"] or "(unresolved module)", r["week"])].append(r)
     out = []
-    # Only these activity types have direct, type-specific source categories
-    # in the question-source inventory. Lecture/DLA/other Tracker rows are
-    # not certified by a same-week PQ, IMCQ, case or question PDF.
+    # Lecture/DLA/etc require independent original-source proof, not any QBank PDF.
     directly_matched_types = {"imcq", "esoft", "small_group"}
     for (term, module, week, typ), expected in sorted(groups.items(), key=lambda kv: str(kv[0])):
-        candidates = []
-        for (t,m,w), source in available.items():
-            # Null term/week means unknown provenance, never a wildcard for
-            # a numbered template cohort. Unmatched originals are reported
-            # separately below, not lost or silently assigned to another week.
-            if m != module or t != term or w != week: continue
+        candidates, unverified = [], []
+        for (t, m, w), source in available.items():
+            # Unknown provenance is not a wildcard for a numbered cohort.
+            if m != module or t != term or w != week:
+                continue
             for r in source:
-                if typ not in directly_matched_types or typ != r["document_type"]: continue
-                candidates.append(r)
-        hashes = {r["source_sha256"] or r["source_id"] for r in candidates}
+                if typ not in directly_matched_types or typ != r["document_type"]:
+                    continue
+                (candidates if verified_source_revision(r) else unverified).append(r)
+        hashes = {r["source_sha256"] for r in candidates}
         source_status = ("activity_type_requires_independent_source_proof"
                          if typ not in directly_matched_types else
                          "module_and_type_candidate_not_line_item_verified"
-                         if candidates else "source_not_found")
-        out.append(dict(academic_term=term, module=module, week=week, week_basis="explicit_template" if week else "unknown",
+                         if candidates else "source_integrity_unverified"
+                         if unverified else "source_not_found")
+        out.append(dict(academic_term=term, module=module, week=week,
+                        week_basis="explicit_template" if week else "unknown",
                         expected_activity_type=typ, expected_tracker_activities=len(expected),
-                        candidate_source_files=len(candidates), byte_distinct_candidates=len(hashes),
+                        candidate_source_files=len(candidates),
+                        byte_distinct_candidates=len(hashes),
                         available_source_ids=";".join(r["source_id"] for r in candidates[:12]),
+                        unverified_source_files=len(unverified),
+                        unverified_source_ids=";".join(r["source_id"] for r in unverified[:12]),
                         source_match_status=source_status,
                         installed_status="not_verified"))
-    # Explicit source-available rows are not evidence that a required activity was scheduled.
-    # Preserve T4/T5 and missing T1/T2/T3 modules without inventing "expected" activities.
-    established = {(x["academic_term"],x["module"],x["week"],x["expected_activity_type"]) for x in out}
-    for (term,module,week), sources in sorted(available.items(), key=lambda kv: str(kv[0])):
+    # Observed originals are not evidence that expected activities were scheduled.
+    established = {(x["academic_term"], x["module"], x["week"], x["expected_activity_type"])
+                   for x in out}
+    for (term, module, week), sources in sorted(available.items(), key=lambda kv: str(kv[0])):
         by_type = collections.defaultdict(list)
-        for source in sources: by_type[source["document_type"]].append(source)
+        for source in sources:
+            by_type[source["document_type"]].append(source)
         for typ, typed_sources in by_type.items():
-            key = (term,module,week,typ)
-            if key in established: continue
-            out.append(dict(academic_term=term,module=module,week=week,
+            if (term, module, week, typ) in established:
+                continue
+            verified = [x for x in typed_sources if verified_source_revision(x)]
+            unverified = [x for x in typed_sources if not verified_source_revision(x)]
+            out.append(dict(academic_term=term, module=module, week=week,
                 week_basis="source_filename_or_folder_not_verified_schedule" if week else "unknown",
                 expected_activity_type=typ, expected_tracker_activities=None,
-                candidate_source_files=len(typed_sources),
-                byte_distinct_candidates=len({x.get("source_sha256") or x["source_id"] for x in typed_sources}),
-                available_source_ids=";".join(x["source_id"] for x in typed_sources[:12]),
-                source_match_status="observed_source_no_authoritative_expected_activity_template",
+                candidate_source_files=len(verified),
+                byte_distinct_candidates=len({x["source_sha256"] for x in verified}),
+                available_source_ids=";".join(x["source_id"] for x in verified[:12]),
+                unverified_source_files=len(unverified),
+                unverified_source_ids=";".join(x["source_id"] for x in unverified[:12]),
+                source_match_status=("observed_source_no_authoritative_expected_activity_template"
+                                     if verified else
+                                     "observed_source_integrity_unverified_no_authoritative_template"),
                 installed_status="not_verified"))
     return out
+
 
 def prepare_queue(rows, packages):
     q = []
@@ -975,7 +992,8 @@ def report(args):
         cloud_verification="NOT PERFORMED", school_content_rights="private_not_shareable_without_authorization"))
     write_csv("coverage-matrix.csv", coverage, ["academic_term", "module", "week", "week_basis", "expected_activity_type",
               "expected_tracker_activities", "candidate_source_files", "byte_distinct_candidates",
-              "available_source_ids", "source_match_status", "installed_status"])
+              "available_source_ids", "unverified_source_files", "unverified_source_ids",
+              "source_match_status", "installed_status"])
     write_csv("source-disposition.csv", records, ["source_id", "source_sha256", "root_label", "relative_path",
               "file_extension", "file_size", "document_type", "academic_term", "module", "week",
               "answer_variant", "assessment_number", "answer_key_partner", "duplicate_group",
