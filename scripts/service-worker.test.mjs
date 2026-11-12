@@ -1589,3 +1589,52 @@ test('R70 genuine network rejection still replays only the validated offline she
   assert.equal(result.status, 200);
   assert.equal(await result.text(), 'SAFE_OFFLINE_SHELL');
 });
+
+
+test('R71 optional cache writes may fail without discarding required offline shell', async () => {
+  const required = './assets/core-12345678.js';
+  const publicResponse = async (url) => {
+    const path = new URL(url).pathname;
+    const type = path.endsWith('.js') ? 'application/javascript'
+      : path.endsWith('.webmanifest') ? 'application/manifest+json'
+      : path.endsWith('.png') ? 'image/png' : 'text/html';
+    return new Response('public-' + path, {
+      headers: { 'content-type': type, 'cache-control': 'public, max-age=600' },
+    });
+  };
+
+  for (const optional of ['./manifest.webmanifest', './icon-192.png']) {
+    const attempted = [];
+    const app = worker({
+      precache: [required],
+      fetchResponse: publicResponse,
+      onCachePut: async (key) => {
+        attempted.push(key);
+        if (key === optional) throw new Error('optional CacheStorage quota rejection');
+      },
+    });
+    let pending;
+    app.events.get('install')({ waitUntil: (value) => { pending = value; } });
+    await pending;
+    const cache = await app.caches.open('axom-shell-current');
+    assert.ok(attempted.includes(optional), optional + ': injected write rejection was exercised');
+    assert.equal(await cache.match(optional), undefined, optional + ': failed write stays absent');
+    assert.ok(await cache.match(required), 'mandatory hashed JavaScript must remain available');
+    assert.ok(await cache.match('./index.html'), 'canonical offline HTML must still install');
+    assert.ok(await cache.match('./'), 'root offline HTML must still install');
+  }
+
+  const fatal = worker({
+    precache: [required],
+    fetchResponse: publicResponse,
+    onCachePut: async (key) => {
+      if (key === required) throw new Error('required JS cache write failed');
+    },
+  });
+  let pending;
+  fatal.events.get('install')({ waitUntil: (value) => { pending = value; } });
+  await assert.rejects(pending, /required JS cache write failed/);
+  const cache = await fatal.caches.open('axom-shell-current');
+  assert.equal(await cache.match('./index.html'), undefined,
+    'required code failure must not install a misleading usable offline shell');
+});
