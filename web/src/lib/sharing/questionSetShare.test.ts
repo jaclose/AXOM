@@ -181,6 +181,64 @@ describe("Question Set share boundary", () => {
     expect(result.questions).toHaveLength(1);
   });
 
+  it("does not arbitrarily inherit private history from two distinct matching local IDs", () => {
+    const first = question("existing-first", {
+      notes: "History belongs to first",
+      attempts: [{ at: NOW, answerKey: "A", status: "incorrect" }],
+    });
+    const second = question("existing-second", {
+      notes: "History belongs to second",
+      attempts: [{ at: NOW, answerKey: "B", status: "correct" }],
+    });
+    const local = [first, second];
+    const original = JSON.stringify(local);
+    const result = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: local,
+      now: NOW,
+    });
+
+    expect(result.alreadyImported).toBe(false);
+    expect(result.reused).toBe(0);
+    expect(result.questions).toHaveLength(1);
+    expect(result.set.questionIds).toEqual([result.questions[0].id]);
+    expect(result.set.questionIds[0]).not.toBe(first.id);
+    expect(result.set.questionIds[0]).not.toBe(second.id);
+    expect(result.questions[0]).toMatchObject({
+      source: "imported", correctKey: "B", status: "unseen", attempts: [],
+    });
+    expect(result.questions[0].notes).toBeUndefined();
+    expect(JSON.stringify(local)).toBe(original);
+  });
+
+  it("creates separate new IDs for repeated shared content with ambiguous local matches", () => {
+    const shared = createQuestionSetShare(
+      questionSet(["q1", "q2"]),
+      [question("q1"), question("q2")],
+      NOW,
+    );
+    const local = [
+      question("history-one", { notes: "Private note one" }),
+      question("history-two", { notes: "Private note two" }),
+    ];
+    const original = JSON.stringify(local);
+    const result = importSharedQuestionSet({
+      snapshot: shared,
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: local,
+      now: NOW,
+    });
+
+    expect(result.reused).toBe(0);
+    expect(result.questions).toHaveLength(2);
+    expect(result.set.questionIds).toEqual(result.questions.map((item) => item.id));
+    expect(new Set(result.set.questionIds).size).toBe(2);
+    expect(result.set.questionIds.every((id) => !local.some((item) => item.id === id))).toBe(true);
+    expect(result.questions.every((item) => item.attempts.length === 0 && !item.notes)).toBe(true);
+    expect(JSON.stringify(local)).toBe(original);
+  });
+
   it("refuses reuse when two local question records have the same ID and identical public content", () => {
     const first = question("ambiguous-local-id", { notes: "First private note" });
     const second = question("ambiguous-local-id", { notes: "Second private note" });

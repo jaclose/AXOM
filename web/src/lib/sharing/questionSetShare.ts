@@ -223,11 +223,16 @@ export function importSharedQuestionSet(input: {
   let reused = 0;
   for (const shared of snapshot.questions) {
     const matches = availableByIdentity.get(questionIdentity(shared));
-    const existing = matches?.shift();
+    // A duplicate local ID is unsafe even if its visible content matches.
+    // Question lookup and learner attempts are ID-based, so never reuse it.
+    if (matches?.some((candidate) => ambiguousExistingIds.has(candidate.id))) {
+      throw new Error("This shared question matches an ambiguous existing question ID. Recover the original local records safely before importing.");
+    }
+    // Distinct local IDs with identical public content can carry unrelated
+    // private notes and attempts. Do not arbitrarily attach a shared question
+    // to either history; create a fresh identity and leave both untouched.
+    const existing = matches?.length === 1 ? matches.shift() : undefined;
     if (existing) {
-      if (ambiguousExistingIds.has(existing.id)) {
-        throw new Error("This shared question matches an ambiguous existing question ID. Recover the original local records safely before importing.");
-      }
       questionIds.push(existing.id);
       reused += 1;
       continue;
