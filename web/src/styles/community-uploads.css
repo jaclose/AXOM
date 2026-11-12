@@ -3,6 +3,8 @@
 .community-hero h2 { margin: 8px 0 10px; color: var(--text); font: var(--fw-semibold) clamp(28px, 3vw, 40px)/1.1 var(--font-display); letter-spacing: -.035em; }
 .community-hero p { max-width: 67ch; margin: 0; color: var(--text-70); }
 .community-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 340px); align-items: start; gap: 22px; }
+/* Host reuses the existing review gate without a learner contribution rail. */
+.community-layout.is-review-only { grid-template-columns: minmax(0, 1fr); }
 .community-results, .community-contribute { min-width: 0; }
 .community-results { display: grid; gap: 16px; }
 .community-contribute { position: sticky; top: 18px; }
