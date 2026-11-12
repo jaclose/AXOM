@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadSupabase } from "../account/supabase";
+import { loadSupabase, readStoredSession } from "../account/supabase";
+import { parseActorSession } from "./actorSession";
 import { useAccount } from "../account/accountStore";
 import type { Preference } from "./model";
 export interface PrivacyRequest { id: string; kind: "export" | "deletion"; status: string; scheduled_for?: string; expires_at?: string; failure_code?: string }
@@ -8,13 +9,53 @@ export interface CommunicationsSettings {
   privacy: PrivacyRequest[]; admin: boolean; deliveryMode: string; deletionEnabled: boolean; hasProtectedCopy: boolean;
 }
 export async function communicationsRequest<T>(action: string, body: object = {}): Promise<T> {
-  const client = await loadSupabase(); if (!client) throw new Error("Connect an AXOM account to manage email delivery. Local previews remain available.");
-  const { data, error } = await client.functions.invoke(`communications?action=${encodeURIComponent(action)}`, { body });
-  if (error) {
-    if ("context" in error && error.context instanceof Response) { const response = await error.context.json().catch(() => null) as { error?: string } | null; if (response?.error) throw new Error(response.error); }
-    throw new Error("Communications could not be reached. Check your connection and try again.");
+  // Destructive intent is captured synchronously, before the lazy SDK boundary.
+  // The server independently checks these claims against its verified bearer.
+  const stored = action === "request-deletion" ? readStoredSession() : null;
+  const actor = action === "request-deletion" ? parseActorSession(stored?.access_token ?? "") : null;
+  const current = action === "request-deletion" ? useAccount.getState() : null;
+  if (action === "request-deletion" &&
+      (!actor || !stored || stored.user.id.toLowerCase() !== actor.userId ||
+       current?.phase !== "signed-in" || current.user?.id.toLowerCase() !== actor.userId)) {
+    throw new Error("Sign in again before confirming account deletion.");
   }
-  if (data?.error) throw new Error(String(data.error)); return data as T;
+  let invalidated = false;
+  const unsubscribe = actor ? useAccount.subscribe(state => {
+    if (state.phase !== "signed-in" || state.user?.id.toLowerCase() !== actor.userId) invalidated = true;
+  }) : null;
+  const assertIntent = () => {
+    if (actor && (invalidated || useAccount.getState().phase !== "signed-in" ||
+        useAccount.getState().user?.id.toLowerCase() !== actor.userId)) {
+      throw new Error("The signed-in account changed. Confirm deletion again after signing in.");
+    }
+  };
+  try {
+    const client = await loadSupabase();
+    if (!client) throw new Error("Connect an AXOM account to manage email delivery. Local previews remain available.");
+    if (actor) {
+      assertIntent();
+      // A different B bearer or fresh A session cannot inherit the old intent.
+      const { data: { session }, error: sessionError } = await client.auth.getSession();
+      assertIntent();
+      const sdkActor = parseActorSession(session?.access_token ?? "");
+      if (sessionError || !session || !sdkActor ||
+          session.user.id.toLowerCase() !== actor.userId ||
+          sdkActor.userId !== actor.userId || sdkActor.sessionId !== actor.sessionId) {
+        throw new Error("Your session changed. Sign in again before confirming deletion.");
+      }
+    }
+    const payload = actor ? { ...body, actorUserId: actor.userId, actorSessionId: actor.sessionId } : body;
+    const { data, error } = await client.functions.invoke(`communications?action=${encodeURIComponent(action)}`, { body: payload });
+    assertIntent();
+    if (error) {
+      if ("context" in error && error.context instanceof Response) { const response = await error.context.json().catch(() => null) as { error?: string } | null; if (response?.error) throw new Error(response.error); }
+      throw new Error("Communications could not be reached. Check your connection and try again.");
+    }
+    if (data?.error) throw new Error(String(data.error));
+    return data as T;
+  } finally {
+    unsubscribe?.();
+  }
 }
 export function useCommunications() {
   const userId = useAccount(s => s.user?.id);
