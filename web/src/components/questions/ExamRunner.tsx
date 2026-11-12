@@ -343,7 +343,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const stored = readInterface();
     return simulate && stored === "axom" ? "nbme" : stored;
   });
-  const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
+  const [presetId, setPresetId] = useState<BlockPreset["id"]>(() => simulate && (presetFilters?.count ?? 20) === 20 ? "usmle-2026" : "custom");
   const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
   const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
 
@@ -733,17 +733,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function chooseInterface(value: ExamInterface) {
+    // Selecting a visual exam interface must not silently change the learner's
+    // requested number of questions or the actual practice pool.
     setExamInterface(value);
     try { localStorage.setItem(INTERFACE_KEY, value); } catch { /* device pref only */ }
-    if (value !== "axom") {
-      const preset = BLOCK_PRESETS.find((item) => item.id === presetId);
-      if (preset?.items) setCount(preset.items);
-    }
   }
 
   function choosePreset(preset: BlockPreset) {
     setPresetId(preset.id);
     if (preset.items) { setCount(preset.items); setTimed(true); }
+  }
+
+  function chooseQuestionCount(value: number) {
+    setCount(value);
+    // A selected preset describes a specific count. When the learner changes
+    // it, call the resulting configuration Custom rather than displaying two
+    // conflicting selected quantities.
+    const preset = BLOCK_PRESETS.find((item) => item.id === presetId);
+    if (preset?.items !== value) setPresetId("custom");
   }
 
   function begin() {
@@ -1288,14 +1295,17 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         )}
         <div className="stack gap6"><span className="field-label">How many questions?</span>
           <div className="block-count-row" role="group" aria-label="Question count">
-            {[10, 20, 40].map((value) => <button type="button" key={value} className={`filter-pill ${count === value ? "on" : ""}`} aria-pressed={count === value} onClick={() => setCount(value)}>{value}</button>)}
+            {[10, 20, 40].map((value) => <button type="button" key={value} className={`filter-pill ${count === value ? "on" : ""}`} aria-pressed={count === value} onClick={() => chooseQuestionCount(value)}>{value}</button>)}
             {fullCount > 0 && ![10, 20, 40].includes(fullCount) && (
-              <button type="button" className={`filter-pill ${count === fullCount ? "on" : ""}`} aria-pressed={count === fullCount} onClick={() => setCount(fullCount)}>
+              <button type="button" className={`filter-pill ${count === fullCount ? "on" : ""}`} aria-pressed={count === fullCount} onClick={() => chooseQuestionCount(fullCount)}>
                 {available > 1000 ? "Max" : "All"} {fullCount.toLocaleString()}
               </button>
             )}
-            <label className="row gap6"><span className="sub">Custom</span><input className="field" aria-label="Custom question count" type="number" min="1" max="1000" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label>
+            <label className="row gap6"><span className="sub">Custom</span><input className="field" aria-label="Custom question count" type="number" min="1" max="1000" value={count} onChange={(event) => chooseQuestionCount(Number(event.target.value))} /></label>
           </div>
+          <p role="status" aria-label="Final block configuration" className="sub">
+            Ready to launch: {Math.min(Math.max(0, count), available)} {Math.min(Math.max(0, count), available) === 1 ? "ready question" : "ready questions"} · {mode === "tutor" ? "Tutor" : "Exam"} · {timed ? "Timed" : "Untimed"} · {examInterface === "axom" ? "AXOM native" : EXAM_SKINS[examInterface].label}.
+          </p>
         </div>
         <div className="stack gap6"><span className="field-label">Question pool</span>
           <div className="row" style={{ flexWrap: "wrap", gap: 6 }} role="radiogroup" aria-label="Question pool"
