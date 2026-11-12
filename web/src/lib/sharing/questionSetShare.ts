@@ -194,7 +194,14 @@ export function importSharedQuestionSet(input: {
 
   const now = validTimestamp(input.now ?? new Date().toISOString(), "Import time");
   const availableByIdentity = new Map<string, QuestionRecord[]>();
+  // Restored workspaces can contain two different records with the same ID.
+  // Content equality alone cannot make that ID safe to reuse: downstream
+  // question lookup and learner attempts are keyed by ID, not by content.
+  const seenExistingIds = new Set<string>();
+  const ambiguousExistingIds = new Set<string>();
   for (const existing of existingQuestions) {
+    if (seenExistingIds.has(existing.id)) ambiguousExistingIds.add(existing.id);
+    else seenExistingIds.add(existing.id);
     const shared = existingQuestionShareView(existing);
     if (!shared) continue;
     const key = questionIdentity(shared);
@@ -210,6 +217,9 @@ export function importSharedQuestionSet(input: {
     const matches = availableByIdentity.get(questionIdentity(shared));
     const existing = matches?.shift();
     if (existing) {
+      if (ambiguousExistingIds.has(existing.id)) {
+        throw new Error("This shared question matches an ambiguous existing question ID. Recover the original local records safely before importing.");
+      }
       questionIds.push(existing.id);
       reused += 1;
       continue;

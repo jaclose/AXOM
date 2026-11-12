@@ -181,6 +181,41 @@ describe("Question Set share boundary", () => {
     expect(result.questions).toHaveLength(1);
   });
 
+  it("refuses reuse when two local question records have the same ID and identical public content", () => {
+    const first = question("ambiguous-local-id", { notes: "First private note" });
+    const second = question("ambiguous-local-id", { notes: "Second private note" });
+    const local = [first, second];
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: local,
+      now: NOW,
+    })).toThrow(/ambiguous existing question ID/i);
+    expect(first.notes).toBe("First private note");
+    expect(second.notes).toBe("Second private note");
+    expect(local).toHaveLength(2);
+  });
+
+  it("refuses reuse when a matching local question ID also belongs to a different answer", () => {
+    const matching = question("ambiguous-local-id", { notes: "Preserve first learner note" });
+    const conflicting = question("ambiguous-local-id", {
+      correctKey: "A",
+      correctAnswerText: "One",
+      explanation: "A different answer and teaching note",
+      notes: "Preserve second learner note",
+    });
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [matching, conflicting],
+      now: NOW,
+    })).toThrow(/ambiguous existing question ID/i);
+    expect(matching.correctKey).toBe("B");
+    expect(conflicting.correctKey).toBe("A");
+    expect(matching.notes).toBe("Preserve first learner note");
+    expect(conflicting.notes).toBe("Preserve second learner note");
+  });
+
   it("imports an unanswered v1 question as explicitly non-scorable", () => {
     const unanswered = createQuestionSetShare(questionSet(), [question("q1", {
       correctKey: undefined,
