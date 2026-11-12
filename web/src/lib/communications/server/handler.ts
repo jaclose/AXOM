@@ -4,6 +4,7 @@ import { renderAxomEmail } from "../email";
 import { CommunicationsService, required, checked, type Identity } from "./service";
 import { hashToken, verifyWebhook, type Env, type ProviderEvent } from "./provider";
 import { cancelDeletion, processPrivacy, requestPrivacy } from "./privacy";
+import { parseActorSession } from "../actorSession";
 import { expandCampaigns, recipients, validateAudience, validateEditorial, type Audience } from "./campaigns";
 
 class RequestError extends Error { constructor(message: string, public status = 400) { super(message); } }
@@ -62,10 +63,28 @@ export function createCommunicationsHandler(db: SupabaseClient, env: Env, fetche
       const auth = await db.auth.getUser(bearer); if (auth.error || !auth.data.user) throw new RequestError("Sign in again to continue.", 401);
       const user = auth.data.user;
       if (administrative.has(action) && !admin(user, env)) throw new RequestError("Administrator access required.", 403);
-      const limit = checked(await db.rpc("consume_communication_limit", { p_key: `${user.id}:${action}`, p_limit: action.startsWith("request-") ? 3 : 60, p_seconds: 3600 }));
-      if (!limit) throw new RequestError("Too many requests. Try again later.", 429);
+      const checkLimit = async () => {
+        const limit = checked(await db.rpc("consume_communication_limit", { p_key: `${user.id}:${action}`, p_limit: action.startsWith("request-") ? 3 : 60, p_seconds: 3600 }));
+        if (!limit) throw new RequestError("Too many requests. Try again later.", 429);
+      };
+      // Preserve existing pre-body throttling for every other action.
+      if (action !== "request-deletion") await checkLimit();
       const raw = await request.text(); if (raw.length > 100000) throw new RequestError("Payload too large", 413);
       let body: Record<string, unknown>; try { body = raw ? JSON.parse(raw) as Record<string, unknown> : {}; if (!body || Array.isArray(body) || typeof body !== "object") throw new Error(); } catch { throw new RequestError("Invalid request body"); }
+      if (action === "request-deletion") {
+        if (env.AXOM_ACCOUNT_DELETION_ENABLED !== "true") throw new RequestError("Account deletion activation is pending. Your account has not been changed.", 503);
+        // getUser authenticated the bearer. Reject missing, foreign or stale
+        // actor/session claims before rate-limiting or any privacy mutation.
+        const verifiedActor = parseActorSession(bearer);
+        if (!verifiedActor ||
+            verifiedActor.userId !== user.id.toLowerCase() ||
+            body.actorUserId !== verifiedActor.userId ||
+            body.actorSessionId !== verifiedActor.sessionId) {
+          throw new RequestError("Your account session changed. Sign in again to confirm deletion.", 403);
+        }
+        if (body.confirmation !== "DELETE MY ACCOUNT" || !recentLogin(bearer)) throw new RequestError("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
+      }
+      if (action === "request-deletion") await checkLimit();
       if (action === "settings") {
         const [prefs, identity, history, privacy] = await Promise.all([service.preferenceRows(user.id), service.identity(user.id), db.from("email_jobs").select("id,type,status,sent_at,created_at,failure_code").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30), db.from("privacy_requests").select("id,kind,status,scheduled_for,expires_at,created_at,failure_code").eq("user_id", user.id).order("created_at", { ascending: false }).limit(20)]);
         return json({ preferences: prefs, identity, history: checked(history), privacy: checked(privacy), admin: admin(user, env), deliveryMode: env.AXOM_EMAIL_MODE ?? "disabled", deletionEnabled: env.AXOM_ACCOUNT_DELETION_ENABLED === "true", hasProtectedCopy: Boolean(await service.workspace(user.id)) }, 200, cors);
@@ -75,8 +94,6 @@ export function createCommunicationsHandler(db: SupabaseClient, env: Env, fetche
       if (action === "request-export") { await requestPrivacy(service, user.id, "export"); return json({ requested: true }, 200, cors); }
       if (action === "export-link") return json({ url: await service.exportLink(user.id, String(body.id)) }, 200, cors);
       if (action === "request-deletion") {
-        if (env.AXOM_ACCOUNT_DELETION_ENABLED !== "true") throw new RequestError("Account deletion activation is pending. Your account has not been changed.", 503);
-        if (body.confirmation !== "DELETE MY ACCOUNT" || !recentLogin(bearer)) throw new RequestError("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
         await requestPrivacy(service, user.id, "deletion"); return json({ requested: true }, 200, cors);
       }
       if (action === "cancel-deletion") {

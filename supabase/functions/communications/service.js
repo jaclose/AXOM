@@ -2316,7 +2316,7 @@ var h = /* @__PURE__ */ e(((e) => {
 		var t = Nt;
 		t !== e && (t === null ? It(e) : e === null ? Ft(t) : t.depth === e.depth ? Pt(t, e) : t.depth > e.depth ? Lt(t, e) : Rt(t, e), Nt = e);
 	}
-	var X = {
+	var Bt = {
 		isMounted: function() {
 			return !1;
 		},
@@ -2328,16 +2328,16 @@ var h = /* @__PURE__ */ e(((e) => {
 		},
 		enqueueForceUpdate: function() {}
 	};
-	function Bt(e, t, n, r) {
+	function Vt(e, t, n, r) {
 		var i = e.state === void 0 ? null : e.state;
-		e.updater = X, e.props = n, e.state = i;
+		e.updater = Bt, e.props = n, e.state = i;
 		var a = {
 			queue: [],
 			replace: !1
 		};
 		e._reactInternals = a;
 		var o = t.contextType;
-		if (e.context = typeof o == "object" && o ? o._currentValue : r, o = t.getDerivedStateFromProps, typeof o == "function" && (o = o(n, i), i = o == null ? i : ht({}, i, o), e.state = i), typeof t.getDerivedStateFromProps != "function" && typeof e.getSnapshotBeforeUpdate != "function" && (typeof e.UNSAFE_componentWillMount == "function" || typeof e.componentWillMount == "function")) if (t = e.state, typeof e.componentWillMount == "function" && e.componentWillMount(), typeof e.UNSAFE_componentWillMount == "function" && e.UNSAFE_componentWillMount(), t !== e.state && X.enqueueReplaceState(e, e.state, null), a.queue !== null && 0 < a.queue.length) if (t = a.queue, o = a.replace, a.queue = null, a.replace = !1, o && t.length === 1) e.state = t[0];
+		if (e.context = typeof o == "object" && o ? o._currentValue : r, o = t.getDerivedStateFromProps, typeof o == "function" && (o = o(n, i), i = o == null ? i : ht({}, i, o), e.state = i), typeof t.getDerivedStateFromProps != "function" && typeof e.getSnapshotBeforeUpdate != "function" && (typeof e.UNSAFE_componentWillMount == "function" || typeof e.componentWillMount == "function")) if (t = e.state, typeof e.componentWillMount == "function" && e.componentWillMount(), typeof e.UNSAFE_componentWillMount == "function" && e.UNSAFE_componentWillMount(), t !== e.state && Bt.enqueueReplaceState(e, e.state, null), a.queue !== null && 0 < a.queue.length) if (t = a.queue, o = a.replace, a.queue = null, a.replace = !1, o && t.length === 1) e.state = t[0];
 		else {
 			for (a = o ? t[0] : e.state, i = !0, o = +!!o; o < t.length; o++) {
 				var s = t[o];
@@ -2347,20 +2347,20 @@ var h = /* @__PURE__ */ e(((e) => {
 		}
 		else a.queue = null;
 	}
-	var Vt = {
+	var X = {
 		id: 1,
 		overflow: ""
 	};
-	function Z(e, t, n) {
+	function Ht(e, t, n) {
 		var r = e.id;
 		e = e.overflow;
-		var i = 32 - Ht(r) - 1;
+		var i = 32 - Ut(r) - 1;
 		r &= ~(1 << i), n += 1;
-		var a = 32 - Ht(t) + i;
+		var a = 32 - Ut(t) + i;
 		if (30 < a) {
 			var o = i - i % 5;
 			return a = (r & (1 << o) - 1).toString(32), r >>= o, i -= o, {
-				id: 1 << 32 - Ht(t) + i | n << i | r,
+				id: 1 << 32 - Ut(t) + i | n << i | r,
 				overflow: a + e
 			};
 		}
@@ -2369,9 +2369,9 @@ var h = /* @__PURE__ */ e(((e) => {
 			overflow: e
 		};
 	}
-	var Ht = Math.clz32 ? Math.clz32 : Gt, Ut = Math.log, Wt = Math.LN2;
+	var Ut = Math.clz32 ? Math.clz32 : Gt, Z = Math.log, Wt = Math.LN2;
 	function Gt(e) {
-		return e >>>= 0, e === 0 ? 32 : 31 - (Ut(e) / Wt | 0) | 0;
+		return e >>>= 0, e === 0 ? 32 : 31 - (Z(e) / Wt | 0) | 0;
 	}
 	function Kt(e, t) {
 		return e === t && (e !== 0 || 1 / e == 1 / t) || e !== e && t !== t;
@@ -2483,7 +2483,7 @@ var h = /* @__PURE__ */ e(((e) => {
 		},
 		useId: function() {
 			var e = Yt.treeContext, t = e.overflow;
-			e = e.id, e = (e & ~(1 << 32 - Ht(e) - 1)).toString(32) + t;
+			e = e.id, e = (e & ~(1 << 32 - Ut(e) - 1)).toString(32) + t;
 			var r = mn;
 			if (r === null) throw Error(n(404));
 			return t = $t++, e = ":" + r.idPrefix + "R" + e, 0 < t && (e += "H" + t.toString(32)), e + ":";
@@ -2522,7 +2522,7 @@ var h = /* @__PURE__ */ e(((e) => {
 			onShellReady: o === void 0 ? _n : o,
 			onShellError: s === void 0 ? _n : s,
 			onFatalError: c === void 0 ? _n : c
-		}, n = bn(t, 0, null, n, !1, !1), n.parentFlushed = !0, e = yn(t, e, null, n, u, jt, null, Vt), l.push(e), t;
+		}, n = bn(t, 0, null, n, !1, !1), n.parentFlushed = !0, e = yn(t, e, null, n, u, jt, null, X), l.push(e), t;
 	}
 	function yn(e, t, n, r, i, a, o, s) {
 		e.allPendingTasks++, n === null ? e.pendingRootTasks++ : n.pendingTasks++;
@@ -2590,13 +2590,13 @@ var h = /* @__PURE__ */ e(((e) => {
 		if (typeof r == "function") if (r.prototype && r.prototype.isReactComponent) {
 			a = Mt(r, t.legacyContext);
 			var o = r.contextType;
-			o = new r(i, typeof o == "object" && o ? o._currentValue : a), Bt(o, r, i, a), wn(e, t, o, r);
+			o = new r(i, typeof o == "object" && o ? o._currentValue : a), Vt(o, r, i, a), wn(e, t, o, r);
 		} else {
 			o = Mt(r, t.legacyContext), a = Cn(e, t, r, i, o);
 			var s = $t !== 0;
-			if (typeof a == "object" && a && typeof a.render == "function" && a.$$typeof === void 0) Bt(a, r, i, o), wn(e, t, a, r);
+			if (typeof a == "object" && a && typeof a.render == "function" && a.$$typeof === void 0) Vt(a, r, i, o), wn(e, t, a, r);
 			else if (s) {
-				i = t.treeContext, t.treeContext = Z(i, 1, 0);
+				i = t.treeContext, t.treeContext = Ht(i, 1, 0);
 				try {
 					$(e, t, a);
 				} finally {
@@ -2668,7 +2668,7 @@ var h = /* @__PURE__ */ e(((e) => {
 			if (typeof r == "object" && r) switch (r.$$typeof) {
 				case J:
 					if (i = Cn(e, t, r.render, i, a), $t !== 0) {
-						r = t.treeContext, t.treeContext = Z(r, 1, 0);
+						r = t.treeContext, t.treeContext = Ht(r, 1, 0);
 						try {
 							$(e, t, i);
 						} finally {
@@ -2732,7 +2732,7 @@ var h = /* @__PURE__ */ e(((e) => {
 	function Dn(e, t, n) {
 		for (var r = n.length, i = 0; i < r; i++) {
 			var a = t.treeContext;
-			t.treeContext = Z(a, r, i);
+			t.treeContext = Ht(a, r, i);
 			try {
 				On(e, t, n[i]);
 			} finally {
@@ -5728,8 +5728,24 @@ async function Ft(e) {
 	return J(await e.db.from("communication_tokens").delete().lt("expires_at", t)), J(await e.db.from("email_events").delete().lt("created_at", (/* @__PURE__ */ new Date(Date.now() - 30 * 864e5)).toISOString()).not("processed_at", "is", null)), J(await e.db.from("communication_rate_limits").delete().lt("window_start", (/* @__PURE__ */ new Date(Date.now() - 864e5)).toISOString())), a;
 }
 //#endregion
+//#region web/src/lib/communications/actorSession.ts
+var It = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function Lt(e) {
+	try {
+		let t = e.split(".")[1];
+		if (!t || t.length > 8192) return null;
+		let n = JSON.parse(atob(t.replace(/-/g, "+").replace(/_/g, "/")));
+		return typeof n.sub != "string" || typeof n.session_id != "string" || !It.test(n.sub) || !It.test(n.session_id) ? null : {
+			userId: n.sub.toLowerCase(),
+			sessionId: n.session_id.toLowerCase()
+		};
+	} catch {
+		return null;
+	}
+}
+//#endregion
 //#region web/src/lib/communications/server/campaigns.ts
-function It(e) {
+function Rt(e) {
 	if (!e || typeof e.title != "string" || !e.title.trim() || e.title.length > 180 || typeof e.excerpt != "string" || e.excerpt.length > 2e3 || (e.body?.length ?? 0) > 8e4 || (e.subject?.length ?? 0) > 180 || (e.preview?.length ?? 0) > 250) throw Error("Provide a title and a concise excerpt.");
 	for (let t of [e.url, e.imageUrl].filter(Boolean)) if (new URL(t).protocol !== "https:") throw Error("Use HTTPS links.");
 	if (e.readingMinutes !== void 0 && (!Number.isInteger(e.readingMinutes) || e.readingMinutes < 1 || e.readingMinutes > 120)) throw Error("Choose a reading time from 1 to 120 minutes.");
@@ -5749,7 +5765,7 @@ function It(e) {
 	});
 	return e;
 }
-function Lt(e) {
+function zt(e) {
 	if (!e || ![
 		"subscribers",
 		"selected",
@@ -5758,8 +5774,8 @@ function Lt(e) {
 	if (e.kind === "selected" && (!e.userIds?.length || e.userIds.length > 100 || e.userIds.some((e) => !/^[0-9a-f-]{36}$/i.test(e)))) throw Error("Choose 1 to 100 account IDs.");
 	if (e.kind === "course" && (!e.courseId || e.courseId.length > 100)) throw Error("Choose a canonical course ID.");
 }
-async function Rt(e, t, r, i) {
-	Lt(r);
+async function Bt(e, t, r, i) {
+	zt(r);
 	let a = e.db.from("communication_preferences").select("user_id").eq("category", n[t]).eq("enabled", !0).order("user_id").limit(200);
 	i && (a = a.gt("user_id", i)), r.kind === "selected" && (a = a.in("user_id", r.userIds));
 	let o = (J(await a) ?? []).map((e) => e.user_id), s = [];
@@ -5777,10 +5793,10 @@ async function Rt(e, t, r, i) {
 		eligible: s
 	};
 }
-async function zt(e) {
+async function Vt(e) {
 	let t = J(await e.db.from("email_campaigns").select("*").eq("status", "scheduled").lte("scheduled_for", (/* @__PURE__ */ new Date()).toISOString()).order("created_at").limit(2)), n = 0;
 	for (let r of t ?? []) {
-		let t = await Rt(e, r.type, r.audience, r.cursor ?? void 0);
+		let t = await Bt(e, r.type, r.audience, r.cursor ?? void 0);
 		for (let n of t.eligible) await e.enqueue({
 			userId: n,
 			type: r.type,
@@ -5803,7 +5819,7 @@ var X = class extends Error {
 	constructor(e, t = 400) {
 		super(e), this.status = t;
 	}
-}, Bt = /* @__PURE__ */ new Set([
+}, Ht = /* @__PURE__ */ new Set([
 	"admin",
 	"campaign-save",
 	"campaign-estimate",
@@ -5812,7 +5828,7 @@ var X = class extends Error {
 	"send-test",
 	"broadcast-export",
 	"article-publish"
-]), Vt = [
+]), Ut = [
 	"essay",
 	"product_update",
 	"research",
@@ -5825,17 +5841,17 @@ var X = class extends Error {
 		...n
 	}
 });
-function Ht(e, t) {
+function Wt(e, t) {
 	return (t.AXOM_COMMUNICATIONS_ADMINS ?? "").split(",").map((e) => e.trim()).includes(e.id);
 }
-function Ut(e) {
+function Gt(e) {
 	try {
 		return !!JSON.parse(atob(e.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).amr?.some((e) => Date.now() / 1e3 - e.timestamp >= 0 && Date.now() / 1e3 - e.timestamp <= 600);
 	} catch {
 		return !1;
 	}
 }
-function Wt(e, t, r) {
+function Kt(e, t, r) {
 	let i = new St(e, t, r);
 	return async (r) => {
 		let a = r.headers.get("origin"), o = (t.AXOM_ALLOWED_ORIGINS ?? t.AXOM_PUBLIC_URL ?? "https://axom.info").split(",").map((e) => e.trim()), s = a && o.includes(a) ? {
@@ -5894,7 +5910,7 @@ function Wt(e, t, r) {
 				let n = J(await e.rpc("acquire_communication_worker"));
 				if (!n) return Z({ busy: !0 });
 				try {
-					let t = await i.schedule(), n = await zt(i), r = await Ft(i), a = await i.work(), o = J(await e.from("communication_identity").select("user_id").eq("topics_dirty", !0).limit(20));
+					let t = await i.schedule(), n = await Vt(i), r = await Ft(i), a = await i.work(), o = J(await e.from("communication_identity").select("user_id").eq("topics_dirty", !0).limit(20));
 					for (let t of o ?? []) try {
 						await i.syncTopics(t.user_id);
 					} catch {
@@ -5925,21 +5941,30 @@ function Wt(e, t, r) {
 			let d = await e.auth.getUser(u);
 			if (d.error || !d.data.user) throw new X("Sign in again to continue.", 401);
 			let f = d.data.user;
-			if (Bt.has(l) && !Ht(f, t)) throw new X("Administrator access required.", 403);
-			if (!J(await e.rpc("consume_communication_limit", {
-				p_key: `${f.id}:${l}`,
-				p_limit: l.startsWith("request-") ? 3 : 60,
-				p_seconds: 3600
-			}))) throw new X("Too many requests. Try again later.", 429);
-			let p = await r.text();
-			if (p.length > 1e5) throw new X("Payload too large", 413);
-			let m;
+			if (Ht.has(l) && !Wt(f, t)) throw new X("Administrator access required.", 403);
+			let p = async () => {
+				if (!J(await e.rpc("consume_communication_limit", {
+					p_key: `${f.id}:${l}`,
+					p_limit: l.startsWith("request-") ? 3 : 60,
+					p_seconds: 3600
+				}))) throw new X("Too many requests. Try again later.", 429);
+			};
+			l !== "request-deletion" && await p();
+			let m = await r.text();
+			if (m.length > 1e5) throw new X("Payload too large", 413);
+			let h;
 			try {
-				if (m = p ? JSON.parse(p) : {}, !m || Array.isArray(m) || typeof m != "object") throw Error();
+				if (h = m ? JSON.parse(m) : {}, !h || Array.isArray(h) || typeof h != "object") throw Error();
 			} catch {
 				throw new X("Invalid request body");
 			}
-			if (l === "settings") {
+			if (l === "request-deletion") {
+				if (t.AXOM_ACCOUNT_DELETION_ENABLED !== "true") throw new X("Account deletion activation is pending. Your account has not been changed.", 503);
+				let e = Lt(u);
+				if (!e || e.userId !== f.id.toLowerCase() || h.actorUserId !== e.userId || h.actorSessionId !== e.sessionId) throw new X("Your account session changed. Sign in again to confirm deletion.", 403);
+				if (h.confirmation !== "DELETE MY ACCOUNT" || !Gt(u)) throw new X("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
+			}
+			if (l === "request-deletion" && await p(), l === "settings") {
 				let [n, r, a, o] = await Promise.all([
 					i.preferenceRows(f.id),
 					i.identity(f.id),
@@ -5951,13 +5976,13 @@ function Wt(e, t, r) {
 					identity: r,
 					history: J(a),
 					privacy: J(o),
-					admin: Ht(f, t),
+					admin: Wt(f, t),
 					deliveryMode: t.AXOM_EMAIL_MODE ?? "disabled",
 					deletionEnabled: t.AXOM_ACCOUNT_DELETION_ENABLED === "true",
 					hasProtectedCopy: !!await i.workspace(f.id)
 				}, 200, s);
 			}
-			if (l === "preferences") return await i.savePreferences(f.id, m.preferences, m.identity), Z({ saved: !0 }, 200, s);
+			if (l === "preferences") return await i.savePreferences(f.id, h.preferences, h.identity), Z({ saved: !0 }, 200, s);
 			if (l === "unsubscribe-all") {
 				let e = await i.preferenceRows(f.id);
 				return await i.savePreferences(f.id, e.map((e) => ({
@@ -5966,20 +5991,16 @@ function Wt(e, t, r) {
 				}))), Z({ saved: !0 }, 200, s);
 			}
 			if (l === "request-export") return await jt(i, f.id, "export"), Z({ requested: !0 }, 200, s);
-			if (l === "export-link") return Z({ url: await i.exportLink(f.id, String(m.id)) }, 200, s);
-			if (l === "request-deletion") {
-				if (t.AXOM_ACCOUNT_DELETION_ENABLED !== "true") throw new X("Account deletion activation is pending. Your account has not been changed.", 503);
-				if (m.confirmation !== "DELETE MY ACCOUNT" || !Ut(u)) throw new X("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
-				return await jt(i, f.id, "deletion"), Z({ requested: !0 }, 200, s);
-			}
+			if (l === "export-link") return Z({ url: await i.exportLink(f.id, String(h.id)) }, 200, s);
+			if (l === "request-deletion") return await jt(i, f.id, "deletion"), Z({ requested: !0 }, 200, s);
 			if (l === "cancel-deletion") return Z({
 				cancelled: !0,
-				...await Mt(i, f.id, String(m.id))
+				...await Mt(i, f.id, String(h.id))
 			}, 200, s);
 			if (l === "pulse") {
-				let e = Number(m.year);
+				let e = Number(h.year);
 				if (!Number.isInteger(e) || e < 2020 || e > (/* @__PURE__ */ new Date()).getUTCFullYear()) throw new X("Choose a valid year.");
-				let t = await i.context(f.id), n = e === (/* @__PURE__ */ new Date()).getUTCFullYear() ? Gt(t.timezone) : `${e}-12-31`;
+				let t = await i.context(f.id), n = e === (/* @__PURE__ */ new Date()).getUTCFullYear() ? qt(t.timezone) : `${e}-12-31`;
 				return Z({ snapshot: (await i.snapshot(f.id, "year", `${e}-01-01`, n, t.timezone))?.payload ?? null }, 200, s);
 			}
 			if (l === "admin") return Z({
@@ -5992,12 +6013,12 @@ function Wt(e, t, r) {
 				deliveryMode: t.AXOM_EMAIL_MODE ?? "disabled"
 			}, 200, s);
 			if (l === "campaign-save") {
-				let t = String(m.type);
-				if (!Vt.includes(t)) throw new X("Choose an editorial or product template.");
-				let n = It(m.content), r = m.audience;
-				Lt(r);
-				let a = typeof m.id == "string" ? m.id : crypto.randomUUID();
-				if (m.id && Y(await e.from("email_campaigns").select("status").eq("id", a).single()).status !== "draft") throw new X("Only drafts can be edited.");
+				let t = String(h.type);
+				if (!Ut.includes(t)) throw new X("Choose an editorial or product template.");
+				let n = Rt(h.content), r = h.audience;
+				zt(r);
+				let a = typeof h.id == "string" ? h.id : crypto.randomUUID();
+				if (h.id && Y(await e.from("email_campaigns").select("status").eq("id", a).single()).status !== "draft") throw new X("Only drafts can be edited.");
 				let o = {
 					type: t,
 					content: n,
@@ -6005,7 +6026,7 @@ function Wt(e, t, r) {
 					created_by: f.id,
 					status: "draft"
 				};
-				if (m.id ? Y(await e.from("email_campaigns").update(o).eq("id", a).eq("status", "draft").select("id").single()) : J(await e.from("email_campaigns").insert({
+				if (h.id ? Y(await e.from("email_campaigns").update(o).eq("id", a).eq("status", "draft").select("id").single()) : J(await e.from("email_campaigns").insert({
 					id: a,
 					...o
 				})), t === "essay" && n.body) {
@@ -6030,17 +6051,17 @@ function Wt(e, t, r) {
 				"broadcast-export",
 				"article-publish"
 			].includes(l)) {
-				let t = Y(await e.from("email_campaigns").select("*").eq("id", String(m.id)).single());
+				let t = Y(await e.from("email_campaigns").select("*").eq("id", String(h.id)).single());
 				if (l === "campaign-cancel") return J(await e.from("email_campaigns").update({ status: "cancelled" }).eq("id", t.id)), J(await e.from("email_jobs").update({ status: "cancelled" }).eq("campaign_id", t.id).in("status", ["queued", "scheduled"])), Z({ cancelled: !0 }, 200, s);
 				if (l === "campaign-estimate") {
-					let e = await Rt(i, t.type, t.audience);
+					let e = await Bt(i, t.type, t.audience);
 					return Z({
 						eligible: e.eligible.length,
 						more: e.scanned.length === 200
 					}, 200, s);
 				}
 				if (l === "article-publish") {
-					if (t.type !== "essay" || m.confirmation !== "PUBLISH ESSAY") throw new X("Review the essay and type PUBLISH ESSAY.");
+					if (t.type !== "essay" || h.confirmation !== "PUBLISH ESSAY") throw new X("Review the essay and type PUBLISH ESSAY.");
 					return Y(await e.from("axom_articles").update({ published_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("campaign_id", t.id).select("id").single()), Z({
 						published: !0,
 						url: t.content.url
@@ -6070,8 +6091,8 @@ function Wt(e, t, r) {
 						note: "Import into a Resend Broadcast and choose the matching opt-in Topic. This generic version omits private course/exam personalization. Do not also schedule this draft in AXOM."
 					}, 200, s);
 				}
-				if (m.confirmation !== "SCHEDULE EMAIL" || t.status !== "draft") throw new X("Review the draft and type SCHEDULE EMAIL.");
-				let n = String(m.scheduledFor);
+				if (h.confirmation !== "SCHEDULE EMAIL" || t.status !== "draft") throw new X("Review the draft and type SCHEDULE EMAIL.");
+				let n = String(h.scheduledFor);
 				if (!Number.isFinite(Date.parse(n)) || Date.parse(n) < Date.now() + 6e4) throw new X("Schedule at least one minute in the future.");
 				if (!J(await e.rpc("schedule_axom_campaign", {
 					p_id: t.id,
@@ -6080,9 +6101,9 @@ function Wt(e, t, r) {
 				return Z({ scheduled: !0 }, 200, s);
 			}
 			if (l === "send-test") {
-				let e = String(m.type);
+				let e = String(h.type);
 				if (!Object.hasOwn(n, e) || e.startsWith("deletion") || e.startsWith("export") || e === "auth" || e === "security") throw new X("This template cannot be test-triggered here.");
-				let t = m.content ? It(m.content) : void 0;
+				let t = h.content ? Rt(h.content) : void 0;
 				return await i.enqueue({
 					userId: f.id,
 					type: e,
@@ -6102,7 +6123,7 @@ function Wt(e, t, r) {
 		}
 	};
 }
-function Gt(e) {
+function qt(e) {
 	return new Intl.DateTimeFormat("en-CA", {
 		timeZone: e,
 		year: "numeric",
@@ -6111,4 +6132,4 @@ function Gt(e) {
 	}).format(/* @__PURE__ */ new Date());
 }
 //#endregion
-export { n as TEMPLATE_CATEGORY, Wt as createCommunicationsHandler, i as preferences, M as renderAxomEmail };
+export { n as TEMPLATE_CATEGORY, Kt as createCommunicationsHandler, i as preferences, M as renderAxomEmail };
