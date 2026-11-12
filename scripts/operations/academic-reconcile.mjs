@@ -159,7 +159,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       errors.push(`Ready > detected question count for ${hash.slice(0, 12)}`);
     }
     if (row.kind === "question-source" && row.status !== "installed" && !row.reason) {
-      blockers.push(`Question source ${hash.slice(0, 12)} is ${row.status} without an explicit reason.`);
+      blockers.push(`Question source ${hash.slice(0, 12)} is ${supportedStates.has(row.status) ? row.status : "invalid"} without an explicit reason.`);
     }
     if (row.kind === "question-source" && row.status === "installed") {
       const keys = ["questionCount", "readyCount", "reviewCount", "figureReferences"];
@@ -268,7 +268,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       errors.push("Tracker activity has invalid week; require a positive integer. Original ID omitted.");
     // Unassigned means no week is filed, rather than a silent numeric scope.
     if (row.weekBasis === "unassigned" && row.week !== undefined && row.week !== null)
-      errors.push("Tracker unassigned activity receipt claims a week; original ID omitted.");
+      errors.push("Tracker activity unassigned receipt claims a week; original ID omitted.");
     if (row.installed !== true) blockers.push("Tracker activity has no installation receipt; original ID omitted.");
   }
   if (expectedTracker !== null && tmap.size !== expectedTracker) {
