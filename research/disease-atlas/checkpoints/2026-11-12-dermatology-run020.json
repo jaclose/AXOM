@@ -1,0 +1,118 @@
+{
+  "release": "AXOM V2 Build020",
+  "date": "2026-11-12",
+  "chapter": "Dermatology: Inflammatory, Neoplastic, Genetic and Metabolic Skin Disease",
+  "parent_build": "Build019",
+  "parent_commit": "d947603374a1f44fc5061d2ffeb6c516ec61b3ed",
+  "inherited_entries": 390,
+  "new_diseases": [
+    [
+      "AXOM-DERM-021",
+      "Pityriasis rubra pilaris"
+    ],
+    [
+      "AXOM-DERM-022",
+      "Discoid lupus erythematosus"
+    ],
+    [
+      "AXOM-DERM-023",
+      "Acanthosis nigricans"
+    ],
+    [
+      "AXOM-DERM-024",
+      "Erythema nodosum"
+    ],
+    [
+      "AXOM-DERM-025",
+      "Porphyria cutanea tarda"
+    ],
+    [
+      "AXOM-DERM-026",
+      "Acne vulgaris"
+    ],
+    [
+      "AXOM-DERM-027",
+      "Ichthyosis vulgaris"
+    ],
+    [
+      "AXOM-DERM-028",
+      "Erythema multiforme"
+    ]
+  ],
+  "expanded_existing": [
+    [
+      "LEGACY-092",
+      "Psoriasis"
+    ],
+    [
+      "LEGACY-093",
+      "Atopic dermatitis"
+    ],
+    [
+      "LEGACY-094",
+      "Basal cell carcinoma"
+    ],
+    [
+      "LEGACY-095",
+      "Cutaneous squamous cell carcinoma"
+    ],
+    [
+      "LEGACY-096",
+      "Melanoma"
+    ]
+  ],
+  "total_unique_entries": 398,
+  "total_detailed_profiles": 310,
+  "total_legacy_concise_entries": 88,
+  "complete_detailed_profiles_this_build": 13,
+  "clinical_section_words": 4593,
+  "clinical_sections_per_profile": 15,
+  "cumulative_source_references": 371,
+  "new_used_reference_records": 18,
+  "new_source_image_links": 13,
+  "cumulative_image_associations": 200,
+  "original_medical_images_embedded": 0,
+  "case_and_privacy_review": "NOT CLEARED; no synthetic medical imagery",
+  "qa": {
+    "passed": 26,
+    "failed": 0,
+    "pdf_pages": 485,
+    "source_hyperlinks_in_new_chapter": 32,
+    "docx_accessibility_findings": 0
+  },
+  "ontology": {
+    "official_mondo_release_pinned": false,
+    "icd11_mms_release_pinned": false,
+    "orphanet_release_pinned": false,
+    "denominator": null,
+    "measured_coverage": null,
+    "candidates_provisional": [
+      "MONDO:0100017",
+      "MONDO:0019558",
+      "MONDO:0011438"
+    ]
+  },
+  "unmerged_parallel_build017": {
+    "reported_new_ids": 10,
+    "full_source_files_unavailable": true,
+    "these_ids_included": false
+  },
+  "durable_library_folder": "/AXOM/DiseaseAtlasV2/Build020",
+  "durably_saved_files": [
+    "AXOM_Disease_Atlas_V2_Run020_Source_Package.zip",
+    "AXOM_Disease_Pathology_Atlas_V2_Run020.docx",
+    "AXOM_Disease_Pathology_Atlas_V2_Run020.pdf",
+    "registry_v2_run020.csv",
+    "coverage_manifest_v2_run020.json",
+    "image_provenance_v2_run020.csv",
+    "dermatology_deep_profiles_run020.json",
+    "sources_run020.json"
+  ],
+  "sha256": {
+    "docx": "bf15eac58266912d8bbce4bd34db268b933d445b37e9245f09caac606178c59c",
+    "pdf": "0a072089ee71b8d84e6a640171114bc22574576b92bace9de51e5cf1b5de60e5",
+    "registry": "794791d9b7ba6937e2926c807c24f4b9af82becfb3f3f07ffa0e3daa5b02b0bd"
+  },
+  "editorial_status": "Structured education draft; no independent specialist signoff; regulatory-label and official ontology release reconciliation pending",
+  "release_authority": "AXOM FORGE only. No production deploy, migration, or branch merge performed."
+}
