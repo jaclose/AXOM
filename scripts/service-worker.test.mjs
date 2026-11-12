@@ -1389,3 +1389,83 @@ test('R55 matching public query provenance keeps offline cache and internal reva
     assert.ok(await legacy.match(key), 'valid public response remains available offline');
   }
 });
+
+test('R56 encoded public versions replay correctly from legacy caches after internal revalidation', async () => {
+  const image = 'https://app.test/landing/hero.png';
+  for (const suffix of ['?v=build%2D20261111', '?v=1%2E2%2E3', '?v=build-20261111']) {
+    const key = image + suffix;
+    const finalUrl = new URL(key);
+    finalUrl.searchParams.set('__axom_revalidate', '123');
+    const app = worker();
+    const legacy = await app.caches.open('axom-shell-legacy');
+    await legacy.put(key, withNetworkUrl(new Response('public-encoded-image', {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+    }), finalUrl.href));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: key, method: 'GET', mode: 'same-origin', cache: 'default', headers: new Headers() },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending, 'strict public version must be intercepted: ' + suffix);
+    assert.equal(await (await pending).text(), 'public-encoded-image', 'replay must not fail for ' + suffix);
+    assert.ok(await legacy.match(key), 'retain valid cached public asset: ' + suffix);
+  }
+});
+
+test('R56 fresh encoded-version assets cache for offline replay without relaxing final-URL provenance', async () => {
+  const image = 'https://app.test/landing/hero.png';
+  for (const suffix of ['?v=build%2D20261111', '?v=1%2E2%2E3']) {
+    let online = true;
+    const app = worker({ fetchResponse: async () => {
+      if (!online) throw new Error('offline');
+      return new Response('fresh-public-image', {
+        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+      });
+    } });
+    const request = { url: image + suffix, method: 'GET', mode: 'same-origin', cache: 'default', headers: new Headers() };
+    const dispatch = async () => {
+      let pending;
+      const tasks = [];
+      app.events.get('fetch')({
+        request,
+        respondWith: (value) => { pending = value; },
+        waitUntil: (value) => { tasks.push(value); },
+      });
+      assert.ok(pending, 'approved encoded public version must be intercepted');
+      const response = await pending;
+      await Promise.all(tasks);
+      return response.text();
+    };
+    assert.equal(await dispatch(), 'fresh-public-image', 'initial online response: ' + suffix);
+    online = false;
+    assert.equal(await dispatch(), 'fresh-public-image', 'offline cache replay: ' + suffix);
+  }
+});
+
+test('R56 encoded public versions still reject substituted or credential-bearing final URLs', async () => {
+  const image = 'https://app.test/landing/hero.png';
+  const cases = [
+    ['?v=build%2D20261111', '?v=build-20261110&__axom_revalidate=123'],
+    ['?v=1%2E2%2E3', '?v=1.2.3&access_token=SYNTHETIC_ACCOUNT_A'],
+    ['?v=1%2E2%2E3', '?v=1.2.3&__axom_revalidate=abc'],
+    ['?v=build%2D20261111', '?v=build-20261111&__axom_revalidate=123&__axom_revalidate=456'],
+  ];
+  for (const [requestQuery, responseQuery] of cases) {
+    const key = image + requestQuery;
+    const app = worker();
+    const legacy = await app.caches.open('axom-shell-legacy');
+    await legacy.put(key, withNetworkUrl(new Response('SYNTHETIC_PRIVATE_BYTES', {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+    }), image + responseQuery));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: key, method: 'GET', mode: 'same-origin', cache: 'default', headers: new Headers() },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending);
+    await assert.rejects(pending, /offline/, 'unsafe final URL must not replay');
+    assert.equal(await legacy.match(key), undefined, 'evict only invalid final provenance');
+  }
+});
