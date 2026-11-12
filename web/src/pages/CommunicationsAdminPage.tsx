@@ -1,9 +1,10 @@
 import { CommunicationsBrand } from "../components/communications/CommunicationsBrand";
 import { useOpticalMotion } from "../lib/communications/useOpticalMotion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Download, Send } from "lucide-react";
 import { GButton } from "../components/ui/primitives";
 import { useStore } from "../lib/store";
+import { useAccount } from "../lib/account/accountStore";
 import { communicationsRequest, useCommunications } from "../lib/communications/client";
 import { localEmailContext, downloadBlob } from "../lib/communications/presentation";
 import { defaultEditorialCta, renderAxomEmail } from "../lib/communications/email";
@@ -14,15 +15,63 @@ interface Campaign { id: string; type: EmailType; content: Editorial; audience: 
 interface AdminState { campaigns: Campaign[]; failures: { id: string; type: string; status: string; failure_code: string }[]; deliveryMode: string }
 const EMPTY: Editorial = { title: "", excerpt: "", body: "", url: "https://axom.info", subject: "", preview: "", cta: defaultEditorialCta("essay"), readingMinutes: 5 };
 export function CommunicationsAdminPage() {
+  const accountId = useAccount(s => s.user?.id);
+  // Reset the entire editor, selected draft and outstanding UI receipts when
+  // the authenticated account changes. The admin permissions hook alone
+  // cannot reset component-local state, including when both users are admins.
+  return <CommunicationsAdminEditor key={accountId ?? "signed-out"} accountId={accountId} />;
+}
+
+function CommunicationsAdminEditor({ accountId }: { accountId: string | undefined }) {
   const opticalRoot = useOpticalMotion<HTMLElement>();
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const isCurrentAccount = () => Boolean(accountId) && mounted.current
+    && useAccount.getState().user?.id === accountId;
   const access = useCommunications(); const state = useStore(); const [data, setData] = useState<AdminState | null>(null); const [type, setType] = useState<EmailType>("essay");
   const [content, setContent] = useState<Editorial>(EMPTY); const [customCta, setCustomCta] = useState(false); const [audience, setAudience] = useState<Audience>({ kind: "subscribers" }); const [id, setId] = useState<string>();
   const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false); const [theme, setTheme] = useState<"dark" | "light">("dark"); const [narrow, setNarrow] = useState(false); const [scheduled, setScheduled] = useState(""); const [confirmation, setConfirmation] = useState(""); const [estimate, setEstimate] = useState(""); const [publishConfirmation, setPublishConfirmation] = useState("");
-  useEffect(() => { if (access.data?.admin) communicationsRequest<AdminState>("admin").then(setData).catch(e => setMessage(e instanceof Error ? e.message : "Studio unavailable.")); }, [access.data?.admin]);
+  useEffect(() => {
+    let current = true;
+    if (!access.data?.admin) {
+      setData(null);
+      return;
+    }
+    setData(null);
+    void communicationsRequest<AdminState>("admin")
+      .then(next => { if (current && isCurrentAccount()) setData(next); })
+      .catch(e => { if (current && isCurrentAccount()) setMessage(e instanceof Error ? e.message : "Studio unavailable."); });
+    return () => { current = false; };
+  }, [access.data?.admin]);
   const preview = useMemo(() => { const input = { type, context: localEmailContext(state, type, theme), baseUrl: location.origin }; try { return { email: renderAxomEmail({ ...input, editorial: content.title ? content : undefined }), error: "" }; } catch (error) { return { email: renderAxomEmail(input), error: error instanceof Error ? error.message : "Check your template variables." }; } }, [state, type, theme, content]);
   const email = preview.email;
-  const run = async (task: () => Promise<unknown>, success: string) => { setBusy(true); setMessage(""); try { await task(); setMessage(success); setData(await communicationsRequest<AdminState>("admin")); } catch (e) { setMessage(e instanceof Error ? e.message : "The request failed."); } finally { setBusy(false); } };
-  const save = async () => { const result = await communicationsRequest<{ id: string; content: Editorial }>("campaign-save", { id, type, content, audience }); setId(result.id); setContent(result.content); };
+  const run = async (task: () => Promise<unknown>, success: string) => {
+    if (!isCurrentAccount()) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await task();
+      if (!isCurrentAccount()) return;
+      const next = await communicationsRequest<AdminState>("admin");
+      if (!isCurrentAccount()) return;
+      setData(next);
+      setMessage(success);
+    } catch (e) {
+      if (isCurrentAccount()) setMessage(e instanceof Error ? e.message : "The request failed.");
+    } finally {
+      if (isCurrentAccount()) setBusy(false);
+    }
+  };
+  const save = async () => {
+    if (!isCurrentAccount()) throw new Error("The signed-in account changed. Review the draft before saving.");
+    const result = await communicationsRequest<{ id: string; content: Editorial }>("campaign-save", { id, type, content, audience });
+    if (!isCurrentAccount()) throw new Error("The signed-in account changed during the draft save.");
+    setId(result.id);
+    setContent(result.content);
+  };
   const update = (patch: Partial<Editorial>) => { setContent(value => ({ ...value, ...patch })); setEstimate(""); };
   return <main ref={opticalRoot} className="comms-page"><header className="comms-heading comms-glass" data-optical=""><div><CommunicationsBrand label="Editorial studio" /><h1>Something worth sending.</h1><p>A clear idea. The right audience. A considered delivery.</p></div><a href="#communications">Preferences <ArrowUpRight size={16} /></a></header>
     {!access.data?.admin ? <div className="comms-notice"><h2>{access.loading ? "Checking studio access…" : "Administrator access required"}</h2><p>{access.error || "Sign in with an account assigned to the communications studio."}</p></div> : <>
