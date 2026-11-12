@@ -44,7 +44,7 @@ import { buildCurriculumCoverage, type CurriculumCoverage } from "../lib/course-
 import { buildAcademicTemplateCatalog } from "../lib/course-engine/academicCatalog";
 import { canonicalModuleKey } from "../lib/course-engine/vocabulary";
 import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
-import { duplicateQuestionRecordIds, verifyCollectionForCourse } from "../lib/course-engine/verifiedPracticeLinks";
+import { duplicateQuestionRecordIds, duplicateQuestionSetIds, verifyCollectionForCourse } from "../lib/course-engine/verifiedPracticeLinks";
 import { legacyCourseFilingProposals, moveTrackerCourseFiling, type CourseFilingProposal } from "../lib/course-engine/courseFiling";
 import { buildQuestionBankBooks, COLLECTION_STATUS_LABEL } from "../lib/bookshelf/questionBankBooks";
 import { WeekOverview } from "../components/tracker/WeekOverview";
@@ -600,6 +600,7 @@ function TrackerQuestionLinks({ scope }: { scope: string }) {
   // Build the collision list from raw records; Map indexing alone drops
   // duplicate identities and could falsely advertise a ready practice link.
   const duplicateRecordIds = useMemo(() => duplicateQuestionRecordIds(s.questions ?? []), [s.questions]);
+  const duplicateSetIds = useMemo(() => duplicateQuestionSetIds(s.questionSets ?? []), [s.questionSets]);
   const questionsById = useMemo(() => new Map((s.questions ?? []).map((question) =>
     [question.id, question] as const)), [s.questions]);
   const setsById = useMemo(() => new Map((s.questionSets ?? []).map((set) =>
@@ -638,7 +639,7 @@ function TrackerQuestionLinks({ scope }: { scope: string }) {
       module: matched?.module ?? module,
       week: collectionWeek ?? week,
       courseId: selectedCourseId,
-    }, questionsById, setsById, requireCourseProof, duplicateRecordIds);
+    }, questionsById, setsById, requireCourseProof, duplicateRecordIds, duplicateSetIds);
     return {
       collection,
       week: collectionWeek,
