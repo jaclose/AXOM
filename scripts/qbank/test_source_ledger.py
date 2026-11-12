@@ -49,6 +49,38 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertIsNone(ledger.mapping("DERS/IMCQ 20.pdf", "downloads_med_school")["week"])
         self.assertIsNone(ledger.mapping("DERS/Week 21/PQ.pdf", "downloads_med_school")["week"])
 
+    def test_native_manifest_week_requires_positive_nonboolean_integer(self):
+        # A native manifest is not official source week evidence unless the value
+        # itself is a real positive integer; preserve explicit path hints on invalid data.
+        for invalid in (True, False, 0, -1, -20, 0.5, "20", None):
+            with self.subTest(invalid=repr(invalid)):
+                native = {"course": {"week": invalid}, "source": {"sourceWeekDeclared": True}}
+                inferred = ledger.mapping("DERS/PQ.pdf", "downloads_med_school", native=native)
+                self.assertIsNone(inferred["week"])
+                self.assertIsNone(inferred["week_evidence"])
+                explicit = ledger.mapping("DERS/Week 20/PQ.pdf", "downloads_med_school", native=native)
+                self.assertEqual(explicit["week"], 20)
+                self.assertEqual(explicit["week_evidence"], "explicit_path_week")
+
+    def test_native_manifest_term_rejects_boolean_coercion_and_preserves_source_term(self):
+        native = {"course": {"term": True, "week": 20}, "source": {"sourceWeekDeclared": True}}
+        mapped = ledger.mapping("Term 4/DERS/PQ.pdf", "downloads_med_school", native=native)
+        self.assertEqual(mapped["academic_term"], "T4")
+        self.assertEqual(mapped["term_evidence"], "explicit_term_folder")
+        self.assertEqual(mapped["week"], 20)
+        self.assertEqual(mapped["week_evidence"], "package_declared_week")
+
+    def test_native_manifest_valid_weeks_preserve_declared_vs_axom_provenance(self):
+        for declared, evidence in ((True, "package_declared_week"), (False, "axom_assigned_week_not_official")):
+            with self.subTest(declared=declared):
+                native = {"course": {"term": 4, "week": 20}, "source": {"sourceWeekDeclared": declared}}
+                mapped = ledger.mapping("DERS/IMCQ 20.pdf", "downloads_med_school", native=native)
+                self.assertEqual(mapped["academic_term"], "T4")
+                self.assertEqual(mapped["week"], 20)
+                self.assertEqual(mapped["week_evidence"], evidence)
+        # An assessment number alone never becomes a source week.
+        self.assertIsNone(ledger.mapping("DERS/IMCQ 20.pdf", "downloads_med_school")["week"])
+
     def test_variant_relationship_is_name_not_assumed_truth(self):
         a = ledger.normalized_pair_key("Examsoft Quiz 5 (Without Answers).pdf")
         b = ledger.normalized_pair_key("Examsoft Quiz 5 (With Answers).pdf")
