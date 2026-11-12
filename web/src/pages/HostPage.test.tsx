@@ -285,15 +285,15 @@ describe("Host page authorization and moderation", () => {
     vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("owner"));
     render(<HostPage />);
     await screen.findByRole("heading", { name: "Attention queue" });
-    const queue = screen.getByTestId("host-question-set-review");
-    expect(queue.getAttribute("data-refresh")).toBe("0");
+    const reviewQueue = () => screen.getByTestId("host-question-set-review");
+    expect(reviewQueue().getAttribute("data-refresh")).toBe("0");
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
-    expect(queue.getAttribute("data-refresh")).toBe("1");
-    await user.click(within(queue).getByRole("button", { name: "Complete synthetic Question Set review" }));
+    await waitFor(() => expect(reviewQueue().getAttribute("data-refresh")).toBe("1"));
+    await user.click(within(reviewQueue()).getByRole("button", { name: "Complete synthetic Question Set review" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
     expect(await screen.findByText("Question Set review recorded. Checking Host queues.")).toBeTruthy();
-    expect(queue.getAttribute("data-refresh")).toBe("2");
+    await waitFor(() => expect(reviewQueue().getAttribute("data-refresh")).toBe("2"));
   });
 
 });
