@@ -127,6 +127,32 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(JSON.stringify(publish({ openedQuestion: opened, liveQuestion: opened }))).not.toContain("sourceChecksum");
   });
 
+  it("revokes stale source attestations when private teaching analyses change without public or timestamp changes", () => {
+    const reviewed: NonNullable<QuestionRecord["analyses"]>[number] = {
+      id: "source-analysis-1", questionId: question.id,
+      sourceFingerprint: "source-evidence-v1", version: 1, origin: "source",
+      status: "reviewed", concept: "Arterial smooth muscle",
+      decisiveClues: ["Tunica media"], mechanism: ["Smooth muscle controls caliber"],
+      distractors: [{ key: "B", whyWrong: "Tunica intima is lined by endothelium." }],
+      references: [{ documentId: "private-slide-1", page: 3, role: "teaching", quote: "Tunica media contains smooth muscle." }],
+      generatedAt: date,
+    };
+    const opened = { ...question, analyses: [reviewed] };
+    const changedReview = { ...opened, analyses: [{ ...reviewed, status: "rejected" as const }] };
+    const changedEvidence = { ...opened, analyses: [{
+      ...reviewed, references: [{ ...reviewed.references[0], documentId: "different-source-document" }],
+    }] };
+    // These private source revisions leave stem, key, explanation, citation,
+    // public snapshot and updatedAt unchanged. Neither old confirmation covers them.
+    expect(() => publish({ openedQuestion: opened, liveQuestion: changedReview })).toThrow(/changed while publishing/);
+    expect(() => publish({ openedQuestion: opened, liveQuestion: changedEvidence })).toThrow(/changed while publishing/);
+    expect(() => publish({ liveQuestion: opened })).toThrow(/changed while publishing/);
+    const unchanged = publish({ openedQuestion: opened, liveQuestion: opened });
+    expect(unchanged.questions[0].correctKey).toBe("A");
+    expect(JSON.stringify(unchanged)).not.toMatch(/private-slide-1|source-analysis-1|different-source-document/);
+    expect(question.correctKey).toBe("A");
+  });
+
   it("never publishes newly held, unexplained or media-dependent questions", () => {
     expect(() => publish({ liveQuestion: { ...question, needsReview: true } })).toThrow(/changed while publishing/);
     expect(() => publish({ liveQuestion: { ...question, explanation: "" } })).toThrow(/changed while publishing/);
