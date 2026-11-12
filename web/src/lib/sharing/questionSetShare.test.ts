@@ -351,7 +351,9 @@ describe("Question Set share boundary", () => {
       snapshot: snapshot(),
       identity: { shareId: SHARE_ID, contentDigest: DIGEST },
       existingQuestions: first.questions,
-      existingSets: [damaged],
+      // A persisted receipt can be malformed at runtime even though QuestionSet
+      // correctly types supported receipt versions as 1. Keep this escape test-only.
+      existingSets: [damaged as unknown as QuestionSet],
       now: NOW,
     })).toThrow(/invalid or unsupported local import receipt/i);
     expect(damaged.questionIds).toEqual(savedIds);
