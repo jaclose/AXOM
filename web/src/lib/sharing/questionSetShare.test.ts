@@ -141,6 +141,56 @@ describe("Question Set share boundary", () => {
       .toBe(await sharedQuestionSetDigest(snapshot()));
   });
 
+  it("refuses inbound reuse when persisted answer text contradicts the key", () => {
+    const stale = question("existing", { correctKey: "B", correctAnswerText: "One" });
+    const untouched = JSON.stringify(stale);
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [stale],
+      now: NOW,
+    })).toThrow(/matching local question has conflicting source answer text/i);
+    expect(JSON.stringify(stale)).toBe(untouched);
+    expect(stale.notes).toBe("PRIVATE");
+    expect(stale.attempts).toHaveLength(1);
+  });
+
+  it("rejects replay if an imported member now has contradictory stored answer evidence", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [],
+      now: NOW,
+    });
+    const corrupted = { ...first.questions[0], correctAnswerText: "One", notes: "RETAIN" };
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [corrupted],
+      existingSets: [first.set],
+      now: NOW,
+    })).toThrow(/incomplete or unavailable question membership/i);
+    expect(corrupted.correctAnswerText).toBe("One");
+    expect(corrupted.notes).toBe("RETAIN");
+    expect(first.set.questionIds).toEqual([first.questions[0].id]);
+  });
+
+  it("allows key-only matching without blocking on unrelated corrupt local questions", () => {
+    const keyOnly = question("key-only", { correctAnswerText: undefined });
+    const unrelated = question("unrelated", { stem: "Different source question", correctAnswerText: "One" });
+    const plan = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [unrelated, keyOnly],
+      now: NOW,
+    });
+    expect(plan.reused).toBe(1);
+    expect(plan.questions).toEqual([]);
+    expect(plan.set.questionIds).toEqual(["key-only"]);
+    expect(keyOnly.correctAnswerText).toBeUndefined();
+    expect(unrelated.correctAnswerText).toBe("One");
+  });
+
   it("reuses only an exact safe-content match and leaves its learner history unchanged", () => {
     const existing = question("existing");
     const result = importSharedQuestionSet({
