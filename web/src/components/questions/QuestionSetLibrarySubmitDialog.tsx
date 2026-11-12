@@ -62,6 +62,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       }),
     };
   }
+  const openedReview = reviewAtOpen.current!;
   // The identity that opened this modal owns its private draft and rights
   // authorization. A→B→A can occur without a React render of B.
   const openingAccount = useRef(accountId);
@@ -270,7 +271,11 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       const batch = draftable.slice(0, 12);
       for (const question of batch) {
         if (controller.signal.aborted || accountRevoked || useAccount.getState().user?.id !== accountId) return;
-        const liveInput = currentDraftInput(set, question);
+        // A reactive parent may refresh the same set ID with NEW source data.
+        // Only the detached revision that opened this review can authorize
+        // sending a private question to an external AI provider.
+        const openedQuestion = openedReview.questions.find(item => item.id === question.id);
+        const liveInput = openedQuestion && currentDraftInput(openedReview.set, openedQuestion);
         if (!liveInput) {
           setDrafts([]);
           setGenerationError("The Question Set or answer evidence changed before AI drafting. Reopen it before sending question content.");
@@ -279,7 +284,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         try {
           const draft = await draftQuestionExplanation(provider, liveInput, controller.signal);
           if (controller.signal.aborted || accountRevoked || useAccount.getState().user?.id !== accountId) return;
-          const stillCurrent = currentDraftInput(set, question);
+          const stillCurrent = openedQuestion && currentDraftInput(openedReview.set, openedQuestion);
           if (!stillCurrent || questionExplanationFingerprint(stillCurrent) !== draft.sourceFingerprint) {
             setDrafts([]);
             setGenerationError("The Question Set or answer evidence changed during AI drafting. Discarded outdated proposals; reopen the set.");
@@ -304,7 +309,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (generationAbort.current === controller) generationAbort.current = null;
       setGenerating(false);
     }
-  }, [provider, accountId, set, statusIdentity, generating, draftable, sessionActive]);
+  }, [provider, accountId, set, statusIdentity, generating, draftable, sessionActive, openedReview]);
 
   useEffect(() => {
     if (!autoDraft || !sessionActive || sessionRevoked.current || checking || !accountId || statusIdentity !== `${accountId}:${set.id}`
@@ -343,7 +348,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     // needs checking. An import, refile or removal can change membership and
     // ownership context without touching any question's updatedAt.
     const liveSet = (bank.questionSets ?? []).find(item => item.id === set.id);
-    if (!sameCommunitySetReviewRevision(set, liveSet)) {
+    if (!sameCommunitySetReviewRevision(openedReview.set, liveSet)) {
       setGenerationError(`The Question Set changed during explanation review. Reopen it before saving drafts.${unverifiedDraftProgress()}`);
       return;
     }
@@ -354,7 +359,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       const fingerprint = question && questionExplanationFingerprint(question);
       const original = question && fingerprint === draft.sourceFingerprint && eligibleForExplanationDraft(question);
       const ownRetry = previousSave?.source === draft.sourceFingerprint && fingerprint === previousSave.applied;
-      if (!question || (!original && !ownRetry) || !set.questionIds.includes(question.id)) {
+      if (!question || (!original && !ownRetry) || !openedReview.set.questionIds.includes(question.id)) {
         setGenerationError(`One or more questions changed. Reopen the set to avoid overwriting newer work.${unverifiedDraftProgress()}`);
         return;
       }
@@ -409,7 +414,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
           && eligibleForExplanationDraft(latestQuestion);
         const ownRetry = previousSave?.source === draft.sourceFingerprint
           && latestFingerprint === previousSave.applied;
-        if (!sameCommunitySetReviewRevision(set, latestWorkspace.questionSets?.find(item => item.id === set.id))
+        if (!sameCommunitySetReviewRevision(openedReview.set, latestWorkspace.questionSets?.find(item => item.id === set.id))
           || !latestQuestion || (!unchanged && !ownRetry)) {
           throw new Error("A question or its source evidence changed during the batch save. Reopen the set before retrying.");
         }
@@ -439,8 +444,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       if (!stillCurrent()) return;
       const stored = raw ? JSON.parse(raw) as { state?: { questions?: QuestionRecord[]; questionSets?: QuestionSet[] } } : null;
       const live = useStore.getState();
-      if (!sameCommunitySetReviewRevision(set, live.questionSets?.find(item => item.id === set.id))
-        || !sameCommunitySetReviewRevision(set, stored?.state?.questionSets?.find(item => item.id === set.id))
+      if (!sameCommunitySetReviewRevision(openedReview.set, live.questionSets?.find(item => item.id === set.id))
+        || !sameCommunitySetReviewRevision(openedReview.set, stored?.state?.questionSets?.find(item => item.id === set.id))
         || drafts.some(draft => {
           const revision = expected.get(draft.questionId)?.applied;
           const persisted = stored?.state?.questions?.find(question => question.id === draft.questionId);
