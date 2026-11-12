@@ -24,7 +24,10 @@ vi.mock("../account/accountStore", () => ({
     },
   ),
 }));
-vi.mock("../account/supabase", () => ({ loadSupabase: mocks.sdk }));
+vi.mock("../account/supabase", () => ({
+  loadSupabase: mocks.sdk,
+  readStoredSession: () => mocks.userId ? session(mocks.userId) : null,
+}));
 const { communicationsRequest } = await import("./client");
 
 function transition(userId: string | null) {
@@ -38,7 +41,19 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 }
-const client = () => ({ functions: { invoke: mocks.invoke } });
+function token(id: string) {
+  return `e30.${btoa(JSON.stringify({ sub: id })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}.sig`;
+}
+function session(id: string) {
+  return { user: { id }, access_token: token(id), refresh_token: "synthetic" };
+}
+const client = () => ({
+  auth: { getSession: async () => ({
+    data: { session: mocks.userId ? session(mocks.userId) : null },
+    error: null,
+  }) },
+  functions: { invoke: mocks.invoke },
+});
 
 beforeEach(() => {
   mocks.userId = "owner-a";
@@ -126,7 +141,7 @@ describe("account export request epoch fences", () => {
     await expect(communicationsRequest<{ url: string }>("export-link", { id: "export-a" }))
       .resolves.toEqual({ url: "https://downloads.example.invalid/owner-a" });
     expect(mocks.invoke).toHaveBeenCalledWith(
-      "communications?action=export-link", { body: { id: "export-a" } },
+      "communications?action=export-link", { body: { id: "export-a" }, headers: { Authorization: `Bearer ${token("owner-a")}` } },
     );
     expect(mocks.listeners.size).toBe(0);
   });
