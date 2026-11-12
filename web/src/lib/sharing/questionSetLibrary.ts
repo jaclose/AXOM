@@ -1,5 +1,5 @@
 import { accountOperationClient } from "../account/supabase";
-import { sharedQuestionSetDigest, validateShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
+import { hasPrivateDeviceCitation, sharedQuestionSetDigest, validateShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
 
 export interface LibraryQuestionSet {
   id: string;
@@ -185,6 +185,11 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   if (!sourceId.trim() || sourceId !== sourceId.trim() || sourceId.length > 200 || credit.length > 80)
     throw new Error("Check the Question Set identity and public credit.");
   validateShare(snapshot);
+  // Preconstructed snapshots can bypass createQuestionSetShare's outbound
+  // privacy check. Enforce it at the final new-submission RPC boundary.
+  // Historical approved sets remain readable/importable unchanged.
+  if (snapshot.questions.some(question => hasPrivateDeviceCitation(question.citation)))
+    throw new Error("Question Set citation contains a private local file path and cannot be published.");
   if (!snapshot.questions.length || snapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
   return withAccount(accountId, async client => {

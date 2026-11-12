@@ -186,6 +186,51 @@ describe("searchable Question Set client boundary", () => {
       .rejects.toThrow(/no longer awaiting academic review/i);
   });
 
+  it.each([
+    ["file URI", "file:///Users/example/private-course.pdf"],
+    ["macOS path", "Internal source /Users/example/private-course.pdf"],
+    ["Linux path", "/home/example/private-course.pdf"],
+    ["Windows drive", "C:\\Users\\Example\\private-course.pdf"],
+    ["Android provider", "content://com.example.provider/document/42"],
+    ["network share", "\\\\campus-server\\share\\private-course.pdf"],
+    ["home-relative path", "~/Documents/private-course.pdf"],
+  ])("refuses direct %s citations before the submission RPC without altering source evidence", async (_label, citation) => {
+    const value = snapshot();
+    value.questions[0].citation = citation;
+    const original = JSON.stringify(value);
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/citation contains a private local file path/i);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(JSON.stringify(value)).toBe(original);
+  });
+
+  it("permits public source references through direct new submission", async () => {
+    const value = snapshot();
+    value.questions[0].citation = "PMID: 123456; DOI: 10.1000/demo; https://example.edu/source";
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    expect(await submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed)).toBe(entryId);
+    expect(rpc).toHaveBeenCalledWith("submit_question_set_library", expect.objectContaining({
+      p_source_id: "set-1", p_snapshot: value, p_rights_confirmed: true, p_answers_confirmed: true,
+    }));
+  });
+
+  it("keeps approved historical previews with device-local citations readable", async () => {
+    const value = snapshot();
+    value.questions[0].citation = "file:///Users/historical/source.pdf";
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: value.title, question_count: 1, status: "approved",
+      snapshot_payload: value, review_revision: 3,
+    }, error: null });
+    service(rpc);
+    const preview = await loadQuestionSetLibraryPreview(accountId, entryId);
+    expect(preview.snapshot).toEqual(value);
+    expect(preview.reviewRevision).toBe(3);
+    expect(rpc).toHaveBeenCalledWith("get_question_set_library", { p_id: entryId });
+  });
+
   it("requires a confirmed answer before sending a public submission", async () => {
     const value = snapshot();
     delete value.questions[0].correctKey;
