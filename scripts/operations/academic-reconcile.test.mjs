@@ -1274,3 +1274,19 @@ test("academic report preserves actionable counts and opaque source fingerprints
     "Gap report should retain a stable opaque checksum prefix for triage.");
   assert.equal(JSON.stringify(result).includes("/private/study/"), false);
 });
+
+test("producer SHA evidence requires a literal string, never coercible arrays", () => {
+  const inventory = fixture();
+  inventory.entries[0].sha256 = [a]; // RegExp.test coerces this into a valid-looking SHA.
+  const sourceResult = run({ inventory });
+  assert.equal(sourceResult.complete, false);
+  assert.ok(sourceResult.errors.some(message => message.includes("Invalid source checksum at inventory row 0")),
+    "A source checksum array must be explicitly rejected rather than admitted as a hash.");
+
+  const pdfTriage = completePdfTriage("text_with_question_indicators");
+  pdfTriage.rows[0].source_sha256 = [a];
+  const pdfResult = run({ pdfTriage });
+  assert.equal(pdfResult.complete, false);
+  assert.ok(pdfResult.errors.some(message => message.includes("missing or repeated source fingerprint")),
+    "A PDF receipt array must not pass digest type validation through RegExp coercion.");
+});
