@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
+import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -196,6 +196,36 @@ describe("Host page authorization and moderation", () => {
     expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
     expect(resolveReport).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
+  });
+
+  it("requires a new role-specific audit receipt and matching account state before reporting success", async () => {
+    const user = userEvent.setup();
+    const target = account("target-account", "Target learner");
+    const initial = { ...dashboard("owner"), accounts: [target] };
+    const updated = {
+      ...dashboard("owner"), accounts: [{ ...target, role: "moderator" as const }],
+      audit: [{
+        id: "synthetic-new-audit", actor_id: "verified-account", target_id: target.user_id,
+        action: "account.role", metadata: { assigned: "moderator", reason: "Reviewed requested role change" },
+        created_at: "2026-11-12T00:00:00.000Z",
+      }],
+    };
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce({ ...initial, accounts: [{ ...target, role: "moderator" as const }] })
+      .mockResolvedValue(updated);
+    vi.mocked(setOperatorRole).mockResolvedValue(undefined);
+    render(<HostPage />);
+    await screen.findByText("Target learner");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Role" }), "moderator");
+    await user.type(screen.getByRole("textbox", { name: /Reason for changing Target learner/ }), "Reviewed requested role change");
+    await user.click(screen.getByRole("button", { name: "Apply role" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Role updated and audited.")).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("did not confirm");
+    await user.click(screen.getByRole("button", { name: "Retry Host" }));
+    expect(await screen.findByText("Role updated and audited.")).toBeTruthy();
+    expect(setOperatorRole).toHaveBeenCalledTimes(1);
   });
 
   it("holds a successful transport response when the Host readback contradicts the requested report resolution", async () => {
