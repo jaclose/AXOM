@@ -137,4 +137,35 @@ describe("Communications settings: visible account versus SDK bearer", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
     expect(screen.getByTestId("settings-identity").textContent).toBe("not-loaded");
   });
+
+  it("discards a late private settings response after an A to B to A switch post-dispatch", async () => {
+    const pending = deferred<{ data: CommunicationsSettings; error: null }>();
+    mocks.invoke.mockImplementationOnce(() => pending.promise);
+    render(<Probe />);
+    await flushSettings();
+    expect(mocks.invoke).toHaveBeenCalledOnce();
+
+    // An unchanged final account ID alone must not admit an old response.
+    moveAccount("owner-b");
+    moveAccount("owner-a");
+    pending.resolve({ data: settings("owner-a", true), error: null });
+    await flushSettings();
+
+    expect(screen.getByTestId("settings-identity").textContent).toBe("not-loaded");
+  });
+
+  it("discards a late private settings response after sign-out post-dispatch", async () => {
+    const pending = deferred<{ data: CommunicationsSettings; error: null }>();
+    mocks.invoke.mockImplementationOnce(() => pending.promise);
+    render(<Probe />);
+    await flushSettings();
+    expect(mocks.invoke).toHaveBeenCalledOnce();
+
+    moveAccount(null);
+    pending.resolve({ data: settings("owner-a", true), error: null });
+    await flushSettings();
+
+    expect(screen.getByTestId("settings-identity").textContent).toBe("not-loaded");
+  });
+
 });
