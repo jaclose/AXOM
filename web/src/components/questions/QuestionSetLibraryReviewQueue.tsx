@@ -9,7 +9,11 @@ import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../ui/primiti
 import { Modal } from "../ui/Modal";
 import "../../styles/question-set-library.css";
 
-export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string }) {
+export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, onReviewed }: {
+  accountId: string;
+  refreshSignal?: number;
+  onReviewed?: () => void;
+}) {
   const [reviewer, setReviewer] = useState(false);
   const [queue, setQueue] = useState<LibrarySubmission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,11 +31,16 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
     void isAcademicReviewer(accountId).then(async allowed => {
       if (!alive) return;
       setReviewer(allowed);
-      if (allowed) setQueue(await listPendingQuestionSets(accountId));
+      if (!allowed) { setPreview(undefined); setReason(""); setAttested(false); }
+      if (allowed) {
+        const items = await listPendingQuestionSets(accountId);
+        // Authorization or account may have changed while the queue was loading.
+        if (alive) setQueue(items);
+      }
     }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "Review queue unavailable."); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [accountId, refresh]);
+  }, [accountId, refresh, refreshSignal]);
 
   async function open(id: string) {
     setBusy(true); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
@@ -40,13 +49,15 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
     finally { setBusy(false); }
   }
   async function decide(approved: boolean) {
-    if (!preview || busy || reason.trim().length < 8 || !attested) return;
+    if (!preview || !reviewer || loading || busy || reason.trim().length < 8 || !attested) return;
     setBusy(true); setError(""); setMessage("");
     try {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
       setPreview(undefined);
       setMessage(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
-      setRefresh(value => value + 1);
+      // Host refresh also rechecks this queue and reviewer rights. A standalone
+      // queue still refreshes itself when no Host callback was supplied.
+      if (onReviewed) onReviewed(); else setRefresh(value => value + 1);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The review could not be saved.";
       // An obsolete reviewed revision must not remain approvable by the same
@@ -87,8 +98,8 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
         <label className="qsl-check"><input type="checkbox" checked={attested} disabled={busy} onChange={event => setAttested(event.target.checked)} />
           <span>I checked the set's distribution rights and answer evidence. My note records what I checked.</span></label>
         <div className="row wrap gap8">
-          <GButton size="sm" variant="primary" disabled={busy || !attested || reason.trim().length < 8} onClick={() => void decide(true)}>Approve for library</GButton>
-          <GButton size="sm" disabled={busy || !attested || reason.trim().length < 8} onClick={() => void decide(false)}>Return for revision</GButton>
+          <GButton size="sm" variant="primary" disabled={busy || loading || !reviewer || !attested || reason.trim().length < 8} onClick={() => void decide(true)}>Approve for library</GButton>
+          <GButton size="sm" disabled={busy || loading || !reviewer || !attested || reason.trim().length < 8} onClick={() => void decide(false)}>Return for revision</GButton>
         </div>
         {error && <p role="alert" className="qsl-error">{error}</p>}
       </div>
