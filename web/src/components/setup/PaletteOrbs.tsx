@@ -2,7 +2,7 @@
 // leans toward the pointer, lifts on hover, and carries an unmistakable ring
 // when chosen. A radiogroup with arrow keys; still and flat under reduced
 // motion. Choosing applies the palette live, everywhere.
-import type { CSSProperties, PointerEvent } from "react";
+import { useState, type CSSProperties, type PointerEvent } from "react";
 import { Check } from "lucide-react";
 import { PALETTES, setPalettePreference } from "../../lib/palette";
 import { usePalettePreference, useResolvedTheme } from "../../lib/useAppearance";
@@ -36,12 +36,20 @@ function rest(event: PointerEvent<HTMLButtonElement>) {
   event.currentTarget.style.setProperty("--py", "0");
 }
 
-export function PaletteOrbs({ label = "Accent palette" }: { label?: string }) {
+const FEATURED_PALETTES = new Set(["midnight", "midnight-black", "ivory"]);
+
+export function PaletteOrbs({ label = "Accent palette", featured = false }: { label?: string; featured?: boolean }) {
   const palette = usePalettePreference();
   const resolved = useResolvedTheme();
+  const [showAll, setShowAll] = useState(() => !FEATURED_PALETTES.has(palette.id));
+  // Never hide a previously selected non-featured palette on a rerun.
+  const selectedNeedsFullList = !FEATURED_PALETTES.has(palette.id);
+  const expanded = !featured || showAll || selectedNeedsFullList;
+  const visible = expanded ? PALETTES : PALETTES.filter((entry) => FEATURED_PALETTES.has(entry.id));
   return (
-    <div className="palette-orbs" role="radiogroup" aria-label={label} onKeyDown={onRadioGroupKeyDown}>
-      {PALETTES.map((definition) => {
+    <div className={`palette-chooser ${featured ? "featured" : ""}`}>
+      <div className={`palette-orbs ${featured ? "compact" : ""}`} role="radiogroup" aria-label={label} onKeyDown={onRadioGroupKeyDown}>
+      {visible.map((definition) => {
         const input = resolved === "light" ? definition.light : definition.dark;
         const selected = palette.id === definition.id;
         const style = {
@@ -75,6 +83,12 @@ export function PaletteOrbs({ label = "Accent palette" }: { label?: string }) {
           </button>
         );
       })}
+      </div>
+      {featured && !selectedNeedsFullList && (
+        <button type="button" className="palette-expand" aria-expanded={expanded} onClick={() => setShowAll((previous) => !previous)}>
+          {expanded ? "Show fewer palettes" : "Explore all palettes"}
+        </button>
+      )}
     </div>
   );
 }
