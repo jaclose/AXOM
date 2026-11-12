@@ -202,3 +202,23 @@ test("source-extracted and installed week numbers are one-based; unknown stays u
   }
   assert.equal(audit(f).complete, true, "Unknown source week must remain explicitly unassigned.");
 });
+
+test("audit readback freshness rejects coercible, timezone-free and impossible timestamps", () => {
+  for (const observedAt of [
+    [NOW], NOW.replace("Z", ""), "2026-02-30T20:50:00.000Z",
+    "2026-11-11 20:50:00Z", "11/11/2026 20:50:00", 1794420600000,
+  ]) {
+    const f = fixture();
+    f.readback.observedAt = observedAt;
+    const result = incomplete(f, "Unverifiable readback timestamp");
+    assert.ok(result.blockers.some(message => message.includes("stale, or future-dated")),
+      "Malformed dates must never certify freshness: " + JSON.stringify(observedAt));
+  }
+  const valid = fixture();
+  valid.readback.observedAt = NOW.replace("Z", "+00:00");
+  assert.equal(audit(valid).complete, true, "Explicit UTC offset is valid.");
+  const leap = "2024-02-29T12:00:00Z";
+  const f = fixture();
+  f.readback.observedAt = leap;
+  assert.equal(verifyTrackerIdentity({ ...f, now: leap }).complete, true, "Valid leap-day receipts remain accepted.");
+});
