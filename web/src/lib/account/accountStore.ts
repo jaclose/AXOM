@@ -241,6 +241,8 @@ export const useAccount = create<AccountState>((set, get) => {
   // Identity generations also distinguish A → B → A, where checking only the
   // final account ID would admit stale asynchronous responses from the first A.
   let accountIdentityEpoch = 0;
+  // Async SDK confirmations cannot supersede a newer authentication event.
+  let sdkAuthEventOrder = 0;
   // A profile SELECT may finish after a successful local rename. Among
   // overlapping SELECTs, only successful authoritative reads supersede older
   // results: a failed later request must not suppress a valid earlier one.
@@ -413,6 +415,7 @@ export const useAccount = create<AccountState>((set, get) => {
         // refresh that failed on a flaky network read as "signed out" while
         // the SDK still held the session: Profile and Account then disagreed.)
         const { data } = supabase.auth.onAuthStateChange((event, session) => {
+          const authEventOrder = ++sdkAuthEventOrder;
           // Only the first SDK event may confirm a boot without a cached session.
           // A later sign-in or A → B → A transition cannot claim the old vault.
           const initialScope = bootInitialSessionScope;
@@ -427,6 +430,33 @@ export const useAccount = create<AccountState>((set, get) => {
             set({ phase: "recovering-password", message: "Choose a new password to finish recovery." });
             return;
           }
+          if (event === "SIGNED_OUT" && get().user && typeof supabase.auth.getSession === "function") {
+            // SIGNED_OUT has no identity. An old A notification can arrive
+            // after B signs in while B is still the SDK's active session.
+            // Never await Supabase from inside its auth callback: its SDK can
+            // hold the auth lock until subscribers return.
+            queueMicrotask(() => {
+              void supabase.auth.getSession().then(({ data: current, error }) => {
+                if (sdkAuthEventOrder !== authEventOrder) return;
+                if (error) throw error;
+                if (current.session?.user) {
+                  // A null event does not revoke a still-active SDK session.
+                  if (get().user?.id !== current.session.user.id) applySession(current.session);
+                  return;
+                }
+                applySession(null);
+              }).catch(() => {
+                if (sdkAuthEventOrder !== authEventOrder) return;
+                // Verification failure is not proof that the current session
+                // remains authorized. Fail closed without deleting device work.
+                applySession(null);
+                set({ error: "AXOM could not verify this account session. Sign in again to restore account access. Your device work remains here." });
+              });
+            });
+            return;
+          }
+          // Minimal synthetic transports without getSession fail closed.
+          // Production Supabase v2 always provides the verified path above.
           applySession(session);
           if (resumeBootWorkspace) void resumeLinkedWorkspaceAfterHydration();
         });

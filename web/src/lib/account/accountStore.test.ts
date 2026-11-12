@@ -373,7 +373,7 @@ describe("account session consistency (Ideas 4: Profile and Account agree; sign-
     useAccount.getState().init();
     await flush();
     emit("SIGNED_OUT", null);
-    expect(useAccount.getState()).toMatchObject({ phase: "signed-out", user: null });
+    await vi.waitFor(() => expect(useAccount.getState()).toMatchObject({ phase: "signed-out", user: null }));
   });
 
   it("keeps upload confirmations on token refresh and drops them on owner change", async () => {
@@ -392,7 +392,9 @@ describe("account session consistency (Ideas 4: Profile and Account agree; sign-
       emit("SIGNED_IN", { ...session, user: { ...session.user, id: "user-2" } });
       for (const clear of clears) expect(clear).toHaveBeenCalledOnce();
       emit("SIGNED_OUT", null);
-      for (const clear of clears) expect(clear).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => {
+        for (const clear of clears) expect(clear).toHaveBeenCalledTimes(2);
+      });
     } finally {
       for (const clear of clears) clear.mockRestore();
     }
