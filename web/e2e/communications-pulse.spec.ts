@@ -10,6 +10,8 @@ mkdirSync(out, { recursive: true });
 test.use({ trace: "off" });
 const consoleIssues = new WeakMap<Page, string[]>();
 const expectedConsoleIssues = new WeakMap<Page, string[]>();
+const syntheticActorUserId = "11111111-1111-4111-8111-111111111111";
+const syntheticActorSessionId = "22222222-2222-4222-8222-222222222222";
 test.beforeEach(({ page }) => {
   const issues: string[] = []; consoleIssues.set(page, issues);
   page.on("pageerror", error => issues.push(error.message));
@@ -17,12 +19,35 @@ test.beforeEach(({ page }) => {
 });
 test.afterEach(({ page }) => { expect(consoleIssues.get(page)).toEqual(expectedConsoleIssues.get(page) ?? []); });
 
-async function setup(page: Page, options: { settingsFailures?: number } = {}) {
+async function setup(page: Page, options: { settingsFailures?: number; authSession?: boolean } = {}) {
   let prefs = preferences("America/Grenada").map(p => ({ ...p, enabled: ["weekly_report", "monthly_report", "annual_pulse"].includes(p.category) }));
   let requests: { id: string; kind: string; status: string; scheduled_for?: string }[] = [];
+  const deletionBodies: Record<string, unknown>[] = [];
   let campaign: Record<string, unknown> | null = null;
   let settingsFailures = options.settingsFailures ?? 0;
   await page.addInitScript(() => { (window as Window & { __AXOM_E2E_ACCOUNT__?: object }).__AXOM_E2E_ACCOUNT__ = { url: "https://communications-test.supabase.co", key: "synthetic-public-test-key" }; });
+  if (options.authSession !== false) {
+    // The fake Zustand account alone is not an authenticated Supabase session.
+    // Seed a fully synthetic, unexpired SDK-readable session before page load.
+    // No real issuer, secret, signature, or actual account exists.
+    await page.addInitScript(({ userId, sessionId }) => {
+      // about:blank and preview iframes are intentionally storage-inaccessible.
+      if (window !== window.top || !/^https?:$/.test(location.protocol)) return;
+      const now = Math.floor(Date.now() / 1000);
+      const encode = (value: object) => btoa(JSON.stringify(value)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+      const token = [
+        encode({ alg: "none", typ: "JWT" }),
+        encode({ sub: userId, session_id: sessionId, aud: "authenticated", role: "authenticated", iat: now, exp: now + 3600, amr: [{ method: "password", timestamp: now }] }),
+        "synthetic-test-only",
+      ].join(".");
+      localStorage.setItem("sb-communications-test-auth-token", JSON.stringify({
+        access_token: token, refresh_token: "synthetic-refresh-token", token_type: "bearer",
+        expires_at: now + 3600, expires_in: 3600,
+        user: { id: userId, aud: "authenticated", role: "authenticated", email: "alex@example.invalid",
+          app_metadata: { provider: "email", providers: ["email"] }, user_metadata: {}, created_at: new Date().toISOString() },
+      }));
+    }, { userId: syntheticActorUserId, sessionId: syntheticActorSessionId });
+  }
   await page.route("https://communications-test.supabase.co/**", async route => {
     const action = new URL(route.request().url()).searchParams.get("action"); const body = route.request().postDataJSON() ?? {};
     let response: unknown = [];
@@ -36,7 +61,15 @@ async function setup(page: Page, options: { settingsFailures?: number } = {}) {
     else if (action === "unsubscribe-all") { prefs = prefs.map(p => ({ ...p, enabled: false })); response = { saved: true }; }
     else if (action === "pulse") response = { snapshot: null };
     else if (action === "request-export") { requests.push({ id: "export-1", kind: "export", status: "requested" }); response = { requested: true }; }
-    else if (action === "request-deletion") { requests.push({ id: "delete-1", kind: "deletion", status: "scheduled", scheduled_for: "2026-10-17T12:00:00Z" }); response = { requested: true }; }
+    else if (action === "request-deletion") {
+      deletionBodies.push(body);
+      if (body.actorUserId !== syntheticActorUserId || body.actorSessionId !== syntheticActorSessionId) {
+        await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Synthetic fixture rejected a mismatched deletion actor." }) });
+        return;
+      }
+      requests.push({ id: "delete-1", kind: "deletion", status: "scheduled", scheduled_for: "2026-10-17T12:00:00Z" });
+      response = { requested: true };
+    }
     else if (action === "cancel-deletion") { requests = requests.map(r => r.id === body.id ? { ...r, status: "cancelled" } : r); response = { cancelled: true }; }
     else if (action === "admin") response = { campaigns: campaign ? [campaign] : [], failures: [], deliveryMode: "disabled" };
     else if (action === "campaign-save") { campaign = { ...body, id: "campaign-1", status: "draft", recipient_count: 0 }; response = { id: "campaign-1", content: body.content }; }
@@ -61,7 +94,7 @@ async function setup(page: Page, options: { settingsFailures?: number } = {}) {
     await dev.flushVault();
     dev.useAccount.setState({ phase: "signed-in", user: { id: "11111111-1111-4111-8111-111111111111", email: "alex@example.invalid", displayName: "Alex Morgan" }, link: "unlinked" });
   });
-  return { allowSettings: () => { settingsFailures = 0; } };
+  return { allowSettings: () => { settingsFailures = 0; }, deletionBodies: () => [...deletionBodies] };
 }
 async function captureLightAccent(page: Page, name: string) {
   await page.evaluate(async () => {
@@ -119,7 +152,7 @@ async function assertPreviewPinsAndReleases(page: Page) {
 for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message)); page.on("console", msg => { if (["error", "warning"].includes(msg.type())) errors.push(msg.text()); });
-  await setup(page);
+  const control = await setup(page);
   // Follow the app's client-side navigation. This UI fixture uses a stand-in
   // account; a new document deliberately reinitializes real Auth and hydration.
   await page.evaluate(() => { location.hash = "communications"; });
@@ -144,7 +177,11 @@ for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${wi
   const localBackup = page.waitForEvent("download"); await page.getByRole("button", { name: "Download local backup" }).click(); await localBackup;
   await page.getByRole("button", { name: "Delete account", exact: true }).click(); await expect(page.getByRole("heading", { name: "Would you like a copy first?" })).toBeVisible();
   await page.getByRole("button", { name: "Continue without backup" }).click(); await page.getByLabel("Type DELETE MY ACCOUNT").fill("DELETE MY ACCOUNT");
-  await page.getByRole("button", { name: "Schedule deletion in 7 days" }).click(); await page.getByRole("button", { name: "Cancel deletion" }).click(); await expect(page.getByText("Deletion cancelled.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Schedule deletion in 7 days" }).click();
+  await expect(page.getByRole("button", { name: "Cancel deletion" })).toBeVisible();
+  expect(control.deletionBodies()).toEqual([{ confirmation: "DELETE MY ACCOUNT", actorUserId: syntheticActorUserId, actorSessionId: syntheticActorSessionId }]);
+  await page.getByRole("button", { name: "Cancel deletion" }).click();
+  await expect(page.getByText("Deletion cancelled.", { exact: true })).toBeVisible();
   await page.getByRole("heading", { name: "Your data stays yours." }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/privacy-${width}.png`, fullPage: true });
   await captureLightAccent(page, `privacy-${width}`);
@@ -333,13 +370,50 @@ test("failed deletion stays reviewable and privacy controls remain keyboard reac
   // Chromium reports the deliberately injected HTTP rejection even though the UI handles it.
   expectedConsoleIssues.set(page, ["Failed to load resource: the server responded with a status of 403 (Forbidden)"]);
   await setup(page); await page.evaluate(() => { location.hash = "privacy"; });
-  await page.route("**/functions/v1/communications?action=request-deletion", route => route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Sign in again to confirm." }) }));
+  let intercepted = 0;
+  await page.route("**/functions/v1/communications?action=request-deletion", route => {
+    intercepted += 1;
+    const body = route.request().postDataJSON();
+    expect(body).toMatchObject({ confirmation: "DELETE MY ACCOUNT", actorUserId: syntheticActorUserId, actorSessionId: syntheticActorSessionId });
+    return route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Sign in again to confirm." }) });
+  });
   await page.getByRole("button", { name: "Delete account", exact: true }).focus(); await page.keyboard.press("Enter");
   await page.getByRole("button", { name: "Continue without backup" }).click(); await page.getByLabel("Type DELETE MY ACCOUNT").fill("DELETE MY ACCOUNT");
   await page.getByRole("button", { name: "Schedule deletion in 7 days" }).click();
   await expect(page.getByText("Sign in again to confirm.", { exact: true })).toBeVisible();
+  expect(intercepted).toBe(1);
   await expect(page.getByRole("heading", { name: "Confirm account deletion" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click(); await expect(page.getByRole("button", { name: "Delete account", exact: true })).toBeVisible();
+});
+
+test("deletion remains fail-closed when only the visual account store is signed in", async ({ page }) => {
+  const control = await setup(page, { authSession: false });
+  await page.evaluate(() => { location.hash = "privacy"; });
+  await page.getByRole("button", { name: "Delete account", exact: true }).click();
+  await page.getByRole("button", { name: "Continue without backup" }).click();
+  await page.getByLabel("Type DELETE MY ACCOUNT").fill("DELETE MY ACCOUNT");
+  await page.getByRole("button", { name: "Schedule deletion in 7 days" }).click();
+  await expect(page.getByText("Sign in again before confirming account deletion.", { exact: true })).toBeVisible();
+  expect(control.deletionBodies()).toHaveLength(0);
+  await expect(page.getByRole("heading", { name: "Confirm account deletion" })).toBeVisible();
+});
+
+test("deletion rejects a foreign cached session without dispatching consent under another account", async ({ page }) => {
+  const control = await setup(page);
+  await page.evaluate(() => {
+    const key = "sb-communications-test-auth-token";
+    const stored = JSON.parse(localStorage.getItem(key) ?? "null") as { user?: { id?: string } } | null;
+    if (!stored?.user) throw new Error("Synthetic session was not seeded");
+    stored.user.id = "33333333-3333-4333-8333-333333333333";
+    localStorage.setItem(key, JSON.stringify(stored));
+  });
+  await page.evaluate(() => { location.hash = "privacy"; });
+  await page.getByRole("button", { name: "Delete account", exact: true }).click();
+  await page.getByRole("button", { name: "Continue without backup" }).click();
+  await page.getByLabel("Type DELETE MY ACCOUNT").fill("DELETE MY ACCOUNT");
+  await page.getByRole("button", { name: "Schedule deletion in 7 days" }).click();
+  await expect(page.getByText("Sign in again before confirming account deletion.", { exact: true })).toBeVisible();
+  expect(control.deletionBodies()).toHaveLength(0);
 });
 
 test("privacy warns about omitted backup media and clears the warning after a complete retry", async ({ page }) => {
