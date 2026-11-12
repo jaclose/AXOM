@@ -7,6 +7,7 @@ import {
 } from "../lib/operator/hostClient";
 import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { QuestionSetLibraryReviewQueue } from "../components/questions/QuestionSetLibraryReviewQueue";
+import { CommunityUploads } from "../components/questions/CommunityUploads";
 import { JournalFeedbackReview } from "../components/dashboard/JournalFeedbackReview";
 import "../styles/host-console.css";
 
@@ -215,8 +216,11 @@ function HostAccountPage() {
               <div><b>{item.title}</b><small>{item.module} · {item.term} · submitted for review · {date(item.updated_at)}</small></div>
               <div><Tag tone="orange">Pending</Tag><small>{item.ready_questions} candidate-ready · {item.review_questions} review</small></div>
             </div>)}</div>}
-          <p className="sub">Approval is intentionally not a one-click host operation. Source provenance, rights and answer-review evidence must be validated through the academic review process first.</p>
+          <p className="sub">Inspect and decide on each exact submitted revision in the academic review queue below. Host ownership alone does not grant reviewer permission; answer evidence and sharing rights remain mandatory.</p>
         </GlassCard>
+        {userId && <CommunityUploads reviewOnly
+          onOpenLibrary={() => { location.hash = "questions"; }}
+          onReviewed={() => setRefresh(value => value + 1)} />}
         {userId && <QuestionSetLibraryReviewQueue accountId={userId} />}
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>
