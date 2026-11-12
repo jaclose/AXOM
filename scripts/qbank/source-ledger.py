@@ -735,14 +735,36 @@ def parse_templates(rows):
                              activity_type=activity, title=title, classification_evidence=r["module_evidence"],
                              installed_status="not_verified", source_association_status="unmatched"))
         r["extraction_status"] = "tracker_template_activities_parsed"
-    # A repeated title within one module needs explicit distinction, never a silently duplicated ID.
-    seen = collections.Counter()
+    # Derived IDs are only source-inventory candidates, not installed Tracker IDs.
+    # Never give the first colliding source an unqualified ID or depend on scan order.
+    by_derived_id = collections.defaultdict(list)
     for a in acts:
-        seen[a["activity_id"]] += 1
-        if seen[a["activity_id"]] > 1:
-            a["activity_id"] += "-repeat-" + str(seen[a["activity_id"]])
+        by_derived_id[a["activity_id"]].append(a)
+    withheld = set()
+    for base_id, group in by_derived_id.items():
+        if len(group) == 1:
+            continue
+        locators = [(a["source_id"], a["source_line"]) for a in group]
+        if len(set(locators)) != len(locators):
+            # A repeated inventory of the *same* original line cannot establish
+            # how many canonical activities exist. Hold the whole ambiguous
+            # group rather than minting plausible-looking IDs or counts.
+            affected = {a["source_id"] for a in group}
+            for source in templates:
+                if source["source_id"] in affected:
+                    source["extraction_status"] = "template_ambiguous_activity_identity_held"
+                    source["review_status"] = "source_identity_review_required"
+                    source["unresolved_reason"] = "duplicate_template_source_locator"
+            withheld.update(id(a) for a in group)
+            continue
+        for a in group:
+            # Distinguish only collisions. All existing unique IDs stay intact;
+            # every disambiguated candidate still requires original-ID review.
+            source_locator = a["source_id"] + "|" + str(a["source_line"])
+            a["activity_id"] = base_id + "-source-" + digest_text(source_locator)[:16]
             a["id_collision_review"] = True
-    return acts
+            a["source_association_status"] = "requires_original_id_review"
+    return [a for a in acts if id(a) not in withheld]
 
 def coverage_matrix(acts, rows):
     groups = collections.defaultdict(list)
