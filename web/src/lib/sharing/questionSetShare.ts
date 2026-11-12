@@ -112,6 +112,17 @@ export function createQuestionSetShare(
     if (byId.has(question.id)) {
       throw new Error("Question Set refers to ambiguous duplicate source question records and cannot be shared safely.");
     }
+    // The stored display answer must agree with the source key. Otherwise
+    // toShared() would silently recalculate it, concealing stale or corrupt
+    // source evidence during publication. Key-only questions remain supported.
+    if (question.correctAnswerText !== undefined) {
+      const keyedChoice = question.options.find(
+        (option) => option.key.trim().toUpperCase() === question.correctKey?.trim().toUpperCase(),
+      );
+      if (!keyedChoice || question.correctAnswerText.trim() !== keyedChoice.text.trim()) {
+        throw new Error("Question Set source answer text conflicts with its keyed choice and requires review before sharing.");
+      }
+    }
     byId.set(question.id, question);
   }
   const questions = set.questionIds
