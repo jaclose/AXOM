@@ -778,9 +778,11 @@ def coverage_matrix(acts, rows):
     for (term, module, week, typ), expected in sorted(groups.items(), key=lambda kv: str(kv[0])):
         candidates = []
         for (t,m,w), source in available.items():
-            if m != module or (t and term and t != term): continue
+            # Null term/week means unknown provenance, never a wildcard for
+            # a numbered template cohort. Unmatched originals are reported
+            # separately below, not lost or silently assigned to another week.
+            if m != module or t != term or w != week: continue
             for r in source:
-                if week is not None and w is not None and w != week: continue
                 if typ in {"imcq", "esoft", "small_group"} and typ != r["document_type"]: continue
                 candidates.append(r)
         hashes = {r["source_sha256"] or r["source_id"] for r in candidates}
