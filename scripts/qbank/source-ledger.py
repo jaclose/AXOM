@@ -211,10 +211,14 @@ def mapping(path, root_label, native=None):
             if native_course.get("name"):
                 module = str(native_course["name"])
                 module_evidence = "package_manifest.course.name"
-            if isinstance(native_course.get("term"), int) and 1 <= native_course["term"] <= 5:
-                term, term_evidence = "T" + str(native_course["term"]), "package_manifest.course.term"
-            if isinstance(native_course.get("week"), int):
-                week = native_course["week"]
+            native_term = native_course.get("term")
+            if type(native_term) is int and 1 <= native_term <= 5:
+                term, term_evidence = "T" + str(native_term), "package_manifest.course.term"
+            # bool is an int in Python; zero/negative/boolean producer values
+            # are not authoritative week evidence and must not erase path hints.
+            native_week = native_course.get("week")
+            if type(native_week) is int and native_week > 0:
+                week = native_week
                 source = native.get("source") or {}
                 declared = source.get("sourceWeekDeclared") if isinstance(source, dict) else None
                 week_evidence = "package_declared_week" if declared is True else "axom_assigned_week_not_official"
