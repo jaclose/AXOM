@@ -276,7 +276,9 @@ export async function bankFiles(
     try {
       if (!asset.checksum) throw new Error(`Image integrity check failed: ${asset.filename}. The package does not provide a checksum for these bytes.`);
       const key = reviewBlobKey(asset.checksum);
-      const stored = await getQuestionAttachmentBlob(key);
+      // A selected prepared bundle already supplies these bytes. Do not run an
+      // unrelated cloud recovery before verifying the immutable source figure.
+      const stored = read && bankFile ? undefined : await getQuestionAttachmentBlob(key);
       const bytes = read && bankFile
         ? await read(bankAssetPath(bankFile, asset.filename))
         : stored ? new Uint8Array(await stored.blob.arrayBuffer()) : undefined;
