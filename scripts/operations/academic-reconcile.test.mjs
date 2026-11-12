@@ -1214,3 +1214,107 @@ test("one-based source weeks reject Week 0 without inventing a numbered curricul
   }
   assert.equal(run().complete, true, "Unassigned unknown weeks must remain supported.");
 });
+
+test("sanitized academic report never serializes private source paths, tracker IDs or free-text review reasons", () => {
+  const secret = "PRIVATE_R41_DO_NOT_EMIT";
+  const cases = [
+    ["malformed source path", () => {
+      const inventory = fixture();
+      inventory.entries[0] = { ...inventory.entries[0], path: secret + "/source.pdf", sha256: "bad" };
+      return run({ inventory });
+    }],
+    ["unclassified source sample", () => {
+      const inventory = fixture();
+      inventory.entries[0] = { ...inventory.entries[0], path: secret + "/unclassified.pdf", sha256: "d".repeat(64) };
+      return run({ inventory });
+    }],
+    ["broken duplicate alias", () => {
+      const inventory = fixture();
+      inventory.entries[1] = { ...inventory.entries[1], path: secret + "/duplicate.pdf", duplicateOf: "wrong-canonical" };
+      return run({ inventory });
+    }],
+    ["pending source reason", () => {
+      const held = dispositions();
+      held.sources[0] = { ...held.sources[0], status: "review-required", reason: secret + " reviewer note" };
+      return run({ dispositions: held });
+    }],
+    ["unknown source kind", () => {
+      const held = dispositions();
+      held.sources[0] = { ...held.sources[0], kind: secret };
+      return run({ dispositions: held });
+    }],
+    ["unknown source status", () => {
+      const held = dispositions();
+      held.sources[0] = { ...held.sources[0], status: secret };
+      return run({ dispositions: held });
+    }],
+    ["tracker duplicate and invalid week", () => {
+      const installed = tracker();
+      installed.activities[0] = { ...installed.activities[0], activityId: secret, week: 0, installed: false };
+      installed.activities[1] = { ...installed.activities[1], activityId: secret, week: 5 };
+      return run({ tracker: installed });
+    }],
+  ];
+  for (const [label, make] of cases) {
+    const report = make();
+    assert.equal(report.complete, false, label);
+    assert.equal(JSON.stringify(report).includes(secret), false,
+      label + " leaked a private input in a supposedly sanitized report.");
+  }
+});
+
+test("academic report preserves actionable counts and opaque source fingerprints after redaction", () => {
+  const inventory = fixture();
+  inventory.entries[0] = { ...inventory.entries[0], path: "/private/study/original.pdf", sha256: "d".repeat(64) };
+  const result = run({ inventory });
+  assert.equal(result.complete, false);
+  assert.equal(result.counts.missingDisposition, 1);
+  assert.ok(result.samples.unclassifiedFiles.every(value => typeof value === "string"));
+  assert.ok(result.samples.unclassifiedFiles.some(value => value.includes("d".repeat(12))),
+    "Gap report should retain a stable opaque checksum prefix for triage.");
+  assert.equal(JSON.stringify(result).includes("/private/study/"), false);
+});
+
+test("producer SHA evidence requires a literal string, never coercible arrays", () => {
+  const inventory = fixture();
+  inventory.entries[0].sha256 = [a]; // RegExp.test coerces this into a valid-looking SHA.
+  const sourceResult = run({ inventory });
+  assert.equal(sourceResult.complete, false);
+  assert.ok(sourceResult.errors.some(message => message.includes("Invalid source checksum at inventory row 0")),
+    "A source checksum array must be explicitly rejected rather than admitted as a hash.");
+
+  const pdfTriage = completePdfTriage("text_with_question_indicators");
+  pdfTriage.rows[0].source_sha256 = [a];
+  const pdfResult = run({ pdfTriage });
+  assert.equal(pdfResult.complete, false);
+  assert.ok(pdfResult.errors.some(message => message.includes("missing or repeated source fingerprint")),
+    "A PDF receipt array must not pass digest type validation through RegExp coercion.");
+});
+
+test("malformed source census and production counts cannot echo arbitrary producer strings", () => {
+  const secret = "PRIVATE_R41_UNTRUSTED_COUNT";
+  for (const mutate of [
+    i => { i.summary.files = secret; },
+    i => { i.summary.uniqueFiles = secret; },
+    i => { i.summary.duplicateFiles = secret; },
+    i => { i.cataloguedPaths = secret; },
+    i => { i.expectedHashedPaths = secret; },
+    i => { i.expectedDistinctHashes = secret; },
+  ]) {
+    const inventory = fixture();
+    mutate(inventory);
+    const report = run({ inventory });
+    assert.equal(report.complete, false);
+    assert.equal(JSON.stringify(report).includes(secret), false,
+      "Unverified denominators must be represented as invalid rather than echoed.");
+  }
+  const production = {
+    projectId: "jofkmfwkidubxcutkwzf", observedAt: new Date().toISOString(),
+    academicCollections: secret, academicRevisions: 2, academicFiles: 0, storageObjects: 0,
+  };
+  const report = run({ production });
+  assert.equal(report.complete, false);
+  assert.equal(JSON.stringify(report).includes(secret), false,
+    "A malformed production statistic must not escape in report counts.");
+  assert.equal(report.counts.productionAcademicCollections, null);
+});
