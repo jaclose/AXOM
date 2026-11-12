@@ -31,8 +31,7 @@ describe("academic reviewer permission freshness", () => {
     const first = isAcademicReviewer("synthetic-reviewer");
     const second = isAcademicReviewer("synthetic-reviewer");
     expect(first).toBe(second);
-    await Promise.resolve();
-    expect(rpc).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
     finish({ data: true, error: null });
     expect(await Promise.all([first, second])).toEqual([true, true]);
     expect(await isAcademicReviewer("synthetic-reviewer")).toBe(true);
