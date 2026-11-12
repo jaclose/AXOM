@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommunicationsSettings } from "./client";
 import { useCommunications } from "./client";
@@ -166,6 +166,49 @@ describe("Communications settings: visible account versus SDK bearer", () => {
     await flushSettings();
 
     expect(screen.getByTestId("settings-identity").textContent).toBe("not-loaded");
+  });
+
+
+  it("keeps only the newest same-account reload even when the older admin response arrives last", async () => {
+    const older = deferred<{ data: CommunicationsSettings; error: null }>();
+    const newer = deferred<{ data: CommunicationsSettings; error: null }>();
+    mocks.invoke.mockImplementationOnce(() => older.promise).mockImplementationOnce(() => newer.promise);
+    const { result } = renderHook(() => useCommunications());
+    await flushSettings();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+
+    act(() => { void result.current.reload(); });
+    await flushSettings();
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
+
+    newer.resolve({ data: settings("owner-a", false), error: null });
+    await flushSettings();
+    expect(result.current.data?.admin).toBe(false);
+
+    older.resolve({ data: settings("owner-a", true), error: null });
+    await flushSettings();
+    expect(result.current.data?.admin).toBe(false);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("clears an earlier administrator permission when same-account revalidation fails", async () => {
+    mocks.invoke.mockResolvedValueOnce({ data: settings("owner-a", true), error: null });
+    const { result } = renderHook(() => useCommunications());
+    await flushSettings();
+    expect(result.current.data?.admin).toBe(true);
+
+    const pending = deferred<{ data: null; error: Error }>();
+    mocks.invoke.mockImplementationOnce(() => pending.promise);
+    act(() => { void result.current.reload(); });
+    await flushSettings();
+    expect(result.current.data).toBeNull();
+    expect(result.current.loading).toBe(true);
+
+    pending.resolve({ data: null, error: new Error("synthetic offline") });
+    await flushSettings();
+    expect(result.current.data).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toContain("Communications could not be reached");
   });
 
 });
