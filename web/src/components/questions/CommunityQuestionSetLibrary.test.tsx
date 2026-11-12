@@ -157,6 +157,45 @@ describe("Community Question Set Library", () => {
     });
   });
 
+  it("distinguishes every teaching disclosure in a multi-question keyboard preview", async () => {
+    const user = userEvent.setup();
+    const many = {
+      ...snapshot,
+      orderedQuestionIds: ["shared-question-1", "shared-question-2", "shared-question-3"],
+      questions: [1, 2, 3].map(number => ({
+        ...snapshot.questions[0],
+        id: `shared-question-${number}`,
+        stem: `Which synthetic answer is supported in question ${number}?`,
+      })),
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: many, contentDigest: "b".repeat(64),
+      status: "approved", reviewRevision: 3,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    await user.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported in question 3?");
+
+    const disclosures = screen.getAllByText("Reveal recorded answer and teaching notes");
+    expect(disclosures).toHaveLength(3);
+    disclosures.forEach((control, index) => {
+      expect(control.textContent).toContain(`for question ${index + 1}`);
+      expect(control.closest("details")?.open).toBe(false);
+    });
+    // After import disables the primary button, the last question can
+    // still be reached from Close with an unambiguous accessible name.
+    await user.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Already in my AXOM" }).hasAttribute("disabled")).toBe(true));
+    screen.getByRole("button", { name: "Close" }).focus();
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(disclosures[2]);
+    await user.click(disclosures[2]);
+    expect(disclosures[2].closest("details")?.open).toBe(true);
+    expect(disclosures[0].closest("details")?.open).toBe(false);
+    expect(disclosures[1].closest("details")?.open).toBe(false);
+    expect(mock.commit).toHaveBeenCalledOnce();
+  });
+
   it("keeps answer and topic disclosures keyboard-reachable after import disables its only action", async () => {
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
