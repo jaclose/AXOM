@@ -140,6 +140,53 @@ describe("course bank read model", () => {
     expect(set).toEqual(original);
     expect(question).toEqual(row);
   });
+  it("holds colliding raw set IDs and all dependent review membership regardless of input order", () => {
+    const conflicting = { ...set, scope: { module: "FTM 1", week: 3, courseId: "c1" }, sourceDocumentIds: ["other-origin"] };
+    const review = { ...set, id: "review-q1", kind: "review" as const };
+    const cleanSet = { ...set, id: "unique", questionIds: ["q2"] };
+    const cleanQuestion = { ...question, id: "q2", setId: "unique" };
+    const original = structuredClone([set, conflicting, review, cleanSet, question, cleanQuestion]);
+    for (const originals of [[set, conflicting], [conflicting, set]]) {
+      const modules = indexed([...originals, review, cleanSet], [question, cleanQuestion]);
+      const weeks = modules.flatMap((module) => module.weeks);
+      expect(weeks.flatMap((week) => week.questionIds)).toEqual(["q2"]);
+      expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["unique"]);
+      expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+    }
+    expect([set, conflicting, review, cleanSet, question, cleanQuestion]).toEqual(original);
+  });
+  it("does not credit a duplicated raw question ID to any source week even when one copy looks ready", () => {
+    const other = { ...question, sourceDocumentId: "other-original", correctKey: "B" };
+    const cleanSet = { ...set, id: "unique", questionIds: ["q2"] };
+    const cleanQuestion = { ...question, id: "q2", setId: "unique" };
+    for (const originals of [[question, other], [other, question]]) {
+      const weeks = indexed([set, cleanSet], [...originals, cleanQuestion])
+        .flatMap((module) => module.weeks);
+      expect(weeks.flatMap((week) => week.questionIds)).toEqual(["q2"]);
+      expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["unique"]);
+      expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+    }
+  });
+
+  it("holds repeated original membership entries instead of silently deduplicating them", () => {
+    const duplicateMembers = { ...set, questionIds: ["q1", "q1"] };
+    const review = { ...set, id: "secondary", kind: "review" as const };
+    const cleanSet = { ...set, id: "unique", questionIds: ["q2"] };
+    const cleanQuestion = { ...question, id: "q2", setId: "unique" };
+    const weeks = indexed([duplicateMembers, review, cleanSet], [question, cleanQuestion])
+      .flatMap((module) => module.weeks);
+    expect(weeks.flatMap((week) => week.questionIds)).toEqual(["q2"]);
+    expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["unique"]);
+    expect(duplicateMembers.questionIds).toEqual(["q1", "q1"]);
+  });
+
+  it("does not let a malformed secondary review suppress an independently verified primary", () => {
+    const malformedReview = { ...set, id: "review", kind: "review" as const, questionIds: ["q1", "q1"] };
+    const [module] = indexed([set, malformedReview], [question]);
+    expect(module.weeks[0]).toMatchObject({ questionIds: ["q1"], ready: 1, attempted: 1 });
+    expect(module.weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
+  });
+
   it("keeps generated and review provenance ahead of school-like titles", () => {
     expect(bankSource({ ...set, kind: "generated" })).toBe("AXOM generated");
     expect(bankSource({ ...set, kind: "review" })).toBe("Review");

@@ -51,6 +51,34 @@ export function buildCourseQuestionBank(
   sets: readonly QuestionSet[], questions: readonly QuestionRecord[],
   courses: readonly Course[], terms: readonly Term[],
 ): BankModule[] {
+  // Raw duplicate originals are ambiguous before Map indexing. A last-write-wins
+  // lookup or Set-deduplicated member list must never certify a source week,
+  // launchable set card or ready count. Leave the records in the library for
+  // review and exclude every affected membership from this navigator only.
+  const repeatedSetIds = new Set<string>();
+  const seenSetIds = new Set<string>();
+  const malformedMemberSets = new Set<QuestionSet>();
+  const ambiguousQuestionIds = new Set<string>();
+  for (const set of sets) {
+    if (seenSetIds.has(set.id)) repeatedSetIds.add(set.id);
+    seenSetIds.add(set.id);
+    if (new Set(set.questionIds).size !== set.questionIds.length) {
+      malformedMemberSets.add(set);
+      // A malformed review must not erase an independently verified primary.
+      // A malformed original cannot be rescued by an unrelated review set.
+      if (set.kind !== "review") set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
+    }
+  }
+  for (const set of sets) {
+    if (repeatedSetIds.has(set.id)) {
+      set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
+    }
+  }
+  const seenQuestionIds = new Set<string>();
+  for (const question of questions) {
+    if (seenQuestionIds.has(question.id)) ambiguousQuestionIds.add(question.id);
+    seenQuestionIds.add(question.id);
+  }
   const questionsById = new Map(questions.map((question) => [question.id, question]));
   const setsById = new Map(sets.map((set) => [set.id, set]));
   const memberships = new Map<string, QuestionSet[]>();
@@ -85,6 +113,10 @@ export function buildCourseQuestionBank(
   const modules = new Map<string, BankModule>();
   const eligibleBySet = new Map<string, string[]>();
   for (const set of sets) {
+    // This also blocks secondary review sets from laundering a conflicted
+    // primary original into a different source week.
+    if (repeatedSetIds.has(set.id) || malformedMemberSets.has(set)
+      || set.questionIds.some((id) => ambiguousQuestionIds.has(id))) continue;
     const rawWeek = set.scope?.week;
     // Invalid explicit source weeks are review work, not a usable week label.
     if (hasDeclaredWeek(rawWeek) && parseWeek(rawWeek) === undefined) continue;
