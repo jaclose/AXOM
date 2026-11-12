@@ -226,6 +226,36 @@ describe("Community Question Set Library", () => {
     expect(mock.commit).toHaveBeenCalledOnce();
   });
 
+  it("never reuses a previous account's search term or input during an account switch", async () => {
+    const user = userEvent.setup();
+    const view = render(<CommunityQuestionSetLibrary />);
+    const searchField = screen.getByRole("searchbox", { name: "Search Community Question Sets" }) as HTMLInputElement;
+    await screen.findByRole("heading", { name: "Synthetic practice" });
+    await user.type(searchField, "private-account-a-topic");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-1", "private-account-a-topic", 0));
+
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+    });
+    view.rerender(<CommunityQuestionSetLibrary />);
+
+    // B must not even briefly display A's term or dispatch it before a
+    // post-render reset effect has had a chance to run.
+    expect(searchField.value).toBe("");
+    await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-2", "", 0));
+    const bQueries = mock.search.mock.calls
+      .filter(([account]) => account === "account-2")
+      .map(([, query]) => query);
+    expect(bQueries.length).toBeGreaterThan(0);
+    expect(bQueries.every(query => query === "")).toBe(true);
+
+    await user.type(searchField, "account-b-topic");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-2", "account-b-topic", 0));
+  });
+
   it("revokes delayed search results after an A to B to A account round trip", async () => {
     let resolveSearch!: (value: typeof summary[]) => void;
     mock.search.mockImplementationOnce(() => new Promise(resolve => { resolveSearch = resolve; }));
