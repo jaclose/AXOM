@@ -83,8 +83,7 @@ describe("account export request epoch fences", () => {
     mocks.invoke.mockReturnValue(completion.promise);
     const request = communicationsRequest("request-export");
     // Allow the loadSupabase() await to resolve and dispatch using A.
-    await Promise.resolve();
-    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
     transition("owner-b");
     completion.resolve({ data: { requested: true }, error: null });
     await expect(request).rejects.toThrow(/account changed/i);
@@ -125,8 +124,7 @@ describe("account export request epoch fences", () => {
     const completion = deferred<{ data: { url: string }; error: null }>();
     mocks.invoke.mockReturnValue(completion.promise);
     const request = communicationsRequest<{ url: string }>("export-link", { id: "export-a" });
-    await Promise.resolve();
-    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
     transition("owner-b");
     completion.resolve({ data: { url: "https://downloads.example.invalid/owner-a" }, error: null });
     await expect(request).rejects.toThrow(/account changed/i);
