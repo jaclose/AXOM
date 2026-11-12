@@ -106,6 +106,33 @@ describe("Question Set share boundary", () => {
     expect(value.questions[0].correctKey).toBe("B");
   });
 
+  it("refuses inconsistent stored source answer text rather than silently recomputing it", () => {
+    const source = question("q1", { correctKey: "B", correctAnswerText: "One" });
+    const original = JSON.stringify(source);
+    expect(() => createQuestionSetShare(questionSet(), [source], NOW))
+      .toThrow(/source answer text conflicts with its keyed choice/i);
+    expect(JSON.stringify(source)).toBe(original);
+    expect(source.correctKey).toBe("B");
+  });
+
+  it("rejects stale display text without a key but permits a valid key-only source", () => {
+    expect(() => createQuestionSetShare(questionSet(), [question("q1", {
+      correctKey: undefined, correctAnswerText: "Two",
+    })], NOW)).toThrow(/source answer text conflicts/i);
+    const keyOnly = question("q1", { correctAnswerText: undefined });
+    const shared = createQuestionSetShare(questionSet(), [keyOnly], NOW);
+    expect(shared.questions[0]).toMatchObject({ correctKey: "B", correctAnswerText: "Two" });
+    expect(keyOnly.correctAnswerText).toBeUndefined();
+  });
+
+  it("does not let unrelated corrupt answer text block a healthy selected set", () => {
+    const shared = createQuestionSetShare(questionSet(), [
+      question("q1"), question("unselected", { correctAnswerText: "One" }),
+    ], NOW);
+    expect(shared.orderedQuestionIds).toEqual(["shared-question-1"]);
+    expect(shared.questions[0].correctKey).toBe("B");
+  });
+
   it("round-trips a historical v1 JSON snapshot with a stable content digest", async () => {
     const serialized = JSON.stringify(snapshot());
     const restored: unknown = JSON.parse(serialized);
