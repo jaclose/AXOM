@@ -324,6 +324,36 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await expect(preview.getByText(STEM, { exact: true })).toBeVisible();
     await preview.getByRole("button", { name: "Add to my AXOM" }).click();
     await expect(preview.getByRole("button", { name: "Already in my AXOM" })).toBeDisabled();
+
+    // Real Chromium acceptance for the Community teaching disclosures.
+    // jsdom cannot validate native <summary> Enter/Space activation.
+    // The imported set still offers Practice, while Add is now disabled.
+    const teachingSummary = preview.getByText("Reveal recorded answer and teaching notes");
+    const topicSummary = preview.getByText("Reveal set topic tags");
+    const teachingDetails = teachingSummary.locator("..");
+    const topicDetails = topicSummary.locator("..");
+    await expect(teachingSummary).toHaveAccessibleName("Reveal recorded answer and teaching notes for question 1");
+    await expect(teachingSummary).toHaveAttribute("tabindex", "0");
+    await expect(topicSummary).toHaveAttribute("tabindex", "0");
+    await expect(teachingDetails).not.toHaveAttribute("open", "");
+    await expect(topicDetails).not.toHaveAttribute("open", "");
+    await expect(preview.getByText(/Submitted answer: B/)).toBeHidden();
+    await expect(preview.getByText("Source: Synthetic review fixture, page 1")).toBeHidden();
+
+    await preview.getByRole("button", { name: "Practice this set" }).focus();
+    await other.keyboard.press("Shift+Tab");
+    await expect(teachingSummary).toBeFocused();
+    await other.keyboard.press("Enter");
+    await expect(teachingDetails).toHaveAttribute("open", "");
+    await expect(preview.getByText(/Submitted answer: B/)).toBeVisible();
+    await expect(preview.getByText("Source: Synthetic review fixture, page 1")).toBeVisible();
+    await other.keyboard.press("Shift+Tab");
+    await expect(topicSummary).toBeFocused();
+    await other.keyboard.press("Space");
+    await expect(topicDetails).toHaveAttribute("open", "");
+    await other.keyboard.press("Space");
+    await expect(topicDetails).not.toHaveAttribute("open", "");
+
     expect(await other.evaluate(async () => {
       const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => {
         questionSets: Array<{ title: string; importProvenance?: { shareId: string } }>;
