@@ -27,6 +27,8 @@ const pdfAvailabilityStatuses = new Set([
   "academic_scope_conflict_review", "academic_scope_changed_review",
 ]);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
+// Malformed producer counts may contain confidential text; do not echo them.
+const safeCount = value => integer(value) ? value : "invalid";
 // Unlike activity counts, a source-stated or inferred curriculum week starts at 1.
 const validWeek = value => Number.isSafeInteger(value) && value >= 1;
 const sample = (array, max = 12) => array.slice(0, max);
@@ -120,22 +122,22 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   const unique = [...byHash.values()];
   if (inventory.expectedHashedPaths !== undefined
     && (!integer(inventory.expectedHashedPaths) || inventory.expectedHashedPaths !== inventory.entries.length))
-    errors.push(`Expanded manifest has ${inventory.entries.length} hashed paths but source summary reports ${inventory.expectedHashedPaths}; require an explicit valid hashed-path count.`);
+    errors.push(`Expanded manifest has ${inventory.entries.length} hashed paths but source summary reports ${safeCount(inventory.expectedHashedPaths)}; require an explicit valid hashed-path count.`);
   if (inventory.expectedDistinctHashes !== undefined
     && (!integer(inventory.expectedDistinctHashes) || inventory.expectedDistinctHashes !== unique.length))
-    errors.push(`Expanded manifest has ${unique.length} unique hashes but source summary reports ${inventory.expectedDistinctHashes}; require an explicit valid distinct-hash count.`);
+    errors.push(`Expanded manifest has ${unique.length} unique hashes but source summary reports ${safeCount(inventory.expectedDistinctHashes)}; require an explicit valid distinct-hash count.`);
   if (inventory.cataloguedPaths !== undefined
     && (!integer(inventory.cataloguedPaths) || inventory.cataloguedPaths < inventory.entries.length))
-    errors.push(`Source summary catalogued path count ${inventory.cataloguedPaths} is missing, invalid or smaller than ${inventory.entries.length} hashed manifest paths.`);
+    errors.push(`Source summary catalogued path count ${safeCount(inventory.cataloguedPaths)} is missing, invalid or smaller than ${inventory.entries.length} hashed manifest paths.`);
   const priorityMissingSha = integer(inventory.priorityMissingSha) ? inventory.priorityMissingSha : null;
   if (priorityMissingSha === null)
     blockers.push("Eligible priority missing-SHA denominator is absent or malformed; pair the source manifest with its verified source summary before certifying coverage.");
   else if (priorityMissingSha > 0)
     blockers.push(`${priorityMissingSha} eligible academic sources have no verified SHA-256; source coverage is incomplete.`);
   if (integer(inventory.cataloguedPaths) && inventory.cataloguedPaths > inventory.entries.length) warnings.push(`${inventory.cataloguedPaths - inventory.entries.length} catalogued paths were not included in the hashed cohort; the eligibility scan must distinguish excluded references from the remaining priority files.`);
-  if (inventory.summary.uniqueFiles !== unique.length) errors.push(`Inventory uniqueFiles ${inventory.summary.uniqueFiles} != ${unique.length} verified unique hashes`);
-  if (inventory.summary.files !== inventory.entries.length) errors.push(`Inventory files ${inventory.summary.files} != ${inventory.entries.length} entries`);
-  if (inventory.summary.duplicateFiles !== duplicateRecords.length) errors.push(`Inventory duplicateFiles ${inventory.summary.duplicateFiles} != ${duplicateRecords.length} duplicates`);
+  if (inventory.summary.uniqueFiles !== unique.length) errors.push(`Inventory uniqueFiles ${safeCount(inventory.summary.uniqueFiles)} != ${unique.length} verified unique hashes`);
+  if (inventory.summary.files !== inventory.entries.length) errors.push(`Inventory files ${safeCount(inventory.summary.files)} != ${inventory.entries.length} entries`);
+  if (inventory.summary.duplicateFiles !== duplicateRecords.length) errors.push(`Inventory duplicateFiles ${safeCount(inventory.summary.duplicateFiles)} != ${duplicateRecords.length} duplicates`);
   for (const entry of duplicateRecords) {
     if (!unique.some(first => first.path === entry.duplicateOf && first.sha256 === entry.sha256)) {
       errors.push("Duplicate source alias does not point to a matching canonical source; original path omitted.");
@@ -521,7 +523,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   if (!Array.isArray(dispositionRows) || !Array.isArray(receiptRows) || !Array.isArray(trackerRows)) warnings.push("This is a discovery baseline, not a release acceptance certificate.");
   const counts = {
     inventoryFiles: inventory.entries.length, uniqueSourceFiles: unique.length, duplicateFiles: duplicateRecords.length,
-    ...(inventory.cataloguedPaths !== undefined ? { cataloguedPaths: inventory.cataloguedPaths } : {}),
+    ...(inventory.cataloguedPaths !== undefined ? { cataloguedPaths: integer(inventory.cataloguedPaths) ? inventory.cataloguedPaths : null } : {}),
     priorityMissingSha,
     explicitlyClassified: dmap.size, missingDisposition: missingDisposition.length,
     questionSources: questionSources.length, nonInstalledQuestionSources: pendingSources.length,
@@ -535,9 +537,9 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     ...(pdfTriageMetrics ?? {}),
     ...(b4AuditMetrics ?? {}),
     ...(figureBearingSources ? { figureBearingSources, declaredFigureReferences, verifiedFigureReferences } : {}),
-    ...(production ? { productionSnapshotAt: production.observedAt,
-      productionAcademicCollections: production.academicCollections,
-      productionAcademicFiles: production.academicFiles } : {}),
+    ...(production ? { productionSnapshotAt: typeof production.observedAt === "string" && Number.isFinite(Date.parse(production.observedAt)) ? new Date(production.observedAt).toISOString() : null,
+      productionAcademicCollections: integer(production.academicCollections) ? production.academicCollections : null,
+      productionAcademicFiles: integer(production.academicFiles) ? production.academicFiles : null } : {}),
   };
   return {
     format: "axom-academic-reconciliation-v1",
