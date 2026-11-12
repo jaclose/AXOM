@@ -8,10 +8,10 @@ export interface CommunicationsSettings {
   privacy: PrivacyRequest[]; admin: boolean; deliveryMode: string; deletionEnabled: boolean; hasProtectedCopy: boolean;
 }
 export async function communicationsRequest<T>(action: string, body: object = {}): Promise<T> {
-  // An export is initiated by one signed-in account. SDK loading may finish
-  // after that account signs out or another learner signs in. Never retarget
-  // the already-clicked request to the account that happens to be current.
-  const isAccountExport = action === "request-export";
+  // Both scheduling an export and retrieving its signed download URL belong
+  // to the initiating account. SDK loading or a late response must not
+  // transfer a private link to whichever account becomes active next.
+  const isAccountExport = action === "request-export" || action === "export-link";
   const initiatingUserId = isAccountExport ? useAccount.getState().user?.id : undefined;
   let accountChanged = false;
   // Observe intermediate A -> B -> A transitions, not only the final ID.
