@@ -124,9 +124,24 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     return next;
   };
   const byId = new Map(input.questions.map((question) => [question.id, question]));
+  // A Map silently drops the first source set when raw originals share an
+  // identity. Hold every collided original before scope or week attribution.
+  const seenSetIds = new Set<string>();
+  const duplicateSetIds = new Set<string>();
+  for (const set of input.sets) {
+    if (seenSetIds.has(set.id)) duplicateSetIds.add(set.id);
+    seenSetIds.add(set.id);
+  }
+  const ambiguousMembers = new Set<string>();
+  for (const set of input.sets) {
+    if (duplicateSetIds.has(set.id)) {
+      for (const id of set.questionIds) ambiguousMembers.add(id);
+    }
+  }
   const setsById = new Map(input.sets.map((set) => [set.id, set]));
   const memberships = new Map<string, CourseScope[]>();
   for (const set of input.sets) {
+    if (duplicateSetIds.has(set.id)) continue;
     for (const id of new Set(set.questionIds)) {
       if (!set.scope) continue;
       memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
@@ -134,6 +149,13 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   let unassignedQuestions = 0;
   for (const question of input.questions) {
+    // Neither a last-write-wins primary nor a legacy secondary membership may
+    // certify a question whose original source-set identity is ambiguous.
+    if ((question.setId != null && duplicateSetIds.has(question.setId))
+      || (question.setId == null && ambiguousMembers.has(question.id))) {
+      unassignedQuestions += 1;
+      continue;
+    }
     const scope = questionScope(question, setsById);
     // Older questions sometimes have immutable set membership but no setId.
     // Inherit it only when all eligible memberships agree on a unique module.
@@ -170,6 +192,18 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   let unassignedCollections = 0;
   for (const set of input.sets) {
+    // A distinct review set cannot launder an ambiguous primary association
+    // into a source-indexed course/week collection.
+    const ambiguousPrimary = set.questionIds.some((id) => {
+      const member = byId.get(id);
+      return Boolean(member && (member.setId != null
+        ? duplicateSetIds.has(member.setId)
+        : ambiguousMembers.has(id)));
+    });
+    if (duplicateSetIds.has(set.id) || ambiguousPrimary) {
+      unassignedCollections += 1;
+      continue;
+    }
     const indexedSetWeek = parseWeek(set.scope?.week);
     const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
     // Set-owned metadata wins if it resolves. A collection whose membership

@@ -60,6 +60,17 @@ describe("course tracker source-versus-question availability", () => {
     expect(JSON.stringify([a, b, clean])).toBe(original);
   });
 
+  it("does not certify a secondary review set using a collided primary source", () => {
+    const result = buildQuestionAvailabilityIndex(input([
+      set("primary", ["q"], { scope: { module: "NCRS", week: 4, courseId: "ppm-500" } }),
+      set("primary", ["q"], { scope: goerScope }),
+      set("review", ["q"], { scope: goerScope, kind: "review" }),
+    ], [question("q", { setId: "primary" })]));
+    expect(result.unassignedCollections).toBe(3);
+    expect(result.unassignedQuestions).toBe(1);
+    expect(result.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.collections ?? 0).toBe(0);
+  });
+
   it("does not double-credit repeated identical source-set IDs as two collections", () => {
     const a = set("same", ["only"], { scope: goerScope });
     const result = buildQuestionAvailabilityIndex(input([a, structuredClone(a)], [
