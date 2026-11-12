@@ -1331,6 +1331,7 @@ class SourceLedgerTests(unittest.TestCase):
             self.skipTest("real source root unavailable")
         source_rows=[dict(original_path=str(p), source_id=digest(str(p)),document_type="tracker_template",
                           root_label="baseline_templates",
+                          source_sha256=hashlib.sha256(p.read_bytes()).hexdigest(),
                           module=ledger.mapping(p.name,"baseline_templates")["module"],
                           academic_term=ledger.mapping(p.name,"baseline_templates")["academic_term"],
                           module_evidence="explicit_template_filename",extraction_status="unexamined")
