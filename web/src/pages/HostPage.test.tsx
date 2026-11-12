@@ -146,7 +146,8 @@ describe("Host page authorization and moderation", () => {
   it("single-flights two privileged clicks in the same React event batch", async () => {
     const user = userEvent.setup();
     const pending = deferred<void>();
-    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));
+    vi.mocked(loadOperatorDashboard).mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
     vi.mocked(resolveReport).mockReturnValue(pending.promise);
     render(<HostPage />);
     const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
@@ -197,12 +198,34 @@ describe("Host page authorization and moderation", () => {
     expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
   });
 
+  it("holds a successful transport response when the Host readback contradicts the requested report resolution", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
+    vi.mocked(resolveReport).mockResolvedValue(undefined);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    await user.click(dismiss);
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Report dismissed and audited.")).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("did not confirm");
+    expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Retry Host" }));
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+  });
+
   it("holds an ambiguous failed write through readback failure until explicit successful verification", async () => {
     const user = userEvent.setup();
     vi.mocked(loadOperatorDashboard)
       .mockResolvedValueOnce(dashboard("moderator"))
       .mockRejectedValueOnce(new Error("Readback offline"))
-      .mockResolvedValue(dashboard("moderator"));
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
     vi.mocked(resolveReport)
       .mockRejectedValueOnce(new Error("Lost acknowledgement"))
       .mockResolvedValue(undefined);
@@ -229,7 +252,9 @@ describe("Host page authorization and moderation", () => {
 
   it("unlocks a failed privileged write so an operator can retry safely", async () => {
     const user = userEvent.setup();
-    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));
+    vi.mocked(loadOperatorDashboard).mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
     vi.mocked(resolveReport)
       .mockRejectedValueOnce(new Error("Connection lost"))
       .mockResolvedValueOnce(undefined);
