@@ -31,6 +31,42 @@ describe("communications on real Postgres", () => {
       expect((await db.query<{ status: string }>(`select status from privacy_requests where user_id='${A}' order by created_at`)).rows).toHaveLength(2);
     } finally { await db.close(); }
   }, 30000);
+  it("scrubs terminal and orphaned deletion-session IDs without freeing live cancellation tombstones", async () => {
+    const db = await database();
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values('${A}','deletion','scheduled','${first}'),('${B}','deletion','scheduled','${second}');
+        update privacy_requests set status='cancelled' where user_id='${A}' and kind='deletion';`);
+      // While the user exists, cancellation must continue to block session replay.
+      expect((await db.query<{ actor_session_id: string }>(`select actor_session_id from privacy_requests where user_id='${A}' and kind='deletion'`)).rows[0].actor_session_id).toBe(first);
+      await expect(db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id) values('${A}','deletion','scheduled','${first}')`)).rejects.toThrow();
+
+      // A failed preflight must retain its consent identity for reconciliation.
+      await db.exec(`update privacy_requests set status='failed' where user_id='${B}' and kind='deletion';`);
+      expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${B}' and kind='deletion'`)).rows[0].actor_session_id).toBe(second);
+
+      // Terminal completion scrubs identity even if a deployed Edge handler only updates status.
+      await db.exec(`update privacy_requests set status='completed' where user_id='${B}' and kind='deletion';`);
+      expect((await db.query<{ user_id: string; actor_session_id: string | null }>(`select user_id,actor_session_id from privacy_requests where user_id='${B}' and kind='deletion'`)).rows[0])
+        .toEqual({ user_id: B, actor_session_id: null });
+
+      // Auth FK ON DELETE SET NULL must also scrub sessions on orphaned receipts,
+      // including a cancelled tombstone whose account no longer exists.
+      await db.exec(`delete from auth.users where id='${A}';`);
+      expect((await db.query<{ user_id: string | null; actor_session_id: string | null; status: string }>(
+        "select user_id,actor_session_id,status from privacy_requests where status='cancelled'"
+      )).rows).toEqual([{ user_id: null, actor_session_id: null, status: "cancelled" }]);
+
+      // A later update may not reintroduce the completed receipt's session identifier.
+      await db.exec(`update privacy_requests set actor_session_id='${second}' where user_id='${B}' and kind='deletion';`);
+      expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${B}' and kind='deletion'`)).rows[0].actor_session_id).toBeNull();
+
+      await db.exec(`insert into privacy_requests(user_id,kind,status) values('${B}','export','requested');`);
+      expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${B}' and kind='export'`)).rows[0].actor_session_id).toBeNull();
+    } finally { await db.close(); }
+  }, 30000);
   it("prevents cross-account reads, browser writes and privileged worker calls", async () => {
     const db = await database();
     try {
