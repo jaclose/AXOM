@@ -128,6 +128,31 @@ function committedAttempts(): Array<{ questionId: string; attempt: Omit<Question
 }
 
 describe("ExamRunner saved blocks and selection semantics", () => {
+  it("keeps the initial 10-question setup custom when choosing a simulation interface", () => {
+    setStore();
+    render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /ExamSoft \(Examplify\)/ }));
+    expect(screen.getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", 10);
+    expect(screen.getByRole("button", { name: "Custom", exact: true }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "USMLE block · 20" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("keeps preset, count and final launch summary consistent across overrides and skins", () => {
+    setStore();
+    render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /ExamSoft \(Examplify\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "USMLE block · 20" }));
+    expect(screen.getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", 20);
+    expect(screen.getByRole("button", { name: "USMLE block · 20" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "10", exact: true }));
+    expect(screen.getByRole("button", { name: "Custom", exact: true }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "USMLE block · 20" }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
+    expect(screen.getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", 10);
+    expect(screen.getByRole("status", { name: "Final block configuration" }).textContent)
+      .toMatch(/1 ready question.*Tutor.*Timed.*UWorld-style/i);
+  });
+
   it.each(["calculator", "annotation"] as const)("lets the top image dialog own Escape while the %s tool remains active", (tool) => {
     setStore();
     render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={() => {}} />);
