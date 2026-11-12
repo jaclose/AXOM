@@ -375,3 +375,53 @@ describe("raw canonical QuestionRecord collision protection at the Tracker bound
     });
   });
 });
+
+
+describe("R56: raw source-set identity must survive last-write-wins indexing", () => {
+  const scope = { module: "NB2", week: 3, courseId: "core" };
+  const requested: CourseScope = scope;
+  const collection = { setId: "set", questionIds: ["source-q"], readyQuestionIds: ["source-q"] };
+
+  it("holds same-ID source sets with conflicting provenance before offering practice", () => {
+    const question = q("source-q", { setId: "set", ...scope });
+    const originals = [
+      { ...bank("set", ["source-q"], { module: "ER", week: 1, courseId: "foreign" }), sourceDocumentIds: ["source-a"] },
+      { ...bank("set", ["source-q"], scope), sourceDocumentIds: ["source-b"] },
+    ];
+    const before = JSON.stringify(originals);
+    const setsById = new Map(originals.map((set) => [set.id, set]));
+    expect(setsById.size).toBe(1);
+    expect(setsById.get("set")?.sourceDocumentIds).toEqual(["source-b"]);
+    const result = verifyCollectionForCourse(
+      collection, requested, new Map([[question.id, question]]), setsById,
+      true, new Set(), new Set(["set"]),
+    );
+    expect(result).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: true,
+      conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+    expect(JSON.stringify(originals)).toBe(before);
+  });
+
+  it("holds a separately referenced primary set whose raw ID is duplicated", () => {
+    const question = q("source-q", { setId: "primary", ...scope });
+    const setsById = new Map([
+      bank("primary", ["source-q"], { module: "ER", week: 1, courseId: "foreign" }),
+      bank("primary", ["source-q"], scope),
+      bank("set", ["source-q"], scope),
+    ].map((set) => [set.id, set]));
+    expect(verifyCollectionForCourse(
+      collection, requested, new Map([[question.id, question]]), setsById,
+      true, new Set(), new Set(["primary"]),
+    )).toMatchObject({ readyQuestionIds: [], sourceReviewRequired: true });
+  });
+
+  it("keeps a distinct clean source usable when a different set ID is duplicated", () => {
+    const question = q("source-q", { setId: "set", ...scope });
+    const source = bank("set", ["source-q"], scope);
+    expect(verifyCollectionForCourse(
+      collection, requested, new Map([[question.id, question]]),
+      new Map([[source.id, source]]), true, new Set(), new Set(["unrelated"]),
+    )).toMatchObject({ readyQuestionIds: ["source-q"], sourceReviewRequired: false });
+  });
+});
