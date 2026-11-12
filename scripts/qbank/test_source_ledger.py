@@ -129,6 +129,64 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(pq["source_match_status"],
                          "observed_source_no_authoritative_expected_activity_template")
 
+    def test_tracker_coverage_requires_literal_verified_source_sha(self):
+        # Scanned-but-unhashed files are original observations, not verified
+        # question-source support or byte-distinct SHA-256 evidence.
+        activity = dict(academic_term="T4", module="DERS", week=20,
+                        activity_type="imcq")
+        originals = [
+            dict(academic_term="T4", module="DERS", week=20,
+                 document_type="imcq", source_id=source_id, source_sha256=sha)
+            for source_id, sha in (
+                ("verified", "a" * 64),
+                ("deferred-hash", None),
+                ("invalid-digest", "not-a-sha"),
+                ("array-digest", ["b" * 64]),
+                ("boolean-digest", True),
+            )
+        ]
+        scheduled = next(x for x in ledger.coverage_matrix([activity], originals)
+                         if x["expected_tracker_activities"] == 1)
+        self.assertEqual(scheduled["candidate_source_files"], 1)
+        self.assertEqual(scheduled["byte_distinct_candidates"], 1)
+        self.assertEqual(scheduled["available_source_ids"], "verified")
+        self.assertEqual(scheduled["unverified_source_files"], 4)
+        self.assertEqual(scheduled["unverified_source_ids"],
+                         "deferred-hash;invalid-digest;array-digest;boolean-digest")
+        self.assertEqual(scheduled["source_match_status"],
+                         "module_and_type_candidate_not_line_item_verified")
+
+    def test_tracker_unverified_source_is_held_not_missing_or_counted(self):
+        activity = dict(academic_term="T4", module="DERS", week=20,
+                        activity_type="esoft")
+        originals = [
+            dict(academic_term="T4", module="DERS", week=20,
+                 document_type="esoft", source_id="unhashed", source_sha256=None),
+            dict(academic_term="T4", module="DERS", week=20,
+                 document_type="esoft", source_id="bad", source_sha256="F" * 64),
+            dict(academic_term="T4", module="DERS", week=19,
+                 document_type="pq", source_id="unplaced-pq", source_sha256=None),
+        ]
+        result = ledger.coverage_matrix([activity], originals)
+        scheduled = next(x for x in result
+                         if x["expected_tracker_activities"] == 1)
+        self.assertEqual(scheduled["candidate_source_files"], 0)
+        self.assertEqual(scheduled["byte_distinct_candidates"], 0)
+        self.assertEqual(scheduled["available_source_ids"], "")
+        self.assertEqual(scheduled["unverified_source_files"], 2)
+        self.assertEqual(scheduled["unverified_source_ids"], "unhashed;bad")
+        self.assertEqual(scheduled["source_match_status"],
+                         "source_integrity_unverified")
+        observed = next(x for x in result
+                        if x["expected_activity_type"] == "pq"
+                        and x["week"] == 19)
+        self.assertIsNone(observed["expected_tracker_activities"])
+        self.assertEqual(observed["candidate_source_files"], 0)
+        self.assertEqual(observed["unverified_source_files"], 1)
+        self.assertEqual(observed["unverified_source_ids"], "unplaced-pq")
+        self.assertEqual(observed["source_match_status"],
+                         "observed_source_integrity_unverified_no_authoritative_template")
+
     def test_tracker_template_activity_requires_exact_original_source_bytes(self):
         # A post-inventory template must not lend its original source ID to
         # edited lines, even if its lexical path and file length are unchanged.
