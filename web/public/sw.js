@@ -248,8 +248,14 @@ async function installPublicShell() {
   await Promise.all(Array.from({ length: Math.min(4, validatedAssets.length) }, async () => {
     while (nextAsset < validatedAssets.length) {
       const { path, response } = validatedAssets[nextAsset++];
-      await cache.put(path, response);
-      installProgress.assetsWritten += 1;
+      try {
+        await cache.put(path, response);
+        installProgress.assetsWritten += 1;
+      } catch (error) {
+        // Visual metadata is optional; a quota failure here must not block
+        // installing validated required code or the public offline HTML shell.
+        if (path !== "./manifest.webmanifest" && path !== "./icon-192.png") throw error;
+      }
     }
   }));
   installProgress.phase = "manifest-write";
