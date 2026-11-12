@@ -274,6 +274,7 @@ describe("Host page authorization and moderation", () => {
     expect(screen.queryByText("Share a course")).toBeNull();
     await user.click(within(review).getByRole("button", { name: "Complete synthetic academic review" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Academic course review recorded. Checking Host queues.")).toBeTruthy();
     // Review callbacks must use the same version generator as manual Host refresh.
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
@@ -291,6 +292,7 @@ describe("Host page authorization and moderation", () => {
     expect(queue.getAttribute("data-refresh")).toBe("1");
     await user.click(within(queue).getByRole("button", { name: "Complete synthetic Question Set review" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("Question Set review recorded. Checking Host queues.")).toBeTruthy();
     expect(queue.getAttribute("data-refresh")).toBe("2");
   });
 
