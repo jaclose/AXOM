@@ -36,7 +36,13 @@ export async function communicationsRequest<T>(action: string, body: object = {}
     // A request already dispatched is not cancelled by this client-side guard.
     assertExportOwner();
     if (error) {
-      if ("context" in error && error.context instanceof Response) { const response = await error.context.json().catch(() => null) as { error?: string } | null; if (response?.error) throw new Error(response.error); }
+      if ("context" in error && error.context instanceof Response) {
+        const response = await error.context.json().catch(() => null) as { error?: string } | null;
+        // Parsing is another asynchronous boundary: A may switch to B, or A -> B -> A,
+        // while the error body is consumed. Never surface A's server text to B.
+        assertExportOwner();
+        if (response?.error) throw new Error(response.error);
+      }
       throw new Error("Communications could not be reached. Check your connection and try again.");
     }
     if (data?.error) throw new Error(String(data.error)); return data as T;
