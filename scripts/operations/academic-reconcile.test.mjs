@@ -1290,3 +1290,31 @@ test("producer SHA evidence requires a literal string, never coercible arrays", 
   assert.ok(pdfResult.errors.some(message => message.includes("missing or repeated source fingerprint")),
     "A PDF receipt array must not pass digest type validation through RegExp coercion.");
 });
+
+test("malformed source census and production counts cannot echo arbitrary producer strings", () => {
+  const secret = "PRIVATE_R41_UNTRUSTED_COUNT";
+  for (const mutate of [
+    i => { i.summary.files = secret; },
+    i => { i.summary.uniqueFiles = secret; },
+    i => { i.summary.duplicateFiles = secret; },
+    i => { i.cataloguedPaths = secret; },
+    i => { i.expectedHashedPaths = secret; },
+    i => { i.expectedDistinctHashes = secret; },
+  ]) {
+    const inventory = fixture();
+    mutate(inventory);
+    const report = run({ inventory });
+    assert.equal(report.complete, false);
+    assert.equal(JSON.stringify(report).includes(secret), false,
+      "Unverified denominators must be represented as invalid rather than echoed.");
+  }
+  const production = {
+    projectId: "jofkmfwkidubxcutkwzf", observedAt: new Date().toISOString(),
+    academicCollections: secret, academicRevisions: 2, academicFiles: 0, storageObjects: 0,
+  };
+  const report = run({ production });
+  assert.equal(report.complete, false);
+  assert.equal(JSON.stringify(report).includes(secret), false,
+    "A malformed production statistic must not escape in report counts.");
+  assert.equal(report.counts.productionAcademicCollections, null);
+});
