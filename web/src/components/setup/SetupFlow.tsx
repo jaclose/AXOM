@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { AxomWordmark } from "../ui/BrandMark";
 import { PaletteOrbs } from "./PaletteOrbs";
+import { PALETTES } from "../../lib/palette";
+import { usePalettePreference } from "../../lib/useAppearance";
 import { ChoiceChips, ChoiceSegment, ChoiceSummary, ChoiceTiles, type ChoiceSummaryRows } from "../ui/Choice";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
@@ -26,6 +28,7 @@ import {
 import { SGU_CURRICULUM } from "../../lib/curricula";
 import { otherWorkspaceUrl } from "../../lib/otherWorkspace";
 import "../../styles/setup.css";
+import "../../styles/setup-appearance.css";
 
 const PATH_ICONS: Record<SetupPath, LucideIcon> = {
   sgu: GraduationCap, usmd: Stethoscope, do: HeartHandshake, img: Globe2, premed: FlaskConical, other: Compass,
@@ -106,7 +109,7 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
 
         <div className="setup-shell">
           <div className="setup-core">
-            <section key={choices.step} className="setup-screen" data-dir={direction}>
+            <section key={choices.step} className="setup-screen" data-dir={direction} data-step={choices.step === 2 ? "appearance" : undefined}>
               {choices.step === 0 && <YouStep choices={choices} update={update} titleId={titleId} headingRef={headingRef} rerun={effectiveMode === "rerun"} otherWorkspace={otherWorkspace} />}
               {choices.step === 1 && <StudyStep choices={choices} update={update} titleId={titleId} headingRef={headingRef} />}
               {choices.step === 2 && <YoursStep titleId={titleId} headingRef={headingRef} />}
@@ -267,8 +270,8 @@ function StudyStep({ choices, update, titleId, headingRef }: StepProps) {
 }
 
 const THEMES: Array<{ value: ThemePreference; label: string; icon: LucideIcon }> = [
-  { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
+  { value: "light", label: "Light", icon: Sun },
   { value: "system", label: "System", icon: Monitor },
 ];
 
@@ -282,16 +285,19 @@ function YoursStep({ titleId, headingRef }: { titleId: string; headingRef: StepP
       <StepCopy
         eyebrow="Your AXOM"
         title="Make it yours."
-        lede="Your accent follows you across AXOM. It changes here as you choose, and anytime later in Settings."
+        lede="Choose your look. Change it anytime in Settings."
         titleId={titleId}
         headingRef={headingRef}
       >
-        <LivePreview />
+        <AppearancePreview />
       </StepCopy>
-      <div className="setup-controls">
-        <PaletteOrbs />
-        <div className="setup-row">
-          <span className="setup-label" id={`${titleId}-theme`}>Mode</span>
+      <div className="setup-controls setup-appearance-controls">
+        <div className="setup-appearance-group">
+          <span className="setup-label">Palette</span>
+          <PaletteOrbs featured />
+        </div>
+        <div className="setup-appearance-mode">
+          <span className="setup-label" id={`${titleId}-theme`}>Appearance mode</span>
           <ChoiceSegment
             labelledBy={`${titleId}-theme`}
             options={THEMES.map(({ value, label, icon: Icon }) => ({ value, label: <><Icon size={ICON_SIZE.body} strokeWidth={1.75} aria-hidden="true" /> {label}</> }))}
@@ -299,28 +305,31 @@ function YoursStep({ titleId, headingRef }: { titleId: string; headingRef: StepP
             onChange={setThemePreference}
           />
         </div>
-        <div className="setup-notify">
-          <Bell size={ICON_SIZE.emphasis} strokeWidth={1.5} aria-hidden="true" />
-          <span>
-            <b>Tell me when a focus block ends</b>
-            <small>
-              {permission === "denied" ? "Blocked in this browser's settings. You can allow it there anytime."
-                : permission === "unavailable" ? "This browser cannot show notifications."
-                  : "A quiet notice when your timer finishes, so you can look away while you study."}
-            </small>
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={notifyOn}
-            aria-label="Focus block notifications"
-            className={`setup-switch ${notifyOn ? "on" : ""}`}
-            disabled={permission === "denied" || permission === "unavailable" || notifyOn}
-            onClick={() => { void requestNotificationPermission().then(setPermission); }}
-          >
-            <span />
-          </button>
-        </div>
+        <details className="setup-appearance-extras">
+          <summary>Optional notifications</summary>
+          <div className="setup-notify">
+            <Bell size={ICON_SIZE.emphasis} strokeWidth={1.5} aria-hidden="true" />
+            <span>
+              <b>Focus timer alerts</b>
+              <small>
+                {permission === "denied" ? "Blocked in browser settings."
+                  : permission === "unavailable" ? "Not available in this browser."
+                    : "A notification when your timer ends."}
+              </small>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notifyOn}
+              aria-label="Focus block notifications"
+              className={`setup-switch ${notifyOn ? "on" : ""}`}
+              disabled={permission === "denied" || permission === "unavailable" || notifyOn}
+              onClick={() => { void requestNotificationPermission().then(setPermission); }}
+            >
+              <span />
+            </button>
+          </div>
+        </details>
       </div>
     </>
   );
@@ -334,15 +343,19 @@ function SetupSummary({ rows, live = false, placement }: { rows: SummaryRows; li
 }
 
 /** A small piece of the real dashboard, painted in the palette being chosen. */
-function LivePreview() {
+/** Preview the actual AXOM mark and the current palette, without invented study statistics. */
+function AppearancePreview() {
+  const palette = usePalettePreference();
+  const selected = PALETTES.find((item) => item.id === palette.id) ?? PALETTES[0];
   return (
-    <div className="setup-preview" aria-hidden="true">
-      <span className="setup-preview-ring"><b>64%</b></span>
-      <span className="setup-preview-copy">
-        <small>Today</small>
-        <b>Study 2h 15m of 3h 30m</b>
-        <span className="setup-preview-chips"><i>Focus 25:00</i><i>Soundscape</i></span>
-      </span>
+    <div className="setup-brand-preview" role="img" aria-label={`Preview: ${selected.label}`}>
+      <span className="setup-brand-preview-halo" aria-hidden="true" />
+      <img className="setup-brand-preview-orb" src="/icons/axom-orb-512.png" alt="" aria-hidden="true" />
+      <div className="setup-brand-preview-caption">
+        <span>AXOM</span>
+        <strong>{selected.label}</strong>
+        <small>{selected.pairing}</small>
+      </div>
     </div>
   );
 }
