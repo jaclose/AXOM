@@ -218,6 +218,38 @@ describe("Question Set share boundary", () => {
     expect(learned.attempts).toEqual([{ at: NOW, status: "correct" }]);
   });
 
+  it("refuses an already-imported result when its original question record was lost", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(), identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const originalIds = [...first.set.questionIds];
+    // An unchanged share ID and digest cannot prove that the learner still
+    // has the imported question. Reimport must not invent a replacement ID.
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(), identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], existingSets: [first.set], now: NOW,
+    })).toThrow(/incomplete or unavailable question membership/i);
+    expect(first.set.questionIds).toEqual(originalIds);
+    expect(first.questions).toHaveLength(1);
+  });
+
+  it("refuses an already-imported result after membership is removed or duplicated", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(), identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    for (const ids of [[], [first.set.questionIds[0], first.set.questionIds[0]]]) {
+      expect(() => importSharedQuestionSet({
+        snapshot: snapshot(), identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+        existingQuestions: first.questions,
+        existingSets: [{ ...first.set, questionIds: ids }],
+        now: NOW,
+      })).toThrow(/incomplete or unavailable question membership/i);
+    }
+    expect(first.questions[0].id).toBe(first.set.questionIds[0]);
+  });
+
   it("refuses to treat changed content under the same share ID as an idempotent replay", () => {
     const first = importSharedQuestionSet({
       snapshot: snapshot(),
