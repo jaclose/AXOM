@@ -77,6 +77,35 @@ describe("Question Set share boundary", () => {
     );
   });
 
+  it("refuses ambiguous selected source records regardless of which answer appears last", () => {
+    const first = question("q1", { correctKey: "A", correctAnswerText: "One" });
+    const second = question("q1", { correctKey: "B", correctAnswerText: "Two" });
+    const originals = JSON.stringify([first, second]);
+    for (const bank of [[first, second], [second, first]]) {
+      expect(() => createQuestionSetShare(questionSet(), bank, NOW))
+        .toThrow(/ambiguous duplicate source question records/i);
+    }
+    expect(JSON.stringify([first, second])).toBe(originals);
+  });
+
+  it("refuses repeated source membership even though share-local IDs would differ", () => {
+    const original = question("q1");
+    expect(() => createQuestionSetShare(
+      questionSet(["q1", "q1"]), [original], NOW,
+    )).toThrow(/duplicate source question IDs/i);
+    expect(original.correctKey).toBe("B");
+  });
+
+  it("ignores duplicate bank IDs that are not members of the shared set", () => {
+    const value = createQuestionSetShare(questionSet(), [
+      question("q1"), question("outside", { correctKey: "A", correctAnswerText: "One" }),
+      question("outside"),
+    ], NOW);
+    expect(value.orderedQuestionIds).toEqual(["shared-question-1"]);
+    expect(value.questions).toHaveLength(1);
+    expect(value.questions[0].correctKey).toBe("B");
+  });
+
   it("round-trips a historical v1 JSON snapshot with a stable content digest", async () => {
     const serialized = JSON.stringify(snapshot());
     const restored: unknown = JSON.parse(serialized);

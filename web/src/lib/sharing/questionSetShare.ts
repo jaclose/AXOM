@@ -99,7 +99,21 @@ export function createQuestionSetShare(
   bank: readonly QuestionRecord[],
   now = new Date().toISOString(),
 ): SharedQuestionSetSnapshot {
-  const byId = new Map(bank.map((question) => [question.id, question]));
+  // Snapshot-local IDs hide the original IDs. If two selected bank rows
+  // share an ID, a Map would silently take the last row, potentially exporting
+  // a different answer key from the one the learner reviewed.
+  const memberIds = new Set(set.questionIds);
+  if (memberIds.size !== set.questionIds.length) {
+    throw new Error("Question Set contains duplicate source question IDs and cannot be shared safely.");
+  }
+  const byId = new Map<string, QuestionRecord>();
+  for (const question of bank) {
+    if (!memberIds.has(question.id)) continue;
+    if (byId.has(question.id)) {
+      throw new Error("Question Set refers to ambiguous duplicate source question records and cannot be shared safely.");
+    }
+    byId.set(question.id, question);
+  }
   const questions = set.questionIds
     .map((id) => byId.get(id))
     .filter((question): question is QuestionRecord => Boolean(question))
