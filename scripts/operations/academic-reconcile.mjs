@@ -369,9 +369,11 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       for (const [id, row] of tmap) {
         const verified = audited.get(id);
         // An externally matching source/readback pair cannot certify a
-        // differently sourced row in this independent Tracker cohort. Exact
-        // string equality also rejects omitted or coercible SHA producer data.
-        if (!verified || row.term !== verified.term || row.module !== verified.module
+        // differently sourced or differently enrolled course row in this
+        // independent Tracker cohort. Exact comparisons also reject omitted
+        // or coercible producer course IDs and SHA fingerprints.
+        if (!verified || row.courseId !== verified.courseId
+          || row.term !== verified.term || row.module !== verified.module
           || row.sourceSha256 !== verified.sourceSha256
           || row.weekBasis !== verified.weekBasis
           || (row.week ?? null) !== (verified.week ?? null)

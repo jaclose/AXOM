@@ -5,11 +5,11 @@ import { verifyTrackerIdentity } from "./academic-tracker-identity.mjs";
 const A = "a".repeat(64), B = "b".repeat(64), C = "c".repeat(64);
 const NOW = "2026-11-11T20:50:00.000Z";
 const first = () => ({
-  activityId: "synthetic:T1:FTM:W2:1", sourceSha256: A,
+  activityId: "synthetic:T1:FTM:W2:1", sourceSha256: A, courseId: "synthetic-course-A",
   term: "T1", module: "FTM", weekBasis: "explicit", week: 2,
 });
 const second = () => ({
-  activityId: "synthetic:T1:FTM:W2:2", sourceSha256: B,
+  activityId: "synthetic:T1:FTM:W2:2", sourceSha256: B, courseId: "synthetic-course-A",
   term: "T1", module: "FTM", weekBasis: "explicit", week: 2,
 });
 function fixture() {
@@ -221,4 +221,30 @@ test("audit readback freshness rejects coercible, timezone-free and impossible t
   const f = fixture();
   f.readback.observedAt = leap;
   assert.equal(verifyTrackerIdentity({ ...f, now: leap }).complete, true, "Valid leap-day receipts remain accepted.");
+});
+
+test("R44 RED: original course identity cannot be substituted while IDs, source hashes, terms, modules and weeks agree", () => {
+  for (const changed of ["synthetic-course-B", undefined, null, ["synthetic-course-A"], "", " synthetic-course-A "]) {
+    const f = fixture();
+    f.readback.activities[0].courseId = changed;
+    const result = incomplete(f, "Cross-course substitution on authenticated readback");
+    assert.ok(result.counts.mismatched > 0 || result.errors.some(message => message.includes("Invalid installed")),
+      "Course mismatch/invalid ID must be surfaced without leaking source values.");
+    assert.ok(!JSON.stringify(result).includes("synthetic-course-B"), "Readback report must redact course IDs.");
+  }
+  const f = fixture();
+  f.source.activities[0].courseId = "synthetic-course-B";
+  const result = incomplete(f, "Cross-course substitution in original ledger");
+  assert.equal(result.counts.mismatched, 1);
+});
+
+test("R44 RED: identical absent or coercible course identifiers cannot manufacture cross-course source proof", () => {
+  for (const invalid of [undefined, null, "", ["synthetic-course-A"], " synthetic-course-A "]) {
+    const f = fixture();
+    f.source.activities[0].courseId = invalid;
+    f.readback.activities[0].courseId = invalid;
+    const result = incomplete(f, "Course identity absent from both ledgers");
+    assert.ok(result.errors.some(message => message.includes("Invalid source") || message.includes("Invalid installed")),
+      "Both sides having an invalid course ID is still a source-identity failure.");
+  }
 });
