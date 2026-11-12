@@ -495,7 +495,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       // source-review evidence not carried in the privacy-stripped public snapshot.
       const live = useStore.getState();
       const snapshot = prepareCurrentCommunityQuestionSetSubmission({
-        openedSet: reviewAtOpen.current.set, openedQuestions: reviewAtOpen.current.questions,
+        openedSet: reviewAtOpen.current!.set, openedQuestions: reviewAtOpen.current!.questions,
         liveSets: live.questionSets ?? [], liveQuestions: live.questions ?? [],
       });
       const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit, {
