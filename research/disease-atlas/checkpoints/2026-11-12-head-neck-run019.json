@@ -11,14 +11,14 @@
   "remaining_concise_entries": 93,
   "pdf_pages": 458,
   "chapter_page_range": "431–458",
-  "new_profile_section_words": 5099,
-  "new_sources": 18,
-  "total_evidence_records": 352,
+  "new_profile_section_words": 5171,
+  "new_sources": 19,
+  "total_evidence_records": 353,
   "new_original_image_source_pages": 7,
   "total_image_associations": 187,
   "authentic_medical_images_embedded": 0,
-  "full_package_sha256": "f62c86551c1a1cdc4dfb3a541383157a31b806dc8a30aafb88ea0f71692f1c11",
-  "docx_sha256": "904120414254f1ac2a04f577ff0c16411cab97661833b052213494d2adb0ad97",
+  "full_package_sha256": "c43cdbd3bb1254c0dc2b42e0886d9b559869bec2f3e8b1a60f86edcb599d8113",
+  "docx_sha256": "debaf8477fc9e101b8aceb2dca329554a81cf56fd4ec4d14e98eeb90f2b5d81a",
   "QA": {
     "structural_tests_passed": 22,
     "failed": 0,
@@ -133,7 +133,8 @@
       "name": "Laryngeal squamous cell carcinoma",
       "clinical_discriminator": "Tobacco/alcohol-related squamous malignancy, often persistent hoarseness. Laryngoscopy with biopsy and site-specific TNM; early organ-preserving local therapy, multimodal approaches for advanced disease.",
       "evidence_ids": [
-        "ENT19-NCI-LAR"
+        "ENT19-NCI-LAR",
+        "ENT19-FDA-AMI26"
       ],
       "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
     },
@@ -142,7 +143,8 @@
       "name": "HPV-mediated oropharyngeal squamous cell carcinoma",
       "clinical_discriminator": "HPV-driven tumor commonly from palatine tonsil/base of tongue. p16 IHC surrogate in appropriate tissue and setting; HPV-specific staging and stage-directed surgery/radiation/systemic therapy.",
       "evidence_ids": [
-        "ENT19-NCI-ORO"
+        "ENT19-NCI-ORO",
+        "ENT19-FDA-AMI26"
       ],
       "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
     },
@@ -246,6 +248,13 @@
     {
       "id": "ENT19-MEDGEN-OTO",
       "url": "https://www.ncbi.nlm.nih.gov/medgen/10508"
+    },
+    {
+      "id": "ENT19-FDA-AMI26",
+      "url": "https://www.fda.gov/drugs/cancer-approvals/fda-grants-accelerated-approval-amivantamab-and-hyaluronidase-lpuj-recurrent-or-metastatic-head-and",
+      "source_type": "FDA accelerated approval",
+      "release_date": "2026-11-05",
+      "limitation": "Preceded by platinum and anti-PD-(L)1; excludes HPV-associated OPSCC; confirmatory benefit pending"
     }
   ],
   "image_files": [
@@ -305,5 +314,7 @@
     "Reviewed educational draft: no external specialist peer review or complete drug-label audit",
     "This GitHub JSON preserves recovery-ready source mapping and summaries, not complete 458-page Word/PDF binaries",
     "No AXOM production merge, migration, deployment or content publication"
-  ]
+  ],
+  "pdf_new_chapter_source_link_annotations": 30,
+  "clinical_update_nov_5_2026": "FDA accelerated approved amivantamab/hyaluronidase-lpuj (EGFR/MET-directed) for adults with recurrent/metastatic head and neck SCC after progression on platinum chemotherapy AND anti-PD-(L)1; specifically NOT indicated for HPV-associated oropharyngeal SCC. Approval based on response rate/duration rather than verified long-term clinical benefit. Adverse effect concerns: administration reactions, ILD/pneumonitis, dermatologic, ocular, embryofetal."
 }
