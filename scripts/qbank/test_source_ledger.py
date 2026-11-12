@@ -86,6 +86,105 @@ class SourceLedgerTests(unittest.TestCase):
             finally:
                 ledger.ROOTS = previous_roots
 
+    def test_tracker_derived_activity_ids_are_stable_across_inventory_order(self):
+        # Derived candidate IDs are not canonical installed Tracker IDs. Two
+        # originals can share the same term/module/type/title without being
+        # interchangeable. The old -repeat-N suffix depended on scan order.
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            rows = []
+            for name, source_id in (("first.txt", "synthetic-a"), ("second.txt", "synthetic-b")):
+                path = root / name
+                data = b"Week 20 Shared Title [Lecture]\\n"
+                path.write_bytes(data)
+                rows.append(dict(document_type="tracker_template", root_label="baseline_templates",
+                                 original_path=str(path), source_id=source_id,
+                                 source_sha256=hashlib.sha256(data).hexdigest(),
+                                 academic_term="T4", module="DERS",
+                                 module_evidence="synthetic_original"))
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("baseline_templates", root)]
+                first = ledger.parse_templates([dict(r) for r in rows])
+                reversed_order = ledger.parse_templates([dict(r) for r in reversed(rows)])
+                self.assertEqual(len(first), 2)
+                self.assertEqual(len({a["activity_id"] for a in first}), 2)
+                self.assertEqual({a["source_id"]: a["activity_id"] for a in first},
+                                 {a["source_id"]: a["activity_id"] for a in reversed_order})
+                self.assertTrue(all(a.get("id_collision_review") is True for a in first))
+                self.assertTrue(all(a["source_association_status"] == "requires_original_id_review"
+                                    for a in first))
+                self.assertTrue(all("-source-" in a["activity_id"] for a in first))
+            finally:
+                ledger.ROOTS = old_roots
+
+    def test_tracker_identical_lines_use_distinct_stable_source_lines(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            path = root / "template.txt"
+            data = b"Week 20 Shared [Lecture]\\nWeek 20 Shared [Lecture]\\n"
+            path.write_bytes(data)
+            row = dict(document_type="tracker_template", root_label="baseline_templates",
+                       original_path=str(path), source_id="synthetic-line-source",
+                       source_sha256=hashlib.sha256(data).hexdigest(),
+                       academic_term="T4", module="DERS",
+                       module_evidence="synthetic_original")
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("baseline_templates", root)]
+                activities = ledger.parse_templates([row])
+                self.assertEqual([a["source_line"] for a in activities], [1, 2])
+                self.assertEqual(len({a["activity_id"] for a in activities}), 2)
+                self.assertTrue(all(a.get("id_collision_review") for a in activities))
+            finally:
+                ledger.ROOTS = old_roots
+
+    def test_tracker_duplicate_inventory_locator_is_held_not_rekeyed(self):
+        # Repeating the same source/line has no independent original identity.
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            path = root / "template.txt"
+            data = b"Week 20 Shared [Lecture]\\n"
+            path.write_bytes(data)
+            base = dict(document_type="tracker_template", root_label="baseline_templates",
+                        original_path=str(path), source_id="synthetic-duplicate-source",
+                        source_sha256=hashlib.sha256(data).hexdigest(),
+                        academic_term="T4", module="DERS",
+                        module_evidence="synthetic_original")
+            rows = [dict(base), dict(base)]
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("baseline_templates", root)]
+                self.assertEqual(ledger.parse_templates(rows), [])
+                self.assertTrue(all(r["extraction_status"] ==
+                                    "template_ambiguous_activity_identity_held" for r in rows))
+                self.assertTrue(all(r["review_status"] ==
+                                    "source_identity_review_required" for r in rows))
+            finally:
+                ledger.ROOTS = old_roots
+
+    def test_tracker_unique_activity_preserves_previous_derived_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            path = root / "template.txt"
+            data = b"Week 20 Unique [DLA]\\n"
+            path.write_bytes(data)
+            base = dict(document_type="tracker_template", root_label="baseline_templates",
+                        original_path=str(path), source_id="synthetic-unique-source",
+                        source_sha256=hashlib.sha256(data).hexdigest(),
+                        academic_term="T4", module="DERS",
+                        module_evidence="synthetic_original")
+            old_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("baseline_templates", root)]
+                activities = ledger.parse_templates([base])
+                old_seed = "DERS|dla|week 20 unique"
+                self.assertEqual(activities[0]["activity_id"],
+                                 "activity:" + ledger.digest_text(old_seed)[:24])
+                self.assertNotIn("id_collision_review", activities[0])
+            finally:
+                ledger.ROOTS = old_roots
+
     def test_explicit_week_20_is_source_hint_not_assessment_number(self):
         # Source filenames may identify DERS week 20; do not infer a week from IMCQ 20.
         for path in ("DERS/Week 20/PQ.pdf", "DERS/wk20/PQ.pdf", "DERS/Week 020/PQ.pdf"):
