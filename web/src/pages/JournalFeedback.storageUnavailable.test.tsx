@@ -162,6 +162,52 @@ describe("Journal feedback when browser storage cannot be read", () => {
     });
   }
 
+  it("holds an incomplete history when an indexed storage key disappears, then recovers on retry", () => {
+    clearFixtureCopies();
+    const oldName = "Journal R43 Earlier Saved Name";
+    const currentName = "Journal R43 Current Saved Name";
+    const previousKey = `axom-journal-feedback-draft:${userIdFromName(oldName)}`;
+    const currentKey = `axom-journal-feedback-draft:${userIdFromName(currentName)}`;
+    const aliasKey = `${currentKey}:name-alias:v1:${"d".repeat(32)}`;
+    const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R43 original private words stay unchanged." });
+    useStore.getState().updateProfile({ name: currentName });
+    localStorage.setItem(previousKey, original);
+    localStorage.setItem(aliasKey, previousKey);
+    render(<JournalPage />);
+
+    const originalKey = Storage.prototype.key;
+    const aliasIndex = Array.from({ length: localStorage.length }, (_, index) =>
+      originalKey.call(localStorage, index)).indexOf(aliasKey);
+    expect(aliasIndex).toBeGreaterThanOrEqual(0);
+    const missingIndex = vi.spyOn(Storage.prototype, "key").mockImplementation(function (this: Storage, index: number) {
+      return this === window.localStorage && index === aliasIndex ? null : originalKey.call(this, index);
+    });
+
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      // A length-admitted key returning null can hide an older alias. Never
+      // claim this is a complete inventory or make the older copy disappear.
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      expect(screen.queryByText("Other saved feedback copies (1)")).toBeNull();
+      expect(localStorage.getItem(previousKey)).toBe(original);
+
+      missingIndex.mockRestore();
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+      fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+      fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("R43 original private words stay unchanged.");
+      expect(localStorage.getItem(previousKey)).toBe(original);
+      expect(localStorage.getItem(aliasKey)).toBe(previousKey);
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      localStorage.removeItem(previousKey);
+      localStorage.removeItem(aliasKey);
+    }
+  });
+
   for (const [description, suffix] of [
     ["truncated", "a".repeat(31)],
     ["non-hex", "g".repeat(32)],
