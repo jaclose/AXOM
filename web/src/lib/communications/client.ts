@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadSupabase } from "../account/supabase";
+import { loadSupabase, readStoredSession } from "../account/supabase";
 import { useAccount } from "../account/accountStore";
 import type { Preference } from "./model";
 export interface PrivacyRequest { id: string; kind: "export" | "deletion"; status: string; scheduled_for?: string; expires_at?: string; failure_code?: string }
@@ -7,12 +7,29 @@ export interface CommunicationsSettings {
   preferences: Preference[]; identity: { accent: string; theme: "dark" | "light" }; history: { id: string; type: string; status: string; created_at: string; sent_at?: string }[];
   privacy: PrivacyRequest[]; admin: boolean; deliveryMode: string; deletionEnabled: boolean; hasProtectedCopy: boolean;
 }
+// A cached SDK session is not proof of bearer identity. Compare the JWT subject
+// to the initiating UI account, then send the exact captured credential to Edge.
+// Edge validates its signature; this client check prevents inadvertent retargeting.
+function bearerSubject(token: string): string | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3 || !parts[1]) return null;
+    const claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))) as { sub?: unknown };
+    return typeof claims.sub === "string" && claims.sub ? claims.sub.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
 export async function communicationsRequest<T>(action: string, body: object = {}): Promise<T> {
   // Both scheduling an export and retrieving its signed download URL belong
   // to the initiating account. SDK loading or a late response must not
   // transfer a private link to whichever account becomes active next.
   const isAccountExport = action === "request-export" || action === "export-link";
   const initiatingUserId = isAccountExport ? useAccount.getState().user?.id : undefined;
+  // Capture *before* the lazy SDK await, including a possible auth refresh.
+  // A stale or foreign persisted credential cannot authorize the UI intent.
+  const initiatingSession = isAccountExport ? readStoredSession() : null;
+  const initiatingBearer = initiatingSession?.access_token ?? "";
   let accountChanged = false;
   // Observe intermediate A -> B -> A transitions, not only the final ID.
   // The account store is synchronous; subscribe before the first await.
@@ -22,7 +39,10 @@ export async function communicationsRequest<T>(action: string, body: object = {}
     })
     : () => {};
   const assertExportOwner = () => {
-    if (isAccountExport && (!initiatingUserId || accountChanged || useAccount.getState().user?.id !== initiatingUserId)) {
+    if (isAccountExport && (!initiatingUserId || accountChanged || useAccount.getState().user?.id !== initiatingUserId ||
+        !initiatingSession || initiatingSession.user.id.toLowerCase() !== initiatingUserId.toLowerCase() ||
+        bearerSubject(initiatingBearer) !== initiatingUserId.toLowerCase() ||
+        readStoredSession()?.access_token !== initiatingBearer)) {
       throw new Error("Your account changed. Request the export again from the active account.");
     }
   };
@@ -31,7 +51,20 @@ export async function communicationsRequest<T>(action: string, body: object = {}
     const client = await loadSupabase();
     assertExportOwner();
     if (!client) throw new Error("Connect an AXOM account to manage email delivery. Local previews remain available.");
-    const { data, error } = await client.functions.invoke(`communications?action=${encodeURIComponent(action)}`, { body });
+    let options: { body: object; headers?: { Authorization: string } } = { body };
+    if (isAccountExport) {
+      // The shared SDK may be signed in as B while Zustand still renders A.
+      // Do not let the SDK silently choose B's token during functions.invoke().
+      const { data: { session }, error: sessionError } = await client.auth.getSession();
+      assertExportOwner();
+      if (sessionError || !session || session.user.id.toLowerCase() !== initiatingUserId!.toLowerCase() ||
+          session.access_token !== initiatingBearer ||
+          bearerSubject(session.access_token) !== initiatingUserId!.toLowerCase()) {
+        throw new Error("Your account session changed. Sign in again before requesting a private export.");
+      }
+      options = { body, headers: { Authorization: `Bearer ${initiatingBearer}` } };
+    }
+    const { data, error } = await client.functions.invoke(`communications?action=${encodeURIComponent(action)}`, options);
     // A response under the old owner cannot report success after a handoff.
     // A request already dispatched is not cancelled by this client-side guard.
     assertExportOwner();
