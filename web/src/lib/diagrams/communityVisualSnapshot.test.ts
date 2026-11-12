@@ -72,4 +72,36 @@ describe("community visual intent publication", () => {
     const result = enrichPublicQuestionSetVisualTags(source);
     expect(result.questions[0].tags.some(tag => tag.startsWith("visual:keyword:") && tag.includes("aaa"))).toBe(false);
   });
+
+  it("never derives a new public keyword from an answer-bearing topic", () => {
+    const source = { ...original, orderedQuestionIds: ["shared-question-1"], questions: [{
+      ...original.questions[0],
+      stem: "In a brachial plexus lesion, which nerve supplies the deltoid?",
+      topic: "Axillary nerve", category: "Anatomy", tags: ["reviewed"],
+    }] };
+    const result = enrichPublicQuestionSetVisualTags(source);
+    expect(result.questions[0].tags).toContain("visual:intent:anatomical-schematic");
+    expect(result.questions[0].tags).toContain("visual:keyword:brachial plexus");
+    // The topic names the correct choice, but the stem does not. Never add
+    // that answer to pre-answer discovery metadata as a generated keyword.
+    expect(result.questions[0].tags).not.toContain("visual:keyword:axillary nerve");
+    expect(result.tags).not.toContain("visual:keyword:axillary nerve");
+    expect(result.questions[0].topic).toBe("Axillary nerve");
+    expect(result.questions[0].correctKey).toBe("A");
+    expect(source.questions[0].tags).toEqual(["reviewed"]);
+    expect(() => validateShare(result)).not.toThrow();
+  });
+
+  it("does not infer a new visual intent from answer-bearing topic or metadata alone", () => {
+    const source = { ...original, orderedQuestionIds: ["shared-question-1"], questions: [{
+      ...original.questions[0],
+      stem: "A patient presents with a painless mass. Which diagnosis is most likely?",
+      topic: "Neoplasm", category: "Pathology", tags: ["reviewed"],
+    }] };
+    const result = enrichPublicQuestionSetVisualTags(source);
+    expect(result.questions[0].tags).toEqual(["reviewed"]);
+    expect(result.tags).toEqual(["reviewed"]);
+    expect(result.questions[0].correctKey).toBe("A");
+    expect(() => validateShare(result)).not.toThrow();
+  });
 });
