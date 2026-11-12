@@ -377,14 +377,14 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
           {previewCompleteRationaleCount < previewCitationTotal && <p className="qsl-preview-source-warning">
             Choice-by-choice rationales recorded for all options in {previewCompleteRationaleCount} of {previewCitationTotal} questions. The first-three preview may not show every rationale gap. Recorded text is not a substitute for source verification.
           </p>}
-          <ol>{activePreview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
+          <ol>{activePreview.snapshot.questions.slice(0, 3).map((question, index) => <li key={question.id}>
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
             {question.citation
               ? <small>Source citation recorded. Reveal teaching notes to inspect it.</small>
               : <small className="qsl-preview-source-warning">No source citation is included for this question. Verify its answer and teaching notes against the original material.</small>}
             <details className="qsl-preview-teaching">
-              <summary tabIndex={0}>Reveal recorded answer and teaching notes</summary>
+              <summary tabIndex={0}>Reveal recorded answer and teaching notes<span className="sr-only"> for question {index + 1}</span></summary>
               <div className="stack gap8">
                 {question.citation && <small>Source: {question.citation}</small>}
                 <VisualIntentNote tags={question.tags} />
