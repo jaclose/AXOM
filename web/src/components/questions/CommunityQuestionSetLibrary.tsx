@@ -69,8 +69,14 @@ function observeAccountSession(accountId: string, onRevoked: () => void) {
 
 export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set: QuestionSet) => void }) {
   const accountId = useAccount(state => state.user?.id);
-  const [input, setInput] = useState("");
-  const [search, setSearch] = useState("");
+  // Search text is private account activity. Switching A → B must hide A's
+  // input immediately and must never send A's submitted query in B's RPC,
+  // even before the account-change reset effect has committed.
+  const [query, setQuery] = useState<{ owner: string | undefined; input: string; search: string }>({
+    owner: accountId, input: "", search: "",
+  });
+  const input = query.owner === accountId ? query.input : "";
+  const search = query.owner === accountId ? query.search : "";
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [sets, setSets] = useState<LibraryQuestionSet[]>([]);
@@ -102,6 +108,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
 
   useEffect(() => {
     cancelPendingPreview();
+    setQuery({ owner: accountId, input: "", search: "" });
     setSets([]); setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
     setLiking(undefined); setOffset(0);
@@ -149,8 +156,9 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!accountId || useAccount.getState().user?.id !== accountId) return;
     setOffset(0);
-    setSearch(input.trim());
+    setQuery({ owner: accountId, input, search: input.trim() });
     setRefresh(value => value + 1);
   }
   async function open(id: string) {
@@ -338,7 +346,10 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       <form className="qsl-search" onSubmit={submitSearch} role="search">
         <label className="sr-only" htmlFor="qsl-search-input">Search Community Question Sets</label>
         <Search size={17} aria-hidden="true" />
-        <input id="qsl-search-input" type="search" value={input} maxLength={100} onChange={event => setInput(event.target.value)} placeholder="Search title, topic or contributor" />
+        <input id="qsl-search-input" type="search" value={input} maxLength={100} onChange={event => setQuery(current => ({
+          owner: accountId, input: event.target.value,
+          search: current.owner === accountId ? current.search : "",
+        }))} placeholder="Search title, topic or contributor" />
         <GButton size="sm" type="submit" disabled={loading}>Search</GButton>
       </form>
       {loading && <p role="status">Loading Question Sets…</p>}
