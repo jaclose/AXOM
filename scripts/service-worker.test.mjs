@@ -413,6 +413,28 @@ test('activation preserves other application caches and old clients', async () =
   assert.deepEqual(await app.caches.keys(), ['other-app', 'axom-shell-previous', 'axom-shell-current']);
 });
 
+test('activation retains an old live page generation across two staged upgrades', async () => {
+  const app = worker();
+  await app.caches.open('other-app');
+  const buildA = await app.caches.open('axom-shell-A');
+  await buildA.put('./assets/legacy-12345678.js', new Response('export const build = "A";', {
+    headers: { 'content-type': 'text/javascript', 'cache-control': 'public, max-age=31536000' },
+  }));
+  await app.caches.open('axom-shell-B');
+  await app.caches.open('axom-shell-current');
+  // A still-open page can request its own lazy chunk after C activates.
+  // The one-client count does not identify which generation owns that page.
+  app.context.self.clients.matchAll = async () => [{ id: 'old-A-tab', url: 'https://app.test/' }];
+  let lifetime;
+  app.events.get('activate')({ waitUntil: (value) => { lifetime = value; } });
+  await lifetime;
+  assert.deepEqual(await app.caches.keys(), [
+    'other-app', 'axom-shell-A', 'axom-shell-B', 'axom-shell-current',
+  ], 'a live A page must not lose A merely because B is the newest previous cache');
+  assert.equal(await (await (await app.caches.open('axom-shell-A'))
+    .match('./assets/legacy-12345678.js'))?.text(), 'export const build = "A";');
+});
+
 test('worker does not intercept account-specific same-origin image-shaped URLs', async () => {
   const app = worker({ fetchResponse: async () => new Response('account-A image', { headers: { 'content-type': 'image/png' } }) });
   for (const path of [
