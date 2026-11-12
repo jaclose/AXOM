@@ -293,3 +293,45 @@ describe("canonical source proof survives Tracker collection lookup", () => {
     expect(JSON.stringify([question, source])).toBe(before);
   });
 });
+
+
+describe("R54: immutable source membership must never be silently deduplicated", () => {
+  it("holds duplicate IDs in original set, collection or ready-membership evidence", () => {
+    const question = q("source-q", {
+      module: "NB2", week: 3, courseId: "core", setId: "set",
+    });
+    const scope = { module: "NB2", week: 3, courseId: "core" };
+    const requested: CourseScope = scope;
+    for (const origin of ["source", "collection", "ready"] as const) {
+      const source = bank("set", origin === "source" ? ["source-q", "source-q"] : ["source-q"], scope);
+      const collection = {
+        setId: "set",
+        questionIds: origin === "collection" ? ["source-q", "source-q"] : ["source-q"],
+        readyQuestionIds: origin === "ready" ? ["source-q", "source-q"] : ["source-q"],
+      };
+      const result = verifyCollectionForCourse(
+        collection, requested,
+        new Map([[question.id, question]]), new Map([[source.id, source]]), true,
+      );
+      expect(result, origin).toEqual({
+        readyQuestionIds: [], sourceReviewRequired: true,
+        conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+      });
+    }
+  });
+
+  it("preserves a uniquely listed original and its exact eligible question", () => {
+    const question = q("source-q", {
+      module: "NB2", week: 3, courseId: "core", setId: "set",
+    });
+    const source = bank("set", ["source-q"], { module: "NB2", week: 3, courseId: "core" });
+    expect(verifyCollectionForCourse(
+      { setId: "set", questionIds: ["source-q"], readyQuestionIds: ["source-q"] },
+      { module: "NB2", week: 3, courseId: "core" },
+      new Map([[question.id, question]]), new Map([[source.id, source]]), true,
+    )).toEqual({
+      readyQuestionIds: ["source-q"], sourceReviewRequired: false,
+      conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+  });
+});
