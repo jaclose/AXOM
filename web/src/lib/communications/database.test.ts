@@ -7,6 +7,7 @@ const A = "11111111-1111-4111-8111-111111111111"; const B = "22222222-2222-4222-
 const migrationDirectory = fileURLToPath(new URL("../../../../supabase/migrations/", import.meta.url));
 const SESSION_CONSENT_MIGRATION = "20261112080000_communications_deletion_session_consent.sql";
 const TERMINAL_SCRUB_MIGRATION = "20261112213000_communications_deletion_receipt_session_scrub.sql";
+const ATOMIC_QUEUE_MIGRATION = "20261112231500_communications_deletion_queue_atomic.sql";
 async function applyMigration(db: PGlite, filename: string) {
   await db.exec(readFileSync(migrationDirectory + filename, "utf8"));
 }
@@ -19,6 +20,99 @@ async function database(throughMigration?: string) {
   return db;
 }
 describe("communications on real Postgres", () => {
+  it("reconciles a single existing future deletion job without resurrecting closed consent", async () => {
+    const db = await database(TERMINAL_SCRUB_MIGRATION);
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+        values('${A}','deletion','scheduled','${first}','2030-11-20T12:00:00Z'),
+              ('${B}','deletion','scheduled','${second}','2030-11-20T12:00:00Z');`);
+      const pendingId = (await db.query<{ id: string }>(
+        `select id from privacy_requests where user_id='${A}'`
+      )).rows[0].id;
+      const closedId = (await db.query<{ id: string }>(
+        `select id from privacy_requests where user_id='${B}'`
+      )).rows[0].id;
+      await db.exec(`insert into email_jobs(user_id,type,category,idempotency_key,variables)
+        values('${A}','deletion_requested','account_deletion','${pendingId}:requested','{}');
+        update privacy_requests set status='cancelled' where id='${closedId}';`);
+      await applyMigration(db, ATOMIC_QUEUE_MIGRATION);
+      const jobs = (await db.query<{ idempotency_key: string }>(
+        `select idempotency_key from email_jobs where category='account_deletion' order by idempotency_key`
+      )).rows.map(job => job.idempotency_key);
+      expect(jobs).toEqual([`${pendingId}:requested`, `${pendingId}:scheduled`]);
+      await applyMigration(db, ATOMIC_QUEUE_MIGRATION);
+      expect((await db.query("select id from email_jobs where category='account_deletion'")).rows).toHaveLength(2);
+      // The scheduled consent remains active and its same-session replay is barred.
+      await expect(db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+        values('${A}','deletion','scheduled','${first}','2030-11-20T12:00:00Z')`))
+        .rejects.toThrow();
+    } finally { await db.close(); }
+  }, 30000);
+
+
+  it("does not enqueue for cancelled, actorless or export-only privacy records", async () => {
+    const db = await database();
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,scheduled_for)
+        values('${A}','deletion','scheduled','2030-11-20T12:00:00Z'),
+              ('${B}','deletion','cancelled','2030-11-20T12:00:00Z'),
+              ('${B}','export','requested',null);`);
+      expect((await db.query("select id from email_jobs where category='account_deletion'")).rows)
+        .toHaveLength(0);
+      expect((await db.query("select id from privacy_requests where kind='deletion'")).rows)
+        .toHaveLength(2);
+    } finally { await db.close(); }
+  }, 30000);
+
+  it("persists both deletion notices atomically with a new scheduled consent", async () => {
+    const db = await database();
+    const session = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for,notification_email)
+        values('${A}','deletion','scheduled','${session}','2030-11-20T12:00:00Z','alex@example.invalid');`);
+      const receipt = (await db.query<{ id: string }>(
+        `select id from privacy_requests where user_id='${A}' and kind='deletion'`
+      )).rows[0];
+      const notices = (await db.query<{
+        type: string; category: string; idempotency_key: string; status: string;
+        variables: { requestId?: string; date?: string };
+      }>(`select type,category,idempotency_key,status,variables
+          from email_jobs where user_id='${A}' and category='account_deletion' order by type`)).rows;
+      expect(notices.map(n => [n.type, n.category, n.idempotency_key, n.status])).toEqual([
+        ["deletion_requested", "account_deletion", `${receipt.id}:requested`, "queued"],
+        ["deletion_scheduled", "account_deletion", `${receipt.id}:scheduled`, "queued"],
+      ]);
+      expect(notices[0].variables.requestId).toBe(receipt.id);
+      expect(Date.parse(notices[1].variables.date ?? "")).toBe(Date.parse("2030-11-20T12:00:00Z"));
+      // The existing handler's post-insert enqueue attempts must remain idempotent.
+      await db.exec(`insert into email_jobs(user_id,type,category,idempotency_key,variables)
+        values('${A}','deletion_requested','account_deletion','${receipt.id}:requested','{}')
+        on conflict (idempotency_key) do nothing;`);
+      expect((await db.query<{ count: string }>(
+        `select count(*)::text as count from email_jobs where user_id='${A}' and category='account_deletion'`
+      )).rows[0].count).toBe("2");
+    } finally { await db.close(); }
+  }, 30000);
+
+  it("rolls back consent if either required deletion job cannot be written", async () => {
+    const db = await database();
+    const session = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const consent = `insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+      values('${A}','deletion','scheduled','${session}','2030-11-20T12:00:00Z')`;
+    try {
+      await db.exec("alter table email_jobs add constraint reject_scheduled_notice check (type <> 'deletion_scheduled')");
+      await expect(db.exec(consent)).rejects.toThrow();
+      expect((await db.query("select id from privacy_requests where user_id=$1", [A])).rows).toHaveLength(0);
+      expect((await db.query("select id from email_jobs where user_id=$1 and category='account_deletion'", [A])).rows).toHaveLength(0);
+      await db.exec("alter table email_jobs drop constraint reject_scheduled_notice");
+      await db.exec(consent);
+      expect((await db.query("select id from privacy_requests where user_id=$1", [A])).rows).toHaveLength(1);
+      expect((await db.query("select id from email_jobs where user_id=$1 and category='account_deletion'", [A])).rows).toHaveLength(2);
+    } finally { await db.close(); }
+  }, 30000);
+
   it("retains cancelled deletion consent as a session-bound replay barrier", async () => {
     const db = await database();
     const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
