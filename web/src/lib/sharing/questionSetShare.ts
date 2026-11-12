@@ -143,8 +143,11 @@ export function importSharedQuestionSet(input: {
   // A share receipt is an identity claim, not a unique constraint on legacy
   // local storage. After restore or interrupted saves, duplicate receipts may
   // disagree about membership/digest. Never arbitrarily trust the first one.
+  // UUID hex digits are case-insensitive. Preserve the original stored shareId,
+  // but compare canonical values so case-only receipt duplicates fail closed.
+  const canonicalShareId = identity.shareId.toLowerCase();
   const matchingReceipts = existingSets.filter(
-    (set) => readSharedQuestionImportProvenance(set)?.shareId === identity.shareId,
+    (set) => readSharedQuestionImportProvenance(set)?.shareId.toLowerCase() === canonicalShareId,
   );
   if (matchingReceipts.length > 1) {
     throw new Error("This imported Question Set has ambiguous duplicate receipts for the same share ID. Resolve the original local sets without replacing question IDs before importing again.");
