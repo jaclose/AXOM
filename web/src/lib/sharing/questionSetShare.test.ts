@@ -296,6 +296,50 @@ describe("Question Set share boundary", () => {
     expect(edited.attempts).toEqual([{ at: NOW, answerKey: "B", status: "correct" }]);
   });
 
+  it("holds duplicate matching receipts even when both memberships look complete", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const duplicate = { ...first.set, id: "duplicate-local-set" };
+    const originalSets = [first.set, duplicate];
+    const originalIds = [...first.set.questionIds];
+    const originalNotes = first.questions[0].notes;
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: first.questions,
+      existingSets: originalSets,
+      now: NOW,
+    })).toThrow(/ambiguous.*share ID/i);
+    expect(first.set.questionIds).toEqual(originalIds);
+    expect(first.questions[0].notes).toBe(originalNotes);
+    expect(originalSets).toHaveLength(2);
+  });
+
+  it("holds conflicting same-share receipts regardless of their order", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const conflict = {
+      ...first.set,
+      id: "conflicting-local-set",
+      importProvenance: { ...first.set.importProvenance, contentDigest: "b".repeat(64) },
+    };
+    for (const existingSets of [[first.set, conflict], [conflict, first.set]]) {
+      expect(() => importSharedQuestionSet({
+        snapshot: snapshot(),
+        identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+        existingQuestions: first.questions,
+        existingSets, now: NOW,
+      })).toThrow(/ambiguous.*share ID/i);
+    }
+    expect(conflict.importProvenance.contentDigest).toBe("b".repeat(64));
+  });
+
   it("refuses to treat changed content under the same share ID as an idempotent replay", () => {
     const first = importSharedQuestionSet({
       snapshot: snapshot(),
