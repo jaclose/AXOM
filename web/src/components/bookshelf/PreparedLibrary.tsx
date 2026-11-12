@@ -427,7 +427,7 @@ export function PreparedLibrary() {
           : /local-only|remains local/i.test(source.reason) ? "Original remains outside this AXOM collection"
           : "No original included in this package";
         return <li key={source.checksum}>
-        <div><strong>{presentation.title}</strong><span>{presentation.scope} · {local.ready} locally answer-ready · {local.review} stored for review · {source.review} held in source · {source.status === "prepared" ? "Prepared package" : source.status}</span><small>{presentation.title !== source.name ? `Original source: ${source.name} · ` : ""}{source.reason} · {originalLabel}</small></div>
+        <div><strong>{presentation.title}</strong><span>{presentation.scope} · {local.ready} locally answer-ready · {local.review} stored for review · {source.review} held in source · {source.status === "prepared" ? "Prepared package" : source.status}</span><small>{presentation.title !== source.name ? <>Original source: <span>{source.name}</span> · </> : null}{source.reason} · {originalLabel}</small></div>
         {reviews.some(d => d.id === `private-review-${source.checksum}`) && <GButton onClick={() => void review(entry)}>Review source</GButton>}
         {source.originalFile && <GButton disabled={originalState !== "stored"} onClick={() => void original(source.checksum, source.name)}>Open original</GButton>}
       </li>; })}</ul>
