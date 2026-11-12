@@ -21,6 +21,10 @@ describe("prepared source presentation", () => {
     const explicit = review({ source: { filename: source.name, sourceWeekDeclared: true } });
     expect(preparedSourcePresentation(source, explicit).scope).toBe("RHPS · Term 5 · Week 2 · Pharmacology");
   });
+  it("rejects malformed control characters in the proposed display title", () => {
+    const bad = review({ bank: { title: "Respiratory\\nPharmacology", discipline: "Pharmacology" } });
+    expect(preparedSourcePresentation(source, bad).title).toBe(source.name);
+  });
   it("does not trust titles for a different original document or module", () => {
     expect(preparedSourcePresentation(source, review({ source: { filename: "Other.pdf" } })).title).toBe(source.name);
     expect(preparedSourcePresentation(source, review({ course: { name: "DERS", term: 4, week: 1 } })).title).toBe(source.name);

@@ -9,7 +9,11 @@ interface CatalogSource {
   readonly module?: string;
 }
 function label(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length > 160 || /[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  if (typeof value !== "string" || value.length > 160) return undefined;
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code !== undefined && (code < 32 || code === 127)) return undefined;
+  }
   const trimmed = value.trim();
   return trimmed || undefined;
 }
