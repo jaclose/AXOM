@@ -120,8 +120,15 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await review.getByRole("textbox", { name: "Review note" }).fill("Synthetic source and distribution rights checked.");
     await review.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
     await review.getByRole("button", { name: "Approve for library" }).click();
-    await expect(queue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
-    console.info("Question Set Library fixture: academic approval recorded.");
+    // Host reloads its dashboard after a review and temporarily unmounts this
+    // queue. Its local status message is therefore not a durable acknowledgement.
+    // Assert the revision-bound approval against SQL, then verify another account
+    // can actually read the approved entry below.
+    await expect.poll(async () => {
+      const submissions = await database.rpc(owner.id, "my_question_set_library") as Array<{ id: string; status: string }>;
+      return submissions.find(submission => submission.id === pending.id)?.status;
+    }).toBe("approved");
+    console.info("Question Set Library fixture: academic approval persisted in SQL.");
 
     const library = other.locator(".qsl-library");
     await library.getByRole("button", { name: "Refresh", exact: true }).click();
