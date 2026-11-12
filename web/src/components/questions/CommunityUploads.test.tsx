@@ -352,4 +352,49 @@ describe("Community Uploads", () => {
     expect(screen.queryByText("Previous account private error")).toBeNull();
     expect(screen.queryByText("Checking and downloading this exact revision…")).toBeNull();
   });
+  it("reuses revision-bound academic review in Host without exposing contribution controls", async () => {
+    const reviewed = vi.fn();
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValue([{ ...row, owned: true }]);
+    render(<CommunityUploads reviewOnly onOpenLibrary={vi.fn()} onReviewed={reviewed} />);
+    expect(screen.getByRole("heading", { name: "Review course uploads" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Share a Question Set" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Share a course" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Browse approved Question Sets" })).toBeNull();
+    const card = (await screen.findByText("NCRS")).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Open revision for review" }));
+    const approve = await within(card).findByRole("button", { name: /Approve for official catalog/ }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    fireEvent.click(within(card).getByRole("checkbox", { name: /inspected this exact revision/ }));
+    fireEvent.click(approve);
+    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(ids.collection, ids.revision, true, "owner-1",
+      expect.objectContaining({ missingExplanations: 0 }), true));
+    await waitFor(() => expect(reviewed).toHaveBeenCalledOnce());
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
+  it("Host never offers approval to an operator without independent academic reviewer permission", async () => {
+    mocks.reviewer.mockResolvedValue(false);
+    render(<CommunityUploads reviewOnly onOpenLibrary={vi.fn()} />);
+    const card = (await screen.findByText("NCRS")).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Open revision for review" }));
+    await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+    expect(within(card).queryByRole("button", { name: /Approve for official catalog/ })).toBeNull();
+    expect(screen.getByText(/Host owner access does not confer medical-content review permission/)).toBeTruthy();
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
+  it("Host refresh rechecks newly granted reviewer access without changing the signed-in account", async () => {
+    mocks.reviewer.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<CommunityUploads reviewOnly onOpenLibrary={vi.fn()} />);
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledTimes(2));
+    const card = (await screen.findByText("NCRS")).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Open revision for review" }));
+    expect(await within(card).findByRole("button", { name: /Approve for official catalog/ })).toBeTruthy();
+  });
+
 });
