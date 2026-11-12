@@ -567,3 +567,120 @@
 .ambient-actions { display: inline-flex; align-items: center; gap: 6px; }
 .foryou-card .soundscape-pin:not(.on) { opacity: 0; }
 .foryou-card:hover .soundscape-pin { opacity: 1; }
+
+
+/* --- Fullscreen resonance timer: always present while a real focus session exists. --- */
+.soundscape-hero.is-fullscreen .soundscape-immersive-timer {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(clamp(320px, 37vw, 960px), calc(100% - 32px));
+  padding: clamp(18px, 1.6vw, 30px);
+  box-sizing: border-box;
+  border-radius: clamp(18px, 1.6vw, 28px);
+  border: 1px solid rgba(var(--accent-rgb), 0.34);
+  background:
+    linear-gradient(125deg, rgba(var(--accent-rgb), 0.13), transparent 52%),
+    linear-gradient(145deg, rgba(16, 22, 32, 0.82), rgba(6, 9, 17, 0.78));
+  color: #f1ede4;
+  box-shadow: 0 24px 96px rgba(0, 0, 0, 0.42), 0 0 45px rgba(var(--accent-rgb), 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(22px) saturate(1.35);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  pointer-events: auto;
+}
+.soundscape-immersive-timer-top,
+.soundscape-immersive-timer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+}
+.soundscape-immersive-timer-top { margin-bottom: clamp(12px, 1.1vw, 26px); }
+.soundscape-immersive-timer-eyebrow {
+  font: 600 clamp(10px, 0.9vw, 15px) / 1.3 var(--font-ui);
+  letter-spacing: 0.18em;
+  color: rgba(241, 237, 228, 0.69);
+}
+.soundscape-immersive-timer-eyebrow span { color: rgb(var(--accent-rgb)); margin: 0 5px; }
+.soundscape-immersive-timer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font: 500 clamp(10px, 0.85vw, 15px) / 1.3 var(--font-ui);
+  color: rgba(241, 237, 228, 0.72);
+}
+.soundscape-immersive-timer-status i {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 0 9px rgba(var(--accent-rgb), 0.7);
+}
+.soundscape-immersive-timer-status.paused i { background: rgba(241, 237, 228, 0.4); box-shadow: none; }
+.soundscape-immersive-timer-readout { min-width: 0; display: grid; gap: 5px; }
+.soundscape-immersive-timer-clock {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: clamp(46px, 5.8vw, 116px);
+  font-weight: 500;
+  line-height: 0.97;
+  letter-spacing: -0.07em;
+  font-variant-numeric: tabular-nums;
+  color: #f8f4eb;
+  text-shadow: 0 0 42px rgba(var(--accent-rgb), 0.12);
+}
+.soundscape-immersive-timer-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(241, 237, 228, 0.65);
+  font: 500 clamp(12px, 1.1vw, 19px) / 1.5 var(--font-ui);
+}
+.soundscape-immersive-timer-toggle {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: clamp(46px, 4.2vw, 76px);
+  height: clamp(46px, 4.2vw, 76px);
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 50%;
+  color: #f1ede4;
+  background: rgba(var(--accent-rgb), 0.19);
+  cursor: pointer;
+  transition: background 0.24s ease, transform 0.24s ease;
+}
+.soundscape-immersive-timer-toggle:hover { background: rgba(var(--accent-rgb), 0.32); transform: scale(1.045); }
+.soundscape-immersive-timer-toggle:focus-visible { outline: 3px solid rgb(var(--accent-rgb)); outline-offset: 4px; }
+
+.soundscape-immersive-stop {
+  margin: 12px 0 0;
+  color: rgba(241, 237, 228, 0.73);
+  font: 500 clamp(12px, 1vw, 17px) / 1.4 var(--font-ui);
+  letter-spacing: 0.025em;
+}
+.soundscape-immersive-timer-track {
+  height: 3px; margin-top: clamp(16px, 1.5vw, 28px);
+  overflow: hidden; border-radius: 99px;
+  background: rgba(241, 237, 228, 0.14);
+}
+.soundscape-immersive-timer-progress {
+  height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.62), rgb(var(--accent-rgb)));
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.45);
+  transition: width 0.45s linear;
+}
+@media (max-width: 560px) {
+  .soundscape-hero.is-fullscreen .soundscape-immersive-timer {
+    bottom: max(14px, env(safe-area-inset-bottom));
+    padding: 16px 18px 18px;
+  }
+  .soundscape-immersive-timer-top { margin-bottom: 14px; }
+  .soundscape-immersive-timer-clock { font-size: clamp(40px, 11vw, 54px); }
+  .soundscape-immersive-timer-toggle { width: 46px; height: 46px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .soundscape-immersive-timer-toggle,
+  .soundscape-immersive-timer-progress { transition: none; }
+}
