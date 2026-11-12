@@ -322,6 +322,16 @@ describe("Journal feedback when browser storage cannot be read", () => {
     const names = Array.from({ length: 259 }, (_, index) => `Journal R39 Overflow Name ${index}`);
     const owners = names.map((name) => `axom-journal-feedback-draft:${userIdFromName(name)}`);
     expect(new Set(owners).size).toBe(owners.length);
+    // A separate authenticated account must not inherit the exhausted
+    // volatile recovery capacity of the overflowed local-only history.
+    const otherAccount = {
+      id: "journal-r42-other-account", email: "r42@example.test",
+      displayName: "Other writer", emailConfirmed: true,
+    };
+    const beforeOtherName = "Journal R42 Other Account Before";
+    const afterOtherName = "Journal R42 Other Account After";
+    const beforeOtherKey = `axom-journal-feedback-draft:${userIdFromName(beforeOtherName)}:account:${otherAccount.id}`;
+    const afterOtherKey = `axom-journal-feedback-draft:${userIdFromName(afterOtherName)}:account:${otherAccount.id}`;
     const original = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R39 original private feedback unchanged." });
     useStore.getState().updateProfile({ name: names[0] });
     localStorage.setItem(owners[0], original);
@@ -346,10 +356,25 @@ describe("Journal feedback when browser storage cannot be read", () => {
       // Do not tell the owner to wait for a storage outage that has already ended.
       expect(screen.getByRole("alert").textContent).toContain("this draft cannot save while recovery is incomplete");
       expect(screen.queryByText("Other saved feedback copies (1)")).toBeNull();
+      // Even when a backlog write fails halfway through, retry must stay
+      // fail-closed and retain the original bytes and all pending links.
+      const originalSet = Storage.prototype.setItem;
+      const partialFailure = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, storageKey: string, value: string) {
+        if (this === window.localStorage && storageKey.startsWith(`${owners[20]}:name-alias:v1:`))
+          throw new Error("R42 one historical link is not writable yet");
+        return originalSet.call(this, storageKey, value);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      partialFailure.mockRestore();
       fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
       expect(screen.getByRole("alert").textContent).toContain("this draft cannot save while recovery is incomplete");
-      // A successful write of older pending links cannot reconstruct the
-      // missing 257th edge, so retry must not falsely report complete history.
+      // All 256 known links can now be written, but the 257th was never
+      // captured. Persisting the backlog must not falsely clear that warning.
+      const durableKnown = owners.slice(1, 257).map((owner) =>
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+          .filter((item) => item?.startsWith(`${owner}:name-alias:v1:`)));
+      expect(durableKnown.every((links) => links.length === 1)).toBe(true);
       expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
       expect(originalGet.call(localStorage, owners[0])).toBe(original);
       first.unmount();
@@ -360,12 +385,42 @@ describe("Journal feedback when browser storage cannot be read", () => {
       fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
       expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
       expect(originalGet.call(localStorage, owners[0])).toBe(original);
+
+      // Storage has recovered and the overflow warning remains truthful.
+      // A distinct account now experiences its own transient rename read
+      // failure. It must retain and recover that account's original bytes.
+      cleanup();
+      useAccount.setState({ user: otherAccount, phase: "signed-in", link: "linked" });
+      useStore.getState().updateProfile({ name: beforeOtherName });
+      const otherSaved = JSON.stringify({ ...JSON.parse(oldDraft), liked: "R42 other account private words." });
+      localStorage.setItem(beforeOtherKey, otherSaved);
+      const otherInitial = render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+      otherInitial.unmount();
+      const otherBlocked = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, storageKey: string) {
+        if (this === window.localStorage && storageKey.startsWith(afterOtherKey))
+          throw new Error("Separate account rename link temporarily unreadable");
+        return originalGet.call(this, storageKey);
+      });
+      useStore.getState().updateProfile({ name: afterOtherName });
+      otherBlocked.mockRestore();
+      render(<JournalPage hasAccountWorkspaceReceipt={() => true} />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.getByText("Other saved feedback copies (1)")).toBeTruthy();
+      fireEvent.click(screen.getByText("Other saved feedback copies (1)"));
+      fireEvent.click(screen.getByRole("button", { name: "Open copy 1" }));
+      expect((screen.getByLabelText("What do you like?") as HTMLTextAreaElement).value)
+        .toBe("R42 other account private words.");
+      expect(originalGet.call(localStorage, beforeOtherKey)).toBe(otherSaved);
+      expect(originalGet.call(localStorage, owners[0])).toBe(original);
     } finally {
       cleanup();
       denied.mockRestore();
       for (let index = localStorage.length - 1; index >= 0; index -= 1) {
         const key = localStorage.key(index);
-        if (key && owners.some((owner) => key === owner || key.startsWith(`${owner}:`)))
+        if (key && ([...owners, beforeOtherKey, afterOtherKey].some((owner) =>
+          key === owner || key.startsWith(`${owner}:`))))
           localStorage.removeItem(key);
       }
     }
