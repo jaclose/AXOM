@@ -2056,7 +2056,10 @@ function readJournalFeedbackCopies(baseKey: string, selectedKey: string | null):
     const keys: string[] = [];
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
-      if (key) keys.push(key);
+      // A concurrent tab may change storage between the length and key reads.
+      // Never treat a missing indexed key as proof of complete saved history.
+      if (key === null) throw new Error("Saved feedback inventory changed while reading");
+      keys.push(key);
     }
     const ownerKeys = [baseKey];
     for (let ownerIndex = 0; ownerIndex < ownerKeys.length; ownerIndex += 1) {
