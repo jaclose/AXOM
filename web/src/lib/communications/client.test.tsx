@@ -20,7 +20,7 @@ vi.mock("../account/accountStore", () => {
 vi.mock("../account/supabase", () => {
   const session = () => {
     const id = mocks.userId;
-    const payload = btoa(JSON.stringify({ sub: id })).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+    const payload = btoa(JSON.stringify({ sub: id })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     return { user: { id }, access_token: `e30.${payload}.synthetic-test-only`, refresh_token: "synthetic-test-only" };
   };
   return {
