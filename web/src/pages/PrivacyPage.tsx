@@ -1,18 +1,54 @@
 import { CommunicationsBrand } from "../components/communications/CommunicationsBrand";
 import { useOpticalMotion } from "../lib/communications/useOpticalMotion";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Download, Mail, ShieldCheck, Trash2 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { exportStateWithAttachments } from "../lib/backup";
 import { GButton } from "../components/ui/primitives";
 import { communicationsRequest, useCommunications } from "../lib/communications/client";
+import { useAccount } from "../lib/account/accountStore";
 import "../styles/communications.css";
 
 export function PrivacyPage() {
+  const accountId = useAccount(state => state.user?.id ?? null);
+  // Unmount each confirmation and pending UI receipt after an account change.
+  return <AccountPrivacyPage key={accountId ?? "signed-out"} accountId={accountId} />;
+}
+
+function AccountPrivacyPage({ accountId }: { accountId: string | null }) {
   const opticalRoot = useOpticalMotion<HTMLElement>();
   const remote = useCommunications(); const [step, setStep] = useState<"closed" | "backup" | "confirm">("closed"); const [confirmation, setConfirmation] = useState(""); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   const [backupResult, setBackupResult] = useState<{ message: string; incomplete: boolean } | null>(null);
-  const perform = async (fn: () => Promise<unknown>, success: string) => { setBusy(true); setMessage(""); try { await fn(); setMessage(success); await remote.reload(); return true; } catch (e) { setMessage(e instanceof Error ? e.message : "The request failed. Your data has not been cleared."); return false; } finally { setBusy(false); } };
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+  // Check the current store at dispatch time, including before React commits a
+  // subsequent account render. The keyed child prevents stale async UI receipts.
+  const sameAccount = () => active.current && Boolean(accountId)
+    && (typeof useAccount.getState !== "function" || useAccount.getState().user?.id === accountId);
+  const deletionAvailable = Boolean(accountId && remote.data?.deletionEnabled && !remote.loading && !remote.error);
+  useEffect(() => {
+    if (!deletionAvailable) { setStep("closed"); setConfirmation(""); }
+  }, [deletionAvailable]);
+  const perform = async (fn: () => Promise<unknown>, success: string) => {
+    if (!sameAccount()) return false;
+    setBusy(true); setMessage("");
+    try {
+      await fn();
+      if (!sameAccount()) return false;
+      await remote.reload();
+      if (!sameAccount()) return false;
+      setMessage(success);
+      return true;
+    } catch (e) {
+      if (sameAccount()) setMessage(e instanceof Error ? e.message : "The request failed. Your data has not been cleared.");
+      return false;
+    } finally {
+      if (sameAccount()) setBusy(false);
+    }
+  };
   const backup = async () => {
     setBusy(true); setMessage(""); setBackupResult(null);
     try {
@@ -51,9 +87,15 @@ export function PrivacyPage() {
     <section className="privacy-block comms-glass"><Download size={24} /><div><p className="comms-kicker">01 / YOUR DATA</p><h2>Take a copy with you.</h2><p>A local backup uses AXOM’s existing portable export, including supported question media. An account export contains the latest protected workspace and account-held communications data.</p><div className="comms-actions"><GButton variant="primary" disabled={busy} onClick={() => void backup()}>Download local backup</GButton><GButton disabled={busy || !remote.data} onClick={() => void perform(() => communicationsRequest("request-export"), "Account export requested. It will appear below when ready.")}>Request account export</GButton></div>{step === "closed" && backupNotice}<small>Original source PDFs and other device-only files are not included in the account export. Private account download links expire after 15 minutes.</small></div></section>
     <section className="privacy-block comms-glass"><Mail size={24} /><div><p className="comms-kicker">02 / COMMUNICATIONS</p><h2>A quieter inbox, on your terms.</h2><p>Choose each category independently. Essential security and account messages remain available.</p><a href="#communications">Manage communications <ArrowUpRight size={14} /></a></div></section>
     <section className="privacy-block privacy-danger comms-glass"><Trash2 size={24} /><div><p className="comms-kicker">03 / YOUR ACCOUNT</p><h2>Leave deliberately.</h2><p>Account deletion removes your sign-in and eligible account-held data after a 7-day cancellation period. It does not remotely erase this device. Backup and required security retention may follow separate policies.</p>{remote.data && !remote.data.deletionEnabled && <p className="comms-notice">Account deletion is awaiting operator activation. No request can be scheduled until it is enabled.</p>}
-      {step === "closed" && <GButton disabled={busy || !remote.data?.deletionEnabled} onClick={() => setStep("backup")}>Delete account</GButton>}
-      {step === "backup" && <div className="privacy-confirm"><h3>Would you like a copy first?</h3><p>Download a local backup before continuing.</p>{backupNotice}<div className="comms-actions"><GButton disabled={busy} onClick={() => void backup()}>Download my data</GButton><GButton onClick={() => setStep("confirm")}>Continue without backup</GButton><GButton onClick={() => setStep("closed")}>Cancel</GButton></div></div>}
-      {step === "confirm" && <form className="privacy-confirm" onSubmit={e => { e.preventDefault(); void perform(() => communicationsRequest("request-deletion", { confirmation }), "Deletion scheduled. You can cancel below before processing begins.").then(ok => { if (ok) { setStep("closed"); setConfirmation(""); } }); }}><h3>Confirm account deletion</h3><p>You must have signed in within the last 10 minutes. Optional emails stop while deletion is pending.</p>{backupNotice}<label>Type DELETE MY ACCOUNT<input name="delete-confirmation" autoComplete="off" value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label><div className="comms-actions"><GButton type="submit" disabled={busy || confirmation !== "DELETE MY ACCOUNT"}>Schedule deletion in 7 days</GButton><GButton type="button" onClick={() => setStep("closed")}>Cancel</GButton></div></form>}
+      {step === "closed" && <GButton disabled={busy || !deletionAvailable} onClick={() => { if (deletionAvailable && sameAccount()) setStep("backup"); }}>Delete account</GButton>}
+      {step === "backup" && deletionAvailable && <div className="privacy-confirm"><h3>Would you like a copy first?</h3><p>Download a local backup before continuing.</p>{backupNotice}<div className="comms-actions"><GButton disabled={busy} onClick={() => void backup()}>Download my data</GButton><GButton disabled={busy} onClick={() => { if (deletionAvailable && sameAccount()) setStep("confirm"); }}>Continue without backup</GButton><GButton onClick={() => setStep("closed")}>Cancel</GButton></div></div>}
+      {step === "confirm" && deletionAvailable && <form className="privacy-confirm" onSubmit={e => {
+        e.preventDefault();
+        if (!deletionAvailable || !sameAccount() || busy || confirmation !== "DELETE MY ACCOUNT") return;
+        void perform(() => communicationsRequest("request-deletion", { confirmation }), "Deletion scheduled. You can cancel below before processing begins.").then(ok => {
+          if (ok && sameAccount()) { setStep("closed"); setConfirmation(""); }
+        });
+      }}><h3>Confirm account deletion</h3><p>You must have signed in within the last 10 minutes. Optional emails stop while deletion is pending.</p>{backupNotice}<label>Type DELETE MY ACCOUNT<input name="delete-confirmation" autoComplete="off" value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label><div className="comms-actions"><GButton type="submit" disabled={busy || !deletionAvailable || confirmation !== "DELETE MY ACCOUNT"}>Schedule deletion in 7 days</GButton><GButton type="button" onClick={() => setStep("closed")}>Cancel</GButton></div></form>}
     </div></section><p role="status" className="comms-status">{message}</p>
     <section className="comms-history"><h2>Your requests</h2><GButton size="sm" disabled={busy || remote.loading} onClick={() => void remote.reload()}>Refresh status</GButton>{remote.loading
       ? <p role="status">Loading request history…</p>
