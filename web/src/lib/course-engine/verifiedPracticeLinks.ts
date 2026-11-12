@@ -31,6 +31,11 @@ export function duplicateQuestionRecordIds(records: readonly Pick<QuestionRecord
   return duplicates;
 }
 
+/** Same-ID source sets also collide in the Tracker's last-write-wins index. */
+export function duplicateQuestionSetIds(sets: readonly Pick<QuestionSet, "id">[]): ReadonlySet<string> {
+  return duplicateQuestionRecordIds(sets);
+}
+
 /** Repeated immutable membership IDs are ambiguous, not extra practice rows. */
 const repeatedMembers = (ids?: readonly string[]): boolean =>
   Boolean(ids && new Set(ids).size !== ids.length);
@@ -62,6 +67,7 @@ export function verifyCollectionForCourse(
   setsById: ReadonlyMap<string, QuestionSet>,
   requireCourseProof = false,
   duplicateRecordIds: ReadonlySet<string> = new Set(),
+  duplicateSetIds: ReadonlySet<string> = new Set(),
 ): VerifiedCourseCollection {
   const sourceSet = collection.setId ? setsById.get(collection.setId) : undefined;
   if (collection.setId && !sourceSet) {
@@ -140,8 +146,16 @@ export function verifyCollectionForCourse(
   // can be hidden there even when each source-set membership array is unique.
   // Treat that association as ambiguous before offering any Practice action.
   const duplicateRecordMembership = memberIds.some((id) => duplicateRecordIds.has(id));
+  // Raw QuestionSet IDs may also be duplicated before Map indexing. Hold both
+  // the visible collection's source and any member's declared primary source.
+  const duplicateSourceSet = Boolean(collection.setId && duplicateSetIds.has(collection.setId));
+  const duplicatePrimarySet = memberIds.some((id) => {
+    const primaryId = questionsById.get(id)?.setId;
+    return primaryId != null && duplicateSetIds.has(primaryId);
+  });
   const sourceReviewRequired = declaredConflict || malformedReadyMembership
-    || repeatedMembership || duplicateRecordMembership || conflictingQuestionCount > 0;
+    || repeatedMembership || duplicateRecordMembership || duplicateSourceSet
+    || duplicatePrimarySet || conflictingQuestionCount > 0;
   const readyQuestionIds = sourceReviewRequired ? [] : [...new Set(collection.readyQuestionIds ?? [])]
     .filter((id) => {
       const question = questionsById.get(id);
