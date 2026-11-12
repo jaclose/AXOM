@@ -20,6 +20,17 @@ const invalidExplicitWeek = (value: unknown): boolean =>
   value != null && (typeof value !== "string" || value.trim() !== "")
     && parseWeek(value) === undefined;
 
+/** Keep raw record identity collisions visible before Map construction loses them. */
+export function duplicateQuestionRecordIds(records: readonly Pick<QuestionRecord, "id">[]): ReadonlySet<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const record of records) {
+    if (seen.has(record.id)) duplicates.add(record.id);
+    seen.add(record.id);
+  }
+  return duplicates;
+}
+
 /** Repeated immutable membership IDs are ambiguous, not extra practice rows. */
 const repeatedMembers = (ids?: readonly string[]): boolean =>
   Boolean(ids && new Set(ids).size !== ids.length);
@@ -50,6 +61,7 @@ export function verifyCollectionForCourse(
   questionsById: ReadonlyMap<string, QuestionRecord>,
   setsById: ReadonlyMap<string, QuestionSet>,
   requireCourseProof = false,
+  duplicateRecordIds: ReadonlySet<string> = new Set(),
 ): VerifiedCourseCollection {
   const sourceSet = collection.setId ? setsById.get(collection.setId) : undefined;
   if (collection.setId && !sourceSet) {
@@ -124,8 +136,12 @@ export function verifyCollectionForCourse(
     validMembers.add(id);
   }
 
+  // The QBank/Tracker books index records in a Map. A duplicate raw record ID
+  // can be hidden there even when each source-set membership array is unique.
+  // Treat that association as ambiguous before offering any Practice action.
+  const duplicateRecordMembership = memberIds.some((id) => duplicateRecordIds.has(id));
   const sourceReviewRequired = declaredConflict || malformedReadyMembership
-    || repeatedMembership || conflictingQuestionCount > 0;
+    || repeatedMembership || duplicateRecordMembership || conflictingQuestionCount > 0;
   const readyQuestionIds = sourceReviewRequired ? [] : [...new Set(collection.readyQuestionIds ?? [])]
     .filter((id) => {
       const question = questionsById.get(id);
