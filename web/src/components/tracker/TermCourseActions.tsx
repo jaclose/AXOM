@@ -7,35 +7,12 @@ import { listTermCourses, termQuizNeedsCatalog, termQuizSelection } from "../../
 import { launchCourseQuiz, MAX_COURSE_QUIZ_QUESTIONS } from "../../lib/course-engine/quizLaunch";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
+import { isBrowserStorageQuotaFailure } from "../../lib/storageQuota";
 import { GButton } from "../ui/primitives";
 
 interface DownloadFailure { id: string; title: string; reason: string }
 
 const STORAGE_QUOTA_RECOVERY = "This course was not confirmed. Do not clear AXOM site data. Keep your existing work, free browser or device storage safely, then retry this term.";
-
-/** A safety-backup failure can wrap the original browser quota exception in
- * AggregateError. Distinguish local storage exhaustion from remote API quotas;
- * neither case authorizes discarding any saved academic data. */
-function isBrowserStorageQuotaFailure(error: unknown): boolean {
-  const pending: unknown[] = [error];
-  const seen = new Set<unknown>();
-  while (pending.length && seen.size < 16) {
-    const current = pending.pop();
-    if (current == null || seen.has(current)) continue;
-    seen.add(current);
-    const record = typeof current === "object" ? current as {
-      name?: unknown; message?: unknown; cause?: unknown; errors?: unknown;
-    } : undefined;
-    const name = typeof record?.name === "string" ? record.name : "";
-    const message = typeof record?.message === "string" ? record.message
-      : typeof current === "string" ? current : "";
-    if (name === "QuotaExceededError"
-      || /QuotaExceededError|(?:browser|device|disk)\s+(?:storage\s+)?(?:is\s+)?full|(?:workspace|storage|backup)\s+exceeded\s+(?:the\s+)?quota/i.test(message)) return true;
-    if (record?.cause != null) pending.push(record.cause);
-    if (Array.isArray(record?.errors)) pending.push(...record.errors);
-  }
-  return false;
-}
 
 /** Term downloads share the single-course installer and its durable account receipt.
  * Stop finishes the current course so a retry can safely skip it. */

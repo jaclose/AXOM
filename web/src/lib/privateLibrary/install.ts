@@ -13,6 +13,7 @@ import { assertInstallableAcademicImageBytes, type InstallableAcademicImage } fr
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
 import { createLocalBackup, refreshLocalBackupSummaries } from "../localBackup";
 import { BUILD_INFO } from "../buildInfo";
+import { isBrowserStorageQuotaFailure } from "../storageQuota";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { questionPracticeReadiness } from "../questionFilters";
 import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog, type ReviewedFiling } from "./types";
@@ -434,6 +435,16 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       const result = await saveBank(bank.pkg, assessed.issues, files, {
         library: currentStore, store: currentStore,
       }, { ...preparedBankImportOptions(bank), ...(refreshEquivalentSource ? { refreshEquivalentSource: true } : {}) });
+      // Some importer failures are returned as partial receipts rather than
+      // exceptions. Capacity exhaustion is not a source-review problem:
+      // continuing with another source can consume more space and misrepresent
+      // a failed write as a completed library download.
+      if (result.errors.some(isBrowserStorageQuotaFailure)) {
+        throw new DOMException(
+          "Browser storage is full while saving this source. Previously saved content remains; this import needs a retry.",
+          "QuotaExceededError",
+        );
+      }
       const durableSections = [
         ...result.sections,
         ...result.incompleteSections.filter(section => section.savedIds.length > 0),
@@ -490,6 +501,12 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       }
     } catch (cause) {
       assertCurrent();
+      if (isBrowserStorageQuotaFailure(cause)) {
+        // Fail closed, but never delete an existing source or its partially
+        // committed questions. A later user-initiated retry is idempotent.
+        progress("Browser storage is full. The library import stopped; previously saved content remains. Keep AXOM site data and retry after safely freeing space.");
+        throw cause;
+      }
       source.status = "failed";
       const retained = currentStore().questions.filter(question => (
         question.content?.provenance.sourceChecksum?.replace(/^sha256:/, "") === source.checksum

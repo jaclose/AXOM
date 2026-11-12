@@ -177,6 +177,67 @@ describe("prepared private library installation", () => {
     await expect(installPrivateLibrary(b.read)).resolves.toMatchObject({ status: "complete", warnings: [] });
     expect(useStore.getState().questions).toHaveLength(1);
   });
+  it("stops before reading a second source after the first source exhausts browser storage", async () => {
+    const baseline = await bundle();
+    await expect(installPrivateLibrary(baseline.read)).resolves.toMatchObject({ status: "complete" });
+    const previousQuestion = structuredClone(useStore.getState().questions[0]);
+    const previousCatalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)?.rawText;
+
+    const b = await bundle();
+    const first = { ...b.catalog.sources[0], id: "quota-source", bankFile: "banks/quota/bank.json", checksum: "b".repeat(64) };
+    const second = { ...b.catalog.sources[0], id: "unattempted-source", bankFile: "banks/unattempted/bank.json", checksum: "c".repeat(64) };
+    b.catalog.sources = [first, second];
+    b.files.set("catalog.json", encode(b.catalog));
+    const reads: string[] = [];
+    const read = async (path: string) => {
+      reads.push(path);
+      if (path === first.bankFile) throw new DOMException("Browser storage is full.", "QuotaExceededError");
+      const bytes = b.files.get(path);
+      if (!bytes) throw new Error(`Missing fixture: ${path}`);
+      return bytes;
+    };
+
+    await expect(installPrivateLibrary(read)).rejects.toMatchObject({ name: "QuotaExceededError" });
+    expect(reads).toContain(first.bankFile);
+    expect(reads).not.toContain(second.bankFile);
+    expect(useStore.getState().questions).toContainEqual(previousQuestion);
+    expect(useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)?.rawText).toBe(previousCatalog);
+    await reloadWorkspace();
+    expect(useStore.getState().questions).toContainEqual(previousQuestion);
+    expect(useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)?.rawText).toBe(previousCatalog);
+  });
+
+  it("propagates storage exhaustion from a partially saved reviewed filing instead of continuing the installation", async () => {
+    const b = await bundle();
+    await expect(installPrivateLibrary(b.read)).resolves.toMatchObject({ status: "complete" });
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const added = structuredClone(bank.pkg.questions[0]);
+    added.id = "sample-quota-2";
+    added.source.questionNumber = 2;
+    added.stem = [{ type: "text", text: "Which sample was added after the first download?" }];
+    bank.pkg.questions.push(added);
+    b.catalog.sources[0].ready = 2;
+    b.files.set("catalog.json", encode(b.catalog));
+    b.files.set("banks/test/bank.json", encode({
+      ...bank, reviewedFiling: { term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned" },
+    }));
+
+    const original = useStore.getState().commitReviewedRefiling;
+    const refusal = vi.fn(async () => ({
+      ok: false as const, message: "QuotaExceededError: browser storage is full", rollbackFailures: [],
+    }));
+    useStore.setState({ commitReviewedRefiling: refusal });
+    try {
+      await expect(installPrivateLibrary(b.read)).rejects.toMatchObject({ name: "QuotaExceededError" });
+    } finally {
+      useStore.setState({ commitReviewedRefiling: original });
+    }
+    expect(refusal).toHaveBeenCalledTimes(1);
+    // Successful earlier records remain; the later import must not claim a
+    // complete catalog or delete any of the existing learner's work.
+    expect(useStore.getState().questions.find(question => question.content?.id === "sample-1")).toBeDefined();
+  });
+
   it("returns a partial receipt with every durable question when a reused filing needs retry", async () => {
     const b = await bundle();
     await expect(installPrivateLibrary(b.read)).resolves.toMatchObject({ status: "complete", questionIds: [expect.any(String)] });
