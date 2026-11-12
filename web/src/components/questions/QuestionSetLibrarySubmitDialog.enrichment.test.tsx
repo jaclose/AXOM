@@ -753,6 +753,46 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.withdraw).not.toHaveBeenCalled();
   });
 
+  it("refuses old attestations after a same-ID parent prop rerender rebases private source analyses", async () => {
+    const analysis: NonNullable<QuestionRecord["analyses"]>[number] = {
+      id: "private-analysis-1", questionId: "q-1",
+      sourceFingerprint: "private-source-revision", version: 1, origin: "source",
+      status: "reviewed", concept: "Arterial media",
+      decisiveClues: ["smooth muscle"], mechanism: ["media regulates vessel caliber"],
+      distractors: [{ key: "B", whyWrong: "intima is the endothelial layer" }],
+      references: [{ documentId: "private-source-1", page: 3, role: "teaching" }],
+      generatedAt: "2026-11-06T12:00:00.000Z",
+    };
+    const source = question({
+      explanation: "Vascular smooth muscle in the tunica media controls arterial caliber and peripheral resistance.",
+      analyses: [analysis],
+    });
+    mocks.workspace.questions = [source];
+    const view = render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    const rights = screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement;
+    const answers = screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement;
+    fireEvent.click(rights);
+    fireEvent.click(answers);
+    await waitFor(() => expect(send.disabled).toBe(false));
+
+    // CommunityUploads supplies reactive props, keyed only by the stable
+    // set ID. The fresh props and store now agree with each other, but not
+    // with the source revision covered by the earlier consent checkboxes.
+    const changed = { ...source, analyses: [{ ...analysis, status: "rejected" as const }] };
+    mocks.workspace.questions = [changed];
+    view.rerender(<QuestionSetLibrarySubmitDialog set={{ ...set }} questions={[changed]} onClose={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Send for review" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Send for review" }));
+
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(await screen.findByText(/source review changed while publishing/)).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: /I own this content/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: /I checked every answer/ }) as HTMLInputElement).checked).toBe(false);
+    expect(changed.correctKey).toBe("A");
+    expect(source.correctKey).toBe("A");
+  });
+
   it("refuses a stale tab's checked attestations after another tab submits and withdraws, even before a storage event", async () => {
     const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
     mocks.workspace.questions = [source];
