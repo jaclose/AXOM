@@ -38,6 +38,61 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(ledger.classification("09_BPM502_PreMidterm_Lectures_DLA.txt","baseline_templates"),"tracker_template")
         self.assertEqual(ledger.mapping("GOER/Week 2/IMCQ 1.pdf", "downloads_goer_week2")["week"],2)
 
+    def test_tracker_coverage_does_not_borrow_unknown_or_foreign_source_scope(self):
+        # A T4 Week 20 template must not count a term-unassigned, week-
+        # unassigned, or Week 19 source as a Week 20 source candidate.
+        activity = dict(academic_term="T4", module="DERS", week=20,
+                        activity_type="imcq")
+        sources = [
+            dict(academic_term="T4", module="DERS", week=20,
+                 document_type="imcq", source_id="exact-week-20", source_sha256="a" * 64),
+            dict(academic_term="T4", module="DERS", week=None,
+                 document_type="imcq", source_id="unknown-week", source_sha256="b" * 64),
+            dict(academic_term=None, module="DERS", week=20,
+                 document_type="imcq", source_id="unknown-term", source_sha256="c" * 64),
+            dict(academic_term="T4", module="DERS", week=19,
+                 document_type="imcq", source_id="week-19", source_sha256="d" * 64),
+        ]
+        result = ledger.coverage_matrix([activity], sources)
+        scheduled = next(x for x in result if x["academic_term"] == "T4"
+                         and x["module"] == "DERS" and x["week"] == 20
+                         and x["expected_activity_type"] == "imcq")
+        self.assertEqual(scheduled["expected_tracker_activities"], 1)
+        self.assertEqual(scheduled["candidate_source_files"], 1)
+        self.assertEqual(scheduled["available_source_ids"], "exact-week-20")
+        for term, week, source_id in (("T4", None, "unknown-week"),
+                                      (None, 20, "unknown-term"),
+                                      ("T4", 19, "week-19")):
+            with self.subTest(source_id=source_id):
+                held = next(x for x in result if x["academic_term"] == term
+                            and x["week"] == week and x["expected_activity_type"] == "imcq")
+                self.assertEqual(held["expected_tracker_activities"], None)
+                self.assertEqual(held["available_source_ids"], source_id)
+                self.assertEqual(held["source_match_status"],
+                                 "observed_source_no_authoritative_expected_activity_template")
+
+    def test_tracker_unplaced_template_does_not_claim_weeked_sources(self):
+        # An activity with no evidenced template week must not silently
+        # inherit a source week, which could fabricate placement.
+        activity = dict(academic_term="T4", module="DERS", week=None,
+                        activity_type="esoft")
+        sources = [
+            dict(academic_term="T4", module="DERS", week=None,
+                 document_type="esoft", source_id="unplaced", source_sha256="e" * 64),
+            dict(academic_term="T4", module="DERS", week=20,
+                 document_type="esoft", source_id="week-20", source_sha256="f" * 64),
+        ]
+        result = ledger.coverage_matrix([activity], sources)
+        unplaced = next(x for x in result if x["academic_term"] == "T4"
+                        and x["module"] == "DERS" and x["week"] is None
+                        and x["expected_activity_type"] == "esoft")
+        self.assertEqual(unplaced["candidate_source_files"], 1)
+        self.assertEqual(unplaced["available_source_ids"], "unplaced")
+        weeked = next(x for x in result if x["week"] == 20
+                      and x["expected_activity_type"] == "esoft")
+        self.assertEqual(weeked["expected_tracker_activities"], None)
+        self.assertEqual(weeked["available_source_ids"], "week-20")
+
     def test_tracker_template_activity_requires_exact_original_source_bytes(self):
         # A post-inventory template must not lend its original source ID to
         # edited lines, even if its lexical path and file length are unchanged.
