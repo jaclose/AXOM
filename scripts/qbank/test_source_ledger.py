@@ -93,6 +93,42 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(weeked["expected_tracker_activities"], None)
         self.assertEqual(weeked["available_source_ids"], "week-20")
 
+    def test_tracker_lectures_and_dlas_do_not_borrow_question_bank_sources(self):
+        # Exact T4/Week20 filing is necessary, but a PQ/IMCQ original is
+        # still not evidence for a lecture/DLA Tracker activity.
+        activities = [
+            dict(academic_term="T4", module="DERS", week=20,
+                 activity_type=activity_type)
+            for activity_type in ("lecture", "flipped_lecture", "dla", "imcq")
+        ]
+        originals = [
+            dict(academic_term="T4", module="DERS", week=20,
+                 document_type=kind, source_id="synthetic-" + kind,
+                 source_sha256=letter * 64)
+            for kind, letter in (("pq", "a"), ("imcq", "b"), ("esoft", "c"),
+                                 ("small_group", "d"))
+        ]
+        rows = ledger.coverage_matrix(activities, originals)
+        for activity_type in ("lecture", "flipped_lecture", "dla"):
+            with self.subTest(activity_type=activity_type):
+                row = next(x for x in rows
+                           if x["expected_activity_type"] == activity_type)
+                self.assertEqual(row["expected_tracker_activities"], 1)
+                self.assertEqual(row["candidate_source_files"], 0)
+                self.assertEqual(row["available_source_ids"], "")
+                self.assertEqual(row["source_match_status"],
+                                 "activity_type_requires_independent_source_proof")
+        imcq = next(x for x in rows if x["expected_activity_type"] == "imcq")
+        self.assertEqual(imcq["candidate_source_files"], 1)
+        self.assertEqual(imcq["available_source_ids"], "synthetic-imcq")
+        self.assertEqual(imcq["source_match_status"],
+                         "module_and_type_candidate_not_line_item_verified")
+        pq = next(x for x in rows if x["expected_activity_type"] == "pq")
+        self.assertIsNone(pq["expected_tracker_activities"])
+        self.assertEqual(pq["available_source_ids"], "synthetic-pq")
+        self.assertEqual(pq["source_match_status"],
+                         "observed_source_no_authoritative_expected_activity_template")
+
     def test_tracker_template_activity_requires_exact_original_source_bytes(self):
         # A post-inventory template must not lend its original source ID to
         # edited lines, even if its lexical path and file length are unchanged.
