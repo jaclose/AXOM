@@ -689,8 +689,22 @@ def parse_templates(rows):
     for r in templates:
         try:
             fd = open_scanned_source_file(r)
-            with os.fdopen(fd, "r", encoding="utf-8-sig") as stream:
-                lines = stream.read().splitlines()
+            # Extract from the exact descriptor whose bytes match the original
+            # scanner SHA. A safe path alone does not prove a stable revision.
+            with os.fdopen(fd, "rb") as stream:
+                original_bytes = stream.read()
+            expected_sha = r.get("source_sha256")
+            if type(expected_sha) is not str or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None:
+                r["extraction_status"] = "template_source_integrity_held"
+                r["review_status"] = "source_integrity_review_required"
+                r["unresolved_reason"] = "template_original_revision_missing_or_invalid"
+                continue
+            if hashlib.sha256(original_bytes).hexdigest() != expected_sha:
+                r["extraction_status"] = "template_source_integrity_held"
+                r["review_status"] = "source_integrity_review_required"
+                r["unresolved_reason"] = "template_source_revision_mismatch"
+                continue
+            lines = original_bytes.decode("utf-8-sig").splitlines()
         except (OSError, ValueError, UnicodeError) as error:
             r["extraction_status"] = "template_source_read_unavailable"
             r["review_status"] = "source_read_unavailable"
