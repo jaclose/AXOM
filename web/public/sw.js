@@ -49,7 +49,11 @@ function matchesRequestedResource(request, response) {
     if (revalidation.length > 1 || (revalidation.length === 1
       && !/^\d{1,17}$/.test(revalidation[0]))) return false;
     resolved.searchParams.delete("__axom_revalidate");
-    return resolved.search === requested.search;
+    // Compare canonical, strictly allowlisted public versions on both sides.
+    // Deleting the internal parameter normalizes the final URL query, so a raw
+    // encoded request such as v=build%2D20261111 must be normalized as well.
+    if (!hasOnlyPublicAssetVersion(requested) || !hasOnlyPublicAssetVersion(resolved)) return false;
+    return resolved.searchParams.toString() === requested.searchParams.toString();
   } catch {
     return false;
   }
