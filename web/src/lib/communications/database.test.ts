@@ -4,12 +4,17 @@ import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { describe, expect, it } from "vitest";
 const A = "11111111-1111-4111-8111-111111111111"; const B = "22222222-2222-4222-8222-222222222222";
-async function database() {
+const migrationDirectory = fileURLToPath(new URL("../../../../supabase/migrations/", import.meta.url));
+const SESSION_CONSENT_MIGRATION = "20261112080000_communications_deletion_session_consent.sql";
+const TERMINAL_SCRUB_MIGRATION = "20261112213000_communications_deletion_receipt_session_scrub.sql";
+async function applyMigration(db: PGlite, filename: string) {
+  await db.exec(readFileSync(migrationDirectory + filename, "utf8"));
+}
+async function database(throughMigration?: string) {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(`create schema extensions; create extension pgcrypto with schema extensions; create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to anon,authenticated,service_role; alter default privileges in schema public grant all on tables to anon,authenticated,service_role; alter default privileges in schema public grant all on functions to anon,authenticated,service_role; create schema auth; create table auth.users(id uuid primary key,email text,raw_user_meta_data jsonb default '{}'); create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$; grant usage on schema auth to anon,authenticated; set search_path=public,extensions;`);
   await db.exec(`create schema storage; create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]); create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text); alter table storage.objects enable row level security; grant usage on schema storage to anon,authenticated; grant select on storage.objects to anon,authenticated; create policy fixture_other_bucket_access on storage.objects for select to anon,authenticated using(true);`);
-  const directory = fileURLToPath(new URL("../../../../supabase/migrations/", import.meta.url));
-  for (const name of readdirSync(directory).filter(f => f.endsWith(".sql")).sort()) await db.exec(readFileSync(directory + name, "utf8"));
+  for (const name of readdirSync(migrationDirectory).filter(f => f.endsWith(".sql") && (!throughMigration || f <= throughMigration)).sort()) await applyMigration(db, name);
   await db.exec(`insert into auth.users(id,email) values('${A}','alex@example.invalid'),('${B}','riley@example.invalid');`);
   return db;
 }
@@ -65,6 +70,42 @@ describe("communications on real Postgres", () => {
 
       await db.exec(`insert into privacy_requests(user_id,kind,status) values('${B}','export','requested');`);
       expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${B}' and kind='export'`)).rows[0].actor_session_id).toBeNull();
+    } finally { await db.close(); }
+  }, 30000);
+
+  it("upgrades an already-R63 database, scrubs historical receipts and retains cancellation replay protection", async () => {
+    // Reconstruct the pre-forward state: consent migration applied; scrub absent.
+    const db = await database(SESSION_CONSENT_MIGRATION);
+    const C = "33333333-3333-4333-8333-333333333333";
+    const completedSession = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const cancelledSession = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const orphanSession = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    try {
+      await db.exec(`insert into auth.users(id,email) values('${C}','orphan@example.invalid');
+        insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values('${A}','deletion','completed','${completedSession}'),
+              ('${B}','deletion','cancelled','${cancelledSession}'),
+              ('${C}','deletion','cancelled','${orphanSession}');
+        delete from auth.users where id='${C}';`);
+      expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${A}' and kind='deletion'`)).rows[0].actor_session_id).toBe(completedSession);
+      expect((await db.query<{ actor_session_id: string | null }>("select actor_session_id from privacy_requests where user_id is null and kind='deletion'")).rows[0].actor_session_id).toBe(orphanSession);
+
+      // A fresh reset would miss these old rows. Apply the later, distinct version.
+      await applyMigration(db, TERMINAL_SCRUB_MIGRATION);
+      expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${A}' and kind='deletion'`)).rows[0].actor_session_id).toBeNull();
+      expect((await db.query<{ actor_session_id: string | null }>("select actor_session_id from privacy_requests where user_id is null and kind='deletion'")).rows[0].actor_session_id).toBeNull();
+      expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${B}' and kind='deletion'`)).rows[0].actor_session_id).toBe(cancelledSession);
+      await expect(db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values('${B}','deletion','scheduled','${cancelledSession}')`)).rejects.toThrow();
+
+      // A previous R64 preview may already have created the same trigger.
+      // Reapplying this SQL must not fail or reintroduce sensitive identifiers.
+      await applyMigration(db, TERMINAL_SCRUB_MIGRATION);
+      await db.exec(`update privacy_requests set status='completed' where user_id='${B}' and kind='deletion';`);
+      expect((await db.query<{ actor_session_id: string | null }>(`select actor_session_id from privacy_requests where user_id='${B}' and kind='deletion'`)).rows[0].actor_session_id).toBeNull();
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values(null,'deletion','cancelled','${orphanSession}');`);
+      expect((await db.query<{ actor_session_id: string | null }>("select actor_session_id from privacy_requests where user_id is null and status='cancelled' and actor_session_id is not null")).rows).toHaveLength(0);
     } finally { await db.close(); }
   }, 30000);
   it("prevents cross-account reads, browser writes and privileged worker calls", async () => {
