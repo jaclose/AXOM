@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import type { CourseScope } from "./scope";
-import { verifyCollectionForCourse } from "./verifiedPracticeLinks";
+import { duplicateQuestionRecordIds, verifyCollectionForCourse } from "./verifiedPracticeLinks";
 
 const stamp = "2026-10-14T12:00:00.000Z";
 const q = (id: string, patch: Partial<QuestionRecord> = {}): QuestionRecord => ({
@@ -332,6 +332,46 @@ describe("R54: immutable source membership must never be silently deduplicated",
     )).toEqual({
       readyQuestionIds: ["source-q"], sourceReviewRequired: false,
       conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+  });
+});
+
+
+describe("raw canonical QuestionRecord collision protection at the Tracker boundary", () => {
+  it("holds a source-unique membership when raw records reuse the same ID with different answer keys", () => {
+    const first = q("source-q", { module: "NB2", week: 3, courseId: "core", setId: "set", correctKey: "A" });
+    const second = q("source-q", { module: "NB2", week: 3, courseId: "core", setId: "set", correctKey: "B" });
+    const originals = [first, second];
+    const sourceSet = bank("set", ["source-q"], { module: "NB2", week: 3, courseId: "core" });
+    // The book and Tracker producers use this same last-write-wins Map.
+    const index = new Map(originals.map((record) => [record.id, record]));
+    expect(index.size).toBe(1);
+    expect(index.get("source-q")?.correctKey).toBe("B");
+    const duplicates = duplicateQuestionRecordIds(originals);
+    expect([...duplicates]).toEqual(["source-q"]);
+    expect(verifyCollectionForCourse({
+      setId: "set", questionIds: ["source-q"], readyQuestionIds: ["source-q"],
+    }, { module: "NB2", week: 3, courseId: "core" }, index,
+    new Map([[sourceSet.id, sourceSet]]), true, duplicates)).toEqual({
+      readyQuestionIds: [], sourceReviewRequired: true,
+      conflictingQuestionCount: 0, unavailableQuestionCount: 0,
+    });
+    expect(originals.map((record) => record.correctKey)).toEqual(["A", "B"]);
+  });
+
+  it("does not hold unrelated unique membership when duplicate records are elsewhere", () => {
+    const clean = q("clean", { module: "NB2", week: 3, courseId: "core", setId: "set" });
+    const unrelated = q("other");
+    const raw = [clean, unrelated, { ...unrelated, correctKey: "B" }];
+    const sourceSet = bank("set", ["clean"], { module: "NB2", week: 3, courseId: "core" });
+    const duplicateIds = duplicateQuestionRecordIds(raw);
+    expect([...duplicateIds]).toEqual(["other"]);
+    expect(verifyCollectionForCourse({
+      setId: "set", questionIds: ["clean"], readyQuestionIds: ["clean"],
+    }, { module: "NB2", week: 3, courseId: "core" },
+    new Map(raw.map((record) => [record.id, record])),
+    new Map([[sourceSet.id, sourceSet]]), true, duplicateIds)).toMatchObject({
+      readyQuestionIds: ["clean"], sourceReviewRequired: false,
     });
   });
 });
