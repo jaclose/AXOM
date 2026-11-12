@@ -290,31 +290,37 @@ async function cachedAppAsset(request) {
   const ordered = [...names.filter((name) => name !== CACHE), CACHE];
   let preferred;
   for (const name of ordered) {
-    const cache = await caches.open(name);
-    const response = await cache.match(request);
-    if (!response) continue;
-    // Older generations can hold a safe-looking key with a signed or
-    // mismatched final Response.url. Evict that entry alone, never its cache.
-    // Synthetic historical fixtures may omit Response.url; validate any
-    // final URL that is actually available.
-    if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) {
-      await cache.delete(request);
-      continue;
+    try {
+      const cache = await caches.open(name);
+      const response = await cache.match(request);
+      if (!response) continue;
+      // Older generations can hold a safe-looking key with a signed or
+      // mismatched final Response.url. Evict that entry alone, never its cache.
+      // Synthetic historical fixtures may omit Response.url; validate any
+      // final URL that is actually available.
+      if (response.redirected || response.status !== 200 || (response.url && !matchesRequestedResource(request, response))) {
+        await cache.delete(request);
+        continue;
+      }
+      if (!matchesPublicCodeMime(request, response)) {
+        // Evict only invalid code bytes retained by an older worker.
+        await cache.delete(request);
+        continue;
+      }
+      if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)
+        && !shippedPublicBuildAsset(request, response)
+        && !(name !== CACHE && await retainedGenerationAsset(cache, request, response))) continue;
+      if (isHtmlResponse(response)) {
+        // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
+        await cache.delete(request);
+        continue;
+      }
+      preferred = response;
+    } catch {
+      // A damaged retained generation may reject a read or eviction. Never
+      // let that failure conceal a separately validated current asset.
+      // Preserve existing safe fallback; do not clear unrelated caches.
     }
-    if (!matchesPublicCodeMime(request, response)) {
-      // Evict only invalid code bytes retained by an older worker.
-      await cache.delete(request);
-      continue;
-    }
-    if (!cacheablePublicResponse(response) && !pinnedPublicBuildAsset(request, response)
-      && !shippedPublicBuildAsset(request, response)
-      && !(name !== CACHE && await retainedGenerationAsset(cache, request, response))) continue;
-    if (isHtmlResponse(response)) {
-      // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
-      await cache.delete(request);
-      continue;
-    }
-    preferred = response;
   }
   return preferred;
 }
