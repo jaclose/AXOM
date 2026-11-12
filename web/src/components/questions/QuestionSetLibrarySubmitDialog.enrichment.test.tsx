@@ -547,6 +547,44 @@ describe("Question Set draft explanation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("refuses AI transmission after a same-ID parent rerender replaces opened answer evidence", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    const { rerender } = render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const draft = await screen.findByRole("button", { name: /Draft explanations/ }) as HTMLButtonElement;
+    await waitFor(() => expect(draft.disabled).toBe(false));
+
+    // Same set and question IDs, unchanged timestamp, still a valid reviewed
+    // answer. Reactive props alone must not re-authorize model transmission.
+    const replaced = { ...source, stem: "Which arterial layer lines the lumen?", correctKey: "B" };
+    mocks.workspace.questions = [replaced];
+    rerender(<QuestionSetLibrarySubmitDialog set={set} questions={[replaced]} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Draft explanations/ }));
+    expect(await screen.findByText(/changed before AI drafting/i)).toBeTruthy();
+    expect(mocks.completeJson).not.toHaveBeenCalled();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(source.correctKey).toBe("A");
+  });
+
+  it("refuses saving AI proposals after a same-ID parent rerender silently refiles the set", async () => {
+    const source = question();
+    mocks.workspace.questions = [source];
+    const { rerender } = render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} autoDraft onClose={vi.fn()} />);
+    expect(await screen.findByText(/1 AI draft/)).toBeTruthy();
+
+    // The proposal was made under the earlier source/rights scope. Parent
+    // reactivity must not make the newer filing count as the opened review.
+    const refiled = { ...set, scope: { courseId: "private-course" } };
+    mocks.workspace.questionSets = [refiled];
+    rerender(<QuestionSetLibrarySubmitDialog set={refiled} questions={[source]} autoDraft onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save inspected explanations to my QBank" }));
+    expect(await screen.findByText(/set changed during explanation review/i)).toBeTruthy();
+    expect(mocks.updateQuestion).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(source.correctKey).toBe("A");
+  });
+
   it("does not transmit stale or revoked source-review evidence to the AI provider", async () => {
     const source = question({
       citation: "Textbook page 12",
