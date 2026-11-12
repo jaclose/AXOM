@@ -42,7 +42,7 @@ export function preparedSourcePresentation(source: CatalogSource, rawReview?: st
     }
     const scope = [module];
     const term = manifest?.course?.term;
-    if (typeof term === "number" && Number.isInteger(term) && term >= 1 && term <= 5) scope.push(`Term ${term}`);
+    if (typeof term === "number" && Number.isInteger(term) && term >= 1 && term <= 5) scope.push(`Term ${term} (package-assigned)`);
     const week = manifest?.course?.week;
     if (typeof week === "number" && Number.isInteger(week) && week >= 1 && week <= 99) {
       scope.push(`Week ${week}${manifest?.source?.sourceWeekDeclared === true ? "" : " (provisional)"}`);

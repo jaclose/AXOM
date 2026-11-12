@@ -13,13 +13,13 @@ describe("prepared source presentation", () => {
   it("prefers the bank's domain title without changing original identity or provisional week", () => {
     expect(preparedSourcePresentation(source, review())).toEqual({
       title: "Respiratory Pharmacology Practice Questions",
-      scope: "RHPS · Term 5 · Week 2 (provisional) · Pharmacology",
+      scope: "RHPS · Term 5 (package-assigned) · Week 2 (provisional) · Pharmacology",
       originalName: source.name,
     });
   });
   it("distinguishes source-declared from proposed weeks", () => {
     const explicit = review({ source: { filename: source.name, sourceWeekDeclared: true } });
-    expect(preparedSourcePresentation(source, explicit).scope).toBe("RHPS · Term 5 · Week 2 · Pharmacology");
+    expect(preparedSourcePresentation(source, explicit).scope).toBe("RHPS · Term 5 (package-assigned) · Week 2 · Pharmacology");
   });
   it("rejects malformed control characters in the proposed display title", () => {
     const bad = review({ bank: { title: "Respiratory\nPharmacology", discipline: "Pharmacology" } });
@@ -36,6 +36,6 @@ describe("prepared source presentation", () => {
   });
   it("does not display an invented valid week for unknown source provenance", () => {
     const info = preparedSourcePresentation(source, review({ course: { name: "RHPS", term: 5, week: 0 } }));
-    expect(info.scope).toBe("RHPS · Term 5 · Pharmacology");
+    expect(info.scope).toBe("RHPS · Term 5 (package-assigned) · Pharmacology");
   });
 });
