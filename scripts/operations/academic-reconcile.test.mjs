@@ -28,8 +28,8 @@ const receipt = (overrides = {}) => ({
 });
 const receipts = () => ({ sources: [receipt()] });
 const tracker = () => ({ activities: [
-  { activityId: "FTM1:L1", term: "T1", module: "FTM 1", week: 2, weekBasis: "explicit", installed: true },
-  { activityId: "FTM1:IMCQ1", term: "T1", module: "FTM 1", weekBasis: "unassigned", installed: true },
+  { activityId: "FTM1:L1", sourceSha256: b, term: "T1", module: "FTM 1", week: 2, weekBasis: "explicit", installed: true },
+  { activityId: "FTM1:IMCQ1", sourceSha256: b, term: "T1", module: "FTM 1", weekBasis: "unassigned", installed: true },
 ] });
 const run = (input = {}) => reconcileAcademicContent({
   // The default synthetic PDF receipt is explicit: source coverage is no longer
@@ -1137,6 +1137,30 @@ test("strict reconciliation accepts separately attested exact original and insta
   assert.equal(result.counts.trackerIdentityDeclared, 2);
   assert.equal(result.counts.trackerIdentityReadback, 2);
   assert.ok(result.warnings.some(x => x.includes("attestation")));
+});
+
+test("R43 RED: strict reconciliation rejects same-ID Tracker row bound to a different original SHA", () => {
+  const pair = identityProof();
+  const observed = tracker();
+  observed.activities[0].sourceSha256 = c;
+  const result = run({ tracker: observed, requireTrackerIdentity: true, ...pair });
+  assert.equal(result.complete, false, JSON.stringify(result));
+  assert.equal(result.counts.trackerIdentityVerified, false);
+  assert.ok(result.blockers.some(message => message.includes("Tracker readback does not match")));
+  assert.ok(!JSON.stringify(result).includes(c), "Private source hash must not appear in diagnostics.");
+  assert.ok(!JSON.stringify(result).includes("FTM1:L1"), "Private canonical ID must not appear in diagnostics.");
+});
+
+test("R43 RED: absent or coercible Tracker-row fingerprints cannot borrow an independent readback SHA", () => {
+  for (const changed of [undefined, null, [b], "wrong-source", b.toUpperCase()]) {
+    const pair = identityProof();
+    const observed = tracker();
+    observed.activities[1].sourceSha256 = changed;
+    const result = run({ tracker: observed, requireTrackerIdentity: true, ...pair });
+    assert.equal(result.complete, false, "Invalid/missing independent Tracker row SHA was accepted: " + typeof changed);
+    assert.equal(result.counts.trackerIdentityVerified, false);
+    assert.ok(result.blockers.some(message => message.includes("Tracker readback does not match")));
+  }
 });
 
 test("same-week foreign activity substitution fails with unchanged activity and scope counts", () => {
