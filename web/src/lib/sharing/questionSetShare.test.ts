@@ -318,6 +318,57 @@ describe("Question Set share boundary", () => {
     expect(originalSets).toHaveLength(2);
   });
 
+  it("holds duplicate import receipts with UUIDs that differ only by hex-letter case", () => {
+    const lower = "abcdefab-cdef-4abc-8abc-abcdef123456";
+    const upper = lower.toUpperCase();
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: lower, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const duplicate = {
+      ...first.set,
+      id: "case-variant-receipt",
+      importProvenance: { ...first.set.importProvenance, shareId: upper },
+    };
+    const retained = [first.set, duplicate];
+    for (const shareId of [lower, upper]) {
+      expect(() => importSharedQuestionSet({
+        snapshot: snapshot(),
+        identity: { shareId, contentDigest: DIGEST },
+        existingQuestions: first.questions,
+        existingSets: retained,
+        now: NOW,
+      })).toThrow(/ambiguous duplicate receipts/i);
+    }
+    expect(first.set.importProvenance.shareId).toBe(lower);
+    expect(duplicate.importProvenance.shareId).toBe(upper);
+    expect(retained).toHaveLength(2);
+    expect(first.questions).toHaveLength(1);
+  });
+
+  it("recognizes a single historical uppercase UUID receipt during lowercase replay", () => {
+    const lower = "abcdefab-cdef-4abc-8abc-abcdef123456";
+    const upper = lower.toUpperCase();
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: upper, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const repeated = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: lower, contentDigest: DIGEST },
+      existingQuestions: first.questions,
+      existingSets: [first.set],
+      now: NOW,
+    });
+    expect(repeated.alreadyImported).toBe(true);
+    expect(repeated.set).toBe(first.set);
+    expect(repeated.questions).toEqual([]);
+    expect(first.set.importProvenance.shareId).toBe(upper);
+    expect(first.set.questionIds).toEqual([first.questions[0].id]);
+  });
+
   it("holds conflicting same-share receipts regardless of their order", () => {
     const first = importSharedQuestionSet({
       snapshot: snapshot(),
