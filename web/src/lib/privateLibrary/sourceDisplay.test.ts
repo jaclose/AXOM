@@ -22,7 +22,7 @@ describe("prepared source presentation", () => {
     expect(preparedSourcePresentation(source, explicit).scope).toBe("RHPS · Term 5 · Week 2 · Pharmacology");
   });
   it("rejects malformed control characters in the proposed display title", () => {
-    const bad = review({ bank: { title: "Respiratory\\nPharmacology", discipline: "Pharmacology" } });
+    const bad = review({ bank: { title: "Respiratory\nPharmacology", discipline: "Pharmacology" } });
     expect(preparedSourcePresentation(source, bad).title).toBe(source.name);
   });
   it("does not trust titles for a different original document or module", () => {
