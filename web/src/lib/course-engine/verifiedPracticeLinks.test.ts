@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import type { CourseScope } from "./scope";
-import { duplicateQuestionRecordIds, verifyCollectionForCourse } from "./verifiedPracticeLinks";
+import { duplicateQuestionRecordIds, duplicateQuestionSetIds, verifyCollectionForCourse } from "./verifiedPracticeLinks";
 
 const stamp = "2026-10-14T12:00:00.000Z";
 const q = (id: string, patch: Partial<QuestionRecord> = {}): QuestionRecord => ({
@@ -390,11 +390,13 @@ describe("R56: raw source-set identity must survive last-write-wins indexing", (
     ];
     const before = JSON.stringify(originals);
     const setsById = new Map(originals.map((set) => [set.id, set]));
+    const duplicateIds = duplicateQuestionSetIds(originals);
+    expect([...duplicateIds]).toEqual(["set"]);
     expect(setsById.size).toBe(1);
     expect(setsById.get("set")?.sourceDocumentIds).toEqual(["source-b"]);
     const result = verifyCollectionForCourse(
       collection, requested, new Map([[question.id, question]]), setsById,
-      true, new Set(), new Set(["set"]),
+      true, new Set(), duplicateIds,
     );
     expect(result).toEqual({
       readyQuestionIds: [], sourceReviewRequired: true,
@@ -405,23 +407,29 @@ describe("R56: raw source-set identity must survive last-write-wins indexing", (
 
   it("holds a separately referenced primary set whose raw ID is duplicated", () => {
     const question = q("source-q", { setId: "primary", ...scope });
-    const setsById = new Map([
+    const originals = [
       bank("primary", ["source-q"], { module: "ER", week: 1, courseId: "foreign" }),
       bank("primary", ["source-q"], scope),
       bank("set", ["source-q"], scope),
-    ].map((set) => [set.id, set]));
+    ];
+    const setsById = new Map(originals.map((set) => [set.id, set]));
+    const duplicateIds = duplicateQuestionSetIds(originals);
+    expect([...duplicateIds]).toEqual(["primary"]);
     expect(verifyCollectionForCourse(
       collection, requested, new Map([[question.id, question]]), setsById,
-      true, new Set(), new Set(["primary"]),
+      true, new Set(), duplicateIds,
     )).toMatchObject({ readyQuestionIds: [], sourceReviewRequired: true });
   });
 
   it("keeps a distinct clean source usable when a different set ID is duplicated", () => {
     const question = q("source-q", { setId: "set", ...scope });
     const source = bank("set", ["source-q"], scope);
+    const unrelated = bank("unrelated", ["other"], { module: "ER", week: 1 });
+    const duplicates = duplicateQuestionSetIds([source, unrelated, { ...unrelated, sourceDocumentIds: ["different-origin"] }]);
+    expect([...duplicates]).toEqual(["unrelated"]);
     expect(verifyCollectionForCourse(
       collection, requested, new Map([[question.id, question]]),
-      new Map([[source.id, source]]), true, new Set(), new Set(["unrelated"]),
+      new Map([[source.id, source]]), true, new Set(), duplicates,
     )).toMatchObject({ readyQuestionIds: ["source-q"], sourceReviewRequired: false });
   });
 });
