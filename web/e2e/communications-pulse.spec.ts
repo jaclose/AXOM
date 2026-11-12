@@ -23,6 +23,25 @@ async function setup(page: Page, options: { settingsFailures?: number } = {}) {
   let campaign: Record<string, unknown> | null = null;
   let settingsFailures = options.settingsFailures ?? 0;
   await page.addInitScript(() => { (window as Window & { __AXOM_E2E_ACCOUNT__?: object }).__AXOM_E2E_ACCOUNT__ = { url: "https://communications-test.supabase.co", key: "synthetic-public-test-key" }; });
+  // The old fixture signed into Zustand alone. Private exports now require the
+  // matching SDK credential too. This test JWT is unsigned and never sent to a real service.
+  await page.addInitScript(() => {
+    if (window !== window.top || !/^https?:$/.test(location.protocol)) return;
+    const now = Math.floor(Date.now() / 1000);
+    const encode = (value: object) => btoa(JSON.stringify(value)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const accessToken = [encode({ alg: "none", typ: "JWT" }), encode({
+      sub: userId, session_id: "22222222-2222-4222-8222-222222222222",
+      aud: "authenticated", role: "authenticated", iat: now, exp: now + 3600,
+    }), "synthetic-test-only"].join(".");
+    localStorage.setItem("sb-communications-test-auth-token", JSON.stringify({
+      access_token: accessToken, refresh_token: "synthetic-refresh-token",
+      token_type: "bearer", expires_at: now + 3600, expires_in: 3600,
+      user: { id: userId, aud: "authenticated", role: "authenticated",
+        email: "alex@example.invalid", app_metadata: { provider: "email", providers: ["email"] },
+        user_metadata: {}, created_at: new Date().toISOString() },
+    }));
+  });
   await page.route("https://communications-test.supabase.co/**", async route => {
     const action = new URL(route.request().url()).searchParams.get("action"); const body = route.request().postDataJSON() ?? {};
     let response: unknown = [];
@@ -35,7 +54,13 @@ async function setup(page: Page, options: { settingsFailures?: number } = {}) {
     else if (action === "preferences") { prefs = body.preferences; response = { saved: true }; }
     else if (action === "unsubscribe-all") { prefs = prefs.map(p => ({ ...p, enabled: false })); response = { saved: true }; }
     else if (action === "pulse") response = { snapshot: null };
-    else if (action === "request-export") { requests.push({ id: "export-1", kind: "export", status: "requested" }); response = { requested: true }; }
+    else if (action === "request-export") {
+      const bearer = (route.request().headers()["authorization"] ?? "").replace(/^Bearer /, "");
+      const payload = bearer.split(".")[1];
+      expect(JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8")).sub)
+        .toBe("11111111-1111-4111-8111-111111111111");
+      requests.push({ id: "export-1", kind: "export", status: "requested" }); response = { requested: true };
+    }
     else if (action === "request-deletion") { requests.push({ id: "delete-1", kind: "deletion", status: "scheduled", scheduled_for: "2026-10-17T12:00:00Z" }); response = { requested: true }; }
     else if (action === "cancel-deletion") { requests = requests.map(r => r.id === body.id ? { ...r, status: "cancelled" } : r); response = { cancelled: true }; }
     else if (action === "admin") response = { campaigns: campaign ? [campaign] : [], failures: [], deliveryMode: "disabled" };
