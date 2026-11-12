@@ -250,6 +250,52 @@ describe("Question Set share boundary", () => {
     expect(first.questions[0].id).toBe(first.set.questionIds[0]);
   });
 
+  it("refuses a substituted or reordered member even when every backing ID exists", () => {
+    const source = createQuestionSetShare(
+      questionSet(["q1", "q2"]),
+      [question("q1"), question("q2", { stem: "Second source stem" })],
+      NOW,
+    );
+    const first = importSharedQuestionSet({
+      snapshot: source, identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const originalIds = [...first.set.questionIds];
+    const unrelated = question("unrelated-record", { stem: "Different source stem" });
+    for (const ids of [
+      [originalIds[1], originalIds[0]],
+      [originalIds[0], unrelated.id],
+    ]) {
+      expect(() => importSharedQuestionSet({
+        snapshot: source, identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+        existingQuestions: [...first.questions, unrelated],
+        existingSets: [{ ...first.set, questionIds: ids }],
+        now: NOW,
+      })).toThrow(/incomplete or unavailable question membership/i);
+    }
+    expect(first.set.questionIds).toEqual(originalIds);
+  });
+
+  it("refuses an existing imported member whose source answer was changed without resetting learner progress", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(), identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const edited = {
+      ...first.questions[0],
+      correctKey: "A",
+      correctAnswerText: "One",
+      notes: "Keep my private notes",
+      attempts: [{ at: NOW, answerKey: "B", status: "correct" as const }],
+    };
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(), identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [edited], existingSets: [first.set], now: NOW,
+    })).toThrow(/incomplete or unavailable question membership/i);
+    expect(edited.notes).toBe("Keep my private notes");
+    expect(edited.attempts).toEqual([{ at: NOW, answerKey: "B", status: "correct" }]);
+  });
+
   it("refuses to treat changed content under the same share ID as an idempotent replay", () => {
     const first = importSharedQuestionSet({
       snapshot: snapshot(),

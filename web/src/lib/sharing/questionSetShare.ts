@@ -151,10 +151,25 @@ export function importSharedQuestionSet(input: {
     // Never report a broken set as already imported or manufacture replacement
     // IDs that could disconnect a learner's attempts and annotations.
     const memberIds = previous.questionIds;
-    const availableIds = new Set(existingQuestions.map(question => question.id));
+    const memberIdSet = new Set(memberIds);
+    const availableById = new Map<string, QuestionRecord>();
+    const ambiguousMemberIds = new Set<string>();
+    for (const question of existingQuestions) {
+      if (!memberIdSet.has(question.id)) continue;
+      if (availableById.has(question.id)) ambiguousMemberIds.add(question.id);
+      else availableById.set(question.id, question);
+    }
+    // Count and existence alone cannot prove membership: an equal-size list
+    // may point to a different local question or reorder two existing IDs.
+    // Compare only published safe content, never attempts or private notes.
     if (memberIds.length !== snapshot.questions.length
-      || new Set(memberIds).size !== memberIds.length
-      || memberIds.some(id => !availableIds.has(id))) {
+      || memberIdSet.size !== memberIds.length
+      || ambiguousMemberIds.size > 0
+      || memberIds.some((id, index) => {
+        const available = availableById.get(id);
+        const view = available && existingQuestionShareView(available);
+        return !view || questionIdentity(view) !== questionIdentity(snapshot.questions[index]);
+      })) {
       throw new Error("This already-imported Question Set has incomplete or unavailable question membership. Recover its original question IDs in Question Bank before importing again.");
     }
     return {
