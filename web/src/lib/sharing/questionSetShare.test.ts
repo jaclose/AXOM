@@ -331,6 +331,81 @@ describe("Question Set share boundary", () => {
     expect(edited.attempts).toEqual([{ at: NOW, answerKey: "B", status: "correct" }]);
   });
 
+  it.each([
+    ["invalid digest", { contentDigest: "not-a-digest" }],
+    ["unsupported version", { version: 2 }],
+    ["noncanonical share ID", { shareId: ` ${SHARE_ID} ` }],
+  ])("holds malformed same-share import receipts with %s without changing learner data", (_label, change) => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const damaged = {
+      ...first.set,
+      importProvenance: { ...first.set.importProvenance, ...change },
+    };
+    const savedIds = [...damaged.questionIds];
+    const savedNotes = first.questions[0].notes;
+    expect(() => importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: first.questions,
+      existingSets: [damaged],
+      now: NOW,
+    })).toThrow(/invalid or unsupported local import receipt/i);
+    expect(damaged.questionIds).toEqual(savedIds);
+    expect(damaged.importProvenance).toMatchObject(change);
+    expect(first.questions[0].notes).toBe(savedNotes);
+  });
+
+  it("counts a damaged matching receipt when checking for duplicate share IDs", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const damaged = {
+      ...first.set,
+      id: "damaged-receipt",
+      importProvenance: { ...first.set.importProvenance, contentDigest: "bad" },
+    };
+    for (const existingSets of [[first.set, damaged], [damaged, first.set]]) {
+      expect(() => importSharedQuestionSet({
+        snapshot: snapshot(),
+        identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+        existingQuestions: first.questions,
+        existingSets,
+        now: NOW,
+      })).toThrow(/ambiguous duplicate receipts/i);
+    }
+    expect(first.set.questionIds).toEqual(damaged.questionIds);
+    expect(damaged.importProvenance.contentDigest).toBe("bad");
+  });
+
+  it("does not block a different share ID because of an unrelated damaged receipt", () => {
+    const first = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], now: NOW,
+    });
+    const unrelated = {
+      ...first.set,
+      importProvenance: {
+        ...first.set.importProvenance,
+        shareId: "00000000-0000-4000-8000-000000000002",
+        contentDigest: "bad",
+      },
+    };
+    const result = importSharedQuestionSet({
+      snapshot: snapshot(),
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [], existingSets: [unrelated], now: NOW,
+    });
+    expect(result.alreadyImported).toBe(false);
+    expect(result.questions).toHaveLength(1);
+  });
+
   it("holds duplicate matching receipts even when both memberships look complete", () => {
     const first = importSharedQuestionSet({
       snapshot: snapshot(),
