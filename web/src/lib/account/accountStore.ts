@@ -444,9 +444,13 @@ export const useAccount = create<AccountState>((set, get) => {
                   if (get().user?.id !== current.session.user.id) applySession(current.session);
                   return;
                 }
+                // The explicit signOut action may already have completed its
+                // cleanup and success receipt while this async read was pending.
+                if (get().phase === "signed-out" && !get().user) return;
                 applySession(null);
               }).catch(() => {
                 if (sdkAuthEventOrder !== authEventOrder) return;
+                if (get().phase === "signed-out" && !get().user) return;
                 // Verification failure is not proof that the current session
                 // remains authorized. Fail closed without deleting device work.
                 applySession(null);
