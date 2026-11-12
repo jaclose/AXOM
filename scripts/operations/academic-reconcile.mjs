@@ -11,7 +11,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { verifyTrackerIdentity } from "./academic-tracker-identity.mjs";
+import { verifyTrackerIdentity, parseAuditTimestamp } from "./academic-tracker-identity.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const supportedKinds = new Set(["question-source", "answer-key", "course-template", "reference", "asset", "other", "excluded"]);
@@ -383,7 +383,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   }
   if (production !== undefined) {
     if (!production || typeof production !== "object" || typeof production.projectId !== "string"
-      || typeof production.observedAt !== "string" || !Number.isFinite(Date.parse(production.observedAt))) {
+      || typeof production.observedAt !== "string" || !Number.isFinite(parseAuditTimestamp(production.observedAt))) {
       errors.push("Production snapshot lacks verified project ID or observation timestamp.");
     } else {
       for (const key of ["academicCollections", "academicRevisions", "academicFiles", "storageObjects"]) {
@@ -396,7 +396,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         errors.push("Media receipts claim verified figures but production has zero academic files.");
       }
       if (production.projectId !== "jofkmfwkidubxcutkwzf") errors.push("Production snapshot is not the verified AXOM Production project.");
-      const elapsed = Date.now() - Date.parse(production.observedAt);
+      const elapsed = Date.now() - parseAuditTimestamp(production.observedAt);
       if (elapsed < -5 * 60_000 || elapsed > 60 * 60_000)
         blockers.push("Production database snapshot is stale or future-dated; repeat an authorized read-only query before release certification.");
     }
@@ -406,19 +406,19 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   let pdfTriageMetrics;
   if (pdfTriage !== undefined) {
     if (pdfTriage?.schema !== "axom-academic-pdf-triage-v1" || !Array.isArray(pdfTriage.rows)
-      || !integer(pdfTriage.queueDistinctPdfJobs) || !Number.isFinite(Date.parse(pdfTriage.runAt))) {
+      || !integer(pdfTriage.queueDistinctPdfJobs) || !Number.isFinite(parseAuditTimestamp(pdfTriage.runAt))) {
       errors.push("PDF availability ledger is absent, malformed or has no timestamp.");
     } else {
       const seenPdf = new Set(), byStatus = {};
       let scopeFlaggedOutsideHoldStatus = 0;
       let unverifiedCurrentAvailability = 0;
-      const reportTime = Date.parse(pdfTriage.runAt);
+      const reportTime = parseAuditTimestamp(pdfTriage.runAt);
       // The report timestamp alone does not prove earlier cached PDF originals
       // were checked again. Each READY row needs a per-run, per-SHA authorized
       // path check; a source SHA from the manifest is not a current file read.
       const hasCurrentAvailabilityProof = entry => {
         const proof = entry.availabilityProof;
-        const checked = Date.parse(proof?.checkedAt ?? "");
+        const checked = parseAuditTimestamp(proof?.checkedAt ?? "");
         return typeof pdfTriage.runId === "string" && pdfTriage.runId.length >= 8
           && proof?.runId === pdfTriage.runId
           && proof?.source_sha256 === entry.source_sha256
@@ -470,7 +470,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       if (scopeReviewHolds) blockers.push(`${scopeReviewHolds} PDF original triage records have conflicting or changed academic scope; manual term/module/week provenance review required.`);
       if (deferred) blockers.push(`${deferred} PDF originals are deferred or encrypted; obtain authorized source review before claiming coverage.`);
       if (noIndicators) blockers.push(`${noIndicators} PDF question jobs have no sampled question indicators; verify source classification before claiming completeness.`);
-      const age = Date.now() - Date.parse(pdfTriage.runAt);
+      const age = Date.now() - parseAuditTimestamp(pdfTriage.runAt);
       if (age < -5 * 60000 || age > 24 * 60 * 60000)
         blockers.push("PDF availability snapshot is stale or future-dated; rerun the staged triage before accepting physical-source coverage.");
       pdfTriageMetrics = { pdfJobsRecorded: pdfTriage.rows.length, pdfJobsInQueue: pdfTriage.queueDistinctPdfJobs,
@@ -487,7 +487,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   let b4AuditMetrics;
   if (corpusAudit !== undefined) {
     if (!corpusAudit || corpusAudit.format !== "axom-b4-corpus-acceptance-v1"
-      || !Number.isFinite(Date.parse(corpusAudit.generatedAt ?? ""))
+      || !Number.isFinite(parseAuditTimestamp(corpusAudit.generatedAt ?? ""))
       || !integer(corpusAudit.queuedSources) || !integer(corpusAudit.receivedSourceDispositions)
       || !integer(corpusAudit.missingReceipts) || !integer(corpusAudit.orphanReceipts)
       || !integer(corpusAudit.pathOnlySourceJobs)
@@ -537,7 +537,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     ...(pdfTriageMetrics ?? {}),
     ...(b4AuditMetrics ?? {}),
     ...(figureBearingSources ? { figureBearingSources, declaredFigureReferences, verifiedFigureReferences } : {}),
-    ...(production ? { productionSnapshotAt: typeof production.observedAt === "string" && Number.isFinite(Date.parse(production.observedAt)) ? new Date(production.observedAt).toISOString() : null,
+    ...(production ? { productionSnapshotAt: typeof production.observedAt === "string" && Number.isFinite(parseAuditTimestamp(production.observedAt)) ? new Date(production.observedAt).toISOString() : null,
       productionAcademicCollections: integer(production.academicCollections) ? production.academicCollections : null,
       productionAcademicFiles: integer(production.academicFiles) ? production.academicFiles : null } : {}),
   };
