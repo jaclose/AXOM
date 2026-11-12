@@ -367,7 +367,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
         {activePreview && <>
           <p>{activePreview.snapshot.questions.length} {activePreview.snapshot.questions.length === 1 ? "question" : "questions"} · Topic tags hidden until reveal</p>
           <details className="qsl-preview-teaching">
-            <summary>Reveal set topic tags</summary>
+            <summary tabIndex={0}>Reveal set topic tags</summary>
             <p>{topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
           </details>
           <p className="sub">Preview the first three questions. Recorded citations and visual hints may reveal answers; open a question's teaching notes to inspect them.</p>
@@ -384,7 +384,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
               ? <small>Source citation recorded. Reveal teaching notes to inspect it.</small>
               : <small className="qsl-preview-source-warning">No source citation is included for this question. Verify its answer and teaching notes against the original material.</small>}
             <details className="qsl-preview-teaching">
-              <summary>Reveal recorded answer and teaching notes</summary>
+              <summary tabIndex={0}>Reveal recorded answer and teaching notes</summary>
               <div className="stack gap8">
                 {question.citation && <small>Source: {question.citation}</small>}
                 <VisualIntentNote tags={question.tags} />
