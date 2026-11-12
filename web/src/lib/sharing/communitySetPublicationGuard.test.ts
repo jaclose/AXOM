@@ -153,6 +153,26 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(question.correctKey).toBe("A");
   });
 
+  it("invalidates stale source and rights review when a private image is removed without a timestamp change", () => {
+    const image: NonNullable<QuestionRecord["attachments"]>[number] = {
+      id: "private-source-exhibit", fileName: "restricted-micrograph.png",
+      mimeType: "image/png", byteSize: 4096, width: 64, height: 64,
+      altText: "Private study image", blobKey: "private-local-image",
+      createdAt: date, updatedAt: date, role: "exhibit",
+    };
+    const openedWithImage = { ...question, attachments: [image] };
+    const liveAfterRemoval = { ...openedWithImage, attachments: [] };
+    // The live question is now text-only and the public snapshot, answer key
+    // and updatedAt are identical. The old image-bearing source review is not.
+    expect(liveAfterRemoval.updatedAt).toBe(openedWithImage.updatedAt);
+    expect(() => publish({ openedQuestion: openedWithImage, liveQuestion: liveAfterRemoval }))
+      .toThrow(/changed while publishing/);
+    const fresh = publish({ openedQuestion: liveAfterRemoval, liveQuestion: liveAfterRemoval });
+    expect(fresh.questions[0].correctKey).toBe("A");
+    expect(JSON.stringify(fresh)).not.toMatch(/private-source-exhibit|restricted-micrograph|private-local-image/);
+    expect(question.correctKey).toBe("A");
+  });
+
   it("never publishes newly held, unexplained or media-dependent questions", () => {
     expect(() => publish({ liveQuestion: { ...question, needsReview: true } })).toThrow(/changed while publishing/);
     expect(() => publish({ liveQuestion: { ...question, explanation: "" } })).toThrow(/changed while publishing/);

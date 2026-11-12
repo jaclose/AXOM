@@ -52,6 +52,11 @@ function sourceReceipt(question: QuestionRecord): string {
     // or question timestamp. An older rights/answer confirmation must not
     // authorize publishing after that private evidence changes.
     question.analyses ?? null,
+    // The public snapshot intentionally omits private image metadata, but
+    // removing/replacing an exhibit changes the source the owner reviewed.
+    // A previously checked rights/answer confirmation must not survive that
+    // silent edit, even when the resulting live question is now text-only.
+    question.attachments ?? null,
   ]);
 }
 

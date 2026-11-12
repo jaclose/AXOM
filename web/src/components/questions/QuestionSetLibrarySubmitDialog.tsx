@@ -46,6 +46,22 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
   autoDraft?: boolean;
 }) {
   const accountId = useAccount(state => state.user?.id);
+  // Parent CommunityUploads passes reactive store props. Re-rendering that
+  // parent must never replace the source revision covered by already-checked
+  // rights/answer attestations. Keep a private, immutable mount-time baseline,
+  // not a prop reference that can be rebound or mutated by another editor.
+  // Capture only this set's members; the entire learner QBank can be large.
+  const reviewAtOpen = useRef<{ set: QuestionSet; questions: QuestionRecord[] } | null>(null);
+  if (reviewAtOpen.current === null) {
+    const byId = new Map(questions.map(question => [question.id, question]));
+    reviewAtOpen.current = {
+      set: JSON.parse(JSON.stringify(set)) as QuestionSet,
+      questions: set.questionIds.flatMap(id => {
+        const member = byId.get(id);
+        return member ? [JSON.parse(JSON.stringify(member)) as QuestionRecord] : [];
+      }),
+    };
+  }
   // The identity that opened this modal owns its private draft and rights
   // authorization. A→B→A can occur without a React render of B.
   const openingAccount = useRef(accountId);
@@ -479,7 +495,7 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       // source-review evidence not carried in the privacy-stripped public snapshot.
       const live = useStore.getState();
       const snapshot = prepareCurrentCommunityQuestionSetSubmission({
-        openedSet: set, openedQuestions: questions,
+        openedSet: reviewAtOpen.current!.set, openedQuestions: reviewAtOpen.current!.questions,
         liveSets: live.questionSets ?? [], liveQuestions: live.questions ?? [],
       });
       const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit, {
