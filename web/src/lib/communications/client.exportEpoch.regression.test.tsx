@@ -182,10 +182,11 @@ describe("account export request epoch fences", () => {
     expect(mocks.listeners.size).toBe(0);
   });
 
-  it("keeps settings (read-only) functional without account-export fencing", async () => {
+  it("refuses private settings while signed out, before SDK acquisition", async () => {
     transition(null);
-    await expect(communicationsRequest<{ requested: boolean }>("settings")).resolves.toEqual({ requested: true });
-    expect(mocks.invoke).toHaveBeenCalledOnce();
+    await expect(communicationsRequest<{ requested: boolean }>("settings")).rejects.toThrow(/account changed/i);
+    expect(mocks.sdk).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
     expect(mocks.listeners.size).toBe(0);
   });
 });
