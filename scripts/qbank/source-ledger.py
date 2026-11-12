@@ -775,6 +775,10 @@ def coverage_matrix(acts, rows):
         if r["document_type"] in {"imcq", "esoft", "pq", "small_group", "case", "review_questions"}:
             available[(r["academic_term"], r["module"] or "(unresolved module)", r["week"])].append(r)
     out = []
+    # Only these activity types have direct, type-specific source categories
+    # in the question-source inventory. Lecture/DLA/other Tracker rows are
+    # not certified by a same-week PQ, IMCQ, case or question PDF.
+    directly_matched_types = {"imcq", "esoft", "small_group"}
     for (term, module, week, typ), expected in sorted(groups.items(), key=lambda kv: str(kv[0])):
         candidates = []
         for (t,m,w), source in available.items():
@@ -783,14 +787,18 @@ def coverage_matrix(acts, rows):
             # separately below, not lost or silently assigned to another week.
             if m != module or t != term or w != week: continue
             for r in source:
-                if typ in {"imcq", "esoft", "small_group"} and typ != r["document_type"]: continue
+                if typ not in directly_matched_types or typ != r["document_type"]: continue
                 candidates.append(r)
         hashes = {r["source_sha256"] or r["source_id"] for r in candidates}
+        source_status = ("activity_type_requires_independent_source_proof"
+                         if typ not in directly_matched_types else
+                         "module_and_type_candidate_not_line_item_verified"
+                         if candidates else "source_not_found")
         out.append(dict(academic_term=term, module=module, week=week, week_basis="explicit_template" if week else "unknown",
                         expected_activity_type=typ, expected_tracker_activities=len(expected),
                         candidate_source_files=len(candidates), byte_distinct_candidates=len(hashes),
                         available_source_ids=";".join(r["source_id"] for r in candidates[:12]),
-                        source_match_status="module_and_type_candidate_not_line_item_verified" if candidates else "source_not_found",
+                        source_match_status=source_status,
                         installed_status="not_verified"))
     # Explicit source-available rows are not evidence that a required activity was scheduled.
     # Preserve T4/T5 and missing T1/T2/T3 modules without inventing "expected" activities.
