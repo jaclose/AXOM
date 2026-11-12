@@ -140,7 +140,16 @@ export function importSharedQuestionSet(input: {
   validateShare(snapshot);
   validateImportIdentity(identity);
 
-  const previous = existingSets.find((set) => readSharedQuestionImportProvenance(set)?.shareId === identity.shareId);
+  // A share receipt is an identity claim, not a unique constraint on legacy
+  // local storage. After restore or interrupted saves, duplicate receipts may
+  // disagree about membership/digest. Never arbitrarily trust the first one.
+  const matchingReceipts = existingSets.filter(
+    (set) => readSharedQuestionImportProvenance(set)?.shareId === identity.shareId,
+  );
+  if (matchingReceipts.length > 1) {
+    throw new Error("This imported Question Set has ambiguous duplicate receipts for the same share ID. Resolve the original local sets without replacing question IDs before importing again.");
+  }
+  const previous = matchingReceipts[0];
   if (previous) {
     const provenance = readSharedQuestionImportProvenance(previous)!;
     if (provenance.contentDigest !== identity.contentDigest.toLowerCase()) {
