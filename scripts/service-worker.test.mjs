@@ -1669,3 +1669,41 @@ test('R71 optional cache writes may fail without discarding required offline she
   assert.equal(await cache.match('./index.html'), undefined,
     'required code failure must not install a misleading usable offline shell');
 });
+
+test('R73 byte-range public asset requests bypass SW cache while ordinary GET remains offline-capable', async () => {
+  const app = worker();
+  const icon = '/icon-192.png';
+  const cache = await app.caches.open('axom-shell-current');
+  await cache.put(icon, withNetworkUrl(new Response('FULL_CACHED_ICON', {
+    headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+  }), 'https://app.test' + icon));
+
+  for (const headers of [
+    new Headers({ Range: 'bytes=0-3' }),
+    new Headers({ Range: 'bytes=0-3', 'If-Range': '"icon-etag"' }),
+  ]) {
+    let intercepted = false;
+    app.events.get('fetch')({
+      request: {
+        url: 'https://app.test' + icon, method: 'GET', mode: 'same-origin', headers,
+      },
+      respondWith: () => { intercepted = true; },
+      waitUntil: () => {},
+    });
+    assert.equal(intercepted, false,
+      'browser must handle byte ranges; never substitute a cached full HTTP 200 response');
+  }
+
+  let response;
+  app.events.get('fetch')({
+    request: {
+      url: 'https://app.test' + icon, method: 'GET', mode: 'same-origin', headers: new Headers(),
+    },
+    respondWith: (value) => { response = value; },
+    waitUntil: () => {},
+  });
+  assert.ok(response, 'normal public GET must remain intercepted for offline replay');
+  assert.equal((await response).status, 200);
+  assert.equal(await (await cache.match(icon)).text(), 'FULL_CACHED_ICON',
+    'Range requests must not alter cached public content');
+});

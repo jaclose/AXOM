@@ -369,6 +369,9 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
+  // A full cached HTTP 200 cannot satisfy a byte-range request. Leave Range
+  // and If-Range semantics, including any 206/416 response, to the browser.
+  if (request.headers?.has?.("range")) return;
   // Authorization-bearing requests must never share the origin-wide shell cache.
   if (request.headers?.has?.("authorization") || request.cache === "no-store") return;
   if (/\/version\.json$/.test(url.pathname) || /\/api\//.test(url.pathname)) return;
