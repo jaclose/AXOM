@@ -356,10 +356,25 @@ describe("Journal feedback when browser storage cannot be read", () => {
       // Do not tell the owner to wait for a storage outage that has already ended.
       expect(screen.getByRole("alert").textContent).toContain("this draft cannot save while recovery is incomplete");
       expect(screen.queryByText("Other saved feedback copies (1)")).toBeNull();
+      // Even when a backlog write fails halfway through, retry must stay
+      // fail-closed and retain the original bytes and all pending links.
+      const originalSet = Storage.prototype.setItem;
+      const partialFailure = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, storageKey: string, value: string) {
+        if (this === window.localStorage && storageKey.startsWith(`${owners[20]}:name-alias:v1:`))
+          throw new Error("R42 one historical link is not writable yet");
+        return originalSet.call(this, storageKey, value);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
+      expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
+      partialFailure.mockRestore();
       fireEvent.click(screen.getByRole("button", { name: "Retry reading saved feedback" }));
       expect(screen.getByRole("alert").textContent).toContain("this draft cannot save while recovery is incomplete");
-      // A successful write of older pending links cannot reconstruct the
-      // missing 257th edge, so retry must not falsely report complete history.
+      // All 256 known links can now be written, but the 257th was never
+      // captured. Persisting the backlog must not falsely clear that warning.
+      const durableKnown = owners.slice(1, 257).map((owner) =>
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+          .filter((item) => item?.startsWith(`${owner}:name-alias:v1:`)));
+      expect(durableKnown.every((links) => links.length === 1)).toBe(true);
       expect(screen.getByRole("button", { name: "Retry reading saved feedback" })).toBeTruthy();
       expect(originalGet.call(localStorage, owners[0])).toBe(original);
       first.unmount();
