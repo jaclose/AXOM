@@ -133,7 +133,7 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("radio", { name: /ExamSoft \(Examplify\)/ }));
     expect(screen.getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", 10);
-    expect(screen.getByRole("button", { name: "Custom", exact: true }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /^Custom$/ }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "USMLE block · 20" }).getAttribute("aria-pressed")).toBe("false");
   });
 
@@ -144,8 +144,8 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     fireEvent.click(screen.getByRole("button", { name: "USMLE block · 20" }));
     expect(screen.getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", 20);
     expect(screen.getByRole("button", { name: "USMLE block · 20" }).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "10", exact: true }));
-    expect(screen.getByRole("button", { name: "Custom", exact: true }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /^10$/ }));
+    expect(screen.getByRole("button", { name: /^Custom$/ }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "USMLE block · 20" }).getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
     expect(screen.getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", 10);
