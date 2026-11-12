@@ -148,3 +148,28 @@ test('malformed legacy revalidation query does not make cached image bytes publi
   await assert.rejects(app.read(request), /synthetic offline/);
   assert.equal(await older.match(request), undefined);
 });
+
+test('encoded version replay prefers current public bytes over poisoned legacy A final URL after A→B', async () => {
+  const app = worker();
+  const key = IMAGE + '?v=build%2D20261111';
+  const old = await app.cache('axom-shell-legacy');
+  const current = await app.cache(`axom-shell-${BUILD}`);
+  const headers = { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' };
+  // An old shared cache can contain a clean key with a signed final URL.
+  // Account B must never inherit these synthetic account-A bytes.
+  await old.put(key, withFinalUrl(
+    new Response('SYNTHETIC_A_PRIVATE_IMAGE', { headers }),
+    new URL(IMAGE + '?v=build-20261111&access_token=SYNTHETIC_A_ONLY', ORIGIN).href,
+  ));
+  await current.put(key, withFinalUrl(
+    new Response('SYNTHETIC_CURRENT_PUBLIC_IMAGE', { headers }),
+    new URL(IMAGE + '?v=build-20261111&__axom_revalidate=123', ORIGIN).href,
+  ));
+  app.goOffline();
+  const result = await app.read(key);
+  assert.equal(result.intercepted, true);
+  assert.equal(await result.response.text(), 'SYNTHETIC_CURRENT_PUBLIC_IMAGE');
+  assert.equal(await old.match(key), undefined, 'evict only the tainted legacy entry');
+  assert.ok(await current.match(key), 'preserve the valid current build entry');
+  assert.equal(app.networkCalls(), 0);
+});
