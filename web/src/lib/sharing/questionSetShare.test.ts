@@ -335,7 +335,7 @@ describe("Question Set share boundary", () => {
     ["invalid digest", { contentDigest: "not-a-digest" }],
     ["unsupported version", { version: 2 }],
     ["noncanonical share ID", { shareId: ` ${SHARE_ID} ` }],
-  ])("holds malformed same-share import receipts with %s without changing learner data", (_label, change) => {
+  ] satisfies [string, Record<string, string | number>][])("holds malformed same-share import receipts with %s without changing learner data", (_label, change) => {
     const first = importSharedQuestionSet({
       snapshot: snapshot(),
       identity: { shareId: SHARE_ID, contentDigest: DIGEST },
