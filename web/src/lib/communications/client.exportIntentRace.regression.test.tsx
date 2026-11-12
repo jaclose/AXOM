@@ -20,11 +20,21 @@ vi.mock("../account/accountStore", () => ({
 }));
 vi.mock("../account/supabase", () => ({
   loadSupabase: mocks.loadSupabase,
+  readStoredSession: () => mocks.userId ? session(mocks.userId) : null,
 }));
 
 const { communicationsRequest } = await import("./client");
 
-type FakeClient = { functions: { invoke: typeof mocks.invoke } };
+function token(id: string) {
+  return `e30.${btoa(JSON.stringify({ sub: id })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}.sig`;
+}
+function session(id: string) {
+  return { user: { id }, access_token: token(id), refresh_token: "synthetic" };
+}
+type FakeClient = {
+  auth: { getSession: () => Promise<{ data: { session: ReturnType<typeof session> | null }; error: null }> };
+  functions: { invoke: typeof mocks.invoke };
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -33,7 +43,10 @@ function deferred<T>() {
 }
 
 function client(): FakeClient {
-  return { functions: { invoke: mocks.invoke } };
+  return {
+    auth: { getSession: async () => ({ data: { session: mocks.userId ? session(mocks.userId) : null }, error: null }) },
+    functions: { invoke: mocks.invoke },
+  };
 }
 
 beforeEach(() => {
@@ -96,7 +109,7 @@ describe("account export intent ownership across asynchronous SDK acquisition", 
 
     await expect(request).resolves.toEqual({ requested: true });
     expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith(
-      "communications?action=request-export", { body: {} },
+      "communications?action=request-export", { body: {}, headers: { Authorization: `Bearer ${token("owner-a")}` } },
     );
   });
 
