@@ -118,6 +118,12 @@ export function createQuestionSetShare(
     if (hasConflictingStoredAnswerText(question)) {
       throw new Error("Question Set source answer text conflicts with its keyed choice and requires review before sharing.");
     }
+    // Local device paths are not transferable citations and may expose
+    // private filesystem or document locations. Require a public source
+    // reference instead of silently removing provenance.
+    if (hasPrivateDeviceCitation(question.citation)) {
+      throw new Error("Question Set citation contains a private local file path and cannot be shared safely.");
+    }
     byId.set(question.id, question);
   }
   const questions = set.questionIds
@@ -456,6 +462,13 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
     tags: [...question.tags],
     citation: question.citation,
   };
+}
+
+function hasPrivateDeviceCitation(citation: string | undefined): boolean {
+  if (!citation) return false;
+  // Reject recognizable absolute device paths, but preserve web URLs, DOIs
+  // and ordinary bibliographic citations. Do not rewrite historical imports.
+  return /(?:^|[\s(])(?:file:\/\/|content:\/\/|\/Users\/|\/home\/|\/private\/|~\/|[a-z]:[\\/]|\\\\[^\s\\]+\\)/i.test(citation.trim());
 }
 
 function hasConflictingStoredAnswerText(question: QuestionRecord): boolean {
