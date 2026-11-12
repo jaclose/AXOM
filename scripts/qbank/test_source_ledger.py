@@ -95,7 +95,7 @@ class SourceLedgerTests(unittest.TestCase):
             rows = []
             for name, source_id in (("first.txt", "synthetic-a"), ("second.txt", "synthetic-b")):
                 path = root / name
-                data = b"Week 20 Shared Title [Lecture]\\n"
+                data = b"Week 20 Shared Title [Lecture]\n"
                 path.write_bytes(data)
                 rows.append(dict(document_type="tracker_template", root_label="baseline_templates",
                                  original_path=str(path), source_id=source_id,
@@ -122,7 +122,7 @@ class SourceLedgerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             path = root / "template.txt"
-            data = b"Week 20 Shared [Lecture]\\nWeek 20 Shared [Lecture]\\n"
+            data = b"Week 20 Shared [Lecture]\nWeek 20 Shared [Lecture]\n"
             path.write_bytes(data)
             row = dict(document_type="tracker_template", root_label="baseline_templates",
                        original_path=str(path), source_id="synthetic-line-source",
@@ -144,7 +144,7 @@ class SourceLedgerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             path = root / "template.txt"
-            data = b"Week 20 Shared [Lecture]\\n"
+            data = b"Week 20 Shared [Lecture]\n"
             path.write_bytes(data)
             base = dict(document_type="tracker_template", root_label="baseline_templates",
                         original_path=str(path), source_id="synthetic-duplicate-source",
@@ -167,7 +167,7 @@ class SourceLedgerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             path = root / "template.txt"
-            data = b"Week 20 Unique [DLA]\\n"
+            data = b"Week 20 Unique [DLA]\n"
             path.write_bytes(data)
             base = dict(document_type="tracker_template", root_label="baseline_templates",
                         original_path=str(path), source_id="synthetic-unique-source",
