@@ -1,0 +1,154 @@
+{
+  "date": "2026-11-12",
+  "build": "018",
+  "added_source_count": 21,
+  "records": [
+    {
+      "id": "EYE17-AAO-POAG25",
+      "title": "AAO Primary Open-Angle Glaucoma PPP 2025 (page published 2026)",
+      "url": "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-AAO-PACD25",
+      "title": "AAO Primary Angle-Closure Disease PPP 2025 (page published 2026)",
+      "url": "https://www.aao.org/education/preferred-practice-pattern/primary-angle-closure-disease-ppp",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-AMD",
+      "title": "NEI age-related macular degeneration stages and treatment",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/age-related-macular-degeneration",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-GA",
+      "title": "NEI complement inhibitors for geographic atrophy",
+      "url": "https://www.nei.nih.gov/research-and-training/research-news/story-discovery-nei-funded-research-paves-way-new-dry-amd-drugs",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-INJ",
+      "title": "NEI intraocular anti-VEGF treatments",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/diabetic-retinopathy/injections-treat-eye-conditions",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-AAO-EVAL25",
+      "title": "AAO Comprehensive Adult Medical Eye Evaluation PPP 2025",
+      "url": "https://www.aao.org/education/preferred-practice-pattern/comprehensive-adult-medical-eye-evaluation-ppp",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-RD",
+      "title": "NEI retinal detachment overview",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/retinal-detachment",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-RD-SURG",
+      "title": "NEI retinal detachment surgery",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/retinal-detachment/surgery-retinal-detachment",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-AAO-RVO26",
+      "title": "AAO Retinal Vein Occlusions PPP 2024 updated June 2026",
+      "url": "https://www.aao.org/education/preferred-practice-pattern/retinal-vein-occlusions-ppp",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-AHA-CRAO21",
+      "title": "AHA central retinal artery occlusion Scientific Statement 2021",
+      "url": "https://doi.org/10.1161/STR.0000000000000366",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-AAO-KER23",
+      "title": "AAO Bacterial Keratitis PPP 2023 (published 2024)",
+      "url": "https://www.aao.org/education/preferred-practice-pattern/bacterial-keratitis-ppp-2023",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-UVEITIS",
+      "title": "NEI uveitis clinical overview updated December 2024",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/uveitis",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NCI-RB",
+      "title": "NCI PDQ Retinoblastoma Treatment updated April 3, 2025",
+      "url": "https://www.cancer.gov/types/retinoblastoma/hp/retinoblastoma-treatment-pdq",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-RB",
+      "title": "NEI retinoblastoma overview",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/retinoblastoma",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NCI-UVEAL",
+      "title": "NCI PDQ intraocular uveal melanoma",
+      "url": "https://www.cancer.gov/types/eye/hp/intraocular-melanoma-treatment-pdq",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NCI-TEB",
+      "title": "NCI tebentafusp-tebn indications",
+      "url": "https://www.cancer.gov/about-cancer/treatment/drugs/tebentafusp-tebn",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-CAT",
+      "title": "NEI cataract causes",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/cataracts/causes-cataracts",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-CAT-SURG",
+      "title": "NEI cataract surgery",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/cataracts/cataract-surgery",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-NEI-RB-TEST",
+      "title": "NEI retinoblastoma testing",
+      "url": "https://www.nei.nih.gov/eye-health-information/eye-conditions-and-diseases/retinoblastoma/tests-retinoblastoma",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-MEDGEN-RB",
+      "title": "MedGen retinoblastoma C0035335",
+      "url": "https://www.ncbi.nlm.nih.gov/medgen/20552",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    },
+    {
+      "id": "EYE17-MEDGEN-RB-SUB",
+      "title": "MedGen intraocular retinoblastoma MONDO:0003077 (subtype, not parent)",
+      "url": "https://www.ncbi.nlm.nih.gov/medgen/78874",
+      "checked_date": "2026-11-12",
+      "status": "source page researched; not independent clinical validation"
+    }
+  ]
+}
