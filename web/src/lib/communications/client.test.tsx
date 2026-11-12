@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../account/accountStore", () => {
   const state = () => ({ user: mocks.userId ? { id: mocks.userId } : null });
   return { useAccount: Object.assign(
-    (selector: (state: ReturnType<typeof state>) => unknown) => selector(state()),
+    (selector: (snapshot: ReturnType<typeof state>) => unknown) => selector(state()),
     { getState: state, subscribe: () => () => {} },
   ) };
 });
