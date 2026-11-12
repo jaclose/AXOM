@@ -20,6 +20,10 @@ const invalidExplicitWeek = (value: unknown): boolean =>
   value != null && (typeof value !== "string" || value.trim() !== "")
     && parseWeek(value) === undefined;
 
+/** Repeated immutable membership IDs are ambiguous, not extra practice rows. */
+const repeatedMembers = (ids?: readonly string[]): boolean =>
+  Boolean(ids && new Set(ids).size !== ids.length);
+
 const scopeMatches = (
   actual: CourseScope, requested: CourseScope, requireCourseProof: boolean,
 ): boolean => {
@@ -68,6 +72,12 @@ export function verifyCollectionForCourse(
   const allowedMembers = new Set(memberIds);
   const malformedReadyMembership = Boolean(sourceSet &&
     collection.readyQuestionIds?.some((id) => !allowedMembers.has(id)));
+  // A set, its derived collection or its ready subset may carry repeated
+  // source IDs. Deduplicating those without a review silently changes exact
+  // membership, so hold the link while retaining the original records.
+  const repeatedMembership = repeatedMembers(sourceSet?.questionIds)
+    || repeatedMembers(collection.questionIds)
+    || repeatedMembers(collection.readyQuestionIds);
   let conflictingQuestionCount = 0;
   let unavailableQuestionCount = 0;
   const validMembers = new Set<string>();
@@ -114,7 +124,8 @@ export function verifyCollectionForCourse(
     validMembers.add(id);
   }
 
-  const sourceReviewRequired = declaredConflict || malformedReadyMembership || conflictingQuestionCount > 0;
+  const sourceReviewRequired = declaredConflict || malformedReadyMembership
+    || repeatedMembership || conflictingQuestionCount > 0;
   const readyQuestionIds = sourceReviewRequired ? [] : [...new Set(collection.readyQuestionIds ?? [])]
     .filter((id) => {
       const question = questionsById.get(id);
