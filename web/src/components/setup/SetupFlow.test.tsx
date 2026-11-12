@@ -57,6 +57,28 @@ describe("SetupFlow", () => {
     expect(localStorage.getItem("axom.setup.v2")).toBeNull();
   });
 
+
+  it("shows only the three featured palettes until a learner asks for more", () => {
+    render(<SetupFlow mode="first-run" />);
+    next();
+    next();
+
+    const group = screen.getByRole("radiogroup", { name: "Accent palette" });
+    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(3);
+    expect(screen.getByLabelText("Preview: AXOM Classic")).toBeTruthy();
+    expect(screen.queryByText("Study 2h 15m of 3h 30m")).toBeNull();
+
+    const optional = screen.getByText("Optional notifications").closest("details");
+    expect(optional?.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Explore all palettes" }));
+    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(9);
+    const amethyst = screen.getByRole("radio", { name: /Amethyst/ });
+    fireEvent.click(amethyst);
+    expect(amethyst.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByLabelText("Preview: Amethyst")).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Appearance mode" })).toBeTruthy();
+  });
+
   it("starts a non-SGU student clean, and a no-flashcards routine gets no card target", () => {
     render(<SetupFlow mode="first-run" />);
     fireEvent.click(screen.getByRole("radio", { name: /US MD/ }));
