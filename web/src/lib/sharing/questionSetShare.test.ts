@@ -96,6 +96,29 @@ describe("Question Set share boundary", () => {
     expect(original.correctKey).toBe("B");
   });
 
+  it.each([
+    ["file URI", "file:///Users/example/private-course.pdf"],
+    ["macOS path", "Internal source /Users/example/private-course.pdf"],
+    ["Linux home path", "/home/example/private-course.pdf"],
+    ["Windows drive path", "C:\\Users\\Example\\private-course.pdf"],
+    ["Android content URI", "content://com.example.provider/document/42"],
+    ["network file share", "\\\\campus-server\\share\\private-course.pdf"],
+  ])("refuses %s citation in a new public snapshot without modifying source evidence", (_label, citation) => {
+    const source = question("q1", { citation });
+    const before = JSON.stringify(source);
+    expect(() => createQuestionSetShare(questionSet(), [source], NOW))
+      .toThrow(/citation contains a private local file path/i);
+    expect(JSON.stringify(source)).toBe(before);
+    expect(source.correctKey).toBe("B");
+  });
+
+  it("retains legitimate public web and bibliographic citations in a shared snapshot", () => {
+    const citation = "PMID: 123456; DOI: 10.1000/example; https://example.edu/medical/lecture";
+    const value = createQuestionSetShare(questionSet(), [question("q1", { citation })], NOW);
+    expect(value.questions[0].citation).toBe(citation);
+    expect(value.questions[0].correctKey).toBe("B");
+  });
+
   it("ignores duplicate bank IDs that are not members of the shared set", () => {
     const value = createQuestionSetShare(questionSet(), [
       question("q1"), question("outside", { correctKey: "A", correctAnswerText: "One" }),
