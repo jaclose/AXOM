@@ -1,0 +1,342 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology V2",
+  "build": "016",
+  "date": "2026-11-12",
+  "chapter": "Respiratory Pathology: Infection, Obstruction, Vascular, Interstitial, Sleep and Pleural Disorders",
+  "parent": {
+    "build": "015",
+    "branch": "docs/disease-atlas-v2-run015-20261111-musculoskeletal",
+    "entries": 360,
+    "detailed": 259,
+    "source_records": 294,
+    "image_associations": 163
+  },
+  "metrics": {
+    "new_unique": 4,
+    "legacy_promotions": 8,
+    "new_detailed_profiles": 12,
+    "total_entries": 364,
+    "total_detailed": 271,
+    "legacy_short": 93,
+    "cumulative_evidence_records": 313,
+    "newsources": 19,
+    "new_authentic_image_source_links": 9,
+    "cumulative_image_associations": 172,
+    "images_embedded": 0,
+    "pdf_pages": 404,
+    "QA_passed": 25,
+    "QA_failed": 0,
+    "accessible_DOCX_findings": 0,
+    "official_Mondo_ICD11_Orphanet_denominator": null,
+    "measured_ontology_coverage": null
+  },
+  "entries": [
+    {
+      "id": "LEGACY-014",
+      "name": "Tuberculosis",
+      "discriminator": "Airborne M. tuberculosis, caseating granulomas, active diagnosis by sputum molecular tests, culture and susceptibility; regimen depends on resistance",
+      "sources": [
+        "PUL16-WHO-TB26",
+        "PUL16-CDC-TB25",
+        "PUL16-CDC-TB-DR"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "LEGACY-015",
+      "name": "Pulmonary embolism",
+      "discriminator": "Thrombus blocks pulmonary vascular bed, acute right ventricular afterload and hypoxemia; risk-based anticoagulation and intervention",
+      "sources": [
+        "PUL16-ESC-PE19"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "LEGACY-016",
+      "name": "ARDS / diffuse alveolar damage",
+      "discriminator": "Clinical acute hypoxemic permeability edema, often DAD histology; not interchangeable with DAD in isolation; lung protective ventilation and prone positioning",
+      "sources": [
+        "PUL16-ATS-ARDS24"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "LEGACY-017",
+      "name": "COPD: emphysema",
+      "discriminator": "Irreversible distal airspace enlargement from alveolar septal destruction; establish airflow obstruction with post-bronchodilator spirometry",
+      "sources": [
+        "PUL16-GOLD26"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "LEGACY-019",
+      "name": "Asthma",
+      "discriminator": "Variable expiratory airflow limitation with airway inflammation; ICS-containing reliever strategy vs SABA monotherapy for most adults/adolescents",
+      "sources": [
+        "PUL16-GINA26"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "LEGACY-020",
+      "name": "Bronchiectasis",
+      "discriminator": "Permanently dilated conducting bronchi with recurrent infection/mucus retention; airway clearance, risk-directed macrolide or inhaled therapy",
+      "sources": [
+        "PUL16-ERS-BRON25"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "LEGACY-021",
+      "name": "Idiopathic pulmonary fibrosis / UIP",
+      "discriminator": "Progressive fibrotic interstitial lung disease after exclusion of known causes; basal subpleural reticulation, honeycombing and fibroblastic foci; UIP morphology not diagnostic of etiology alone",
+      "sources": [
+        "PUL16-ATS-IPF22",
+        "PUL16-FDA-IPF25"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "LEGACY-023",
+      "name": "Lung adenocarcinoma",
+      "discriminator": "Malignant glandular pulmonary epithelium with acinar, lepidic, solid or mucinous patterns; biomarker-genotype therapy and staging required",
+      "sources": [
+        "PUL16-NCI-NSCLC",
+        "PUL16-NCI-LUNG-DRUG"
+      ],
+      "action": "PROMOTED_DETAILED_EXISTING"
+    },
+    {
+      "id": "AXOM-PUL-015",
+      "name": "Pulmonary arterial hypertension (WHO group 1)",
+      "discriminator": "Precapillary pulmonary hypertension by right heart catheterization; evaluate idiopathic, heritable and associated causes and exclude group 2-5 phenotypes",
+      "sources": [
+        "PUL16-ESC-PAH22",
+        "PUL16-FDA-SOTA24"
+      ],
+      "action": "NEW_UNIQUE"
+    },
+    {
+      "id": "AXOM-PUL-016",
+      "name": "Malignant pleural mesothelioma",
+      "discriminator": "Diffuse pleural mesothelial malignant neoplasm, usually asbestos-associated; invasive pattern and mesothelial immunohistochemistry to separate carcinoma",
+      "sources": [
+        "PUL16-NCI-MESO",
+        "PUL16-FDA-MESO24"
+      ],
+      "action": "NEW_UNIQUE"
+    },
+    {
+      "id": "AXOM-PUL-017",
+      "name": "Spontaneous pneumothorax",
+      "discriminator": "Air in pleural space without direct trauma, with tension physiology requiring immediate decompression based on clinical suspicion",
+      "sources": [
+        "PUL16-BTS-PLEURA23"
+      ],
+      "action": "NEW_UNIQUE"
+    },
+    {
+      "id": "AXOM-PUL-018",
+      "name": "Obstructive sleep apnea-hypopnea syndrome",
+      "discriminator": "Repetitive upper airway collapse in sleep causing apnea/hypopnea; objective sleep monitoring, positive airway pressure, adherence review",
+      "sources": [
+        "PUL16-NICE-OSA21"
+      ],
+      "action": "NEW_UNIQUE"
+    }
+  ],
+  "ontology": {
+    "official_baselines_imported": false,
+    "denominator": null,
+    "measured_coverage": null,
+    "MONDO_PA_hypertension": {
+      "axom_id": "AXOM-PUL-015",
+      "MONDO": "MONDO:0015924",
+      "Orphanet_cross_reference": "182090",
+      "Monarch_version": "2026-10-06",
+      "ICD11_foundation_entity": "1931148955",
+      "WHO_ICD11_MMS_code": null,
+      "status": "Monarch cross-reference observed, independent Orphanet/WHO mapping pending",
+      "source": "https://monarchinitiative.org/MONDO%3A0015924"
+    },
+    "other_mappings": "UNVERIFIED; DO NOT ASSIGN FABRICATED IDS"
+  },
+  "image_source_pages": [
+    {
+      "disease_id": "LEGACY-014",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Pulmonary_tuberculosis_-_Necrotizing_granuloma_(6545185109).jpg",
+      "creator": "Yale Rosen / Pulmonary Pathology",
+      "license": "CC BY-SA 2.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "LEGACY-015",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Saddle_thromboembolus.jpg",
+      "creator": "Yale Rosen / Pulmonary Pathology",
+      "license": "CC BY-SA 2.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "LEGACY-016",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Diffuse_alveolar_damage_(DAD)_(4563408105).jpg",
+      "creator": "Yale Rosen / Pulmonary Pathology",
+      "license": "CC BY-SA 2.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "LEGACY-016",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Diffuse_alveolar_damage_(DAD),_resolving_(4563407981).jpg",
+      "creator": "Yale Rosen / Pulmonary Pathology",
+      "license": "CC BY-SA 2.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "LEGACY-017",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Emphysema_(4858474968).jpg",
+      "creator": "Yale Rosen / Pulmonary Pathology",
+      "license": "CC BY-SA 2.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "LEGACY-023",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Mucinous_lung_adenocarcinoma_--_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 4.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "LEGACY-023",
+      "file_page": "https://commons.wikimedia.org/wiki/File:ALK_positive_lung_adenocarcinoma_--_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 4.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "AXOM-PUL-015",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Plexiform_lesion_-_Pulmonary_hypertension.jpg",
+      "creator": "Bulent Celasun MD",
+      "license": "CC BY-SA 2.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    },
+    {
+      "disease_id": "AXOM-PUL-016",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Malignant_epithelioid_mesothelioma_-_very_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "original_binary_embedded": false,
+      "rights_status": "File-page source and nominal commercial-compatible CC BY-SA license recorded; tissue identity/privacy/file hash not independently validated; link-only"
+    }
+  ],
+  "source_registry_new": [
+    {
+      "id": "PUL16-WHO-TB26",
+      "url": "https://www.who.int/publications/i/item/9789240125124"
+    },
+    {
+      "id": "PUL16-CDC-TB25",
+      "url": "https://www.cdc.gov/tb/hcp/treatment/tuberculosis-disease.html"
+    },
+    {
+      "id": "PUL16-CDC-TB-DR",
+      "url": "https://www.cdc.gov/tb/php/dear-colleague-letters/2025-treatment-guidelines.html"
+    },
+    {
+      "id": "PUL16-ESC-PE19",
+      "url": "https://academic.oup.com/eurheartj/article/41/4/543/5556136"
+    },
+    {
+      "id": "PUL16-ATS-ARDS24",
+      "url": "https://doi.org/10.1164/rccm.202311-2011ST"
+    },
+    {
+      "id": "PUL16-GOLD26",
+      "url": "https://goldcopd.org/2026-gold-report-and-pocket-guide/"
+    },
+    {
+      "id": "PUL16-GINA26",
+      "url": "https://ginasthma.org/2026-gina-summary-guide/"
+    },
+    {
+      "id": "PUL16-ERS-BRON25",
+      "url": "https://publications.ersnet.org/lookup/pmid/41016738"
+    },
+    {
+      "id": "PUL16-FDA-IPF25",
+      "url": "https://www.fda.gov/drugs/news-events-human-drugs/fda-approves-drug-treat-idiopathic-pulmonary-fibrosis"
+    },
+    {
+      "id": "PUL16-ATS-IPF22",
+      "url": "https://doi.org/10.1164/rccm.202202-0399ST"
+    },
+    {
+      "id": "PUL16-NCI-NSCLC",
+      "url": "https://www.cancer.gov/types/lung/hp/non-small-cell-lung-treatment-pdq"
+    },
+    {
+      "id": "PUL16-NCI-LUNG-DRUG",
+      "url": "https://www.cancer.gov/about-cancer/treatment/drugs/lung"
+    },
+    {
+      "id": "PUL16-ESC-PAH22",
+      "url": "https://academic.oup.com/eurheartj/article/43/38/3618/6673929"
+    },
+    {
+      "id": "PUL16-FDA-SOTA24",
+      "url": "https://www.fda.gov/drugs/drug-trials-snapshots/drug-trials-snapshots-winrevair"
+    },
+    {
+      "id": "PUL16-NCI-MESO",
+      "url": "https://www.cancer.gov/types/mesothelioma/hp/mesothelioma-treatment-pdq"
+    },
+    {
+      "id": "PUL16-FDA-MESO24",
+      "url": "https://www.fda.gov/drugs/cancer-approvals/fda-approves-pembrolizumab-chemotherapy-unresectable-advanced-or-metastatic-malignant-pleural"
+    },
+    {
+      "id": "PUL16-BTS-PLEURA23",
+      "url": "https://www.brit-thoracic.org.uk/clinical-resources/guidelines/pleural-disease/"
+    },
+    {
+      "id": "PUL16-NICE-OSA21",
+      "url": "https://www.nice.org.uk/guidance/ng202/chapter/1-obstructive-sleep-apnoeahypopnoea-syndrome"
+    },
+    {
+      "id": "PUL16-WHO-ICD26",
+      "url": "https://www.who.int/philippines/news/detail-global/16-02-2026-icd-11-2026-release"
+    }
+  ],
+  "deliverables": {
+    "package_name": "AXOM_Disease_Atlas_V2_Run016_Source_Package.zip",
+    "source_package_sha256": "7d79884d15afa756231c5868a9df8ed100d32607c4bd62c73be669fbc77bbb15",
+    "docx": "AXOM_Disease_Pathology_Atlas_V2_Run016.docx",
+    "pdf": "AXOM_Disease_Pathology_Atlas_V2_Run016.pdf",
+    "full_binaries_persisted_on_GitHub": false,
+    "full_binaries_persisted_on_Google_Drive": false,
+    "full_binaries_persisted_on_Library": false,
+    "complete_new_prose_in_current_turn_source_package": true
+  },
+  "QA": {
+    "checks_passed": 25,
+    "failed": 0,
+    "docx_converted_and_sample_pages_rendered": true,
+    "PDF_pages_379_to_404_new_chapter": true,
+    "word_accessibility_issues": 0,
+    "no_synthetic_medical_images": true,
+    "clinical_peer_review": false,
+    "independent_case_rights_clearance": false,
+    "category": "structural QA, not specialist clinical validation"
+  },
+  "governance": {
+    "status": "unmerged research-only checkpoint; no release, migration or production actions",
+    "coordination": "AXOM FORGE root retains approval and integration authority"
+  }
+}
