@@ -116,6 +116,47 @@ describe("Community Question Set Library", () => {
     await waitFor(() => expect(mock.like).toHaveBeenCalledWith("account-1", summary.id, true));
   });
 
+  it("keeps answer-bearing authored tags, citations and visual keywords behind deliberate reveal without changing import evidence", async () => {
+    const answerBearing = {
+      ...snapshot, tags: ["Axillary nerve"],
+      questions: [{
+        ...snapshot.questions[0],
+        citation: "Source chapter: Axillary nerve",
+        tags: ["visual:intent:anatomical-schematic", "visual:keyword:axillary nerve"],
+      }],
+    };
+    mock.search.mockResolvedValueOnce([{ ...summary, tags: ["Axillary nerve"] }]);
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: answerBearing, contentDigest: "f".repeat(64),
+      status: "approved", reviewRevision: 4,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    const heading = await screen.findByRole("heading", { name: "Synthetic practice" });
+    expect(heading.closest("article")?.textContent).not.toContain("Axillary nerve");
+    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+
+    const setTags = screen.getByText("Axillary nerve").closest("details");
+    const citation = screen.getByText("Source: Source chapter: Axillary nerve").closest("details");
+    const visual = screen.getByText(/Visual intent metadata: anatomical schematic/).closest("details");
+    expect(setTags?.open).toBe(false);
+    expect(citation?.open).toBe(false);
+    expect(visual).toBe(citation);
+    expect(screen.getByText("Submitted answer: B").closest("details")).toBe(citation);
+
+    fireEvent.click(screen.getByText("Reveal recorded answer and teaching notes"));
+    expect(citation?.open).toBe(true);
+    fireEvent.click(screen.getByText("Reveal set topic tags"));
+    expect(setTags?.open).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(answerBearing);
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0].correctKey).toBe("B");
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      contentDigest: "f".repeat(64), reviewRevision: 4,
+    });
+  });
+
   it("revokes delayed search results after an A to B to A account round trip", async () => {
     let resolveSearch!: (value: typeof summary[]) => void;
     mock.search.mockImplementationOnce(() => new Promise(resolve => { resolveSearch = resolve; }));
@@ -702,12 +743,13 @@ describe("Community Question Set Library", () => {
     render(<CommunityQuestionSetLibrary />);
     const heading = await screen.findByRole("heading", { name: "Synthetic practice" });
     const card = heading.closest("article");
-    expect(card?.textContent).toContain("renal");
+    expect(card?.textContent).not.toContain("renal");
     expect(card?.textContent).not.toContain("visual:");
     fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
     await screen.findByText("Which synthetic answer is supported?");
-    expect(screen.getByText("1 question · renal")).toBeTruthy();
-    expect(screen.getByText(/Visual intent metadata: histology micrograph/)).toBeTruthy();
+    expect(screen.getByText("1 question · Topic tags hidden until reveal")).toBeTruthy();
+    expect(screen.getByText("renal").closest("details")?.open).toBe(false);
+    expect(screen.getByText(/Visual intent metadata: histology micrograph/).closest("details")?.open).toBe(false);
     expect(screen.getByText(/No diagram is included.*media rights require separate review/)).toBeTruthy();
     expect(screen.queryByText(/visual:intent:/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
@@ -736,7 +778,8 @@ describe("Community Question Set Library", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
     await screen.findByText("Which synthetic answer is supported?");
     expect(screen.queryByText(/Visual intent metadata/)).toBeNull();
-    expect(screen.getByText("1 question · renal")).toBeTruthy();
+    expect(screen.getByText("1 question · Topic tags hidden until reveal")).toBeTruthy();
+    expect(screen.getByText("renal").closest("details")?.open).toBe(false);
   });
 
   it("retains bounded recognized visual plans when an unknown intent comes first", async () => {

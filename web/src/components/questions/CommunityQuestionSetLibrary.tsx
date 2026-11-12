@@ -348,7 +348,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
         <div className="qsl-card-top"><span>LEARNER COLLECTION</span><Tag tone="neutral">{set.questionCount} {set.questionCount === 1 ? "question" : "questions"}</Tag></div>
         <h3>{set.title}</h3>
         <p>{set.credit ? `By ${set.credit}` : "Shared by an AXOM learner"}</p>
-        <div className="qsl-tags">{topicTags(set.tags).slice(0, 4).map(tag => <span key={tag}>{tag}</span>)}</div>
+        {/* Authored topic tags can contain the correct answer. They remain
+            searchable, but are not rendered before an explicit reveal. */}
         <div className="qsl-card-actions">
           <GButton size="sm" onClick={() => void open(set.id)}>Preview set</GButton>
           <GhostButton disabled={liking === set.id} aria-label={`${set.liked ? "Unlike" : "Like"} ${set.title}`}
@@ -364,8 +365,12 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       <div className="qsl-preview stack gap12" aria-busy={opening || importing}>
         {opening && <p role="status">Opening this Question Set…</p>}
         {activePreview && <>
-          <p>{activePreview.snapshot.questions.length} {activePreview.snapshot.questions.length === 1 ? "question" : "questions"} · {topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
-          <p className="sub">Preview the first three questions. Check their sources while studying.</p>
+          <p>{activePreview.snapshot.questions.length} {activePreview.snapshot.questions.length === 1 ? "question" : "questions"} · Topic tags hidden until reveal</p>
+          <details className="qsl-preview-teaching">
+            <summary>Reveal set topic tags</summary>
+            <p>{topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
+          </details>
+          <p className="sub">Preview the first three questions. Recorded citations and visual hints may reveal answers; open a question's teaching notes to inspect them.</p>
           {previewCitationCount < previewCitationTotal && <p className="qsl-preview-source-warning">
             Source citations recorded for {previewCitationCount} of {previewCitationTotal} questions. The first-three preview may not show every citation gap. A recorded citation does not establish medical accuracy.
           </p>}
@@ -375,12 +380,14 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
           <ol>{activePreview.snapshot.questions.slice(0, 3).map(question => <li key={question.id}>
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
-            {question.citation ? <small>Source: {question.citation}</small>
+            {question.citation
+              ? <small>Source citation recorded. Reveal teaching notes to inspect it.</small>
               : <small className="qsl-preview-source-warning">No source citation is included for this question. Verify its answer and teaching notes against the original material.</small>}
-            <VisualIntentNote tags={question.tags} />
             <details className="qsl-preview-teaching">
               <summary>Reveal recorded answer and teaching notes</summary>
               <div className="stack gap8">
+                {question.citation && <small>Source: {question.citation}</small>}
+                <VisualIntentNote tags={question.tags} />
                 {question.correctKey
                   ? <p><b>Submitted answer: {question.correctKey.trim()}</b> · {question.options.find(option => option.key.trim().toUpperCase() === question.correctKey?.trim().toUpperCase())?.text}</p>
                   : <p>No recorded answer key. Do not infer one from the explanation.</p>}
