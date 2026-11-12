@@ -115,6 +115,31 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("PreparedLibrary truthfulness", () => {
+
+  it("shows the domain-specific bank title and explicitly marks provisional weeks without promoting held questions", () => {
+    const catalog = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
+    catalog.sources[0].module = "RHPS";
+    mocks.documents[0] = { ...mocks.documents[0], rawText: JSON.stringify(catalog) };
+    const reviewDocument = mocks.documents.find(document => document.id === `private-review-${checksum}`)!;
+    reviewDocument.rawText = JSON.stringify({
+      pkg: { manifest: {
+        schemaVersion: 1, course: { name: "RHPS", term: 5, week: 2 },
+        bank: { id: "rhps-pharm", title: "Respiratory Pharmacology Practice Questions", discipline: "Pharmacology" },
+        source: { filename: "Source.pdf", sourceWeekDeclared: false },
+        questionsFile: "questions.json", assetsDirectory: "assets/",
+      }, questions: [] },
+      issues: [], sourceText: { rawText: "" }, sourceBytes: 0, notes: [],
+    });
+    render(<PreparedLibrary />);
+    expect(screen.getByText("Respiratory Pharmacology Practice Questions")).toBeTruthy();
+    expect(screen.getByText(/RHPS · Term 5 \(package-assigned\) · Week 2 \(provisional\) · Pharmacology · 1 locally answer-ready/)).toBeTruthy();
+    expect(screen.getByText(/Original source:/)).toBeTruthy();
+    expect(screen.getByText("Source.pdf").closest("li")?.querySelector("button")?.textContent).toContain("Review source");
+    expect(screen.getByText(/4 held in source/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Find a source"), { target: { value: "Source.pdf" } });
+    expect(screen.getByText("Respiratory Pharmacology Practice Questions")).toBeTruthy();
+  });
+
   it("combines installed catalogs, de-duplicates sources, and totals local readiness and held review", () => {
     const secondChecksum = "b".repeat(64);
     const thirdChecksum = "e".repeat(64);
