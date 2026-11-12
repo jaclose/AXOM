@@ -38,6 +38,54 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual(ledger.classification("09_BPM502_PreMidterm_Lectures_DLA.txt","baseline_templates"),"tracker_template")
         self.assertEqual(ledger.mapping("GOER/Week 2/IMCQ 1.pdf", "downloads_goer_week2")["week"],2)
 
+    def test_tracker_template_activity_requires_exact_original_source_bytes(self):
+        # A post-inventory template must not lend its original source ID to
+        # edited lines, even if its lexical path and file length are unchanged.
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            template = root / "01_DERS_Lectures.txt"
+            original = b"Week 20 Baseline [Lecture]\n"
+            replacement = b"Week 19 Baseline [Lecture]\n"
+            self.assertEqual(len(original), len(replacement))
+            template.write_bytes(original)
+            original_sha = hashlib.sha256(original).hexdigest()
+            row = dict(document_type="tracker_template", root_label="baseline_templates",
+                       original_path=str(template), source_id="synthetic-source-id",
+                       source_sha256=original_sha, academic_term="T4", module="DERS",
+                       module_evidence="synthetic_original", extraction_status="unexamined")
+            previous_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("baseline_templates", root)]
+                valid_row = dict(row)
+                valid = ledger.parse_templates([valid_row])
+                self.assertEqual(len(valid), 1)
+                self.assertEqual(valid[0]["source_id"], "synthetic-source-id")
+                self.assertEqual(valid[0]["week"], 20)
+                self.assertEqual(valid_row["extraction_status"], "tracker_template_activities_parsed")
+
+                template.write_bytes(replacement)
+                changed_row = dict(row)
+                self.assertEqual(ledger.parse_templates([changed_row]), [])
+                self.assertEqual(changed_row["extraction_status"], "template_source_integrity_held")
+                self.assertEqual(changed_row["review_status"], "source_integrity_review_required")
+                self.assertEqual(changed_row["unresolved_reason"], "template_source_revision_mismatch")
+
+                # No checksum, an invalid checksum or a coerced collection
+                # cannot prove the original text even if current bytes match.
+                template.write_bytes(original)
+                for bad_sha in (None, "not-a-sha", [original_sha], original_sha.upper()):
+                    with self.subTest(bad_sha=repr(bad_sha)):
+                        unverified_row = dict(row, source_sha256=bad_sha)
+                        self.assertEqual(ledger.parse_templates([unverified_row]), [])
+                        self.assertEqual(unverified_row["extraction_status"],
+                                         "template_source_integrity_held")
+                        self.assertEqual(unverified_row["review_status"],
+                                         "source_integrity_review_required")
+                        self.assertEqual(unverified_row["unresolved_reason"],
+                                         "template_original_revision_missing_or_invalid")
+            finally:
+                ledger.ROOTS = previous_roots
+
     def test_explicit_week_20_is_source_hint_not_assessment_number(self):
         # Source filenames may identify DERS week 20; do not infer a week from IMCQ 20.
         for path in ("DERS/Week 20/PQ.pdf", "DERS/wk20/PQ.pdf", "DERS/Week 020/PQ.pdf"):
