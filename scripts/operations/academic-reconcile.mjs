@@ -112,7 +112,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       errors.push(`Invalid source inventory row at index ${index}; require an object with a canonical source checksum.`);
       continue;
     }
-    if (!SHA256.test(file.sha256 ?? "")) { errors.push(`Invalid source checksum at inventory row ${index}; original path omitted.`); continue; }
+    if (typeof file.sha256 !== "string" || !SHA256.test(file.sha256)) { errors.push(`Invalid source checksum at inventory row ${index}; original path omitted.`); continue; }
     if (file.duplicateOf) { duplicateRecords.push(file); continue; }
     if (byHash.has(file.sha256)) errors.push(`Non-duplicate entries share checksum ${file.sha256.slice(0, 12)}`);
     else byHash.set(file.sha256, file);
@@ -426,7 +426,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
           && checked <= reportTime + 5 * 60_000;
       };
       for (const entry of pdfTriage.rows) {
-        if (!SHA256.test(entry?.source_sha256 ?? "") || seenPdf.has(entry.source_sha256)) {
+        if (typeof entry?.source_sha256 !== "string" || !SHA256.test(entry.source_sha256) || seenPdf.has(entry.source_sha256)) {
           errors.push("PDF availability ledger has a missing or repeated source fingerprint.");
           continue;
         }
@@ -544,7 +544,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     complete: errors.length === 0 && blockers.length === 0,
     errors, blockers, warnings,
     counts,
-    samples: { unclassifiedFiles: sample(missingDisposition.map(x => SHA256.test(x.sha256) ? x.sha256.slice(0, 12) : "invalid-checksum")),
+    samples: { unclassifiedFiles: sample(missingDisposition.map(x => typeof x.sha256 === "string" && SHA256.test(x.sha256) ? x.sha256.slice(0, 12) : "invalid-checksum")),
       pendingQuestionSources: sample(pendingSources.map(([h, row]) => ({ source: h.slice(0, 12), status: supportedStates.has(row.status) ? row.status : "invalid", reason: row.reason ? "[redacted: consult private disposition]" : null }))) },
   };
 }
