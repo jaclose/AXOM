@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommunicationsSettings } from "../lib/communications/client";
@@ -74,8 +74,8 @@ describe("PrivacyPage identity-bound destructive workflow", () => {
     mocks.userId = "owner-b";
     remote = { data: settings(), loading: false, error: "", reload: mocks.reload };
     view.rerender(<PrivacyPage />);
-    complete({});
-    await waitFor(() => expect(screen.queryByText(/Deletion scheduled\. You can cancel below/)).toBeNull());
+    await act(async () => { complete({}); });
+    expect(screen.queryByText(/Deletion scheduled\. You can cancel below/)).toBeNull();
     expect(screen.queryByDisplayValue("DELETE MY ACCOUNT")).toBeNull();
     expect(mocks.reload).not.toHaveBeenCalled();
   });
