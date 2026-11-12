@@ -133,7 +133,8 @@ describe("PreparedLibrary truthfulness", () => {
     render(<PreparedLibrary />);
     expect(screen.getByText("Respiratory Pharmacology Practice Questions")).toBeTruthy();
     expect(screen.getByText(/RHPS · Term 5 \(package-assigned\) · Week 2 \(provisional\) · Pharmacology · 1 locally answer-ready/)).toBeTruthy();
-    expect(screen.getByText(/Original source: Source\.pdf/)).toBeTruthy();
+    expect(screen.getByText(/Original source:/)).toBeTruthy();
+    expect(screen.getByText("Source.pdf").closest("li")?.querySelector("button")?.textContent).toContain("Review source");
     expect(screen.getByText(/4 held in source/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Find a source"), { target: { value: "Source.pdf" } });
     expect(screen.getByText("Respiratory Pharmacology Practice Questions")).toBeTruthy();
