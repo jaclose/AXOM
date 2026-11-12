@@ -1,0 +1,175 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology V2",
+  "build": "018",
+  "date": "2026-11-12",
+  "chapter": "Ophthalmology and Ocular Pathology",
+  "parent_verified_binary_build": "016",
+  "parent_verified_unique_entries": 364,
+  "new_ids": 12,
+  "new_deep_profiles": 12,
+  "unique_entries_in_this_binary": 376,
+  "detailed_profiles_in_this_binary": 283,
+  "remaining_short_profiles": 93,
+  "new_evidence": 21,
+  "cumulative_evidence_records_in_branch": 334,
+  "new_authentic_image_file_pages": 8,
+  "cumulative_image_associations": 180,
+  "medical_photographs_embedded": 0,
+  "pdf_pages": 429,
+  "pdf_ophthalmology_chapter_pages": "405–429",
+  "local_QA": {
+    "passed": 28,
+    "failed": 0,
+    "accessibility_high": 0,
+    "accessibility_medium": 0,
+    "accessibility_low": 0
+  },
+  "archive_sha256": "eaaeee30ec946bc0bf2b193e07cd11803177eb84dbf33abdfc76d0ad6c18a043",
+  "word_sha256": "607ff72efeeaad232208db698db99342ed4bbd6e4a636fa88752a9ee3b2fbaa0",
+  "pdf_sha256": "4847fdd28717f00c68997ae49b32409b557ca78ac8eccb41545c5b45ee5ffe29",
+  "diseases": [
+    {
+      "id": "AXOM-EYE-001",
+      "name": "Primary open-angle glaucoma",
+      "diagnostic_discriminator": "Progressive retinal ganglion-cell damage with open drainage angle; pressure is a risk factor but not a required diagnostic threshold.",
+      "evidence_ids": [
+        "EYE17-AAO-POAG25",
+        "EYE17-AAO-EVAL25"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-002",
+      "name": "Primary angle-closure glaucoma and acute angle-closure crisis",
+      "diagnostic_discriminator": "Iridotrabecular contact blocks outflow; a painful acute intraocular-pressure spike requires emergent treatment.",
+      "evidence_ids": [
+        "EYE17-AAO-PACD25"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-003",
+      "name": "Age-related macular degeneration",
+      "diagnostic_discriminator": "Drusen and retinal-pigment-epithelium dysfunction cause central visual loss; late atrophy and neovascularization are distinct.",
+      "evidence_ids": [
+        "EYE17-NEI-AMD",
+        "EYE17-NEI-GA"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-004",
+      "name": "Diabetic retinopathy",
+      "diagnostic_discriminator": "Hyperglycemic retinal microangiopathy; macular edema may occur across stages while neovascularization defines proliferative disease.",
+      "evidence_ids": [
+        "EYE17-NEI-INJ"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-005",
+      "name": "Rhegmatogenous retinal detachment",
+      "diagnostic_discriminator": "Full-thickness retinal break admits vitreous fluid beneath retina; flashes, floaters and peripheral curtain are urgent signs.",
+      "evidence_ids": [
+        "EYE17-NEI-RD",
+        "EYE17-NEI-RD-SURG"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-006",
+      "name": "Central retinal vein occlusion",
+      "diagnostic_discriminator": "Retinal venous obstruction produces widespread hemorrhages and macular edema; ischemia raises neovascular-glaucoma risk.",
+      "evidence_ids": [
+        "EYE17-AAO-RVO26"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-007",
+      "name": "Central retinal artery occlusion",
+      "diagnostic_discriminator": "Sudden profound painless monocular vision loss is a retinal ischemic stroke demanding immediate stroke-center assessment.",
+      "evidence_ids": [
+        "EYE17-AHA-CRAO21"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-008",
+      "name": "Bacterial keratitis with corneal ulceration",
+      "diagnostic_discriminator": "Corneal epithelial defect plus stromal infiltrate may progress to melting and perforation; collect cultures in severe/atypical disease.",
+      "evidence_ids": [
+        "EYE17-AAO-KER23"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-009",
+      "name": "Noninfectious anterior uveitis",
+      "diagnostic_discriminator": "Pain and photophobia with anterior chamber cells and flare; infectious mimics require exclusion before steroids.",
+      "evidence_ids": [
+        "EYE17-NEI-UVEITIS"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-010",
+      "name": "Retinoblastoma",
+      "diagnostic_discriminator": "Childhood malignant retinal tumor with biallelic RB1 inactivation; leukocoria warrants urgent specialist evaluation.",
+      "evidence_ids": [
+        "EYE17-NCI-RB",
+        "EYE17-NEI-RB",
+        "EYE17-NEI-RB-TEST",
+        "EYE17-MEDGEN-RB"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-011",
+      "name": "Uveal melanoma",
+      "diagnostic_discriminator": "Adult uveal melanocytic malignancy often involving GNAQ/GNA11 signaling; hepatic metastasis is a major risk.",
+      "evidence_ids": [
+        "EYE17-NCI-UVEAL",
+        "EYE17-NCI-TEB"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    },
+    {
+      "id": "AXOM-EYE-012",
+      "name": "Age-related cataract",
+      "diagnostic_discriminator": "Oxidative modification and aggregation of lens crystallins reduce transparency; function-limiting disease treated by extraction.",
+      "evidence_ids": [
+        "EYE17-NEI-CAT",
+        "EYE17-NEI-CAT-SURG"
+      ],
+      "status": "new_deep_profile_in_local_binary; independent_specialist_review_pending"
+    }
+  ],
+  "parallel_build_017": {
+    "chapter": "Male Genitourinary",
+    "google_docs_research_checkpoint": "https://docs.google.com/document/d/1ixaxQQRroGXCdrSWkGp1rtWy4vMDMyRRktOoowNTF98/edit",
+    "reported_unique_entries": 374,
+    "reported_detailed": 285,
+    "reported_new_ids": 10,
+    "integrated_into_018": false,
+    "reason": "Full 017 master binary/registry unavailable; checkpoint alone not sufficient for lossless merge",
+    "potential_not_verified_union_unique": 386,
+    "potential_not_verified_union_detailed": 297
+  },
+  "ontology": {
+    "MONDO_baseline_pinned": false,
+    "ICD11_baseline_pinned": false,
+    "Orphanet_baseline_pinned": false,
+    "validated_coverage_denominator": null,
+    "coverage_pct": null
+  },
+  "images": {
+    "policy": "authentic source pages only; no images embedded pending specimen-level diagnostic/rights/privacy and binary integrity review"
+  },
+  "storage": {
+    "full_018_archive_persistent": false,
+    "reason": "Files Library folder creation and ZIP/DOCX/PDF uploads returned AccessDeny",
+    "github_checkpoint_contains": "identities, summaries, source-index crossrefs, metrics and checksums; not full clinical manuscript"
+  },
+  "release_gateway": "research branch only; no app code merges, migrations or production deployment"
+}
