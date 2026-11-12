@@ -146,6 +146,17 @@ export function importSharedQuestionSet(input: {
     if (provenance.contentDigest !== identity.contentDigest.toLowerCase()) {
       throw new Error("This share ID was already imported from different content. The existing local set was preserved.");
     }
+    // An import receipt is not proof that its original question records
+    // survived deletion, restoration, or an interrupted local save.
+    // Never report a broken set as already imported or manufacture replacement
+    // IDs that could disconnect a learner's attempts and annotations.
+    const memberIds = previous.questionIds;
+    const availableIds = new Set(existingQuestions.map(question => question.id));
+    if (memberIds.length !== snapshot.questions.length
+      || new Set(memberIds).size !== memberIds.length
+      || memberIds.some(id => !availableIds.has(id))) {
+      throw new Error("This already-imported Question Set has incomplete or unavailable question membership. Recover its original question IDs in Question Bank before importing again.");
+    }
     return {
       set: previous as ImportedSharedQuestionSet,
       questions: [],
