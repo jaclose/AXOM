@@ -1,0 +1,66 @@
+# AXOM Mothership 30-minute intake.
+# Lightweight, read-only GitHub checkpoint. NOT an autonomous AI coding worker,
+# CI release gate, merge authority, hosted acceptance, or deploy trigger.
+# GitHub schedule dispatch is best-effort and only becomes active on default branch.
+name: AXOM Mothership 30-minute Intake
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: axom-mothership-30m
+  cancel-in-progress: false
+
+jobs:
+  read-only-intake:
+    if: ${{ github.repository == 'jaclose/AXOM' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect main, MOTHERSHIP, FORGE, recent PRs and CI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          main_sha="$(gh api "repos/${REPO}/branches/main" --jq '.commit.sha')"
+          mothership="$(gh api "repos/${REPO}/issues/106")"
+          forge="$(gh api "repos/${REPO}/issues/140")"
+          pulls="$(gh api "repos/${REPO}/pulls?state=open&sort=updated&direction=desc&per_page=20")"
+          runs="$(gh api "repos/${REPO}/actions/runs?per_page=10")"
+
+          {
+            echo '## AXOM Mothership / 30-minute read-only intake'
+            printf 'UTC checkpoint: %s\n\n' "$(date -u '+%Y-%m-%d %H:%M:%S')"
+            printf 'Main commit: %s\n\n' "$main_sha"
+            printf 'MOTHERSHIP #106: %s (updated %s)\n\n' \
+              "$(printf '%s\n' "$mothership" | jq -r '.state')" \
+              "$(printf '%s\n' "$mothership" | jq -r '.updated_at')"
+            printf 'FORGE #140: %s (updated %s)\n\n' \
+              "$(printf '%s\n' "$forge" | jq -r '.state')" \
+              "$(printf '%s\n' "$forge" | jq -r '.updated_at')"
+
+            echo '### Twenty most recently updated open PRs (not a complete release manifest)'
+            echo '| PR | Draft | Head SHA | Updated UTC |'
+            echo '| --- | --- | --- | --- |'
+            printf '%s\n' "$pulls" | jq -r '.[] | "| #\(.number) | \(.draft) | \(.head.sha[0:12]) | \(.updated_at) |"'
+            echo ''
+            echo '### Ten most recent GitHub Actions runs'
+            echo '| Run | Workflow | Status | Conclusion |'
+            echo '| --- | --- | --- | --- |'
+            printf '%s\n' "$runs" | jq -r '.workflow_runs[]? | "| \(.id) | \(.name | gsub("\\|"; "/")) | \(.status) | \(.conclusion // "pending") |"'
+            echo ''
+            echo 'This is a read-only intake sample. PR checks are not an independent review.'
+            echo 'FORGE #140 remains the sole release gateway. No merge, push, deployment,'
+            echo 'migration, publication or issue modification is performed by this workflow.'
+            echo 'The schedule does not invoke a ChatGPT engineering worker.'
+          } >> "$GITHUB_STEP_SUMMARY"
