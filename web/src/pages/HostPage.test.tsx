@@ -17,6 +17,12 @@ vi.mock("../lib/operator/hostClient", () => ({
   setOperatorRole: vi.fn(),
 }));
 vi.mock("../components/questions/QuestionSetLibraryReviewQueue", () => ({ QuestionSetLibraryReviewQueue: () => null }));
+vi.mock("../components/questions/CommunityUploads", () => ({
+  CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) =>
+    <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
+      <button type="button" onClick={onReviewed}>Complete synthetic academic review</button>
+    </section>,
+}));
 vi.mock("../components/dashboard/JournalFeedbackReview", () => ({ JournalFeedbackReview: () => null }));
 
 const dashboard = (role: "owner" | "moderator"): OperatorDashboard => ({
@@ -145,4 +151,23 @@ describe("Host page authorization and moderation", () => {
       "verified-account", "post-id", "dismiss", "Documented false report",
     ));
   });
+  it("mounts a review-only academic course queue and refreshes Host after a verified decision", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue({
+      ...dashboard("owner"),
+      queue: [{
+        collection_id: "11111111-1111-4111-8111-111111111111",
+        title: "Synthetic pending course", module: "NCRS", term: "Term 4",
+        owner_id: "student", visibility: "shared", ready_questions: 8,
+        review_questions: 2, updated_at: "2026-11-11T00:00:00Z",
+      }],
+    });
+    render(<HostPage />);
+    const review = await screen.findByTestId("host-community-review");
+    expect(review.getAttribute("data-review-only")).toBe("true");
+    expect(screen.queryByText("Share a course")).toBeNull();
+    await user.click(within(review).getByRole("button", { name: "Complete synthetic academic review" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+  });
+
 });
