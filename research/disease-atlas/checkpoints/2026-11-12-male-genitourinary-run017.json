@@ -1,0 +1,233 @@
+{
+  "kind": "AXOM disease atlas V2 auditable research-only recovery checkpoint",
+  "build": "017",
+  "date": "2026-11-12",
+  "chapter": "Male Genitourinary, Andrology and Urologic Pathology",
+  "parent": {
+    "build": "016",
+    "entries": 364,
+    "detailed": 271,
+    "branch": "docs/disease-atlas-v2-run016-20261112-respiratory"
+  },
+  "increments": {
+    "added_unique_ids": [
+      "AXOM-MGU-001",
+      "AXOM-MGU-002",
+      "AXOM-MGU-003",
+      "AXOM-MGU-004",
+      "AXOM-MGU-005",
+      "AXOM-MGU-006",
+      "AXOM-MGU-007",
+      "AXOM-MGU-008",
+      "AXOM-MGU-009",
+      "AXOM-MGU-010"
+    ],
+    "promoted_existing_ids": [
+      "LEGACY-113",
+      "LEGACY-114",
+      "LEGACY-115",
+      "LEGACY-116"
+    ],
+    "total_unique_entries": 374,
+    "total_detailed_profiles": 285,
+    "remaining_concise": 89,
+    "new_sources": 22,
+    "cumulative_sources": 335,
+    "new_original_image_source_pages": 16,
+    "cumulative_image_associations": 188,
+    "images_embedded": 0,
+    "pdf_pages": 434,
+    "qa_passed": 24,
+    "qa_failed": 0
+  },
+  "profiles": [
+    {
+      "id": "LEGACY-113",
+      "name": "Prostate adenocarcinoma",
+      "notes": "Invasive acinar carcinoma; Gleason/ISUP grade group and TNM stage; absent basal cells in invasive glands. PSA alone is nonspecific; localized surveillance/curative management vs systemic ADT and intensification depending on risk and disease state.",
+      "sources": [
+        "MG17-EAU-PC",
+        "MG17-NCI-PC",
+        "MG17-EAU-BPH"
+      ]
+    },
+    {
+      "id": "LEGACY-114",
+      "name": "Benign prostatic hyperplasia",
+      "notes": "Nonmalignant transition-zone nodular hyperplasia, DHT-mediated growth and alpha1 smooth muscle tone; urinary symptoms do not prove obstruction. Alpha blockers or 5-alpha reductase inhibitors for selected patients, procedural management when clinically indicated.",
+      "sources": [
+        "MG17-EAU-LUTS",
+        "MG17-AUA-BPH"
+      ]
+    },
+    {
+      "id": "LEGACY-115",
+      "name": "Testicular seminoma",
+      "notes": "GCNIS-related germinoma usually OCT4/SOX17/CD117-positive and AFP-normal. Inguinal orchiectomy and stage-tailored surveillance/chemotherapy/radiotherapy; elevated AFP suggests nonseminomatous elements.",
+      "sources": [
+        "MG17-EAU-TGCT",
+        "MG17-NCI-TGCT",
+        "MG17-WHO-GCT"
+      ]
+    },
+    {
+      "id": "LEGACY-116",
+      "name": "Testicular embryonal carcinoma",
+      "notes": "Primitive nonseminomatous GCNIS-related cancer; OCT4/SOX2/CD30 expression and early lymphovascular invasion; mixed tumor recognition, serum markers and stage determine cisplatin-based treatment.",
+      "sources": [
+        "MG17-EAU-TGCT",
+        "MG17-NCI-TGCT",
+        "MG17-WHO-GCT"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-001",
+      "name": "Testicular torsion",
+      "notes": "Spermatic cord twisting and acute ischemia; clinical high suspicion mandates immediate surgical exploration without delaying for sonography.",
+      "sources": [
+        "MG17-EAU-TORSION",
+        "MG17-BAUS-TORSION"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-002",
+      "name": "Acute epididymitis",
+      "notes": "Epididymal inflammation/infection, subacute unilateral pain; torsion exclusion is first; STI and enteric risks guide NAAT, urine testing and antibiotics.",
+      "sources": [
+        "MG17-CDC-EPI",
+        "MG17-EAU-UTI",
+        "MG17-EAU-TORSION"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-003",
+      "name": "Acute bacterial prostatitis",
+      "notes": "Abrupt febrile infection of prostate with urinary symptoms; urine/blood cultures, no vigorous massage, risk-sensitive antibiotic therapy and drainage of significant retention.",
+      "sources": [
+        "MG17-EAU-UTI",
+        "MG17-CDC-UTI"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-004",
+      "name": "Penile squamous cell carcinoma",
+      "notes": "Biopsy-confirmed invasive SCC; HPV-associated vs HPV-independent pathway; primary lesion stage and inguinal nodal status determine prognosis and penile-preserving versus radical therapy.",
+      "sources": [
+        "MG17-NCI-PEN",
+        "MG17-EAU-PEN"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-005",
+      "name": "Male urethral stricture disease",
+      "notes": "Spongiofibrosis and lumen narrowing; map by retrograde urethrography and/or cystoscopy; appropriate urethroplasty may be more durable than serial endoscopic treatments.",
+      "sources": [
+        "MG17-EAU-STR",
+        "MG17-EAU-STR26"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-006",
+      "name": "Fournier gangrene",
+      "notes": "Necrotizing fasciitis of perineum/genitalia with risk of sepsis; resuscitation, immediate empiric broad antimicrobials and early repeated surgical debridement; do not postpone for imaging.",
+      "sources": [
+        "MG17-EAU-UTI",
+        "MG17-EAU-FOURNIER"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-007",
+      "name": "Varicocele",
+      "notes": "Pampiniform venous dilation/reflux linked to subfertility in some men; select repair for clinically palpable varicocele with infertility and abnormal semen, not asymptomatic subclinical imaging-only findings.",
+      "sources": [
+        "MG17-EAU-INFERT",
+        "MG17-AUA-INFERT"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-008",
+      "name": "Peyronie disease",
+      "notes": "Acquired tunica albuginea fibrosis leading to curvature/hinge; active versus stable disease directs nonoperative and procedural options.",
+      "sources": [
+        "MG17-EAU-PEY"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-009",
+      "name": "High-grade prostatic intraepithelial neoplasia",
+      "notes": "NONINVASIVE pre-neoplastic duct/gland epithelium with intact basal layer; focal isolated finding does not itself justify automatic immediate repeat biopsy.",
+      "sources": [
+        "MG17-AUA-BIOPSY",
+        "MG17-NCI-PC"
+      ]
+    },
+    {
+      "id": "AXOM-MGU-010",
+      "name": "Germ cell neoplasia in situ of testis",
+      "notes": "Intratubular NONINVASIVE precursor of most postpubertal testicular GCTs; OCT4/PLAP positivity interpreted with morphology; specialist fertility-informed treatment decisions.",
+      "sources": [
+        "MG17-EAU-TGCT",
+        "MG17-WHO-GCT"
+      ]
+    }
+  ],
+  "primary_source_url_map": {
+    "MG17-EAU-PC": "https://uroweb.org/guidelines/prostate-cancer/summary-of-changes/2026",
+    "MG17-NCI-PC": "https://www.cancer.gov/types/prostate/hp/prostate-treatment-pdq",
+    "MG17-EAU-TGCT": "https://uroweb.org/guidelines/testicular-cancer/summary-of-changes/2026",
+    "MG17-WHO-GCT": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9544657/",
+    "MG17-EAU-TORSION": "https://uroweb.org/guidelines/paediatric-urology/chapter/acute-scrotum",
+    "MG17-CDC-EPI": "https://www.cdc.gov/std/treatment-guidelines/epididymitis.htm",
+    "MG17-EAU-FOURNIER": "https://uroweb.org/guidelines/urological-infections/chapter/the-guideline",
+    "MG17-EAU-INFERT": "https://uroweb.org/guidelines/sexual-and-reproductive-health/chapter/male-infertility",
+    "MG17-NCI-PEN": "https://www.cancer.gov/types/penile/hp/penile-treatment-pdq"
+  },
+  "medical_image_provenance": {
+    "image_source_ledger": "image_provenance_v2_run017.csv in generated local source package; 16 new original individual Wikimedia Commons file pages; creators/licenses stated there",
+    "source_file_page_examples": [
+      "https://commons.wikimedia.org/wiki/File:Histopathology_of_acute_prostatitis,_annotated.jpg",
+      "https://commons.wikimedia.org/wiki/File:Scrotal_ultrasonography_of_testicular_torsion.jpg"
+    ],
+    "image_binary_retrieval_status": "not independently retrieved/hashed; no medical images embedded",
+    "rights_status": "commercial-compatible CC terms on original file pages are not substitute for specimen-level diagnosis, copyright, privacy and consent assessment; all images link-only"
+  },
+  "persistence": {
+    "google_drive_checkpoint_url": "https://docs.google.com/document/d/1ixaxQQRroGXCdrSWkGp1rtWy4vMDMyRRktOoowNTF98/edit",
+    "google_drive_readback_verified": true,
+    "local_complete_zip_filename": "AXOM_Disease_Atlas_V2_Run017_Source_Package.zip",
+    "local_zip_sha256": "da5d0a02cbaf5f13e1f741ec35747118e5058c12b5dc2cd389b6c3607ebd536b",
+    "full_binary_persisted_in_github_or_drive": false,
+    "blockers": [
+      "ChatGPT Library upload AccessDeny",
+      "Google Drive connector file_uri rejected local container path"
+    ],
+    "full_document_paths_not_persisted": [
+      "atlas_run017/deliverables/AXOM_Disease_Pathology_Atlas_V2_Run017.docx",
+      "atlas_run017/deliverables/AXOM_Disease_Pathology_Atlas_V2_Run017.pdf"
+    ],
+    "disclaimer": "This research checkpoint records provenance and summaries, not the full 14 profiles or complete 434-page manuscript."
+  },
+  "ontology": {
+    "official_denominator": null,
+    "measured_coverage": null,
+    "release_pinned_Mondo_ICD11_Orphanet": false,
+    "complete_crosswalks_new": 0
+  },
+  "governance": {
+    "production_deploy": false,
+    "merge": false,
+    "migration": false,
+    "clinical_specialist_review": false,
+    "drug_label_audit_complete": false
+  },
+  "qa": {
+    "duplicate_ids": 0,
+    "all_364_parent_ids_preserved": true,
+    "all_14_new_or_expanded_profiles_have_15_required_sections": true,
+    "docx_a11y_findings": 0,
+    "pdf_new_chapter_pages": "406-434",
+    "external_links_in_new_pdf_chapter": 42,
+    "sampled_visual_pages": 4,
+    "automated_checks_passed": 24
+  }
+}
