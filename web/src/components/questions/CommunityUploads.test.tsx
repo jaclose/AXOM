@@ -364,6 +364,7 @@ describe("Community Uploads", () => {
     expect(screen.queryByRole("button", { name: "Browse approved Question Sets" })).toBeNull();
     const card = (await screen.findByText("NCRS")).closest("article")!;
     const importConfirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await waitFor(() => expect((within(card).getByRole("button", { name: "Import into my library for review" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(within(card).getByRole("button", { name: "Import into my library for review" }));
     expect(importConfirm).toHaveBeenCalledOnce();
     const approve = await within(card).findByRole("button", { name: /Approve for official catalog/ }) as HTMLButtonElement;
@@ -388,6 +389,7 @@ describe("Community Uploads", () => {
     expect(mocks.download).not.toHaveBeenCalled();
 
     const confirmImport = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await waitFor(() => expect((within(card).getByRole("button", { name: "Import into my library for review" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(within(card).getByRole("button", { name: "Import into my library for review" }));
     expect(confirmImport).toHaveBeenCalledOnce();
     expect(mocks.saveReference).not.toHaveBeenCalled();
@@ -416,6 +418,7 @@ describe("Community Uploads", () => {
     await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledTimes(2));
     const card = (await screen.findByText("NCRS")).closest("article")!;
     const importConfirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await waitFor(() => expect((within(card).getByRole("button", { name: "Import into my library for review" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(within(card).getByRole("button", { name: "Import into my library for review" }));
     expect(await within(card).findByRole("button", { name: /Approve for official catalog/ })).toBeTruthy();
     importConfirm.mockRestore();
