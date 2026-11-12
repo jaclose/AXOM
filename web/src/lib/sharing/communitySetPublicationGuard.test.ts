@@ -48,8 +48,10 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(snapshot.questions).toHaveLength(1);
     expect(snapshot.questions[0].correctKey).toBe("A");
     expect(snapshot.questions[0].id).toBe("shared-question-1");
-    expect(snapshot.questions[0].tags).toContain("visual:intent:anatomical-schematic");
-    expect(snapshot.tags).toContain("visual:intent:anatomical-schematic");
+    // "anatomy" is an authored tag, not visible stem evidence for a
+    // generated pre-answer diagram hint. Preserve it without inventing intent.
+    expect(snapshot.questions[0].tags).toEqual(["anatomy"]);
+    expect(snapshot.tags).not.toContain("visual:intent:anatomical-schematic");
     expect(JSON.stringify(snapshot)).not.toMatch(/Sensitive private note|sourceDocumentId|attempts/);
   });
 

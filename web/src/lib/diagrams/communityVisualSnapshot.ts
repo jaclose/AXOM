@@ -30,7 +30,11 @@ export function enrichPublicQuestionSetVisualTags(
 ): SharedQuestionSetSnapshot {
   const setTags = [...snapshot.tags];
   const questions = snapshot.questions.map(question => {
-    const plan = planMedicalVisual(question);
+    // Public visual hints can appear before an answer is revealed. Topic,
+    // category, system and authored tags may encode the correct answer even
+    // when the question stem does not. Derive NEW hint tags only from stem
+    // vocabulary the learner already sees; preserve author tags unchanged.
+    const plan = planMedicalVisual({ stem: question.stem, tags: [] });
     if (plan.kind === "none") return question;
 
     const tags = [...question.tags];
