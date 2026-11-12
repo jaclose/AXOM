@@ -15,6 +15,17 @@ function date(value: string | null): string {
   return value ? new Date(value).toLocaleDateString() : "Never";
 }
 
+/** A fresh, actor-bound audit receipt is stronger than a successful network response.
+ * Compare with the previous snapshot so older unrelated actions cannot be reused. */
+function hasNewOperatorAudit(before: OperatorDashboard | undefined, next: OperatorDashboard,
+  actor: string, target: string, action: string, reason: string, expected: Record<string, unknown> = {},
+): boolean {
+  const oldIds = new Set(before?.audit.map(item => item.id) ?? []);
+  return next.audit.some(item => !oldIds.has(item.id) && item.actor_id === actor
+    && item.target_id === target && item.action === action && item.metadata.reason === reason.trim()
+    && Object.entries(expected).every(([key, value]) => item.metadata[key] === value));
+}
+
 type AccountSearchState = {
   query: string;
   status: "loading" | "ready" | "error";
@@ -39,7 +50,9 @@ function HostAccountPage() {
   // Keep privileged writes blocked until a post-settlement server readback succeeds.
   // A lost acknowledgement is not proof that a role/AI/audit write was rolled back.
   const pendingReadbackVersion = useRef<number | null>(null);
-  const mutationOutcome = useRef<{ success?: string; error?: string } | null>(null);
+  const mutationOutcome = useRef<{
+    success?: string; error?: string; verify: (next: OperatorDashboard) => boolean;
+  } | null>(null);
   const refreshVersion = useRef(0);
   const requestRefresh = useCallback(() => {
     const next = ++refreshVersion.current;
@@ -66,12 +79,21 @@ function HostAccountPage() {
       // Older focus/initial reads must never release a newer mutation barrier.
       if (pendingReadbackVersion.current !== null && refresh >= pendingReadbackVersion.current) {
         const result = mutationOutcome.current;
+        if (result?.success && !result.verify(value)) {
+          // Do not unlock a privileged action or claim an audit solely because
+          // a dashboard fetch succeeded. A later Retry Host may resolve the state.
+          setError("Host readback did not confirm this change. The action may have been applied. Retry Host to verify the server state before another change.");
+          return;
+        }
         pendingReadbackVersion.current = null;
         mutationOutcome.current = null;
         mutationInFlight.current = false;
         setBusy(false);
         if (result?.success) setMessage(result.success);
-        if (result?.error) setError(result.error);
+        if (result?.error) {
+          if (result.verify(value)) setMessage("The server confirms this action despite a lost acknowledgement.");
+          else setError(result.error);
+        }
       }
     }).catch(cause => {
       if (!alive) return;
@@ -113,16 +135,18 @@ function HostAccountPage() {
   }, [userId, canManageAccounts, loading, normalizedSearch, refresh, searchRetry]);
   const activeSearch = accountSearch?.query === normalizedSearch ? accountSearch : undefined;
   const accounts = normalizedSearch ? activeSearch?.status === "ready" ? activeSearch.accounts : [] : dashboard?.accounts ?? [];
-  async function change(fn: () => Promise<void>, success: string) {
+  async function change(fn: () => Promise<void>, success: string,
+    verify: (next: OperatorDashboard) => boolean,
+  ) {
     if (mutationInFlight.current || busy) return;
     mutationInFlight.current = true;
     setBusy(true); setError(""); setMessage("");
     try {
       await fn();
-      mutationOutcome.current = { success };
+      mutationOutcome.current = { success, verify };
     } catch (e) {
       const detail = e instanceof Error ? e.message : "The change could not be confirmed.";
-      mutationOutcome.current = { error: `${detail}. Verify the refreshed server state before retrying.` };
+      mutationOutcome.current = { error: `${detail}. Verify the refreshed server state before retrying.`, verify };
     } finally {
       // Even a rejected transport reply may follow a committed server-side audit.
       // Do not permit another action until a request started after this point resolves.
@@ -145,7 +169,10 @@ function HostAccountPage() {
         onClick={() => {
           const wanted = roleDrafts[account.user_id];
           if (!wanted) return;
-          void change(() => setOperatorRole(userId!, account.user_id, wanted, reason), "Role updated and audited.");
+          void change(() => setOperatorRole(userId!, account.user_id, wanted, reason), "Role updated and audited.",
+            next => hasNewOperatorAudit(dashboard, next, userId!, account.user_id, "account.role", reason, { assigned: wanted })
+              && (!next.accounts.some(item => item.user_id === account.user_id)
+                || (next.accounts.find(item => item.user_id === account.user_id)?.role ?? "member") === wanted));
         }}>Apply role</GButton>}
       <label>Cloud AI
         <select value={draft.enabled ? "enabled" : "disabled"} disabled={!owner || busy}
@@ -162,7 +189,12 @@ function HostAccountPage() {
         onClick={() => {
           const limit = Number(draft.limit);
           if (!Number.isInteger(limit) || limit < 0 || limit > 1000) { setError("Quota must be 0 to 1000."); return; }
-          void change(() => setOperatorAI(userId!, account.user_id, draft.enabled, limit, reason), "AI policy saved and audited.");
+          void change(() => setOperatorAI(userId!, account.user_id, draft.enabled, limit, reason), "AI policy saved and audited.",
+            next => hasNewOperatorAudit(dashboard, next, userId!, account.user_id, "ai.policy", reason,
+              { enabled: draft.enabled, daily_limit: limit })
+              && (!next.accounts.some(item => item.user_id === account.user_id)
+                || next.accounts.some(item => item.user_id === account.user_id
+                  && item.ai_enabled === draft.enabled && item.ai_daily_limit === limit)));
         }}>Apply AI policy</GButton>}
       {owner && <label className="host-change-reason">Reason for changing {account.display_name ?? "this account"}
         <textarea value={reason} minLength={8} maxLength={500} rows={2} disabled={busy} onChange={event => setReasons(current => ({ ...current, [account.user_id]: event.target.value }))} placeholder="Record why this access or allowance is changing." />
@@ -273,12 +305,18 @@ function HostAccountPage() {
               <small>8 to 500 characters, saved in the audit history.</small>
             </label>
             <div className="row wrap gap8"><GButton size="sm" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8}
-              onClick={() => void change(() => resolveReport(userId!, report.post_id, "dismiss", reportReasons[report.post_id] ?? ""), "Report dismissed and audited.")}>Dismiss report</GButton>
+              onClick={() => void change(() => resolveReport(userId!, report.post_id, "dismiss", reportReasons[report.post_id] ?? ""), "Report dismissed and audited.",
+                next => Boolean(next.role) && !next.reports.some(item => item.post_id === report.post_id)
+                  && (role !== "owner" || hasNewOperatorAudit(dashboard, next, userId!, report.post_id,
+                    "social.report.dismiss", reportReasons[report.post_id] ?? "")))}>Dismiss report</GButton>
               <GButton size="sm" variant="danger" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8} onClick={() => {
                 // Skip a second destructive prompt before React commits the busy state.
                 if (mutationInFlight.current || busy) return;
                 if (window.confirm("Remove this reported post? The author’s private workspace stays untouched."))
-                  void change(() => resolveReport(userId!, report.post_id, "remove", reportReasons[report.post_id] ?? ""), "Reported post removed and audited.");
+                  void change(() => resolveReport(userId!, report.post_id, "remove", reportReasons[report.post_id] ?? ""), "Reported post removed and audited.",
+                    next => Boolean(next.role) && !next.reports.some(item => item.post_id === report.post_id)
+                      && (role !== "owner" || hasNewOperatorAudit(dashboard, next, userId!, report.post_id,
+                        "social.report.remove", reportReasons[report.post_id] ?? "")));
               }}>Remove post</GButton>
             </div>
           </article>)}
