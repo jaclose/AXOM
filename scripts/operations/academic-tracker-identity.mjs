@@ -11,6 +11,29 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// A Date.parse result does not certify that a producer supplied a real,
+// timezone-qualified observation. JS coerces arrays and normalizes dates such
+// as February 30; either could falsely satisfy a freshness/byte-readback gate.
+// Accept the existing ISO Z and explicit-offset receipts, but reject ambiguous,
+// coercible and impossible timestamps before computing a freshness window.
+export function parseAuditTimestamp(value) {
+  if (typeof value !== "string") return NaN;
+  const matched = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!matched) return NaN;
+  const year = Number(matched[1]), month = Number(matched[2]), day = Number(matched[3]);
+  const hour = Number(matched[4]), minute = Number(matched[5]), second = Number(matched[6]);
+  const offset = matched[8];
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1]
+    || hour > 23 || minute > 59 || second > 59) return NaN;
+  if (offset !== "Z") {
+    const offsetHour = Number(offset.slice(1, 3)), offsetMinute = Number(offset.slice(4, 6));
+    if (offsetHour > 23 || offsetMinute > 59) return NaN;
+  }
+  return Date.parse(value);
+}
+
 export function verifyTrackerIdentity({source, readback, now = new Date()} = {}) {
   const errors = [], blockers = [];
   const sha = /^[0-9a-f]{64}$/;
@@ -36,7 +59,7 @@ export function verifyTrackerIdentity({source, readback, now = new Date()} = {})
     blockers.push("Source activity membership requires independent original-source readback, not a cloud-derived reconstruction.");
   if (readback?.ownerAuthenticated !== true || readback?.cloudReadbackVerified !== true)
     blockers.push("Installed activity membership requires authenticated learner/owner cloud readback.");
-  const nowMs = new Date(now).getTime(), receiptMs = Date.parse(readback?.observedAt ?? "");
+  const nowMs = new Date(now).getTime(), receiptMs = parseAuditTimestamp(readback?.observedAt);
   if (!Number.isFinite(nowMs) || !Number.isFinite(receiptMs) || receiptMs > nowMs + 5 * 60000 || nowMs - receiptMs > 60 * 60000)
     blockers.push("Installed activity readback is missing, stale, or future-dated; obtain a current authenticated receipt.");
   function index(rows, kind) {
