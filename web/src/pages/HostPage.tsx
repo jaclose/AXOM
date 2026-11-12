@@ -256,9 +256,9 @@ function HostAccountPage() {
         </GlassCard>
         {userId && <CommunityUploads reviewOnly
           onOpenLibrary={() => { location.hash = "questions"; }}
-          onReviewed={() => { requestRefresh(); }} />}
+          onReviewed={() => { setMessage("Academic course review recorded. Checking Host queues."); requestRefresh(); }} />}
         {userId && <QuestionSetLibraryReviewQueue accountId={userId} refreshSignal={refresh}
-          onReviewed={() => { requestRefresh(); }} />}
+          onReviewed={() => { setMessage("Question Set review recorded. Checking Host queues."); requestRefresh(); }} />}
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Reported community posts" sub="Only reported posts enter this moderation queue." />
