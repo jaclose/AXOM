@@ -410,7 +410,42 @@ test('activation preserves other application caches and old clients', async () =
   app.context.self.clients.matchAll = async () => [{}];
   app.events.get('activate')({ waitUntil: (value) => { task = value; } });
   await task;
-  assert.deepEqual(await app.caches.keys(), ['other-app', 'axom-shell-previous', 'axom-shell-current']);
+  assert.deepEqual(await app.caches.keys(),
+    ['other-app', 'axom-shell-oldest', 'axom-shell-previous', 'axom-shell-current'],
+    'a single surviving tab may still depend on the oldest build');
+  app.context.self.clients.matchAll = async () => [];
+  app.events.get('activate')({ waitUntil: (value) => { task = value; } });
+  await task;
+  assert.deepEqual(await app.caches.keys(), ['other-app', 'axom-shell-previous', 'axom-shell-current'],
+    'only a zero-client activation can safely prune superseded generations');
+});
+
+test('R79 one surviving legacy window retains its A-only lazy chunk across B and C caches', async () => {
+  const app = worker();
+  const path = '/assets/legacy-only-12345678.js';
+  const legacy = await app.caches.open('axom-shell-A');
+  await legacy.put(path, withNetworkUrl(new Response('legacy-A-code', {
+    headers: { 'content-type': 'application/javascript', 'cache-control': 'public, max-age=600' },
+  }), 'https://app.test' + path));
+  await app.caches.open('axom-shell-B');
+  await app.caches.open('axom-shell-current');
+  await app.caches.open('unrelated-app');
+  app.context.self.clients.matchAll = async () => [{ url: 'https://app.test/dashboard' }];
+  let activation;
+  app.events.get('activate')({ waitUntil: (value) => { activation = value; } });
+  await activation;
+  assert.deepEqual(await app.caches.keys(),
+    ['axom-shell-A', 'axom-shell-B', 'axom-shell-current', 'unrelated-app'],
+    'an old active tab may need A after an unused B has been staged and C activated');
+  let response;
+  app.events.get('fetch')({
+    request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin', headers: new Headers() },
+    respondWith: (value) => { response = value; },
+    waitUntil: () => {},
+  });
+  assert.ok(response, 'public build code should have a safe cached path');
+  assert.equal(await (await response).text(), 'legacy-A-code',
+    'old A tab still loads its lazy code offline after C activation');
 });
 
 test('worker does not intercept account-specific same-origin image-shaped URLs', async () => {

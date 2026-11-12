@@ -340,10 +340,14 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
-    // Retain older assets while other tabs may still be using them. Only this
-    // application's caches are eligible; IndexedDB is never touched.
+    // A surviving window may still execute any older build, not necessarily
+    // the newest previous cache generation. Without a verified client-version
+    // handshake, even a single window must pin ALL earlier generations so its
+    // offline lazy chunks remain loadable across multiple staged updates.
+    // This defers cache reclamation for long-lived tabs; only a zero-client
+    // activation safely prunes old generations. IndexedDB is never touched.
     const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    if (clients.length > 1) return;
+    if (clients.length > 0) return;
     const keys = (await caches.keys()).filter((key) => key.startsWith(CACHE_PREFIX));
     const previous = keys.filter((key) => key !== CACHE).at(-1);
     await Promise.all(keys.filter((key) => key !== CACHE && key !== previous).map((key) => caches.delete(key)));
