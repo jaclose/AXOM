@@ -498,7 +498,14 @@ def inspect_packages(rows):
             if not matching_roots:
                 raise ValueError("unknown_native_package_source_root")
             root = max(matching_roots, key=lambda directory: len(directory.parts))
-            data = read_native_package_json(root, path.parent, path.name)
+            data, inspected_manifest_sha256 = read_native_package_json(
+                root, path.parent, path.name, with_digest=True)
+            # Secure parsing is not sufficient: bind the parsed manifest bytes to
+            # the original inventory revision, just as templates are bound.
+            if not verified_source_revision(r):
+                issues.append("manifest_inventory_sha_missing_or_invalid")
+            elif r["source_sha256"] != inspected_manifest_sha256:
+                issues.append("manifest_differ_from_inventory_sha")
             if not isinstance(data, dict) or data.get("schemaVersion") != 1:
                 raise ValueError("unsupported_native_manifest_schema")
             questions_file = data.get("questionsFile") or "questions.json"
@@ -574,8 +581,9 @@ def inspect_packages(rows):
             if missing_assets: issues.append("missing_or_unsafe_assets:" + str(len(missing_assets)))
             qrecord = lookup.get(str(qpath))
             # A post-scan substitution must not inherit the original source ID.
-            if (qrecord and qrecord.get("source_sha256")
-                    and qrecord["source_sha256"] != inspected_questions_sha256):
+            if not qrecord or not verified_source_revision(qrecord):
+                issues.append("questions_inventory_sha_missing_or_invalid")
+            elif qrecord["source_sha256"] != inspected_questions_sha256:
                 issues.append("questions_differ_from_inventory_sha")
             native = mapping(str(path), r["root_label"], native=data)
             r.update(native)

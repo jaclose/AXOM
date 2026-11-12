@@ -516,6 +516,74 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertIn("questions_secure_recheck_unavailable", linked_parent["issues"])
             self.assertIsNone(linked_parent.get("questions_sha256"))
 
+    def test_native_manifest_and_questions_require_exact_scanned_inventory_revisions(self):
+        # Parseable, contained native JSON cannot be called locally ready when
+        # the original inventory row/hash is absent or its bytes were replaced.
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            package_dir = root / "synthetic"
+            package_dir.mkdir()
+            questions_path = package_dir / "questions.json"
+            questions_path.write_text(json.dumps({
+                "bankId": "demo", "questions": [{
+                    "id": "q1", "stem": "Synthetic question",
+                    "choices": ["A", "B"],
+                    "provenance": {"sourceChecksum": "a" * 64}
+                }]
+            }))
+            manifest_path = package_dir / "manifest.json"
+            original = json.dumps({
+                "schemaVersion": 1, "bank": {"id": "demo", "title": "Alpha"},
+                "questionsFile": "questions.json",
+                "source": {"filename": "unavailable.pdf"}
+            })
+            replacement = original.replace("Alpha", "Bravo")
+            self.assertEqual(len(original), len(replacement))
+            manifest_path.write_text(original)
+            manifest_sha = hashlib.sha256(original.encode()).hexdigest()
+            questions_sha = hashlib.sha256(questions_path.read_bytes()).hexdigest()
+            manifest_row = dict(document_type="native_manifest", root_label="synthetic",
+                                original_path=str(manifest_path), source_sha256=manifest_sha,
+                                review_status="unexamined")
+            questions_row = dict(document_type="native_questions", root_label="synthetic",
+                                 original_path=str(questions_path), source_sha256=questions_sha)
+            cases = (
+                ("unchanged", original, manifest_row, questions_row, None),
+                ("manifest_swapped", replacement, manifest_row, questions_row,
+                 "manifest_differ_from_inventory_sha"),
+                ("manifest_unverified", original, dict(manifest_row, source_sha256=None),
+                 questions_row, "manifest_inventory_sha_missing_or_invalid"),
+                ("manifest_malformed", original,
+                 dict(manifest_row, source_sha256=[manifest_sha]),
+                 questions_row, "manifest_inventory_sha_missing_or_invalid"),
+                ("questions_unverified", original, manifest_row,
+                 dict(questions_row, source_sha256=None),
+                 "questions_inventory_sha_missing_or_invalid"),
+                ("questions_malformed", original, manifest_row,
+                 dict(questions_row, source_sha256=questions_sha.upper()),
+                 "questions_inventory_sha_missing_or_invalid"),
+                ("questions_row_missing", original, manifest_row, None,
+                 "questions_inventory_sha_missing_or_invalid"),
+            )
+            previous_roots = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("synthetic", root)]
+                for label, manifest_text, mrow, qrow, expected_issue in cases:
+                    with self.subTest(case=label):
+                        manifest_path.write_text(manifest_text)
+                        rows = [dict(mrow)] + ([dict(qrow)] if qrow else [])
+                        packages, _, errors = ledger.inspect_packages(rows)
+                        self.assertEqual(errors, [])
+                        self.assertEqual(len(packages), 1)
+                        if expected_issue:
+                            self.assertIn(expected_issue, packages[0]["issues"])
+                            self.assertEqual(packages[0]["status"], "requires_package_review")
+                        else:
+                            self.assertEqual(packages[0]["issues"], [])
+                            self.assertEqual(packages[0]["status"], "local_ready_for_agent2_review")
+            finally:
+                ledger.ROOTS = previous_roots
+
     def test_native_inventory_sha_mismatch_never_becomes_canonical_ready(self):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
