@@ -1318,3 +1318,44 @@ test("malformed source census and production counts cannot echo arbitrary produc
     "A malformed production statistic must not escape in report counts.");
   assert.equal(report.counts.productionAcademicCollections, null);
 });
+
+test("academic producer timestamps require explicit timezone and actual calendar dates", () => {
+  const now = new Date().toISOString();
+  const invalid = [
+    [now], now.replace("Z", ""), "2026-02-30T12:00:00Z",
+    "2026-11-12 02:30:00Z", "11/12/2026 02:30:00",
+  ];
+  const productionBase = { projectId: "jofkmfwkidubxcutkwzf",
+    academicCollections: 1, academicRevisions: 1, academicFiles: 1, storageObjects: 1 };
+  for (const malformed of invalid) {
+    const production = run({ production: { ...productionBase, observedAt: malformed } });
+    assert.ok(production.errors.some(message => message.includes("observation timestamp")),
+      "Malformed production time must be a schema error: " + JSON.stringify(malformed));
+
+    const triage = completePdfTriage("text_with_question_indicators");
+    triage.runAt = malformed;
+    const invalidRun = run({ pdfTriage: triage });
+    assert.ok(invalidRun.errors.some(message => message.includes("no timestamp")),
+      "Malformed PDF run time must be a schema error: " + JSON.stringify(malformed));
+
+    const ready = completePdfTriage("text_with_question_indicators");
+    ready.rows[0].availabilityProof.checkedAt = malformed;
+    const invalidProof = run({ pdfTriage: ready });
+    assert.equal(invalidProof.counts.pdfUnverifiedCurrentAvailability, 1,
+      "Malformed per-original time must not prove current source availability: " + JSON.stringify(malformed));
+
+    const b4 = run({ corpusAudit: canonicalB4Audit({ generatedAt: malformed }) });
+    assert.ok(b4.errors.some(message => message.includes("Canonical B4 acceptance schema")),
+      "Malformed B4 audit time must be rejected: " + JSON.stringify(malformed));
+  }
+
+  const offset = now.replace("Z", "+00:00");
+  const ready = completePdfTriage("text_with_question_indicators");
+  ready.runAt = offset;
+  ready.rows[0].availabilityProof.checkedAt = offset;
+  assert.equal(run({ pdfTriage: ready }).complete, true, "Explicit-offset PDF proof remains valid.");
+  assert.equal(run({ production: { ...productionBase, observedAt: offset } }).complete, true,
+    "Explicit-offset current production readback remains valid.");
+  assert.equal(run({ corpusAudit: canonicalB4Audit({ generatedAt: offset }) }).complete, true,
+    "Explicit-offset B4 source audit remains valid.");
+});
