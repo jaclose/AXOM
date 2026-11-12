@@ -146,15 +146,23 @@ export function importSharedQuestionSet(input: {
   // UUID hex digits are case-insensitive. Preserve the original stored shareId,
   // but compare canonical values so case-only receipt duplicates fail closed.
   const canonicalShareId = identity.shareId.toLowerCase();
-  const matchingReceipts = existingSets.filter(
-    (set) => readSharedQuestionImportProvenance(set)?.shareId.toLowerCase() === canonicalShareId,
-  );
+  // A recognizable same-share receipt with a corrupt digest, unsupported
+  // version, or malformed ID spelling must not vanish from collision checks.
+  // This is detection only: the typed receipt reader below still rejects it.
+  const matchingReceipts = existingSets.filter((set) => {
+    const raw = (set as QuestionSet & { importProvenance?: unknown }).importProvenance;
+    return isRecord(raw) && typeof raw.shareId === "string"
+      && raw.shareId.trim().toLowerCase() === canonicalShareId;
+  });
   if (matchingReceipts.length > 1) {
     throw new Error("This imported Question Set has ambiguous duplicate receipts for the same share ID. Resolve the original local sets without replacing question IDs before importing again.");
   }
   const previous = matchingReceipts[0];
   if (previous) {
-    const provenance = readSharedQuestionImportProvenance(previous)!;
+    const provenance = readSharedQuestionImportProvenance(previous);
+    if (!provenance) {
+      throw new Error("This share ID has an invalid or unsupported local import receipt. Recover the original local receipt before importing again.");
+    }
     if (provenance.contentDigest !== identity.contentDigest.toLowerCase()) {
       throw new Error("This share ID was already imported from different content. The existing local set was preserved.");
     }
