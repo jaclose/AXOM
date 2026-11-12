@@ -44,7 +44,10 @@ function sourceRevision(document: SourceDocument, questions: readonly QuestionRe
 
 /** Unreviewed community material is discoverable without entering the official
  * catalog. Every download still uses the normal hash-checked installer. */
-export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibrary: () => void; onPracticeSet?: (set: QuestionSet) => void }) {
+export function CommunityUploads({ onOpenLibrary, onPracticeSet, reviewOnly = false, onReviewed }: {
+  onOpenLibrary: () => void; onPracticeSet?: (set: QuestionSet) => void;
+  reviewOnly?: boolean; onReviewed?: () => void;
+}) {
   const accountId = useAccount(state => state.user?.id);
   const accountPhase = useAccount(state => state.phase);
   const questionSets = useStore(state => state.questionSets ?? EMPTY_SETS);
@@ -62,6 +65,7 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
   const [reviewer, setReviewer] = useState(false);
+  const [reviewerReady, setReviewerReady] = useState(false);
   const [owned, setOwned] = useState<{ accountId: string; rows: AcademicCourse[] }>();
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [selected, setSelected] = useState<Selected>();
@@ -117,7 +121,6 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
     && localPrepared.revision === localSource?.revision ? localPrepared : undefined;
 
   useEffect(() => {
-    let current = true;
     accountEpoch.current += 1;
     focusListFeedback.current = false;
     setReviewer(false);
@@ -132,9 +135,20 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
     setSelectedQuestionSetId(""); setSubmittingQuestionSetId(""); setBrowseQuestionSets(false);
     setLocalFilingConfirmed(false); setLocalRights(false); setLocalPrepared(undefined);
     setProgress(""); setError(""); setFeedbackLocation(""); setBusyId(""); setWithdrawId("");
-    if (accountId) void isAcademicReviewer(accountId).then(value => { if (current) setReviewer(value); });
-    return () => { current = false; };
   }, [accountId]);
+
+  // Review rights can change while this screen is mounted. A refresh must
+  // recheck the server, never reuse a prior grant or failed role read.
+  useEffect(() => {
+    let active = true;
+    setReviewer(false);
+    setReviewerReady(false);
+    if (!accountId) setReviewerReady(true);
+    else void isAcademicReviewer(accountId).then(value => {
+      if (active) { setReviewer(value); setReviewerReady(true); }
+    }, () => { if (active) setReviewerReady(true); });
+    return () => { active = false; };
+  }, [accountId, refresh]);
 
   useEffect(() => {
     if (!focusListFeedback.current || feedbackLocation !== "list" || (!progress && !error)) return;
@@ -346,6 +360,7 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
           : "Review recorded. This upload is no longer in the unreviewed list.");
         focusListFeedback.current = true; setFeedbackLocation("list");
         setRefresh(value => value + 1);
+        onReviewed?.();
       }
     } catch (cause) {
       if (active()) setError(cause instanceof Error ? cause.message : "The review could not be saved.");
@@ -384,24 +399,29 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
     </div>;
   }
 
-  return <section className="community-uploads" aria-label="Community Uploads">
+  return <section className="community-uploads" aria-label={reviewOnly ? "Host academic review" : "Community Uploads"}>
     <header className="community-hero">
-      <span className="qb-eyebrow">Shared by learners</span>
-      <h2>Community Uploads</h2>
-      <p>Discover standalone Question Sets and courses shared by learners. Question Sets enter search only after academic review; community courses remain visibly Unreviewed until approved.</p>
+      <span className="qb-eyebrow">{reviewOnly ? "Host / academic content" : "Shared by learners"}</span>
+      <h2>{reviewOnly ? "Review course uploads" : "Community Uploads"}</h2>
+      <p>{reviewOnly
+        ? "Inspect each source, answer, figure and explanation before deciding on its exact submission. Host ownership alone never authorizes academic approval."
+        : "Discover standalone Question Sets and courses shared by learners. Question Sets enter search only after academic review; community courses remain visibly Unreviewed until approved."}</p>
     </header>
 
     {!accountId ? accountPhase === "loading" ? <GlassCard pad><p role="status">Checking your account…</p></GlassCard>
       : accountPhase === "unconfigured" ? <GlassCard pad><h3>Course exchange is unavailable here</h3><p>This build has no account service. Your personal practice is still available in Question Bank.</p><a className="gbtn sm" href="#questions">Open Question Bank <ArrowUpRight size={ICON_SIZE.body} aria-hidden="true" /></a></GlassCard>
       : <GlassCard pad><h3>Sign in to browse and contribute</h3><p>Community uploads are available to signed-in AXOM accounts.</p><GButton onClick={() => useUi.getState().requestSettings("account")}>Open account settings</GButton></GlassCard> : <>
-      <div className="community-layout">
+      <div className={`community-layout${reviewOnly ? " is-review-only" : ""}`}>
         <div className="community-results">
-          <div className="community-qbank-discovery">
+          {!reviewOnly && <div className="community-qbank-discovery">
             <GButton size="sm" onClick={() => setBrowseQuestionSets(value => !value)}>
               <BookUp2 size={ICON_SIZE.body} aria-hidden="true" /> {browseQuestionSets ? "Hide approved Question Sets" : "Browse approved Question Sets"}
             </GButton>
             {browseQuestionSets && <CommunityQuestionSetLibrary onPractice={onPracticeSet} />}
-          </div>
+          </div>}
+          {reviewOnly && !reviewerReady && <p role="status">Checking independent academic reviewer access…</p>}
+          {reviewOnly && reviewerReady && !reviewer &&
+            <p className="community-warning">Academic reviewer authority is not confirmed. Host owner access does not confer medical-content review permission. Refresh after a separately authorized reviewer grant.</p>}
           <form className="community-search" onSubmit={searchNow}>
             <label>Find an upload<input type="search" value={draftSearch} onChange={event => setDraftSearch(event.target.value)} placeholder="Course or module" /></label>
             <label>Term<select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{TERMS.map(value => <option key={value}>{value}</option>)}</select></label>
@@ -411,7 +431,7 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
           {feedback("list")}
           {loading && !page && <p role="status">Loading community uploads…</p>}
           {listError && <p role="alert">{listError}</p>}
-          {!loading && !listError && page && rows.length === 0 && <GlassCard pad><h3>No unreviewed uploads here yet</h3><p>Try another term or search, or share a prepared course below.</p></GlassCard>}
+          {!loading && !listError && page && rows.length === 0 && <GlassCard pad><h3>No unreviewed uploads here yet</h3><p>{reviewOnly ? "No pending course submission matches this filter." : "Try another term or search, or share a prepared course below."}</p></GlassCard>}
           <div className="community-list">
             {rows.map(row => <article key={row.id} className="community-card">
               <div className="community-card-head"><span className="community-term">{row.term}</span><Tag tone="orange">Unreviewed</Tag></div>
@@ -420,10 +440,10 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
               <p className="community-warning">Community material has not been approved by an AXOM reviewer. Check its sources before relying on it.</p>
               <div className="community-actions">
                 <GButton disabled={Boolean(busyId)} onClick={() => void loadPreview(row)}>Preview course</GButton>
-                <GButton disabled={Boolean(busyId)} onClick={() => void download(row)}><BookOpen size={ICON_SIZE.body} /> {busyId === row.id ? "Checking…" : "Download to practice"}</GButton>
+                <GButton disabled={Boolean(busyId)} onClick={() => void download(row)}><BookOpen size={ICON_SIZE.body} /> {busyId === row.id ? "Checking…" : reviewOnly ? "Open revision for review" : "Download to practice"}</GButton>
                 {downloaded?.accountId === accountId && downloaded.revisionId === row.current_revision_id && <GButton onClick={onOpenLibrary}>Open saved questions <ArrowUpRight size={ICON_SIZE.body} /></GButton>}
-                {row.owned && <GButton disabled={Boolean(busyId)} onClick={() => void withdraw(row)}>{withdrawId === row.id ? "Confirm withdraw" : "Withdraw"}</GButton>}
-                {withdrawId === row.id && <GButton onClick={() => setWithdrawId("")}>Cancel</GButton>}
+                {row.owned && !reviewOnly && <GButton disabled={Boolean(busyId)} onClick={() => void withdraw(row)}>{withdrawId === row.id ? "Confirm withdraw" : "Withdraw"}</GButton>}
+                {!reviewOnly && withdrawId === row.id && <GButton onClick={() => setWithdrawId("")}>Cancel</GButton>}
               </div>
               {feedback(row.id)}
               {preview?.accountId === accountId && preview.revisionId === row.current_revision_id && <div className="community-preview">
@@ -443,7 +463,7 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
           {page?.more && <GButton disabled={loading} onClick={() => void loadMore()}>{loading ? "Loading…" : "Load more uploads"}</GButton>}
         </div>
 
-        <aside className="community-contribute">
+        {!reviewOnly && <aside className="community-contribute">
           <GlassCard pad className="community-qbank-publish">
             <BookUp2 size={ICON_SIZE.display} aria-hidden="true" />
             <h3>Share a Question Set</h3>
@@ -537,9 +557,9 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
             </fieldset>}
             {feedback("submit")}
           </GlassCard>
-        </aside>
+        </aside>}
       </div>
-      {submittingQuestionSet && <QuestionSetLibrarySubmitDialog key={submittingQuestionSet.id}
+      {!reviewOnly && submittingQuestionSet && <QuestionSetLibrarySubmitDialog key={submittingQuestionSet.id}
         set={submittingQuestionSet} questions={questions} autoDraft onClose={() => setSubmittingQuestionSetId("")} />}
     </>}
   </section>;
