@@ -16,7 +16,12 @@ vi.mock("../lib/operator/hostClient", () => ({
   setOperatorAI: vi.fn(),
   setOperatorRole: vi.fn(),
 }));
-vi.mock("../components/questions/QuestionSetLibraryReviewQueue", () => ({ QuestionSetLibraryReviewQueue: () => null }));
+vi.mock("../components/questions/QuestionSetLibraryReviewQueue", () => ({
+  QuestionSetLibraryReviewQueue: ({ refreshSignal, onReviewed }: { refreshSignal?: number; onReviewed?: () => void }) =>
+    <section data-testid="host-question-set-review" data-refresh={String(refreshSignal ?? 0)}>
+      <button type="button" onClick={onReviewed}>Complete synthetic Question Set review</button>
+    </section>,
+}));
 vi.mock("../components/questions/CommunityUploads", () => ({
   CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) =>
     <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
@@ -272,6 +277,21 @@ describe("Host page authorization and moderation", () => {
     // Review callbacks must use the same version generator as manual Host refresh.
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+  });
+
+  it("refreshes standalone Question Set reviewer permissions from Host and Host after a completed decision", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("owner"));
+    render(<HostPage />);
+    await screen.findByRole("heading", { name: "Attention queue" });
+    const queue = screen.getByTestId("host-question-set-review");
+    expect(queue.getAttribute("data-refresh")).toBe("0");
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(queue.getAttribute("data-refresh")).toBe("1");
+    await user.click(within(queue).getByRole("button", { name: "Complete synthetic Question Set review" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+    expect(queue.getAttribute("data-refresh")).toBe("2");
   });
 
 });
