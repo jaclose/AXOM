@@ -357,7 +357,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   assertCurrent();
   const localBackups = await refreshLocalBackupSummaries();
   assertCurrent();
-  await createLocalBackup(BUILD_INFO.schemaVersion, localBackups.length + 2);
+  await createLocalBackup(BUILD_INFO.schemaVersion, localBackups.length + 2, { reuseEquivalent: true });
   const checkpoint = getVaultWriteCheckpoint();
   for (const entry of catalog.templates) {
     const bytes = await read(entry.file);
