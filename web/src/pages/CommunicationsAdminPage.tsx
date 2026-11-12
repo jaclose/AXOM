@@ -1,6 +1,6 @@
 import { CommunicationsBrand } from "../components/communications/CommunicationsBrand";
 import { useOpticalMotion } from "../lib/communications/useOpticalMotion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Download, Send } from "lucide-react";
 import { GButton } from "../components/ui/primitives";
 import { useStore } from "../lib/store";
@@ -29,8 +29,8 @@ function CommunicationsAdminEditor({ accountId }: { accountId: string | undefine
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  const isCurrentAccount = () => Boolean(accountId) && mounted.current
-    && useAccount.getState().user?.id === accountId;
+  const isCurrentAccount = useCallback(() => Boolean(accountId) && mounted.current
+    && useAccount.getState().user?.id === accountId, [accountId]);
   const access = useCommunications(); const state = useStore(); const [data, setData] = useState<AdminState | null>(null); const [type, setType] = useState<EmailType>("essay");
   const [content, setContent] = useState<Editorial>(EMPTY); const [customCta, setCustomCta] = useState(false); const [audience, setAudience] = useState<Audience>({ kind: "subscribers" }); const [id, setId] = useState<string>();
   const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false); const [theme, setTheme] = useState<"dark" | "light">("dark"); const [narrow, setNarrow] = useState(false); const [scheduled, setScheduled] = useState(""); const [confirmation, setConfirmation] = useState(""); const [estimate, setEstimate] = useState(""); const [publishConfirmation, setPublishConfirmation] = useState("");
@@ -45,7 +45,7 @@ function CommunicationsAdminEditor({ accountId }: { accountId: string | undefine
       .then(next => { if (current && isCurrentAccount()) setData(next); })
       .catch(e => { if (current && isCurrentAccount()) setMessage(e instanceof Error ? e.message : "Studio unavailable."); });
     return () => { current = false; };
-  }, [access.data?.admin]);
+  }, [access.data?.admin, isCurrentAccount]);
   const preview = useMemo(() => { const input = { type, context: localEmailContext(state, type, theme), baseUrl: location.origin }; try { return { email: renderAxomEmail({ ...input, editorial: content.title ? content : undefined }), error: "" }; } catch (error) { return { email: renderAxomEmail(input), error: error instanceof Error ? error.message : "Check your template variables." }; } }, [state, type, theme, content]);
   const email = preview.email;
   const run = async (task: () => Promise<unknown>, success: string) => {
