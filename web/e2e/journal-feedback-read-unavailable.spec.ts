@@ -42,7 +42,7 @@ test("feedback remains locally recoverable when browser reads fail, then retries
   const dialog = page.getByRole("dialog", { name: "How is the journal feeling?" });
   const liked = dialog.getByLabel("What do you like?");
   await expect(liked).toBeEditable();
-  await expect(dialog.getByText(/AXOM cannot read saved feedback/)).toBeVisible();
+  await expect(dialog.getByText(/AXOM cannot verify saved feedback/)).toBeVisible();
   await liked.fill("An unsaved in-tab recovery draft");
   await expect(dialog.getByRole("button", { name: "Download draft" })).toBeVisible();
   const exportReady = page.waitForEvent("download");
