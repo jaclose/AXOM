@@ -1214,3 +1214,63 @@ test("one-based source weeks reject Week 0 without inventing a numbered curricul
   }
   assert.equal(run().complete, true, "Unassigned unknown weeks must remain supported.");
 });
+
+test("sanitized academic report never serializes private source paths, tracker IDs or free-text review reasons", () => {
+  const secret = "PRIVATE_R41_DO_NOT_EMIT";
+  const cases = [
+    ["malformed source path", () => {
+      const inventory = fixture();
+      inventory.entries[0] = { ...inventory.entries[0], path: secret + "/source.pdf", sha256: "bad" };
+      return run({ inventory });
+    }],
+    ["unclassified source sample", () => {
+      const inventory = fixture();
+      inventory.entries[0] = { ...inventory.entries[0], path: secret + "/unclassified.pdf", sha256: "d".repeat(64) };
+      return run({ inventory });
+    }],
+    ["broken duplicate alias", () => {
+      const inventory = fixture();
+      inventory.entries[1] = { ...inventory.entries[1], path: secret + "/duplicate.pdf", duplicateOf: "wrong-canonical" };
+      return run({ inventory });
+    }],
+    ["pending source reason", () => {
+      const held = dispositions();
+      held.sources[0] = { ...held.sources[0], status: "review-required", reason: secret + " reviewer note" };
+      return run({ dispositions: held });
+    }],
+    ["unknown source kind", () => {
+      const held = dispositions();
+      held.sources[0] = { ...held.sources[0], kind: secret };
+      return run({ dispositions: held });
+    }],
+    ["unknown source status", () => {
+      const held = dispositions();
+      held.sources[0] = { ...held.sources[0], status: secret };
+      return run({ dispositions: held });
+    }],
+    ["tracker duplicate and invalid week", () => {
+      const installed = tracker();
+      installed.activities[0] = { ...installed.activities[0], activityId: secret, week: 0, installed: false };
+      installed.activities[1] = { ...installed.activities[1], activityId: secret, week: 5 };
+      return run({ tracker: installed });
+    }],
+  ];
+  for (const [label, make] of cases) {
+    const report = make();
+    assert.equal(report.complete, false, label);
+    assert.equal(JSON.stringify(report).includes(secret), false,
+      label + " leaked a private input in a supposedly sanitized report.");
+  }
+});
+
+test("academic report preserves actionable counts and opaque source fingerprints after redaction", () => {
+  const inventory = fixture();
+  inventory.entries[0] = { ...inventory.entries[0], path: "/private/study/original.pdf", sha256: "d".repeat(64) };
+  const result = run({ inventory });
+  assert.equal(result.complete, false);
+  assert.equal(result.counts.missingDisposition, 1);
+  assert.ok(result.samples.unclassifiedFiles.every(value => typeof value === "string"));
+  assert.ok(result.samples.unclassifiedFiles.some(value => value.includes("d".repeat(12))),
+    "Gap report should retain a stable opaque checksum prefix for triage.");
+  assert.equal(JSON.stringify(result).includes("/private/study/"), false);
+});
