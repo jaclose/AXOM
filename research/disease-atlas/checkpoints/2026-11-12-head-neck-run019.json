@@ -1,0 +1,309 @@
+{
+  "atlas": "AXOM Comprehensive Atlas of Human Disease & Pathology V2",
+  "build": "019",
+  "date": "2026-11-12",
+  "parent_full_manuscript_build": "018",
+  "parent_full_manuscript_entries": 376,
+  "new_entries": 14,
+  "new_detailed_profiles": 14,
+  "total_unique_in_branch": 390,
+  "detailed_total_in_branch": 297,
+  "remaining_concise_entries": 93,
+  "pdf_pages": 458,
+  "chapter_page_range": "431–458",
+  "new_profile_section_words": 5099,
+  "new_sources": 18,
+  "total_evidence_records": 352,
+  "new_original_image_source_pages": 7,
+  "total_image_associations": 187,
+  "authentic_medical_images_embedded": 0,
+  "full_package_sha256": "f62c86551c1a1cdc4dfb3a541383157a31b806dc8a30aafb88ea0f71692f1c11",
+  "docx_sha256": "904120414254f1ac2a04f577ff0c16411cab97661833b052213494d2adb0ad97",
+  "QA": {
+    "structural_tests_passed": 22,
+    "failed": 0,
+    "accessibility_findings": 0,
+    "rendered_visual_spot_checks": 3,
+    "images_parent_duplicate_associations_preserved": 1
+  },
+  "ontology": {
+    "monitored": "MONDO; WHO ICD-11 MMS; Orphanet; MedGen",
+    "official_pinned_denominator": null,
+    "measured_coverage": null,
+    "provisional_medgen_links": {
+      "AXOM-ENT-002": "MONDO:0007972; ORPHA45360",
+      "AXOM-ENT-006": "MONDO:0005349"
+    }
+  },
+  "separate_build017_not_merged": {
+    "chapter": "male genitourinary",
+    "new_ids_reported": 10,
+    "reason": "Complete original registry and manuscript unavailable; union count not validated",
+    "checkpoint": "https://docs.google.com/document/d/1ixaxQQRroGXCdrSWkGp1rtWy4vMDMyRRktOoowNTF98/edit"
+  },
+  "diseases": [
+    {
+      "id": "AXOM-ENT-001",
+      "name": "Benign paroxysmal positional vertigo",
+      "clinical_discriminator": "Positional vertigo lasting seconds with canal-specific nystagmus. Posterior-canal Dix–Hallpike; canalith repositioning. No routine imaging or suppressants without atypical findings.",
+      "evidence_ids": [
+        "ENT19-AAO-BPPV17"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-002",
+      "name": "Ménière disease",
+      "clinical_discriminator": "Spontaneous episodic vertigo 20 min–12 h, fluctuating sensorineural hearing loss and aural symptoms. Audiogram; exclude vestibular migraine. Intratympanic therapies selected for refractory episodes.",
+      "evidence_ids": [
+        "ENT19-AAO-MEN20",
+        "ENT19-MEDGEN-MEN"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-003",
+      "name": "Acute unilateral vestibulopathy (vestibular neuritis)",
+      "clinical_discriminator": "Continuous acute vestibular syndrome with unilateral hypofunction and no new cochlear deficits. Exclude posterior-circulation stroke; properly trained HINTS exam only in indicated patients. Early vestibular rehabilitation.",
+      "evidence_ids": [
+        "ENT19-BARANY-AUVP22",
+        "ENT19-APTA-VR22"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-004",
+      "name": "Idiopathic sudden sensorineural hearing loss",
+      "clinical_discriminator": "Sudden sensorineural loss over ≤72 h. Exclude conductive loss, urgent audiometry and appropriate MRI/ABR; discuss time-sensitive systemic/intratympanic steroids and salvage per guideline.",
+      "evidence_ids": [
+        "ENT19-AAO-SSNHL19"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-005",
+      "name": "Middle-ear cholesteatoma",
+      "clinical_discriminator": "Keratinizing squamous epithelium in middle ear erodes ossicles, can cause labyrinthitis, facial palsy and intracranial infection. Otoscopy, CT temporal bone, diffusion MRI; usually surgical eradication.",
+      "evidence_ids": [
+        "ENT19-EAONO-CHOL15"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-006",
+      "name": "Otosclerosis (otic-capsule otospongiosis)",
+      "clinical_discriminator": "Abnormal otic-capsule remodeling fixes stapes, causing progressive conductive or mixed loss with typically normal tympanic membrane. Audiometry, acoustic reflexes; hearing aids or selected stapes surgery.",
+      "evidence_ids": [
+        "ENT19-NIDCD-OTO",
+        "ENT19-MEDGEN-OTO"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-007",
+      "name": "Chronic rhinosinusitis with nasal polyps",
+      "clinical_discriminator": "≥12 weeks sinonasal symptoms and objective inflammation/polyposis; type-2 eosinophilic inflammation is common but not universal. Saline, intranasal glucocorticoids, surgery or selected biologics.",
+      "evidence_ids": [
+        "ENT19-AAO-ARS25",
+        "ENT19-AAO-BIO26"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-008",
+      "name": "Acute bacterial rhinosinusitis",
+      "clinical_discriminator": "≥10 days symptoms without improvement or double worsening support bacterial illness. Uncomplicated adults: watchful waiting with follow-up or amoxicillin with/without clavulanate 5–7 days where indicated; emergent orbital/intracranial signs.",
+      "evidence_ids": [
+        "ENT19-AAO-ARS25",
+        "ENT19-AAO-ARS-EXEC25"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-009",
+      "name": "Nasopharyngeal carcinoma",
+      "clinical_discriminator": "Often EBV-associated nonkeratinizing carcinoma with cervical nodes or unilateral middle-ear effusion. Endoscopic biopsy, EBER ISH, MRI staging; radiotherapy plus stage-adapted systemic treatment.",
+      "evidence_ids": [
+        "ENT19-NCI-NPC"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-010",
+      "name": "Laryngeal squamous cell carcinoma",
+      "clinical_discriminator": "Tobacco/alcohol-related squamous malignancy, often persistent hoarseness. Laryngoscopy with biopsy and site-specific TNM; early organ-preserving local therapy, multimodal approaches for advanced disease.",
+      "evidence_ids": [
+        "ENT19-NCI-LAR"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-011",
+      "name": "HPV-mediated oropharyngeal squamous cell carcinoma",
+      "clinical_discriminator": "HPV-driven tumor commonly from palatine tonsil/base of tongue. p16 IHC surrogate in appropriate tissue and setting; HPV-specific staging and stage-directed surgery/radiation/systemic therapy.",
+      "evidence_ids": [
+        "ENT19-NCI-ORO"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-012",
+      "name": "Necrotizing otitis externa and skull-base osteomyelitis",
+      "clinical_discriminator": "Invasive infection in diabetes/immunosuppression with severe nocturnal otalgia, canal granulation, cranial neuropathy. Culture/biopsy to exclude cancer, imaging, prolonged antipseudomonal therapy and multidisciplinary care.",
+      "evidence_ids": [
+        "ENT19-NOE-SR23"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-013",
+      "name": "Peritonsillar abscess (quinsy)",
+      "clinical_discriminator": "Suppurative infection around palatine tonsil, presenting with unilateral pain, trismus, muffled speech, asymmetry. Prioritize airway when threatened; drainage, antibiotics for oral flora, hydration.",
+      "evidence_ids": [
+        "ENT19-PTA-MERCK"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    },
+    {
+      "id": "AXOM-ENT-014",
+      "name": "Vestibular schwannoma",
+      "clinical_discriminator": "Benign Schwann-cell IAC/CPA tumor with asymmetric sensorineural loss, tinnitus and sometimes imbalance. MRI with gadolinium; observe, radiosurgery or microsurgery by growth, size and function.",
+      "evidence_ids": [
+        "ENT19-EANO-VS19"
+      ],
+      "status": "detailed_profile_in_458_page_local_manuscript; specialist_review_pending"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ENT19-AAO-BPPV17",
+      "url": "https://aao-hnsfjournals.onlinelibrary.wiley.com/doi/10.1177/0194599816689667"
+    },
+    {
+      "id": "ENT19-AAO-MEN20",
+      "url": "https://journals.sagepub.com/doi/10.1177/0194599820909438"
+    },
+    {
+      "id": "ENT19-BARANY-AUVP22",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9661346/"
+    },
+    {
+      "id": "ENT19-APTA-VR22",
+      "url": "https://www.apta.org/patient-care/evidence-based-practice-resources/cpgs/vestibular-rehabilitation-for-peripheral-vestibular-hypofunction-an-evidence-based-clinical-practice-guideline-cpg"
+    },
+    {
+      "id": "ENT19-AAO-SSNHL19",
+      "url": "https://journals.sagepub.com/doi/10.1177/0194599819859883"
+    },
+    {
+      "id": "ENT19-EAONO-CHOL15",
+      "url": "https://doi.org/10.5152/iao.2015.1206"
+    },
+    {
+      "id": "ENT19-NIDCD-OTO",
+      "url": "https://www.nidcd.nih.gov/health/otosclerosis"
+    },
+    {
+      "id": "ENT19-AAO-ARS25",
+      "url": "https://aao-hnsfjournals.onlinelibrary.wiley.com/doi/full/10.1002/ohn.1344"
+    },
+    {
+      "id": "ENT19-AAO-ARS-EXEC25",
+      "url": "https://aao-hnsfjournals.onlinelibrary.wiley.com/doi/full/10.1002/ohn.1342"
+    },
+    {
+      "id": "ENT19-AAO-BIO26",
+      "url": "https://bulletin.entnet.org/article/spring-2026-updates-for-biologics-in-chronic-rhinosinusitis/"
+    },
+    {
+      "id": "ENT19-NCI-NPC",
+      "url": "https://www.cancer.gov/types/head-and-neck/hp/adult/nasopharyngeal-treatment-pdq"
+    },
+    {
+      "id": "ENT19-NCI-LAR",
+      "url": "https://www.cancer.gov/types/head-and-neck/hp/adult/laryngeal-treatment-pdq"
+    },
+    {
+      "id": "ENT19-NCI-ORO",
+      "url": "https://www.cancer.gov/types/head-and-neck/hp/adult/oropharyngeal-treatment-pdq"
+    },
+    {
+      "id": "ENT19-NOE-SR23",
+      "url": "https://onlinelibrary.wiley.com/doi/10.1111/coa.14041"
+    },
+    {
+      "id": "ENT19-PTA-MERCK",
+      "url": "https://www.merckmanuals.com/professional/ear-nose-and-throat-disorders/how-to-do-throat-procedures/how-to-drain-a-peritonsillar-abscess"
+    },
+    {
+      "id": "ENT19-EANO-VS19",
+      "url": "https://www.eano.eu/publications/eano-guidelines/eano-guideline-on-the-diagnosis-and-treatment-of-vestibular-schwannoma/"
+    },
+    {
+      "id": "ENT19-MEDGEN-MEN",
+      "url": "https://www.ncbi.nlm.nih.gov/medgen/7530"
+    },
+    {
+      "id": "ENT19-MEDGEN-OTO",
+      "url": "https://www.ncbi.nlm.nih.gov/medgen/10508"
+    }
+  ],
+  "image_files": [
+    {
+      "filename": "Attic_Cholesteatoma.jpg",
+      "creator": "Michael Hawke MD",
+      "license": "CC BY 4.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Attic_Cholesteatoma.jpg",
+      "status": "source_link_only; patient_specimen_privacy_diagnosis_not_independently_cleared; zero_images_embedded"
+    },
+    {
+      "filename": "Histopathology_of_a_nasal_polyp.jpg",
+      "creator": "Luh Putu Lusy Indrawati, Vita Arfiana Nurul Fatimah and Osman Sianipar",
+      "license": "CC BY 4.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Histopathology_of_a_nasal_polyp.jpg",
+      "status": "source_link_only; patient_specimen_privacy_diagnosis_not_independently_cleared; zero_images_embedded"
+    },
+    {
+      "filename": "Laryngeal_squamous_carcinoma_--_very_high_mag.jpg",
+      "creator": "Nephron",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Laryngeal_squamous_carcinoma_--_very_high_mag.jpg",
+      "status": "source_link_only; patient_specimen_privacy_diagnosis_not_independently_cleared; zero_images_embedded"
+    },
+    {
+      "filename": "Akn_t4_antoni_a.jpg",
+      "creator": "Jensflorian",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Akn_t4_antoni_a.jpg",
+      "status": "source_link_only; patient_specimen_privacy_diagnosis_not_independently_cleared; zero_images_embedded"
+    },
+    {
+      "filename": "Peritonsillar_abscess_in_a_case_of_chronic_recurrent_tonsillitis,_HE_1.JPG",
+      "creator": "Patho",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Peritonsillar_abscess_in_a_case_of_chronic_recurrent_tonsillitis,_HE_1.JPG",
+      "status": "source_link_only; patient_specimen_privacy_diagnosis_not_independently_cleared; zero_images_embedded"
+    },
+    {
+      "filename": "Peritonsillar_abscess_in_a_case_of_chronic_recurrent_tonsillitis,_HE_4.JPG",
+      "creator": "Patho",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Peritonsillar_abscess_in_a_case_of_chronic_recurrent_tonsillitis,_HE_4.JPG",
+      "status": "source_link_only; patient_specimen_privacy_diagnosis_not_independently_cleared; zero_images_embedded"
+    },
+    {
+      "filename": "PeritonsilarAbs.jpg",
+      "creator": "James Heilman MD",
+      "license": "CC BY-SA 3.0",
+      "source_page": "https://commons.wikimedia.org/wiki/File:PeritonsilarAbs.jpg",
+      "status": "source_link_only; patient_specimen_privacy_diagnosis_not_independently_cleared; zero_images_embedded"
+    }
+  ],
+  "editorial_limits": [
+    "Only individual source-page licenses checked, not independent specimen/subject release",
+    "No medical photographs copied or embedded; original binary permissions remain unverified",
+    "Reviewed educational draft: no external specialist peer review or complete drug-label audit",
+    "This GitHub JSON preserves recovery-ready source mapping and summaries, not complete 458-page Word/PDF binaries",
+    "No AXOM production merge, migration, deployment or content publication"
+  ]
+}
