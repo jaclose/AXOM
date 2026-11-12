@@ -43,7 +43,9 @@ describe("account deletion intent verified against the authenticated bearer (no 
     const h = harness();
     const response = await h.invoke(payload);
     expect(response.status).toBe(403);
-    expect(h.rpc).not.toHaveBeenCalled();
+    expect(h.rpc).toHaveBeenCalledWith("consume_communication_limit", {
+      p_key: `${A}:request-deletion:attempt`, p_limit: 12, p_seconds: 3600,
+    });
     expect(h.from).not.toHaveBeenCalled();
   });
   it("rejects bearer subject disagreement even when actor matches authenticated user", async () => {

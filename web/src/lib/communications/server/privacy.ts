@@ -217,15 +217,40 @@ async function removeExportAfterBarrierLoss(
   throw cause;
 }
 
-export async function requestPrivacy(service: CommunicationsService, userId: string, kind: "export" | "deletion"): Promise<void> {
+export async function requestPrivacy(service: CommunicationsService, userId: string, kind: "export" | "deletion", actorSessionId?: string): Promise<void> {
+  // Deletion consent cannot be replayed after cancellation in the same sign-in.
+  // Older export requests and historical NULL-session rows stay unchanged.
+  if (kind === "deletion" && (!actorSessionId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(actorSessionId))) {
+    throw new Error("A verified sign-in session is required to request deletion.");
+  }
   const user = await service.user(userId);
   if (!user.email_confirmed_at) throw new Error("Verify your email before continuing.");
   const scheduled = new Date(Date.now() + 7 * 86400000).toISOString();
-  const result = await service.db.from("privacy_requests").insert({ user_id: userId, kind, status: kind === "deletion" ? "scheduled" : "requested", scheduled_for: kind === "deletion" ? scheduled : null, notification_email: kind === "deletion" ? user.email : null }).select("id").single();
+  const result = await service.db.from("privacy_requests").insert({
+    user_id: userId, kind, status: kind === "deletion" ? "scheduled" : "requested",
+    scheduled_for: kind === "deletion" ? scheduled : null,
+    notification_email: kind === "deletion" ? user.email : null,
+    ...(kind === "deletion" ? { actor_session_id: actorSessionId } : {}),
+  }).select("id").single();
   if (kind === "export" && result.error?.code === "PT409") {
     throw new Error("Export is unavailable while account deletion is processing or needs manual reconciliation.");
   }
   if (result.error?.code === "23505") {
+    if (kind === "deletion") {
+      const sameSession = checked(await service.db.from("privacy_requests")
+        .select("status,failure_code").eq("user_id", userId).eq("kind", kind)
+        .eq("actor_session_id", actorSessionId).order("created_at", { ascending: false }).limit(1)) as { status: string; failure_code: string | null }[] | null;
+      if (sameSession?.length) {
+        if (["scheduled", "requested", "processing"].includes(sameSession[0].status)) return;
+        if (sameSession[0].status === "failed") {
+          if (sameSession[0].failure_code === "deletion-preflight-failed") {
+            throw new Error("Cancel the existing failed deletion request before scheduling another.");
+          }
+          throw new Error("Deletion needs manual reconciliation before another request can be scheduled.");
+        }
+        throw new Error("Deletion consent for this session is closed. Sign in again before requesting another deletion.");
+      }
+    }
     const existing = checked(await service.db.from("privacy_requests")
       .select("status,failure_code")
       .eq("user_id", userId)
@@ -239,6 +264,7 @@ export async function requestPrivacy(service: CommunicationsService, userId: str
       }
       throw new Error(`${kind === "deletion" ? "Deletion" : "Export"} needs manual reconciliation before another request can be scheduled.`);
     }
+    if (kind === "deletion") throw new Error("Another deletion request is already pending. Resolve it before a new request.");
     return;
   }
   const row = required(result);
