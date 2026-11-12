@@ -115,13 +115,8 @@ export function createQuestionSetShare(
     // The stored display answer must agree with the source key. Otherwise
     // toShared() would silently recalculate it, concealing stale or corrupt
     // source evidence during publication. Key-only questions remain supported.
-    if (question.correctAnswerText !== undefined) {
-      const keyedChoice = question.options.find(
-        (option) => option.key.trim().toUpperCase() === question.correctKey?.trim().toUpperCase(),
-      );
-      if (!keyedChoice || question.correctAnswerText.trim() !== keyedChoice.text.trim()) {
-        throw new Error("Question Set source answer text conflicts with its keyed choice and requires review before sharing.");
-      }
+    if (hasConflictingStoredAnswerText(question)) {
+      throw new Error("Question Set source answer text conflicts with its keyed choice and requires review before sharing.");
     }
     byId.set(question.id, question);
   }
@@ -226,6 +221,9 @@ export function importSharedQuestionSet(input: {
   }
 
   const now = validTimestamp(input.now ?? new Date().toISOString(), "Import time");
+  // Compare against the incoming content only. Unrelated damaged local
+  // questions must not prevent a healthy Community import.
+  const incomingIdentities = new Set(snapshot.questions.map(questionIdentity));
   const availableByIdentity = new Map<string, QuestionRecord[]>();
   // Restored workspaces can contain two different records with the same ID.
   // Content equality alone cannot make that ID safe to reuse: downstream
@@ -235,7 +233,7 @@ export function importSharedQuestionSet(input: {
   for (const existing of existingQuestions) {
     if (seenExistingIds.has(existing.id)) ambiguousExistingIds.add(existing.id);
     else seenExistingIds.add(existing.id);
-    const shared = existingQuestionShareView(existing);
+    const shared = existingQuestionShareView(existing, incomingIdentities);
     if (!shared) continue;
     const key = questionIdentity(shared);
     const matches = availableByIdentity.get(key) ?? [];
@@ -460,14 +458,34 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
   };
 }
 
-function existingQuestionShareView(question: QuestionRecord): SharedQuestion | undefined {
+function hasConflictingStoredAnswerText(question: QuestionRecord): boolean {
+  if (question.correctAnswerText === undefined) return false;
+  const correctKey = question.correctKey?.trim().toUpperCase();
+  const keyedChoice = question.options.find(
+    (option) => option.key.trim().toUpperCase() === correctKey,
+  );
+  return !keyedChoice || question.correctAnswerText.trim() !== keyedChoice.text.trim();
+}
+
+function existingQuestionShareView(
+  question: QuestionRecord, incomingIdentities?: ReadonlySet<string>,
+): SharedQuestion | undefined {
   const shared = toShared(question);
   try {
     validateSharedQuestion(shared, 0);
-    return shared;
   } catch {
     return undefined;
   }
+  // Projection recomputes answer text from the key. Do not let that
+  // normalization conceal contradictory stored answer evidence and reuse
+  // a learner's original ID, notes or attempts under a different answer.
+  if (hasConflictingStoredAnswerText(question)) {
+    if (incomingIdentities?.has(questionIdentity(shared))) {
+      throw new Error("A matching local question has conflicting source answer text. Review its original answer evidence before importing this shared set.");
+    }
+    return undefined;
+  }
+  return shared;
 }
 
 function questionIdentity(question: SharedQuestion): string {
