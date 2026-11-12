@@ -55,9 +55,10 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
           || (originalHash && (!Number.isFinite(priorTime) || !Number.isFinite(currentTime)))) {
           throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
         }
-        // Choose the oldest receipt deterministically, independent of source
-        // iteration order, without changing either underlying original.
-        const owner = originalHash && priorTime <= currentTime
+        // Choose the older receipt deterministically. For exactly equal
+        // timestamps preserve the legacy last-reference owner, so existing
+        // manifest/rehydration behavior remains compatible.
+        const owner = originalHash && priorTime < currentTime
           ? prior : { questionId: question.id, attachment, checksum };
         refs.set(attachment.blobKey, { questionId: owner.questionId, attachment: owner.attachment,
           checksum: checksum ?? prior.checksum });
