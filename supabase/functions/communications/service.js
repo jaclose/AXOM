@@ -168,7 +168,7 @@ function m(e, t) {
 	};
 }
 //#endregion
-//#region web/node_modules/react/cjs/react.production.min.js
+//#region ../AXOM-mothership-vault-session-20261107/web/node_modules/react/cjs/react.production.min.js
 var h = /* @__PURE__ */ e(((e) => {
 	var t = Symbol.for("react.element"), n = Symbol.for("react.portal"), r = Symbol.for("react.fragment"), i = Symbol.for("react.strict_mode"), a = Symbol.for("react.profiler"), o = Symbol.for("react.provider"), s = Symbol.for("react.context"), c = Symbol.for("react.forward_ref"), l = Symbol.for("react.suspense"), u = Symbol.for("react.memo"), d = Symbol.for("react.lazy"), f = Symbol.iterator;
 	function p(e) {
@@ -5408,33 +5408,47 @@ async function At(e, t, n, r) {
 	}
 	throw n;
 }
-async function jt(e, t, n) {
-	let r = await e.user(t);
-	if (!r.email_confirmed_at) throw Error("Verify your email before continuing.");
-	let i = new Date(Date.now() + 7 * 864e5).toISOString(), a = await e.db.from("privacy_requests").insert({
+async function jt(e, t, n, r) {
+	if (n === "deletion" && (!r || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(r))) throw Error("A verified sign-in session is required to request deletion.");
+	let i = await e.user(t);
+	if (!i.email_confirmed_at) throw Error("Verify your email before continuing.");
+	let a = new Date(Date.now() + 7 * 864e5).toISOString(), o = await e.db.from("privacy_requests").insert({
 		user_id: t,
 		kind: n,
 		status: n === "deletion" ? "scheduled" : "requested",
-		scheduled_for: n === "deletion" ? i : null,
-		notification_email: n === "deletion" ? r.email : null
+		scheduled_for: n === "deletion" ? a : null,
+		notification_email: n === "deletion" ? i.email : null,
+		...n === "deletion" ? { actor_session_id: r } : {}
 	}).select("id").single();
-	if (n === "export" && a.error?.code === "PT409") throw Error("Export is unavailable while account deletion is processing or needs manual reconciliation.");
-	if (a.error?.code === "23505") {
-		let r = (J(await e.db.from("privacy_requests").select("status,failure_code").eq("user_id", t).eq("kind", n).order("created_at", { ascending: !1 }).limit(20)) ?? []).find((e) => e.status === "failed");
-		if (r) throw n === "deletion" && r.failure_code === "deletion-preflight-failed" ? Error("Cancel the existing failed deletion request before scheduling another.") : Error(`${n === "deletion" ? "Deletion" : "Export"} needs manual reconciliation before another request can be scheduled.`);
+	if (n === "export" && o.error?.code === "PT409") throw Error("Export is unavailable while account deletion is processing or needs manual reconciliation.");
+	if (o.error?.code === "23505") {
+		if (n === "deletion") {
+			let i = J(await e.db.from("privacy_requests").select("status,failure_code").eq("user_id", t).eq("kind", n).eq("actor_session_id", r).order("created_at", { ascending: !1 }).limit(1));
+			if (i?.length) {
+				if ([
+					"scheduled",
+					"requested",
+					"processing"
+				].includes(i[0].status)) return;
+				throw i[0].status === "failed" ? i[0].failure_code === "deletion-preflight-failed" ? Error("Cancel the existing failed deletion request before scheduling another.") : Error("Deletion needs manual reconciliation before another request can be scheduled.") : Error("Deletion consent for this session is closed. Sign in again before requesting another deletion.");
+			}
+		}
+		let i = (J(await e.db.from("privacy_requests").select("status,failure_code").eq("user_id", t).eq("kind", n).order("created_at", { ascending: !1 }).limit(20)) ?? []).find((e) => e.status === "failed");
+		if (i) throw n === "deletion" && i.failure_code === "deletion-preflight-failed" ? Error("Cancel the existing failed deletion request before scheduling another.") : Error(`${n === "deletion" ? "Deletion" : "Export"} needs manual reconciliation before another request can be scheduled.`);
+		if (n === "deletion") throw Error("Another deletion request is already pending. Resolve it before a new request.");
 		return;
 	}
-	let o = Y(a);
+	let s = Y(o);
 	await e.enqueue({
 		userId: t,
 		type: n === "deletion" ? "deletion_requested" : "export_requested",
-		key: `${o.id}:requested`,
-		variables: { requestId: o.id }
+		key: `${s.id}:requested`,
+		variables: { requestId: s.id }
 	}), n === "deletion" && await e.enqueue({
 		userId: t,
 		type: "deletion_scheduled",
-		key: `${o.id}:scheduled`,
-		variables: { date: i }
+		key: `${s.id}:scheduled`,
+		variables: { date: a }
 	});
 }
 async function Mt(e, t, n) {
@@ -5949,7 +5963,13 @@ function Kt(e, t, r) {
 					p_seconds: 3600
 				}))) throw new X("Too many requests. Try again later.", 429);
 			};
-			l !== "request-deletion" && await p();
+			if (l === "request-deletion") {
+				if (!J(await e.rpc("consume_communication_limit", {
+					p_key: `${f.id}:request-deletion:attempt`,
+					p_limit: 12,
+					p_seconds: 3600
+				}))) throw new X("Too many deletion confirmation attempts. Try again later.", 429);
+			} else await p();
 			let m = await r.text();
 			if (m.length > 1e5) throw new X("Payload too large", 413);
 			let h;
@@ -5992,7 +6012,11 @@ function Kt(e, t, r) {
 			}
 			if (l === "request-export") return await jt(i, f.id, "export"), Z({ requested: !0 }, 200, s);
 			if (l === "export-link") return Z({ url: await i.exportLink(f.id, String(h.id)) }, 200, s);
-			if (l === "request-deletion") return await jt(i, f.id, "deletion"), Z({ requested: !0 }, 200, s);
+			if (l === "request-deletion") {
+				let e = Lt(u);
+				if (!e) throw new X("Sign in again to confirm deletion.", 403);
+				return await jt(i, f.id, "deletion", e.sessionId), Z({ requested: !0 }, 200, s);
+			}
 			if (l === "cancel-deletion") return Z({
 				cancelled: !0,
 				...await Mt(i, f.id, String(h.id))

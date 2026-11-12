@@ -14,6 +14,23 @@ async function database() {
   return db;
 }
 describe("communications on real Postgres", () => {
+  it("retains cancelled deletion consent as a session-bound replay barrier", async () => {
+    const db = await database();
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const newSession = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values('${A}','deletion','scheduled','${first}');
+        update privacy_requests set status='cancelled' where user_id='${A}' and actor_session_id='${first}';`);
+      await expect(db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values('${A}','deletion','scheduled','${first}')`)).rejects.toThrow();
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values('${A}','deletion','scheduled','${newSession}')`);
+      await expect(db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id)
+        values('${A}','export','requested','${newSession}')`)).rejects.toThrow();
+      expect((await db.query<{ status: string }>(`select status from privacy_requests where user_id='${A}' order by created_at`)).rows).toHaveLength(2);
+    } finally { await db.close(); }
+  }, 30000);
   it("prevents cross-account reads, browser writes and privileged worker calls", async () => {
     const db = await database();
     try {

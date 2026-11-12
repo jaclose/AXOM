@@ -67,8 +67,14 @@ export function createCommunicationsHandler(db: SupabaseClient, env: Env, fetche
         const limit = checked(await db.rpc("consume_communication_limit", { p_key: `${user.id}:${action}`, p_limit: action.startsWith("request-") ? 3 : 60, p_seconds: 3600 }));
         if (!limit) throw new RequestError("Too many requests. Try again later.", 429);
       };
-      // Preserve existing pre-body throttling for every other action.
-      if (action !== "request-deletion") await checkLimit();
+      // Authenticated invalid deletion attempts must not evade rate limiting.
+      // This separate budget does not consume the three valid-consent requests/hour.
+      if (action === "request-deletion") {
+        const allowed = checked(await db.rpc("consume_communication_limit", {
+          p_key: `${user.id}:request-deletion:attempt`, p_limit: 12, p_seconds: 3600,
+        }));
+        if (!allowed) throw new RequestError("Too many deletion confirmation attempts. Try again later.", 429);
+      } else await checkLimit();
       const raw = await request.text(); if (raw.length > 100000) throw new RequestError("Payload too large", 413);
       let body: Record<string, unknown>; try { body = raw ? JSON.parse(raw) as Record<string, unknown> : {}; if (!body || Array.isArray(body) || typeof body !== "object") throw new Error(); } catch { throw new RequestError("Invalid request body"); }
       if (action === "request-deletion") {
@@ -94,7 +100,12 @@ export function createCommunicationsHandler(db: SupabaseClient, env: Env, fetche
       if (action === "request-export") { await requestPrivacy(service, user.id, "export"); return json({ requested: true }, 200, cors); }
       if (action === "export-link") return json({ url: await service.exportLink(user.id, String(body.id)) }, 200, cors);
       if (action === "request-deletion") {
-        await requestPrivacy(service, user.id, "deletion"); return json({ requested: true }, 200, cors);
+        // Actor JWT was authenticated and validated above; bind the confirmed
+        // session to the durable consent row before scheduling anything.
+        const actor = parseActorSession(bearer);
+        if (!actor) throw new RequestError("Sign in again to confirm deletion.", 403);
+        await requestPrivacy(service, user.id, "deletion", actor.sessionId);
+        return json({ requested: true }, 200, cors);
       }
       if (action === "cancel-deletion") {
         const result = await cancelDeletion(service, user.id, String(body.id));

@@ -734,7 +734,7 @@ describe("deletion dependency safety", () => {
     const service = new CommunicationsService(db, {});
     const enqueue = vi.spyOn(service, "enqueue").mockResolvedValue();
 
-    await expect(requestPrivacy(service, "account-a", "deletion")).rejects.toThrow(message);
+    await expect(requestPrivacy(service, "account-a", "deletion", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).rejects.toThrow(message);
     expect(enqueue).not.toHaveBeenCalled();
   });
 
