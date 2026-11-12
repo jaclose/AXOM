@@ -269,6 +269,37 @@ test('current public assets win over retained generations; newest safe fallback 
   assert.equal(await oldest.match('/assets/shared-12345678.js'), undefined, 'stale cached HTML must still be evicted');
 });
 
+test('a rejected retained-cache read or eviction cannot hide a valid current offline icon', async () => {
+  const path = '/icon-192.png';
+  for (const operation of ['match', 'delete']) {
+    const app = worker();
+    const old = await app.caches.open('axom-shell-older');
+    const current = await app.caches.open('axom-shell-current');
+    await old.put(path, new Response(operation === 'delete' ? '<!doctype html>bad image rewrite' : 'old-icon', {
+      headers: { 'content-type': operation === 'delete' ? 'text/html' : 'image/png' },
+    }));
+    await current.put(path, new Response('current-icon', { headers: { 'content-type': 'image/png' } }));
+
+    // A single retained Cache object is damaged. Other cache generations work.
+    const originalOpen = app.caches.open.bind(app.caches);
+    app.caches.open = async (name) => {
+      const cache = await originalOpen(name);
+      if (name !== 'axom-shell-older') return cache;
+      return operation === 'match'
+        ? { ...cache, match: async () => { throw new Error('legacy read rejected'); } }
+        : { ...cache, delete: async () => { throw new Error('legacy eviction rejected'); } };
+    };
+    let pending;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending, operation + ': expected shipped public icon interception');
+    assert.equal(await (await pending).text(), 'current-icon', operation + ': do not lose safe current bytes');
+  }
+});
+
 test('mixed-case HTML asset rewrites are rejected online and evicted from retained cache', async () => {
   const path = '/assets/poison-12345678.js';
   let online = true;
