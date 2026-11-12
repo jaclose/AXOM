@@ -1538,3 +1538,54 @@ test('R58 rejected optional body drain is tolerated, but required fetch failure 
   const held = await requiredApp.caches.open('axom-shell-current');
   assert.equal(await held.match('./index.html'), undefined, 'no partial offline shell');
 });
+
+test('R70 resolved navigation responses preserve online status, MIME, and body despite a cached offline shell', async () => {
+  const cases = [
+    ['PDF 200', 200, 'application/pdf', 'ONLINE_PDF_BYTES'],
+    ['partial CSV 206', 206, 'text/csv', 'ONLINE_CSV_PARTIAL'],
+    ['forbidden HTML 403', 403, 'text/html', 'ONLINE_FORBIDDEN'],
+    ['server error HTML 503', 503, 'text/html', 'ONLINE_UNAVAILABLE'],
+  ];
+  for (const [name, status, type, body] of cases) {
+    const app = worker({
+      fetchResponse: async () => new Response(body, {
+        status, headers: { 'content-type': type, 'cache-control': 'private, no-store' },
+      }),
+    });
+    const cache = await app.caches.open('axom-shell-current');
+    await cache.put('./index.html', withNetworkUrl(new Response('SAFE_OFFLINE_SHELL', {
+      headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+    }), 'https://app.test/index.html'));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test/reports/view', method: 'GET', mode: 'navigate', headers: new Headers() },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending, name + ': worker must handle navigation');
+    const result = await pending;
+    assert.equal(result.status, status, name + ': do not mask server status');
+    assert.equal(result.headers.get('content-type'), type, name + ': preserve MIME');
+    assert.equal(await result.text(), body, name + ': preserve online body');
+    assert.equal(await (await cache.match('./index.html')).text(), 'SAFE_OFFLINE_SHELL',
+      name + ': do not overwrite canonical offline shell');
+  }
+});
+
+test('R70 genuine network rejection still replays only the validated offline shell', async () => {
+  const app = worker({ fetchResponse: async () => { throw new Error('offline'); } });
+  const cache = await app.caches.open('axom-shell-current');
+  await cache.put('./index.html', withNetworkUrl(new Response('SAFE_OFFLINE_SHELL', {
+    headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+  }), 'https://app.test/index.html'));
+  let pending;
+  app.events.get('fetch')({
+    request: { url: 'https://app.test/private-route', method: 'GET', mode: 'navigate', headers: new Headers() },
+    respondWith: (value) => { pending = value; },
+    waitUntil: () => {},
+  });
+  assert.ok(pending);
+  const result = await pending;
+  assert.equal(result.status, 200);
+  assert.equal(await result.text(), 'SAFE_OFFLINE_SHELL');
+});

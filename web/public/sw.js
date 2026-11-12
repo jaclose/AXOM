@@ -371,7 +371,9 @@ self.addEventListener("fetch", (event) => {
           if (safeOfflineShell(response)) cacheResponse(event, "./index.html", response);
           return response;
         }
-        return (await offlineShell().catch(() => undefined)) || response;
+        // The server answered: preserve status, MIME and body (including errors
+        // and downloads). Cached HTML is only for genuine network failures.
+        return response;
       } catch {
         return (await offlineShell().catch(() => undefined)) || Response.error();
       }
