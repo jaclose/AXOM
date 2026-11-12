@@ -70,7 +70,8 @@ export function verifyTrackerIdentity({source, readback, now = new Date()} = {})
         continue;
       }
       const id = row.activityId;
-      if (!validName(id) || typeof row.sourceSha256 !== "string" || !sha.test(row.sourceSha256)
+      if (!validName(id) || !validName(row.courseId)
+        || typeof row.sourceSha256 !== "string" || !sha.test(row.sourceSha256)
         || !validName(row.term) || !validName(row.module)
         || !["explicit", "unassigned", ...(kind === "installed" ? ["inferred"] : [])].includes(row.weekBasis)
         || (row.weekBasis === "unassigned"
@@ -92,14 +93,15 @@ export function verifyTrackerIdentity({source, readback, now = new Date()} = {})
   for (const [id, original] of expected) {
     const installed = actual.get(id);
     if (!installed) { missing++; continue; }
-    if (original.sourceSha256 !== installed.sourceSha256 || original.term !== installed.term
+    if (original.courseId !== installed.courseId || original.sourceSha256 !== installed.sourceSha256
+      || original.term !== installed.term
       || original.module !== installed.module || original.weekBasis !== installed.weekBasis
       || (original.week ?? null) !== (installed.week ?? null)) mismatched++;
   }
   for (const id of actual.keys()) if (!expected.has(id)) unexpected++;
   if (missing) errors.push(`${missing} original source activity identities are absent from readback.`);
   if (unexpected) errors.push(`${unexpected} installed activity identities lack source membership.`);
-  if (mismatched) errors.push(`${mismatched} canonical activity identities differ in source SHA, term, module, or week.`);
+  if (mismatched) errors.push(`${mismatched} canonical activity identities differ in course, source SHA, term, module, or week.`);
   const identityMatched = errors.length === 0 && blockers.filter(x => x.startsWith("Installed activity receipt")).length === 0;
   return {
     schema: "axom-academic-tracker-identity-audit-v1",
