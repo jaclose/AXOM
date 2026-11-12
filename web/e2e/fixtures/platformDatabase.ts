@@ -15,7 +15,7 @@ export const PLATFORM_USERS = [
 const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" };
 const rpcNames = new Set(["axom_operator_role", "axom_operator_overview", "axom_operator_accounts", "axom_operator_review_queue",
   "axom_operator_reports", "axom_operator_set_role", "axom_operator_set_ai", "axom_operator_resolve_report", "consume_ai_quota",
-  "academic_catalog",
+  "academic_catalog", "academic_community_catalog",
   "academic_is_reviewer", "submit_question_set_library", "withdraw_question_set_library", "review_question_set_library",
   "my_question_set_library", "pending_question_set_library", "set_question_set_library_like",
   "list_question_set_library", "get_question_set_library", "authorize_question_set_library_import", "axom_community_preferences", "axom_save_community_preferences",

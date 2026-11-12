@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
+import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -16,7 +16,12 @@ vi.mock("../lib/operator/hostClient", () => ({
   setOperatorAI: vi.fn(),
   setOperatorRole: vi.fn(),
 }));
-vi.mock("../components/questions/QuestionSetLibraryReviewQueue", () => ({ QuestionSetLibraryReviewQueue: () => null }));
+vi.mock("../components/questions/QuestionSetLibraryReviewQueue", () => ({
+  QuestionSetLibraryReviewQueue: ({ refreshSignal, onReviewed }: { refreshSignal?: number; onReviewed?: () => void }) =>
+    <section data-testid="host-question-set-review" data-refresh={String(refreshSignal ?? 0)}>
+      <button type="button" onClick={onReviewed}>Complete synthetic Question Set review</button>
+    </section>,
+}));
 vi.mock("../components/questions/CommunityUploads", () => ({
   CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) =>
     <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
@@ -138,6 +143,162 @@ describe("Host page authorization and moderation", () => {
     expect(within(overview as HTMLElement).getAllByText("Restricted")).toHaveLength(2);
   });
 
+  it("single-flights two privileged clicks in the same React event batch", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<void>();
+    vi.mocked(loadOperatorDashboard).mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
+    vi.mocked(resolveReport).mockReturnValue(pending.promise);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    // Both native events are delivered before React flushes its busy-state render.
+    act(() => { dismiss.click(); dismiss.click(); });
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve(); });
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+  });
+
+  it("does not prompt for a second destructive action while the first write is pending", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<void>();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));
+    vi.mocked(resolveReport).mockReturnValue(pending.promise);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    const remove = screen.getByRole("button", { name: "Remove post" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    act(() => { dismiss.click(); remove.click(); });
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+    await act(async () => { pending.resolve(); });
+    confirm.mockRestore();
+  });
+
+  it("blocks the next privileged action until a fresh dashboard readback confirms the previous action", async () => {
+    const user = userEvent.setup();
+    const readback = deferred<OperatorDashboard>();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockReturnValueOnce(readback.promise);
+    vi.mocked(resolveReport).mockResolvedValue(undefined);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    await user.click(dismiss);
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Report dismissed and audited.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { readback.resolve({ ...dashboard("moderator"), reports: [] }); });
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
+  });
+
+  it("requires a new role-specific audit receipt and matching account state before reporting success", async () => {
+    const user = userEvent.setup();
+    const target = account("target-account", "Target learner");
+    const initial = { ...dashboard("owner"), accounts: [target] };
+    const updated = {
+      ...dashboard("owner"), accounts: [{ ...target, role: "moderator" as const }],
+      audit: [{
+        id: "synthetic-new-audit", actor_id: "verified-account", target_id: target.user_id,
+        action: "account.role", metadata: { assigned: "moderator", reason: "Reviewed requested role change" },
+        created_at: "2026-11-12T00:00:00.000Z",
+      }],
+    };
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce({ ...initial, accounts: [{ ...target, role: "moderator" as const }] })
+      .mockResolvedValue(updated);
+    vi.mocked(setOperatorRole).mockResolvedValue(undefined);
+    render(<HostPage />);
+    await screen.findByText("Target learner");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Role" }), "moderator");
+    await user.type(screen.getByRole("textbox", { name: /Reason for changing Target learner/ }), "Reviewed requested role change");
+    await user.click(screen.getByRole("button", { name: "Apply role" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Role updated and audited.")).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("did not confirm");
+    await user.click(screen.getByRole("button", { name: "Retry Host" }));
+    expect(await screen.findByText("Role updated and audited.")).toBeTruthy();
+    expect(setOperatorRole).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds a successful transport response when the Host readback contradicts the requested report resolution", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
+    vi.mocked(resolveReport).mockResolvedValue(undefined);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    await user.click(dismiss);
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Report dismissed and audited.")).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("did not confirm");
+    expect((screen.getByRole("button", { name: "Dismiss report" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Retry Host" }));
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds an ambiguous failed write through readback failure until explicit successful verification", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockRejectedValueOnce(new Error("Readback offline"))
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
+    vi.mocked(resolveReport)
+      .mockRejectedValueOnce(new Error("Lost acknowledgement"))
+      .mockResolvedValue(undefined);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    await user.click(dismiss);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Readback offline");
+    expect(alert.textContent).toContain("may have been applied");
+    expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    const verify = screen.getByRole("button", { name: "Retry Host" }) as HTMLButtonElement;
+    expect(verify.disabled).toBe(false);
+    await user.click(verify);
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+    expect((await screen.findByRole("alert")).textContent).toContain("Lost acknowledgement");
+    expect(await screen.findByRole("button", { name: "Dismiss report" })).toBeTruthy();
+    expect(resolveReport).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Dismiss report" }));
+    await waitFor(() => expect(resolveReport).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+  });
+
+  it("unlocks a failed privileged write so an operator can retry safely", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard).mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValueOnce(dashboard("moderator"))
+      .mockResolvedValue({ ...dashboard("moderator"), reports: [] });
+    vi.mocked(resolveReport)
+      .mockRejectedValueOnce(new Error("Connection lost"))
+      .mockResolvedValueOnce(undefined);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    await user.type(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/ }), "Documented false report");
+    await user.click(dismiss);
+    expect((await screen.findByRole("alert")).textContent).toContain("Connection lost");
+    // The verified refresh replaces the old controls, so retry on the current snapshot.
+    await user.click(await screen.findByRole("button", { name: "Dismiss report" }));
+    await waitFor(() => expect(resolveReport).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
+  });
+
   it("requires a reason before a moderator can dismiss a reported post", async () => {
     const user = userEvent.setup();
     vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("moderator"));
@@ -168,6 +329,26 @@ describe("Host page authorization and moderation", () => {
     expect(screen.queryByText("Share a course")).toBeNull();
     await user.click(within(review).getByRole("button", { name: "Complete synthetic academic review" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Academic course review recorded. Checking Host queues.")).toBeTruthy();
+    // Review callbacks must use the same version generator as manual Host refresh.
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+  });
+
+  it("refreshes standalone Question Set reviewer permissions from Host and Host after a completed decision", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("owner"));
+    render(<HostPage />);
+    await screen.findByRole("heading", { name: "Attention queue" });
+    const reviewQueue = () => screen.getByTestId("host-question-set-review");
+    expect(reviewQueue().getAttribute("data-refresh")).toBe("0");
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(reviewQueue().getAttribute("data-refresh")).toBe("1"));
+    await user.click(within(reviewQueue()).getByRole("button", { name: "Complete synthetic Question Set review" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("Question Set review recorded. Checking Host queues.")).toBeTruthy();
+    await waitFor(() => expect(reviewQueue().getAttribute("data-refresh")).toBe("2"));
   });
 
 });

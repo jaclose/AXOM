@@ -404,7 +404,7 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet, reviewOnly = fa
       <span className="qb-eyebrow">{reviewOnly ? "Host / academic content" : "Shared by learners"}</span>
       <h2>{reviewOnly ? "Review course uploads" : "Community Uploads"}</h2>
       <p>{reviewOnly
-        ? "Inspect each source, answer, figure and explanation before deciding on its exact submission. Host ownership alone never authorizes academic approval."
+        ? "Preview is read-only. Importing an unreviewed revision for full inspection changes your private AXOM library and requires confirmation. Host ownership alone never authorizes academic approval."
         : "Discover standalone Question Sets and courses shared by learners. Question Sets enter search only after academic review; community courses remain visibly Unreviewed until approved."}</p>
     </header>
 
@@ -440,7 +440,10 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet, reviewOnly = fa
               <p className="community-warning">Community material has not been approved by an AXOM reviewer. Check its sources before relying on it.</p>
               <div className="community-actions">
                 <GButton disabled={Boolean(busyId)} onClick={() => void loadPreview(row)}>Preview course</GButton>
-                <GButton disabled={Boolean(busyId)} onClick={() => void download(row)}><BookOpen size={ICON_SIZE.body} /> {busyId === row.id ? "Checking…" : reviewOnly ? "Open revision for review" : "Download to practice"}</GButton>
+                <GButton disabled={Boolean(busyId) || (reviewOnly && (!reviewerReady || !reviewer))} onClick={() => {
+                  if (reviewOnly && !window.confirm("Import this unreviewed course into your private AXOM library for detailed academic review? This saves questions and source references to your personal workspace. Preview course is read-only.")) return;
+                  void download(row);
+                }}><BookOpen size={ICON_SIZE.body} /> {busyId === row.id ? "Checking…" : reviewOnly ? "Import into my library for review" : "Download to practice"}</GButton>
                 {downloaded?.accountId === accountId && downloaded.revisionId === row.current_revision_id && <GButton onClick={onOpenLibrary}>Open saved questions <ArrowUpRight size={ICON_SIZE.body} /></GButton>}
                 {row.owned && !reviewOnly && <GButton disabled={Boolean(busyId)} onClick={() => void withdraw(row)}>{withdrawId === row.id ? "Confirm withdraw" : "Withdraw"}</GButton>}
                 {!reviewOnly && withdrawId === row.id && <GButton onClick={() => setWithdrawId("")}>Cancel</GButton>}
