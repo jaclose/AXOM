@@ -1,0 +1,97 @@
+{
+  "date": "2026-11-12",
+  "build": "018",
+  "source_file_pages": 8,
+  "actual_images_embedded": 0,
+  "rights_policy": "No redistribution until creator, diagnosis, specimen, privacy and per-file license review complete",
+  "records": [
+    {
+      "disease_id": "AXOM-EYE-001",
+      "visual": "optic disc glaucomatous cupping",
+      "url": "https://commons.wikimedia.org/wiki/File:Glaukompapille2.jpg",
+      "claimed_creator": "Snoop",
+      "stated_license": "CC BY-SA 3.0",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    },
+    {
+      "disease_id": "AXOM-EYE-003",
+      "visual": "macular degeneration fundus",
+      "url": "https://commons.wikimedia.org/wiki/File:MacularDegenerationFundus.jpg",
+      "claimed_creator": "Tmhlee",
+      "stated_license": "CC BY-SA 3.0",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    },
+    {
+      "disease_id": "AXOM-EYE-003",
+      "visual": "intermediate age-related macular degeneration",
+      "url": "https://commons.wikimedia.org/wiki/File:Intermediate_age_related_macular_degeneration.jpg",
+      "claimed_creator": "US National Eye Institute (stated)",
+      "stated_license": "public domain claimed; provenance confirmation outstanding",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    },
+    {
+      "disease_id": "AXOM-EYE-004",
+      "visual": "diabetic retinopathy fundus",
+      "url": "https://commons.wikimedia.org/wiki/File:Fundus_-_diabetic_retinopathy.png",
+      "claimed_creator": "Hao and collaborators, PLOS ONE 2022 Figure 1A",
+      "stated_license": "CC BY 4.0 stated",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    },
+    {
+      "disease_id": "AXOM-EYE-008",
+      "visual": "corneal ulcer H&E low magnification; bacterial cause NOT confirmed",
+      "url": "https://commons.wikimedia.org/wiki/File:Corneal_ulcer_--_low_mag.jpg",
+      "claimed_creator": "Nephron",
+      "stated_license": "CC BY-SA 3.0",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    },
+    {
+      "disease_id": "AXOM-EYE-008",
+      "visual": "corneal ulcer H&E intermediate magnification; bacterial cause NOT confirmed",
+      "url": "https://commons.wikimedia.org/wiki/File:Corneal_ulcer_--_intermed_mag.jpg",
+      "claimed_creator": "Nephron",
+      "stated_license": "CC BY-SA 3.0",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    },
+    {
+      "disease_id": "AXOM-EYE-008",
+      "visual": "clinical corneal ulcer source labels bacterial superinfection",
+      "url": "https://commons.wikimedia.org/wiki/File:Corneal_Ulcer.png",
+      "claimed_creator": "Yoanmb",
+      "stated_license": "CC BY-SA 4.0",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    },
+    {
+      "disease_id": "AXOM-EYE-012",
+      "visual": "slit-lamp view of cataract",
+      "url": "https://commons.wikimedia.org/wiki/File:Slit_lamp_view_of_Cataract_in_Human_Eye.png",
+      "claimed_creator": "Rakesh Ahuja MD",
+      "stated_license": "CC BY-SA 2.5",
+      "redistribution": "NOT CLEARED; source link only",
+      "patient_privacy": "NOT CONFIRMED",
+      "original_binary": "not retrieved or hashed",
+      "diagnosis_verification": "source page description only; independent specialist verification pending"
+    }
+  ]
+}
