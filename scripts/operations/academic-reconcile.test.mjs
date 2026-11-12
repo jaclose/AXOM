@@ -331,7 +331,7 @@ test("source-declared Tracker module/term scope holds foreign substitutions at a
     assert.equal(result.counts.reportedTrackerActivities, 2, label);
     assert.equal(result.complete, false, label);
     assert.ok(result.blockers.some(message =>
-      message.includes("FTM 1") && message.includes("1/2")), JSON.stringify(result.blockers));
+      message.includes("scope #1") && message.includes("1/2")), JSON.stringify(result.blockers));
   }
 
   // Multiple source templates may intentionally contribute activities to one scope.
@@ -369,7 +369,7 @@ test("source-declared Tracker weeks reject same-module wrong-week and basis subs
     const result = run({ inventory, tracker: mutated });
     assert.equal(result.complete, false, label);
     assert.ok(result.blockers.some(message => message.includes("Tracker source week")
-      && message.includes("T1/FTM 1") && message.includes("3")),
+      && message.includes("scope #1") && message.includes("3")),
       `${label}: ${JSON.stringify(result.blockers)}`);
   }
 });
@@ -1405,4 +1405,26 @@ test("R44 RED: matching original and cloud course proof cannot be transplanted i
   assert.equal(result.complete, false);
   assert.equal(result.counts.trackerIdentityVerified, false);
   assert.ok(result.blockers.some(message => message.includes("Tracker readback does not match")));
+});
+
+test("R45 RED: producer-controlled course labels and malformed cloud counts cannot leak through academic diagnostics", () => {
+  const secrets = ["PRIVATE_TERM_DO_NOT_REPORT", "PRIVATE_MODULE_DO_NOT_REPORT",
+    "PRIVATE_STORED_COUNT_DO_NOT_REPORT", "PRIVATE_REVIEW_COUNT_DO_NOT_REPORT",
+    "PRIVATE_FIGURE_COUNT_DO_NOT_REPORT"];
+  const inventory = fixture();
+  inventory.summary.templates = [{ term: secrets[0], module: secrets[1], week: 2, items: 2 }];
+  const cloud = receipts();
+  cloud.sources[0].questionCount = secrets[2];
+  cloud.sources[0].reviewCount = secrets[3];
+  cloud.sources[0].figureReferences = secrets[4];
+  const sources = dispositions();
+  sources.sources[0].figureReferences = 1;
+  const result = run({ inventory, dispositions: sources, receipts: cloud });
+  const json = JSON.stringify(result);
+  assert.equal(result.complete, false);
+  assert.ok(result.blockers.some(message => message.includes("Tracker source scope")));
+  assert.ok(result.errors.some(message => message.includes("Figure count mismatch")));
+  assert.ok(result.errors.some(message => message.includes("Ready/stored mismatch")));
+  assert.ok(result.errors.some(message => message.includes("Review/stored mismatch")));
+  for (const secret of secrets) assert.equal(json.includes(secret), false, `Leaked untrusted source value: ${secret}`);
 });

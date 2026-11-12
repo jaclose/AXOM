@@ -226,7 +226,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         if (!receipt?.bankReadbackVerified || receipt.ownerAuthenticated !== true || receipt.figureReadbackVerified !== true) {
           blockers.push(`Figure-bearing source ${hash.slice(0, 12)} lacks authenticated image-byte readback.`);
         } else if (receipt.figureReferences !== declaredFigures) {
-          errors.push(`Figure count mismatch ${hash.slice(0, 12)}: expected ${declaredFigures}, read ${receipt.figureReferences ?? "unknown"}`);
+          errors.push(`Figure count mismatch ${hash.slice(0, 12)}: expected ${declaredFigures}, read ${safeCount(receipt.figureReferences)}`);
         } else verifiedFigureReferences += declaredFigures;
       }
     }
@@ -239,8 +239,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     }
     const readyCountMatches = receipt.questionCount === row.readyCount;
     const reviewCountMatches = integer(receipt.reviewCount) && receipt.reviewCount === row.reviewCount;
-    if (!readyCountMatches) errors.push(`Ready/stored mismatch ${hash.slice(0, 12)}: ${row.readyCount ?? "unknown"} ready, ${receipt.questionCount} stored`);
-    if (!reviewCountMatches) errors.push(`Review/stored mismatch ${hash.slice(0, 12)}: ${row.reviewCount ?? "unknown"} review, ${receipt.reviewCount ?? "unknown"} stored`);
+    if (!readyCountMatches) errors.push(`Ready/stored mismatch ${hash.slice(0, 12)}: ${safeCount(row.readyCount)} ready, ${safeCount(receipt.questionCount)} stored`);
+    if (!reviewCountMatches) errors.push(`Review/stored mismatch ${hash.slice(0, 12)}: ${safeCount(row.reviewCount)} review, ${safeCount(receipt.reviewCount)} stored`);
     if (readyCountMatches && reviewCountMatches) verifiedReadyQuestions += receipt.questionCount;
   }
   // A missing or malformed template denominator is unknown, not an empty
@@ -286,18 +286,18 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       const prior = declaredScopes.get(key);
       declaredScopes.set(key, { term, module: template.module, items: (prior?.items ?? 0) + template.items });
     }
-    for (const scope of declaredScopes.values()) {
+    for (const [scopeOrdinal, scope] of [...declaredScopes.values()].entries()) {
       const actual = [...tmap.values()].filter(row =>
         row.module === scope.module && (scope.term === null || row.term === scope.term)).length;
       if (actual !== scope.items) {
-        blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has ${actual}/${scope.items} activity identities; source-template membership is not verified.`);
+        blockers.push(`Tracker source scope #${scopeOrdinal + 1} has ${actual}/${safeCount(scope.items)} activity identities; source-template membership is not verified.`);
       }
     }
     if (templateEntries.some(entry => typeof entry.module !== "string" || !entry.module.trim()))
       warnings.push("Some Tracker template rows lack source-declared module scope; only their aggregate activity count is verifiable.");
     // Only a complete, explicitly source-filed term/module cohort can certify
     // exact source-week membership. Do not infer weeks from installed receipts.
-    for (const scope of declaredScopes.values()) {
+    for (const [scopeOrdinal, scope] of [...declaredScopes.values()].entries()) {
       const matching = templateEntries.filter(entry => entry.module === scope.module
         && (scope.term === null || entry.term === scope.term));
       const weekly = matching.filter(entry => entry.week !== undefined && entry.week !== null);
@@ -307,21 +307,21 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         && entry.weekBasis === "unassigned");
       if (!weekly.length && !sourceUnassigned.length) {
         if (matching.some(entry => entry.weekBasis === "explicit")) {
-          blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has invalid source-week evidence; explicit filing requires a numeric week.`);
+          blockers.push(`Tracker source scope #${scopeOrdinal + 1} has invalid source-week evidence; explicit filing requires a numeric week.`);
         } else {
-          warnings.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has no source-declared week; week membership is unverified.`);
+          warnings.push(`Tracker source scope #${scopeOrdinal + 1} has no source-declared week; week membership is unverified.`);
         }
         continue;
       }
       const ambiguous = !scope.term || templateEntries.some(entry =>
         !entry.module || (entry.module === scope.module && (!entry.term || !String(entry.term).trim())));
       if (ambiguous || weekly.length + sourceUnassigned.length !== matching.length) {
-        blockers.push(`Tracker source scope ${scope.term ? scope.term + "/" : ""}${scope.module} has a partial source-week census; cannot certify exact week membership.`);
+        blockers.push(`Tracker source scope #${scopeOrdinal + 1} has a partial source-week census; cannot certify exact week membership.`);
         continue;
       }
       if (weekly.some(entry => !validWeek(entry.week)
         || (entry.weekBasis !== undefined && entry.weekBasis !== "explicit"))) {
-        blockers.push(`Tracker source scope ${scope.term}/${scope.module} has invalid source-week evidence; require explicit positive week numbers and source-based filing.`);
+        blockers.push(`Tracker source scope #${scopeOrdinal + 1} has invalid source-week evidence; require explicit positive week numbers and source-based filing.`);
         continue;
       }
       const declaredWeeks = new Map();
@@ -331,7 +331,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
           row.term === scope.term && row.module === scope.module
           && row.weekBasis === "explicit" && row.week === week).length;
         if (actual !== expected) {
-          blockers.push(`Tracker source week ${scope.term}/${scope.module}/${week} has ${actual}/${expected} explicitly filed activity identities; source-week membership is not verified.`);
+          blockers.push(`Tracker source week in scope #${scopeOrdinal + 1}, week ${validWeek(week) ? week : "invalid"} has ${actual}/${expected} explicitly filed activity identities; source-week membership is not verified.`);
         }
       }
       if (sourceUnassigned.length) {
@@ -340,7 +340,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
           row.term === scope.term && row.module === scope.module
           && row.weekBasis === "unassigned" && (row.week === undefined || row.week === null)).length;
         if (actual !== expected) {
-          blockers.push(`Tracker source-unassigned cohort ${scope.term}/${scope.module} has ${actual}/${expected} activity identities; source-week membership is not verified.`);
+          blockers.push(`Tracker source-unassigned cohort in scope #${scopeOrdinal + 1} has ${actual}/${expected} activity identities; source-week membership is not verified.`);
         }
       }
     }
