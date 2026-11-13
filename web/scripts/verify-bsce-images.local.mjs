@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { chromium } from "@playwright/test";
+import process from "node:process";
 
 const zipPath = process.env.AXOM_BSCE_LOCAL_ZIP;
 if (!zipPath) throw new Error("AXOM_BSCE_LOCAL_ZIP required");
@@ -27,20 +28,20 @@ try {
   const decoded = await page.evaluate(async (images) => {
     const checks = [];
     for (const image of images) {
-      const raw = atob(image.base64);
+      const raw = globalThis.atob(image.base64);
       const bytes = Uint8Array.from(raw, character => character.charCodeAt(0));
-      const blob = new Blob([bytes], { type: "image/jpeg" });
-      const bitmap = await createImageBitmap(blob);
+      const blob = new globalThis.Blob([bytes], { type: "image/jpeg" });
+      const bitmap = await globalThis.createImageBitmap(blob);
       const actual = { width: bitmap.width, height: bitmap.height };
       bitmap.close();
       if (actual.width !== image.width || actual.height !== image.height) throw new Error("Bitmap size mismatch " + image.name);
-      const url = URL.createObjectURL(blob);
+      const url = globalThis.URL.createObjectURL(blob);
       try {
-        const element = new Image();
+        const element = new globalThis.Image();
         element.src = url;
         await element.decode();
         if (element.naturalWidth !== image.width || element.naturalHeight !== image.height) throw new Error("HTMLImageElement size mismatch " + image.name);
-      } finally { URL.revokeObjectURL(url); }
+      } finally { globalThis.URL.revokeObjectURL(url); }
       checks.push({ q: image.number, name: image.name, ...actual });
     }
     return checks;
