@@ -80,6 +80,9 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [sets, setSets] = useState<LibraryQuestionSet[]>([]);
+  // Discovery rows include the viewer's like state. An A → B render must
+  // never display A's rows while the account-change reset effect is pending.
+  const [listingAccountId, setListingAccountId] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [more, setMore] = useState(false);
@@ -109,7 +112,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   useEffect(() => {
     cancelPendingPreview();
     setQuery({ owner: accountId, input: "", search: "" });
-    setSets([]); setPreview(undefined); setPreviewAccountId(undefined);
+    setSets([]); setListingAccountId(undefined); setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
     setLiking(undefined); setOffset(0);
   }, [accountId]);
@@ -123,7 +126,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   useEffect(() => {
     let alive = true;
     if (!accountId) {
-      setSets([]); setMore(false); setLoading(false); setError("");
+      setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
       return;
     }
     // Search results carry account-specific like state. A sign-out and
@@ -131,13 +134,14 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     // effect cleanup alone cannot invalidate the earlier response.
     const session = observeAccountSession(accountId, () => {
       if (!alive) return;
-      setSets([]); setMore(false); setLoading(false); setError("");
+      setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
     });
     if (!session.current()) {
       session.stop();
-      setSets([]); setMore(false); setLoading(false); setError("");
+      setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
       return;
     }
+    setListingAccountId(accountId);
     if (offset === 0) setSets([]);
     setLoading(true); setError("");
     void searchQuestionSetLibrary(accountId, search, offset).then(page => {
@@ -301,6 +305,13 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     }
   }
 
+  // Render-time ownership gating protects the committed DOM *before* passive
+  // effects can clear account A's cached result, error and pagination state.
+  const visibleListing = Boolean(accountId && listingAccountId === accountId
+    && useAccount.getState().user?.id === accountId);
+  const visibleSets = visibleListing ? sets : [];
+  const visibleLoading = visibleListing && loading;
+  const visibleError = visibleListing ? error : "";
   const activePreview = accountId && previewAccountId === accountId
     && useAccount.getState().user?.id === accountId ? preview : undefined;
   // The modal shows only three questions, but source coverage must reflect
@@ -339,7 +350,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   return <GlassCard pad className="qsl-library">
     <PanelHeader headingLevel={2} title="Find a Question Set"
       sub="Learner sets beyond AXOM's course collection. Each is reviewed before listing."
-      action={<GButton size="sm" disabled={!accountId || loading} onClick={() => { setOffset(0); setRefresh(value => value + 1); }}>
+      action={<GButton size="sm" disabled={!accountId || visibleLoading} onClick={() => { setOffset(0); setRefresh(value => value + 1); }}>
         <RefreshCw size={16} aria-hidden="true" /> Refresh
       </GButton>} />
     {!accountId ? <p>Sign in through Account to search and save learner Question Sets.</p> : <>
@@ -350,12 +361,12 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
           owner: accountId, input: event.target.value,
           search: current.owner === accountId ? current.search : "",
         }))} placeholder="Search title, topic or contributor" />
-        <GButton size="sm" type="submit" disabled={loading}>Search</GButton>
+        <GButton size="sm" type="submit" disabled={visibleLoading}>Search</GButton>
       </form>
-      {loading && <p role="status">Loading Question Sets…</p>}
-      {error && <p role="alert" className="qsl-error">{error}</p>}
-      {!loading && !error && sets.length === 0 && <div className="qsl-empty"><BookOpen size={24} aria-hidden="true" /><b>No sets found</b><p>Try another topic. Approved learner sets will appear here.</p></div>}
-      <div className="qsl-grid">{sets.map(set => <article key={set.id} className="qsl-card">
+      {visibleLoading && <p role="status">Loading Question Sets…</p>}
+      {visibleError && <p role="alert" className="qsl-error">{visibleError}</p>}
+      {visibleListing && !visibleLoading && !visibleError && visibleSets.length === 0 && <div className="qsl-empty"><BookOpen size={24} aria-hidden="true" /><b>No sets found</b><p>Try another topic. Approved learner sets will appear here.</p></div>}
+      <div className="qsl-grid">{visibleSets.map(set => <article key={set.id} className="qsl-card">
         <div className="qsl-card-top"><span>LEARNER COLLECTION</span><Tag tone="neutral">{set.questionCount} {set.questionCount === 1 ? "question" : "questions"}</Tag></div>
         <h3>{set.title}</h3>
         <p>{set.credit ? `By ${set.credit}` : "Shared by an AXOM learner"}</p>
@@ -367,7 +378,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             aria-pressed={set.liked} onClick={() => void like(set)}><Heart size={16} fill={set.liked ? "currentColor" : "none"} aria-hidden="true" /> {set.likes}</GhostButton>
         </div>
       </article>)}</div>
-      {more && <GButton disabled={loading} onClick={() => setOffset(value => value + 24)}>Load more sets</GButton>}
+      {visibleListing && more && <GButton disabled={visibleLoading} onClick={() => setOffset(value => value + 24)}>Load more sets</GButton>}
       <p className="sub">Import copies the reviewed listing into your private AXOM. It does not connect your attempts, notes or files to the contributor.</p>
     </>}
     {(opening || activePreview || previewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => {

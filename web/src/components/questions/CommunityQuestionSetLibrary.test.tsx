@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
@@ -224,6 +225,44 @@ describe("Community Question Set Library", () => {
     fireEvent.click(topics);
     expect(topics.closest("details")?.open).toBe(true);
     expect(mock.commit).toHaveBeenCalledOnce();
+  });
+
+  it("redacts previous-account discovery rows and liked state in the first B commit", async () => {
+    const privateA = { ...summary, title: "Account A private liked set", liked: true, likes: 9 };
+    const publicB = { ...summary, id: "00000000-0000-4000-8000-000000000022",
+      title: "Account B approved set", liked: false, likes: 0 };
+    mock.search.mockResolvedValueOnce([privateA]);
+    let resolveB!: (value: typeof summary[]) => void;
+    mock.search.mockImplementationOnce(() => new Promise(resolve => { resolveB = resolve; }));
+    const leakedCommits: string[] = [];
+    const recordCommit = () => {
+      if (mock.accountId !== "account-2") return;
+      const listing = document.querySelector(".qsl-grid")?.textContent ?? "";
+      if (listing.includes(privateA.title)) leakedCommits.push(listing);
+    };
+    const view = render(<Profiler id="community-discovery" onRender={recordCommit}>
+      <CommunityQuestionSetLibrary />
+    </Profiler>);
+    await screen.findByRole("heading", { name: privateA.title });
+    expect(screen.getByRole("button", { name: `Unlike ${privateA.title}` }).getAttribute("aria-pressed")).toBe("true");
+
+    // The Profiler examines committed DOM before passive effects can clear A's
+    // cached listing. No A title or like control may be visible in B's render.
+    act(() => {
+      mock.accountId = "account-2";
+      view.rerender(<Profiler id="community-discovery" onRender={recordCommit}>
+        <CommunityQuestionSetLibrary />
+      </Profiler>);
+    });
+    expect(leakedCommits).toEqual([]);
+    expect(screen.queryByRole("heading", { name: privateA.title })).toBeNull();
+    expect(screen.queryByRole("button", { name: `Unlike ${privateA.title}` })).toBeNull();
+    await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-2", "", 0));
+    await act(async () => { resolveB([publicB]); });
+    expect(await screen.findByRole("heading", { name: publicB.title })).toBeTruthy();
+    expect(screen.getByRole("button", { name: `Like ${publicB.title}` }).getAttribute("aria-pressed")).toBe("false");
+    expect(leakedCommits).toEqual([]);
+    expect(mock.like).not.toHaveBeenCalled();
   });
 
   it("never reuses a previous account's search term or input during an account switch", async () => {
