@@ -43,8 +43,13 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
   if (candidate.week !== undefined && (!Number.isSafeInteger(candidate.week) || (candidate.week as number) < 1)) {
     return invalid("The saved course selection has an invalid week.");
   }
+  if (candidate.courseId !== undefined
+    && (typeof candidate.courseId !== "string" || !candidate.courseId.trim())) {
+    return invalid("The saved course selection has an invalid course identifier.");
+  }
   if (candidate.setIds !== undefined && (!Array.isArray(candidate.setIds)
     || candidate.setIds.length > MAX_SELECTION
+    || new Set(candidate.setIds).size !== candidate.setIds.length
     || candidate.setIds.some((id: unknown) => typeof id !== "string" || !id.trim()))) {
     return invalid("The saved course selection has invalid collection identifiers.");
   }
