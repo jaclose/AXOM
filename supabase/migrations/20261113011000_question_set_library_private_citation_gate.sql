@@ -27,6 +27,12 @@ begin
   -- must still be rejected. Avoid scanning all URL path/query components
   -- as if they were device-local file references.
   for v_pass in 0..3 loop
+    -- A public HTTP(S) URL can still disclose authentication credentials
+    -- or an email identifier through its authority userinfo. Detect that
+    -- before exempting ordinary public URL paths and query parameters.
+    if v_value ~* $userinfo$https?://[^[:space:]/?#<>"'|;,]+@$userinfo$ then
+      return true;
+    end if;
     v_without_public_urls := pg_catalog.regexp_replace(
       v_value, $url$https?://[^[:space:]<>"'|;,]+$url$, ' ', 'gi');
     -- Recognize arbitrary absolute POSIX roots, slash-style UNC locations,
@@ -88,7 +94,7 @@ begin
     loop
       if pg_catalog.jsonb_typeof(v_question->'citation') = 'string'
          and private.question_set_library_has_private_citation(v_question->>'citation') then
-        raise exception 'Question Set citation contains a private local file path'
+        raise exception 'Question Set citation contains a private local file path or URL credentials'
           using errcode = '22023';
       end if;
     end loop;

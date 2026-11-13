@@ -116,6 +116,11 @@ describe("Question Set share boundary", () => {
     ["arbitrary absolute folder", "source:/unpublished/private.pdf"],
     ["slash-style network share", "//campus-server/share/private.pdf"],
     ["encoded arbitrary root", "source%3A%2Froot%2Fprivate.pdf"],
+    ["URL basic-auth password", "https://learner:private-password@example.edu/lesson"],
+    ["URL email identity", "https://learner@example.edu/lesson"],
+    ["percent-encoded userinfo", "https://learner%3Asecret%40example.edu/lesson"],
+    ["percent-encoded URL and authority", "https%3A%2F%2Flearner%40example.edu%2Flesson"],
+    ["nested userinfo URL in query", "https://example.edu/redirect?to=https://learner:secret@other.edu/lesson"],
   ])("refuses %s citation in a new public snapshot without modifying source evidence", (_label, citation) => {
     const source = question("q1", { citation });
     const before = JSON.stringify(source);
@@ -129,6 +134,9 @@ describe("Question Set share boundary", () => {
     "https://example.edu/research?source=/home/public-notes",
     "https://example.edu/tmp/lecture.pdf",
     "DOI:10.1000/abc",
+    "https://example.edu/paper?q=learner@example.edu",
+    "https://example.edu/@editor/chapter",
+    "https://example.edu/paper#author@university",
   ])("preserves public path-like sources (%s)", citation => {
     const value = createQuestionSetShare(questionSet(), [question("q1", { citation })], NOW);
     expect(value.questions[0].citation).toBe(citation);

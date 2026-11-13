@@ -122,7 +122,7 @@ export function createQuestionSetShare(
     // private filesystem or document locations. Require a public source
     // reference instead of silently removing provenance.
     if (hasPrivateDeviceCitation(question.citation)) {
-      throw new Error("Question Set citation contains a private local file path and cannot be shared safely.");
+      throw new Error("Question Set citation contains a private local file path or URL credentials and cannot be shared safely.");
     }
     byId.set(question.id, question);
   }
@@ -470,6 +470,9 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
 // Keep the new-publication client admission aligned with the staged SQL gate.
 // A public URL may contain paths in its query; a separate labeled local path
 // after that URL is still private. Historical snapshots are not revalidated.
+// HTTP(S) URL authority userinfo may contain a password or private email.
+// Never hide it behind the public-URL exemption, including nested URLs.
+const PRIVATE_HTTP_CITATION_USERINFO = /https?:\/\/[^\s/?#<>"'|;,]+@/i;
 const PUBLIC_HTTP_CITATION_URL = /https?:\/\/[^\s<>"'|;,]+/gi;
 const PRIVATE_DEVICE_CITATION = /(?:^|[^a-z0-9/@])(?:file:\/+|content:\/\/|\/\/[^\s\x2f]+\/|\/[a-z0-9._~-]+(?:\/|$)|~\/|[a-z]:[\\/])|\\\\/i;
 
@@ -480,6 +483,7 @@ export function hasPrivateDeviceCitation(citation: string | undefined): boolean 
   // Apply at most three ASCII percent-decoding rounds. PostgreSQL preserves
   // percent-encoded UTF-8 octets, and fails closed on controls/oversized input.
   for (let pass = 0; pass <= 3; pass += 1) {
+    if (PRIVATE_HTTP_CITATION_USERINFO.test(value)) return true;
     const withoutPublicUrls = value.replace(PUBLIC_HTTP_CITATION_URL, " ");
     if (PRIVATE_DEVICE_CITATION.test(withoutPublicUrls)) return true;
     if (pass === 3) break;

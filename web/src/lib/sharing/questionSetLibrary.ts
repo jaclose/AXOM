@@ -189,7 +189,7 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   // privacy check. Enforce it at the final new-submission RPC boundary.
   // Historical approved sets remain readable/importable unchanged.
   if (snapshot.questions.some(question => hasPrivateDeviceCitation(question.citation)))
-    throw new Error("Question Set citation contains a private local file path and cannot be published.");
+    throw new Error("Question Set citation contains a private local file path or URL credentials and cannot be published.");
   if (!snapshot.questions.length || snapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
   return withAccount(accountId, async client => {
