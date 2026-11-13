@@ -331,6 +331,15 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     // without a blobKey can still identify a distinct image by attachment ID.
     const normalized = extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64: "AA==" }] });
     if (normalized.length !== 1) throw new Error("The backup contains an invalid or missing image record.");
+    // Validate the actual archive bytes, not only metadata, before handing
+    // workspace JSON to the caller. Use the export-side image predicates so
+    // ZIP imports cannot silently accept media that a new export would hold.
+    const imageBytes = await zip.file(item.file)!.async("uint8array");
+    const { mimeType, byteSize } = normalized[0];
+    if (imageBytes.byteLength !== byteSize || !hasExpectedImageStructure(imageBytes, mimeType)
+      || (mimeType === "image/png" && !(await hasInflatablePngImageData(imageBytes)))) {
+      throw new Error("A backup image failed its integrity check. No workspace data has been changed.");
+    }
     // One stored image per immutable key and archive path: reject aliases
     // before exposing workspace metadata for adoption.
     if (mediaFiles.has(item.file) || mediaKeys.has(normalized[0].blobKey)) {
