@@ -426,6 +426,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Conditional public assets preserve server validators and 304/412 status.
+  // Keep navigation in AXOM's offline recovery handler above this guard.
+  if (["if-none-match", "if-match", "if-modified-since", "if-unmodified-since"]
+    .some((header) => request.headers?.has?.(header))) return;
+
   // Query-string access tokens and signatures must never reach shared cache reads.
   if (!hasOnlyPublicAssetVersion(url)) return;
 

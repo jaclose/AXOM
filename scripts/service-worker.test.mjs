@@ -2056,3 +2056,62 @@ test('R73 byte-range public asset requests bypass SW cache while ordinary GET re
   assert.equal(await (await cache.match(icon)).text(), 'FULL_CACHED_ICON',
     'Range requests must not alter cached public content');
 });
+
+test('R97 conditional public asset validators bypass SW cache while ordinary GET remains offline-capable', async () => {
+  const app = worker();
+  const url = 'https://app.test/icon-192.png';
+  const cache = await app.caches.open('axom-shell-current');
+  await cache.put(url, withNetworkUrl(new Response('CACHED_PUBLIC_ICON', {
+    headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+  }), url));
+
+  for (const [header, value] of [
+    ['If-None-Match', '"icon-revision-a"'],
+    ['If-Match', '"icon-revision-a"'],
+    ['If-Modified-Since', 'Wed, 11 Nov 2026 12:00:00 GMT'],
+    ['If-Unmodified-Since', 'Wed, 11 Nov 2026 12:00:00 GMT'],
+  ]) {
+    let intercepted = false;
+    app.events.get('fetch')({
+      request: { url, method: 'GET', mode: 'same-origin', cache: 'default',
+        headers: new Headers({ [header]: value }) },
+      respondWith: () => { intercepted = true; },
+      waitUntil: () => {},
+    });
+    assert.equal(intercepted, false, header + ': preserve browser/server 304 and 412 semantics');
+    assert.equal(await (await cache.match(url)).text(), 'CACHED_PUBLIC_ICON',
+      header + ': conditional request must not mutate the existing offline asset');
+  }
+
+  let response;
+  app.events.get('fetch')({
+    request: { url, method: 'GET', mode: 'same-origin', cache: 'default', headers: new Headers() },
+    respondWith: (value) => { response = value; },
+    waitUntil: () => {},
+  });
+  assert.ok(response, 'unconditional GET must remain intercepted for offline replay');
+  assert.equal(await (await response).text(), 'CACHED_PUBLIC_ICON');
+});
+
+test('R97 conditional SPA navigation retains validated offline shell on a real network failure', async () => {
+  for (const [header, value] of [
+    ['If-None-Match', '"shell-etag"'],
+    ['If-Modified-Since', 'Wed, 11 Nov 2026 12:00:00 GMT'],
+  ]) {
+    const app = worker({ fetchResponse: async () => { throw new Error('offline'); } });
+    const cache = await app.caches.open('axom-shell-current');
+    await cache.put('./index.html', withNetworkUrl(new Response('SAFE_OFFLINE_SHELL', {
+      headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+    }), 'https://app.test/index.html'));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test/saved-work', method: 'GET', mode: 'navigate',
+        headers: new Headers({ [header]: value }) },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending, header + ': offline SPA navigation must remain under SW recovery');
+    assert.equal(await (await pending).text(), 'SAFE_OFFLINE_SHELL',
+      header + ': preserve validated offline HTML when network is truly unavailable');
+  }
+});
