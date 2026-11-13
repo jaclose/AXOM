@@ -13,10 +13,19 @@ interface DownloadFailure { id: string; title: string; reason: string }
 
 /** Term downloads share the single-course installer and its durable account receipt.
  * Stop finishes the current course so a retry can safely skip it. */
-export function TermCourseActions({ term, accountId, courses, disabled, onBusyChange }: {
+type TermCourseActionsProps = {
   term: string; accountId: string; courses: readonly AcademicCourse[];
   disabled: boolean; onBusyChange: (busy: boolean) => void;
-}) {
+};
+
+/** Scope all download, progress and failure UI to the exact learner and term.
+ * Keying only the catalog lookup is insufficient: completed download failures
+ * and quiz errors also survive a prop change until the component remounts. */
+export function TermCourseActions(props: TermCourseActionsProps) {
+  return <ScopedTermCourseActions key={JSON.stringify([props.accountId, props.term])} {...props} />;
+}
+
+function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyChange }: TermCourseActionsProps) {
   const workspace = useStore();
   const needsCatalog = termQuizNeedsCatalog(accountId, workspace);
   // The previous account's catalog must never be observable for even one
@@ -56,9 +65,17 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
   const running = useRef(false);
   const stopped = useRef(false);
   const mounted = useRef(true);
+  const onBusyChangeRef = useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; stopped.current = true; };
+    return () => {
+      mounted.current = false;
+      stopped.current = true;
+      // Release the old scope before the next learner starts. The abandoned
+      // request's eventual finally must not clear the new learner's busy state.
+      if (running.current) onBusyChangeRef.current(false);
+    };
   }, []);
 
   async function download() {
@@ -102,8 +119,8 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
         else { setMessage(""); setError(cause instanceof Error ? cause.message : "This term could not be downloaded. Try again when connected."); }
       }
     } finally {
-      scope.dispose(); running.current = false; onBusyChange(false);
-      if (mounted.current) { setBusy(false); setStopping(false); }
+      scope.dispose(); running.current = false;
+      if (mounted.current) { onBusyChange(false); setBusy(false); setStopping(false); }
     }
   }
   function practice() {
