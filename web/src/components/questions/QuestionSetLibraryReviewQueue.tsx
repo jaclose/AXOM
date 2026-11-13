@@ -40,7 +40,7 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
     finally { setBusy(false); }
   }
   async function decide(approved: boolean) {
-    if (!preview || busy || reason.trim().length < 8 || !attested) return;
+    if (!preview || busy || reason.trim().length < 8 || (approved && (!attested || shown < preview.snapshot.questions.length))) return;
     setBusy(true); setError(""); setMessage("");
     try {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
@@ -79,16 +79,17 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
           {question.explanation && <p>{question.explanation}</p>}
           <small>Source: {question.citation || "No citation supplied"}</small>
         </li>)}</ol>
-        {shown < preview.snapshot.questions.length && <GhostButton disabled={busy} onClick={() => setShown(value => value + 20)}>Show next 20 questions</GhostButton>}
+        {shown < preview.snapshot.questions.length && <GhostButton disabled={busy} onClick={() => setShown(value => Math.min(value + 20, preview.snapshot.questions.length))}>Show next 20 questions</GhostButton>}
+        <p className="sub">{Math.min(shown, preview.snapshot.questions.length)} of {preview.snapshot.questions.length} questions displayed for inspection. Approval requires displaying the full set and checking its rights and answer evidence. A documented rejection does not require an affirmative attestation.</p>
         <label className="qsl-field">Review note
           <textarea className="field" value={reason} minLength={8} maxLength={500} rows={3} disabled={busy}
             onChange={event => setReason(event.target.value)} placeholder="Record source, rights or answer checks performed." />
         </label>
-        <label className="qsl-check"><input type="checkbox" checked={attested} disabled={busy} onChange={event => setAttested(event.target.checked)} />
-          <span>I checked the set's distribution rights and answer evidence. My note records what I checked.</span></label>
+        <label className="qsl-check"><input type="checkbox" checked={attested} disabled={busy || shown < preview.snapshot.questions.length} onChange={event => setAttested(event.target.checked)} />
+          <span>I checked the set's distribution rights and answer evidence for every question. My note records what I checked.</span></label>
         <div className="row wrap gap8">
-          <GButton size="sm" variant="primary" disabled={busy || !attested || reason.trim().length < 8} onClick={() => void decide(true)}>Approve for library</GButton>
-          <GButton size="sm" disabled={busy || !attested || reason.trim().length < 8} onClick={() => void decide(false)}>Return for revision</GButton>
+          <GButton size="sm" variant="primary" disabled={busy || !attested || shown < preview.snapshot.questions.length || reason.trim().length < 8} onClick={() => void decide(true)}>Approve for library</GButton>
+          <GButton size="sm" disabled={busy || reason.trim().length < 8} onClick={() => void decide(false)}>Return for revision</GButton>
         </div>
         {error && <p role="alert" className="qsl-error">{error}</p>}
       </div>
