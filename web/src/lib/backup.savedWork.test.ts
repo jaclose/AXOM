@@ -87,4 +87,39 @@ describe("saved-work recovery without downloading content", () => {
     expect(parseImport(await exported!.text()).deferredContent).toEqual(deferred.deferredContent);
     expect(attemptedDownload).not.toHaveBeenCalled(); expect(accountRead).not.toHaveBeenCalled();
   });
+
+  it("does not certify a complete export when referenced images or originals were omitted", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    const result = await exportStateWithAttachments(state);
+    expect(result.missingBlobKeys).toEqual(["offline-figure", "unavailable-image"]);
+    expect(result.missingOriginalIds).toEqual(["document"]);
+    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
+    expect(lastBackupAt()).toBeNull();
+  });
+
+  it("certifies a complete export when every expected image and original is readable", async () => {
+    localStorage.clear();
+    const { state, original } = await fixture();
+    await saveSourceOriginal(state.documents[0], original);
+    for (const a of state.questions[0].attachments ?? []) {
+      await putQuestionAttachmentBlob(a.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "q", updatedAt: a.updatedAt });
+    }
+    const result = await exportStateWithAttachments(state);
+    expect(result.missingBlobKeys).toEqual([]);
+    expect(result.missingOriginalIds).toEqual([]);
+    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
+    expect(lastBackupAt()).not.toBeNull();
+  });
+
+  it("does not certify an image-incomplete JSON export as a successful full backup", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    const result = await exportStateWithAttachments(state);
+    expect(result.missingBlobKeys).toEqual(["offline-figure", "unavailable-image"]);
+    expect(result.missingOriginalIds).toEqual([]);
+    expect(filename).toMatch(/^axom-backup-.*\.json$/);
+    expect(lastBackupAt()).toBeNull();
+  });
 });

@@ -96,6 +96,7 @@ export async function exportStateWithAttachments(
   if (backupOriginalDocuments(metadata.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
     const result = await createMediaBackupArchive(payload, references, metadata.documents, options);
     downloadBackupBlob(result.blob, "zip", scope);
+    if (scope === "complete" && !deferredSourceCount && !result.missingBlobKeys.length && !result.missingOriginalIds.length) markBackupDone();
     return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount };
   }
   let attachmentCount = 0;
@@ -111,6 +112,7 @@ export async function exportStateWithAttachments(
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
   downloadBackupPayload(payload, scope);
+  if (scope === "complete" && !deferredSourceCount && !missingBlobKeys.length) markBackupDone();
   return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount };
 }
 
@@ -127,8 +129,7 @@ function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: Backup
   a.download = `${BRAND.productName.toLowerCase()}-${scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
   a.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  // A references-only recovery copy must not imply the whole library is backed up.
-  if (scope === "complete") markBackupDone();
+  // The caller certifies completion only after checking omitted binary assets.
 }
 
 /** Record when the user last exported, for the data-health panel. */
