@@ -76,7 +76,17 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const receiptSetsByQuestion = new Map<string, Set<string>>();
   const setIds = new Set<string>();
   const setCounts = new Map<string, number>();
-  for (const set of workspace.questionSets) setCounts.set(set.id, (setCounts.get(set.id) ?? 0) + 1);
+  const explicitSetMembers = new Map<string, Set<string> | null>();
+  for (const set of workspace.questionSets) {
+    setCounts.set(set.id, (setCounts.get(set.id) ?? 0) + 1);
+    // Legacy local sets may omit membership. A declared list is authoritative;
+    // malformed declarations never become proof of an original question link.
+    if (Object.prototype.hasOwnProperty.call(set, "questionIds")) {
+      explicitSetMembers.set(set.id, Array.isArray(set.questionIds)
+        && set.questionIds.every(id => typeof id === "string" && id.trim().length > 0)
+        ? new Set(set.questionIds) : null);
+    }
+  }
   for (const saved of workspaceReferences(accountId, workspace)) {
     const catalog = courses.find(course => course.id === saved.collectionId && course.current_revision_id === saved.revisionId);
     if (saved.term && catalog && termIdentity(saved.term) !== termIdentity(catalog.term)) continue;
@@ -103,6 +113,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   return { scopeKind: "term", module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
     && (!question.setId || (setCounts.get(question.setId) === 1
-      && receiptSetsByQuestion.get(question.id)?.has(question.setId)))
+      && receiptSetsByQuestion.get(question.id)?.has(question.setId)
+      && (!explicitSetMembers.has(question.setId) || explicitSetMembers.get(question.setId)?.has(question.id) === true)))
     && questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id) };
 }

@@ -205,6 +205,31 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 2", "account", state).questionIds).toEqual(["cross-listed"]);
   });
 
+  it("holds questions contradicted by explicit original-set membership without hiding valid or loose neighbors", () => {
+    const state = workspace([receipt(1, ["valid", "stale", "loose"], { setIds: ["valid-set", "stale-set"] })], [
+      question("valid", { setId: "valid-set" }),
+      question("stale", { setId: "stale-set" }),
+      question("loose"),
+    ]);
+    const explicitSet = (id: string, questionIds: string[]) =>
+      ({ id, questionIds }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [explicitSet("valid-set", ["valid"]), explicitSet("stale-set", ["different-question"])];
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["valid", "loose"]);
+  });
+
+  it("holds malformed declared membership without rejecting legacy sets that omit the list", () => {
+    const state = workspace([receipt(1, ["malformed", "legacy", "loose"], { setIds: ["bad-set", "legacy-set"] })], [
+      question("malformed", { setId: "bad-set" }),
+      question("legacy", { setId: "legacy-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "bad-set", questionIds: "not-an-array" } as unknown as (typeof state.questionSets)[number],
+      { id: "legacy-set" } as unknown as (typeof state.questionSets)[number],
+    ];
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["legacy", "loose"]);
+  });
+
   it("preserves same-term cross-listing when one receipt owns the original set", () => {
     const state = workspace([
       receipt(1, ["shared"], { setIds: ["set-1"] }),
