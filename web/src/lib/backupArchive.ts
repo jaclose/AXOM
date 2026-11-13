@@ -17,6 +17,24 @@ type MediaEntry = { file: string; metadata: Omit<QuestionAttachmentExportPayload
 type OriginalEntry = { file: string; documentId: string; sha256: string; byteSize: number; mimeType: string };
 const MAX_ORIGINAL_BYTES = 128 * 1024 * 1024;
 export const MAX_ZIP_WORKSPACE_BYTES = MAX_ORIGINAL_BYTES;
+export const MAX_ZIP_BACKUP_ENTRIES = 30_000;
+export const MAX_ZIP_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** Export must obey the exact ceilings enforced by readPortableBackup.
+ * Count JSZip's real entries, including generated directories and workspace.json.
+ * Validate the serialized size separately because ZIP metadata adds overhead. */
+class ZipExportBudgetExceeded extends Error {}
+export function assertRestorableZipBudget(entryCount: number, expandedBytes: number, archiveBytes?: number): void {
+  if (!Number.isSafeInteger(entryCount) || entryCount < 0 || entryCount > MAX_ZIP_BACKUP_ENTRIES) {
+    throw new ZipExportBudgetExceeded("The ZIP backup exceeds 30,000 file entries. No backup was downloaded or certified.");
+  }
+  if (!Number.isSafeInteger(expandedBytes) || expandedBytes < 0 || expandedBytes > MAX_ZIP_BACKUP_BYTES) {
+    throw new ZipExportBudgetExceeded("The ZIP backup's expanded size exceeds the 2 GB recovery safety limit. No backup was downloaded or certified.");
+  }
+  if (archiveBytes !== undefined && (!Number.isSafeInteger(archiveBytes) || archiveBytes < 0 || archiveBytes > MAX_ZIP_BACKUP_BYTES)) {
+    throw new ZipExportBudgetExceeded("The ZIP archive size exceeds the 2 GB recovery safety limit. No backup was downloaded or certified.");
+  }
+}
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
@@ -267,6 +285,11 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
+  let expandedBytes = 0;
+  const reserveExpandedBytes = (bytes: number) => {
+    assertRestorableZipBudget(0, expandedBytes + bytes);
+    expandedBytes += bytes;
+  };
   for (const { metadata, conflicting } of mediaReferences(references)) {
     if (conflicting) {
       missingBlobKeys.push(metadata.blobKey);
@@ -274,9 +297,15 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     }
     try {
       const { bytes } = await verifiedMediaBlob(metadata, options);
+      reserveExpandedBytes(bytes.byteLength);
       const file = `media/${media.length}`;
       zip.file(file, bytes); media.push({ file, metadata });
-    } catch { missingBlobKeys.push(metadata.blobKey); }
+    } catch (error) {
+      // A safety-budget failure is not a missing image that can be omitted from
+      // a partial backup; abort so no unusable archive can be certified.
+      if (error instanceof ZipExportBudgetExceeded) throw error;
+      missingBlobKeys.push(metadata.blobKey);
+    }
   }
   const originals: OriginalEntry[] = [];
   const missingOriginalIds: string[] = [];
@@ -284,20 +313,34 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     try {
       const blob = await readSourceOriginal(document.id, document.checksum, options);
       if (!blob || blob.size > MAX_ORIGINAL_BYTES) throw new Error("Original unavailable or too large");
+      // Check the declared size before allocating original bytes, then account
+      // for the actual buffer length only after the read succeeds.
+      assertRestorableZipBudget(0, expandedBytes + blob.size);
       const bytes = new Uint8Array(await blob.arrayBuffer());
+      reserveExpandedBytes(bytes.byteLength);
       const file = `originals/${originals.length}`;
       zip.file(file, bytes);
       originals.push({ file, documentId: document.id, sha256: document.checksum!.replace(/^sha256:/, ""), byteSize: bytes.byteLength, mimeType: blob.type });
-    } catch { missingOriginalIds.push(document.id); }
+    } catch (error) {
+      if (error instanceof ZipExportBudgetExceeded) throw error;
+      missingOriginalIds.push(document.id);
+    }
   }
   // The ZIP reader limits the uncompressed workspace.json entry to 128 MiB.
   // Do not produce a backup the same application would refuse to restore.
   const workspaceJson = JSON.stringify({ ...payload, _backupFormat: FORMAT, _backupVersion: 2, media, originals });
-  if (new Blob([workspaceJson], { type: "application/json" }).size > MAX_ZIP_WORKSPACE_BYTES) {
+  const workspaceBytes = new Blob([workspaceJson], { type: "application/json" }).size;
+  if (workspaceBytes > MAX_ZIP_WORKSPACE_BYTES) {
     throw new Error("The ZIP workspace exceeds the 128 MB recovery safety limit. No backup was downloaded or certified.");
   }
+  reserveExpandedBytes(workspaceBytes);
   zip.file("workspace.json", workspaceJson);
+  const entryCount = Object.keys(zip.files).length;
+  assertRestorableZipBudget(entryCount, expandedBytes);
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true });
+  // STORE still adds per-file headers/central directory bytes. The generated
+  // ZIP must fit the reader's file-size bound, not just its uncompressed data.
+  assertRestorableZipBudget(entryCount, expandedBytes, blob.size);
   if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed during export. Start a new export from the current workspace.");
   return { blob, attachmentCount: media.length, missingBlobKeys, originalCount: originals.length, missingOriginalIds };
 }
@@ -366,9 +409,9 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       return stageQuestionAttachmentPayloads(payloads, refs);
     }, restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
   }
-  if (file.size > 2 * 1024 * 1024 * 1024) throw new Error("This backup exceeds the 2 GB archive limit.");
+  if (file.size > MAX_ZIP_BACKUP_BYTES) throw new Error("This backup exceeds the 2 GB archive limit.");
   const zip = await JSZip.loadAsync(new Uint8Array(await file.arrayBuffer()));
-  if (Object.keys(zip.files).length > 30000) throw new Error("Too many files in this backup.");
+  if (Object.keys(zip.files).length > MAX_ZIP_BACKUP_ENTRIES) throw new Error("Too many files in this backup.");
   let expanded = 0;
   for (const entry of Object.values(zip.files)) {
     const size = (entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0;
@@ -376,7 +419,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     if (size < 0 || size > limit) throw new Error("A backup file exceeds the safety limit.");
     expanded += size;
   }
-  if (expanded > 2 * 1024 * 1024 * 1024) throw new Error("The expanded backup exceeds the safety limit.");
+  if (expanded > MAX_ZIP_BACKUP_BYTES) throw new Error("The expanded backup exceeds the safety limit.");
   const workspace = zip.file("workspace.json");
   if (!workspace) throw new Error("This ZIP is not an AXOM workspace backup. Prepared libraries are installed from the Course Library or QBank.");
   const rawText = await workspace.async("string");
