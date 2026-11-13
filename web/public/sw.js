@@ -402,10 +402,6 @@ self.addEventListener("fetch", (event) => {
   // A full cached HTTP 200 cannot satisfy a byte-range request. Leave Range
   // and If-Range semantics, including any 206/416 response, to the browser.
   if (request.headers?.has?.("range")) return;
-  // Conditional validators and preconditions belong to the HTTP server.
-  // A cached unconditional 200 must not replace genuine 304/412 responses.
-  if (["if-none-match", "if-match", "if-modified-since", "if-unmodified-since"]
-    .some((header) => request.headers?.has?.(header))) return;
   // Authorization-bearing requests must never share the origin-wide shell cache.
   if (request.headers?.has?.("authorization") || request.cache === "no-store") return;
   if (/\/version\.json$/.test(url.pathname) || /\/api\//.test(url.pathname)) return;
@@ -429,6 +425,11 @@ self.addEventListener("fetch", (event) => {
     })());
     return;
   }
+
+  // Conditional public assets preserve server validators and 304/412 status.
+  // Keep navigation in AXOM's offline recovery handler above this guard.
+  if (["if-none-match", "if-match", "if-modified-since", "if-unmodified-since"]
+    .some((header) => request.headers?.has?.(header))) return;
 
   // Query-string access tokens and signatures must never reach shared cache reads.
   if (!hasOnlyPublicAssetVersion(url)) return;
