@@ -2092,3 +2092,26 @@ test('R97 conditional public asset validators bypass SW cache while ordinary GET
   assert.ok(response, 'unconditional GET must remain intercepted for offline replay');
   assert.equal(await (await response).text(), 'CACHED_PUBLIC_ICON');
 });
+
+test('R97 conditional SPA navigation retains validated offline shell on a real network failure', async () => {
+  for (const [header, value] of [
+    ['If-None-Match', '"shell-etag"'],
+    ['If-Modified-Since', 'Wed, 11 Nov 2026 12:00:00 GMT'],
+  ]) {
+    const app = worker({ fetchResponse: async () => { throw new Error('offline'); } });
+    const cache = await app.caches.open('axom-shell-current');
+    await cache.put('./index.html', withNetworkUrl(new Response('SAFE_OFFLINE_SHELL', {
+      headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+    }), 'https://app.test/index.html'));
+    let pending;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test/saved-work', method: 'GET', mode: 'navigate',
+        headers: new Headers({ [header]: value }) },
+      respondWith: (value) => { pending = value; },
+      waitUntil: () => {},
+    });
+    assert.ok(pending, header + ': offline SPA navigation must remain under SW recovery');
+    assert.equal(await (await pending).text(), 'SAFE_OFFLINE_SHELL',
+      header + ': preserve validated offline HTML when network is truly unavailable');
+  }
+});
