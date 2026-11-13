@@ -222,6 +222,13 @@ describe("searchable Question Set client boundary", () => {
     ["nested Android content URI in public URL", "https://example.edu/view?source=content://private.documents/item/1"],
     ["encoded nested local file URI", "https://example.edu/view?source=file%3A%2F%2F%2FUsers%2Flearner%2Fprivate.pdf"],
     ["double-encoded nested local URI", "https://example.edu/view?source=file%253A%252F%252F%252FUsers%252Flearner%252Fprivate.pdf"],
+    ["embedded PDF data URI", "data:application/pdf;base64,JVBERi0x"],
+    ["embedded text data URI", "data:text/plain;charset=utf-8;base64,YWJj"],
+    ["empty-media-type data URI", "data:,private%20notes"],
+    ["browser object URL", "blob:https://example.edu/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+    ["opaque-origin object URL", "blob:null/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+    ["nested encoded inline document", "https://example.edu/view?src=data%3Aapplication%2Fpdf%3Bbase64%2CJVBERi0x"],
+    ["double-encoded object URL", "https://example.edu/view?src=blob%253Ahttps%253A%252F%252Fexample.edu%252Fprivate"],
   ])("refuses direct %s citations before the submission RPC without altering source evidence", async (_label, citation) => {
     const value = snapshot();
     value.questions[0].citation = citation;
@@ -256,6 +263,8 @@ describe("searchable Question Set client boundary", () => {
     "https://example.edu/paper?q=learner@example.edu",
     "https://example.edu/@editor/chapter",
     "https://example.edu/paper#author@university",
+    "Data: available upon request",
+    "https://example.edu/paper?format=data",
   ])("allows a public citation containing path-like words (%s)", async citation => {
     const value = snapshot();
     value.questions[0].citation = citation;

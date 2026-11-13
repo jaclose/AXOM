@@ -122,7 +122,7 @@ export function createQuestionSetShare(
     // private filesystem or document locations. Require a public source
     // reference instead of silently removing provenance.
     if (hasPrivateDeviceCitation(question.citation)) {
-      throw new Error("Question Set citation contains a private local file path or URL credentials and cannot be shared safely.");
+      throw new Error("Question Set citation contains a private local file path, inline document URI or URL credentials and cannot be shared safely.");
     }
     byId.set(question.id, question);
   }
@@ -476,6 +476,9 @@ const PRIVATE_HTTP_CITATION_USERINFO = /https?:\/\/[^\s/?#<>"'|;,]+@/i;
 // A public HTTPS wrapper does not make a nested device URI safe to publish.
 // Check these explicit schemes before masking ordinary public URL spans.
 const PRIVATE_NESTED_DEVICE_URI = /(?:^|[^a-z0-9])(?:file:\/+|content:\/\/)/i;
+// Browser object URLs and data URIs can embed private or unlicensed bytes.
+// They are not transferable source citations, even inside public URL parameters.
+const PRIVATE_INLINE_DOCUMENT_URI = /(?:^|[^a-z0-9])(?:blob:(?:https?:\/\/|null\/)|data:[^\s,;]*[,;])/i;
 const PUBLIC_HTTP_CITATION_URL = /https?:\/\/[^\s<>"'|;,]+/gi;
 const PRIVATE_DEVICE_CITATION = /(?:^|[^a-z0-9/@])(?:file:\/+|content:\/\/|\/\/[^\s\x2f]+\/|\/[a-z0-9._~-]+(?:\/|$)|~\/|[a-z]:[\\/])|\\\\/i;
 
@@ -488,6 +491,7 @@ export function hasPrivateDeviceCitation(citation: string | undefined): boolean 
   for (let pass = 0; pass <= 3; pass += 1) {
     if (PRIVATE_HTTP_CITATION_USERINFO.test(value)) return true;
     if (PRIVATE_NESTED_DEVICE_URI.test(value)) return true;
+    if (PRIVATE_INLINE_DOCUMENT_URI.test(value)) return true;
     const withoutPublicUrls = value.replace(PUBLIC_HTTP_CITATION_URL, " ");
     if (PRIVATE_DEVICE_CITATION.test(withoutPublicUrls)) return true;
     if (pass === 3) break;
