@@ -62,6 +62,70 @@ function worker({ failCacheMatch = false, failCachePut = false, onCachePut = asy
   return { events, caches, context, activations: () => activations };
 }
 
+test('R83 rejected install removes only its newly created partial shell cache', async () => {
+  const chunk = './assets/critical-87654321.js';
+  for (const failedPath of [chunk, './index.html']) {
+    const app = worker({
+      precache: [chunk],
+      onCachePut: async (path) => {
+        if (path === failedPath) throw new Error('synthetic required write quota rejection');
+      },
+      fetchResponse: async (request) => {
+        const pathname = new URL(typeof request === 'string' ? request : request.url).pathname;
+        if (pathname.endsWith('.js')) return new Response('export const ready = true;', {
+          headers: { 'content-type': 'text/javascript', 'cache-control': 'public, max-age=600' },
+        });
+        if (pathname.endsWith('.png')) return new Response('icon', {
+          headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+        });
+        if (pathname.endsWith('.webmanifest')) return new Response('{"name":"AXOM"}', {
+          headers: { 'content-type': 'application/manifest+json', 'cache-control': 'public, max-age=600' },
+        });
+        return new Response('<!doctype html>safe-shell', {
+          headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0' },
+        });
+      },
+    });
+    const older = await app.caches.open('axom-shell-previous');
+    const privateCache = await app.caches.open('private-learner-files');
+    await older.put('./previous.txt', new Response('previous'));
+    await privateCache.put('./private.txt', new Response('learner'));
+    let task;
+    app.events.get('install')({ waitUntil: (value) => { task = value; } });
+    await assert.rejects(task, /synthetic required write quota rejection/);
+    assert.deepEqual(await app.caches.keys(), ['axom-shell-previous', 'private-learner-files'],
+      failedPath + ': failed install left an abandoned partial cache or deleted older/private data');
+    assert.equal(await (await older.match('./previous.txt')).text(), 'previous');
+    assert.equal(await (await privateCache.match('./private.txt')).text(), 'learner');
+  }
+});
+
+test('R83 failed same-build install must never delete an existing usable cache', async () => {
+  const app = worker({
+    precache: ['./assets/critical-87654321.js'],
+    onCachePut: async (path) => {
+      if (path === './assets/critical-87654321.js') throw new Error('synthetic quota rejection');
+    },
+    fetchResponse: async (request) => {
+      const path = new URL(typeof request === 'string' ? request : request.url).pathname;
+      return path.endsWith('.js')
+        ? new Response('export const retry = true;', { headers: { 'content-type': 'text/javascript' } })
+        : path.endsWith('.png')
+          ? new Response('icon', { headers: { 'content-type': 'image/png' } })
+          : path.endsWith('.webmanifest')
+            ? new Response('{"name":"AXOM"}', { headers: { 'content-type': 'application/manifest+json' } })
+            : new Response('<!doctype html>safe-shell', { headers: { 'content-type': 'text/html' } });
+    },
+  });
+  const existing = await app.caches.open('axom-shell-current');
+  await existing.put('./index.html', new Response('original-shell'));
+  let task;
+  app.events.get('install')({ waitUntil: (value) => { task = value; } });
+  await assert.rejects(task, /synthetic quota rejection/);
+  assert.ok((await app.caches.keys()).includes('axom-shell-current'), 'pre-existing same-build cache was deleted');
+  assert.equal(await (await existing.match('./index.html')).text(), 'original-shell');
+});
+
 test('worker stages an update without forcing activation; only consent activates', async () => {
   const app = worker({ fetchResponse: async () =>
     new Response('<!doctype html>public', { headers: { 'content-type': 'text/html' } }) });
