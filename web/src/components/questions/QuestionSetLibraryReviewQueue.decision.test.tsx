@@ -65,6 +65,11 @@ describe("Question Set academic decisions", () => {
       "independent-reviewer", expect.objectContaining({ id }), false, reason,
     ));
     await screen.findByText("Question Set returned to its contributor with your note.");
+    // A deliberate refresh is different from the completion-triggered refresh:
+    // clear the old confirmation before re-checking reviewer access.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(screen.queryByText("Question Set returned to its contributor with your note.")).toBeNull();
     expect(mocks.decide).toHaveBeenCalledTimes(1);
   });
 
