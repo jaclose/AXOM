@@ -10,10 +10,10 @@
     "web/src/lib/communications/email.tsx": "c2fd758c7430dc0b8c49bc61fcb9bb26905ac80810aa8a9daf182d47009394e8",
     "web/src/lib/communications/model.ts": "df12dc539c4f478044491d3a4a498aa50b7cf2cefd0b4ef5620c20eace895f2b",
     "web/src/lib/communications/server/campaigns.ts": "90e1728f7962b9bc7fb6dd57047a05e22abb39891f8623eddf3857d73729fbcc",
-    "web/src/lib/communications/server/handler.ts": "3dbe947172732ef3a69f96da12e36b9ddd408fcff1b7be1c5b990f577aa6d808",
-    "web/src/lib/communications/server/privacy.ts": "2ef5976a2132040218e273d0b1afc2cd4c8e9b3872529fb0187442caa4546c60",
+    "web/src/lib/communications/server/handler.ts": "3cab2d6c97cb7fb8e29e9ac78e5fb265772883d2d8c837fbdf1281fb8d4e49ce",
+    "web/src/lib/communications/server/privacy.ts": "9e2c6d28346c5ec37b4f2e63acff0fd21823ecebbefd113a07fd1eae4a9707e5",
     "web/src/lib/communications/server/provider.ts": "3b8d69d1c2959955e384192ed124e8fc4d05374d165f406895ea34c15dbc2535",
-    "web/src/lib/communications/server/service.ts": "abbe51e062b650e58dc6066e195db42aa5186b28bd8e13ecbbc254bde31a8902",
+    "web/src/lib/communications/server/service.ts": "a730ed6db438b9cbc65f928ccc5783e6de36b0a0bfdf08a54835ca45bf0ba678",
     "web/src/lib/communications/snapshot.ts": "256864b7340135a748f3e51744311f6d5fa1692bd0f3b783584c998720f5d86d",
     "web/src/lib/dailyRollover.ts": "6e6aed982c6943dba78be291a6c6d6379dfad78ef86c597368847b5dfcd7966a",
     "web/src/lib/dailySuccess.ts": "8218feb41af26e262b72a99c73b1d55911c0e119cfa27021c2947d02397f5252",
@@ -33,15 +33,6 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "71ca3164db4ac1d8bda9dc0e82eb12bd863b3bdc73ac7f694ed0007c9f1ed83d"
-  },
-  "authTemplates": {
-    "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",
-    "supabase/templates/communications/magic_link.html": "f8e4801fe3f939c7e188a137b777d28d8b2c2abb1c563c024e8c219dd4fee03d",
-    "supabase/templates/communications/recovery.html": "732df891c1e28f118c3183fc4106c93cc096fd767cd21087ebb5b5a1e556ed27",
-    "supabase/templates/communications/invite.html": "f41a9467a1051e9615cf13a6c3e897c4f8dec8952b849dc5b9cad7f74be67553",
-    "supabase/templates/communications/email_change.html": "96aad919eee5d7017603d5a89ecd354c5c8148b710250dc477768b9150903fe9",
-    "supabase/templates/communications/reauthentication.html": "1fdc5c8f1ffd9f449b06600f491c6baee4717ea9f6a15da9adffc5b28499a54c",
-    "supabase/templates/communications/security.html": "a208ba03fb9bbd712a2f6f798127ed9db478f0ebe891f9fbd0f93c3ad6f16560"
+    "sha256": "32c321473d4fb5260ff5f279e81c0b1862e36e4c7bf73543ac8f40fdda940af3"
   }
 }

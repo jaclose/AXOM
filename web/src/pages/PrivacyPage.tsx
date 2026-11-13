@@ -32,15 +32,15 @@ function AccountPrivacyPage({ accountId }: { accountId: string | null }) {
   useEffect(() => {
     if (!deletionAvailable) { setStep("closed"); setConfirmation(""); }
   }, [deletionAvailable]);
-  const perform = async (fn: () => Promise<unknown>, success: string) => {
+  const perform = async <T,>(fn: () => Promise<T>, success: string | ((result: T) => string)) => {
     if (!sameAccount()) return false;
     setBusy(true); setMessage("");
     try {
-      await fn();
+      const result = await fn();
       if (!sameAccount()) return false;
       await remote.reload();
       if (!sameAccount()) return false;
-      setMessage(success);
+      setMessage(typeof success === "function" ? success(result) : success);
       return true;
     } catch (e) {
       if (sameAccount()) setMessage(e instanceof Error ? e.message : "The request failed. Your data has not been cleared.");
@@ -114,7 +114,12 @@ function AccountPrivacyPage({ accountId }: { accountId: string | null }) {
               const retryableExport = request.kind === "export"
                 && request.status === "failed"
                 && !needsReconciliation;
-              return <li key={request.id}><div><strong>{request.kind === "export" ? "Account export" : "Account deletion"}</strong><small>{request.scheduled_for ? new Date(request.scheduled_for).toLocaleString() : ""}</small>{needsReconciliation && <small>This request needs operator review and cannot be retried or cancelled automatically.</small>}{retryableExport && <small>This export did not complete. You can request another account export.</small>}</div><span className="comms-state">{request.status}</span>{request.kind === "export" && request.status === "ready" && <button disabled={busy} onClick={() => void perform(async () => { const result = await communicationsRequest<{ url: string }>("export-link", { id: request.id }); const link = document.createElement("a"); link.href = result.url; link.rel = "noreferrer"; link.click(); }, "Private download opened.")}>Download</button>}{cancellableDeletion && <button disabled={busy} onClick={() => void perform(() => communicationsRequest("cancel-deletion", { id: request.id }), "Deletion cancelled.")}>Cancel deletion</button>}</li>;
+              return <li key={request.id}><div><strong>{request.kind === "export" ? "Account export" : "Account deletion"}</strong><small>{request.scheduled_for ? new Date(request.scheduled_for).toLocaleString() : ""}</small>{needsReconciliation && <small>This request needs operator review and cannot be retried or cancelled automatically.</small>}{retryableExport && <small>This export did not complete. You can request another account export.</small>}{request.kind === "deletion" && request.status === "cancelled" && request.notice_delivery_uncertain && <small>An account email already in progress may still arrive. Its delivery needs review.</small>}</div><span className="comms-state">{request.status}</span>{request.kind === "export" && request.status === "ready" && <button disabled={busy} onClick={() => void perform(async () => { const result = await communicationsRequest<{ url: string }>("export-link", { id: request.id }); const link = document.createElement("a"); link.href = result.url; link.rel = "noreferrer"; link.click(); }, "Private download opened.")}>Download</button>}{cancellableDeletion && <button disabled={busy} onClick={() => void perform(
+                () => communicationsRequest<{ noticeDeliveryUncertain: boolean }>("cancel-deletion", { id: request.id }),
+                receipt => receipt.noticeDeliveryUncertain
+                  ? "Deletion cancelled. An account email already in progress may still arrive. Its delivery needs review."
+                  : "Deletion cancelled.",
+              )}>Cancel deletion</button>}</li>;
             })}</ul>}</section>
   </main>;
 }

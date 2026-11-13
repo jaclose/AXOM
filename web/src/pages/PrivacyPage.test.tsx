@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommunicationsSettings } from "../lib/communications/client";
 import { PrivacyPage } from "./PrivacyPage";
+import { useAccount } from "../lib/account/accountStore";
 
 const mocks = vi.hoisted(() => ({
   exportStateWithAttachments: vi.fn(),
@@ -117,6 +118,46 @@ describe("PrivacyPage", () => {
     const history = screen.getByRole("heading", { name: "Your requests" }).closest("section")!;
     await waitFor(() => expect(within(history).getByText("Account export")).toBeTruthy());
     expect(within(history).queryByText(/no account data requests/i)).toBeNull();
+  });
+
+  it.each([
+    [true, /account email already in progress may still arrive/i],
+    [false, /^Deletion cancelled\.$/i],
+  ])("shows truthful cancellation receipt when possible in-flight delivery is %s", async (uncertain, expected) => {
+    const previous = useAccount.getState();
+    useAccount.setState({
+      phase: "signed-in",
+      user: { id: "11111111-1111-4111-8111-111111111111", email: "alex@example.invalid",
+        displayName: "Alex", emailConfirmed: true },
+      link: "linked",
+    });
+    remote = {
+      data: settings([{ id: "deletion-request", kind: "deletion", status: "scheduled" }]),
+      loading: false, error: "", reload: mocks.reload,
+    };
+    mocks.communicationsRequest.mockResolvedValue({ cancelled: true, notificationQueued: true, noticeDeliveryUncertain: uncertain });
+    mocks.reload.mockResolvedValue(undefined);
+    try {
+      render(<PrivacyPage />);
+      await userEvent.setup().click(screen.getByRole("button", { name: "Cancel deletion" }));
+      await waitFor(() => expect(document.querySelector(".comms-status")?.textContent ?? "").toMatch(expected));
+      expect(mocks.communicationsRequest).toHaveBeenCalledWith("cancel-deletion", { id: "deletion-request" });
+    } finally {
+      cleanup();
+      useAccount.setState(previous);
+    }
+  });
+
+  it("keeps possible in-flight email warning visible in the saved cancelled request history", () => {
+    remote = {
+      data: settings([{ id: "cancelled", kind: "deletion", status: "cancelled",
+        notice_delivery_uncertain: true }]),
+      loading: false, error: "", reload: mocks.reload,
+    };
+    render(<PrivacyPage />);
+    const history = screen.getByRole("heading", { name: "Your requests" }).closest("section")!;
+    expect(within(history).getByText(/account email already in progress may still arrive/i)).toBeTruthy();
+    expect(within(history).queryByRole("button", { name: "Cancel deletion" })).toBeNull();
   });
 
   it("offers cancellation only while deletion is genuinely reversible", () => {

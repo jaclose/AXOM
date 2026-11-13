@@ -92,7 +92,7 @@ export function createCommunicationsHandler(db: SupabaseClient, env: Env, fetche
       }
       if (action === "request-deletion") await checkLimit();
       if (action === "settings") {
-        const [prefs, identity, history, privacy] = await Promise.all([service.preferenceRows(user.id), service.identity(user.id), db.from("email_jobs").select("id,type,status,sent_at,created_at,failure_code").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30), db.from("privacy_requests").select("id,kind,status,scheduled_for,expires_at,created_at,failure_code").eq("user_id", user.id).order("created_at", { ascending: false }).limit(20)]);
+        const [prefs, identity, history, privacy] = await Promise.all([service.preferenceRows(user.id), service.identity(user.id), db.from("email_jobs").select("id,type,status,sent_at,created_at,failure_code").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30), db.from("privacy_requests").select("id,kind,status,scheduled_for,expires_at,created_at,failure_code,notice_delivery_uncertain").eq("user_id", user.id).order("created_at", { ascending: false }).limit(20)]);
         return json({ preferences: prefs, identity, history: checked(history), privacy: checked(privacy), admin: admin(user, env), deliveryMode: env.AXOM_EMAIL_MODE ?? "disabled", deletionEnabled: env.AXOM_ACCOUNT_DELETION_ENABLED === "true", hasProtectedCopy: Boolean(await service.workspace(user.id)) }, 200, cors);
       }
       if (action === "preferences") { await service.savePreferences(user.id, body.preferences as Preference[], body.identity as Identity | undefined); return json({ saved: true }, 200, cors); }
