@@ -43,6 +43,11 @@ declare
     'source://campus-server/share/private.pdf',
     'source:/opt/study/private.pdf',
     'source:/etc/passwd',
+    'https://learner:private-password@example.edu/lesson',
+    'https://learner@example.edu/lesson',
+    'https://learner%3Asecret%40example.edu/lesson',
+    'https%3A%2F%2Flearner%40example.edu%2Flesson',
+    'https://example.edu/redirect?to=https://learner:secret@other.edu/lesson',
     'source:%2Fvar%2Fmobile%2Flecture.pdf',
     'source:C:\Users\Example\private.pdf',
     'content://com.example.documents/private/42',
@@ -63,7 +68,10 @@ declare
     'https://example.edu/resources?source=home',
     'https://example.edu/resources?source=/home/lesson.pdf',
     'https://example.edu/resources?source=//campus-server/share/lesson.pdf',
-    'https://example.edu/path/%C3%A9tude?q=%C3%A9'
+    'https://example.edu/path/%C3%A9tude?q=%C3%A9',
+    'https://example.edu/paper?q=learner@example.edu',
+    'https://example.edu/@editor/chapter',
+    'https://example.edu/paper#author@university'
   ];
 begin
   -- A valid row must remain unchanged when a later private update fails.

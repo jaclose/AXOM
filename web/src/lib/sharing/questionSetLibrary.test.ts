@@ -213,6 +213,11 @@ describe("searchable Question Set client boundary", () => {
     ["arbitrary absolute folder", "source:/unpublished/private.pdf"],
     ["slash-style network share", "//campus-server/share/private.pdf"],
     ["encoded arbitrary root", "source%3A%2Froot%2Fprivate.pdf"],
+    ["URL basic-auth password", "https://learner:private-password@example.edu/lesson"],
+    ["URL email identity", "https://learner@example.edu/lesson"],
+    ["percent-encoded userinfo", "https://learner%3Asecret%40example.edu/lesson"],
+    ["percent-encoded URL and authority", "https%3A%2F%2Flearner%40example.edu%2Flesson"],
+    ["nested userinfo URL in query", "https://example.edu/redirect?to=https://learner:secret@other.edu/lesson"],
   ])("refuses direct %s citations before the submission RPC without altering source evidence", async (_label, citation) => {
     const value = snapshot();
     value.questions[0].citation = citation;
@@ -244,6 +249,9 @@ describe("searchable Question Set client boundary", () => {
     "https://example.edu/research?source=/home/public-notes",
     "https://example.edu/tmp/lecture.pdf",
     "DOI:10.1000/abc",
+    "https://example.edu/paper?q=learner@example.edu",
+    "https://example.edu/@editor/chapter",
+    "https://example.edu/paper#author@university",
   ])("allows a public citation containing path-like words (%s)", async citation => {
     const value = snapshot();
     value.questions[0].citation = citation;
