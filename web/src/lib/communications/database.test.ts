@@ -8,6 +8,7 @@ const migrationDirectory = fileURLToPath(new URL("../../../../supabase/migration
 const SESSION_CONSENT_MIGRATION = "20261112080000_communications_deletion_session_consent.sql";
 const TERMINAL_SCRUB_MIGRATION = "20261112213000_communications_deletion_receipt_session_scrub.sql";
 const ATOMIC_QUEUE_MIGRATION = "20261112231500_communications_deletion_queue_atomic.sql";
+const DELETION_CANCEL_GUARD_MIGRATION = "20261113003000_communications_deletion_cancel_notice_guard.sql";
 async function applyMigration(db: PGlite, filename: string) {
   await db.exec(readFileSync(migrationDirectory + filename, "utf8"));
 }
@@ -20,6 +21,53 @@ async function database(throughMigration?: string) {
   return db;
 }
 describe("communications on real Postgres", () => {
+  it("atomically cancels unsent deletion notices when deletion consent is cancelled", async () => {
+    const db = await database();
+    const session = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+        values('${A}','deletion','scheduled','${session}','2030-11-20T12:00:00Z');`);
+      const receipt = (await db.query<{ id: string }>(
+        `select id from privacy_requests where user_id='${A}' and kind='deletion'`
+      )).rows[0].id;
+      await db.exec(`update email_jobs set status='processing',attempts=1
+        where idempotency_key='${receipt}:scheduled';`);
+      await db.exec(`update privacy_requests set status='cancelled' where id='${receipt}';`);
+      const before = (await db.query<{ status: string }>(
+        `select status from email_jobs where idempotency_key like '${receipt}:%' order by idempotency_key`
+      )).rows.map(row => row.status);
+      expect(before).toEqual(["cancelled", "cancelled"]);
+    } finally { await db.close(); }
+  }, 30000);
+
+  it("reconciles unclaimed jobs for previously cancelled requests without mutating dispatched attempts", async () => {
+    const db = await database(ATOMIC_QUEUE_MIGRATION);
+    const s1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const s2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+        values('${A}','deletion','scheduled','${s1}','2030-11-20T12:00:00Z'),
+              ('${B}','deletion','scheduled','${s2}','2030-11-20T12:00:00Z');`);
+      const ids = (await db.query<{id:string;user_id:string}>(
+        "select id,user_id from privacy_requests where kind='deletion'"
+      )).rows;
+      const a = ids.find(row => row.user_id === A)!.id;
+      const b = ids.find(row => row.user_id === B)!.id;
+      await db.exec(`update email_jobs set status='processing',first_attempt_at=now()
+        where idempotency_key='${b}:scheduled';
+        update privacy_requests set status='cancelled' where id in ('${a}','${b}');`);
+      await applyMigration(db, DELETION_CANCEL_GUARD_MIGRATION);
+      const status = (await db.query<{idempotency_key:string; status:string}>(
+        "select idempotency_key,status from email_jobs order by idempotency_key"
+      )).rows;
+      expect(status.filter(row => row.idempotency_key.startsWith(a + ":")).map(row => row.status))
+        .toEqual(["cancelled","cancelled"]);
+      expect(status.find(row => row.idempotency_key === b + ":requested")?.status).toBe("cancelled");
+      expect(status.find(row => row.idempotency_key === b + ":scheduled")?.status).toBe("processing");
+      await applyMigration(db, DELETION_CANCEL_GUARD_MIGRATION);
+    } finally { await db.close(); }
+  }, 30000);
+
   it("reconciles a single existing future deletion job without resurrecting closed consent", async () => {
     const db = await database(TERMINAL_SCRUB_MIGRATION);
     const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

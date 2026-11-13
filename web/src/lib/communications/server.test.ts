@@ -82,6 +82,95 @@ const job: EmailJob = { id: "job-a", user_id: "account-a", type: "weekly_report"
 const ok = (data: unknown = null) => ({ data, error: null });
 
 describe("communications server boundaries", () => {
+  it("delivers a still-scheduled account-matched notice after two current-state checks", async () => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const allowed = () => ok({ id, status: "scheduled", actor_session_id: id });
+    const processing = () => ok({ status: "processing", first_attempt_at: null });
+    const { db, calls } = database([allowed(), processing(), ok(null), ok([]), allowed(), processing(), ok(), ok()]);
+    const service = new CommunicationsService(db, {});
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "context").mockResolvedValue({
+      displayName: "Alex", accent: "#c8a96a", theme: "dark", locale: "en",
+      timezone: "UTC", orbUrl: "https://axom.info/icons/axom-orb-512.png",
+    });
+    const send = vi.spyOn(service.provider, "sendPrepared").mockResolvedValue("provider-a");
+    await service.sendAxomEmail({
+      ...job, type: "deletion_requested", category: "account_deletion",
+      idempotency_key: id + ":requested", variables: { requestId: id },
+      delivery_payload: { from: "AXOM <sender@example.invalid>", to: ["alex@example.invalid"],
+        subject: "Request received", html: "requested", text: "requested" },
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(calls.filter(call => call.table === "privacy_requests" && call.method === "eq"
+      && call.args[0] === "id" && call.args[1] === id)).toHaveLength(2);
+  });
+
+  it("stops a claimed deletion notice when cancellation wins during preparation", async () => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const results = [
+      ok({ id, status: "scheduled", actor_session_id: id }),
+      ok({ status: "processing", first_attempt_at: null }),
+      ok(null), ok([]),
+      ok({ id, status: "cancelled", actor_session_id: id }),
+      ok({ status: "processing", first_attempt_at: null }), ok(),
+    ];
+    const { db, calls } = database(results);
+    const service = new CommunicationsService(db, {});
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "context").mockResolvedValue({
+      displayName: "Alex", accent: "#c8a96a", theme: "dark", locale: "en",
+      timezone: "UTC", orbUrl: "https://axom.info/icons/axom-orb-512.png",
+    });
+    const send = vi.spyOn(service.provider, "sendPrepared").mockResolvedValue("provider-a");
+    await service.sendAxomEmail({
+      ...job, type: "deletion_scheduled", category: "account_deletion",
+      idempotency_key: id + ":scheduled", variables: { date: "2030-11-20T12:00:00Z" },
+      delivery_payload: { from: "AXOM <sender@example.invalid>", to: ["alex@example.invalid"],
+        subject: "Deletion scheduled", html: "scheduled", text: "scheduled" },
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({ table: "email_jobs", method: "update",
+      args: [{ status: "cancelled", failure_code: "deletion-consent-not-active" }] });
+  });
+
+  it("holds prior provider-attempt ambiguity instead of labeling the job unsent", async () => {
+    const { db, calls } = database([
+      ok(null), ok({ status: "processing", first_attempt_at: "2026-11-12T00:00:00Z" }), ok(),
+    ]);
+    const service = new CommunicationsService(db, {});
+    const send = vi.spyOn(service.provider, "sendPrepared").mockResolvedValue("provider-a");
+    await service.sendAxomEmail({
+      ...job, type: "deletion_requested", category: "account_deletion",
+      idempotency_key: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:requested",
+      variables: { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      first_attempt_at: "2026-11-12T00:00:00Z",
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({ table: "email_jobs", method: "update",
+      args: [{ status: "failed", failure_code: "delivery-reconciliation-required" }] });
+  });
+
+  it("does not dispatch a deletion notice when the originating consent is no longer active", async () => {
+    const { db, calls } = database([ok(null), ok([]), ok()]);
+    const service = new CommunicationsService(db, {});
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "context").mockResolvedValue({
+      displayName: "Alex", accent: "#c8a96a", theme: "dark", locale: "en",
+      timezone: "UTC", orbUrl: "https://axom.info/icons/axom-orb-512.png",
+    });
+    const send = vi.spyOn(service.provider, "sendPrepared").mockResolvedValue("provider-a");
+    await service.sendAxomEmail({
+      ...job, type: "deletion_scheduled", category: "account_deletion",
+      idempotency_key: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:scheduled",
+      variables: { date: "2030-11-20T12:00:00Z" },
+      delivery_payload: { from: "AXOM <sender@example.invalid>", to: ["alex@example.invalid"],
+        subject: "Deletion scheduled", html: "scheduled", text: "scheduled" },
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(calls.some(call => call.table === "privacy_requests" && call.method === "eq"
+      && call.args[0] === "kind" && call.args[1] === "deletion")).toBe(true);
+  });
+
   it("rejects administrator claims supplied through user metadata", async () => {
     const { db } = database(); const handler = createCommunicationsHandler(db, {});
     expect((await handler(new Request("https://axom.invalid?action=admin", { method: "POST", headers: { authorization: "Bearer verified-user" } }))).status).toBe(403);
