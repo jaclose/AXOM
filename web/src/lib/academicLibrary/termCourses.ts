@@ -79,11 +79,12 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const explicitSetMembers = new Map<string, Set<string> | null>();
   for (const set of workspace.questionSets) {
     setCounts.set(set.id, (setCounts.get(set.id) ?? 0) + 1);
-    // Legacy local sets may omit membership. A declared list is authoritative;
-    // malformed declarations never become proof of an original question link.
+    // Legacy local sets may omit membership. An explicit list is authoritative;
+    // malformed or repeated IDs are never proof of an original question link.
     if (Object.prototype.hasOwnProperty.call(set, "questionIds")) {
       explicitSetMembers.set(set.id, Array.isArray(set.questionIds)
         && set.questionIds.every(id => typeof id === "string" && id.trim().length > 0)
+        && new Set(set.questionIds).size === set.questionIds.length
         ? new Set(set.questionIds) : null);
     }
   }
@@ -100,7 +101,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
       for (const originalSetId of saved.setIds) owningSets.add(originalSetId);
       receiptSetsByQuestion.set(id, owningSets);
     }
-    for (const id of saved.setIds) if (setCounts.get(id) === 1) setIds.add(id);
+    for (const id of saved.setIds) if (setCounts.get(id) === 1 && explicitSetMembers.get(id) !== null) setIds.add(id);
   }
   const counts = new Map<string, number>();
   for (const question of workspace.questions) counts.set(question.id, (counts.get(question.id) ?? 0) + 1);

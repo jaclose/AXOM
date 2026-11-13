@@ -217,6 +217,27 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["valid", "loose"]);
   });
 
+  it("rejects duplicate explicit original-set members without hiding valid or legacy neighbors", () => {
+    const state = workspace([receipt(1, ["adjacent", "separated", "valid", "legacy", "loose"], {
+      setIds: ["adjacent-set", "separated-set", "valid-set", "legacy-set"],
+    })], [
+      question("adjacent", { setId: "adjacent-set" }),
+      question("separated", { setId: "separated-set" }),
+      question("valid", { setId: "valid-set" }),
+      question("legacy", { setId: "legacy-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "adjacent-set", questionIds: ["adjacent", "adjacent"] },
+      { id: "separated-set", questionIds: ["separated", "unrelated", "separated"] },
+      { id: "valid-set", questionIds: ["valid"] },
+      { id: "legacy-set" },
+    ] as unknown as typeof state.questionSets;
+    const selected = termQuizSelection("Term 1", "account", state);
+    expect(selected.questionIds).toEqual(["valid", "legacy", "loose"]);
+    expect(selected.setIds).toEqual(["valid-set", "legacy-set"]);
+  });
+
   it("holds malformed declared membership without rejecting legacy sets that omit the list", () => {
     const state = workspace([receipt(1, ["malformed", "legacy", "loose"], { setIds: ["bad-set", "legacy-set"] })], [
       question("malformed", { setId: "bad-set" }),
