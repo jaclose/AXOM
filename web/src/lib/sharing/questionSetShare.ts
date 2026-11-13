@@ -473,6 +473,9 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
 // HTTP(S) URL authority userinfo may contain a password or private email.
 // Never hide it behind the public-URL exemption, including nested URLs.
 const PRIVATE_HTTP_CITATION_USERINFO = /https?:\/\/[^\s/?#<>"'|;,]+@/i;
+// A public HTTPS wrapper does not make a nested device URI safe to publish.
+// Check these explicit schemes before masking ordinary public URL spans.
+const PRIVATE_NESTED_DEVICE_URI = /(?:^|[^a-z0-9])(?:file:\/+|content:\/\/)/i;
 const PUBLIC_HTTP_CITATION_URL = /https?:\/\/[^\s<>"'|;,]+/gi;
 const PRIVATE_DEVICE_CITATION = /(?:^|[^a-z0-9/@])(?:file:\/+|content:\/\/|\/\/[^\s\x2f]+\/|\/[a-z0-9._~-]+(?:\/|$)|~\/|[a-z]:[\\/])|\\\\/i;
 
@@ -484,6 +487,7 @@ export function hasPrivateDeviceCitation(citation: string | undefined): boolean 
   // percent-encoded UTF-8 octets, and fails closed on controls/oversized input.
   for (let pass = 0; pass <= 3; pass += 1) {
     if (PRIVATE_HTTP_CITATION_USERINFO.test(value)) return true;
+    if (PRIVATE_NESTED_DEVICE_URI.test(value)) return true;
     const withoutPublicUrls = value.replace(PUBLIC_HTTP_CITATION_URL, " ");
     if (PRIVATE_DEVICE_CITATION.test(withoutPublicUrls)) return true;
     if (pass === 3) break;

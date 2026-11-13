@@ -33,6 +33,12 @@ begin
     if v_value ~* $userinfo$https?://[^[:space:]/?#<>"'|;,]+@$userinfo$ then
       return true;
     end if;
+    -- A nested file/content URI remains private even when a public HTTPS
+    -- redirect or preview URL contains it. Inspect before masking URLs;
+    -- the existing decoder also covers percent-encoded nested schemes.
+    if v_value ~* $nested$(^|[^a-z0-9])(file:/+|content://)$nested$ then
+      return true;
+    end if;
     v_without_public_urls := pg_catalog.regexp_replace(
       v_value, $url$https?://[^[:space:]<>"'|;,]+$url$, ' ', 'gi');
     -- Recognize arbitrary absolute POSIX roots, slash-style UNC locations,
