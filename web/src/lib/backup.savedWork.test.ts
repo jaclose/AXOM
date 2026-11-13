@@ -8,12 +8,15 @@ import { makeSeed } from "./seed";
 import { sha256Hex } from "./checksum";
 import { saveSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { ATTACHMENT_EXPORT_KEY, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
+import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
 import { splitCloudContent } from "./sync/cloudContent";
 import { deferContent } from "./sync/deferredContent";
 import { retainDownloadedContent } from "./sync/contentDownloads";
 
-const attachment: QuestionImageAttachment = { id: "figure", blobKey: "offline-figure", fileName: "figure.png", mimeType: "image/png", byteSize: 4, altText: "Test figure", createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z", role: "question" };
+const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
+const PNG_BYTES = Uint8Array.from(atob(PNG_BASE64), char => char.charCodeAt(0));
+const pngBlob = () => new Blob([PNG_BYTES.buffer as ArrayBuffer], { type: "image/png" });
+const attachment: QuestionImageAttachment = { id: "figure", blobKey: "offline-figure", fileName: "figure.png", mimeType: "image/png", byteSize: PNG_BYTES.length, altText: "Test figure", createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z", role: "question" };
 const attemptedDownload = vi.fn(async () => { throw new Error("Offline"); });
 const accountRead = vi.hoisted(() => vi.fn(async () => { throw new Error("Account unavailable"); }));
 vi.mock("./account/supabase", () => ({ accountOperationClient: accountRead }));
@@ -52,7 +55,7 @@ describe("saved-work recovery without downloading content", () => {
   it("exports local images and exact originals while preserving deferred notes and references", async () => {
     const { state, original, deferred } = await fixture();
     await saveSourceOriginal(state.documents[0], original);
-    await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "q", updatedAt: attachment.updatedAt });
+    await putQuestionAttachmentBlob(attachment.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "q", updatedAt: attachment.updatedAt });
     const result = await exportStateWithAttachments(deferred, "saved-work");
     expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: ["unavailable-image"], originalCount: 1, missingOriginalIds: [], deferredSourceCount: 2 });
     expect(filename).toMatch(/^axom-saved-work-.*\.zip$/);
@@ -104,7 +107,7 @@ describe("saved-work recovery without downloading content", () => {
     const { state, original } = await fixture();
     await saveSourceOriginal(state.documents[0], original);
     for (const a of state.questions[0].attachments ?? []) {
-      await putQuestionAttachmentBlob(a.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "q", updatedAt: a.updatedAt });
+      await putQuestionAttachmentBlob(a.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "q", updatedAt: a.updatedAt });
     }
     const result = await exportStateWithAttachments(state);
     expect(result.missingBlobKeys).toEqual([]);
@@ -132,8 +135,8 @@ describe("saved-work recovery without downloading content", () => {
       { ...attachment, id: "another-reference", assetId: "another-source" },
     ];
     await putQuestionAttachmentBlob(attachment.blobKey, {
-      blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/png",
-      byteSize: 4, questionId: "q", updatedAt: attachment.updatedAt,
+      blob: pngBlob(), mimeType: "image/png",
+      byteSize: PNG_BYTES.length, questionId: "q", updatedAt: attachment.updatedAt,
     });
     const result = await exportStateWithAttachments(state);
     expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: [], originalCount: 0 });
@@ -141,8 +144,12 @@ describe("saved-work recovery without downloading content", () => {
     expect(lastBackupAt()).not.toBeNull();
     const backup = await readPortableBackup(new File([exported!], filename));
     expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toHaveLength(1);
-    expect(await backup.restoreMedia([{ id: "q", attachments: state.questions[0].attachments }]))
-      .toMatchObject({ restored: 0, skipped: 1 });
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    const staged = await backup.restoreMedia([{ id: "q", attachments: state.questions[0].attachments }]);
+    expect(staged).toMatchObject({ restored: 1, skipped: 0 });
+    expect(new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer()))
+      .toEqual(PNG_BYTES);
+    await staged.rollback();
   });
 
   it.each([
@@ -154,8 +161,8 @@ describe("saved-work recovery without downloading content", () => {
     state.documents = [];
     state.questions[0].attachments = [attachment, { ...attachment, ...changes, id: "contradiction" }];
     await putQuestionAttachmentBlob(attachment.blobKey, {
-      blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/png",
-      byteSize: 4, questionId: "q", updatedAt: attachment.updatedAt,
+      blob: pngBlob(), mimeType: "image/png",
+      byteSize: PNG_BYTES.length, questionId: "q", updatedAt: attachment.updatedAt,
     });
     const result = await exportStateWithAttachments(state);
     expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
@@ -185,6 +192,26 @@ describe("saved-work recovery without downloading content", () => {
     expect(lastBackupAt()).toBeNull();
     const backup = await readPortableBackup(new File([exported!], filename));
     expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
+  });
+
+  it("does not certify equal-length fake or damaged PNG bytes in a complete JSON backup", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    state.questions[0].attachments = [attachment];
+    for (const bytes of [
+      new Uint8Array(PNG_BYTES.length).fill(0x58),
+      (() => { const altered = new Uint8Array(PNG_BYTES); altered[45] ^= 1; return altered; })(),
+    ]) {
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+        mimeType: "image/png", byteSize: PNG_BYTES.length,
+        questionId: "q", updatedAt: attachment.updatedAt,
+      });
+      const result = await exportStateWithAttachments(state);
+      expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+      expect(lastBackupAt()).toBeNull();
+    }
   });
 
   it("aborts a JSON export on account switch instead of downloading prior-account metadata", async () => {
