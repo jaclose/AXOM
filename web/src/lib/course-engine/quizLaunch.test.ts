@@ -79,6 +79,31 @@ describe("course to canonical quiz handoff", () => {
     expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
   });
 
+  it("preserves exact cross-module Term practice while holding malformed aggregate claims", () => {
+    const selection = { term: "Term 5", module: "Term 5", scopeKind: "term" as const,
+      questionIds: ["one", "two"], setIds: [] };
+    const downloaded = [{ ...questions[0], module: "GOER", week: 1 },
+      { ...questions[1], module: "NCRS", week: 2 }];
+    launchCourseQuiz(selection);
+    const pending = sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY);
+    expect(readCourseQuizLaunch(downloaded)).toMatchObject(selection);
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
+    for (const altered of [
+      { ...selection, week: 1 },
+      { ...selection, courseId: "one-course" },
+      { ...selection, module: "GOER" },
+      { ...selection, scopeKind: "unrecognized" },
+    ]) {
+      sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(altered));
+      expect(readCourseQuizLaunch(downloaded)).toBeNull();
+    }
+    sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, pending!);
+    expect(readCourseQuizLaunch(downloaded)?.questionIds).toEqual(["one", "two"]);
+    const fixed = { term: "Term 5", module: "GOER", questionIds: ["one", "two"], setIds: [] };
+    launchCourseQuiz(fixed);
+    expect(readCourseQuizLaunch(downloaded)).toBeNull();
+  });
+
   it("does not accept duplicate, invalid or excessive fixed question IDs", () => {
     const base = { term: "Term 1", module: "SAMPLE", setIds: [] };
     expect(() => launchCourseQuiz({ ...base, questionIds: ["one", "one"] }))

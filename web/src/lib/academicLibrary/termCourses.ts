@@ -83,7 +83,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const counts = new Map<string, number>();
   for (const question of workspace.questions) counts.set(question.id, (counts.get(question.id) ?? 0) + 1);
   const deferred = new Set(workspace.deferredContent?.questions.map(question => question.id) ?? []);
-  return { module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
+  return { scopeKind: "term", module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
     && questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id) };
 }

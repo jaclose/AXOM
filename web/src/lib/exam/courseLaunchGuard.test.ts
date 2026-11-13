@@ -102,6 +102,32 @@ describe("exact Course Tracker practice handoff", () => {
     ]).state).toBe("ready");
   });
 
+  it("distinguishes reviewed term-wide unions from contradictory fixed-module claims", () => {
+    const selection = { scopeKind: "term", module: "Term 5", term: "Term 5",
+      questionIds: ["q1", "q2"], setIds: [] };
+    sessionStorage.setItem(KEY, JSON.stringify(selection));
+    const local = [question("q1", { module: "GOER", week: 1 }),
+      question("q2", { module: "NCRS", week: 2 })];
+    expect(inspectCourseLaunch(local)).toEqual({ state: "ready", launch: selection });
+    const pending = sessionStorage.getItem(KEY);
+    for (const invalid of [
+      { ...selection, module: "GOER" },
+      { ...selection, week: 2 },
+      { ...selection, courseId: "unrelated" },
+      { ...selection, scopeKind: "anything" },
+    ]) {
+      sessionStorage.setItem(KEY, JSON.stringify(invalid));
+      expect(inspectCourseLaunch(local).state).toBe("invalid");
+    }
+    sessionStorage.setItem(KEY, pending!);
+    expect(inspectCourseLaunch(local).state).toBe("ready");
+    sessionStorage.setItem(KEY, JSON.stringify({ term: "Term 5", module: "GOER",
+      questionIds: ["q1", "q2"], setIds: [] }));
+    expect(inspectCourseLaunch(local)).toMatchObject({
+      state: "pending", ready: 1, review: 1, reviewIds: ["q2"],
+    });
+  });
+
   it("has no pending state when no handoff exists", () => {
     expect(inspectCourseLaunch([])).toEqual({ state: "none" });
   });
