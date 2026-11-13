@@ -233,7 +233,7 @@ describe("saved-work recovery without downloading content", () => {
   });
 
 
-  it("routes more than 4096 distinct image identities to ZIP even with less than 128 MiB of metadata", async () => {
+  it("exports 4097 verified small images as a recoverable ZIP and certifies only after complete coverage", async () => {
     localStorage.clear();
     const { state } = await fixture();
     state.documents = [];
@@ -241,28 +241,28 @@ describe("saved-work recovery without downloading content", () => {
       ...attachment, id: `figure-${index}`, blobKey: `image-${index}`,
     }));
     state.questions[0].attachments = images;
-    await putQuestionAttachmentBlob(images[0].blobKey, {
+    dispose();
+    // Real exporter and ZIP preflight run; a synthetic loader supplies each
+    // immutable key without thousands of unrelated IndexedDB writes.
+    dispose = setMissingAttachmentLoader(async () => ({
       blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
       questionId: "q", updatedAt: attachment.updatedAt,
-    });
+    }));
 
     const result = await exportStateWithAttachments(state);
     expect(filename).toMatch(/^axom-backup-.*\.zip$/);
-    expect(result.attachmentCount).toBe(1);
-    expect(result.missingBlobKeys).toHaveLength(4096);
-    expect(lastBackupAt()).toBeNull();
+    expect(result).toMatchObject({ attachmentCount: 4097, missingBlobKeys: [], originalCount: 0 });
+    expect(lastBackupAt()).not.toBeNull();
     const portable = await readPortableBackup(new File([exported!], filename));
     expect(JSON.parse(portable.rawText).questions[0].attachments).toHaveLength(4097);
     expect(JSON.parse(portable.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
-    await deleteQuestionAttachmentBlobs([images[0].blobKey]);
     const staged = await portable.restoreMedia([{ id: "q", attachments: [images[0]] }]);
-    expect(staged).toMatchObject({ restored: 1, skipped: 0 });
-    expect(new Uint8Array(await (await getQuestionAttachmentBlob(images[0].blobKey))!.blob.arrayBuffer()))
+    expect(staged).toMatchObject({ restored: 1, skipped: 4096 });
+    expect(new Uint8Array(await (await getQuestionAttachmentBlob(images[0].blobKey, { localOnly: true }))!.blob.arrayBuffer()))
       .toEqual(PNG_BYTES);
     await staged.rollback();
-  });
-
-
+    expect(await getQuestionAttachmentBlob(images[0].blobKey, { localOnly: true })).toBeUndefined();
+  }, 90_000);
   it("falls back to a valid ZIP when the serialized JSON exceeds its import byte limit", async () => {
     localStorage.clear();
     const state = makeSeed();
