@@ -45,6 +45,25 @@ describe("portable binary media backup", () => {
     expect(await backup.restoreMedia(refs)).toMatchObject({ restored: 1, skipped: 0 });
   });
 
+  it.each([
+    { defect: "truncated blob", bytes: "AB", recordSize: 4, mime: "image/png" },
+    { defect: "empty blob", bytes: "", recordSize: 4, mime: "image/png" },
+    { defect: "inaccurate stored length", bytes: "AXOM", recordSize: 2, mime: "image/png" },
+    { defect: "mismatched stored MIME", bytes: "AXOM", recordSize: 4, mime: "image/jpeg" },
+  ] as const)("does not count a $defect as a backed-up image", async ({ bytes, recordSize, mime }) => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([bytes], { type: mime }), mimeType: mime, byteSize: recordSize,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({}, refs);
+    expect(exported.attachmentCount).toBe(0);
+    expect(exported.missingBlobKeys).toEqual([attachment.blobKey]);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    expect(zip.file("media/0")).toBeNull();
+    expect(JSON.parse(await zip.file("workspace.json")!.async("string")).media).toEqual([]);
+  });
+
   it("never overwrites existing bytes when a portable backup reuses their blob key", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4,

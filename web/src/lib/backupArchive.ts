@@ -41,6 +41,12 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
       const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
       if (!record) throw new Error("Missing image");
       const bytes = new Uint8Array(await record.blob.arrayBuffer());
+      // An IndexedDB entry can exist but contain truncated or mismatched bytes.
+      // Do not count it as a complete portable image; restore would reject it.
+      if (!Number.isSafeInteger(metadata.byteSize) || metadata.byteSize <= 0
+        || metadata.byteSize > MAX_QUESTION_ATTACHMENT_BYTES
+        || bytes.byteLength !== metadata.byteSize || record.byteSize !== metadata.byteSize
+        || record.mimeType !== metadata.mimeType) throw new Error("Image record does not match its reference");
       const file = `media/${media.length}`;
       zip.file(file, bytes); media.push({ file, metadata });
     } catch { missingBlobKeys.push(metadata.blobKey); }
