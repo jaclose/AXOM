@@ -208,9 +208,10 @@ describe("term course actions", () => {
     expect(screen.queryByText(/Account A private/)).toBeNull();
     expect(screen.queryByText(/Download complete/)).toBeNull();
   });
-  it("prevents an abandoned account A download from resetting account B busy state or status", async () => {
+  it("prevents late A completion from clearing B's still-active download or progress", async () => {
     const first = deferred();
-    mocks.download.mockReturnValueOnce(first.promise);
+    const second = deferred();
+    mocks.download.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     const actions = (accountId: string) => <TermCourseActions term="Term 5" accountId={accountId}
       courses={courses} disabled={false} onBusyChange={onBusyChange} />;
     const view = render(actions("account-a"));
@@ -221,11 +222,17 @@ describe("term course actions", () => {
     expect(screen.getByRole("button", { name: "Download Term 5" }).hasAttribute("disabled")).toBe(false);
     mocks.download.mockImplementation(async (entry: AcademicCourse) => { mocks.downloaded.add(entry.id); });
     fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
-    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
-    const callsAfterB = onBusyChange.mock.calls.length;
+    await screen.findByText("Downloading 1 of 3: GOER");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    const callsDuringB = onBusyChange.mock.calls.length;
     await act(async () => first.resolve());
-    expect(onBusyChange).toHaveBeenCalledTimes(callsAfterB);
-    expect(screen.getByText("Download complete. 3 downloaded, 0 already on this device.")).toBeTruthy();
+    expect(onBusyChange).toHaveBeenCalledTimes(callsDuringB);
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByText("Downloading 1 of 3: GOER")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    await act(async () => second.resolve());
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
     expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["GOER", "GOER", "CPR", "RHPS"]);
   });
 
