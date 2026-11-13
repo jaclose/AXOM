@@ -6,7 +6,7 @@ import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { assertRestorableZipBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
@@ -100,6 +100,91 @@ afterEach(async () => {
 });
 
 describe("portable binary media backup", () => {
+
+  it("matches ZIP entry acceptance at 30,000 including real JSZip directory and original entries", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("workspace.json", "{}");
+    zip.file("media/0", PNG_BYTES);
+    zip.file("originals/0", "source");
+    // Count actual JSZip entries, including any implicit directory records.
+    const initialEntries = Object.keys(zip.files).length;
+    expect(initialEntries).toBeGreaterThanOrEqual(3);
+    for (let index = 1; index <= 30_000 - initialEntries; index++) {
+      zip.file(`media/${index}`, "");
+    }
+    const exactlyAccepted = Object.keys(zip.files).length;
+    expect(exactlyAccepted).toBe(30_000);
+    expect(() => assertRestorableZipBudget(exactlyAccepted, 12)).not.toThrow();
+    zip.file("media/over-the-limit", "");
+    expect(Object.keys(zip.files)).toHaveLength(30_001);
+    expect(() => assertRestorableZipBudget(Object.keys(zip.files).length, 12))
+      .toThrow(/30,000.*entries/i);
+  }, 60_000);
+
+  it("matches both 2 GiB ZIP expanded and serialized archive limits without allocating gigabytes", () => {
+    const twoGiB = 2 * 1024 * 1024 * 1024;
+    expect(() => assertRestorableZipBudget(3, twoGiB)).not.toThrow();
+    expect(() => assertRestorableZipBudget(3, twoGiB + 1)).toThrow(/expanded.*2 GB/i);
+    expect(() => assertRestorableZipBudget(3, 10, twoGiB)).not.toThrow();
+    expect(() => assertRestorableZipBudget(3, 10, twoGiB + 1)).toThrow(/archive.*2 GB/i);
+    expect(() => assertRestorableZipBudget(3, Number.POSITIVE_INFINITY)).toThrow(/expanded.*2 GB/i);
+  });
+
+  it("rejects an oversized serialized ZIP before returning any downloadable backup", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const originalSize = Object.getOwnPropertyDescriptor(NativeBlob.prototype, "size")!.get!;
+    vi.spyOn(NativeBlob.prototype, "size", "get").mockImplementation(function (this: Blob) {
+      const real = originalSize.call(this) as number;
+      return this.type === "application/zip" ? 2 * 1024 * 1024 * 1024 + 1 : real;
+    });
+    try {
+      await expect(createMediaBackupArchive({}, refs)).rejects.toThrow(/archive.*2 GB/i);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+
+  it("round-trips images with two verified originals and supports staged image rollback", async () => {
+    const firstBlob = new Blob(["first source"], { type: "text/plain" });
+    const secondBlob = new Blob(["second source"], { type: "text/plain" });
+    const document = async (id: string, blob: Blob): Promise<SourceDocument> => ({
+      id, title: id, fileName: `${id}.txt`, fileType: "text/plain",
+      uploadedAt: "2026-10-13", rawText: await blob.text(),
+      sizeBytes: blob.size, checksum: await sha256Hex(await blob.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    });
+    const first = await document("first-original", firstBlob);
+    const second = await document("second-original", secondBlob);
+    await saveSourceOriginal(first, firstBlob);
+    await saveSourceOriginal(second, secondBlob);
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({ documents: [first, second] }, refs, [first, second]);
+    expect(exported).toMatchObject({
+      attachmentCount: 1, originalCount: 2, missingBlobKeys: [], missingOriginalIds: [],
+    });
+    const portable = await readPortableBackup(new File([exported.blob], "mixed-originals.zip"));
+    await deleteSourceOriginal(first.id);
+    await deleteSourceOriginal(second.id);
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    const staged = await portable.restoreMedia(refs);
+    expect(staged).toMatchObject({ restored: 1, skipped: 0 });
+    expect(await portable.restoreOriginals([first, second])).toEqual({ restored: 2, skipped: 0 });
+    expect(await (await readSourceOriginal(first.id, first.checksum))?.text()).toBe("first source");
+    expect(await (await readSourceOriginal(second.id, second.checksum))?.text()).toBe("second source");
+    const recovered = await getQuestionAttachmentBlob(attachment.blobKey);
+    expect(new Uint8Array(await recovered!.blob.arrayBuffer())).toEqual(PNG_BYTES);
+    await staged.rollback();
+    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
+  });
+
   it("round-trips distinct question references to one shared image without embedding base64 in workspace JSON", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "held-question", updatedAt: attachment.updatedAt });
     const secondAttachment = { ...attachment, id: "figure-second", assetId: "source-page-second" };
