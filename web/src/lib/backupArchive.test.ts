@@ -64,6 +64,45 @@ describe("portable binary media backup", () => {
     expect(JSON.parse(await zip.file("workspace.json")!.async("string")).media).toEqual([]);
   });
 
+
+  it.each([
+    { conflict: "MIME", changes: { mimeType: "image/jpeg" } },
+    { conflict: "byte size", changes: { byteSize: 6 } },
+  ] as const)("holds a shared storage key with contradictory $conflict instead of certifying its ZIP bytes", async ({ changes }) => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const conflictingAttachment: QuestionImageAttachment = { ...attachment, ...changes, id: "other-figure" };
+    const references = [...refs, { id: "other-question", attachments: [conflictingAttachment] }];
+    expect(mediaBackupBytes(references)).toBe(4);
+    const exported = await createMediaBackupArchive({ _app: "AXOM" }, references);
+    expect(exported.attachmentCount).toBe(0);
+    expect(exported.missingBlobKeys).toEqual([attachment.blobKey]);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    expect(zip.file("media/0")).toBeNull();
+    expect(JSON.parse(await zip.file("workspace.json")!.async("string")).media).toEqual([]);
+    const backup = await readPortableBackup(new File([exported.blob], "conflicting.zip"));
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    await expect(backup.restoreMedia(references)).rejects.toThrow("conflicting image metadata");
+    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
+  });
+
+  it("fails closed on conflicting references when restoring an older JSON backup", async () => {
+    const payload = {
+      _app: "AXOM",
+      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }],
+    };
+    const backup = await readPortableBackup(new File([JSON.stringify(payload)], "older.json"));
+    const conflictingAttachment: QuestionImageAttachment = {
+      ...attachment, id: "second-figure", byteSize: attachment.byteSize + 1,
+    };
+    await expect(backup.restoreMedia([...refs, { id: "other-question", attachments: [conflictingAttachment] }]))
+      .rejects.toThrow("conflicting image metadata");
+    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
+  });
+
   it("never overwrites existing bytes when a portable backup reuses their blob key", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4,

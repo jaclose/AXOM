@@ -22,11 +22,37 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
 const FORMAT = "axom-media-backup";
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
 
-function mediaReferences(references: References) {
-  return [...new Map(references.flatMap(q => (q.attachments ?? []).map(a => [a.blobKey, { ...a, questionId: q.id }] as const))).values()];
+type MediaReference = { metadata: Omit<QuestionAttachmentExportPayload, "base64">; conflicting: boolean };
+
+/** One shared key may be referenced repeatedly, but it cannot name different media.
+ * Keep the first reference and mark conflicts; a last-wins Map would hide evidence
+ * that at least one question cannot be faithfully recovered from this archive. */
+function mediaReferences(references: References): MediaReference[] {
+  const byKey = new Map<string, MediaReference>();
+  for (const question of references) {
+    for (const attachment of question.attachments ?? []) {
+      const existing = byKey.get(attachment.blobKey);
+      if (existing) {
+        if (existing.metadata.mimeType !== attachment.mimeType
+          || existing.metadata.byteSize !== attachment.byteSize) existing.conflicting = true;
+      } else {
+        byKey.set(attachment.blobKey, {
+          metadata: { ...attachment, questionId: question.id }, conflicting: false,
+        });
+      }
+    }
+  }
+  return [...byKey.values()];
 }
+
+function assertConsistentMediaReferences(references: References): void {
+  if (mediaReferences(references).some(entry => entry.conflicting)) {
+    throw new Error("The workspace references conflicting image metadata for one storage key. Resolve the conflict before restoring images.");
+  }
+}
+
 export function mediaBackupBytes(references: References): number {
-  return mediaReferences(references).reduce((n, a) => n + a.byteSize, 0);
+  return mediaReferences(references).reduce((n, entry) => n + entry.metadata.byteSize, 0);
 }
 
 /** Binary images avoid the single-string limit of large base64 JSON backups. */
@@ -36,7 +62,11 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
-  for (const metadata of mediaReferences(references)) {
+  for (const { metadata, conflicting } of mediaReferences(references)) {
+    if (conflicting) {
+      missingBlobKeys.push(metadata.blobKey);
+      continue;
+    }
     try {
       const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
       if (!record) throw new Error("Missing image");
@@ -80,7 +110,10 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   if (!file.name.toLowerCase().endsWith(".zip")) {
     const rawText = await file.text();
     const payloads = extractQuestionAttachmentPayloads(JSON.parse(rawText));
-    return { rawText, restoreMedia: refs => stageQuestionAttachmentPayloads(payloads, refs), restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
+    return { rawText, restoreMedia: refs => {
+      assertConsistentMediaReferences(refs);
+      return stageQuestionAttachmentPayloads(payloads, refs);
+    }, restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
   }
   if (file.size > 2 * 1024 * 1024 * 1024) throw new Error("This backup exceeds the 2 GB archive limit.");
   const zip = await JSZip.loadAsync(new Uint8Array(await file.arrayBuffer()));
@@ -132,6 +165,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     }
     return { restored, skipped };
   }, restoreMedia: async references => {
+    assertConsistentMediaReferences(references);
     const payloads: QuestionAttachmentExportPayload[] = [];
     for (const item of media) {
       const bytes = await zip.file(item.file)!.async("uint8array");
