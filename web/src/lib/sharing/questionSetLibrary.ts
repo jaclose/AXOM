@@ -201,7 +201,7 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   // Historical approved sets remain readable/importable unchanged.
   if (submittedSnapshot.questions.some(question => hasPrivateDeviceCitation(question.citation)))
     throw new Error("Question Set citation contains a private local file path, inline document URI or URL credentials and cannot be published.");
-  if (!snapshot.questions.length || submittedSnapshot.questions.some(question => !question.correctKey))
+  if (!submittedSnapshot.questions.length || submittedSnapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
   // The dialog filters missing/placeholder rationales, but other callers can
   // reach this service directly. Enforce explanation presence at final egress,
