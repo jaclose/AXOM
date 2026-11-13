@@ -92,6 +92,79 @@ function hasExpectedImageStructure(bytes: Uint8Array, mime: string): boolean {
   return false;
 }
 
+/** Validate zlib IDAT data and PNG scanline geometry before certifying an image.
+ * CRC-correct containers alone can contain zero/invalid compressed pixels.
+ * This is bounded structural validation, not a source digest or full pixel decode. */
+async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
+  try {
+    if (typeof DecompressionStream !== "function") return false;
+    const u32 = (at: number) =>
+      (bytes[at] * 0x1000000 + (bytes[at + 1] << 16) + (bytes[at + 2] << 8) + bytes[at + 3]) >>> 0;
+    const width = u32(16), height = u32(20), depth = bytes[24], color = bytes[25], interlace = bytes[28];
+    const allowedDepths: Record<number, readonly number[]> = {
+      0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16],
+    };
+    const channels: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+    if (!width || !height || !allowedDepths[color]?.includes(depth)
+      || bytes[26] !== 0 || bytes[27] !== 0 || (interlace !== 0 && interlace !== 1)) return false;
+    const parts: Uint8Array[] = [];
+    let totalCompressed = 0, sawIdat = false, afterIdat = false, palette = false;
+    for (let at = 8; at + 12 <= bytes.length;) {
+      const n = u32(at), name = String.fromCharCode(...bytes.subarray(at + 4, at + 8));
+      if (name === "IHDR" && at !== 8) return false;
+      if (name === "PLTE") { if (sawIdat) return false; palette = true; }
+      if (name === "IDAT") {
+        if (afterIdat) return false;
+        sawIdat = true;
+        totalCompressed += n;
+        if (totalCompressed > bytes.length) return false;
+        parts.push(bytes.subarray(at + 8, at + 8 + n));
+      } else if (sawIdat) afterIdat = true;
+      if (name === "IEND") break;
+      at += n + 12;
+    }
+    if (!sawIdat || totalCompressed === 0 || (color === 3 && !palette)) return false;
+    const passes = interlace === 0 ? [[0, 0, 1, 1]] : [
+      [0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4],
+      [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2],
+    ];
+    const rows: Array<{ h: number; rowBytes: number }> = [];
+    let expected = 0;
+    for (const [x, y, dx, dy] of passes) {
+      const w = Math.max(0, Math.ceil((width - x) / dx));
+      const h = Math.max(0, Math.ceil((height - y) / dy));
+      if (!w || !h) continue;
+      const rowBytes = Math.ceil(w * channels[color] * depth / 8);
+      const added = h * (rowBytes + 1);
+      if (!Number.isSafeInteger(added) || added > MAX_ORIGINAL_BYTES - expected) return false;
+      expected += added;
+      rows.push({ h, rowBytes });
+    }
+    const compressed = new Uint8Array(totalCompressed);
+    let written = 0;
+    for (const part of parts) { compressed.set(part, written); written += part.length; }
+    const decoded = new Uint8Array(expected);
+    const reader = new Blob([compressed as BlobPart]).stream()
+      .pipeThrough(new DecompressionStream("deflate")).getReader();
+    let length = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > expected - length) { await reader.cancel(); return false; }
+      decoded.set(value, length); length += value.byteLength;
+    }
+    if (length !== expected) return false;
+    let row = 0;
+    for (const { h, rowBytes } of rows) {
+      for (let y = 0; y < h; y++) {
+        if (decoded[row] > 4) return false;
+        row += rowBytes + 1;
+      }
+    }
+    return true;
+  } catch { return false; }
+}
+
 /** The same byte/metadata admission check protects both ZIP and JSON exports.
  * A readable storage record is not proof that it matches the learner's reference. */
 async function verifiedMediaBlob(
@@ -104,7 +177,8 @@ async function verifiedMediaBlob(
   if (!Number.isSafeInteger(metadata.byteSize) || metadata.byteSize <= 0
     || metadata.byteSize > MAX_QUESTION_ATTACHMENT_BYTES
     || bytes.byteLength !== metadata.byteSize || record.byteSize !== metadata.byteSize
-    || record.mimeType !== metadata.mimeType || !hasExpectedImageStructure(bytes, metadata.mimeType)) throw new Error("Image record does not match its reference");
+    || record.mimeType !== metadata.mimeType || !hasExpectedImageStructure(bytes, metadata.mimeType)
+    || (metadata.mimeType === "image/png" && !(await hasInflatablePngImageData(bytes)))) throw new Error("Image record does not match its reference");
   return { blob: record.blob, bytes };
 }
 

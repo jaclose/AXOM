@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
+import { deflateSync } from "node:zlib";
 import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
@@ -10,6 +11,22 @@ import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttach
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
 const PNG_BYTES = Uint8Array.from(atob(PNG_BASE64), char => char.charCodeAt(0));
+
+function crcCorrectPngWithIdat(data: Uint8Array): Uint8Array {
+  const chunk = new Uint8Array(12 + data.byteLength);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, data.byteLength);
+  chunk.set([73, 68, 65, 84], 4); // IDAT
+  chunk.set(data, 8);
+  let crc = 0xffffffff;
+  for (let i = 4; i < 8 + data.byteLength; i++) {
+    crc ^= chunk[i];
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  view.setUint32(8 + data.byteLength, (crc ^ 0xffffffff) >>> 0);
+  return Uint8Array.from([...PNG_BYTES.subarray(0, 33), ...chunk, ...PNG_BYTES.subarray(-12)]);
+}
+
 const pngBlob = () => new Blob([PNG_BYTES.buffer as ArrayBuffer], { type: "image/png" });
 const attachment: QuestionImageAttachment = { id: "figure", blobKey: "private-library:figure", fileName: "figure.png", mimeType: "image/png", byteSize: PNG_BYTES.length, altText: "Test figure", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z", role: "question" };
 const refs = [{ id: "held-question", attachments: [attachment] }];
@@ -80,6 +97,25 @@ describe("portable binary media backup", () => {
     });
     const result = await createMediaBackupArchive({}, [{ id: "held-question", attachments: [expected] }]);
     expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+  });
+
+  it("does not certify CRC-correct empty, invalid-zlib or undecodable PNG scanlines", async () => {
+    for (const idat of [
+      new Uint8Array(), // No compressed image data
+      Uint8Array.from([0x78, 0x9c, 1, 2, 3]), // Invalid zlib stream, valid PNG chunk CRC
+      deflateSync(Uint8Array.from([5, 0, 0, 0, 0])), // Valid zlib but invalid filter byte
+      deflateSync(Uint8Array.from([0, 0])), // Valid zlib but truncated RGBA scanline
+    ]) {
+      const bytes = crcCorrectPngWithIdat(idat);
+      const ref = { ...attachment, byteSize: bytes.length };
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+        mimeType: "image/png", byteSize: bytes.length,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const result = await createMediaBackupArchive({}, [{ id: "held-question", attachments: [ref] }]);
+      expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+    }
   });
 
   it("does not certify a same-size fake PNG or a byte-corrupted valid PNG as backed up", async () => {
