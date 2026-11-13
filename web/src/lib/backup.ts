@@ -1,7 +1,7 @@
 import { contentMetadata, readDeferredContent } from "./sync/deferredContent";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
-import { backupOriginalDocuments, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
+import { backupOriginalDocuments, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
@@ -24,7 +24,6 @@ import { normalizeQuestionAnnotations, reconcileQuestionAnnotationSources } from
 import { mergeQuestionAnalyses, normalizeQuestionAnalyses } from "./decode/normalize";
 import {
   ATTACHMENT_EXPORT_KEY,
-  collectQuestionAttachmentPayloads,
   normalizeQuestionAttachments,
 } from "./questionAttachments";
 import { DEFAULT_FOCUS_IDS, focusOption, normalizedFocusIds } from "./experience";
@@ -102,7 +101,7 @@ export async function exportStateWithAttachments(
   let attachmentCount = 0;
   let missingBlobKeys: string[];
   try {
-    const collected = await collectQuestionAttachmentPayloads(references, options);
+    const collected = await collectVerifiedMediaBackupPayloads(references, options);
     if (collected.payloads.length) payload[ATTACHMENT_EXPORT_KEY] = collected.payloads;
     attachmentCount = collected.payloads.length;
     missingBlobKeys = collected.missingBlobKeys;

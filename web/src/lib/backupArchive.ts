@@ -45,6 +45,48 @@ function mediaReferences(references: References): MediaReference[] {
   return [...byKey.values()];
 }
 
+/** The same byte/metadata admission check protects both ZIP and JSON exports.
+ * A readable storage record is not proof that it matches the learner's reference. */
+async function verifiedMediaBlob(
+  metadata: Omit<QuestionAttachmentExportPayload, "base64">,
+  options: AttachmentReadOptions,
+): Promise<{ blob: Blob; bytes: Uint8Array }> {
+  const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
+  if (!record) throw new Error("Missing image");
+  const bytes = new Uint8Array(await record.blob.arrayBuffer());
+  if (!Number.isSafeInteger(metadata.byteSize) || metadata.byteSize <= 0
+    || metadata.byteSize > MAX_QUESTION_ATTACHMENT_BYTES
+    || bytes.byteLength !== metadata.byteSize || record.byteSize !== metadata.byteSize
+    || record.mimeType !== metadata.mimeType) throw new Error("Image record does not match its reference");
+  return { blob: record.blob, bytes };
+}
+
+/** Small JSON exports require the same shared-key and byte checks as ZIP.
+ * Keep one verified payload per key; conflicting aliases are reported as missing
+ * rather than emitted as incompatible, falsely complete restore records. */
+export async function collectVerifiedMediaBackupPayloads(
+  references: References, options: AttachmentReadOptions = {},
+): Promise<{ payloads: QuestionAttachmentExportPayload[]; missingBlobKeys: string[] }> {
+  const scope = options.scope ?? getQuestionAttachmentScope();
+  options = { ...options, scope };
+  const payloads: QuestionAttachmentExportPayload[] = [];
+  const missingBlobKeys: string[] = [];
+  for (const { metadata, conflicting } of mediaReferences(references)) {
+    if (conflicting) {
+      missingBlobKeys.push(metadata.blobKey);
+      continue;
+    }
+    try {
+      const { blob } = await verifiedMediaBlob(metadata, options);
+      payloads.push({ ...metadata, base64: await blobToBase64(blob) });
+    } catch {
+      missingBlobKeys.push(metadata.blobKey);
+    }
+  }
+  if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed during export. Start a new export from the current workspace.");
+  return { payloads, missingBlobKeys };
+}
+
 function assertConsistentMediaReferences(references: References): void {
   if (mediaReferences(references).some(entry => entry.conflicting)) {
     throw new Error("The workspace references conflicting image metadata for one storage key. Resolve the conflict before restoring images.");
@@ -68,15 +110,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
       continue;
     }
     try {
-      const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
-      if (!record) throw new Error("Missing image");
-      const bytes = new Uint8Array(await record.blob.arrayBuffer());
-      // An IndexedDB entry can exist but contain truncated or mismatched bytes.
-      // Do not count it as a complete portable image; restore would reject it.
-      if (!Number.isSafeInteger(metadata.byteSize) || metadata.byteSize <= 0
-        || metadata.byteSize > MAX_QUESTION_ATTACHMENT_BYTES
-        || bytes.byteLength !== metadata.byteSize || record.byteSize !== metadata.byteSize
-        || record.mimeType !== metadata.mimeType) throw new Error("Image record does not match its reference");
+      const { bytes } = await verifiedMediaBlob(metadata, options);
       const file = `media/${media.length}`;
       zip.file(file, bytes); media.push({ file, metadata });
     } catch { missingBlobKeys.push(metadata.blobKey); }
@@ -110,7 +144,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   if (!file.name.toLowerCase().endsWith(".zip")) {
     const rawText = await file.text();
     const payloads = extractQuestionAttachmentPayloads(JSON.parse(rawText));
-    return { rawText, restoreMedia: refs => {
+    return { rawText, restoreMedia: async refs => {
       assertConsistentMediaReferences(refs);
       return stageQuestionAttachmentPayloads(payloads, refs);
     }, restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };

@@ -7,7 +7,7 @@ import { makeSeed } from "./seed";
 import { sha256Hex } from "./checksum";
 import { saveSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
+import { ATTACHMENT_EXPORT_KEY, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
 import { splitCloudContent } from "./sync/cloudContent";
 import { deferContent } from "./sync/deferredContent";
 import { retainDownloadedContent } from "./sync/contentDownloads";
@@ -122,4 +122,68 @@ describe("saved-work recovery without downloading content", () => {
     expect(filename).toMatch(/^axom-backup-.*\.json$/);
     expect(lastBackupAt()).toBeNull();
   });
+  it("deduplicates compatible shared keys in a complete JSON backup and restores their bytes", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    state.questions[0].attachments = [
+      attachment,
+      { ...attachment, id: "another-reference", assetId: "another-source" },
+    ];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/png",
+      byteSize: 4, questionId: "q", updatedAt: attachment.updatedAt,
+    });
+    const result = await exportStateWithAttachments(state);
+    expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: [], originalCount: 0 });
+    expect(filename).toMatch(/\\.json$/);
+    expect(lastBackupAt()).not.toBeNull();
+    const backup = await readPortableBackup(new File([exported!], filename));
+    expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toHaveLength(1);
+    expect(await backup.restoreMedia([{ id: "q", attachments: state.questions[0].attachments }]))
+      .toMatchObject({ restored: 0, skipped: 1 });
+  });
+
+  it.each([
+    { name: "MIME", changes: { mimeType: "image/jpeg" } },
+    { name: "declared byte size", changes: { byteSize: 5 } },
+  ] as const)("does not certify conflicting JSON shared-key $name", async ({ changes }) => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    state.questions[0].attachments = [attachment, { ...attachment, ...changes, id: "contradiction" }];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/png",
+      byteSize: 4, questionId: "q", updatedAt: attachment.updatedAt,
+    });
+    const result = await exportStateWithAttachments(state);
+    expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+    expect(lastBackupAt()).toBeNull();
+    expect(filename).toMatch(/\\.json$/);
+    const backup = await readPortableBackup(new File([exported!], filename));
+    expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
+    await expect(backup.restoreMedia([{ id: "q", attachments: state.questions[0].attachments }]))
+      .rejects.toThrow("conflicting image metadata");
+  });
+
+  it.each([
+    { name: "truncated image", bytes: "AB", storedSize: 4, storedMime: "image/png" },
+    { name: "lying stored size", bytes: "AXOM", storedSize: 2, storedMime: "image/png" },
+    { name: "mismatched stored MIME", bytes: "AXOM", storedSize: 4, storedMime: "image/jpeg" },
+  ] as const)("does not certify $name in complete JSON export", async ({ bytes, storedSize, storedMime }) => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    state.questions[0].attachments = [attachment];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([bytes], { type: storedMime }), mimeType: storedMime,
+      byteSize: storedSize, questionId: "q", updatedAt: attachment.updatedAt,
+    });
+    const result = await exportStateWithAttachments(state);
+    expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+    expect(lastBackupAt()).toBeNull();
+    const backup = await readPortableBackup(new File([exported!], filename));
+    expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
+  });
+
 });
