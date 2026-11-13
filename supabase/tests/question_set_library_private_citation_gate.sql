@@ -126,23 +126,23 @@ begin
   end;
 end $test$;
 
--- Existing publication snapshots, even if they contain a legacy local path,
--- are not rescanned on status/reviewer-only changes.
+-- Historical approved snapshots are not rewritten or rescanned on rejection;
+-- pending-to-approved is now guarded separately by R96.
 alter table pg_temp.question_set_library_citation_fixture
   disable trigger question_set_library_private_citation_gate;
-insert into pg_temp.question_set_library_citation_fixture(snapshot_payload)
-values ('{"questions":[{"citation":"file:///Users/historical/original.pdf"}]}'::jsonb);
+insert into pg_temp.question_set_library_citation_fixture(snapshot_payload, status)
+values ('{"questions":[{"citation":"file:///Users/historical/original.pdf"}]}'::jsonb, 'approved');
 alter table pg_temp.question_set_library_citation_fixture
   enable trigger question_set_library_private_citation_gate;
-update pg_temp.question_set_library_citation_fixture set status = 'approved'
+update pg_temp.question_set_library_citation_fixture set status = 'rejected'
 where snapshot_payload->'questions'->0->>'citation' = 'file:///Users/historical/original.pdf';
 
 do $history$
 begin
   if (select status from pg_temp.question_set_library_citation_fixture
       where snapshot_payload->'questions'->0->>'citation' =
-        'file:///Users/historical/original.pdf') is distinct from 'approved' then
-    raise exception 'Historical status-only approval did not persist';
+        'file:///Users/historical/original.pdf') is distinct from 'rejected' then
+    raise exception 'Historical status-only rejection did not persist';
   end if;
 end $history$;
 
