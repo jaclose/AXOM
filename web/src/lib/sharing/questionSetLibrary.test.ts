@@ -229,6 +229,12 @@ describe("searchable Question Set client boundary", () => {
     ["opaque-origin object URL", "blob:null/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
     ["nested encoded inline document", "https://example.edu/view?src=data%3Aapplication%2Fpdf%3Bbase64%2CJVBERi0x"],
     ["double-encoded object URL", "https://example.edu/view?src=blob%253Ahttps%253A%252F%252Fexample.edu%252Fprivate"],
+    ["four-layer encoded inline PDF", "https://example.edu/view?src=data%2525253Aapplication%2525252Fpdf%2525253Bbase64%2525252CJVBERi0x"],
+    ["five-layer encoded inline PDF", "https://example.edu/view?src=data%252525253Aapplication%252525252Fpdf%252525253Bbase64%252525252CJVBERi0x"],
+    ["twelve-layer encoded inline PDF", "https://example.edu/view?src=data%25252525252525252525253Aapplication%25252525252525252525252Fpdf%25252525252525252525253Bbase64%25252525252525252525252CJVBERi0x"],
+    ["five-layer encoded browser object URL", "https://example.edu/view?src=blob%252525253Ahttps%252525253A%252525252F%252525252Fexample.edu%252525252Fprivate"],
+    ["five-layer encoded private file URI", "https://example.edu/view?src=file%252525253A%252525252F%252525252F%252525252FUsers%252525252Flearner%252525252Fprivate.pdf"],
+    ["four-layer fully escaped scheme", "https://example.edu/view?src=%2525252564%2525252561%2525252574%2525252561%252525253Aapplication%252525252Fpdf%252525253Bbase64%252525252CJVBERi0x"],
   ])("refuses direct %s citations before the submission RPC without altering source evidence", async (_label, citation) => {
     const value = snapshot();
     value.questions[0].citation = citation;
@@ -265,6 +271,8 @@ describe("searchable Question Set client boundary", () => {
     "https://example.edu/paper#author@university",
     "Data: available upon request",
     "https://example.edu/paper?format=data",
+    "https://example.edu/paper?term=alpha%3Abeta&name=%C3%A9tude",
+    "DOI: 10.1000/escaped%2520space",
   ])("allows a public citation containing path-like words (%s)", async citation => {
     const value = snapshot();
     value.questions[0].citation = citation;

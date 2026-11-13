@@ -37,14 +37,22 @@ declare
     'blob:https://example.edu/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     'blob:null/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     'https://example.edu/view?src=data%3Aapplication%2Fpdf%3Bbase64%2CJVBERi0x',
-    'https://example.edu/view?src=blob%253Ahttps%253A%252F%252Fexample.edu%252Fprivate'
+    'https://example.edu/view?src=blob%253Ahttps%253A%252F%252Fexample.edu%252Fprivate',
+    'https://example.edu/view?src=data%2525253Aapplication%2525252Fpdf%2525253Bbase64%2525252CJVBERi0x',
+    'https://example.edu/view?src=data%252525253Aapplication%252525252Fpdf%252525253Bbase64%252525252CJVBERi0x',
+    'https://example.edu/view?src=data%25252525252525252525253Aapplication%25252525252525252525252Fpdf%25252525252525252525253Bbase64%25252525252525252525252CJVBERi0x',
+    'https://example.edu/view?src=blob%252525253Ahttps%252525253A%252525252F%252525252Fexample.edu%252525252Fprivate',
+    'https://example.edu/view?src=file%252525253A%252525252F%252525252F%252525252FUsers%252525252Flearner%252525252Fprivate.pdf',
+    'https://example.edu/view?src=%2525252564%2525252561%2525252574%2525252561%252525253Aapplication%252525252Fpdf%252525253Bbase64%252525252CJVBERi0x'
   ];
   v_allowed text[] := array[
     'PMID: 123456; DOI: 10.1000/example',
     'Data: available upon request',
     'https://example.edu/paper?format=data',
     'https://example.edu/lecture?source=/home/public.pdf',
-    'https://example.edu/path/%C3%A9tude'
+    'https://example.edu/path/%C3%A9tude',
+    'https://example.edu/paper?term=alpha%3Abeta&name=%C3%A9tude',
+    'DOI: 10.1000/escaped%2520space'
   ];
 begin
   insert into pg_temp.question_set_inline_citation_fixture(snapshot_payload)
