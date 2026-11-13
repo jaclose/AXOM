@@ -247,7 +247,7 @@ describe("saved-work recovery without downloading content", () => {
     });
 
     const result = await exportStateWithAttachments(state);
-    expect(filename).toMatch(/^axom-backup-.*\\.zip$/);
+    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
     expect(result.attachmentCount).toBe(1);
     expect(result.missingBlobKeys).toHaveLength(4096);
     expect(lastBackupAt()).toBeNull();
@@ -260,6 +260,45 @@ describe("saved-work recovery without downloading content", () => {
     expect(new Uint8Array(await (await getQuestionAttachmentBlob(images[0].blobKey))!.blob.arrayBuffer()))
       .toEqual(PNG_BYTES);
     await staged.rollback();
+  });
+
+
+  it("falls back to a valid ZIP when the serialized JSON exceeds its import byte limit", async () => {
+    localStorage.clear();
+    const state = makeSeed();
+    state.documents = []; state.questions = [];
+    const nativeSize = Object.getOwnPropertyDescriptor(NativeBlob.prototype, "size")!.get!;
+    let simulatedOversize = false;
+    vi.spyOn(NativeBlob.prototype, "size", "get").mockImplementation(function (this: Blob) {
+      const actual = nativeSize.call(this) as number;
+      if (!simulatedOversize && this.type === "application/json") {
+        simulatedOversize = true;
+        return 256 * 1024 * 1024 + 1;
+      }
+      return actual;
+    });
+    const result = await exportStateWithAttachments(state);
+    expect(simulatedOversize).toBe(true);
+    expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [], originalCount: 0 });
+    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
+    expect(lastBackupAt()).not.toBeNull();
+    const imported = await readPortableBackup(new File([exported!], filename));
+    expect(parseImport(imported.rawText).profile.userId).toBe(state.profile.userId);
+  });
+
+  it("refuses an unimportable oversized ZIP workspace before downloading or marking success", async () => {
+    localStorage.clear();
+    const { state } = await fixture(); // An original-backed export chooses ZIP.
+    const nativeSize = Object.getOwnPropertyDescriptor(NativeBlob.prototype, "size")!.get!;
+    vi.spyOn(NativeBlob.prototype, "size", "get").mockImplementation(function (this: Blob) {
+      const actual = nativeSize.call(this) as number;
+      return this.type === "application/json" ? 128 * 1024 * 1024 + 1 : actual;
+    });
+    await expect(exportStateWithAttachments(state))
+      .rejects.toThrow(/ZIP workspace exceeds the 128 MB recovery safety limit/i);
+    expect(exported).toBeUndefined();
+    expect(filename).toBe("");
+    expect(lastBackupAt()).toBeNull();
   });
 
 
