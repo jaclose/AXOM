@@ -9,7 +9,14 @@ import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../ui/primiti
 import { Modal } from "../ui/Modal";
 import "../../styles/question-set-library.css";
 
+// A reviewer queue contains source questions and answer keys. React's keyed
+// boundary drops the old account's preview before effects run after a switch.
+// Permission checks remain server-side; this prevents client-side disclosure.
 export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string }) {
+  return <AccountScopedReviewQueue key={accountId} accountId={accountId} />;
+}
+
+function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
   const [reviewer, setReviewer] = useState(false);
   const [queue, setQueue] = useState<LibrarySubmission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,10 +31,14 @@ export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(""); setQueue([]); setReviewer(false);
+    setPreview(undefined); setReason(""); setAttested(false);
     void isAcademicReviewer(accountId).then(async allowed => {
       if (!alive) return;
       setReviewer(allowed);
-      if (allowed) setQueue(await listPendingQuestionSets(accountId));
+      if (allowed) {
+        const pending = await listPendingQuestionSets(accountId);
+        if (alive) setQueue(pending);
+      }
     }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "Review queue unavailable."); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
