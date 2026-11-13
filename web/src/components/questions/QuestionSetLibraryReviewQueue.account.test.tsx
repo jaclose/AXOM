@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Profiler } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuestionSetLibraryReviewQueue } from "./QuestionSetLibraryReviewQueue";
@@ -137,4 +138,55 @@ describe("Question Set reviewer account isolation", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(mocks.decide).not.toHaveBeenCalled();
   });
+  it("redacts confidential rows in the same render that starts a reviewer permission refresh", async () => {
+    let finishAccess!: (allowed: boolean) => void;
+    mocks.reviewer.mockResolvedValueOnce(true).mockImplementationOnce(() => new Promise<boolean>(resolve => {
+      finishAccess = resolve;
+    }));
+    const disclosureCommits: string[] = [];
+    let captureRefresh = false;
+    render(<Profiler id="reviewer-queue" onRender={() => {
+      // Profiler observes the committed DOM before the next passive effect.
+      // Waiting until an effect clears old submissions is too late.
+      if (captureRefresh && document.body.textContent?.includes("Account A pending set"))
+        disclosureCommits.push("stale pending row");
+      if (captureRefresh && document.body.textContent?.includes("Account A confidential source and answer"))
+        disclosureCommits.push("stale inspected key");
+    }}><QuestionSetLibraryReviewQueue accountId="account-A" /></Profiler>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
+    expect(await screen.findByText("Account A confidential source and answer")).toBeTruthy();
+    captureRefresh = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(disclosureCommits).toEqual([]);
+    expect(screen.queryByText("Account A pending set")).toBeNull();
+    expect(screen.queryByText("Account A confidential source and answer")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Inspect" })).toBeNull();
+    await act(async () => { finishAccess(false); });
+    expect(await screen.findByText(/no academic reviewer permission/i)).toBeTruthy();
+    expect(mocks.pending).toHaveBeenCalledTimes(1);
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
+
+  it("keeps the old submission list hidden until refreshed reviewer and queue requests both settle", async () => {
+    let finishList!: (rows: ReturnType<typeof pendingRow>[]) => void;
+    mocks.pending.mockResolvedValueOnce([pendingRow("Old reviewer row")])
+      .mockImplementationOnce(() => new Promise<ReturnType<typeof pendingRow>[]>(resolve => {
+        finishList = resolve;
+      }));
+    render(<QuestionSetLibraryReviewQueue accountId="account-A" />);
+    expect(await screen.findByText("Old reviewer row")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(mocks.pending).toHaveBeenCalledTimes(2));
+
+    expect(screen.queryByText("Old reviewer row")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Inspect" })).toBeNull();
+    await act(async () => { finishList([pendingRow("New permitted row")]); });
+    expect(await screen.findByText("New permitted row")).toBeTruthy();
+    expect(screen.queryByText("Old reviewer row")).toBeNull();
+    expect(mocks.preview).not.toHaveBeenCalled();
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
+
 });
