@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Play, Square } from "lucide-react";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
+import { useAccount } from "../../lib/account/accountStore";
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { downloadCourseQuestions, isAcademicCourseDownloaded } from "../../lib/academicLibrary/downloadReference";
 import { listTermCourses, termQuizNeedsCatalog, termQuizSelection } from "../../lib/academicLibrary/termCourses";
@@ -72,9 +73,9 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
     return () => {
       mounted.current = false;
       stopped.current = true;
-      // Release the old scope before the next learner starts. The abandoned
-      // request's eventual finally must not clear the new learner's busy state.
-      if (running.current) onBusyChangeRef.current(false);
+      // Preview navigation can unmount the controls while the current course
+      // is still downloading. Retain the parent's lock until that course
+      // settles; a real account switch releases it through the run listener.
     };
   }, []);
 
@@ -84,6 +85,12 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
     setBusy(true); setStopping(false); onBusyChange(true);
     setMessage(`Reading all courses in ${term}…`); setError(""); setFailures([]);
     const scope = academicAccountScope(accountId);
+    // The controls can already be unmounted by preview navigation when the
+    // account changes. Keep this listener alive for the request's lifetime so
+    // the previous learner's lock is released immediately, not at settlement.
+    const unsubscribeAccount = useAccount.subscribe(state => {
+      if (state.user?.id !== accountId) onBusyChangeRef.current(false);
+    });
     let completed = 0;
     let skipped = 0;
     let failed = 0;
@@ -119,8 +126,15 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
         else { setMessage(""); setError(cause instanceof Error ? cause.message : "This term could not be downloaded. Try again when connected."); }
       }
     } finally {
+      // A preview-unmounted request still owns the parent's lock until it
+      // settles. A changed-account request does not own the next learner's
+      // lock and must never clear it after B has started downloading.
+      let sameAccount = true;
+      try { scope.assertCurrent(); } catch { sameAccount = false; }
+      unsubscribeAccount();
       scope.dispose(); running.current = false;
-      if (mounted.current) { onBusyChange(false); setBusy(false); setStopping(false); }
+      if (sameAccount) onBusyChangeRef.current(false);
+      if (mounted.current) { setBusy(false); setStopping(false); }
     }
   }
   function practice() {
