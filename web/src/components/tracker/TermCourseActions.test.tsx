@@ -6,9 +6,26 @@ import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { TermCourseActions } from "./TermCourseActions";
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), download: vi.fn(), launch: vi.fn(), assertCurrent: vi.fn(), dispose: vi.fn(),
-  downloaded: new Set<string>(), questionIds: ["ready-question"], setIds: ["ready-set"], needsCatalog: false }));
+  downloaded: new Set<string>(), questionIds: ["ready-question"], setIds: ["ready-set"], needsCatalog: false,
+  activeAccount: "learner", accountListeners: new Set<(state: { user?: { id: string } }) => void>() }));
 vi.mock("../../lib/store", () => ({ useStore: Object.assign(() => ({}), { getState: () => ({}) }) }));
-vi.mock("../../lib/academicLibrary/accountScope", () => ({ academicAccountScope: () => ({ assertCurrent: mocks.assertCurrent, dispose: mocks.dispose }) }));
+vi.mock("../../lib/account/accountStore", () => ({ useAccount: {
+  getState: () => ({ user: { id: mocks.activeAccount } }),
+  subscribe: (listener: (state: { user?: { id: string } }) => void) => {
+    mocks.accountListeners.add(listener);
+    return () => { mocks.accountListeners.delete(listener); };
+  },
+} }));
+vi.mock("../../lib/academicLibrary/accountScope", () => ({ academicAccountScope: (accountId: string) => {
+  let switched = false;
+  return { assertCurrent: () => {
+    if (switched || mocks.activeAccount !== accountId) {
+      switched = true;
+      throw new Error("The account changed.");
+    }
+    mocks.assertCurrent();
+  }, dispose: mocks.dispose };
+} }));
 vi.mock("../../lib/academicLibrary/downloadReference", () => ({ downloadCourseQuestions: mocks.download,
   isAcademicCourseDownloaded: (course: AcademicCourse) => mocks.downloaded.has(course.id) }));
 vi.mock("../../lib/academicLibrary/termCourses", () => ({ listTermCourses: mocks.list,
@@ -21,6 +38,10 @@ function course(id: string): AcademicCourse {
 }
 const courses = [course("GOER"), course("CPR"), course("RHPS")];
 const onBusyChange = vi.fn();
+function switchAccount(accountId: string) {
+  mocks.activeAccount = accountId;
+  for (const listener of [...mocks.accountListeners]) listener({ user: { id: accountId } });
+}
 function mount(disabled = false) {
   return render(<TermCourseActions term="Term 5" accountId="learner" courses={courses.slice(0, 1)} disabled={disabled} onBusyChange={onBusyChange} />);
 }
@@ -31,6 +52,7 @@ function deferred() {
 }
 beforeEach(() => {
   vi.clearAllMocks(); mocks.downloaded.clear(); mocks.questionIds = ["ready-question"]; mocks.setIds = ["ready-set"]; mocks.needsCatalog = false;
+  mocks.activeAccount = "learner"; mocks.accountListeners.clear();
   mocks.list.mockResolvedValue(courses);
   mocks.download.mockImplementation(async (entry: AcademicCourse) => { mocks.downloaded.add(entry.id); });
   mocks.assertCurrent.mockImplementation(() => {}); mocks.launch.mockImplementation(() => {});
@@ -90,7 +112,7 @@ describe("term course actions", () => {
     await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
   });
   it("ends the run on account change instead of attempting remaining courses", async () => {
-    mocks.download.mockImplementationOnce(async () => { mocks.assertCurrent.mockImplementation(() => { throw new Error("The account changed."); }); });
+    mocks.download.mockImplementationOnce(async () => { switchAccount("another-learner"); });
     mount(); fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
     await screen.findByText("The account changed.");
     expect(mocks.download).toHaveBeenCalledTimes(1); expect(mocks.dispose).toHaveBeenCalledTimes(1);
@@ -101,6 +123,51 @@ describe("term course actions", () => {
     await screen.findByText("Downloading 1 of 3: GOER");
     view.unmount(); await act(async () => active.resolve());
     expect(mocks.download).toHaveBeenCalledTimes(1); expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("retains the parent download lock through same-account preview unmount until the held course settles", async () => {
+    const active = deferred();
+    mocks.download.mockReturnValueOnce(active.promise);
+    const view = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    const busyCalls = onBusyChange.mock.calls.length;
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    view.unmount();
+    expect(onBusyChange).toHaveBeenCalledTimes(busyCalls);
+    // A remounted preview's term action receives the still-owned parent lock.
+    mount(true);
+    expect(screen.getByRole("button", { name: "Download Term 5" }).hasAttribute("disabled")).toBe(true);
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    await act(async () => active.resolve());
+    await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+    expect(mocks.download).toHaveBeenCalledTimes(1);
+  });
+  it("releases a preview-unmounted A lock on account switch without clearing B's in-flight download", async () => {
+    const first = deferred();
+    const second = deferred();
+    mocks.download.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const actions = (accountId: string) => <TermCourseActions term="Term 5" accountId={accountId}
+      courses={courses} disabled={false} onBusyChange={onBusyChange} />;
+    switchAccount("account-a");
+    const view = render(actions("account-a"));
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    view.unmount();
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    switchAccount("account-b");
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    render(actions("account-b"));
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    const callsDuringB = onBusyChange.mock.calls.length;
+    await act(async () => first.resolve());
+    expect(onBusyChange).toHaveBeenCalledTimes(callsDuringB);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    await act(async () => second.resolve());
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
   it("uses the exact quiz handoff and displays its active-quiz error", () => {
     mocks.launch.mockImplementation(() => { throw new Error("Finish your current quiz first."); });
@@ -127,9 +194,11 @@ describe("term course actions", () => {
       <TermCourseActions term="Term 5" accountId={accountId} courses={courses.slice(0, 1)}
         disabled={false} onBusyChange={onBusyChange} />
     </Profiler>;
+    switchAccount("account-a");
     const view = render(action("account-a"));
     await waitFor(() => expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(false));
     const beforeSwitch = frames.length;
+    switchAccount("account-b");
     view.rerender(action("account-b"));
     const switchFrames = frames.slice(beforeSwitch);
     expect(switchFrames.length).toBeGreaterThan(0);
@@ -181,4 +250,63 @@ describe("term course actions", () => {
     await act(async () => {});
     expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(false);
   });
+  it("redacts the prior account's download diagnostics and quiz errors on the first account-switch commit", async () => {
+    mocks.download.mockImplementation(async (entry: AcademicCourse) => {
+      if (entry.id === "CPR") throw new Error("Account A private course diagnostic.");
+      mocks.downloaded.add(entry.id);
+    });
+    mocks.launch.mockImplementation(() => { throw new Error("Account A private quiz diagnostic."); });
+    const frames: Array<{ accountId: string; leaked: boolean }> = [];
+    const actions = (accountId: string) => <Profiler id="term-switch-diagnostics" onRender={() => {
+      frames.push({ accountId, leaked: !!document.body.textContent?.includes("Account A private")
+        || !!document.body.textContent?.includes("Download complete.") });
+    }}>
+      <TermCourseActions term="Term 5" accountId={accountId} courses={courses}
+        disabled={false} onBusyChange={onBusyChange} />
+    </Profiler>;
+    switchAccount("account-a");
+    const view = render(actions("account-a"));
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText(/Account A private course diagnostic/);
+    fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
+    expect(screen.getByText("Account A private quiz diagnostic.")).toBeTruthy();
+    const start = frames.length;
+    switchAccount("account-b");
+    view.rerender(actions("account-b"));
+    const switched = frames.slice(start);
+    expect(switched.length).toBeGreaterThan(0);
+    expect(switched.every(frame => frame.accountId === "account-b" && !frame.leaked)).toBe(true);
+    expect(screen.queryByText(/Account A private/)).toBeNull();
+    expect(screen.queryByText(/Download complete/)).toBeNull();
+  });
+  it("prevents late A completion from clearing B's still-active download or progress", async () => {
+    const first = deferred();
+    const second = deferred();
+    mocks.download.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const actions = (accountId: string) => <TermCourseActions term="Term 5" accountId={accountId}
+      courses={courses} disabled={false} onBusyChange={onBusyChange} />;
+    switchAccount("account-a");
+    const view = render(actions("account-a"));
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    switchAccount("account-b");
+    view.rerender(actions("account-b"));
+    expect(screen.queryByText("Downloading 1 of 3: GOER")).toBeNull();
+    expect(screen.getByRole("button", { name: "Download Term 5" }).hasAttribute("disabled")).toBe(false);
+    mocks.download.mockImplementation(async (entry: AcademicCourse) => { mocks.downloaded.add(entry.id); });
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    const callsDuringB = onBusyChange.mock.calls.length;
+    await act(async () => first.resolve());
+    expect(onBusyChange).toHaveBeenCalledTimes(callsDuringB);
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByText("Downloading 1 of 3: GOER")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    await act(async () => second.resolve());
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["GOER", "GOER", "CPR", "RHPS"]);
+  });
+
 });

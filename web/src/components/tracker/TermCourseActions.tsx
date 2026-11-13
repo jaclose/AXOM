@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Play, Square } from "lucide-react";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
+import { useAccount } from "../../lib/account/accountStore";
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { downloadCourseQuestions, isAcademicCourseDownloaded } from "../../lib/academicLibrary/downloadReference";
 import { listTermCourses, termQuizNeedsCatalog, termQuizSelection } from "../../lib/academicLibrary/termCourses";
@@ -13,10 +14,19 @@ interface DownloadFailure { id: string; title: string; reason: string }
 
 /** Term downloads share the single-course installer and its durable account receipt.
  * Stop finishes the current course so a retry can safely skip it. */
-export function TermCourseActions({ term, accountId, courses, disabled, onBusyChange }: {
+type TermCourseActionsProps = {
   term: string; accountId: string; courses: readonly AcademicCourse[];
   disabled: boolean; onBusyChange: (busy: boolean) => void;
-}) {
+};
+
+/** Scope all download, progress and failure UI to the exact learner and term.
+ * Keying only the catalog lookup is insufficient: completed download failures
+ * and quiz errors also survive a prop change until the component remounts. */
+export function TermCourseActions(props: TermCourseActionsProps) {
+  return <ScopedTermCourseActions key={JSON.stringify([props.accountId, props.term])} {...props} />;
+}
+
+function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyChange }: TermCourseActionsProps) {
   const workspace = useStore();
   const needsCatalog = termQuizNeedsCatalog(accountId, workspace);
   // The previous account's catalog must never be observable for even one
@@ -56,9 +66,17 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
   const running = useRef(false);
   const stopped = useRef(false);
   const mounted = useRef(true);
+  const onBusyChangeRef = useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; stopped.current = true; };
+    return () => {
+      mounted.current = false;
+      stopped.current = true;
+      // Preview navigation can unmount the controls while the current course
+      // is still downloading. Retain the parent's lock until that course
+      // settles; a real account switch releases it through the run listener.
+    };
   }, []);
 
   async function download() {
@@ -67,6 +85,12 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
     setBusy(true); setStopping(false); onBusyChange(true);
     setMessage(`Reading all courses in ${term}…`); setError(""); setFailures([]);
     const scope = academicAccountScope(accountId);
+    // The controls can already be unmounted by preview navigation when the
+    // account changes. Keep this listener alive for the request's lifetime so
+    // the previous learner's lock is released immediately, not at settlement.
+    const unsubscribeAccount = useAccount.subscribe(state => {
+      if (state.user?.id !== accountId) onBusyChangeRef.current(false);
+    });
     let completed = 0;
     let skipped = 0;
     let failed = 0;
@@ -102,7 +126,14 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
         else { setMessage(""); setError(cause instanceof Error ? cause.message : "This term could not be downloaded. Try again when connected."); }
       }
     } finally {
-      scope.dispose(); running.current = false; onBusyChange(false);
+      // A preview-unmounted request still owns the parent's lock until it
+      // settles. A changed-account request does not own the next learner's
+      // lock and must never clear it after B has started downloading.
+      let sameAccount = true;
+      try { scope.assertCurrent(); } catch { sameAccount = false; }
+      unsubscribeAccount();
+      scope.dispose(); running.current = false;
+      if (sameAccount) onBusyChangeRef.current(false);
       if (mounted.current) { setBusy(false); setStopping(false); }
     }
   }
