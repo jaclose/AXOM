@@ -478,6 +478,20 @@ test('R93 newer unhashed public icon refreshes online before retained fallback b
   assert.equal(networkAttempts, 2, 'old-generation fallback must only follow network rejection');
   assert.equal(await (await older.match(path)).text(), 'previous-build-orb',
     'retained generation must remain byte-for-byte unchanged');
+
+  online = true;
+  assert.equal(await visit(), 'current-build-orb',
+    'reconnected current build must revalidate after serving retained offline fallback');
+  assert.equal(networkAttempts, 3,
+    'reconnection must fetch fresh bytes instead of pinning retained artwork');
+  assert.equal(await (await current.match(path)).text(), 'current-build-orb',
+    'reconnected bytes must be cached in the current generation');
+  assert.equal(await (await older.match(path)).text(), 'previous-build-orb',
+    'freshness recovery must not mutate the retained generation');
+  assert.equal(await visit(), 'current-build-orb',
+    'subsequent current-generation icon requests must reuse validated fresh bytes');
+  assert.equal(networkAttempts, 3,
+    'current-generation cache hit must not cause an extra network fetch');
 });
 
 test('current public assets win over retained generations; newest safe fallback survives offline', async () => {
