@@ -50,7 +50,7 @@ describe("portable binary media backup", () => {
     { defect: "empty blob", bytes: "", recordSize: 4, mime: "image/png" },
     { defect: "inaccurate stored length", bytes: "AXOM", recordSize: 2, mime: "image/png" },
     { defect: "mismatched stored MIME", bytes: "AXOM", recordSize: 4, mime: "image/jpeg" },
-  ])("does not count a $defect as a backed-up image", async ({ bytes, recordSize, mime }) => {
+  ] as const)("does not count a $defect as a backed-up image", async ({ bytes, recordSize, mime }) => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: new Blob([bytes], { type: mime }), mimeType: mime, byteSize: recordSize,
       questionId: "held-question", updatedAt: attachment.updatedAt,
