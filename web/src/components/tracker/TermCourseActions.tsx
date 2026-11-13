@@ -19,15 +19,26 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
 }) {
   const workspace = useStore();
   const needsCatalog = termQuizNeedsCatalog(accountId, workspace);
-  const [legacyCatalog, setLegacyCatalog] = useState<AcademicCourse[]>();
-  const [catalogError, setCatalogError] = useState("");
+  // The previous account's catalog must never be observable for even one
+  // render after a prop change. Passive effect cleanup runs after commit, so
+  // clearing state in an effect alone cannot protect the Practice button.
   const [catalogRetry, setCatalogRetry] = useState(0);
+  const [catalogState, setCatalogState] = useState<{
+    term: string; accountId: string; retry: number;
+    courses?: AcademicCourse[]; error?: string;
+  }>();
+  const currentCatalog = needsCatalog && catalogState?.term === term
+    && catalogState.accountId === accountId && catalogState.retry === catalogRetry
+    ? catalogState : undefined;
+  const legacyCatalog = currentCatalog?.courses;
+  const catalogError = currentCatalog?.error ?? "";
   useEffect(() => {
     let cancelled = false;
-    setLegacyCatalog(undefined); setCatalogError("");
+    setCatalogState(undefined);
     if (needsCatalog) void listTermCourses(term, accountId, { shouldStop: () => cancelled })
-      .then(result => { if (!cancelled) setLegacyCatalog(result); })
-      .catch(cause => { if (!cancelled) setCatalogError(cause instanceof Error ? cause.message : "Saved course details could not be read."); });
+      .then(result => { if (!cancelled) setCatalogState({ term, accountId, retry: catalogRetry, courses: result }); })
+      .catch(cause => { if (!cancelled) setCatalogState({ term, accountId, retry: catalogRetry,
+        error: cause instanceof Error ? cause.message : "Saved course details could not be read." }); });
     return () => { cancelled = true; };
   }, [term, accountId, needsCatalog, catalogRetry]);
   const practiceCatalog = legacyCatalog ?? courses;
