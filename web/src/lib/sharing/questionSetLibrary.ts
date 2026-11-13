@@ -1,4 +1,5 @@
 import { accountOperationClient } from "../account/supabase";
+import { hasExplanationProse } from "../questionExplanationCoverage";
 import { hasPrivateDeviceCitation, sharedQuestionSetDigest, validateShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
 
 export interface LibraryQuestionSet {
@@ -192,6 +193,12 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
     throw new Error("Question Set citation contains a private local file path, inline document URI or URL credentials and cannot be published.");
   if (!snapshot.questions.length || snapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
+  // The dialog filters missing/placeholder rationales, but other callers can
+  // reach this service directly. Enforce explanation presence at final egress,
+  // without treating prose as medically verified or relaxing reviewer approval.
+  // Historical approved snapshots remain readable without this new admission gate.
+  if (snapshot.questions.some(question => !hasExplanationProse(question.explanation)))
+    throw new Error("Every submitted question needs teaching explanation prose, not only a key or source notice. Review missing explanations before submitting.");
   return withAccount(accountId, async client => {
     const { data, error } = await client.rpc("submit_question_set_library", {
       p_source_id: sourceId, p_snapshot: snapshot, p_credit: credit.trim(),
