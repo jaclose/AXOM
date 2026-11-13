@@ -50,12 +50,17 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
 
   function refreshQueue() {
     ++previewEpoch.current; // Invalidate an in-flight Inspect request synchronously.
+    // The next permission check runs in an effect, after React may paint.
+    // Drop previously authorized rows *now*, not only in that effect.
+    setReviewer(false); setQueue([]); setLoading(true);
     setPreview(undefined); setReason(""); setAttested(false); setShown(20);
-    setBusy(false);
+    setError(""); setMessage(""); setBusy(false);
     setRefresh(value => value + 1);
   }
 
   async function open(id: string) {
+    // A stale row or synthetic click cannot inspect while access is rechecked.
+    if (!reviewer || loading || busy || !queue.some(item => item.id === id)) return;
     const epoch = ++previewEpoch.current;
     setBusy(true); setPreview(undefined); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
     try {
@@ -92,13 +97,13 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
     {loading && <p role="status">Checking academic review access…</p>}
     {!loading && !reviewer && !error && <p className="sub">This operator account has no academic reviewer permission. Host access alone cannot approve medical content.</p>}
     {reviewer && !loading && queue.length === 0 && <p className="sub">No learner Question Sets await review.</p>}
-    {queue.map(item => <div className="qsl-review-row" key={item.id}>
+    {reviewer && !loading && queue.map(item => <div className="qsl-review-row" key={item.id}>
       <div><b>{item.title}</b><small>{item.questionCount} questions · {item.credit || "No public credit"} · submitted {new Date(item.createdAt).toLocaleDateString()}</small></div>
       <div><Tag tone="orange">Pending</Tag><GButton size="sm" disabled={busy} onClick={() => void open(item.id)}>Inspect</GButton></div>
     </div>)}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert" className="qsl-error">{error}</p>}
-    {preview && <Modal title={`Review ${preview.snapshot.title}`} onClose={busy ? () => {} : () => setPreview(undefined)}>
+    {reviewer && !loading && preview && <Modal title={`Review ${preview.snapshot.title}`} onClose={busy ? () => {} : () => setPreview(undefined)}>
       <div className="qsl-review-detail stack gap12">
         <p><BookOpenCheck size={17} aria-hidden="true" /> {preview.snapshot.questions.length} questions. The contributor attested to rights and answer review. Check that evidence yourself before approval.</p>
         <ol>{preview.snapshot.questions.slice(0, shown).map(question => <li key={question.id}>
