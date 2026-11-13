@@ -177,5 +177,41 @@ describe("downloaded term practice", () => {
     expect(selected.questionIds).toEqual(["clean", "loose"]);
     expect(selected.setIds).toEqual(["clean-set"]);
   });
+  it("does not borrow an original set from a different term download receipt", () => {
+    const state = workspace([
+      receipt(1, ["misbound", "matched", "loose"], { setIds: ["set-1"] }),
+      receipt(2, ["separate"], { setIds: ["set-2"] }),
+    ], [
+      question("misbound", { setId: "set-2" }),
+      question("matched", { setId: "set-1" }),
+      question("loose"),
+      question("separate", { setId: "set-2" }),
+    ]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("set-1"), set("set-2")];
+    const selection = termQuizSelection("Term 1", "account", state);
+    expect(selection.questionIds).toEqual(["matched", "loose", "separate"]);
+    expect(selection.setIds).toEqual(["set-1", "set-2"]);
+  });
 
+  it("does not borrow a set grant from an unrelated term's receipt", () => {
+    const state = workspace([
+      receipt(1, ["cross-listed"], { term: "Term 1", setIds: ["set-1"] }),
+      receipt(2, ["cross-listed"], { term: "Term 2", setIds: ["set-2"] }),
+    ], [question("cross-listed", { setId: "set-2" })]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("set-1"), set("set-2")];
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual([]);
+    expect(termQuizSelection("Term 2", "account", state).questionIds).toEqual(["cross-listed"]);
+  });
+
+  it("preserves same-term cross-listing when one receipt owns the original set", () => {
+    const state = workspace([
+      receipt(1, ["shared"], { setIds: ["set-1"] }),
+      receipt(2, ["shared"], { setIds: ["set-2"] }),
+    ], [question("shared", { setId: "set-2" })]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("set-1"), set("set-2")];
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["shared"]);
+  });
 });

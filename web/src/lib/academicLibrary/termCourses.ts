@@ -71,6 +71,9 @@ export function termQuizNeedsCatalog(accountId: string, workspace: TermWorkspace
 export function termQuizSelection(term: string, accountId: string, workspace: TermWorkspace,
   courses: readonly AcademicCourse[] = []): CourseQuizLaunch {
   const ids = new Set<string>();
+  // Bind original sets to the receipt that actually authorizes each question.
+  // A unique set in a different downloaded collection is not source proof.
+  const receiptSetsByQuestion = new Map<string, Set<string>>();
   const setIds = new Set<string>();
   const setCounts = new Map<string, number>();
   for (const set of workspace.questionSets) setCounts.set(set.id, (setCounts.get(set.id) ?? 0) + 1);
@@ -81,7 +84,12 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
     if (!savedTerm || termIdentity(savedTerm) !== termIdentity(term)) continue;
     // An original set ID must resolve to exactly one local set. An ambiguous
     // or absent original is not evidence that its questions can be practiced.
-    for (const id of saved.questionIds) ids.add(id);
+    for (const id of saved.questionIds) {
+      ids.add(id);
+      const owningSets = receiptSetsByQuestion.get(id) ?? new Set<string>();
+      for (const originalSetId of saved.setIds) owningSets.add(originalSetId);
+      receiptSetsByQuestion.set(id, owningSets);
+    }
     for (const id of saved.setIds) if (setCounts.get(id) === 1) setIds.add(id);
   }
   const counts = new Map<string, number>();
@@ -89,6 +97,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const deferred = new Set(workspace.deferredContent?.questions.map(question => question.id) ?? []);
   return { scopeKind: "term", module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
-    && (!question.setId || setCounts.get(question.setId) === 1)
+    && (!question.setId || (setCounts.get(question.setId) === 1
+      && receiptSetsByQuestion.get(question.id)?.has(question.setId)))
     && questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id) };
 }
