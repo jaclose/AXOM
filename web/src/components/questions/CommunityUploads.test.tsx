@@ -74,6 +74,10 @@ vi.mock("./QuestionSetLibrarySubmitDialog", () => ({
 vi.mock("./CommunityQuestionSetLibrary", () => ({
   CommunityQuestionSetLibrary: () => <section aria-label="Approved Community Question Sets">Approved standalone sets</section>,
 }));
+vi.mock("./QuestionSetLibraryReviewQueue", () => ({
+  QuestionSetLibraryReviewQueue: ({ accountId }: { accountId: string }) =>
+    <section aria-label="Question Set moderator queue">Review queue for {accountId}</section>,
+}));
 
 const row = { id: ids.collection, title: "Current course", module: "NCRS", term: "Term 4",
   current_revision_id: ids.revision, ready_questions: 8, review_questions: 2,
@@ -102,6 +106,36 @@ describe("Community Uploads", () => {
     mocks.prepareSaved.mockResolvedValue({ metadata: { ready_questions: 1, term: "Term 4", module: "NCRS" } });
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("exposes the existing permission-checked Question Set moderation queue to independent academic reviewers", async () => {
+    mocks.account.id = "reviewer-1";
+    mocks.reviewer.mockResolvedValue(true);
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    const open = await screen.findByRole("button", { name: "Open Question Set review queue" });
+    expect(screen.queryByLabelText("Question Set moderator queue")).toBeNull();
+    fireEvent.click(open);
+    expect(screen.getByLabelText("Question Set moderator queue").textContent).toContain("reviewer-1");
+    fireEvent.click(screen.getByRole("button", { name: "Hide Question Set review queue" }));
+    expect(screen.queryByLabelText("Question Set moderator queue")).toBeNull();
+  });
+
+  it("closes an open moderator queue immediately when the signed-in account changes", async () => {
+    mocks.reviewer.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const view = render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Question Set review queue" }));
+    expect(screen.getByLabelText("Question Set moderator queue")).toBeTruthy();
+    mocks.account.id = "ordinary-2";
+    view.rerender(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    expect(screen.queryByLabelText("Question Set moderator queue")).toBeNull();
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledWith("ordinary-2"));
+    expect(screen.queryByRole("button", { name: "Open Question Set review queue" })).toBeNull();
+  });
+
+  it("does not expose academic Question Set moderation to ordinary contributors", async () => {
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledWith("owner-1"));
+    expect(screen.queryByRole("button", { name: "Open Question Set review queue" })).toBeNull();
+  });
 
   it("lets an independent Question Set be selected and reviewed without a source file, term, or course", () => {
     mocks.workspace.questionSets = [{

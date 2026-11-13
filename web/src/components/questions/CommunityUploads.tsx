@@ -22,6 +22,7 @@ import { listOwnedAcademicCourses, ownedCourseStatus } from "../../lib/academicL
 import { AcademicCourseUpload } from "../tracker/AcademicCourseUpload";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
 import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
+import { QuestionSetLibraryReviewQueue } from "./QuestionSetLibraryReviewQueue";
 import { GButton, GlassCard, Tag } from "../ui/primitives";
 import { TechnicalDetails } from "../shell/TechnicalDetails";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -62,6 +63,8 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
   const [reviewer, setReviewer] = useState(false);
+  const [reviewerForAccount, setReviewerForAccount] = useState<string>();
+  const [questionSetReviewOpen, setQuestionSetReviewOpen] = useState(false);
   const [owned, setOwned] = useState<{ accountId: string; rows: AcademicCourse[] }>();
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [selected, setSelected] = useState<Selected>();
@@ -121,6 +124,8 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
     accountEpoch.current += 1;
     focusListFeedback.current = false;
     setReviewer(false);
+    setReviewerForAccount(undefined);
+    setQuestionSetReviewOpen(false);
     setSelected(undefined);
     setOwned(undefined);
     setDownloaded(undefined);
@@ -132,7 +137,9 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
     setSelectedQuestionSetId(""); setSubmittingQuestionSetId(""); setBrowseQuestionSets(false);
     setLocalFilingConfirmed(false); setLocalRights(false); setLocalPrepared(undefined);
     setProgress(""); setError(""); setFeedbackLocation(""); setBusyId(""); setWithdrawId("");
-    if (accountId) void isAcademicReviewer(accountId).then(value => { if (current) setReviewer(value); });
+    if (accountId) void isAcademicReviewer(accountId).then(value => {
+      if (current) { setReviewer(value); setReviewerForAccount(value ? accountId : undefined); }
+    });
     return () => { current = false; };
   }, [accountId]);
 
@@ -444,6 +451,15 @@ export function CommunityUploads({ onOpenLibrary, onPracticeSet }: { onOpenLibra
         </div>
 
         <aside className="community-contribute">
+          {accountId && reviewerForAccount === accountId && <GlassCard pad className="community-qbank-reviewer">
+            <h3>Academic Question Set reviews</h3>
+            <p>Appointed academic reviewers can inspect learner Question Sets here without Host access.
+              A contributor cannot approve their own submission.</p>
+            <GButton size="sm" onClick={() => setQuestionSetReviewOpen(value => !value)}>
+              {questionSetReviewOpen ? "Hide Question Set review queue" : "Open Question Set review queue"}
+            </GButton>
+            {questionSetReviewOpen && <QuestionSetLibraryReviewQueue accountId={accountId} />}
+          </GlassCard>}
           <GlassCard pad className="community-qbank-publish">
             <BookUp2 size={ICON_SIZE.display} aria-hidden="true" />
             <h3>Share a Question Set</h3>
