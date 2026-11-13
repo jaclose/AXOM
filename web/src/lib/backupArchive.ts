@@ -6,7 +6,7 @@ import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
-  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, blobToBase64,
+  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, base64ToBytes, blobToBase64,
   extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
   type StagedQuestionAttachmentRestore,
@@ -300,7 +300,23 @@ export interface PortableBackupRead {
 export async function readPortableBackup(file: File): Promise<PortableBackupRead> {
   if (!file.name.toLowerCase().endsWith(".zip")) {
     const rawText = await file.text();
-    const payloads = extractQuestionAttachmentPayloads(JSON.parse(rawText));
+    const parsed = JSON.parse(rawText) as unknown;
+    const payloads = extractQuestionAttachmentPayloads(parsed);
+    const declared = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)[ATTACHMENT_EXPORT_KEY] : undefined;
+    // Do not silently discard malformed records from a portable JSON image
+    // list, or expose a workspace whose embedded bytes cannot be restored.
+    if (declared !== undefined && (!Array.isArray(declared) || declared.length !== payloads.length)) {
+      throw new Error("The backup contains an invalid or missing image record.");
+    }
+    for (const payload of payloads) {
+      const bytes = base64ToBytes(payload.base64);
+      if (!bytes || bytes.byteLength !== payload.byteSize
+        || !hasExpectedImageStructure(bytes, payload.mimeType)
+        || (payload.mimeType === "image/png" && !(await hasInflatablePngImageData(bytes)))) {
+        throw new Error("A backup image failed its integrity check. No workspace data has been changed.");
+      }
+    }
     return { rawText, restoreMedia: async refs => {
       assertConsistentMediaReferences(refs);
       return stageQuestionAttachmentPayloads(payloads, refs);
