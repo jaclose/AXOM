@@ -7,7 +7,7 @@ import { sha256 } from "../question-content/assets";
 import { auditedRhpsSourceRefresh, bankFiles, folderLibraryReader, installPrivateLibrary, mergeStoredReview, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
 import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "./types";
 import { privateReviewMedia } from "./media";
-import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
+import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, setMissingAttachmentLoader, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
 import { buildCourseBooks } from "../bookshelf/courseBooks";
 import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCourses";
 import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
@@ -461,6 +461,31 @@ describe("shared image identity in prepared libraries", () => {
 
     expect(files.map(file => file.name)).toEqual(["root-figure.png"]);
     expect(read).toHaveBeenCalledOnce();
+  });
+
+  it("imports a verified ZIP image when the linked cloud-image resolver fails", async () => {
+    stubSuccessfulImageDecode();
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const checksum = await sha256(png);
+    bank.pkg.questions[0].assets = [{
+      id: "verified-figure", filename: "verified-figure.png", mimeType: "image/png",
+      role: "stem", questionId: "sample-1", checksum,
+    }];
+    b.files.set("banks/test/assets/verified-figure.png", png);
+    await deleteQuestionAttachmentBlobs([`private-library:${checksum}`]);
+    const unregister = setMissingAttachmentLoader(async () => {
+      throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
+    });
+    try {
+      const files = await bankFiles(bank, b.read, "banks/test/bank.json");
+      expect(files.map(file => file.name)).toEqual(["verified-figure.png"]);
+      const stored = await getQuestionAttachmentBlob(`private-library:${checksum}`, { localOnly: true });
+      expect(stored?.byteSize).toBe(png.length);
+    } finally { unregister(); }
   });
 
   it("materializes a reused source-page image once even when question-local asset IDs differ", async () => {
