@@ -221,6 +221,54 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
       "select id,status from public.question_set_library_entries where id in ($1,$2)",
       [firstId, secondId])).rows;
     expect(surviving).toEqual([{ id: firstId, status: "approved" }]);
+
+    // A learner's approved preview authorizes only this exact publication
+    // edition. The publisher can withdraw it after the learner opens it;
+    // that prior receipt must never authorize a later import, including if
+    // an identical source set is shared again under the same local ID.
+    const authorize = (id: string, revision: number, value: typeof first) =>
+      as<{ value: {
+        id: string; status: string; review_revision: number;
+        snapshot_payload: typeof first;
+      } }>(publisherB,
+        "select public.authorize_question_set_library_import($1,$2::bigint,$3::jsonb) value",
+        [id, revision, JSON.stringify(value)]);
+    const [originalReceipt] = await authorize(firstId, 2, first);
+    expect(originalReceipt.value).toMatchObject({
+      id: firstId, status: "approved", review_revision: 2, snapshot_payload: first,
+    });
+
+    await as(publisherA, "select public.withdraw_question_set_library($1)", [firstId]);
+    await expect(authorize(firstId, 2, first))
+      .rejects.toThrow(/changed or was withdrawn/i);
+    await expect(as(publisherB, "select public.get_question_set_library($1)", [firstId]))
+      .rejects.toThrow(/unavailable/i);
+    expect(await as<{ id: string }>(publisherB,
+      "select id from public.list_question_set_library($1,0)", ["Publisher A public candidate"]))
+      .toEqual([]);
+
+    // Identical source identity and source-verified answer key do not revive
+    // a withdrawn entry UUID or bypass a fresh academic review decision.
+    const newId = await submit(publisherA, first);
+    expect(newId).not.toBe(firstId);
+    await expect(authorize(firstId, 2, first))
+      .rejects.toThrow(/changed or was withdrawn/i);
+    await expect(authorize(newId, 1, first))
+      .rejects.toThrow(/changed or was withdrawn/i); // pending, not public
+    await as(reviewer,
+      "select public.review_question_set_library($1,true,'New edition source and rights reviewed',$2::jsonb,1::bigint)",
+      [newId, JSON.stringify(first)]);
+    const [freshReceipt] = await authorize(newId, 2, first);
+    expect(freshReceipt.value).toMatchObject({
+      id: newId, status: "approved", review_revision: 2, snapshot_payload: first,
+    });
+    await expect(authorize(firstId, 2, first))
+      .rejects.toThrow(/changed or was withdrawn/i);
+    const visible = await as<{ id: string }>(publisherB,
+      "select id from public.list_question_set_library($1,0)", ["Publisher A public candidate"]);
+    expect(visible.map(row => row.id)).toContain(newId);
+    expect(visible.map(row => row.id)).not.toContain(firstId);
+    expect(visible.map(row => row.id)).not.toContain(secondId);
   }, 60_000);
 
 });
