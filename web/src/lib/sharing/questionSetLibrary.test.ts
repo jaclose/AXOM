@@ -354,6 +354,37 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it("pins the validated submission across asynchronous account lookup", async () => {
+    const value = snapshot();
+    const expected = JSON.parse(JSON.stringify(value)) as ReturnType<typeof snapshot>;
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    let resumeAccount!: (operation: Awaited<ReturnType<typeof accountOperationClient>>) => void;
+    vi.mocked(accountOperationClient).mockImplementationOnce(() =>
+      new Promise(resolve => { resumeAccount = resolve; }));
+
+    // Submission validation occurs before the service yields to resolve the
+    // signed-in account. Simulate editing a source key and adding a private
+    // citation while that account request remains unresolved.
+    const pending = submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed);
+    value.questions[0].correctKey = "B";
+    value.questions[0].correctAnswerText = "Second";
+    value.questions[0].explanation = "The second choice is now claimed as correct.";
+    value.questions[0].citation = "file:///Users/private/source.pdf";
+
+    resumeAccount({
+      userId: accountId, client: { rpc },
+      assertCurrent: vi.fn().mockResolvedValue(undefined),
+    } as never);
+    await expect(pending).resolves.toBe(entryId);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_question_set_library", expect.objectContaining({
+      p_source_id: "set-1", p_snapshot: expected,
+      p_rights_confirmed: true, p_answers_confirmed: true,
+    }));
+    expect(expected.questions[0].correctKey).toBe("A");
+    expect(expected.questions[0].citation).toBeUndefined();
+    expect(value.questions[0].correctKey).toBe("B");
+  });
+
   it("rejects a changed account after a submission response", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
     const assertCurrent = vi.fn().mockResolvedValueOnce(undefined)

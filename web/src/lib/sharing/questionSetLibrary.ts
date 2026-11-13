@@ -185,23 +185,33 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
     throw new Error("Confirm redistribution rights and source-reviewed answers before submitting.");
   if (!sourceId.trim() || sourceId !== sourceId.trim() || sourceId.length > 200 || credit.length > 80)
     throw new Error("Check the Question Set identity and public credit.");
-  validateShare(snapshot);
+  // Pin the exact public snapshot synchronously, before account lookup yields.
+  // A source edit during authentication must not change the key, teaching
+  // rationale, or citation after the publisher's validation/attestation.
+  // JSON is the canonical on-wire shape; this also drops object identity.
+  let submittedSnapshot: SharedQuestionSetSnapshot;
+  try {
+    submittedSnapshot = JSON.parse(JSON.stringify(snapshot)) as SharedQuestionSetSnapshot;
+  } catch {
+    throw new Error("The Question Set could not be prepared for safe publication.");
+  }
+  validateShare(submittedSnapshot);
   // Preconstructed snapshots can bypass createQuestionSetShare's outbound
   // privacy check. Enforce it at the final new-submission RPC boundary.
   // Historical approved sets remain readable/importable unchanged.
-  if (snapshot.questions.some(question => hasPrivateDeviceCitation(question.citation)))
+  if (submittedSnapshot.questions.some(question => hasPrivateDeviceCitation(question.citation)))
     throw new Error("Question Set citation contains a private local file path, inline document URI or URL credentials and cannot be published.");
-  if (!snapshot.questions.length || snapshot.questions.some(question => !question.correctKey))
+  if (!submittedSnapshot.questions.length || submittedSnapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
   // The dialog filters missing/placeholder rationales, but other callers can
   // reach this service directly. Enforce explanation presence at final egress,
   // without treating prose as medically verified or relaxing reviewer approval.
   // Historical approved snapshots remain readable without this new admission gate.
-  if (snapshot.questions.some(question => !hasExplanationProse(question.explanation)))
+  if (submittedSnapshot.questions.some(question => !hasExplanationProse(question.explanation)))
     throw new Error("Every submitted question needs teaching explanation prose, not only a key or source notice. Review missing explanations before submitting.");
   return withAccount(accountId, async client => {
     const { data, error } = await client.rpc("submit_question_set_library", {
-      p_source_id: sourceId, p_snapshot: snapshot, p_credit: credit.trim(),
+      p_source_id: sourceId, p_snapshot: submittedSnapshot, p_credit: credit.trim(),
       p_rights_confirmed: attestations.rightsConfirmed, p_answers_confirmed: attestations.answersConfirmed,
     });
     if (error || !uuid(data)) throw new Error(error?.message ?? "The submission could not be confirmed.");
