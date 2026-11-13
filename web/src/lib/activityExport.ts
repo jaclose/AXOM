@@ -39,7 +39,7 @@ function overviewRows(logs: StudyLog[]) {
 function detailRows(logs: StudyLog[]) {
   return [
     ["Study day", "Timestamp", "Type", "Minutes", "Cards", "Note"],
-    ...logs.slice().sort((a, b) => b.ts.localeCompare(a.ts)).map((log) => [
+    ...logs.slice().sort(compareExportTimestampDesc).map((log) => [
       log.dayKey,
       log.ts,
       log.type,
@@ -48,6 +48,15 @@ function detailRows(logs: StudyLog[]) {
       log.note ?? "",
     ]),
   ];
+}
+
+/** Export the latest event first, even if imported logs use different UTC offsets. */
+function compareExportTimestampDesc(a: StudyLog, b: StudyLog): number {
+  const aTime = Date.parse(a.ts);
+  const bTime = Date.parse(b.ts);
+  return Number.isFinite(aTime) && Number.isFinite(bTime)
+    ? bTime - aTime
+    : b.ts.localeCompare(a.ts);
 }
 
 function appendSheet(XLSX: XlsxModule, wb: WorkBook, name: string, rows: unknown[][], widths: number[]) {
