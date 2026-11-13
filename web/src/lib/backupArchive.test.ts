@@ -220,6 +220,70 @@ describe("portable binary media backup", () => {
       .rejects.toThrow(/invalid or missing image record/i);
   });
 
+  it.each(["different bytes", "different declared size"] as const)(
+    "rejects JSON images sharing a storage key with %s before workspace adoption", async conflict => {
+      const first = palettePng([Uint8Array.from([12, 34, 56])]);
+      const second = conflict === "different bytes"
+        ? palettePng([Uint8Array.from([13, 34, 56])])
+        : palettePng([Uint8Array.from([12, 34, 56, 78, 90, 12])]);
+      const asBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+      const raw = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [
+        { ...attachment, id: "first-use", questionId: "question-a", blobKey: "shared:figure", byteSize: first.length, base64: asBase64(first) },
+        { ...attachment, id: "second-use", questionId: "question-b", blobKey: "shared:figure", byteSize: second.length, base64: asBase64(second) },
+      ] };
+      await expect(readPortableBackup(new File([JSON.stringify(raw)], "ambiguous.json")))
+        .rejects.toThrow(/conflicting image records/i);
+    },
+  );
+
+  it("accepts identical JSON media shared by two question references and restores one immutable blob", async () => {
+    const bytes = palettePng([Uint8Array.from([12, 34, 56])]);
+    const base64 = btoa(String.fromCharCode(...bytes));
+    const shared = { ...attachment, blobKey: "shared:figure", byteSize: bytes.length };
+    const raw = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [
+      { ...shared, id: "first-use", questionId: "question-a", base64 },
+      { ...shared, id: "second-use", questionId: "question-b", base64 },
+    ] };
+    const backup = await readPortableBackup(new File([JSON.stringify(raw)], "shared.json"));
+    const references = [
+      { id: "question-a", attachments: [{ ...shared, id: "first-use" }] },
+      { id: "question-b", attachments: [{ ...shared, id: "second-use" }] },
+    ];
+    const staged = await backup.restoreMedia(references);
+    expect(staged).toMatchObject({ restored: 1, skipped: 1 });
+    const recovered = await getQuestionAttachmentBlob(shared.blobKey);
+    expect(new Uint8Array(await recovered!.blob.arrayBuffer())).toEqual(bytes);
+    await staged.rollback();
+    expect(await getQuestionAttachmentBlob(shared.blobKey)).toBeUndefined();
+  });
+
+  it("rejects oversized JSON files before reading or parsing their contents", async () => {
+    const file = new File(["{}"], "oversize.json");
+    Object.defineProperty(file, "size", { value: 256 * 1024 * 1024 + 1 });
+    const read = vi.spyOn(file, "text");
+    await expect(readPortableBackup(file)).rejects.toThrow(/256 MB safety limit/i);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("bounds JSON image-list count before normalizing and inflating thousands of records", async () => {
+    const entries = Array.from({ length: 4097 }, (_, i) => ({
+      ...attachment, id: `image-${i}`, questionId: `question-${i}`, base64: PNG_BASE64,
+    }));
+    const raw = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: entries };
+    await expect(readPortableBackup(new File([JSON.stringify(raw)], "too-many.json")))
+      .rejects.toThrow(/too many image records/i);
+  });
+
+  it("rejects cumulative declared JSON image work before allocating image buffers", async () => {
+    const entries = Array.from({ length: 17 }, (_, i) => ({
+      ...attachment, id: `image-${i}`, questionId: `question-${i}`,
+      blobKey: `unique-${i}`, byteSize: 8 * 1024 * 1024, base64: PNG_BASE64,
+    }));
+    const raw = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: entries };
+    await expect(readPortableBackup(new File([JSON.stringify(raw)], "oversized-images.json")))
+      .rejects.toThrow(/total image size exceeds the 128 MB/i);
+  });
+
   it("reports missing images and retains compatibility with existing JSON backups", async () => {
     expect((await createMediaBackupArchive({}, refs)).missingBlobKeys).toEqual([attachment.blobKey]);
     const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: PNG_BASE64 }] };
