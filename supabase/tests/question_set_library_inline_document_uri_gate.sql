@@ -89,22 +89,23 @@ begin
   end loop;
 end $test$;
 
--- Historical content is not rewritten or retroactively reclassified.
+-- Historical approved content is not rewritten on rejection; R96 separately
+-- refuses a legacy pending private citation on approval.
 alter table pg_temp.question_set_inline_citation_fixture
   disable trigger question_set_library_inline_document_uri_gate;
-insert into pg_temp.question_set_inline_citation_fixture(snapshot_payload)
-values ('{"questions":[{"citation":"data:text/plain,old-publication"}]}'::jsonb);
+insert into pg_temp.question_set_inline_citation_fixture(snapshot_payload, status)
+values ('{"questions":[{"citation":"data:text/plain,old-publication"}]}'::jsonb, 'approved');
 alter table pg_temp.question_set_inline_citation_fixture
   enable trigger question_set_library_inline_document_uri_gate;
-update pg_temp.question_set_inline_citation_fixture set status = 'approved'
+update pg_temp.question_set_inline_citation_fixture set status = 'rejected'
 where snapshot_payload->'questions'->0->>'citation' = 'data:text/plain,old-publication';
 
 do $history$
 begin
   if (select status from pg_temp.question_set_inline_citation_fixture
       where snapshot_payload->'questions'->0->>'citation' = 'data:text/plain,old-publication')
-       is distinct from 'approved' then
-    raise exception 'Historical moderation status-only transition failed';
+       is distinct from 'rejected' then
+    raise exception 'Historical moderation rejection was blocked';
   end if;
 end $history$;
 
