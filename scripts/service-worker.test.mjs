@@ -2115,3 +2115,47 @@ test('R97 conditional SPA navigation retains validated offline shell on a real n
       header + ': preserve validated offline HTML when network is truly unavailable');
   }
 });
+
+
+test('R98 only-if-cached public requests remain browser-owned without forced network revalidation', async () => {
+  const asset = '/icons/axom-orb-512.png';
+  const url = 'https://app.test' + asset;
+  let networkAttempts = 0;
+  const app = worker({
+    fetchResponse: async () => {
+      networkAttempts++;
+      return new Response('NETWORK_ICON', {
+        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+      });
+    },
+  });
+  const current = await app.caches.open('axom-shell-current');
+  await current.put(asset, withNetworkUrl(new Response('CACHED_ICON', {
+    headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+  }), url));
+
+  const dispatch = async (path, cacheMode) => {
+    let intercepted;
+    app.events.get('fetch')({
+      request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin',
+        cache: cacheMode, headers: new Headers() },
+      respondWith: (response) => { intercepted = response; },
+      waitUntil: () => {},
+    });
+    if (intercepted) await intercepted;
+    return intercepted;
+  };
+  const interceptions = [
+    Boolean(await dispatch(asset, 'only-if-cached')),
+    Boolean(await dispatch('/icons/uncached-512.png', 'only-if-cached')),
+  ];
+  assert.deepEqual(interceptions, [false, false],
+    'browser HTTP cache must own cache-only requests, whether SW cache is hit or missed');
+  assert.equal(networkAttempts, 0,
+    'cache-only requests must not trigger the worker\'s cache-busted no-store fetch');
+
+  const ordinary = await dispatch(asset, 'default');
+  assert.ok(ordinary, 'ordinary GET must continue to use validated public shell cache');
+  assert.equal(await ordinary.text(), 'CACHED_ICON');
+  assert.equal(networkAttempts, 0, 'ordinary cached GET must remain offline-safe');
+});
