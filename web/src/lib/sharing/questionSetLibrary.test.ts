@@ -385,6 +385,42 @@ describe("searchable Question Set client boundary", () => {
     expect(value.questions[0].correctKey).toBe("B");
   });
 
+  it("refuses a changed reviewed snapshot after async account verification, before the public RPC", async () => {
+    const value = snapshot();
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    let resumeAccount!: (operation: Awaited<ReturnType<typeof accountOperationClient>>) => void;
+    vi.mocked(accountOperationClient).mockImplementationOnce(() =>
+      new Promise(resolve => { resumeAccount = resolve; }));
+    let live = JSON.parse(JSON.stringify(value)) as ReturnType<typeof snapshot>;
+    const pending = submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed, () => live);
+    live = { ...live, questions: live.questions.map(item => ({
+      ...item, correctKey: "B", correctAnswerText: "Second",
+      explanation: "The second answer was substituted after source review.",
+    })) };
+    resumeAccount({
+      userId: accountId, client: { rpc },
+      assertCurrent: vi.fn().mockResolvedValue(undefined),
+    } as never);
+    await expect(pending).rejects.toThrow(/changed during account verification/);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(value.questions[0].correctKey).toBe("A");
+  });
+
+  it("accepts a refreshed, identical wire snapshot after async account verification", async () => {
+    const value = snapshot();
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    let rechecked = 0;
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed, () => {
+      rechecked += 1;
+      return JSON.parse(JSON.stringify(value)) as ReturnType<typeof snapshot>;
+    })).resolves.toBe(entryId);
+    expect(rechecked).toBe(1);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_question_set_library", expect.objectContaining({
+      p_source_id: "set-1", p_snapshot: value,
+    }));
+  });
+
   it("rejects a changed account after a submission response", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
     const assertCurrent = vi.fn().mockResolvedValueOnce(undefined)

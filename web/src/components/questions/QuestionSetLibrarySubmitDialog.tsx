@@ -505,6 +505,21 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       });
       const id = await submitQuestionSetToLibrary(accountId, set.id, snapshot, credit, {
         rightsConfirmed: rights, answersConfirmed: answers,
+      }, () => {
+        // Account verification yields before the RPC. Recheck the precise
+        // source-review revision and cross-tab consent immediately before
+        // network egress, not only at the Send button's click boundary.
+        if (sessionRevoked.current || useAccount.getState().user?.id !== accountId
+          || rightsEpoch.current !== publicationEpoch || answersEpoch.current !== publicationEpoch
+          || readCommunityPublicationEpoch() !== publicationEpoch)
+          throw new Error("The account or publication attestations changed during verification. Reopen this set and reconfirm both attestations.");
+        const latest = useStore.getState();
+        return prepareCurrentCommunityQuestionSetSubmission({
+          openedSet: reviewAtOpen.current!.set, openedQuestions: reviewAtOpen.current!.questions,
+          liveSets: latest.questionSets ?? [], liveQuestions: latest.questions ?? [],
+          // Compare the identical public wire revision, not a new timestamp.
+          now: snapshot.createdAt,
+        });
       });
       // Signal acknowledged mutations before any potentially failing readback.
       // This prevents a second same-origin tab from silently reusing old grants.
