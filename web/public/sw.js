@@ -402,6 +402,10 @@ self.addEventListener("fetch", (event) => {
   // A full cached HTTP 200 cannot satisfy a byte-range request. Leave Range
   // and If-Range semantics, including any 206/416 response, to the browser.
   if (request.headers?.has?.("range")) return;
+  // Conditional validators and preconditions belong to the HTTP server.
+  // A cached unconditional 200 must not replace genuine 304/412 responses.
+  if (["if-none-match", "if-match", "if-modified-since", "if-unmodified-since"]
+    .some((header) => request.headers?.has?.(header))) return;
   // Authorization-bearing requests must never share the origin-wide shell cache.
   if (request.headers?.has?.("authorization") || request.cache === "no-store") return;
   if (/\/version\.json$/.test(url.pathname) || /\/api\//.test(url.pathname)) return;
