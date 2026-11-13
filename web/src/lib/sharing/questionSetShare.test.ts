@@ -103,6 +103,11 @@ describe("Question Set share boundary", () => {
     ["Windows drive path", "C:\\Users\\Example\\private-course.pdf"],
     ["Android content URI", "content://com.example.provider/document/42"],
     ["network file share", "\\\\campus-server\\share\\private-course.pdf"],
+    ["label-adjacent local path", "source:/Users/Example/private.pdf"],
+    ["label-adjacent drive", "source=C:\\Users\\Example\\private.pdf"],
+    ["encoded local URI", "file%3A%2F%2F%2FUsers%2FExample%2Fprivate.pdf"],
+    ["external disk", "/Volumes/JDabSSD/private.pdf"],
+    ["Linux external mount", "/mnt/private-source/file.pdf"],
   ])("refuses %s citation in a new public snapshot without modifying source evidence", (_label, citation) => {
     const source = question("q1", { citation });
     const before = JSON.stringify(source);

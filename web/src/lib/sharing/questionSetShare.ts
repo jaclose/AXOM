@@ -464,11 +464,26 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
   };
 }
 
+// This is a new-publication safeguard, not a change to historical snapshot
+// validation/digests. A source prefix such as "source:" or "=" must not hide a
+// local path, while a public HTTPS URL containing "/home/" stays acceptable.
+const PRIVATE_DEVICE_CITATION = /(?:^|[^a-z0-9/@])(?:file:\/+|content:\/\/|\/(?:Users|home|private|Volumes|mnt|media)\/|~\/|[a-z]:[\\/]|\\\\[^\s\\]+\\)/i;
+
 export function hasPrivateDeviceCitation(citation: string | undefined): boolean {
   if (!citation) return false;
-  // Reject recognizable absolute device paths, but preserve web URLs, DOIs
-  // and ordinary bibliographic citations. Do not rewrite historical imports.
-  return /(?:^|[\s(])(?:file:\/\/|content:\/\/|\/Users\/|\/home\/|\/private\/|~\/|[a-z]:[\\/]|\\\\[^\s\\]+\\)/i.test(citation.trim());
+  let value = citation.trim();
+  // Paths pasted from browsers/file pickers can be percent-encoded once or
+  // twice. Inspect at most three decoding rounds; never mutate source evidence.
+  // Decode octets individually so unrelated malformed percent escapes cannot
+  // conceal an otherwise recognizable private file reference.
+  for (let pass = 0; pass < 3; pass += 1) {
+    if (PRIVATE_DEVICE_CITATION.test(value)) return true;
+    const decoded = value.replace(/%([a-f0-9]{2})/gi,
+      (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+    if (decoded === value) return false;
+    value = decoded;
+  }
+  return PRIVATE_DEVICE_CITATION.test(value);
 }
 
 function hasConflictingStoredAnswerText(question: QuestionRecord): boolean {

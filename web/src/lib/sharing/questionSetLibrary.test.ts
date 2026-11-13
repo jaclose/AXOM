@@ -194,6 +194,17 @@ describe("searchable Question Set client boundary", () => {
     ["Android provider", "content://com.example.provider/document/42"],
     ["network share", "\\\\campus-server\\share\\private-course.pdf"],
     ["home-relative path", "~/Documents/private-course.pdf"],
+    ["label-colon macOS path", "source:/Users/Example/private.pdf"],
+    ["label-equals macOS path", "source=/Users/Example/private.pdf"],
+    ["label-colon Windows path", "source:C:\\Users\\Example\\private.pdf"],
+    ["label-equals Windows path", "source=C:\\Users\\Example\\private.pdf"],
+    ["label-colon file URI", "source:file:///Users/Example/private.pdf"],
+    ["encoded file URI", "file%3A%2F%2F%2FUsers%2FExample%2Fprivate.pdf"],
+    ["double-encoded file URI", "file%253A%252F%252F%252FUsers%252FExample%252Fprivate.pdf"],
+    ["encoded file URI with unrelated malformed escape", "file%3A%2F%2F%2FUsers%2FExample%2Fprivate.pdf%GG"],
+    ["macOS external volume", "/Volumes/JDabSSD/private.pdf"],
+    ["Linux mount", "/mnt/private-source/file.pdf"],
+    ["removable-media mount", "/media/user/source/file.pdf"],
   ])("refuses direct %s citations before the submission RPC without altering source evidence", async (_label, citation) => {
     const value = snapshot();
     value.questions[0].citation = citation;
@@ -215,6 +226,20 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).toHaveBeenCalledWith("submit_question_set_library", expect.objectContaining({
       p_source_id: "set-1", p_snapshot: value, p_rights_confirmed: true, p_answers_confirmed: true,
     }));
+  });
+
+  it.each([
+    "https://example.edu/home/overview",
+    "https://example.edu/Volumes/lecture-record",
+    "https://example.edu/resources?course=home",
+    "PMID: 123456; DOI: 10.1000/example",
+  ])("allows a public citation containing path-like words (%s)", async citation => {
+    const value = snapshot();
+    value.questions[0].citation = citation;
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    expect(await submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed)).toBe(entryId);
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 
   it("keeps approved historical previews with device-local citations readable", async () => {
