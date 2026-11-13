@@ -48,13 +48,13 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
     return () => { alive = false; ++previewEpoch.current; };
   }, [accountId, refresh]);
 
-  function refreshQueue() {
+  function refreshQueue(outcome = "") {
     ++previewEpoch.current; // Invalidate an in-flight Inspect request synchronously.
     // The next permission check runs in an effect, after React may paint.
     // Drop previously authorized rows *now*, not only in that effect.
     setReviewer(false); setQueue([]); setLoading(true);
     setPreview(undefined); setReason(""); setAttested(false); setShown(20);
-    setError(""); setMessage(""); setBusy(false);
+    setError(""); setMessage(outcome); setBusy(false);
     setRefresh(value => value + 1);
   }
 
@@ -78,9 +78,9 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
     setBusy(true); setError(""); setMessage("");
     try {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
-      setPreview(undefined);
-      setMessage(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
-      refreshQueue();
+      // Retain the completed decision through the automatic permission recheck.
+      // An explicit Refresh still clears old results, and an account switch remounts this queue.
+      refreshQueue(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The review could not be saved.";
       // An obsolete reviewed revision must not remain approvable by the same
