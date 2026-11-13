@@ -43,13 +43,20 @@ function pngChunk(name: string, data: Uint8Array): Uint8Array {
   view.setUint32(8 + data.length, (crc ^ 0xffffffff) >>> 0);
   return chunk;
 }
-function palettePng(palettes: readonly Uint8Array[], options: { afterIdat?: boolean; color?: number } = {}): Uint8Array {
+function palettePng(palettes: readonly Uint8Array[], options: {
+  afterIdat?: boolean; color?: number; bitDepth?: 1 | 2 | 4 | 8;
+  pixelIndex?: number; interlace?: 0 | 1; width?: number; height?: number;
+  inflatedRows?: Uint8Array;
+} = {}): Uint8Array {
   const ihdr = new Uint8Array(13);
   const view = new DataView(ihdr.buffer);
-  view.setUint32(0, 1); view.setUint32(4, 1);
-  ihdr[8] = 1; ihdr[9] = options.color ?? 3;
+  view.setUint32(0, options.width ?? 1); view.setUint32(4, options.height ?? 1);
+  const depth = options.bitDepth ?? 1;
+  ihdr[8] = depth; ihdr[9] = options.color ?? 3; ihdr[12] = options.interlace ?? 0;
   const paletteChunks = palettes.map(palette => pngChunk("PLTE", palette));
-  const idat = pngChunk("IDAT", deflateSync(Uint8Array.from([0, 0]))); // filter 0, index 0
+  // One packed sample by default; supplied rows exercise PNG filter reconstruction.
+  const inflated = options.inflatedRows ?? Uint8Array.from([0, (options.pixelIndex ?? 0) << (8 - depth)]);
+  const idat = pngChunk("IDAT", deflateSync(inflated));
   return Uint8Array.from([
     ...PNG_BYTES.subarray(0, 8), ...pngChunk("IHDR", ihdr),
     ...(!options.afterIdat ? paletteChunks.flatMap(chunk => [...chunk]) : []),
@@ -167,6 +174,67 @@ describe("portable binary media backup", () => {
       expect(zip.missingBlobKeys, label).toEqual([attachment.blobKey]);
       expect(json.payloads, label).toEqual([]);
       expect(json.missingBlobKeys, label).toEqual([attachment.blobKey]);
+    }
+  });
+
+  it("rejects palette indices absent from CRC-correct 1/2/4/8-bit indexed pixels, including Adam7", async () => {
+    const palette = Uint8Array.from([12, 34, 56]); // one legal palette entry: index 0 only
+    for (const depth of [1, 2, 4, 8] as const) {
+      for (const interlace of [0, 1] as const) {
+        const bytes = palettePng([palette], { bitDepth: depth, pixelIndex: 1, interlace });
+        const references = [{ id: "held-question", attachments: [{ ...attachment, byteSize: bytes.length }] }];
+        await putQuestionAttachmentBlob(attachment.blobKey, {
+          blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+          mimeType: "image/png", byteSize: bytes.length,
+          questionId: "held-question", updatedAt: attachment.updatedAt,
+        });
+        const zip = await createMediaBackupArchive({}, references);
+        const json = await collectVerifiedMediaBackupPayloads(references);
+        expect(zip.attachmentCount, `depth ${depth} interlace ${interlace}`).toBe(0);
+        expect(zip.missingBlobKeys).toEqual([attachment.blobKey]);
+        expect(json.payloads).toEqual([]);
+        expect(json.missingBlobKeys).toEqual([attachment.blobKey]);
+      }
+    }
+  });
+
+  it("reconstructs filtered indexed rows before checking palette cardinality", async () => {
+    const palette = Uint8Array.from([12, 34, 56, 78, 90, 12]); // indices 0 and 1
+    const samples = [
+      { label: "valid Sub/Up/Average/Paeth filters", valid: true,
+        bytes: palettePng([palette], { bitDepth: 8, width: 2, height: 5,
+          inflatedRows: Uint8Array.from([
+            0, 0, 1, // None => [0,1]
+            1, 0, 1, // Sub  => [0,1]
+            2, 0, 0, // Up   => [0,1]
+            3, 0, 1, // Average => [0,1]
+            4, 0, 0, // Paeth => [0,1]
+          ]) }) },
+      { label: "Up filter reconstructs invalid index 2", valid: false,
+        bytes: palettePng([palette], { bitDepth: 8, width: 2, height: 2,
+          inflatedRows: Uint8Array.from([0, 0, 1, 2, 0, 1]) }) },
+      { label: "valid Adam7 index 1", valid: true,
+        bytes: palettePng([palette], { interlace: 1, pixelIndex: 1 }) },
+    ];
+    for (const { label, valid, bytes } of samples) {
+      const references = [{ id: "held-question", attachments: [{ ...attachment, byteSize: bytes.length }] }];
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+        mimeType: "image/png", byteSize: bytes.length,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const zip = await createMediaBackupArchive({}, references);
+      const json = await collectVerifiedMediaBackupPayloads(references);
+      expect(zip.attachmentCount, label).toBe(valid ? 1 : 0);
+      expect(json.payloads.length, label).toBe(valid ? 1 : 0);
+      expect(zip.missingBlobKeys, label).toEqual(valid ? [] : [attachment.blobKey]);
+      expect(json.missingBlobKeys, label).toEqual(valid ? [] : [attachment.blobKey]);
+      if (valid) {
+        await deleteQuestionAttachmentBlobs([attachment.blobKey]); // only synthetic fixture
+        const portable = await readPortableBackup(new File([zip.blob], "indexed-verified.zip"));
+        expect(await portable.restoreMedia(references)).toMatchObject({ restored: 1, skipped: 0 });
+        expect(new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer())).toEqual(bytes);
+      }
     }
   });
 
