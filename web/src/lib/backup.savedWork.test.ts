@@ -136,7 +136,7 @@ describe("saved-work recovery without downloading content", () => {
     });
     const result = await exportStateWithAttachments(state);
     expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: [], originalCount: 0 });
-    expect(filename).toMatch(/\\.json$/);
+    expect(filename).toMatch(/\.json$/);
     expect(lastBackupAt()).not.toBeNull();
     const backup = await readPortableBackup(new File([exported!], filename));
     expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toHaveLength(1);
@@ -159,7 +159,7 @@ describe("saved-work recovery without downloading content", () => {
     const result = await exportStateWithAttachments(state);
     expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
     expect(lastBackupAt()).toBeNull();
-    expect(filename).toMatch(/\\.json$/);
+    expect(filename).toMatch(/\.json$/);
     const backup = await readPortableBackup(new File([exported!], filename));
     expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
     await expect(backup.restoreMedia([{ id: "q", attachments: state.questions[0].attachments }]))
