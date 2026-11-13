@@ -327,15 +327,21 @@ async function cachedAppAsset(request) {
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
-    // A rejected install can leave partially written public shell assets.
-    // Remove only a cache newly created by this installation. An existing
-    // same-build cache may serve an active page and must never be deleted.
-    const knownCaches = await caches.keys().catch(() => null);
-    const createdByInstall = knownCaches !== null && !knownCaches.includes(CACHE);
+    // A build cache is an immutable generation: a failed same-ID update must
+    // never partially overwrite assets still required by an active old page.
+    // CacheStorage writes cannot commit multiple entries atomically. Fail
+    // closed if cache inventory is unavailable or this identity already exists;
+    // a legitimate new deployment must have a distinct build identifier.
+    const knownCaches = await caches.keys();
+    if (knownCaches.includes(CACHE)) {
+      throw new Error("AXOM install refused: build cache already exists");
+    }
     try {
       await installPublicShell();
     } catch (error) {
-      if (createdByInstall) await caches.delete(CACHE).catch(() => {});
+      // Only the generation proved absent before this install may be removed.
+      // Older build and learner caches are never touched.
+      await caches.delete(CACHE).catch(() => {});
       throw error;
     }
   })());
