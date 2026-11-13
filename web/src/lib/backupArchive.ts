@@ -323,8 +323,17 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const manifest = JSON.parse(rawText) as { _backupFormat?: string; _backupVersion?: number; media?: MediaEntry[]; originals?: OriginalEntry[]; documents?: SourceDocument[]; deferredContent?: { documents?: SourceDocument[] } };
   if (manifest._backupFormat !== FORMAT || ![1, 2].includes(manifest._backupVersion ?? 0) || !Array.isArray(manifest.media)) throw new Error("Unsupported workspace backup format.");
   const media = manifest.media;
+  const mediaFiles = new Set<string>();
+  const mediaKeys = new Set<string>();
   for (const item of media) {
     if (!item || !/^media\/\d+$/.test(item.file) || !zip.file(item.file) || extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64: "AA==" }] }).length !== 1) throw new Error("The backup contains an invalid or missing image record.");
+    // One stored image per immutable storage key and archive path: reject
+    // ambiguous aliases before exposing workspace metadata for adoption.
+    if (mediaFiles.has(item.file) || mediaKeys.has(item.metadata.blobKey)) {
+      throw new Error("The backup contains duplicate image records. No workspace data has been changed.");
+    }
+    mediaFiles.add(item.file);
+    mediaKeys.add(item.metadata.blobKey);
   }
   const originals = manifest._backupVersion === 2 ? manifest.originals : [];
   if (!Array.isArray(originals)) throw new Error("The backup has no original-file manifest.");
