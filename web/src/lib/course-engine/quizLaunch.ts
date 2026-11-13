@@ -1,6 +1,8 @@
 import type { QuestionBankBook } from "../bookshelf/questionBankBooks";
 import { questionMappingStatus, type QuestionRecord } from "../questions";
 import { STORAGE_KEYS } from "../brand";
+import { parseWeek } from "./scope";
+import { canonicalModuleKey } from "./vocabulary";
 
 /** One handoff identity and size contract for curriculum and QBank. */
 export const COURSE_QUIZ_LAUNCH_KEY = "axom.courseQuizLaunch.v1";
@@ -83,6 +85,27 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
   if (alreadyInQuestionBank) window.dispatchEvent(new Event(COURSE_QUIZ_LAUNCH_EVENT));
 }
 
+/** The fixed quiz request cannot override contradictory original filing.
+ * Missing legacy filing is not independent proof, but is not a contradiction.
+ * This is a read-only preflight; the pending request and attempt bytes survive. */
+function contradictsDeclaredScope(
+  question: QuestionRecord,
+  requested: Pick<CourseQuizLaunch, "module" | "week" | "courseId">,
+): boolean {
+  const sourceModule: unknown = question.module;
+  if (sourceModule != null && (typeof sourceModule !== "string"
+    || (sourceModule.trim() && canonicalModuleKey(sourceModule) !== canonicalModuleKey(requested.module)))) return true;
+  const sourceWeek: unknown = question.week;
+  if (sourceWeek != null && (typeof sourceWeek !== "string" || sourceWeek.trim())) {
+    const parsed = parseWeek(sourceWeek);
+    if (parsed === undefined || (requested.week !== undefined && parsed !== requested.week)) return true;
+  }
+  const sourceCourse: unknown = question.courseId;
+  if (sourceCourse != null && sourceCourse !== "" && (typeof sourceCourse !== "string"
+    || (requested.courseId !== undefined && sourceCourse !== requested.courseId))) return true;
+  return false;
+}
+
 /** Reading is pure so React's repeated initializers cannot consume the request. */
 export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): CourseQuizLaunch | null {
   try {
@@ -105,6 +128,10 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
     const eligible = new Set<string>();
     for (const question of questions) {
       if (!requestedIds.has(question.id)) continue;
+      if (contradictsDeclaredScope(question, {
+        module: value.module, week: typeof value.week === "number" ? value.week : undefined,
+        courseId: typeof value.courseId === "string" ? value.courseId : undefined,
+      })) return null;
       if (seenOnDevice.has(question.id)) duplicateOnDevice.add(question.id);
       seenOnDevice.add(question.id);
       if (questionMappingStatus(question) === "ready" && question.options.length >= 2) eligible.add(question.id);
