@@ -61,6 +61,28 @@ describe("exact Course Tracker practice handoff", () => {
     expect(inspectCourseLaunch([]).state).toBe("invalid");
     expect(sessionStorage.getItem(KEY)).toBe("{broken");
   });
+  it("rejects malformed course and collection identities before describing missing content as recoverable", () => {
+    const valid = { term: "Term 4", module: "FTCM", week: 2,
+      questionIds: ["q1", "q2"], setIds: ["imcq-week2"] };
+    for (const broken of [
+      { ...valid, courseId: 42 },
+      { ...valid, courseId: "  " },
+      { ...valid, setIds: ["imcq-week2", "imcq-week2"] },
+    ]) {
+      const original = JSON.stringify(broken);
+      sessionStorage.setItem(KEY, original);
+      // A malformed handoff is invalid whether hydration has zero or one
+      // of its requested questions. It must not promise a recoverable launch.
+      expect(inspectCourseLaunch([]).state).toBe("invalid");
+      expect(inspectCourseLaunch([question("q1")]).state).toBe("invalid");
+      expect(sessionStorage.getItem(KEY)).toBe(original);
+    }
+    sessionStorage.setItem(KEY, JSON.stringify({ ...valid, courseId: "course-a" }));
+    expect(inspectCourseLaunch([question("q1")])).toMatchObject({
+      state: "pending", total: 2, ready: 1, missing: 1, review: 0,
+    });
+  });
+
   it("holds disputed on-device identities for review rather than reporting a runnable quiz", () => {
     store(["q1", "q2"]);
     const pending = sessionStorage.getItem(KEY);
