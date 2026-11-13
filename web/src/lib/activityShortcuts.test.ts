@@ -64,4 +64,37 @@ describe("activity shortcuts", () => {
     expect(recentActivityShortcuts(logs, [], 0)).toEqual([]);
     expect(frequentActivityShortcuts(logs, [], 0)).toEqual([]);
   });
+
+  it("keeps activity shortcut signatures distinct when fields contain separators", () => {
+    const withTypeSeparator = log("type-a", "Reading|Review", "2026-07-12T11:00:00.000Z", { trackerId: "tracker" });
+    const withTrackerSeparator = log("tracker-b", "Reading", "2026-07-12T12:00:00.000Z", { trackerId: "review|tracker" });
+
+    expect(activitySignature(withTypeSeparator)).not.toBe(activitySignature(withTrackerSeparator));
+    expect(recentActivityShortcuts([withTypeSeparator, withTrackerSeparator]).map((item) => item.label))
+      .toEqual(["Reading", "Reading|Review"]);
+    expect(recentActivityShortcuts([withTypeSeparator, withTrackerSeparator], [activitySignature(withTypeSeparator)])
+      .map((item) => item.label)).toEqual(["Reading"]);
+
+    const repeated = [
+      withTypeSeparator,
+      withTrackerSeparator,
+      log("type-c", "Reading|Review", "2026-07-12T13:00:00.000Z", { trackerId: "tracker" }),
+      log("tracker-d", "Reading", "2026-07-12T14:00:00.000Z", { trackerId: "review|tracker" }),
+    ];
+    expect(frequentActivityShortcuts(repeated, [], 2, 2)).toMatchObject([
+      { label: "Reading", uses: 2 },
+      { label: "Reading|Review", uses: 2 },
+    ]);
+    expect(activitySignature(log("plain", "Reading", "2026-07-12T15:00:00.000Z", {
+      trackerId: "tracker-1",
+      minutes: 30,
+    }))).toBe("reading|tracker-1|30|0||");
+  });
+
+  it("does not conflate backslashes with escaped shortcut delimiters", () => {
+    const literalSlash = log("slash", "Reading\\|Review", "2026-07-12T11:00:00.000Z", { trackerId: "tracker" });
+    const withoutSlash = log("pipe", "Reading|Review", "2026-07-12T12:00:00.000Z", { trackerId: "tracker" });
+    expect(activitySignature(literalSlash)).not.toBe(activitySignature(withoutSlash));
+  });
+
 });

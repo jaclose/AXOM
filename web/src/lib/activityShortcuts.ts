@@ -18,13 +18,18 @@ export function activitySignature(log: Pick<StudyLog, "type" | "trackerId" | "mi
   const quantity = safeNumber(log.quantity) || legacyCards;
   const quantityKind = log.quantityKind ?? (legacyCards > 0 ? "cards" : "");
   return [
-    normalize(log.type),
-    log.trackerId ?? "",
+    escapeSignatureField(normalize(log.type)),
+    escapeSignatureField(log.trackerId ?? ""),
     safeNumber(log.minutes),
     quantity,
-    quantityKind,
-    normalize(log.quantityLabel ?? ""),
+    escapeSignatureField(quantityKind),
+    escapeSignatureField(normalize(log.quantityLabel ?? "")),
   ].join("|");
+}
+
+/** Keep signature fields unambiguous without changing ordinary legacy signatures. */
+function escapeSignatureField(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 export function recentActivityShortcuts(
