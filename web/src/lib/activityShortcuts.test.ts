@@ -131,4 +131,38 @@ describe("activity shortcuts", () => {
       .toEqual(["Reading\\"]);
   });
 
+
+  it("orders recent suggestions by the actual instant across UTC offsets", () => {
+    const laterLocal = log("local-later", "Local review", "2026-07-12T12:00:00-04:00", { minutes: 45 });
+    const earlierUtc = log("utc-earlier", "UTC review", "2026-07-12T15:00:00Z", { minutes: 40 });
+
+    expect(recentActivityShortcuts([laterLocal, earlierUtc]).map((item) => item.label))
+      .toEqual(["Local review", "UTC review"]);
+  });
+
+  it("selects the truly latest use and ranks equally frequent suggestions across UTC offsets", () => {
+    const logs = [
+      log("a-older", "Local review", "2026-07-12T15:00:00Z", { minutes: 30 }),
+      log("a-later", "Local review", "2026-07-12T12:00:00-04:00", { minutes: 30 }),
+      log("b-older", "UTC review", "2026-07-12T14:00:00Z", { minutes: 45 }),
+      log("b-later", "UTC review", "2026-07-12T15:30:00Z", { minutes: 45 }),
+    ];
+
+    expect(frequentActivityShortcuts(logs, [], 2, 2).map((item) => [item.label, item.lastUsedAt]))
+      .toEqual([
+        ["Local review", "2026-07-12T12:00:00-04:00"],
+        ["UTC review", "2026-07-12T15:30:00Z"],
+      ]);
+  });
+
+  it("resolves equal instants by the same stable log ID tie-breaker", () => {
+    const logs = [
+      log("z", "Reading", "2026-07-12T12:00:00-04:00", { minutes: 30 }),
+      log("a", "Reading", "2026-07-12T16:00:00Z", { minutes: 30 }),
+    ];
+
+    expect(frequentActivityShortcuts(logs, [], 1, 2)[0].lastUsedAt)
+      .toBe("2026-07-12T12:00:00-04:00");
+  });
+
 });

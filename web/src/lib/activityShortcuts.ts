@@ -64,7 +64,7 @@ export function recentActivityShortcuts(
   const hiddenSet = new Set(hidden);
   const legacyHiddenSet = legacyHiddenKeys(logs, hiddenSet);
   const seen = new Set<string>();
-  const sorted = [...logs].sort((a, b) => b.ts.localeCompare(a.ts) || b.id.localeCompare(a.id));
+  const sorted = [...logs].sort(compareLogRecency);
   const result: ActivityShortcut[] = [];
   for (const log of sorted) {
     const signature = activitySignature(log);
@@ -95,14 +95,27 @@ export function frequentActivityShortcuts(
     if (!current) grouped.set(signature, { latest: log, uses: 1 });
     else {
       current.uses += 1;
-      if (log.ts > current.latest.ts || log.ts === current.latest.ts && log.id > current.latest.id) current.latest = log;
+      if (compareLogRecency(log, current.latest) < 0) current.latest = log;
     }
   }
   return [...grouped.entries()]
     .filter(([signature, value]) => value.uses >= threshold && !excludedSet.has(signature))
     .map(([signature, value]) => toShortcut(value.latest, signature, value.uses))
-    .sort((a, b) => b.uses - a.uses || b.lastUsedAt.localeCompare(a.lastUsedAt) || a.signature.localeCompare(b.signature))
+    .sort((a, b) => b.uses - a.uses || compareActivityTimeDesc(a.lastUsedAt, b.lastUsedAt) || a.signature.localeCompare(b.signature))
     .slice(0, Math.max(0, limit));
+}
+
+/** Compare instants, not ISO text; imported logs can retain distinct UTC offsets. */
+function compareActivityTimeDesc(a: string, b: string): number {
+  const aTime = Date.parse(a);
+  const bTime = Date.parse(b);
+  return Number.isFinite(aTime) && Number.isFinite(bTime)
+    ? bTime - aTime
+    : b.localeCompare(a);
+}
+
+function compareLogRecency(a: Pick<StudyLog, "ts" | "id">, b: Pick<StudyLog, "ts" | "id">): number {
+  return compareActivityTimeDesc(a.ts, b.ts) || b.id.localeCompare(a.id);
 }
 
 function toShortcut(log: StudyLog, signature: string, uses: number): ActivityShortcut {
