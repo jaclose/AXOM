@@ -121,6 +121,10 @@ describe("Question Set share boundary", () => {
     ["percent-encoded userinfo", "https://learner%3Asecret%40example.edu/lesson"],
     ["percent-encoded URL and authority", "https%3A%2F%2Flearner%40example.edu%2Flesson"],
     ["nested userinfo URL in query", "https://example.edu/redirect?to=https://learner:secret@other.edu/lesson"],
+    ["nested local file URI in public URL", "https://example.edu/redirect?source=file:///Users/learner/private.pdf"],
+    ["nested Android content URI in public URL", "https://example.edu/view?source=content://private.documents/item/1"],
+    ["encoded nested local file URI", "https://example.edu/view?source=file%3A%2F%2F%2FUsers%2Flearner%2Fprivate.pdf"],
+    ["double-encoded nested local URI", "https://example.edu/view?source=file%253A%252F%252F%252FUsers%252Flearner%252Fprivate.pdf"],
   ])("refuses %s citation in a new public snapshot without modifying source evidence", (_label, citation) => {
     const source = question("q1", { citation });
     const before = JSON.stringify(source);
