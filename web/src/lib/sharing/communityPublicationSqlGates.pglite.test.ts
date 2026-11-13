@@ -41,4 +41,105 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
       await db.exec("rollback;");
     }
   }, 60_000);
+  it("rejects a historical private citation through the actual reviewer RPC", async () => {
+    // Synthetic users and a legacy row are isolated to this PGlite instance.
+    // A pre-gate snapshot is reproduced by briefly disabling *user* triggers,
+    // never by changing real learner data or the deployed admission rules.
+    const owner = "a1111111-1111-4111-8111-111111111111";
+    const reviewer = "a3333333-3333-4333-8333-333333333333";
+    const learner = "a2222222-2222-4222-8222-222222222222";
+    await db.query(
+      "insert into auth.users(id,email) values($1,'publisher@example.test'),($2,'reviewer@example.test'),($3,'learner@example.test')",
+      [owner, reviewer, learner],
+    );
+    await db.query("insert into public.academic_reviewers(user_id) values($1)", [reviewer]);
+
+    async function as<T = Record<string, unknown>>(
+      account: string, sql: string, params: unknown[] = [],
+    ): Promise<T[]> {
+      await db.exec("reset role;");
+      await db.query("select set_config('request.jwt.claim.sub',$1,false)", [account]);
+      await db.exec("set role authenticated;");
+      try { return (await db.query<T>(sql, params)).rows; }
+      finally { await db.exec("reset role;"); }
+    }
+
+    const safe = {
+      shareFormatVersion: 1,
+      title: "Synthetic reviewer admission",
+      tags: [],
+      orderedQuestionIds: ["shared-q1"],
+      questions: [{
+        id: "shared-q1",
+        stem: "Which synthetic option is marked in the source?",
+        options: [{ key: "A", text: "Marked" }, { key: "B", text: "Not marked" }],
+        correctKey: "A",
+        tags: [],
+        citation: "PMID: 123456",
+      }],
+      createdAt: "2026-11-13T07:00:00Z",
+      copyrightNotice: "Original synthetic test material",
+    };
+    const submit = async (sourceId: string, snapshot: typeof safe) => {
+      const [row] = await as<{ id: string }>(owner,
+        "select public.submit_question_set_library($1,$2::jsonb,$3,$4,$5) id",
+        [sourceId, JSON.stringify(snapshot), "Synthetic author", true, true]);
+      return row.id;
+    };
+    const review = (id: string, snapshot: typeof safe, revision: number, approved: boolean) =>
+      as(reviewer,
+        "select public.review_question_set_library($1,$2,$3,$4::jsonb,$5::bigint)",
+        [id, approved, "Reviewed synthetic provenance and citation rights", JSON.stringify(snapshot), revision]);
+
+    const id = await submit("synthetic-pre-citation-gate", safe);
+    const legacy = {
+      ...safe,
+      questions: [{ ...safe.questions[0], citation: "file:///Users/synthetic/private-notes.pdf" }],
+    };
+    await db.exec("alter table public.question_set_library_entries disable trigger user;");
+    try {
+      await db.query(
+        "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(legacy), id],
+      );
+    } finally {
+      await db.exec("alter table public.question_set_library_entries enable trigger user;");
+    }
+    const [before] = (await db.query<{ status: string; review_revision: number }>(
+      "select status,review_revision from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(before.status).toBe("pending");
+    await expect(review(id, legacy, before.review_revision, true))
+      .rejects.toThrow(/citation requires privacy review/i);
+    const [held] = (await db.query<{ status: string; snapshot_payload: typeof safe; review_revision: number }>(
+      "select status,snapshot_payload,review_revision from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(held).toMatchObject({
+      status: "pending", snapshot_payload: legacy, review_revision: before.review_revision,
+    });
+    expect(await as<{ id: string }>(learner,
+      "select id from public.list_question_set_library($1,0)", ["Synthetic reviewer admission"]))
+      .toEqual([]);
+    await expect(as(learner, "select public.get_question_set_library($1)", [id]))
+      .rejects.toThrow(/unavailable/i);
+    // Moderation can still reject the legacy row, preserving original evidence.
+    await review(id, legacy, before.review_revision, false);
+    const [rejected] = (await db.query<{ status: string; snapshot_payload: typeof safe }>(
+      "select status,snapshot_payload from public.question_set_library_entries where id=$1", [id],
+    )).rows;
+    expect(rejected).toMatchObject({ status: "rejected", snapshot_payload: legacy });
+
+    // Positive control: a separately submitted keyed, public-source set remains
+    // approvable and discoverable. No generated explanation gains review status.
+    const safeId = await submit("synthetic-reviewed-safe", safe);
+    await review(safeId, safe, 1, true);
+    expect((await as<{ id: string }>(learner,
+      "select id from public.list_question_set_library($1,0)", ["Synthetic reviewer admission"]))
+      .map(row => row.id)).toContain(safeId);
+    const [preview] = await as<{ value: { status: string; snapshot_payload: typeof safe } }>(
+      learner, "select public.get_question_set_library($1) value", [safeId],
+    );
+    expect(preview.value).toMatchObject({ status: "approved", snapshot_payload: safe });
+  }, 60_000);
+
 });
