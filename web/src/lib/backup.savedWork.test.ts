@@ -233,4 +233,34 @@ describe("saved-work recovery without downloading content", () => {
   });
 
 
+  it("routes more than 4096 distinct image identities to ZIP even with less than 128 MiB of metadata", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    const images = Array.from({ length: 4097 }, (_, index) => ({
+      ...attachment, id: `figure-${index}`, blobKey: `image-${index}`,
+    }));
+    state.questions[0].attachments = images;
+    await putQuestionAttachmentBlob(images[0].blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "q", updatedAt: attachment.updatedAt,
+    });
+
+    const result = await exportStateWithAttachments(state);
+    expect(filename).toMatch(/^axom-backup-.*\\.zip$/);
+    expect(result.attachmentCount).toBe(1);
+    expect(result.missingBlobKeys).toHaveLength(4096);
+    expect(lastBackupAt()).toBeNull();
+    const portable = await readPortableBackup(new File([exported!], filename));
+    expect(JSON.parse(portable.rawText).questions[0].attachments).toHaveLength(4097);
+    expect(JSON.parse(portable.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
+    await deleteQuestionAttachmentBlobs([images[0].blobKey]);
+    const staged = await portable.restoreMedia([{ id: "q", attachments: [images[0]] }]);
+    expect(staged).toMatchObject({ restored: 1, skipped: 0 });
+    expect(new Uint8Array(await (await getQuestionAttachmentBlob(images[0].blobKey))!.blob.arrayBuffer()))
+      .toEqual(PNG_BYTES);
+    await staged.rollback();
+  });
+
+
 });
