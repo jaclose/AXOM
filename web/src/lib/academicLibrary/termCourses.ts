@@ -72,32 +72,16 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   courses: readonly AcademicCourse[] = []): CourseQuizLaunch {
   const ids = new Set<string>();
   const setIds = new Set<string>();
-  const selectedReferences: DownloadReference[] = [];
-  const questionTerms = new Map<string, string>();
-  const ambiguousQuestionIds = new Set<string>();
-  const requestedTerm = termIdentity(term);
-  // Count provenance across *all* valid downloaded receipts, not only those
-  // selected for this term. A reused original ID with contradictory term
-  // ownership is review-held in both terms until its source is reconciled.
+  const setCounts = new Map<string, number>();
+  for (const set of workspace.questionSets) setCounts.set(set.id, (setCounts.get(set.id) ?? 0) + 1);
   for (const saved of workspaceReferences(accountId, workspace)) {
     const catalog = courses.find(course => course.id === saved.collectionId && course.current_revision_id === saved.revisionId);
     if (saved.term && catalog && termIdentity(saved.term) !== termIdentity(catalog.term)) continue;
     const savedTerm = saved.term ?? catalog?.term ?? installedReferenceTerm(saved, workspace);
-    if (!savedTerm) continue;
-    const ownerTerm = termIdentity(savedTerm);
-    for (const id of saved.questionIds) {
-      const prior = questionTerms.get(id);
-      if (prior !== undefined && prior !== ownerTerm) ambiguousQuestionIds.add(id);
-      else questionTerms.set(id, ownerTerm);
-    }
-    if (ownerTerm === requestedTerm) selectedReferences.push(saved);
-  }
-  const setCounts = new Map<string, number>();
-  for (const set of workspace.questionSets) setCounts.set(set.id, (setCounts.get(set.id) ?? 0) + 1);
-  for (const saved of selectedReferences) {
+    if (!savedTerm || termIdentity(savedTerm) !== termIdentity(term)) continue;
+    // An original set ID must resolve to exactly one local set. An ambiguous
+    // or absent original is not evidence that its questions can be practiced.
     for (const id of saved.questionIds) ids.add(id);
-    // An ID present in two original on-device sets is not evidence for
-    // either set. Keep clean set identities and their practice independent.
     for (const id of saved.setIds) if (setCounts.get(id) === 1) setIds.add(id);
   }
   const counts = new Map<string, number>();
@@ -105,7 +89,6 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const deferred = new Set(workspace.deferredContent?.questions.map(question => question.id) ?? []);
   return { scopeKind: "term", module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
-    && !ambiguousQuestionIds.has(question.id)
-    && (!question.setId || (setCounts.get(question.setId) ?? 0) < 2)
+    && (!question.setId || setCounts.get(question.setId) === 1)
     && questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id) };
 }
