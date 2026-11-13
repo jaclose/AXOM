@@ -62,6 +62,90 @@ function worker({ failCacheMatch = false, failCachePut = false, onCachePut = asy
   return { events, caches, context, activations: () => activations };
 }
 
+test('R89 a failed retained-chunk inventory write aborts the new generation without erasing older or private caches', async () => {
+  const chunk = './assets/critical-87654321.js';
+  for (const sourceKind of ['precache', 'shipped']) {
+    let manifestWriteAttempts = 0;
+    const app = worker({
+      precache: sourceKind === 'precache' ? [chunk] : [],
+      shippedChunks: sourceKind === 'shipped' ? [chunk] : [],
+      onCachePut: async (key) => {
+        if (key === './__axom-retained-public-chunks.json') {
+          manifestWriteAttempts++;
+          throw new Error('synthetic retained inventory quota rejection');
+        }
+      },
+      fetchResponse: async (request) => {
+        const path = new URL(typeof request === 'string' ? request : request.url).pathname;
+        const type = path.endsWith('.js') ? 'text/javascript'
+          : path.endsWith('.png') ? 'image/png'
+            : path.endsWith('.webmanifest') ? 'application/manifest+json' : 'text/html';
+        return new Response('PUBLIC_' + path, {
+          headers: { 'content-type': type, 'cache-control': path.endsWith('.js') ? 'no-store' : 'public, max-age=0' },
+        });
+      },
+    });
+    const older = await app.caches.open('axom-shell-previous');
+    const learner = await app.caches.open('private-learner-files');
+    await older.put('./previous.js', new Response('PREVIOUS_BUILD_BYTES'));
+    await learner.put('./private.txt', new Response('PRIVATE_LEARNER_BYTES'));
+
+    let task;
+    app.events.get('install')({ waitUntil: (value) => { task = value; } });
+    await assert.rejects(task, /synthetic retained inventory quota rejection/,
+      sourceKind + ': missing required cache metadata must fail the entire install');
+    assert.equal(manifestWriteAttempts, 1, sourceKind + ': injected metadata failure must be reached');
+    assert.deepEqual(await app.caches.keys(), ['axom-shell-previous', 'private-learner-files'],
+      sourceKind + ': cleanup may remove only the failed new generation');
+    assert.equal(await (await older.match('./previous.js')).text(), 'PREVIOUS_BUILD_BYTES');
+    assert.equal(await (await learner.match('./private.txt')).text(), 'PRIVATE_LEARNER_BYTES');
+  }
+});
+
+test('R89 a successful pinned inventory survives install while a truly empty inventory remains optional', async () => {
+  const chunk = './assets/critical-87654321.js';
+  const fetchResponse = async (request) => {
+    const path = new URL(typeof request === 'string' ? request : request.url).pathname;
+    const type = path.endsWith('.js') ? 'text/javascript'
+      : path.endsWith('.png') ? 'image/png'
+        : path.endsWith('.webmanifest') ? 'application/manifest+json' : 'text/html';
+    return new Response('PUBLIC_' + path, {
+      headers: { 'content-type': type, 'cache-control': path.endsWith('.js') ? 'no-store' : 'public, max-age=0' },
+    });
+  };
+  for (const sourceKind of ['precache', 'shipped']) {
+    const app = worker({
+      precache: sourceKind === 'precache' ? [chunk] : [],
+      shippedChunks: sourceKind === 'shipped' ? [chunk] : [],
+      fetchResponse,
+    });
+    let task;
+    app.events.get('install')({ waitUntil: (value) => { task = value; } });
+    await task;
+    const current = await app.caches.open('axom-shell-current');
+    const manifest = await (await current.match('./__axom-retained-public-chunks.json')).json();
+    assert.equal(manifest.version, 1);
+    assert.deepEqual([...manifest.chunks], [chunk], sourceKind + ': exact immutable chunk must be pinned');
+    assert.ok(await current.match('./index.html'), 'offline shell must install');
+  }
+  let rejectedEmptyWrite = 0;
+  const empty = worker({
+    fetchResponse,
+    onCachePut: async (key) => {
+      if (key === './__axom-retained-public-chunks.json') {
+        rejectedEmptyWrite++;
+        throw new Error('synthetic optional empty inventory quota rejection');
+      }
+    },
+  });
+  let task;
+  empty.events.get('install')({ waitUntil: (value) => { task = value; } });
+  await task;
+  assert.equal(rejectedEmptyWrite, 1);
+  assert.ok(await (await empty.caches.open('axom-shell-current')).match('./index.html'),
+    'no retained code to authorize: an empty optional manifest must not block shell installation');
+});
+
 test('R83 rejected install removes only its newly created partial shell cache', async () => {
   const chunk = './assets/critical-87654321.js';
   for (const failedPath of [chunk, './index.html']) {
