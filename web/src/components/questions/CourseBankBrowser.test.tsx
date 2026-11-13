@@ -263,3 +263,42 @@ describe("CourseBankBrowser dynamic handoff isolation", () => {
     expect(screen.getByText("School PQ 1")).toBeTruthy();
   });
 });
+
+describe("CourseBankBrowser repeated Tracker handoffs", () => {
+  it("does not resurrect a prior manual week after an A to B to A handoff", async () => {
+    const user = userEvent.setup();
+    const view = render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Biomolecules/ }));
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 99 }} onPractice={vi.fn()} />);
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    expect(screen.getByText("IMCQ 1")).toBeTruthy();
+  });
+
+  it("clears an old term filter when a different explicit Tracker handoff arrives", async () => {
+    const user = userEvent.setup();
+    const view = render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "Term 2");
+    expect(screen.getByRole("combobox", { name: "Filter by term" }).getAttribute("value")).toBeNull();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c2", module: "Biomolecules", week: 1 }} onPractice={vi.fn()} />);
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    expect(screen.getByText("IMCQ 1")).toBeTruthy();
+    expect((screen.getByRole("combobox", { name: "Filter by term" }) as HTMLSelectElement).value).toBe("");
+  });
+});
+
+describe("CourseBankBrowser explicit handoff search after manual outline selection", () => {
+  it("never turns a click on the same module into cross-course search", async () => {
+    const user = userEvent.setup();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Neuro.*weeks/ }));
+    await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "School");
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Biomolecules.*weeks/ }));
+    await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "School");
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+  });
+});
