@@ -404,6 +404,9 @@ self.addEventListener("fetch", (event) => {
   if (request.headers?.has?.("range")) return;
   // Authorization-bearing requests must never share the origin-wide shell cache.
   if (request.headers?.has?.("authorization") || request.cache === "no-store") return;
+  // Cache-only callers rely on the browser HTTP cache (or a cache-miss response).
+  // The worker must not substitute a cache-busted no-store network fetch.
+  if (request.cache === "only-if-cached") return;
   if (/\/version\.json$/.test(url.pathname) || /\/api\//.test(url.pathname)) return;
 
   if (request.mode === "navigate") {
