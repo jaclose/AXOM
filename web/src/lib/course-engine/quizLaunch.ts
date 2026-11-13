@@ -9,6 +9,8 @@ export const COURSE_QUIZ_LAUNCH_KEY = "axom.courseQuizLaunch.v1";
 export const COURSE_QUIZ_LAUNCH_EVENT = "axom:course-quiz-launch";
 export const MAX_COURSE_QUIZ_QUESTIONS = 2000;
 export interface CourseQuizLaunch {
+  /** Explicitly downloaded cross-course union; legacy/fixed module launches omit this. */
+  scopeKind?: "term";
   module: string;
   term: string;
   /** Optional stable owner identity for same-named modules in different courses. */
@@ -16,6 +18,16 @@ export interface CourseQuizLaunch {
   week?: number;
   questionIds: string[];
   setIds: string[];
+}
+
+/** A term union is not a module. Only the term receipts' producer may add
+ * this explicit marker. A malformed marker must never bypass module checks. */
+export function isValidCourseQuizScope(value: {
+  module?: unknown; term?: unknown; week?: unknown; courseId?: unknown; scopeKind?: unknown;
+}): boolean {
+  return value.scopeKind === undefined || (value.scopeKind === "term"
+    && typeof value.module === "string" && typeof value.term === "string"
+    && value.module === value.term && value.week === undefined && value.courseId === undefined);
 }
 
 /** A fixed canonical selection. An empty course never means the whole bank. */
@@ -49,7 +61,7 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
   if (selection.questionIds.length > MAX_COURSE_QUIZ_QUESTIONS
     || new Set(selection.questionIds).size !== selection.questionIds.length
     || selection.questionIds.some(id => typeof id !== "string" || !id.trim())
-    || !selection.module.trim() || !selection.term.trim()
+    || !selection.module.trim() || !selection.term.trim() || !isValidCourseQuizScope(selection)
     || (selection.week !== undefined && (!Number.isSafeInteger(selection.week) || selection.week < 1))
     || (selection.courseId !== undefined && !selection.courseId.trim())
     || selection.setIds.length > MAX_COURSE_QUIZ_QUESTIONS
@@ -90,11 +102,12 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
  * This is a read-only preflight; the pending request and attempt bytes survive. */
 export function hasDeclaredCourseScopeConflict(
   question: QuestionRecord,
-  requested: Pick<CourseQuizLaunch, "module" | "week" | "courseId">,
+  requested: Pick<CourseQuizLaunch, "module" | "week" | "courseId" | "scopeKind">,
 ): boolean {
   const sourceModule: unknown = question.module;
   if (sourceModule != null && (typeof sourceModule !== "string"
-    || (sourceModule.trim() && canonicalModuleKey(sourceModule) !== canonicalModuleKey(requested.module)))) return true;
+    || (sourceModule.trim() && requested.scopeKind !== "term"
+      && canonicalModuleKey(sourceModule) !== canonicalModuleKey(requested.module)))) return true;
   const sourceWeek: unknown = question.week;
   if (sourceWeek != null && (typeof sourceWeek !== "string" || sourceWeek.trim())) {
     const parsed = parseWeek(sourceWeek);
@@ -118,6 +131,7 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
       || new Set(value.questionIds).size !== value.questionIds.length
       || ("week" in value && value.week !== undefined && (!Number.isSafeInteger(value.week) || (value.week as number) < 1))
       || ("courseId" in value && value.courseId !== undefined && (typeof value.courseId !== "string" || !value.courseId.trim()))
+      || !isValidCourseQuizScope(value)
       || ("setIds" in value && (!Array.isArray(value.setIds) || value.setIds.length > MAX_COURSE_QUIZ_QUESTIONS
         || new Set(value.setIds).size !== value.setIds.length
         || value.setIds.some(id => typeof id !== "string" || !id.trim())))) return null;
@@ -129,7 +143,8 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
     for (const question of questions) {
       if (!requestedIds.has(question.id)) continue;
       if (hasDeclaredCourseScopeConflict(question, {
-        module: value.module, week: "week" in value && typeof value.week === "number" ? value.week : undefined,
+        module: value.module, scopeKind: "scopeKind" in value && value.scopeKind === "term" ? "term" : undefined,
+        week: "week" in value && typeof value.week === "number" ? value.week : undefined,
         courseId: "courseId" in value && typeof value.courseId === "string" ? value.courseId : undefined,
       })) return null;
       if (seenOnDevice.has(question.id)) duplicateOnDevice.add(question.id);
@@ -140,6 +155,7 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
     // shorter or order-dependent block. Preserve the pending request for repair.
     if (!questionIds.every(id => eligible.has(id) && !duplicateOnDevice.has(id))) return null;
     return { module: value.module, term: value.term, questionIds,
+      ...("scopeKind" in value && value.scopeKind === "term" ? { scopeKind: "term" as const } : {}),
       ...("courseId" in value && typeof value.courseId === "string" ? { courseId: value.courseId } : {}),
       ...("week" in value && typeof value.week === "number" ? { week: value.week } : {}),
       setIds: "setIds" in value && Array.isArray(value.setIds) ? value.setIds as string[] : [] };
