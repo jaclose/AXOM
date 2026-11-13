@@ -6,7 +6,7 @@ import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
@@ -25,6 +25,38 @@ function crcCorrectPngWithIdat(data: Uint8Array): Uint8Array {
   }
   view.setUint32(8 + data.byteLength, (crc ^ 0xffffffff) >>> 0);
   return Uint8Array.from([...PNG_BYTES.subarray(0, 33), ...chunk, ...PNG_BYTES.subarray(-12)]);
+}
+
+/** Build CRC-correct 1x1 PNGs so tests exercise semantic palette admission,
+ * not a corrupted checksum or an incidental decoder failure. */
+function pngChunk(name: string, data: Uint8Array): Uint8Array {
+  const chunk = new Uint8Array(12 + data.length);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) chunk[4 + i] = name.charCodeAt(i);
+  chunk.set(data, 8);
+  let crc = 0xffffffff;
+  for (let i = 4; i < 8 + data.length; i++) {
+    crc ^= chunk[i];
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  view.setUint32(8 + data.length, (crc ^ 0xffffffff) >>> 0);
+  return chunk;
+}
+function palettePng(palettes: readonly Uint8Array[], options: { afterIdat?: boolean; color?: number } = {}): Uint8Array {
+  const ihdr = new Uint8Array(13);
+  const view = new DataView(ihdr.buffer);
+  view.setUint32(0, 1); view.setUint32(4, 1);
+  ihdr[8] = 1; ihdr[9] = options.color ?? 3;
+  const paletteChunks = palettes.map(palette => pngChunk("PLTE", palette));
+  const idat = pngChunk("IDAT", deflateSync(Uint8Array.from([0, 0]))); // filter 0, index 0
+  return Uint8Array.from([
+    ...PNG_BYTES.subarray(0, 8), ...pngChunk("IHDR", ihdr),
+    ...(!options.afterIdat ? paletteChunks.flatMap(chunk => [...chunk]) : []),
+    ...idat,
+    ...(options.afterIdat ? paletteChunks.flatMap(chunk => [...chunk]) : []),
+    ...pngChunk("IEND", new Uint8Array()),
+  ]);
 }
 
 const pngBlob = () => new Blob([PNG_BYTES.buffer as ArrayBuffer], { type: "image/png" });
@@ -84,6 +116,59 @@ describe("portable binary media backup", () => {
     expect(JSON.parse(await zip.file("workspace.json")!.async("string")).media).toEqual([]);
   });
 
+
+  it("round-trips a valid indexed PNG through ZIP and JSON with identical recovered bytes", async () => {
+    const bytes = palettePng([Uint8Array.from([12, 34, 56])]);
+    const references = [{ id: "held-question", attachments: [{ ...attachment, byteSize: bytes.length }] }];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: bytes.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const zip = await createMediaBackupArchive({}, references);
+    const json = await collectVerifiedMediaBackupPayloads(references);
+    expect(zip).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+    expect(json).toMatchObject({ missingBlobKeys: [] });
+    expect(json.payloads).toHaveLength(1);
+
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    const jsonBackup = await readPortableBackup(new File([
+      JSON.stringify({ _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: json.payloads }),
+    ], "indexed.json"));
+    expect(await jsonBackup.restoreMedia(references)).toMatchObject({ restored: 1, skipped: 0 });
+    expect(new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer())).toEqual(bytes);
+
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    const zipBackup = await readPortableBackup(new File([zip.blob], "indexed.zip"));
+    expect(await zipBackup.restoreMedia(references)).toMatchObject({ restored: 1, skipped: 0 });
+    expect(new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("holds malformed or forbidden PLTE chunks in both ZIP and JSON export", async () => {
+    const rgb = Uint8Array.from([12, 34, 56]);
+    const invalid = [
+      { label: "empty palette", bytes: palettePng([new Uint8Array()]) },
+      { label: "incomplete RGB entry", bytes: palettePng([Uint8Array.from([1, 2, 3, 4])]) },
+      { label: "too many entries for indexed bit depth", bytes: palettePng([Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9])]) },
+      { label: "duplicate palette", bytes: palettePng([rgb, rgb]) },
+      { label: "palette after image data", bytes: palettePng([rgb], { afterIdat: true }) },
+      { label: "palette forbidden in grayscale", bytes: palettePng([rgb], { color: 0 }) },
+    ];
+    for (const { label, bytes } of invalid) {
+      const references = [{ id: "held-question", attachments: [{ ...attachment, byteSize: bytes.length }] }];
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+        mimeType: "image/png", byteSize: bytes.length,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const zip = await createMediaBackupArchive({}, references);
+      const json = await collectVerifiedMediaBackupPayloads(references);
+      expect(zip.attachmentCount, label).toBe(0);
+      expect(zip.missingBlobKeys, label).toEqual([attachment.blobKey]);
+      expect(json.payloads, label).toEqual([]);
+      expect(json.missingBlobKeys, label).toEqual([attachment.blobKey]);
+    }
+  });
 
   it("rejects a CRC-correct PNG container without required image-data chunks", async () => {
     const withoutImageData = new Uint8Array([
