@@ -93,8 +93,8 @@ function hasExpectedImageStructure(bytes: Uint8Array, mime: string): boolean {
 }
 
 /** Validate zlib IDAT data and PNG scanline geometry before certifying an image.
- * CRC-correct containers alone can contain zero/invalid compressed pixels.
- * This is bounded structural validation, not a source digest or full pixel decode. */
+ * CRC-correct containers can contain invalid compressed pixels or out-of-range palette references.
+ * This is bounded raster admission, not a source digest or full image decoder. */
 async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
   try {
     if (typeof DecompressionStream !== "function") return false;
@@ -135,7 +135,7 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
       [0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4],
       [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2],
     ];
-    const rows: Array<{ h: number; rowBytes: number }> = [];
+    const rows: Array<{ w: number; h: number; rowBytes: number }> = [];
     let expected = 0;
     for (const [x, y, dx, dy] of passes) {
       const w = Math.max(0, Math.ceil((width - x) / dx));
@@ -145,7 +145,7 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
       const added = h * (rowBytes + 1);
       if (!Number.isSafeInteger(added) || added > MAX_ORIGINAL_BYTES - expected) return false;
       expected += added;
-      rows.push({ h, rowBytes });
+      rows.push({ w, h, rowBytes });
     }
     const compressed = new Uint8Array(totalCompressed);
     let written = 0;
@@ -162,9 +162,45 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
     }
     if (length !== expected) return false;
     let row = 0;
-    for (const { h, rowBytes } of rows) {
+    for (const { w, h, rowBytes } of rows) {
+      // Indexed PNG pixels are one byte per filter sample even at 1/2/4-bit
+      // depth. Each Adam7 pass begins with an independent previous scanline.
+      let previous = color === 3 ? new Uint8Array(rowBytes) : null;
+      let reconstructed = color === 3 ? new Uint8Array(rowBytes) : null;
       for (let y = 0; y < h; y++) {
-        if (decoded[row] > 4) return false;
+        const filter = decoded[row];
+        if (filter > 4) return false;
+        if (color === 3 && previous && reconstructed) {
+          for (let byte = 0; byte < rowBytes; byte++) {
+            const left = byte > 0 ? reconstructed[byte - 1] : 0;
+            const up = previous[byte];
+            const upperLeft = byte > 0 ? previous[byte - 1] : 0;
+            let predictor = 0;
+            if (filter === 1) predictor = left;
+            else if (filter === 2) predictor = up;
+            else if (filter === 3) predictor = Math.floor((left + up) / 2);
+            else if (filter === 4) {
+              const estimate = left + up - upperLeft;
+              const leftError = Math.abs(estimate - left);
+              const upError = Math.abs(estimate - up);
+              const upperLeftError = Math.abs(estimate - upperLeft);
+              predictor = leftError <= upError && leftError <= upperLeftError
+                ? left : upError <= upperLeftError ? up : upperLeft;
+            }
+            reconstructed[byte] = (decoded[row + 1 + byte] + predictor) & 0xff;
+          }
+          // PNG packs sub-8-bit palette indices most-significant-bit first.
+          // Validate only real pixels, not padding bits at the end of a row.
+          const mask = (1 << depth) - 1;
+          for (let x = 0; x < w; x++) {
+            const bit = x * depth;
+            const index = (reconstructed[bit >> 3] >> (8 - depth - (bit & 7))) & mask;
+            if (index >= paletteEntries) return false;
+          }
+          const old = previous;
+          previous = reconstructed;
+          reconstructed = old;
+        }
         row += rowBytes + 1;
       }
     }
