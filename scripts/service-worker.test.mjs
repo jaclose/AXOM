@@ -2203,5 +2203,5 @@ test('R99 force-cache SW miss preserves browser HTTP cache preference without ch
   await dispatch('/icons/axom-orb-192.png', 'default');
   assert.equal(requests.length, 2);
   assert.equal(requests[1].cache, 'no-store', 'ordinary cache miss preserves AXOM revalidation');
-  assert.match(requests[1].url, /__axom_revalidate=\\d+/, 'default miss remains cache-busted');
+  assert.match(requests[1].url, /__axom_revalidate=[0-9]+/, 'default miss remains cache-busted');
 });
