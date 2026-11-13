@@ -79,8 +79,10 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
     try {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
       setPreview(undefined);
-      setMessage(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
+      // Refresh drops stale reviewer data and resets old feedback. Publish the
+      // completed decision afterward so its confirmation survives that reset.
       refreshQueue();
+      setMessage(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The review could not be saved.";
       // An obsolete reviewed revision must not remain approvable by the same
