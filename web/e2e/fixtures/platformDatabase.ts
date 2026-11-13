@@ -12,6 +12,8 @@ export const PLATFORM_USERS = [
   { id: "11111111-1111-4111-8111-111111111111", name: "Fixture Atlas", handle: "fixture_atlas" },
   { id: "22222222-2222-4222-8222-222222222222", name: "Fixture Briar", handle: "fixture_briar" },
 ] as const;
+/** Added lazily only when a test needs independent publisher/reviewer/learner. */
+export const PLATFORM_GUEST_LEARNER = { id: "33333333-3333-4333-8333-333333333333", name: "Fixture Cedar", handle: "fixture_cedar" } as const;
 const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" };
 const rpcNames = new Set(["axom_operator_role", "axom_operator_overview", "axom_operator_accounts", "axom_operator_review_queue",
   "axom_operator_reports", "axom_operator_set_role", "axom_operator_set_ai", "axom_operator_resolve_report", "consume_ai_quota",
@@ -143,8 +145,12 @@ export async function createPlatformDatabase() {
     return asUser(userId, sql, values);
   };
 
-  const attach = async (page: Page, index: 0 | 1) => {
-    const person = PLATFORM_USERS[index];
+  const attach = async (page: Page, index: 0 | 1 | 2) => {
+    const person = index === 2 ? PLATFORM_GUEST_LEARNER : PLATFORM_USERS[index];
+    if (index === 2) {
+      await db.query("insert into auth.users(id,email,raw_user_meta_data) values($1,$2,$3) on conflict (id) do nothing",
+        [person.id, `${person.handle}@example.test`, JSON.stringify({ display_name: person.name })]);
+    }
     const unexpected: string[] = [];
     const metadata: Record<string, unknown> = { display_name: person.name };
     await page.addInitScript(({ url, person, nudges }) => {
