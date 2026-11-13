@@ -464,7 +464,12 @@ self.addEventListener("fetch", (event) => {
     const freshUrl = new URL(request.url);
     freshUrl.searchParams.set("__axom_revalidate", String(Date.now()));
     try {
-      const response = await fetch(freshUrl.href, { cache: "no-store" });
+      // On a service-worker miss, force-cache must consult the browser's HTTP
+      // cache before using the network; do not rewrite its URL or cache mode.
+      // Ordinary GETs still bypass stale deployment assets with no-store.
+      const response = request.cache === "force-cache"
+        ? await fetch(request)
+        : await fetch(freshUrl.href, { cache: "no-store" });
       const isHtml = isHtmlResponse(response);
       if (response.ok && !isHtml) {
         cacheResponse(event, request, response);
