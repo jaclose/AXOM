@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { createPlatformDatabase, PLATFORM_USERS } from "./fixtures/platformDatabase";
+import { createPlatformDatabase, PLATFORM_GUEST_LEARNER, PLATFORM_USERS } from "./fixtures/platformDatabase";
 
 const TITLE = "Synthetic source-checked set";
 const STEM = "Which synthetic label is the reviewed answer?";
@@ -96,6 +96,13 @@ async function seedFourQuestionEvidenceSet(page: Page) {
 
 async function openLocalSets(page: Page) {
   await page.goto("/#questions");
+  // Returning from an independent reviewer no longer navigates the publisher
+  // away from Questions. Close only the settled submit dialog before clicking tabs.
+  const priorSubmit = page.getByRole("dialog", { name: `Submit ${TITLE}` });
+  if (await priorSubmit.isVisible()) {
+    await priorSubmit.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(priorSubmit).toHaveCount(0);
+  }
   await page.getByRole("tab", { name: /Library/ }).click();
   await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   const submit = page.getByRole("button", { name: "Submit to library", exact: true });
@@ -118,12 +125,16 @@ async function openSharedLibrary(page: Page) {
 test("Question Set Library submit, review, import, like and withdrawal use real SQL authorization", async ({ page, browser, baseURL }) => {
   test.setTimeout(210_000);
   const database = await createPlatformDatabase();
-  const [owner, member] = PLATFORM_USERS;
+  // Publisher, Host reviewer and importing learner are distinct fixture identities.
+  const [reviewer, owner] = PLATFORM_USERS;
+  const member = PLATFORM_GUEST_LEARNER;
   const otherContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   const other = await otherContext.newPage();
+  const reviewerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const reviewerPage = await reviewerContext.newPage();
   const errors: string[] = [];
   const unexpected: string[][] = [];
-  for (const target of [page, other]) {
+  for (const target of [page, other, reviewerPage]) {
     target.setDefaultTimeout(15_000);
     target.setDefaultNavigationTimeout(30_000);
     target.on("pageerror", error => errors.push(error.message));
@@ -131,10 +142,10 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     target.on("dialog", dialog => dialog.accept());
   }
   try {
-    await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [owner.id]);
+    await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [reviewer.id]);
     console.info("Question Set Library fixture: migration and reviewer seed complete.");
-    for (const [index, target] of [page, other].entries()) {
-      unexpected.push(await database.attach(target, index as 0 | 1));
+    for (const [target, index] of [[page, 1], [other, 2], [reviewerPage, 0]] as const) {
+      unexpected.push(await database.attach(target, index));
       await target.goto(`${baseURL}/#questions`);
       await seedLocalWorkspace(target);
     }
@@ -186,12 +197,12 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await expect(other.getByText("No sets found", { exact: true })).toBeVisible();
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
 
-    await page.goto(`${baseURL}/#host`);
-    const queue = page.locator(".qsl-review-queue");
+    await reviewerPage.goto(`${baseURL}/#host`);
+    const queue = reviewerPage.locator(".qsl-review-queue");
     await expect(queue.getByRole("heading", { name: "Question Set Library review" })).toBeVisible();
     await expect(queue.getByText(TITLE, { exact: true })).toBeVisible();
     await queue.getByRole("button", { name: "Inspect" }).click();
-    const review = page.getByRole("dialog", { name: `Review ${TITLE}` });
+    const review = reviewerPage.getByRole("dialog", { name: `Review ${TITLE}` });
     await expect(review.getByText(STEM, { exact: true })).toBeVisible();
     await review.getByRole("textbox", { name: "Review note" }).fill("Synthetic source and distribution rights checked.");
     await review.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
@@ -416,6 +427,7 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     expect(errors).toEqual([]);
   } finally {
     await otherContext.close();
+    await reviewerContext.close();
     await database.close();
   }
 });
@@ -423,14 +435,19 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
 test("four-question SQL-approved set discloses unseen citation and distractor gaps before private import", async ({ page, browser, baseURL }) => {
   test.setTimeout(210_000);
   const database = await createPlatformDatabase();
-  const [owner, member] = PLATFORM_USERS;
+  // Publisher, Host reviewer and importing learner are distinct fixture identities.
+  const [reviewer, owner] = PLATFORM_USERS;
+  const member = PLATFORM_GUEST_LEARNER;
   const learnerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   const learner = await learnerContext.newPage();
+  const reviewerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const reviewerPage = await reviewerContext.newPage();
   try {
-    await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [owner.id]);
-    await database.attach(page, 0);
-    await database.attach(learner, 1);
-    for (const target of [page, learner]) {
+    await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [reviewer.id]);
+    await database.attach(page, 1);
+    await database.attach(learner, 2);
+    await database.attach(reviewerPage, 0);
+    for (const target of [page, learner, reviewerPage]) {
       await target.goto(`${baseURL}/#questions`);
       await seedLocalWorkspace(target);
     }
@@ -461,11 +478,11 @@ test("four-question SQL-approved set discloses unseen citation and distractor ga
     // No unsigned set is searchable by the other learner.
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
 
-    await page.goto(`${baseURL}/#host`);
-    const queue = page.locator(".qsl-review-queue");
+    await reviewerPage.goto(`${baseURL}/#host`);
+    const queue = reviewerPage.locator(".qsl-review-queue");
     await expect(queue.getByRole("heading", { name: "Question Set Library review" })).toBeVisible();
     await queue.getByRole("button", { name: "Inspect" }).click();
-    const review = page.getByRole("dialog", { name: `Review ${TITLE}` });
+    const review = reviewerPage.getByRole("dialog", { name: `Review ${TITLE}` });
     await review.getByRole("textbox", { name: "Review note" })
       .fill("Synthetic four-item fixture reviewed; fourth item intentionally has incomplete recorded teaching evidence.");
     await review.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
@@ -517,6 +534,7 @@ test("four-question SQL-approved set discloses unseen citation and distractor ga
     expect(afterImportEvidence.review_revision).toBe(approvedEvidence.review_revision);
   } finally {
     await learnerContext.close();
+    await reviewerContext.close();
     await database.close();
   }
 });
@@ -524,14 +542,19 @@ test("four-question SQL-approved set discloses unseen citation and distractor ga
 test("withdrawn publication cannot be imported from an already-open learner preview", async ({ page, browser, baseURL }) => {
   test.setTimeout(240_000);
   const database = await createPlatformDatabase();
-  const [owner, member] = PLATFORM_USERS;
+  // Publisher, Host reviewer and importing learner are distinct fixture identities.
+  const [reviewer, owner] = PLATFORM_USERS;
+  const member = PLATFORM_GUEST_LEARNER;
   const learnerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   const learner = await learnerContext.newPage();
+  const reviewerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const reviewerPage = await reviewerContext.newPage();
   try {
-    await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [owner.id]);
-    await database.attach(page, 0);
-    await database.attach(learner, 1);
-    for (const target of [page, learner]) {
+    await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [reviewer.id]);
+    await database.attach(page, 1);
+    await database.attach(learner, 2);
+    await database.attach(reviewerPage, 0);
+    for (const target of [page, learner, reviewerPage]) {
       await target.goto(`${baseURL}/#questions`);
       await seedLocalWorkspace(target);
     }
@@ -546,11 +569,11 @@ test("withdrawn publication cannot be imported from an already-open learner prev
 
     const [pending] = await database.rpc(owner.id, "my_question_set_library") as Array<{ id: string; status: string }>;
     expect(pending.status).toBe("pending");
-    await page.goto(`${baseURL}/#host`);
-    const queue = page.locator(".qsl-review-queue");
+    await reviewerPage.goto(`${baseURL}/#host`);
+    const queue = reviewerPage.locator(".qsl-review-queue");
     await expect(queue.getByRole("heading", { name: "Question Set Library review" })).toBeVisible();
     await queue.getByRole("button", { name: "Inspect" }).click();
-    const review = page.getByRole("dialog", { name: `Review ${TITLE}` });
+    const review = reviewerPage.getByRole("dialog", { name: `Review ${TITLE}` });
     await review.getByRole("textbox", { name: "Review note" }).fill("Synthetic source and distribution rights verified for this fixture.");
     await review.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
     await review.getByRole("button", { name: "Approve for library" }).click();
@@ -638,11 +661,14 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     expect(newPending.snapshot_payload.questions[0].correctKey).toBe("B");
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
 
-    await page.goto(`${baseURL}/#host`);
-    const newQueue = page.locator(".qsl-review-queue");
+    await reviewerPage.goto(`${baseURL}/#host`);
+    const newQueue = reviewerPage.locator(".qsl-review-queue");
     await expect(newQueue.getByRole("heading", { name: "Question Set Library review" })).toBeVisible();
+    // Reviewer stays on Host while another account re-submits. Explicitly reload the queue.
+    await newQueue.getByRole("button", { name: "Refresh" }).click();
+    await expect(newQueue.getByText(TITLE, { exact: true })).toBeVisible();
     await newQueue.getByRole("button", { name: "Inspect" }).click();
-    const newReview = page.getByRole("dialog", { name: `Review ${TITLE}` });
+    const newReview = reviewerPage.getByRole("dialog", { name: `Review ${TITLE}` });
     await expect(newReview.getByText(STEM, { exact: true })).toBeVisible();
     await newReview.getByRole("textbox", { name: "Review note" })
       .fill("Independently rechecked identical synthetic source and distribution rights for this new submission.");
@@ -702,6 +728,7 @@ test("withdrawn publication cannot be imported from an already-open learner prev
     expect(afterImport.review_revision).toBe(newApproval.review_revision);
   } finally {
     await learnerContext.close();
+    await reviewerContext.close();
     await database.close();
   }
 });
