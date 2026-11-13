@@ -214,4 +214,23 @@ describe("downloaded term practice", () => {
     state.questionSets = [set("set-1"), set("set-2")];
     expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["shared"]);
   });
+
+  it("does not let a different account's deferred recovery hide authorized term questions", () => {
+    const state = workspace([receipt(1, ["set-bound", "loose", "neighbor"], { setIds: ["owned-set"] })], [
+      question("set-bound", { setId: "owned-set" }), question("loose"), question("neighbor"),
+    ]);
+    state.questionSets = [{ id: "owned-set" } as unknown as (typeof state.questionSets)[number]];
+    state.deferredContent = { accountId: "other", questions: [{ id: "set-bound" }, { id: "loose" }],
+      documents: [], sources: [], media: [] };
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["set-bound", "loose", "neighbor"]);
+    expect(termQuizSelection("Term 1", "other", state).questionIds).toEqual([]);
+  });
+
+  it("continues withholding this account's deferred questions while keeping ready neighbors", () => {
+    const state = workspace([receipt(1, ["deferred", "ready"])], [question("deferred"), question("ready")]);
+    state.deferredContent = { accountId: "account", questions: [{ id: "deferred" }],
+      documents: [], sources: [], media: [] };
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["ready"]);
+  });
+
 });
