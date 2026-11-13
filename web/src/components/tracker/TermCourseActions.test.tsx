@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { TermCourseActions } from "./TermCourseActions";
@@ -111,6 +112,57 @@ describe("term course actions", () => {
     mocks.questionIds = Array.from({ length: count }, (_, index) => `question-${index}`);
     mount(); expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(true);
     if (count) expect(screen.getByText(/supports up to 2000 questions/)).toBeTruthy();
+  });
+  it("never exposes the previous account's legacy catalog in the committed Practice button while another account loads", async () => {
+    mocks.needsCatalog = true;
+    let resolveNext!: (entries: AcademicCourse[]) => void;
+    const nextCatalog = new Promise<AcademicCourse[]>(resolve => { resolveNext = resolve; });
+    mocks.list.mockResolvedValueOnce(courses).mockReturnValueOnce(nextCatalog);
+    const frames: Array<{ accountId: string; disabled: boolean; pending: boolean }> = [];
+    const action = (accountId: string) => <Profiler id="legacy-account-switch" onRender={() => {
+      const practice = screen.queryByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement | null;
+      frames.push({ accountId, disabled: practice?.disabled ?? false,
+        pending: !!screen.queryByText("Reading saved course details for term practice…") });
+    }}>
+      <TermCourseActions term="Term 5" accountId={accountId} courses={courses.slice(0, 1)}
+        disabled={false} onBusyChange={onBusyChange} />
+    </Profiler>;
+    const view = render(action("account-a"));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(false));
+    const beforeSwitch = frames.length;
+    view.rerender(action("account-b"));
+    const switchFrames = frames.slice(beforeSwitch);
+    expect(switchFrames.length).toBeGreaterThan(0);
+    expect(switchFrames.every(frame => frame.accountId === "account-b" && frame.disabled && frame.pending)).toBe(true);
+    expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.launch).not.toHaveBeenCalled();
+    await act(async () => resolveNext(courses));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+  it("does not reuse the previous retry's catalog error while a new request starts", async () => {
+    mocks.needsCatalog = true;
+    mocks.list.mockRejectedValueOnce(new Error("First catalog attempt failed."));
+    let resolveRetry!: (entries: AcademicCourse[]) => void;
+    const retry = new Promise<AcademicCourse[]>(resolve => { resolveRetry = resolve; });
+    mocks.list.mockReturnValueOnce(retry);
+    const frames: Array<{ disabled: boolean; error: boolean; pending: boolean }> = [];
+    render(<Profiler id="legacy-retry" onRender={() => {
+      const practice = screen.queryByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement | null;
+      frames.push({ disabled: practice?.disabled ?? false,
+        error: !!screen.queryByText("First catalog attempt failed."),
+        pending: !!screen.queryByText("Reading saved course details for term practice…") });
+    }}>
+      <TermCourseActions term="Term 5" accountId="learner" courses={courses.slice(0, 1)}
+        disabled={false} onBusyChange={onBusyChange} />
+    </Profiler>);
+    await screen.findByText("First catalog attempt failed.");
+    const beforeRetry = frames.length;
+    fireEvent.click(screen.getByRole("button", { name: "Retry term practice" }));
+    const retryFrames = frames.slice(beforeRetry);
+    expect(retryFrames.length).toBeGreaterThan(0);
+    expect(retryFrames.every(frame => frame.disabled && !frame.error && frame.pending)).toBe(true);
+    await act(async () => resolveRetry(courses));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(false));
   });
   it("prevents another term starting while a download is running", () => {
     mount(true); fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
