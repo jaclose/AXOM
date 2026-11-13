@@ -142,4 +142,85 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
     expect(preview.value).toMatchObject({ status: "approved", snapshot_payload: safe });
   }, 60_000);
 
+  it("isolates a matching source ID across two learner publishers and owner withdrawals", async () => {
+    const publisherA = "a1111111-1111-4111-8111-111111111111";
+    const publisherB = "a2222222-2222-4222-8222-222222222222";
+    const reviewer = "a3333333-3333-4333-8333-333333333333";
+    const sourceId = "synthetic-colliding-local-source-r101";
+    const makeSnapshot = (title: string) => ({
+      shareFormatVersion: 1,
+      title,
+      tags: [],
+      orderedQuestionIds: ["r101-q1"],
+      questions: [{
+        id: "r101-q1", stem: "Which synthetic label is keyed?",
+        options: [{ key: "A", text: "Keyed" }, { key: "B", text: "Not keyed" }],
+        correctKey: "A", tags: [], citation: "PMID: 123456",
+      }],
+      createdAt: "2026-11-13T08:00:00Z",
+      copyrightNotice: "Original synthetic test material",
+    });
+    const first = makeSnapshot("Publisher A public candidate");
+    const second = makeSnapshot("Publisher B private candidate");
+
+    async function as<T = Record<string, unknown>>(account: string, sql: string, args: unknown[] = []): Promise<T[]> {
+      await db.exec("reset role;");
+      await db.query("select set_config('request.jwt.claim.sub',$1,false)", [account]);
+      await db.exec("set role authenticated;");
+      try { return (await db.query<T>(sql, args)).rows; }
+      finally { await db.exec("reset role;"); }
+    }
+    const submit = async (account: string, value: typeof first) => {
+      const [row] = await as<{ id: string }>(account,
+        "select public.submit_question_set_library($1,$2::jsonb,'Synthetic author',true,true) id",
+        [sourceId, JSON.stringify(value)]);
+      return row.id;
+    };
+
+    const firstId = await submit(publisherA, first);
+    const secondId = await submit(publisherB, second);
+    expect(firstId).not.toBe(secondId);
+    const ownA = await as<{ id: string }>(publisherA, "select id from public.my_question_set_library()");
+    const ownB = await as<{ id: string }>(publisherB, "select id from public.my_question_set_library()");
+    expect(ownA.map(row => row.id)).toContain(firstId);
+    expect(ownA.map(row => row.id)).not.toContain(secondId);
+    expect(ownB.map(row => row.id)).toContain(secondId);
+    expect(ownB.map(row => row.id)).not.toContain(firstId);
+    await expect(as(publisherA, "select public.get_question_set_library($1)", [secondId]))
+      .rejects.toThrow(/unavailable/i);
+    await expect(as(publisherB, "select public.get_question_set_library($1)", [firstId]))
+      .rejects.toThrow(/unavailable/i);
+
+    // Security-definer withdrawal must use the JWT owner, not a caller-supplied
+    // local source identity. A cross-account request is a no-op.
+    await as(publisherB, "select public.withdraw_question_set_library($1)", [firstId]);
+    await as(publisherA, "select public.withdraw_question_set_library($1)", [secondId]);
+    const pending = (await db.query<{ id: string; owner_id: string; status: string }>(
+      "select id,owner_id,status from public.question_set_library_entries where id in ($1,$2)",
+      [firstId, secondId])).rows;
+    expect(pending).toEqual(expect.arrayContaining([
+      { id: firstId, owner_id: publisherA, status: "pending" },
+      { id: secondId, owner_id: publisherB, status: "pending" },
+    ]));
+
+    await as(reviewer,
+      "select public.review_question_set_library($1,true,'Inspected original synthetic rights and keys',$2::jsonb,1::bigint)",
+      [firstId, JSON.stringify(first)]);
+    expect((await as<{ id: string }>(publisherB,
+      "select id from public.list_question_set_library($1,0)", ["Publisher A public candidate"]))
+      .map(row => row.id)).toContain(firstId);
+    expect(await as<{ id: string }>(publisherA,
+      "select id from public.list_question_set_library($1,0)", ["Publisher B private candidate"]))
+      .toEqual([]);
+    const [approvedPreview] = await as<{ value: { status: string } }>(publisherB,
+      "select public.get_question_set_library($1) value", [firstId]);
+    expect(approvedPreview.value.status).toBe("approved");
+
+    await as(publisherB, "select public.withdraw_question_set_library($1)", [secondId]);
+    const surviving = (await db.query<{ id: string; status: string }>(
+      "select id,status from public.question_set_library_entries where id in ($1,$2)",
+      [firstId, secondId])).rows;
+    expect(surviving).toEqual([{ id: firstId, status: "approved" }]);
+  }, 60_000);
+
 });
