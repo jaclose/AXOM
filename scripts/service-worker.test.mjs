@@ -429,6 +429,60 @@ test('no-cache canonical navigation refreshes offline shell, protected variants 
   }
 });
 
+test('R96 forced public asset reload and no-cache requests fetch fresh bytes instead of replaying current cache', async () => {
+  const path = '/icons/axom-orb-512.png';
+  const url = 'https://app.test' + path;
+  for (const cacheMode of ['reload', 'no-cache']) {
+    let networkAttempts = 0;
+    let online = true;
+    const app = worker({
+      fetchResponse: async () => {
+        networkAttempts++;
+        if (!online) throw new Error('synthetic network unavailable for forced revalidation');
+        return new Response('REFRESHED_ORB', {
+          headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+        });
+      },
+    });
+    const current = await app.caches.open('axom-shell-current');
+    const retained = await app.caches.open('axom-shell-previous');
+    const publicHeaders = { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' };
+    await current.put(path, withNetworkUrl(new Response('STALE_CURRENT_ORB', { headers: publicHeaders }), url));
+    await retained.put(path, withNetworkUrl(new Response('OLDER_RETAINED_ORB', { headers: publicHeaders }), url));
+
+    const visit = async (mode) => {
+      let pending;
+      const tasks = [];
+      app.events.get('fetch')({
+        request: { url, method: 'GET', mode: 'same-origin', cache: mode },
+        respondWith: (value) => { pending = value; },
+        waitUntil: (value) => { tasks.push(value); },
+      });
+      assert.ok(pending, cacheMode + ': public icon must be intercepted');
+      const response = await pending;
+      await Promise.all(tasks);
+      return response.text();
+    };
+
+    assert.equal(await visit(cacheMode), 'REFRESHED_ORB',
+      cacheMode + ': explicit network revalidation must not serve stale current cache bytes');
+    assert.equal(networkAttempts, 1, cacheMode + ': a fresh network request must execute');
+    assert.equal(await (await current.match(path)).text(), 'REFRESHED_ORB',
+      cacheMode + ': only the current cache must be refreshed');
+    assert.equal(await (await retained.match(path)).text(), 'OLDER_RETAINED_ORB',
+      cacheMode + ': retained bytes must not change');
+    assert.equal(await visit('default'), 'REFRESHED_ORB',
+      cacheMode + ': ordinary requests remain cache-first');
+    assert.equal(networkAttempts, 1, cacheMode + ': cache-first hit should avoid network');
+    online = false;
+    await assert.rejects(visit(cacheMode), /synthetic network unavailable/,
+      cacheMode + ': explicit revalidation failure must not silently replay cached bytes');
+    assert.equal(networkAttempts, 2);
+    assert.equal(await (await current.match(path)).text(), 'REFRESHED_ORB',
+      cacheMode + ': failed revalidation must preserve the last valid cache entry');
+  }
+});
+
 test('R93 newer unhashed public icon refreshes online before retained fallback but survives offline', async () => {
   const path = '/icons/axom-orb-512.png';
   const url = 'https://app.test' + path;
