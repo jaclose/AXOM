@@ -88,7 +88,7 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
 /** The fixed quiz request cannot override contradictory original filing.
  * Missing legacy filing is not independent proof, but is not a contradiction.
  * This is a read-only preflight; the pending request and attempt bytes survive. */
-function contradictsDeclaredScope(
+export function hasDeclaredCourseScopeConflict(
   question: QuestionRecord,
   requested: Pick<CourseQuizLaunch, "module" | "week" | "courseId">,
 ): boolean {
@@ -128,7 +128,7 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
     const eligible = new Set<string>();
     for (const question of questions) {
       if (!requestedIds.has(question.id)) continue;
-      if (contradictsDeclaredScope(question, {
+      if (hasDeclaredCourseScopeConflict(question, {
         module: value.module, week: typeof value.week === "number" ? value.week : undefined,
         courseId: typeof value.courseId === "string" ? value.courseId : undefined,
       })) return null;
