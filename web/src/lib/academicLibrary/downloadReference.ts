@@ -26,6 +26,17 @@ type CourseIdentity = Pick<AcademicCourse, "id" | "current_revision_id">;
 const unsettledReferences = new Set<string>();
 const referenceKey = (accountId: string, revisionId: string) => `${accountId}:${revisionId}`;
 
+/** A deferred buffer belongs to its originating account. Foreign recovery IDs
+ * cannot invalidate an already-installed course, while unknown owners remain
+ * held conservatively instead of being treated as current-account proof. */
+function hasDeferredReferenceMembers(saved: DownloadReference, accountId: string,
+  deferred: DownloadWorkspace["deferredContent"]): boolean {
+  if (!deferred || (deferred.accountId && deferred.accountId !== accountId)) return false;
+  const documentIds = new Set([...saved.documentIds, ...saved.templateIds]);
+  return deferred.questions.some(question => saved.questionIds.includes(question.id))
+    || deferred.documents.some(document => documentIds.has(document.id));
+}
+
 export function readDownloadReference(documents: readonly SourceDocument[], course: CourseIdentity, accountId?: string): DownloadReference | undefined {
   if (!accountId) return;
   const matches = documents.filter(doc => doc.fileType === ACADEMIC_REFERENCE_TYPE && doc.id === `academic-${course.current_revision_id}`);
@@ -70,8 +81,7 @@ export function isAcademicCourseDownloaded(course: CourseIdentity, accountId: st
   const documentIds = [...new Set([...saved.documentIds, ...saved.templateIds])];
   if (!exactMembers(documentIds, workspace.documents) || !exactMembers(saved.questionIds, workspace.questions)
     || !exactMembers(saved.setIds, workspace.questionSets)) return false;
-  return !workspace.deferredContent?.questions.some(question => saved.questionIds.includes(question.id))
-    && !workspace.deferredContent?.documents.some(document => documentIds.includes(document.id));
+  return !hasDeferredReferenceMembers(saved, accountId, workspace.deferredContent);
 }
 
 /** The same install and durable account reference used by a single question
@@ -84,7 +94,7 @@ export async function downloadCourseQuestions(course: AcademicCourse, accountId:
     scope.assertCurrent();
     if (!accountId || scope.key !== accountId) throw new Error("Sign in again before downloading these questions.");
     let saved = readDownloadReference(useStore.getState().documents, course, accountId);
-    if (saved && useStore.getState().deferredContent) {
+    if (saved && hasDeferredReferenceMembers(saved, accountId, useStore.getState().deferredContent)) {
       progress("Downloading these questions and your saved progress…");
       await downloadAccountContent({ questionIds: saved.questionIds, documentIds: [...new Set([...saved.documentIds, ...saved.templateIds])] });
       scope.assertCurrent();
