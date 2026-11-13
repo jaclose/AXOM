@@ -2,7 +2,7 @@ import { contentMetadata, readDeferredContent } from "./sync/deferredContent";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
-import { backupOriginalDocuments, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
+import { backupOriginalDocuments, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, MAX_JSON_BACKUP_BYTES, MAX_JSON_MEDIA_RECORDS, mediaBackupBytes } from "./backupArchive";
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
@@ -100,18 +100,28 @@ export async function exportStateWithAttachments(
   const deferredSourceCount = state.deferredContent?.sources.length ?? 0;
   const options = { localOnly: scope === "saved-work", scope: attachmentScope };
   const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
-  if (backupOriginalDocuments(metadata.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
+  const exportZip = async () => {
+    // Always send only metadata into workspace.json. Inline base64 belongs to
+    // the JSON route and must not be duplicated inside a ZIP fallback.
     const result = await createMediaBackupArchive(payload, references, metadata.documents, options);
     assertExportIdentity();
     downloadBackupBlob(result.blob, "zip", scope);
     if (scope === "complete" && !deferredSourceCount && !result.missingBlobKeys.length && !result.missingOriginalIds.length) markBackupDone();
     return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount };
-  }
+  };
+  // The ZIP reader accepts more image entries than the bounded JSON reader.
+  // Count distinct immutable keys, not multiple question references to one key.
+  const distinctImageKeys = new Set(references.flatMap(question =>
+    (question.attachments ?? []).map(attachment => attachment.blobKey))).size;
+  if (backupOriginalDocuments(metadata.documents).length
+    || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES
+    || distinctImageKeys > MAX_JSON_MEDIA_RECORDS) return exportZip();
   let attachmentCount = 0;
   let missingBlobKeys: string[];
+  const jsonPayload = { ...payload };
   try {
     const collected = await collectVerifiedMediaBackupPayloads(references, options);
-    if (collected.payloads.length) payload[ATTACHMENT_EXPORT_KEY] = collected.payloads;
+    if (collected.payloads.length) jsonPayload[ATTACHMENT_EXPORT_KEY] = collected.payloads;
     attachmentCount = collected.payloads.length;
     missingBlobKeys = collected.missingBlobKeys;
   } catch {
@@ -122,13 +132,25 @@ export async function exportStateWithAttachments(
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
   assertExportIdentity();
-  downloadBackupPayload(payload, scope);
+  const jsonBlob = portableJsonBlob(jsonPayload);
+  // Byte length, not string length, is the import boundary. For large inline
+  // base64 or text use a ZIP; the ZIP writer enforces its own workspace limit.
+  if (jsonBlob.size > MAX_JSON_BACKUP_BYTES) return exportZip();
+  assertExportIdentity();
+  downloadBackupBlob(jsonBlob, "json", scope);
   if (scope === "complete" && !deferredSourceCount && !missingBlobKeys.length) markBackupDone();
   return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount };
 }
 
+function portableJsonBlob(payload: Record<string, unknown>): Blob {
+  return new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+}
+
 function downloadBackupPayload(payload: Record<string, unknown>, scope: BackupScope = "complete") {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const blob = portableJsonBlob(payload);
+  if (blob.size > MAX_JSON_BACKUP_BYTES) {
+    throw new Error("This JSON export exceeds the 256 MB recovery safety limit. No backup was downloaded.");
+  }
   downloadBackupBlob(blob, "json", scope);
 }
 
