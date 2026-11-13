@@ -94,6 +94,7 @@ function hasExpectedImageStructure(bytes: Uint8Array, mime: string): boolean {
 
 /** Validate zlib IDAT data and PNG scanline geometry before certifying an image.
  * CRC-correct containers alone can contain zero/invalid compressed pixels.
+ * Indexed palette samples are unfiltered and range-checked in every Adam7 pass.
  * This is bounded structural validation, not a source digest or full pixel decode. */
 async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
   try {
@@ -135,7 +136,7 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
       [0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4],
       [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2],
     ];
-    const rows: Array<{ h: number; rowBytes: number }> = [];
+    const rows: Array<{ w: number; h: number; rowBytes: number }> = [];
     let expected = 0;
     for (const [x, y, dx, dy] of passes) {
       const w = Math.max(0, Math.ceil((width - x) / dx));
@@ -145,7 +146,7 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
       const added = h * (rowBytes + 1);
       if (!Number.isSafeInteger(added) || added > MAX_ORIGINAL_BYTES - expected) return false;
       expected += added;
-      rows.push({ h, rowBytes });
+      rows.push({ w, h, rowBytes });
     }
     const compressed = new Uint8Array(totalCompressed);
     let written = 0;
@@ -161,11 +162,39 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
       decoded.set(value, length); length += value.byteLength;
     }
     if (length !== expected) return false;
-    let row = 0;
-    for (const { h, rowBytes } of rows) {
+    let offset = 0;
+    for (const { w, h, rowBytes } of rows) {
+      // Each Adam7 pass has its own previous row; filters operate on reconstructed
+      // bytes, not compressed/raw filtered bytes. Indexed PNG samples use bpp=1.
+      let previous = color === 3 ? new Uint8Array(rowBytes) : undefined;
       for (let y = 0; y < h; y++) {
-        if (decoded[row] > 4) return false;
-        row += rowBytes + 1;
+        const filter = decoded[offset++];
+        if (filter > 4) return false;
+        if (previous) {
+          const current = new Uint8Array(rowBytes);
+          for (let i = 0; i < rowBytes; i++) {
+            const left = i ? current[i - 1] : 0;
+            const above = previous[i];
+            const upperLeft = i ? previous[i - 1] : 0;
+            let predictor = 0;
+            if (filter === 1) predictor = left;
+            else if (filter === 2) predictor = above;
+            else if (filter === 3) predictor = Math.floor((left + above) / 2);
+            else if (filter === 4) {
+              const p = left + above - upperLeft;
+              const dl = Math.abs(p - left), da = Math.abs(p - above), dul = Math.abs(p - upperLeft);
+              predictor = dl <= da && dl <= dul ? left : da <= dul ? above : upperLeft;
+            }
+            current[i] = (decoded[offset + i] + predictor) & 255;
+          }
+          for (let x = 0; x < w; x++) {
+            const bit = x * depth;
+            const pixel = (current[bit >>> 3] >>> (8 - depth - (bit & 7))) & ((1 << depth) - 1);
+            if (pixel >= paletteEntries) return false;
+          }
+          previous = current;
+        }
+        offset += rowBytes;
       }
     }
     return true;
