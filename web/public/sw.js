@@ -290,12 +290,12 @@ function cacheResponse(event, key, response) {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key, copy)).catch(() => {}));
 }
 
-async function cachedAppAsset(request) {
+async function cachedAppAsset(request, { currentOnly = false } = {}) {
   // Inspect retained generations in creation order, then the current build.
   // The last valid matching asset wins, while stale HTML rewrites in older
   // caches are still evicted even when the current cache has a valid copy.
   const names = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX));
-  const ordered = [...names.filter((name) => name !== CACHE), CACHE];
+  const ordered = currentOnly ? [CACHE] : [...names.filter((name) => name !== CACHE), CACHE];
   let preferred;
   for (const name of ordered) {
     try {
@@ -440,17 +440,32 @@ self.addEventListener("fetch", (event) => {
   const staticAsset = shippedAsset && /\.(?:js|mjs|css|png|jpe?g|svg|webp|ico|woff2?|webmanifest)$/.test(publicPath);
   if (!staticAsset) return;
   event.respondWith((async () => {
-    const hit = await cachedAppAsset(request).catch(() => undefined);
+    // Only hash-named JS/CSS has a content-addressed identity across builds.
+    // Other public URLs (icons, fonts, artwork) can change bytes at the same
+    // path. Prefer the current generation; on a miss try the network before
+    // replaying a retained generation, or an old logo can mask the new one.
+    const immutableCode = /^assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(publicPath);
+    const hit = await cachedAppAsset(request, { currentOnly: !immutableCode }).catch(() => undefined);
     if (hit) return hit;
     // A cache-busted no-store request escapes immutable HTML fallbacks left by a bad deployment.
     const freshUrl = new URL(request.url);
     freshUrl.searchParams.set("__axom_revalidate", String(Date.now()));
-    const response = await fetch(freshUrl.href, { cache: "no-store" });
-    const isHtml = isHtmlResponse(response);
-    if (response.ok && !isHtml) {
-      cacheResponse(event, request, response);
+    try {
+      const response = await fetch(freshUrl.href, { cache: "no-store" });
+      const isHtml = isHtmlResponse(response);
+      if (response.ok && !isHtml) {
+        cacheResponse(event, request, response);
+      }
+      return isHtml ? Response.error() : response;
+    } catch (error) {
+      // Retained unhashed public assets remain an offline-only fallback. Every
+      // candidate still passes the same MIME, provenance and privacy guards.
+      if (!immutableCode) {
+        const retained = await cachedAppAsset(request).catch(() => undefined);
+        if (retained) return retained;
+      }
+      throw error;
     }
-    return isHtml ? Response.error() : response;
   })());
 });
 

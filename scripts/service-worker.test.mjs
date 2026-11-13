@@ -429,6 +429,57 @@ test('no-cache canonical navigation refreshes offline shell, protected variants 
   }
 });
 
+test('R93 newer unhashed public icon refreshes online before retained fallback but survives offline', async () => {
+  const path = '/icons/axom-orb-512.png';
+  const url = 'https://app.test' + path;
+  let online = true;
+  let networkAttempts = 0;
+  const app = worker({
+    fetchResponse: async () => {
+      networkAttempts++;
+      if (!online) throw new Error('offline');
+      return new Response('current-build-orb', {
+        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=0' },
+      });
+    },
+  });
+  const older = await app.caches.open('axom-shell-previous');
+  await older.put(path, withNetworkUrl(new Response('previous-build-orb', {
+    headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' },
+  }), url));
+  const visit = async () => {
+    let pending;
+    const tasks = [];
+    app.events.get('fetch')({
+      request: { url, method: 'GET', mode: 'same-origin' },
+      respondWith: (value) => { pending = value; },
+      waitUntil: (value) => { tasks.push(value); },
+    });
+    assert.ok(pending, 'shipped public icon request must be intercepted');
+    const response = await pending;
+    await Promise.all(tasks);
+    return response.text();
+  };
+
+  assert.equal(await visit(), 'current-build-orb',
+    'online new build must not serve a retained older icon when current cache misses');
+  assert.equal(networkAttempts, 1, 'online current-generation miss must request fresh bytes');
+  const current = await app.caches.open('axom-shell-current');
+  assert.equal(await (await current.match(path)).text(), 'current-build-orb',
+    'safe fresh icon must populate only the current generation');
+  online = false;
+  assert.equal(await visit(), 'current-build-orb',
+    'safe current-generation copy remains available without network');
+  assert.equal(networkAttempts, 1, 'valid current-generation icon should remain cache-first');
+
+  await current.delete(path);
+  assert.equal(await visit(), 'previous-build-orb',
+    'a genuine offline current miss may fall back to a validated retained public icon');
+  assert.equal(networkAttempts, 2, 'old-generation fallback must only follow network rejection');
+  assert.equal(await (await older.match(path)).text(), 'previous-build-orb',
+    'retained generation must remain byte-for-byte unchanged');
+});
+
 test('current public assets win over retained generations; newest safe fallback survives offline', async () => {
   const app = worker();
   const oldest = await app.caches.open('axom-shell-oldest');
