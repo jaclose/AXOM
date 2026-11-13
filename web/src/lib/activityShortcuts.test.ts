@@ -97,4 +97,38 @@ describe("activity shortcuts", () => {
     expect(activitySignature(literalSlash)).not.toBe(activitySignature(withoutSlash));
   });
 
+  it("continues honoring persisted legacy hidden signatures containing separators", () => {
+    const withTypeSeparator = log("type-a", "Reading|Review", "2026-07-12T11:00:00.000Z", { trackerId: "tracker" });
+    const withTrackerSeparator = log("tracker-b", "Reading", "2026-07-12T12:00:00.000Z", { trackerId: "review|tracker" });
+    const historicallyHidden = "reading|review|tracker|0|0||";
+
+    expect(activitySignature(withTypeSeparator)).not.toBe(historicallyHidden);
+    // Under the old raw delimiter encoding, hiding either configuration hid both.
+    expect(recentActivityShortcuts([withTypeSeparator, withTrackerSeparator], [historicallyHidden])).toEqual([]);
+    const repeated = [
+      withTypeSeparator,
+      withTrackerSeparator,
+      log("type-c", "Reading|Review", "2026-07-12T13:00:00.000Z", { trackerId: "tracker" }),
+      log("tracker-d", "Reading", "2026-07-12T14:00:00.000Z", { trackerId: "review|tracker" }),
+    ];
+    expect(frequentActivityShortcuts(repeated, [historicallyHidden], 2, 2)).toEqual([]);
+  });
+
+  it("does not apply a new escaped hidden signature as another activity's legacy alias", () => {
+    const hidden = log("hidden", "Reading|Review", "2026-07-12T11:00:00.000Z", { trackerId: "tracker" });
+    const unrelated = log("unrelated", "Reading\\", "2026-07-12T12:00:00.000Z", { trackerId: "Review|tracker" });
+    const newHiddenKey = activitySignature(hidden);
+
+    expect(newHiddenKey).not.toBe(activitySignature(unrelated));
+    expect(recentActivityShortcuts([hidden, unrelated], [newHiddenKey]).map((item) => item.label)).toEqual(["Reading\\"]);
+    const repeated = [
+      hidden,
+      unrelated,
+      log("hidden-again", "Reading|Review", "2026-07-12T13:00:00.000Z", { trackerId: "tracker" }),
+      log("unrelated-again", "Reading\\", "2026-07-12T14:00:00.000Z", { trackerId: "Review|tracker" }),
+    ];
+    expect(frequentActivityShortcuts(repeated, [newHiddenKey], 2, 2).map((item) => item.label))
+      .toEqual(["Reading\\"]);
+  });
+
 });
