@@ -445,7 +445,12 @@ self.addEventListener("fetch", (event) => {
     // path. Prefer the current generation; on a miss try the network before
     // replaying a retained generation, or an old logo can mask the new one.
     const immutableCode = /^assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(publicPath);
-    const hit = await cachedAppAsset(request, { currentOnly: !immutableCode }).catch(() => undefined);
+    // Explicit reload/no-cache requests must reach the network even if an
+    // earlier response is in the current cache. Never substitute stale bytes
+    // when the caller requested revalidation and that network attempt fails.
+    const forceRevalidate = request.cache === "reload" || request.cache === "no-cache";
+    const hit = forceRevalidate ? undefined
+      : await cachedAppAsset(request, { currentOnly: !immutableCode }).catch(() => undefined);
     if (hit) return hit;
     // A cache-busted no-store request escapes immutable HTML fallbacks left by a bad deployment.
     const freshUrl = new URL(request.url);
@@ -460,7 +465,7 @@ self.addEventListener("fetch", (event) => {
     } catch (error) {
       // Retained unhashed public assets remain an offline-only fallback. Every
       // candidate still passes the same MIME, provenance and privacy guards.
-      if (!immutableCode) {
+      if (!immutableCode && !forceRevalidate) {
         const retained = await cachedAppAsset(request).catch(() => undefined);
         if (retained) return retained;
       }
