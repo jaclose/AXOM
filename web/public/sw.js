@@ -326,7 +326,19 @@ async function cachedAppAsset(request) {
 }
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(installPublicShell());
+  event.waitUntil((async () => {
+    // A rejected install can leave partially written public shell assets.
+    // Remove only a cache newly created by this installation. An existing
+    // same-build cache may serve an active page and must never be deleted.
+    const knownCaches = await caches.keys().catch(() => null);
+    const createdByInstall = knownCaches !== null && !knownCaches.includes(CACHE);
+    try {
+      await installPublicShell();
+    } catch (error) {
+      if (createdByInstall) await caches.delete(CACHE).catch(() => {});
+      throw error;
+    }
+  })());
   // No skipWaiting: a ready update must not interrupt an open workspace.
 });
 
