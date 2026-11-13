@@ -205,6 +205,14 @@ describe("searchable Question Set client boundary", () => {
     ["macOS external volume", "/Volumes/JDabSSD/private.pdf"],
     ["Linux mount", "/mnt/private-source/file.pdf"],
     ["removable-media mount", "/media/user/source/file.pdf"],
+    ["root directory", "source:/root/study/private.pdf"],
+    ["temporary directory", "source:/tmp/private.pdf"],
+    ["iOS mobile directory", "/var/mobile/Containers/private.pdf"],
+    ["Android storage", "/storage/emulated/0/private.pdf"],
+    ["opt directory", "source:/opt/exams/private.pdf"],
+    ["arbitrary absolute folder", "source:/unpublished/private.pdf"],
+    ["slash-style network share", "//campus-server/share/private.pdf"],
+    ["encoded arbitrary root", "source%3A%2Froot%2Fprivate.pdf"],
   ])("refuses direct %s citations before the submission RPC without altering source evidence", async (_label, citation) => {
     const value = snapshot();
     value.questions[0].citation = citation;
@@ -233,6 +241,9 @@ describe("searchable Question Set client boundary", () => {
     "https://example.edu/Volumes/lecture-record",
     "https://example.edu/resources?course=home",
     "PMID: 123456; DOI: 10.1000/example",
+    "https://example.edu/research?source=/home/public-notes",
+    "https://example.edu/tmp/lecture.pdf",
+    "DOI:10.1000/abc",
   ])("allows a public citation containing path-like words (%s)", async citation => {
     const value = snapshot();
     value.questions[0].citation = citation;

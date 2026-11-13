@@ -467,23 +467,34 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
 // This is a new-publication safeguard, not a change to historical snapshot
 // validation/digests. A source prefix such as "source:" or "=" must not hide a
 // local path, while a public HTTPS URL containing "/home/" stays acceptable.
-const PRIVATE_DEVICE_CITATION = /(?:^|[^a-z0-9/@])(?:file:\/+|content:\/\/|\/(?:Users|home|private|Volumes|mnt|media)\/|~\/|[a-z]:[\\/]|\\\\[^\s\\]+\\)/i;
+// Keep the new-publication client admission aligned with the staged SQL gate.
+// A public URL may contain paths in its query; a separate labeled local path
+// after that URL is still private. Historical snapshots are not revalidated.
+const PUBLIC_HTTP_CITATION_URL = /https?:\/\/[^\s<>"'|;,]+/gi;
+const PRIVATE_DEVICE_CITATION = /(?:^|[^a-z0-9/@])(?:file:\/+|content:\/\/|\/\/[^\s\x2f]+\/|\/[a-z0-9._~-]+(?:\/|$)|~\/|[a-z]:[\\/])|\\\\/i;
 
 export function hasPrivateDeviceCitation(citation: string | undefined): boolean {
   if (!citation) return false;
   let value = citation.trim();
-  // Paths pasted from browsers/file pickers can be percent-encoded once or
-  // twice. Inspect at most three decoding rounds; never mutate source evidence.
-  // Decode octets individually so unrelated malformed percent escapes cannot
-  // conceal an otherwise recognizable private file reference.
-  for (let pass = 0; pass < 3; pass += 1) {
-    if (PRIVATE_DEVICE_CITATION.test(value)) return true;
-    const decoded = value.replace(/%([a-f0-9]{2})/gi,
-      (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
-    if (decoded === value) return false;
+  let replacements = 0;
+  // Apply at most three ASCII percent-decoding rounds. PostgreSQL preserves
+  // percent-encoded UTF-8 octets, and fails closed on controls/oversized input.
+  for (let pass = 0; pass <= 3; pass += 1) {
+    const withoutPublicUrls = value.replace(PUBLIC_HTTP_CITATION_URL, " ");
+    if (PRIVATE_DEVICE_CITATION.test(withoutPublicUrls)) return true;
+    if (pass === 3) break;
+    let unsafeEscape = false;
+    const decoded = value.replace(/%([a-f0-9]{2})/gi, (original, hex: string) => {
+      replacements += 1;
+      const octet = Number.parseInt(hex, 16);
+      if (octet < 32 || octet === 127) unsafeEscape = true;
+      return octet > 127 ? original : String.fromCharCode(octet);
+    });
+    if (unsafeEscape || replacements > 512) return true;
+    if (decoded === value) break;
     value = decoded;
   }
-  return PRIVATE_DEVICE_CITATION.test(value);
+  return false;
 }
 
 function hasConflictingStoredAnswerText(question: QuestionRecord): boolean {
