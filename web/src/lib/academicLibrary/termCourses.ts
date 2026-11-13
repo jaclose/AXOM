@@ -111,10 +111,25 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const deferred = new Set(workspace.deferredContent &&
     (!workspace.deferredContent.accountId || workspace.deferredContent.accountId === accountId)
     ? workspace.deferredContent.questions.map(question => question.id) : []);
-  return { scopeKind: "term", module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
+  const readyQuestions = workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
     && (!question.setId || (setCounts.get(question.setId) === 1
       && receiptSetsByQuestion.get(question.id)?.has(question.setId)
       && (!explicitSetMembers.has(question.setId) || explicitSetMembers.get(question.setId)?.has(question.id) === true)))
-    && questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id) };
+    && questionMappingStatus(question) === "ready" && question.options.length >= 2);
+  // A receipt may name a source set whose only questions were held, removed or
+  // refilled. Only advertise sets represented by the actual runnable question
+  // pool; the runner uses setIds as provenance and a source filter.
+  const runnableIds = new Set(readyQuestions.map(question => question.id));
+  const linkedSetIds = new Set(readyQuestions.map(question => question.setId).filter((id): id is string => typeof id === "string" && !!id.trim()));
+  const runnableSetIds = [...setIds].filter(id => {
+    if (linkedSetIds.has(id)) return true;
+    const declaredMembers = explicitSetMembers.get(id);
+    // A valid explicit membership can establish a cross-listed source even
+    // when the QuestionRecord lacks the original primary setId.
+    return declaredMembers instanceof Set && [...declaredMembers].some(questionId =>
+      runnableIds.has(questionId) && receiptSetsByQuestion.get(questionId)?.has(id));
+  });
+  return { scopeKind: "term", module: term, term, setIds: runnableSetIds,
+    questionIds: readyQuestions.map(question => question.id) };
 }
