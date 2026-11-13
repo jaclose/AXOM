@@ -98,6 +98,22 @@ describe("downloaded term practice", () => {
     expect(selection.questionIds).toEqual(Array.from({ length: 26 }, (_, index) => `q-${index}`));
     expect(selection).toMatchObject({ module: "Term 1", term: "Term 1" });
   });
+  it("labels reviewed receipt unions as term-wide without inventing a fixed source module", () => {
+    const state = workspace([
+      receipt(1, ["goer"], { term: "Term 5" }),
+      receipt(2, ["ncrs"], { term: "Term 5" }),
+      receipt(3, ["other"], { term: "Term 4" }),
+    ], [
+      question("goer", { module: "GOER", week: 1 }),
+      question("ncrs", { module: "NCRS", week: 2 }),
+      question("other", { module: "GOER", week: 1 }),
+    ]);
+    expect(termQuizSelection("Term 5", "account", state)).toMatchObject({
+      scopeKind: "term", term: "Term 5", module: "Term 5",
+      questionIds: ["goer", "ncrs"],
+    });
+  });
+
   it("supports legacy receipts using exact revision metadata or an installed hosted owner, never a title match", () => {
     const state = workspace([receipt(1, ["catalog"], { term: undefined }), receipt(2, ["owner"], { term: undefined }), receipt(3, ["ambiguous"], { term: undefined })],
       [question("catalog"), question("owner"), question("ambiguous")]);
