@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
 import { exportStateWithAttachments, lastBackupAt, parseImport } from "./backup";
 import { readPortableBackup } from "./backupArchive";
+import { setQuestionAttachmentAccount } from "./questionAttachmentScope";
 import { makeSeed } from "./seed";
 import { sha256Hex } from "./checksum";
 import { saveSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
@@ -185,5 +186,24 @@ describe("saved-work recovery without downloading content", () => {
     const backup = await readPortableBackup(new File([exported!], filename));
     expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
   });
+
+  it("aborts a JSON export on account switch instead of downloading prior-account metadata", async () => {
+    const { state } = await fixture();
+    state.documents = [];
+    state.questions[0].attachments = [{ ...attachment, blobKey: "missing-during-switch" }];
+    dispose();
+    dispose = setMissingAttachmentLoader(async () => {
+      setQuestionAttachmentAccount("second-account");
+      return undefined;
+    });
+    try {
+      await expect(exportStateWithAttachments(state)).rejects.toThrow("account changed during export");
+      expect(exported).toBeUndefined();
+      expect(filename).toBe("");
+    } finally {
+      setQuestionAttachmentAccount(undefined);
+    }
+  });
+
 
 });
