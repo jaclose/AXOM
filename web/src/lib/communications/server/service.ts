@@ -117,6 +117,19 @@ export class CommunicationsService {
     }
     // Cancellation can win while personalization/template I/O is in progress.
     if (!(await this.deletionNoticeMaySend(job))) return;
+    if (job.type === "deletion_requested" || job.type === "deletion_scheduled") {
+      // This RPC takes the exact consent row's lock, shared with cancellation.
+      // It admits delivery only if the request is still active. Once admitted,
+      // a later cancellation truthfully records possible in-flight delivery.
+      // A final SELECT alone cannot close this check-to-provider race.
+      const admitted = checked(await this.db.rpc("admit_deletion_notice_dispatch", {
+        p_job_id: job.id, p_user_id: job.user_id,
+      }));
+      if (admitted !== true) {
+        await this.deletionNoticeMaySend(job);
+        return;
+      }
+    }
     const providerId = await this.provider.sendPrepared(payload, job.idempotency_key, job.variables.test);
     checked(await this.db.from("email_jobs").update({ status: "sent", provider_id: providerId, sent_at: new Date().toISOString(), failure_code: null }).eq("id", job.id).eq("status", "processing"));
     checked(await this.db.from("email_send_log").upsert({ job_id: job.id, attempt: job.attempts, outcome: "sent", provider_id: providerId }, { onConflict: "job_id,attempt" }));

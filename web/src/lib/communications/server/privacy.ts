@@ -271,7 +271,7 @@ export async function requestPrivacy(service: CommunicationsService, userId: str
   await service.enqueue({ userId, type: kind === "deletion" ? "deletion_requested" : "export_requested", key: `${row.id}:requested`, variables: { requestId: row.id } });
   if (kind === "deletion") await service.enqueue({ userId, type: "deletion_scheduled", key: `${row.id}:scheduled`, variables: { date: scheduled } });
 }
-export async function cancelDeletion(service: CommunicationsService, userId: string, requestId: string): Promise<{ notificationQueued: boolean }> {
+export async function cancelDeletion(service: CommunicationsService, userId: string, requestId: string): Promise<{ notificationQueued: boolean; noticeDeliveryUncertain: boolean }> {
   const current = checked(await service.db.from("privacy_requests").select("id,status,failure_code").eq("id", requestId).eq("user_id", userId).eq("kind", "deletion").maybeSingle());
   const cancellable = current?.status === "scheduled"
     || (current?.status === "failed" && current.failure_code === "deletion-preflight-failed");
@@ -279,15 +279,18 @@ export async function cancelDeletion(service: CommunicationsService, userId: str
   let query = service.db.from("privacy_requests").update({ status: "cancelled", notification_email: null, failure_code: null })
     .eq("id", requestId).eq("user_id", userId).eq("kind", "deletion").eq("status", current.status);
   if (current.status === "failed") query = query.eq("failure_code", "deletion-preflight-failed");
-  const row = checked(await query.select("id").maybeSingle());
+  const row = checked(await query.select("id,notice_delivery_uncertain").maybeSingle());
   if (!row) throw new Error("Deletion can no longer be cancelled, or it was already cancelled.");
+  // The SQL BEFORE trigger records possible provider I/O in the same committed
+  // cancellation transaction. Do not promise recall of in-flight delivery.
+  const noticeDeliveryUncertain = row.notice_delivery_uncertain === true;
   // The confirmed state transition is authoritative. A non-essential receipt
   // must not turn a successful cancellation into an ambiguous UI failure.
   try {
     await service.enqueue({ userId, type: "deletion_cancelled", key: `${row.id}:cancelled` });
-    return { notificationQueued: true };
+    return { notificationQueued: true, noticeDeliveryUncertain };
   } catch {
-    return { notificationQueued: false };
+    return { notificationQueued: false, noticeDeliveryUncertain };
   }
 }
 /** The service role can see every account's feedback, so verify ownership again

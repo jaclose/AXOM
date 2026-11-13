@@ -22,7 +22,7 @@ type BoundaryResult = {
   count?: number | null;
 };
 
-function database(results: BoundaryResult[] = []) {
+function database(results: BoundaryResult[] = [], dispatchAdmission = true) {
   const calls: { table: string; method: string; args: unknown[] }[] = [];
   const rpcCalls: { name: string; args: Record<string, unknown> | undefined }[] = [];
   const from = vi.fn((table: string) => {
@@ -45,6 +45,7 @@ function database(results: BoundaryResult[] = []) {
   };
   const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     rpcCalls.push({ name, args });
+    if (name === "admit_deletion_notice_dispatch") return ok(dispatchAdmission);
     // Keep existing boundary fixtures aligned while the production path moves
     // the same transitions into atomic database functions.
     if (name === "quarantine_stale_privacy_requests") {
@@ -103,6 +104,37 @@ describe("communications server boundaries", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(calls.filter(call => call.table === "privacy_requests" && call.method === "eq"
       && call.args[0] === "id" && call.args[1] === id)).toHaveLength(2);
+  });
+
+  it("denies provider I/O if cancellation wins after the final read but before atomic dispatch admission", async () => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const attempted = "2026-11-12T00:00:00Z";
+    const allowed = () => ok({ id, status: "scheduled", actor_session_id: id });
+    const processing = () => ok({ status: "processing", first_attempt_at: attempted });
+    const { db, calls, rpcCalls } = database([
+      allowed(), processing(), ok(null), ok([]),
+      allowed(), processing(),
+      ok({ id, status: "cancelled", actor_session_id: id }), processing(), ok(),
+    ], false);
+    const service = new CommunicationsService(db, {});
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "context").mockResolvedValue({
+      displayName: "Alex", accent: "#c8a96a", theme: "dark", locale: "en",
+      timezone: "UTC", orbUrl: "https://axom.info/icons/axom-orb-512.png",
+    });
+    const send = vi.spyOn(service.provider, "sendPrepared").mockResolvedValue("provider-a");
+    await service.sendAxomEmail({
+      ...job, type: "deletion_requested", category: "account_deletion",
+      idempotency_key: id + ":requested", variables: { requestId: id },
+      first_attempt_at: attempted,
+      delivery_payload: { from: "AXOM <sender@example.invalid>", to: ["alex@example.invalid"],
+        subject: "Request received", html: "requested", text: "requested" },
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(rpcCalls).toContainEqual({ name: "admit_deletion_notice_dispatch",
+      args: { p_job_id: job.id, p_user_id: "account-a" } });
+    expect(calls).toContainEqual({ table: "email_jobs", method: "update",
+      args: [{ status: "failed", failure_code: "delivery-reconciliation-required" }] });
   });
 
   it("stops a claimed deletion notice when cancellation wins during preparation", async () => {
@@ -784,7 +816,7 @@ describe("deletion dependency safety", () => {
     const cancellableService = new CommunicationsService(cancellable.db, {});
     const enqueue = vi.spyOn(cancellableService, "enqueue").mockResolvedValue();
     await expect(cancelDeletion(cancellableService, "account-a", "delete-a"))
-      .resolves.toEqual({ notificationQueued: true });
+      .resolves.toEqual({ notificationQueued: true, noticeDeliveryUncertain: false });
     expect(enqueue).toHaveBeenCalledWith({ userId: "account-a", type: "deletion_cancelled", key: "delete-a:cancelled" });
 
     const irreversible = database([ok({ id: "delete-b", status: "failed", failure_code: "deletion-reconciliation-required" })]);
@@ -793,6 +825,17 @@ describe("deletion dependency safety", () => {
     await expect(cancelDeletion(irreversibleService, "account-a", "delete-b"))
       .rejects.toThrow("can no longer be cancelled");
     expect(irreversible.calls.some(call => call.method === "update")).toBe(false);
+  });
+
+  it("returns durable possible-in-flight warning even when the cancellation receipt enqueue fails", async () => {
+    const { db } = database([
+      ok({ id: "delete-a", status: "scheduled", failure_code: null }),
+      ok({ id: "delete-a", notice_delivery_uncertain: true }),
+    ]);
+    const service = new CommunicationsService(db, {});
+    vi.spyOn(service, "enqueue").mockRejectedValue(new Error("queue-unavailable"));
+    await expect(cancelDeletion(service, "account-a", "delete-a"))
+      .resolves.toEqual({ notificationQueued: false, noticeDeliveryUncertain: true });
   });
 
   it("keeps a confirmed deletion cancellation successful when its receipt cannot be queued", async () => {
@@ -804,7 +847,7 @@ describe("deletion dependency safety", () => {
     vi.spyOn(service, "enqueue").mockRejectedValue(new Error("queue-unavailable"));
 
     await expect(cancelDeletion(service, "account-a", "delete-a"))
-      .resolves.toEqual({ notificationQueued: false });
+      .resolves.toEqual({ notificationQueued: false, noticeDeliveryUncertain: false });
     expect(cancelled.calls).toContainEqual({
       table: "privacy_requests",
       method: "update",

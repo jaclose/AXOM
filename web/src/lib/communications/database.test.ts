@@ -21,6 +21,92 @@ async function database(throughMigration?: string) {
   return db;
 }
 describe("communications on real Postgres", () => {
+
+  it("linearizes provider dispatch admission before cancellation and retains uncertainty", async () => {
+    const db = await database();
+    const session = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+        values('${A}','deletion','scheduled','${session}','2030-11-20T12:00:00Z');`);
+      const requestId = (await db.query<{ id: string }>(`select id from privacy_requests where user_id='${A}' and kind='deletion'`)).rows[0].id;
+      const jobId = (await db.query<{ id: string }>(`select id from email_jobs where idempotency_key='${requestId}:scheduled'`)).rows[0].id;
+      await db.exec(`update email_jobs set status='processing',attempts=1,first_attempt_at=now() where id='${jobId}'`);
+      const admitted = (await db.query<{ allowed: boolean }>(
+        `select public.admit_deletion_notice_dispatch('${jobId}'::uuid,'${A}'::uuid) as allowed`
+      )).rows[0].allowed;
+      expect(admitted).toBe(true);
+      await db.exec(`update privacy_requests set status='cancelled' where id='${requestId}'`);
+      const receipt = (await db.query<{ status: string; notice_delivery_uncertain: boolean }>(
+        `select status,notice_delivery_uncertain from privacy_requests where id='${requestId}'`
+      )).rows[0];
+      expect(receipt).toEqual({ status: "cancelled", notice_delivery_uncertain: true });
+      expect((await db.query<{ allowed:boolean }>(`select public.admit_deletion_notice_dispatch('${jobId}'::uuid,'${A}'::uuid) as allowed`)).rows[0].allowed).toBe(false);
+      expect((await db.query<{ status:string }>(`select status from email_jobs where id='${jobId}'`)).rows[0].status).toBe("processing");
+    } finally { await db.close(); }
+  }, 30000);
+
+  it("denies dispatch after cancellation and for a foreign owner", async () => {
+    const db = await database();
+    const session = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+        values('${A}','deletion','scheduled','${session}','2030-11-20T12:00:00Z');`);
+      const requestId = (await db.query<{id:string}>(`select id from privacy_requests where user_id='${A}' and kind='deletion'`)).rows[0].id;
+      const jobId = (await db.query<{id:string}>(`select id from email_jobs where idempotency_key='${requestId}:requested'`)).rows[0].id;
+      await db.exec(`update email_jobs set status='processing',attempts=1,first_attempt_at=now() where id='${jobId}'`);
+      expect((await db.query<{allowed:boolean}>(`select public.admit_deletion_notice_dispatch('${jobId}'::uuid,'${B}'::uuid) as allowed`)).rows[0].allowed).toBe(false);
+      await db.exec(`update privacy_requests set status='cancelled' where id='${requestId}'`);
+      expect((await db.query<{allowed:boolean}>(`select public.admit_deletion_notice_dispatch('${jobId}'::uuid,'${A}'::uuid) as allowed`)).rows[0].allowed).toBe(false);
+      const state = (await db.query<{notice_delivery_uncertain:boolean}>(`select notice_delivery_uncertain from privacy_requests where id='${requestId}'`)).rows[0];
+      expect(state.notice_delivery_uncertain).toBe(true); // Conservative legacy first_attempt_at, even without the new RPC.
+      const unrelated = (await db.query<{status:string}>(`select status from email_jobs where idempotency_key='${requestId}:scheduled'`)).rows[0];
+      expect(unrelated.status).toBe("cancelled");
+    } finally { await db.close(); }
+  }, 30000);
+
+  it("backfills only unresolved attempted notices on previously cancelled consent", async () => {
+    const db = await database(DELETION_CANCEL_GUARD_MIGRATION);
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    try {
+      await db.exec(`insert into privacy_requests(user_id,kind,status,actor_session_id,scheduled_for)
+        values('${A}','deletion','scheduled','${first}','2030-11-20T12:00:00Z'),
+              ('${B}','deletion','scheduled','${second}','2030-11-20T12:00:00Z');`);
+      const rows = (await db.query<{id:string;user_id:string}>(`select id,user_id from privacy_requests where kind='deletion'`)).rows;
+      const attemptedId = rows.find(row => row.user_id === A)!.id;
+      await db.exec(`update email_jobs set status='processing',attempts=1,first_attempt_at=now()
+        where idempotency_key='${attemptedId}:requested';
+        update privacy_requests set status='cancelled' where kind='deletion';`);
+      await applyMigration(db, "20261113030000_communications_deletion_dispatch_admission.sql");
+      expect((await db.query<{user_id:string;notice_delivery_uncertain:boolean}>(`
+        select user_id,notice_delivery_uncertain from privacy_requests where kind='deletion' order by user_id
+      `)).rows).toEqual([
+        { user_id: A, notice_delivery_uncertain: true },
+        { user_id: B, notice_delivery_uncertain: false },
+      ]);
+      await applyMigration(db, "20261113030000_communications_deletion_dispatch_admission.sql");
+      expect((await db.query<{notice_delivery_uncertain:boolean}>(`
+        select notice_delivery_uncertain from privacy_requests where user_id='${A}' and kind='deletion'
+      `)).rows[0].notice_delivery_uncertain).toBe(true);
+    } finally { await db.close(); }
+  }, 30000);
+
+  it("restricts atomic deletion notice dispatch admission to service_role", async () => {
+    const db = await database();
+    try {
+      const access = (await db.query<{ role_name:string; allowed:boolean }>(`
+        select name as role_name, has_function_privilege(name,
+          'public.admit_deletion_notice_dispatch(uuid,uuid)', 'EXECUTE') as allowed
+        from (values ('anon'),('authenticated'),('service_role')) as roles(name) order by name
+      `)).rows;
+      expect(access).toEqual([
+        { role_name: "anon", allowed: false },
+        { role_name: "authenticated", allowed: false },
+        { role_name: "service_role", allowed: true },
+      ]);
+    } finally { await db.close(); }
+  }, 30000);
+
   it("atomically cancels unsent deletion notices when deletion consent is cancelled", async () => {
     const db = await database();
     const session = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

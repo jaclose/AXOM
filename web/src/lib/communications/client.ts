@@ -3,7 +3,7 @@ import { loadSupabase, readStoredSession } from "../account/supabase";
 import { parseActorSession } from "./actorSession";
 import { useAccount } from "../account/accountStore";
 import type { Preference } from "./model";
-export interface PrivacyRequest { id: string; kind: "export" | "deletion"; status: string; scheduled_for?: string; expires_at?: string; failure_code?: string }
+export interface PrivacyRequest { id: string; kind: "export" | "deletion"; status: string; scheduled_for?: string; expires_at?: string; failure_code?: string; notice_delivery_uncertain?: boolean }
 export interface CommunicationsSettings {
   preferences: Preference[]; identity: { accent: string; theme: "dark" | "light" }; history: { id: string; type: string; status: string; created_at: string; sent_at?: string }[];
   privacy: PrivacyRequest[]; admin: boolean; deliveryMode: string; deletionEnabled: boolean; hasProtectedCopy: boolean;
