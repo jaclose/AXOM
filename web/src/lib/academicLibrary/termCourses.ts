@@ -72,18 +72,23 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   courses: readonly AcademicCourse[] = []): CourseQuizLaunch {
   const ids = new Set<string>();
   const setIds = new Set<string>();
+  const setCounts = new Map<string, number>();
+  for (const set of workspace.questionSets) setCounts.set(set.id, (setCounts.get(set.id) ?? 0) + 1);
   for (const saved of workspaceReferences(accountId, workspace)) {
     const catalog = courses.find(course => course.id === saved.collectionId && course.current_revision_id === saved.revisionId);
     if (saved.term && catalog && termIdentity(saved.term) !== termIdentity(catalog.term)) continue;
     const savedTerm = saved.term ?? catalog?.term ?? installedReferenceTerm(saved, workspace);
     if (!savedTerm || termIdentity(savedTerm) !== termIdentity(term)) continue;
+    // An original set ID must resolve to exactly one local set. An ambiguous
+    // or absent original is not evidence that its questions can be practiced.
     for (const id of saved.questionIds) ids.add(id);
-    for (const id of saved.setIds) if (workspace.questionSets.some(set => set.id === id)) setIds.add(id);
+    for (const id of saved.setIds) if (setCounts.get(id) === 1) setIds.add(id);
   }
   const counts = new Map<string, number>();
   for (const question of workspace.questions) counts.set(question.id, (counts.get(question.id) ?? 0) + 1);
   const deferred = new Set(workspace.deferredContent?.questions.map(question => question.id) ?? []);
   return { scopeKind: "term", module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
+    && (!question.setId || setCounts.get(question.setId) === 1)
     && questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id) };
 }
