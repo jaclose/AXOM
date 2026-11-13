@@ -279,4 +279,51 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["ready"]);
   });
 
+  it("does not advertise receipt sets with no runnable members after review, absence and source holds", () => {
+    const state = workspace([receipt(1, ["held", "ready", "loose", "missing"], {
+      setIds: ["held-set", "ready-set", "empty-set"],
+    })], [
+      question("held", { setId: "held-set", needsReview: true }),
+      question("ready", { setId: "ready-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "held-set", questionIds: ["held"] },
+      { id: "ready-set", questionIds: ["ready"] },
+      { id: "empty-set", questionIds: ["missing"] },
+    ] as unknown as typeof state.questionSets;
+    const selection = termQuizSelection("Term 1", "account", state);
+    expect(selection.questionIds).toEqual(["ready", "loose"]);
+    expect(selection.setIds).toEqual(["ready-set"]);
+  });
+
+  it("keeps eligible explicitly cross-listed and legacy primary set provenance, not unrelated receipt sets", () => {
+    const state = workspace([receipt(1, ["cross-listed", "legacy", "loose"], {
+      setIds: ["cross-set", "legacy-set", "unrelated-set"],
+    })], [
+      question("cross-listed"),
+      question("legacy", { setId: "legacy-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "cross-set", questionIds: ["cross-listed"] },
+      { id: "legacy-set" },
+      { id: "unrelated-set", questionIds: ["not-a-receipt-member"] },
+    ] as unknown as typeof state.questionSets;
+    const selection = termQuizSelection("Term 1", "account", state);
+    expect(selection.questionIds).toEqual(["cross-listed", "legacy", "loose"]);
+    expect(selection.setIds).toEqual(["cross-set", "legacy-set"]);
+  });
+
+  it("leaves the collection filter empty for loose-only runnable term selections", () => {
+    const state = workspace([receipt(1, ["ready-loose", "held-set-member"], { setIds: ["held-set"] })], [
+      question("ready-loose"),
+      question("held-set-member", { setId: "held-set", needsReview: true }),
+    ]);
+    state.questionSets = [{ id: "held-set", questionIds: ["held-set-member"] }] as unknown as typeof state.questionSets;
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["ready-loose"], setIds: [],
+    });
+  });
+
 });
