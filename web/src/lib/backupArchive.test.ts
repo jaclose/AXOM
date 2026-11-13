@@ -68,6 +68,20 @@ describe("portable binary media backup", () => {
   });
 
 
+  it("rejects a CRC-correct PNG container without required image-data chunks", async () => {
+    const withoutImageData = new Uint8Array([
+      ...PNG_BYTES.subarray(0, 33), ...PNG_BYTES.subarray(58),
+    ]);
+    const expected = { ...attachment, byteSize: withoutImageData.byteLength };
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([withoutImageData.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: withoutImageData.byteLength,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const result = await createMediaBackupArchive({}, [{ id: "held-question", attachments: [expected] }]);
+    expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+  });
+
   it("does not certify a same-size fake PNG or a byte-corrupted valid PNG as backed up", async () => {
     for (const bytes of [
       new Uint8Array(PNG_BYTES.length).fill(0x58),

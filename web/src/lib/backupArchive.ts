@@ -59,6 +59,7 @@ function hasExpectedImageStructure(bytes: Uint8Array, mime: string): boolean {
     if (!has(0, 137, 80, 78, 71, 13, 10, 26, 10)) return false;
     let offset = 8;
     let first = true;
+    let sawImageData = false;
     while (offset + 12 <= bytes.length) {
       const length = be32(offset);
       if (length > bytes.length - offset - 12) return false;
@@ -73,7 +74,8 @@ function hasExpectedImageStructure(bytes: Uint8Array, mime: string): boolean {
       if (((crc ^ 0xffffffff) >>> 0) !== be32(offset + 8 + length)) return false;
       offset += length + 12;
       first = false;
-      if (name === "IEND") return length === 0 && offset === bytes.length;
+      if (name === "IDAT") sawImageData = true;
+      if (name === "IEND") return sawImageData && length === 0 && offset === bytes.length;
     }
     return false;
   }
