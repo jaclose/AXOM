@@ -74,13 +74,13 @@ describe("activity workbook chronology", () => {
     writtenSheets.length = 0;
     const invalidA = entry("invalid-a", "aaa-not-a-date", "Review");
     const invalidZ = entry("invalid-z", "zzz-not-a-date", "Review");
-    const sameB = entry("b", "2026-07-12T15:00:00Z", "Review");
-    const sameA = entry("a", "2026-07-12T15:00:00Z", "Review");
+    const sameB = { ...entry("b", "2026-07-12T15:00:00Z", "Review"), note: "from-b" };
+    const sameA = { ...entry("a", "2026-07-12T15:00:00Z", "Review"), note: "from-a" };
 
     await exportActivityWorkbook([invalidA, sameB, invalidZ, sameA]);
     expect(writtenSheets.find((item) => item.name === "Review")?.rows.slice(1).map((row) => row[1]))
       .toEqual([sameA.ts, sameB.ts, invalidZ.ts, invalidA.ts]);
     expect(writtenSheets.find((item) => item.name === "Review")?.rows.slice(1).map((row) => row[5]))
-      .toEqual(["", "", "", ""]);
+      .toEqual(["from-a", "from-b", "", ""]);
   });
 });
