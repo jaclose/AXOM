@@ -271,4 +271,86 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
     expect(visible.map(row => row.id)).not.toContain(secondId);
   }, 60_000);
 
+  it("requires a separate academic reviewer for publication, including direct status updates", async () => {
+    // A publisher may also hold reviewer privileges. This must not turn their
+    // own attestation into an independent academic approval. Synthetic only.
+    const author = "c1111111-1111-4111-8111-111111111111";
+    const reviewer = "c3333333-3333-4333-8333-333333333333";
+    const learner = "c2222222-2222-4222-8222-222222222222";
+    await db.query(
+      "insert into auth.users(id,email) values($1,'self-review-author@example.test'),($2,'independent-reviewer@example.test'),($3,'review-learner@example.test')",
+      [author, reviewer, learner],
+    );
+    await db.query("insert into public.academic_reviewers(user_id) values($1),($2)", [author, reviewer]);
+
+    async function as<T = Record<string, unknown>>(account: string, sql: string, params: unknown[] = []): Promise<T[]> {
+      await db.exec("reset role;");
+      await db.query("select set_config('request.jwt.claim.sub',$1,false)", [account]);
+      await db.exec("set role authenticated;");
+      try { return (await db.query<T>(sql, params)).rows; }
+      finally { await db.exec("reset role;"); }
+    }
+    const snapshot = {
+      shareFormatVersion: 1,
+      title: "Independent academic review R103",
+      tags: [],
+      orderedQuestionIds: ["independent-q1"],
+      questions: [{
+        id: "independent-q1", stem: "Which source-marked synthetic option is keyed?",
+        options: [{ key: "A", text: "Recorded answer" }, { key: "B", text: "Distractor" }],
+        correctKey: "A", tags: [], citation: "PMID: 123456",
+      }],
+      createdAt: "2026-11-13T10:00:00Z",
+      copyrightNotice: "Original synthetic testing material",
+    };
+    const [entry] = await as<{ id: string }>(author,
+      "select public.submit_question_set_library($1,$2::jsonb,'Synthetic original author',true,true) id",
+      ["r103-author-is-reviewer", JSON.stringify(snapshot)]);
+    const decide = (who: string) => as(who,
+      "select public.review_question_set_library($1,true,$2,$3::jsonb,1::bigint)",
+      [entry.id, "Inspected the independent synthetic source and sharing rights", JSON.stringify(snapshot)]);
+    await expect(decide(author)).rejects.toThrow(/independent academic reviewer/i);
+
+    // A privileged direct status update bearing that same reviewer's JWT
+    // must fail too. RLS is not the only protection for service-role paths.
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)", [author]);
+    await expect(db.query(
+      `update public.question_set_library_entries
+         set status='approved', reviewed_by=$2, reviewed_at=now(),
+             approved_at=now(), review_note='Claimed independent source review'
+         where id=$1`, [entry.id, author],
+    )).rejects.toThrow(/independent academic reviewer/i);
+
+    const [held] = (await db.query<{
+      status: string; review_revision: number; reviewed_by: string | null;
+    }>("select status,review_revision,reviewed_by from public.question_set_library_entries where id=$1",
+      [entry.id])).rows;
+    expect(held).toEqual({ status: "pending", review_revision: 1, reviewed_by: null });
+    expect(await as<{ id: string }>(learner,
+      "select id from public.list_question_set_library($1,0)", ["Independent academic review R103"]))
+      .toEqual([]);
+    await expect(as(learner, "select public.get_question_set_library($1)", [entry.id]))
+      .rejects.toThrow(/unavailable/i);
+
+    // The distinct academically authorized reviewer can approve the exact
+    // revision without changing keys, provenance, IDs or answer content.
+    await decide(reviewer);
+    const [approved] = (await db.query<{
+      id: string; status: string; reviewed_by: string; review_revision: number;
+      snapshot_payload: typeof snapshot;
+    }>("select id,status,reviewed_by,review_revision,snapshot_payload from public.question_set_library_entries where id=$1",
+      [entry.id])).rows;
+    expect(approved).toMatchObject({
+      id: entry.id, status: "approved", reviewed_by: reviewer, review_revision: 2,
+      snapshot_payload: snapshot,
+    });
+    expect((await as<{ id: string }>(learner,
+      "select id from public.list_question_set_library($1,0)", ["Independent academic review R103"]))
+      .map(row => row.id)).toContain(entry.id);
+    const [receipt] = await as<{ value: { id: string; review_revision: number } }>(learner,
+      "select public.authorize_question_set_library_import($1,2::bigint,$2::jsonb) value",
+      [entry.id, JSON.stringify(snapshot)]);
+    expect(receipt.value).toMatchObject({ id: entry.id, review_revision: 2 });
+  }, 60_000);
+
 });
