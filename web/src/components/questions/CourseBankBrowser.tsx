@@ -103,8 +103,13 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
   const scoped = scopedCandidates.length === 1 ? scopedCandidates[0] : undefined;
   const selectedInitial = visibleBranches.flatMap((branch) => branch.weeks)
     .find((week) => week.sets.some((set) => selectedIds.includes(set.id)));
-  const initial = ambiguousScope ? undefined : scoped?.weeks.find((week) => week.week === initialScope?.week)
-    ?? scoped?.weeks[0] ?? selectedInitial ?? visibleBranches[0]?.weeks[0];
+  // Explicit Tracker/course handoffs are constraints, not browsing hints:
+  // an unavailable source week must never auto-open a different week or course.
+  const initial = ambiguousScope ? undefined : initialScope
+    ? (initialScope.week === undefined
+      ? scoped?.weeks[0]
+      : scoped?.weeks.find((week) => week.week === initialScope.week))
+    : selectedInitial ?? visibleBranches[0]?.weeks[0];
   const active = visibleBranches.flatMap((branch) => branch.weeks)
     .find((week) => week.key === chosen) ?? initial;
   const branch = visibleBranches.find((item) => item.weeks.some((week) => week.key === active?.key));
@@ -160,7 +165,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
         <option value="missing">Unavailable / missing records</option>
       </select></label>
     </div>}
-    {!branches.length ? <div className="cb-empty"><BookOpen size={24} aria-hidden="true" /><h2>Your course questions start here</h2><p>No saved question sets are installed. Browse available course packages or import a question file, then review its answer mappings.</p></div>
+    {!branches.length ? <div className="cb-empty"><BookOpen size={24} aria-hidden="true" /><h2>{questionSets.length ? "Question sources require review" : "Your course questions start here"}</h2><p>{questionSets.length ? "Saved question sets exist, but none have verified course/week membership for this navigator. Review original source identities and filing in the Question Bank before practicing." : "No saved question sets are installed. Browse available course packages or import a question file, then review its answer mappings."}</p></div>
     : !visibleBranches.length ? <p className="cb-empty" role="status">No modules match the selected term and course. Change a filter to browse your other courses.</p>
     : <div className="cb-layout">
       <nav className="cb-outline" aria-label="Course outline">
@@ -181,6 +186,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
         <header className="cb-week-head">
           <p className="cb-eyebrow">{search ? "Within selected academic scope" : `${branch?.term} / ${branch?.course} / ${branch?.module}`}</p>
           <h2>{search ? "Search results" : active?.label ?? "Select an academic week"}</h2>
+          {!active && initialScope && !ambiguousScope && <p className="qb-collection-warning" role="status">No verified collections match the requested course, module or week. Select an available week explicitly before practicing.</p>}
           {search ? <p>{matches.length} matching collections</p> : <dl className="cb-week-facts" aria-label="Week question counts">
             <div><dt>Stored questions</dt><dd>{active?.questionIds.length ?? 0}</dd></div>
             <div><dt>Answered</dt><dd>{active?.attempted ?? 0}</dd></div>
