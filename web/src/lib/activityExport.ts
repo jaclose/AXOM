@@ -18,8 +18,9 @@ export async function exportActivityWorkbook(logs: StudyLog[]) {
   appendSheet(XLSX, wb, "All Activity", detailRows(logs), [14, 20, 14, 12, 12, 42]);
 
   const byType = [...new Set(logs.map((log) => log.type))].sort();
+  const usedSheetNames = new Set(["overview", "all activity"]);
   for (const type of byType) {
-    appendSheet(XLSX, wb, safeSheetName(type), detailRows(logs.filter((log) => log.type === type)), [14, 20, 14, 12, 12, 42]);
+    appendSheet(XLSX, wb, uniqueSheetName(type, usedSheetNames), detailRows(logs.filter((log) => log.type === type)), [14, 20, 14, 12, 12, 42]);
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
@@ -80,6 +81,19 @@ function appendSheet(XLSX: XlsxModule, wb: WorkBook, name: string, rows: unknown
 
 function sum(logs: StudyLog[], key: "minutes" | "cards") {
   return logs.reduce((total, log) => total + Number(log[key] || 0), 0);
+}
+
+function uniqueSheetName(input: string, usedNames: Set<string>) {
+  const base = safeSheetName(input);
+  for (let index = 1; ; index++) {
+    const suffix = index === 1 ? "" : ` (${index})`;
+    const name = `${base.slice(0, 31 - suffix.length)}${suffix}`;
+    const key = name.toLowerCase();
+    if (!usedNames.has(key)) {
+      usedNames.add(key);
+      return name;
+    }
+  }
 }
 
 function safeSheetName(input: string) {
