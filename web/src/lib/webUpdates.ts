@@ -5,9 +5,18 @@ export async function activateWaitingWebUpdate(): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
   const registration = await navigator.serviceWorker.getRegistration(new URL(WORKER_PATH, document.baseURI));
   if (!registration) return;
+  // An update() promise completing is not proof that a replacement worker
+  // installed. Keep the current window open when the old worker remains active.
+  const previouslyActive = registration.active;
   await registration.update();
   if (registration.installing) await waitForWorker(registration.installing, "installed");
-  if (!registration.waiting) return;
+  if (!registration.waiting) {
+    // Another tab may have activated a different worker while update() ran.
+    // This is worker-identity evidence, not proof of the expected build ID.
+    if (registration.active && registration.active !== previouslyActive
+      && registration.active.state === "activated") return;
+    throw new Error("The new web build could not be staged. Your current app remains open; check your connection and try again.");
+  }
   const worker = registration.waiting;
   const activated = waitForWorker(worker, "activated");
   worker.postMessage({ type: "AXOM_ACTIVATE_UPDATE" });
