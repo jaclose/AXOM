@@ -46,7 +46,7 @@ beforeEach(() => {
     question("t2"),
   ];
   state.questionSets = [
-    set("imcq", "IMCQ 1", ["ready", "ready", "review-suggested", "unresolved", "missing"], "c4", "Neuro"),
+    set("imcq", "IMCQ 1", ["ready", "review-suggested", "unresolved", "missing"], "c4", "Neuro"),
     set("suggested", "IMCQ Suggested", ["review-suggested"], "c4", "Neuro"),
     set("unresolved", "IMCQ Unresolved", ["unresolved"], "c4", "Neuro"),
     set("pq", "School PQ 1", ["t2"], "c2", "Biomolecules"),
@@ -122,6 +122,32 @@ describe("CourseBankBrowser academic navigation", () => {
   });
 });
 
+describe("CourseBankBrowser explicit academic scope integrity", () => {
+  it("holds duplicate original membership and never launches an unrelated course by fallback", () => {
+    // Malformed original ID lists must remain held; the valid Term 2 PQ
+    // cannot silently replace an explicitly requested Term 4 handoff.
+    state.questionSets[0] = {
+      ...state.questionSets[0], questionIds: ["ready", "ready", "review-suggested", "unresolved", "missing"],
+    };
+    const onPractice = vi.fn();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={onPractice} />);
+    expect(screen.queryByRole("button", { name: "Practice IMCQ 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice week" })).toBeNull();
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Select an academic week" })).toBeTruthy();
+    expect(onPractice).not.toHaveBeenCalled();
+  });
+
+  it("does not silently refile an explicitly requested unavailable week to Week 1", () => {
+    const onPractice = vi.fn();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 99 }} onPractice={onPractice} />);
+    expect(screen.getByRole("heading", { name: "Select an academic week" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Practice week" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice IMCQ 1" })).toBeNull();
+    expect(onPractice).not.toHaveBeenCalled();
+  });
+});
+
 describe("CourseBankBrowser ambiguous curriculum scope", () => {
   it("does not infer a course from a repeated module name", async () => {
     state.courses[0] = { ...state.courses[0], modules: [{ id: "m2", name: "Neuro" }] };
@@ -156,7 +182,7 @@ describe("CourseBankBrowser recovery routes", () => {
     expect(onRestoreMissing).toHaveBeenCalledTimes(1);
     expect(onRestoreMissing).toHaveBeenCalledWith({
       setId: "imcq", setTitle: "IMCQ 1", createdAt: "2026-10-14T00:00:00Z",
-      expectedQuestionIds: ["ready", "ready", "review-suggested", "unresolved", "missing"],
+      expectedQuestionIds: ["ready", "review-suggested", "unresolved", "missing"],
       missingQuestionIds: ["missing"], sourceDocumentIds: [],
       scope: { courseId: "c4", module: "Neuro", week: 1 },
     });
@@ -165,7 +191,7 @@ describe("CourseBankBrowser recovery routes", () => {
   });
 
   it("keeps two collections' missing recovery requests separate", async () => {
-    state.questionSets.push(set("second", "Second IMCQ", ["ready", "missing-two", "missing-two"], "c4", "Neuro"));
+    state.questionSets.push(set("second", "Second IMCQ", ["ready", "missing-two"], "c4", "Neuro"));
     const user = userEvent.setup();
     const restore = vi.fn();
     render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onRestoreMissing={restore} />);
