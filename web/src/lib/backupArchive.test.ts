@@ -43,13 +43,15 @@ function pngChunk(name: string, data: Uint8Array): Uint8Array {
   view.setUint32(8 + data.length, (crc ^ 0xffffffff) >>> 0);
   return chunk;
 }
-function palettePng(palettes: readonly Uint8Array[], options: { afterIdat?: boolean; color?: number } = {}): Uint8Array {
+function palettePng(palettes: readonly Uint8Array[], options: { afterIdat?: boolean; color?: number; depth?: 1 | 2 | 4 | 8; pixelIndex?: number; width?: number; height?: number; interlace?: 0 | 1; filteredScanlines?: readonly number[] } = {}): Uint8Array {
   const ihdr = new Uint8Array(13);
   const view = new DataView(ihdr.buffer);
-  view.setUint32(0, 1); view.setUint32(4, 1);
-  ihdr[8] = 1; ihdr[9] = options.color ?? 3;
+  view.setUint32(0, options.width ?? 1); view.setUint32(4, options.height ?? 1);
+  const depth = options.depth ?? 1;
+  ihdr[8] = depth; ihdr[9] = options.color ?? 3; ihdr[12] = options.interlace ?? 0;
   const paletteChunks = palettes.map(palette => pngChunk("PLTE", palette));
-  const idat = pngChunk("IDAT", deflateSync(Uint8Array.from([0, 0]))); // filter 0, index 0
+  const pixelByte = (options.pixelIndex ?? 0) << (8 - depth);
+  const idat = pngChunk("IDAT", deflateSync(Uint8Array.from(options.filteredScanlines ?? [0, pixelByte])));
   return Uint8Array.from([
     ...PNG_BYTES.subarray(0, 8), ...pngChunk("IHDR", ihdr),
     ...(!options.afterIdat ? paletteChunks.flatMap(chunk => [...chunk]) : []),
@@ -142,6 +144,71 @@ describe("portable binary media backup", () => {
     const zipBackup = await readPortableBackup(new File([zip.blob], "indexed.zip"));
     expect(await zipBackup.restoreMedia(references)).toMatchObject({ restored: 1, skipped: 0 });
     expect(new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("does not certify indexed PNG pixels that refer beyond their palette in ZIP or JSON", async () => {
+    const singleColor = Uint8Array.from([12, 34, 56]);
+    for (const depth of [1, 2, 4, 8] as const) {
+      // A CRC-correct image with valid zlib and geometry, but palette entry 1 is absent.
+      const bytes = palettePng([singleColor], { depth, pixelIndex: 1 });
+      const references = [{ id: "held-question", attachments: [{ ...attachment, byteSize: bytes.length }] }];
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+        mimeType: "image/png", byteSize: bytes.length,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const zip = await createMediaBackupArchive({}, references);
+      const json = await collectVerifiedMediaBackupPayloads(references);
+      expect(zip.attachmentCount, `depth ${depth}`).toBe(0);
+      expect(zip.missingBlobKeys, `depth ${depth}`).toEqual([attachment.blobKey]);
+      expect(json.payloads, `depth ${depth}`).toEqual([]);
+      expect(json.missingBlobKeys, `depth ${depth}`).toEqual([attachment.blobKey]);
+    }
+
+    // Packed-pixel checks must also work on the first Adam7 pass.
+    const interlaced = palettePng([singleColor], { depth: 1, pixelIndex: 1, interlace: 1 });
+    const interlacedRefs = [{ id: "held-question", attachments: [{ ...attachment, byteSize: interlaced.length }] }];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([interlaced.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: interlaced.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    expect((await createMediaBackupArchive({}, interlacedRefs)).attachmentCount).toBe(0);
+
+    // Sub filter reconstructs [1, 2] from stored [1, 1]. A raw-byte
+    // palette check would falsely accept this stream with two entries.
+    const twoColors = Uint8Array.from([12, 34, 56, 78, 90, 123]);
+    const invalidSub = palettePng([twoColors], { depth: 8, width: 2, filteredScanlines: [1, 1, 1] });
+    const subRefs = [{ id: "held-question", attachments: [{ ...attachment, byteSize: invalidSub.length }] }];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([invalidSub.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: invalidSub.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    expect((await createMediaBackupArchive({}, subRefs)).attachmentCount).toBe(0);
+    expect((await collectVerifiedMediaBackupPayloads(subRefs)).payloads).toEqual([]);
+
+    // Up filter reconstructs the second row's pixel as 2 from [1, 1].
+    const invalidUp = palettePng([twoColors], { depth: 8, height: 2, filteredScanlines: [0, 1, 2, 1] });
+    const upRefs = [{ id: "held-question", attachments: [{ ...attachment, byteSize: invalidUp.length }] }];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([invalidUp.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: invalidUp.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    expect((await createMediaBackupArchive({}, upRefs)).attachmentCount).toBe(0);
+    expect((await collectVerifiedMediaBackupPayloads(upRefs)).payloads).toEqual([]);
+
+    // Exact same index is valid when palette entry 1 actually exists.
+    const bytes = palettePng([Uint8Array.from([12, 34, 56, 78, 90, 123])], { pixelIndex: 1 });
+    const references = [{ id: "held-question", attachments: [{ ...attachment, byteSize: bytes.length }] }];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: bytes.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    expect((await createMediaBackupArchive({}, references)).attachmentCount).toBe(1);
+    expect((await collectVerifiedMediaBackupPayloads(references)).payloads).toHaveLength(1);
   });
 
   it("holds malformed or forbidden PLTE chunks in both ZIP and JSON export", async () => {
