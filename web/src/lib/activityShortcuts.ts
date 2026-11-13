@@ -12,24 +12,47 @@ export interface ActivityShortcut {
   lastUsedAt: string;
 }
 
+type SignatureLog = Pick<StudyLog, "type" | "trackerId" | "minutes" | "cards" | "quantity" | "quantityKind" | "quantityLabel">;
+
 /** Notes are deliberately excluded: shortcuts must never surface private text. */
-export function activitySignature(log: Pick<StudyLog, "type" | "trackerId" | "minutes" | "cards" | "quantity" | "quantityKind" | "quantityLabel">): string {
+export function activitySignature(log: SignatureLog): string {
+  return signatureFields(log).map(escapeSignatureField).join("|");
+}
+
+/** Read-only compatibility for previously stored, unescaped hidden preferences. */
+function legacyActivitySignature(log: SignatureLog): string {
+  return signatureFields(log).join("|");
+}
+
+function signatureFields(log: SignatureLog): string[] {
   const legacyCards = safeNumber(log.cards);
   const quantity = safeNumber(log.quantity) || legacyCards;
   const quantityKind = log.quantityKind ?? (legacyCards > 0 ? "cards" : "");
   return [
-    escapeSignatureField(normalize(log.type)),
-    escapeSignatureField(log.trackerId ?? ""),
-    safeNumber(log.minutes),
-    quantity,
-    escapeSignatureField(quantityKind),
-    escapeSignatureField(normalize(log.quantityLabel ?? "")),
-  ].join("|");
+    normalize(log.type),
+    log.trackerId ?? "",
+    String(safeNumber(log.minutes)),
+    String(quantity),
+    quantityKind,
+    normalize(log.quantityLabel ?? ""),
+  ];
 }
 
 /** Keep signature fields unambiguous without changing ordinary legacy signatures. */
 function escapeSignatureField(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+}
+
+/**
+ * Legacy raw signatures may identify more than one activity. Preserve that
+ * historical hide behavior, but let a current escaped key take precedence over
+ * an unrelated activity whose old raw key happens to have the same bytes.
+ * Never mutate the learner's stored preference list during interpretation.
+ */
+function legacyHiddenKeys(logs: StudyLog[], hidden: Set<string>): Set<string> {
+  if (hidden.size === 0) return hidden;
+  const currentKeys = new Set(logs.map(activitySignature));
+  return new Set([...hidden].filter((key) => !currentKeys.has(key)));
 }
 
 export function recentActivityShortcuts(
@@ -39,12 +62,13 @@ export function recentActivityShortcuts(
 ): ActivityShortcut[] {
   if (limit <= 0) return [];
   const hiddenSet = new Set(hidden);
+  const legacyHiddenSet = legacyHiddenKeys(logs, hiddenSet);
   const seen = new Set<string>();
   const sorted = [...logs].sort((a, b) => b.ts.localeCompare(a.ts) || b.id.localeCompare(a.id));
   const result: ActivityShortcut[] = [];
   for (const log of sorted) {
     const signature = activitySignature(log);
-    if (seen.has(signature) || hiddenSet.has(signature)) continue;
+    if (seen.has(signature) || hiddenSet.has(signature) || legacyHiddenSet.has(legacyActivitySignature(log))) continue;
     seen.add(signature);
     result.push(toShortcut(log, signature, 1));
     if (result.length >= Math.max(0, limit)) break;
@@ -61,11 +85,12 @@ export function frequentActivityShortcuts(
 ): ActivityShortcut[] {
   if (limit <= 0) return [];
   const hiddenSet = new Set(hidden);
+  const legacyHiddenSet = legacyHiddenKeys(logs, hiddenSet);
   const excludedSet = new Set(exclude);
   const grouped = new Map<string, { latest: StudyLog; uses: number }>();
   for (const log of logs) {
     const signature = activitySignature(log);
-    if (hiddenSet.has(signature)) continue;
+    if (hiddenSet.has(signature) || legacyHiddenSet.has(legacyActivitySignature(log))) continue;
     const current = grouped.get(signature);
     if (!current) grouped.set(signature, { latest: log, uses: 1 });
     else {
