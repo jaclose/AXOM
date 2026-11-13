@@ -15,6 +15,14 @@ vi.mock("xlsx-js-style", () => ({
     encode_cell: ({ c }: { c: number }) => String.fromCharCode(65 + c) + "1",
     book_append_sheet: (_book: unknown, sheet: { rows: unknown[][] }, name: string) => {
       // Excel worksheet names are case-insensitive. Mirror the real writer's collision guard.
+      if (
+        !name || name.length > 31 ||
+        /[\\/?*[\]:]/.test(name) ||
+        name.startsWith("'") || name.endsWith("'") ||
+        name.toLowerCase() === "history"
+      ) {
+        throw new Error(`Invalid Excel worksheet: ${name}`);
+      }
       if (writtenSheets.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
         throw new Error(`Duplicate worksheet: ${name}`);
       }
@@ -60,6 +68,49 @@ describe("activity workbook sheet names", () => {
     expect(writtenSheets[1].rows.slice(1).map((row) => row[5]).sort()).toEqual(
       logs.map((log) => log.note).sort(),
     );
+  });
+});
+
+
+describe("Excel-compatible custom worksheet names", () => {
+  it("avoids reserved History and edge apostrophes, including truncated collision suffixes", async () => {
+    writtenSheets.length = 0;
+    writeFile.mockClear();
+    const stem = `${"A".repeat(26)}'WXYZ`;
+    const types = [
+      "History",
+      "history",
+      "'History'",
+      "'Rounds",
+      "Rounds'",
+      "'Rounds'",
+      "Rounds",
+      "Team's Notes",
+      "'",
+      `${stem}1`,
+      `${stem}2`,
+    ];
+    const logs = types.map((type, index) => ({
+      ...entry(`excel-${index}`, "2026-11-13T12:00:00Z", type),
+      note: `source-${index}`,
+    }));
+
+    await exportActivityWorkbook(logs);
+
+    expect(writtenSheets).toHaveLength(types.length + 2);
+    const names = writtenSheets.map((sheet) => sheet.name);
+    expect(new Set(names.map((name) => name.toLowerCase())).size).toBe(names.length);
+    expect(names).toContain("Team's Notes");
+    expect(names).toContain("Rounds");
+    expect(names.some((name) => name.toLowerCase() === "history")).toBe(false);
+    expect(names.every((name) => !name.startsWith("'") && !name.endsWith("'"))).toBe(true);
+    expect(writtenSheets.slice(2).map((sheet) => sheet.rows[1][5]).sort()).toEqual(
+      logs.map((log) => log.note).sort(),
+    );
+    expect(writtenSheets[1].rows.slice(1).map((row) => row[5]).sort()).toEqual(
+      logs.map((log) => log.note).sort(),
+    );
+    expect(writeFile).toHaveBeenCalledTimes(1);
   });
 });
 

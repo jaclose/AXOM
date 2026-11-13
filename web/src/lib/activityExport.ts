@@ -87,7 +87,9 @@ function uniqueSheetName(input: string, usedNames: Set<string>) {
   const base = safeSheetName(input);
   for (let index = 1; ; index++) {
     const suffix = index === 1 ? "" : ` (${index})`;
-    const name = `${base.slice(0, 31 - suffix.length)}${suffix}`;
+    // Suffix truncation can expose an interior apostrophe at the new edge.
+    const stem = base.slice(0, 31 - suffix.length).replace(/^'+|'+$/g, "") || "Activity";
+    const name = `${stem}${suffix}`;
     const key = name.toLowerCase();
     if (!usedNames.has(key)) {
       usedNames.add(key);
@@ -97,5 +99,7 @@ function uniqueSheetName(input: string, usedNames: Set<string>) {
 }
 
 function safeSheetName(input: string) {
-  return input.replace(/[\\/?*[\]:]/g, " ").slice(0, 31) || "Activity";
+  const base = input.replace(/[\\/?*[\]:]/g, " ").slice(0, 31).replace(/^'+|'+$/g, "") || "Activity";
+  // Microsoft Excel reserves History regardless of case.
+  return base.toLowerCase() === "history" ? `${base} Sheet` : base;
 }
