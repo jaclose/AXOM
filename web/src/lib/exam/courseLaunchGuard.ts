@@ -2,7 +2,7 @@
 // The canonical reader now keeps the entire requested pool intact. This
 // diagnostic guard explains missing/review records without consuming the
 // pending request or introducing a second session store.
-import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS as MAX_SELECTION, hasDeclaredCourseScopeConflict, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
+import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS as MAX_SELECTION, hasDeclaredCourseScopeConflict, isValidCourseQuizScope, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
 import { questionPracticeReadiness } from "../questionFilters";
 import type { QuestionRecord } from "../questions";
 
@@ -35,6 +35,9 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
     || candidate.questionIds.some((id) => typeof id !== "string" || !id.trim())) {
     return invalid("The saved course selection has missing or invalid academic/question identifiers.");
   }
+  if (!isValidCourseQuizScope(candidate)) {
+    return invalid("The saved course selection has an invalid academic scope.");
+  }
   const ids = candidate.questionIds as string[];
   if (new Set(ids).size !== ids.length) return invalid("The saved course selection contains duplicate question identifiers.");
   if (candidate.week !== undefined && (!Number.isSafeInteger(candidate.week) || (candidate.week as number) < 1)) {
@@ -56,6 +59,7 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
   }
   const expectedScope = {
     module: candidate.module as string,
+    ...(candidate.scopeKind === "term" ? { scopeKind: "term" as const } : {}),
     ...(typeof candidate.week === "number" ? { week: candidate.week } : {}),
     ...(typeof candidate.courseId === "string" ? { courseId: candidate.courseId } : {}),
   };
