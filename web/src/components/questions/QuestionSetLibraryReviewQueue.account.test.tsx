@@ -97,4 +97,44 @@ describe("Question Set reviewer account isolation", () => {
     expect(await screen.findByText(/no academic reviewer permission/i)).toBeTruthy();
     expect(mocks.decide).not.toHaveBeenCalled();
   });
+
+  it("cancels a pending inspection on Refresh before a revoked reviewer can see it", async () => {
+    let completeOld!: (preview: typeof pendingPreview) => void;
+    mocks.preview.mockImplementation(() => new Promise<typeof pendingPreview>(resolve => {
+      completeOld = resolve;
+    }));
+    mocks.reviewer.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    render(<QuestionSetLibraryReviewQueue accountId="account-A" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith("account-A", id));
+    const refreshButton = screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement;
+    expect(refreshButton.disabled).toBe(false);
+    fireEvent.click(refreshButton);
+    expect(await screen.findByText(/no academic reviewer permission/i)).toBeTruthy();
+
+    await act(async () => { completeOld(pendingPreview); });
+    expect(screen.queryByText("Account A confidential source and answer")).toBeNull();
+    expect(screen.queryByText("Private correct option")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve for library" })).toBeNull();
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
+
+  it("drops the error from a cancelled inspection after a fresh queue loads", async () => {
+    let failOld!: (error: Error) => void;
+    mocks.preview.mockImplementation(() => new Promise<typeof pendingPreview>((_resolve, reject) => {
+      failOld = reject;
+    }));
+
+    render(<QuestionSetLibraryReviewQueue accountId="account-A" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith("account-A", id));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByRole("button", { name: "Inspect" })).toBeTruthy();
+
+    await act(async () => { failOld(new Error("Stale inspection error: source unavailable")); });
+    expect(screen.queryByText(/stale inspection error/i)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
 });

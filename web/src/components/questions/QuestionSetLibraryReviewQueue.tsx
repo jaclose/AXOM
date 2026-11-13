@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpenCheck, RefreshCw } from "lucide-react";
 import { isAcademicReviewer } from "../../lib/academicLibrary/client";
 import {
@@ -28,7 +28,11 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
   const [reason, setReason] = useState("");
   const [attested, setAttested] = useState(false);
   const [shown, setShown] = useState(20);
+  // An inspection response must not outlive an explicit refresh or newer selection.
+  // This client guard complements the revision check enforced by PostgreSQL.
+  const previewEpoch = useRef(0);
   useEffect(() => {
+    ++previewEpoch.current;
     let alive = true;
     setLoading(true); setError(""); setQueue([]); setReviewer(false);
     setPreview(undefined); setReason(""); setAttested(false);
@@ -41,14 +45,28 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
       }
     }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "Review queue unavailable."); })
       .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    return () => { alive = false; ++previewEpoch.current; };
   }, [accountId, refresh]);
 
+  function refreshQueue() {
+    ++previewEpoch.current; // Invalidate an in-flight Inspect request synchronously.
+    setPreview(undefined); setReason(""); setAttested(false); setShown(20);
+    setBusy(false);
+    setRefresh(value => value + 1);
+  }
+
   async function open(id: string) {
-    setBusy(true); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
-    try { setPreview(await loadPendingQuestionSetReviewPreview(accountId, id)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "This submission could not be opened."); }
-    finally { setBusy(false); }
+    const epoch = ++previewEpoch.current;
+    setBusy(true); setPreview(undefined); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
+    try {
+      const inspected = await loadPendingQuestionSetReviewPreview(accountId, id);
+      if (epoch === previewEpoch.current) setPreview(inspected);
+    } catch (cause) {
+      if (epoch === previewEpoch.current)
+        setError(cause instanceof Error ? cause.message : "This submission could not be opened.");
+    } finally {
+      if (epoch === previewEpoch.current) setBusy(false);
+    }
   }
   async function decide(approved: boolean) {
     if (!preview || busy || reason.trim().length < 8 || (approved && (!attested || shown < preview.snapshot.questions.length))) return;
@@ -57,7 +75,7 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
       setPreview(undefined);
       setMessage(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
-      setRefresh(value => value + 1);
+      refreshQueue();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The review could not be saved.";
       // An obsolete reviewed revision must not remain approvable by the same
@@ -70,7 +88,7 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
   }
   return <GlassCard pad className="qsl-review-queue">
     <PanelHeader headingLevel={2} title="Question Set Library review" sub="Learner submissions appear in search only after academic review."
-      action={<GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16} aria-hidden="true" /> Refresh</GButton>} />
+      action={<GButton size="sm" disabled={loading || (busy && !!preview)} onClick={refreshQueue}><RefreshCw size={16} aria-hidden="true" /> Refresh</GButton>} />
     {loading && <p role="status">Checking academic review access…</p>}
     {!loading && !reviewer && !error && <p className="sub">This operator account has no academic reviewer permission. Host access alone cannot approve medical content.</p>}
     {reviewer && !loading && queue.length === 0 && <p className="sub">No learner Question Sets await review.</p>}
