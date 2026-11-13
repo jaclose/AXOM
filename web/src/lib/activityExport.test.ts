@@ -14,6 +14,10 @@ vi.mock("xlsx-js-style", () => ({
     decode_range: () => ({ s: { c: 0, r: 0 }, e: { c: 5, r: 0 } }),
     encode_cell: ({ c }: { c: number }) => String.fromCharCode(65 + c) + "1",
     book_append_sheet: (_book: unknown, sheet: { rows: unknown[][] }, name: string) => {
+      // Excel worksheet names are case-insensitive. Mirror the real writer's collision guard.
+      if (writtenSheets.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+        throw new Error(`Duplicate worksheet: ${name}`);
+      }
       writtenSheets.push({ name, rows: sheet.rows });
     },
   },
@@ -23,6 +27,41 @@ vi.mock("xlsx-js-style", () => ({
 function entry(id: string, ts: string, type = "Reading"): StudyLog {
   return { id, ts, type, dayKey: "2026-07-12", minutes: 30, cards: 5 };
 }
+
+describe("activity workbook sheet names", () => {
+  it("retains all custom types when sanitized, truncated or case-folded names collide", async () => {
+    writtenSheets.length = 0;
+    const types = [
+      "Anki/Review",
+      "Anki?Review",
+      "Overview",
+      "overview",
+      "all activity",
+      `${"A".repeat(31)}1`,
+      `${"A".repeat(31)}2`,
+    ];
+    const logs = types.map((type, index) => ({
+      ...entry(String(index), "2026-11-13T12:00:00Z", type),
+      note: `original:${type}`,
+    }));
+
+    await exportActivityWorkbook(logs);
+
+    expect(writtenSheets).toHaveLength(types.length + 2);
+    expect(writtenSheets.map((item) => item.name).slice(0, 2)).toEqual(["Overview", "All Activity"]);
+    expect(new Set(writtenSheets.map((item) => item.name.toLowerCase())).size).toBe(writtenSheets.length);
+    for (const sheet of writtenSheets) {
+      expect(sheet.name.length).toBeLessThanOrEqual(31);
+    }
+    const typeSheets = writtenSheets.slice(2);
+    expect(typeSheets.some((item) => item.name === "Anki Review")).toBe(true);
+    expect(typeSheets.some((item) => item.name === "Anki Review (2)")).toBe(true);
+    expect(typeSheets.map((item) => item.rows[1][5]).sort()).toEqual(logs.map((log) => log.note).sort());
+    expect(writtenSheets[1].rows.slice(1).map((row) => row[5]).sort()).toEqual(
+      logs.map((log) => log.note).sort(),
+    );
+  });
+});
 
 describe("activity workbook chronology", () => {
   it("orders both All Activity and per-type sheets by actual UTC instant across offsets", async () => {
