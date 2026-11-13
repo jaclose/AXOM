@@ -144,4 +144,36 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["unique"]);
     expect(termQuizSelection("Term 5", "account", state).questionIds).toEqual([]);
   });
+
+  it("holds an original question ID reused by downloaded receipts in different terms", () => {
+    const state = workspace([
+      receipt(1, ["cross-term", "term-one-only"]),
+      receipt(2, ["cross-term", "term-two-only"], { term: "Term 2" }),
+    ], [question("cross-term"), question("term-one-only"), question("term-two-only")]);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["term-one-only"]);
+    expect(termQuizSelection("Term 2", "account", state).questionIds).toEqual(["term-two-only"]);
+  });
+
+  it("continues deduplicating compatible shared membership across equivalent term labels", () => {
+    const state = workspace([
+      receipt(1, ["shared", "first"]),
+      receipt(2, ["shared", "second"], { term: "T01" }),
+    ], [question("shared"), question("first"), question("second")]);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["shared", "first", "second"]);
+  });
+
+  it("holds duplicate on-device set identities and their linked questions without hiding clean neighbors", () => {
+    const state = workspace([receipt(1, ["ambiguous", "clean"], {
+      setIds: ["duplicated-set", "clean-set"],
+    })], [
+      question("ambiguous", { setId: "duplicated-set" }),
+      question("clean", { setId: "clean-set" }),
+    ]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("duplicated-set"), set("duplicated-set"), set("clean-set")];
+    const selected = termQuizSelection("Term 1", "account", state);
+    expect(selected.questionIds).toEqual(["clean"]);
+    expect(selected.setIds).toEqual(["clean-set"]);
+  });
+
 });
