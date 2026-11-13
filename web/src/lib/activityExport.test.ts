@@ -43,7 +43,7 @@ describe("activity workbook chronology", () => {
     expect(writeFile).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the old lexical ordering fallback for malformed imported timestamps", async () => {
+  it("places a valid timestamp ahead of a malformed imported timestamp", async () => {
     writtenSheets.length = 0;
     const valid = entry("valid", "2026-07-12T15:00:00Z", "Review");
     const invalid = entry("invalid", "zzz-not-a-date", "Review");
@@ -51,6 +51,36 @@ describe("activity workbook chronology", () => {
     await exportActivityWorkbook([valid, invalid]);
 
     expect(writtenSheets.find((item) => item.name === "Review")?.rows.slice(1).map((row) => row[1]))
-      .toEqual([invalid.ts, valid.ts]);
+      .toEqual([valid.ts, invalid.ts]);
+  });
+
+  it("uses one deterministic order for all permutations of valid offsets and malformed records", async () => {
+    const a = entry("A", "2026-07-12T12:00:00-04:00"); // 16:00 UTC
+    const b = entry("B", "2026-07-12T15:00:00Z"); // 15:00 UTC
+    const x = entry("X", "2026-07-12T14:00:00Bad"); // invalid
+    const permutations = [[a, b, x], [a, x, b], [b, a, x], [b, x, a], [x, a, b], [x, b, a]];
+
+    for (const logs of permutations) {
+      writtenSheets.length = 0;
+      await exportActivityWorkbook(logs);
+      for (const name of ["All Activity", "Reading"]) {
+        expect(writtenSheets.find((item) => item.name === name)?.rows.slice(1).map((row) => row[1]))
+          .toEqual([a.ts, b.ts, x.ts]);
+      }
+    }
+  });
+
+  it("orders multiple malformed timestamps lexically and breaks equal timestamps by ID", async () => {
+    writtenSheets.length = 0;
+    const invalidA = entry("invalid-a", "aaa-not-a-date", "Review");
+    const invalidZ = entry("invalid-z", "zzz-not-a-date", "Review");
+    const sameB = entry("b", "2026-07-12T15:00:00Z", "Review");
+    const sameA = entry("a", "2026-07-12T15:00:00Z", "Review");
+
+    await exportActivityWorkbook([invalidA, sameB, invalidZ, sameA]);
+    expect(writtenSheets.find((item) => item.name === "Review")?.rows.slice(1).map((row) => row[1]))
+      .toEqual([sameA.ts, sameB.ts, invalidZ.ts, invalidA.ts]);
+    expect(writtenSheets.find((item) => item.name === "Review")?.rows.slice(1).map((row) => row[5]))
+      .toEqual(["", "", "", ""]);
   });
 });
