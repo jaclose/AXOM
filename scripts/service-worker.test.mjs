@@ -121,9 +121,56 @@ test('R83 failed same-build install must never delete an existing usable cache',
   await existing.put('./index.html', new Response('original-shell'));
   let task;
   app.events.get('install')({ waitUntil: (value) => { task = value; } });
-  await assert.rejects(task, /synthetic quota rejection/);
+  await assert.rejects(task, /AXOM install refused: build cache already exists/);
   assert.ok((await app.caches.keys()).includes('axom-shell-current'), 'pre-existing same-build cache was deleted');
   assert.equal(await (await existing.match('./index.html')).text(), 'original-shell');
+});
+
+test('R87 reused build identity fails closed without mutating original cache bytes', async () => {
+  const required = './assets/critical-87654321.js';
+  let lateQuotaEnabled = false;
+  let installWrites = 0;
+  const app = worker({
+    precache: [required],
+    onCachePut: async (path) => {
+      if (lateQuotaEnabled) installWrites++;
+      if (lateQuotaEnabled && path === './index.html') throw new Error('synthetic late quota rejection');
+    },
+    fetchResponse: async (request) => {
+      const pathname = new URL(typeof request === 'string' ? request : request.url).pathname;
+      const mime = pathname.endsWith('.js') ? 'text/javascript'
+        : pathname.endsWith('.png') ? 'image/png'
+          : pathname.endsWith('.webmanifest') ? 'application/manifest+json' : 'text/html';
+      return new Response(pathname.endsWith('.js') ? 'NEW_BUILD_CODE' : 'NEW_BUILD_SHELL', {
+        headers: { 'content-type': mime, 'cache-control': 'public, max-age=600' },
+      });
+    },
+  });
+  const existing = await app.caches.open('axom-shell-current');
+  const older = await app.caches.open('axom-shell-prior');
+  const privateCache = await app.caches.open('private-learner-files');
+  const old = [
+    ['./', 'OLD_BUILD_ROOT'],
+    ['./index.html', 'OLD_BUILD_INDEX'],
+    [required, 'OLD_BUILD_CODE'],
+    ['./__axom-retained-public-chunks.json', 'OLD_BUILD_MANIFEST'],
+  ];
+  for (const [path, bytes] of old) await existing.put(path, new Response(bytes));
+  await older.put('./older.txt', new Response('OLD_GENERATION_BYTES'));
+  await privateCache.put('./private.txt', new Response('PRIVATE_LEARNER_BYTES'));
+  lateQuotaEnabled = true;
+
+  let install;
+  app.events.get('install')({ waitUntil: (task) => { install = task; } });
+  await assert.rejects(install, /AXOM install refused: build cache already exists/,
+    'a repeated build ID must fail closed before any same-generation write');
+  assert.equal(installWrites, 0, 'no existing same-build entry may be overwritten before install aborts');
+  for (const [path, bytes] of old) {
+    assert.equal(await (await existing.match(path))?.text(), bytes, path + ': original cache bytes must survive');
+  }
+  assert.equal(await (await older.match('./older.txt')).text(), 'OLD_GENERATION_BYTES');
+  assert.equal(await (await privateCache.match('./private.txt')).text(), 'PRIVATE_LEARNER_BYTES');
+  assert.deepEqual(await app.caches.keys(), ['axom-shell-current', 'axom-shell-prior', 'private-learner-files']);
 });
 
 test('worker stages an update without forcing activation; only consent activates', async () => {
