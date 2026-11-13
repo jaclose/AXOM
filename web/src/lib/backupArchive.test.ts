@@ -148,6 +148,30 @@ describe("portable binary media backup", () => {
     },
   );
 
+  it.each(["non-image payload", "CRC-correct PNG with invalid zlib data"] as const)(
+    "rejects a ZIP with %s before exposing workspace data", async defect => {
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const exported = await createMediaBackupArchive({}, refs);
+      const { default: JSZip } = await import("jszip");
+      const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+      const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+      // Keep the manifest internally consistent; a byte-length-only guard
+      // must not be allowed to stand in for actual media integrity.
+      const damaged = defect === "non-image payload"
+        ? new Uint8Array(PNG_BYTES.length)
+        : crcCorrectPngWithIdat(Uint8Array.from([0, 1, 2, 3]));
+      manifest.media[0].metadata.byteSize = damaged.byteLength;
+      zip.file("media/0", damaged);
+      zip.file("workspace.json", JSON.stringify(manifest));
+      const corrupted = await zip.generateAsync({ type: "blob" });
+      await expect(readPortableBackup(new File([corrupted], "corrupted.zip")))
+        .rejects.toThrow(/backup image failed.*integrity/i);
+    },
+  );
+
   it("accepts distinct legacy ZIP media IDs when both omit an explicit blobKey", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
