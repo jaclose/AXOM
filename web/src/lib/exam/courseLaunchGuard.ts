@@ -2,7 +2,7 @@
 // The canonical reader now keeps the entire requested pool intact. This
 // diagnostic guard explains missing/review records without consuming the
 // pending request or introducing a second session store.
-import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS as MAX_SELECTION, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
+import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS as MAX_SELECTION, hasDeclaredCourseScopeConflict, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
 import { questionPracticeReadiness } from "../questionFilters";
 import type { QuestionRecord } from "../questions";
 
@@ -54,6 +54,11 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
     if (byId.has(question.id)) duplicateOnDevice.add(question.id);
     else byId.set(question.id, question);
   }
+  const expectedScope = {
+    module: candidate.module as string,
+    ...(typeof candidate.week === "number" ? { week: candidate.week } : {}),
+    ...(typeof candidate.courseId === "string" ? { courseId: candidate.courseId } : {}),
+  };
   let ready = 0;
   let missing = 0;
   const reviewIds: string[] = [];
@@ -61,7 +66,7 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
     const record = byId.get(id);
     if (duplicateOnDevice.has(id)) reviewIds.push(id);
     else if (!record) missing += 1;
-    else if (questionPracticeReadiness(record) === "ready") ready += 1;
+    else if (questionPracticeReadiness(record) === "ready" && !hasDeclaredCourseScopeConflict(record, expectedScope)) ready += 1;
     else reviewIds.push(id);
   }
 
