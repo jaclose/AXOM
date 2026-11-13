@@ -195,6 +195,31 @@ describe("portable binary media backup", () => {
       .resolves.toMatchObject({ rawText: expect.any(String), restoreMedia: expect.any(Function) });
   });
 
+  it.each(["same-size non-image", "CRC-correct PNG with invalid zlib", "truncated PNG payload"] as const)(
+    "rejects a JSON backup with %s before exposing workspace state", async defect => {
+      const bytes = defect === "same-size non-image" ? new Uint8Array(PNG_BYTES.length)
+        : defect === "CRC-correct PNG with invalid zlib" ? crcCorrectPngWithIdat(Uint8Array.from([0, 1, 2, 3]))
+          : PNG_BYTES;
+      const base64 = defect === "truncated PNG payload" ? PNG_BASE64.slice(0, -8)
+        : btoa(String.fromCharCode(...bytes));
+      const raw = {
+        _app: "AXOM",
+        [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", byteSize: bytes.length, base64 }],
+      };
+      await expect(readPortableBackup(new File([JSON.stringify(raw)], "corrupt.json")))
+        .rejects.toThrow(/backup image failed.*integrity/i);
+    },
+  );
+
+  it("rejects a malformed embedded JSON image record instead of silently omitting it", async () => {
+    const raw = {
+      _app: "AXOM",
+      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "", base64: PNG_BASE64 }],
+    };
+    await expect(readPortableBackup(new File([JSON.stringify(raw)], "malformed.json")))
+      .rejects.toThrow(/invalid or missing image record/i);
+  });
+
   it("reports missing images and retains compatibility with existing JSON backups", async () => {
     expect((await createMediaBackupArchive({}, refs)).missingBlobKeys).toEqual([attachment.blobKey]);
     const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: PNG_BASE64 }] };
