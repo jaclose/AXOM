@@ -178,7 +178,12 @@ export async function listMyQuestionSetSubmissions(accountId: string): Promise<L
 
 export async function submitQuestionSetToLibrary(accountId: string, sourceId: string,
   snapshot: SharedQuestionSetSnapshot, credit: string,
-  attestations: CommunityPublicationAttestations): Promise<string> {
+  attestations: CommunityPublicationAttestations,
+  // The publisher can provide an exact local-revision readback. This runs
+  // synchronously after the async auth gate and immediately before the RPC.
+  // A saved checkbox cannot authorize source evidence changed during auth.
+  revalidateCurrent?: () => SharedQuestionSetSnapshot,
+): Promise<string> {
   // A valid answer key is not evidence of redistribution rights or human
   // source review. Reject direct callers that omit either explicit assertion.
   if (attestations?.rightsConfirmed !== true || attestations?.answersConfirmed !== true)
@@ -210,6 +215,8 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   if (submittedSnapshot.questions.some(question => !hasExplanationProse(question.explanation)))
     throw new Error("Every submitted question needs teaching explanation prose, not only a key or source notice. Review missing explanations before submitting.");
   return withAccount(accountId, async client => {
+    if (revalidateCurrent && JSON.stringify(revalidateCurrent()) !== JSON.stringify(submittedSnapshot))
+      throw new Error("The Question Set changed during account verification. Reopen it and reconfirm source review and sharing rights.");
     const { data, error } = await client.rpc("submit_question_set_library", {
       p_source_id: sourceId, p_snapshot: submittedSnapshot, p_credit: credit.trim(),
       p_rights_confirmed: attestations.rightsConfirmed, p_answers_confirmed: attestations.answersConfirmed,

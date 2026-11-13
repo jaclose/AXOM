@@ -831,6 +831,59 @@ describe("Question Set draft explanation review", () => {
     expect(source.correctKey).toBe("A");
   });
 
+  it("rechecks private source evidence after account verification before submitting a reviewed set", async () => {
+    const source = question({
+      explanation: "Vascular smooth muscle in the tunica media regulates arterial caliber and peripheral resistance.",
+    });
+    mocks.workspace.questions = [source];
+    let finishAuthentication!: () => void;
+    mocks.submit.mockImplementationOnce(async (...args: unknown[]) => {
+      const validate = args[5] as () => unknown;
+      await new Promise<void>(resolve => { finishAuthentication = resolve; });
+      validate();
+      return "unreachable-publication-id";
+    });
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+    // This is a private source-review revision without a timestamp or key edit.
+    mocks.workspace.questions = [{ ...source, sourceDocumentId: "newly-replaced-source" }];
+    await act(async () => { finishAuthentication(); });
+    expect(await screen.findByText(/Question Set or its source review changed while publishing/)).toBeTruthy();
+    expect(mocks.submissions).toHaveBeenCalledTimes(2);
+    expect((mocks.workspace.questions[0] as QuestionRecord).correctKey).toBe("A");
+  });
+
+  it("revokes checked rights and source attestations changed during authentication", async () => {
+    const source = question({
+      explanation: "Vascular smooth muscle in the tunica media regulates arterial caliber and peripheral resistance.",
+    });
+    mocks.workspace.questions = [source];
+    let finishAuthentication!: () => void;
+    mocks.submit.mockImplementationOnce(async (...args: unknown[]) => {
+      const validate = args[5] as () => unknown;
+      await new Promise<void>(resolve => { finishAuthentication = resolve; });
+      validate();
+      return "unreachable-publication-id";
+    });
+    render(<QuestionSetLibrarySubmitDialog set={set} questions={[source]} onClose={vi.fn()} />);
+    const send = await screen.findByRole("button", { name: "Send for review" }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /I own this content/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every answer/ }));
+    await waitFor(() => expect(send.disabled).toBe(false));
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+    expect(signalCommunityPublicationChange()).toBe(true);
+    await act(async () => { finishAuthentication(); });
+    expect(await screen.findByText(/publication attestations changed during verification/)).toBeTruthy();
+    expect(mocks.submissions).toHaveBeenCalledTimes(2);
+    expect(source.correctKey).toBe("A");
+  });
+
   it("refuses a stale tab's checked attestations after another tab submits and withdraws, even before a storage event", async () => {
     const source = question({ explanation: "The tunica media contains smooth muscle that regulates vascular resistance." });
     mocks.workspace.questions = [source];
