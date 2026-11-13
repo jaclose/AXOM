@@ -2159,3 +2159,49 @@ test('R98 only-if-cached public requests remain browser-owned without forced net
   assert.equal(await ordinary.text(), 'CACHED_ICON');
   assert.equal(networkAttempts, 0, 'ordinary cached GET must remain offline-safe');
 });
+
+
+test('R99 force-cache SW miss preserves browser HTTP cache preference without changing ordinary GET', async () => {
+  const asset = '/icons/axom-orb-512.png';
+  const url = 'https://app.test' + asset;
+  const requests = [];
+  const app = worker({
+    fetchResponse: async (request, options) => {
+      requests.push({
+        url: typeof request === 'string' ? request : request.url,
+        cache: typeof request === 'string' ? options?.cache : request.cache,
+      });
+      return new Response('HTTP_CACHE_ICON', {
+        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=600' },
+      });
+    },
+  });
+  const dispatch = async (path, cacheMode) => {
+    let response;
+    const extensions = [];
+    app.events.get('fetch')({
+      request: { url: 'https://app.test' + path, method: 'GET', mode: 'same-origin',
+        cache: cacheMode, headers: new Headers() },
+      respondWith: (value) => { response = value; },
+      waitUntil: (value) => extensions.push(value),
+    });
+    assert.ok(response, 'force-cache must retain the validated service-worker offline path');
+    const result = await response;
+    await Promise.all(extensions);
+    return result;
+  };
+
+  assert.equal(await (await dispatch(asset, 'force-cache')).text(), 'HTTP_CACHE_ICON');
+  assert.equal(requests.length, 1, 'SW miss must invoke the browser fetch exactly once');
+  assert.deepEqual(requests[0], { url, cache: 'force-cache' },
+    'do not replace the original force-cache request with a cache-busted no-store fetch');
+
+  assert.equal(await (await dispatch(asset, 'force-cache')).text(), 'HTTP_CACHE_ICON',
+    'validated current-generation asset remains usable offline');
+  assert.equal(requests.length, 1, 'a current-generation SW cache hit should avoid another browser fetch');
+
+  await dispatch('/icons/axom-orb-192.png', 'default');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].cache, 'no-store', 'ordinary cache miss preserves AXOM revalidation');
+  assert.match(requests[1].url, /__axom_revalidate=\\d+/, 'default miss remains cache-busted');
+});
