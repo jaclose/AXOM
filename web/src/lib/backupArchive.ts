@@ -108,11 +108,18 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
     if (!width || !height || !allowedDepths[color]?.includes(depth)
       || bytes[26] !== 0 || bytes[27] !== 0 || (interlace !== 0 && interlace !== 1)) return false;
     const parts: Uint8Array[] = [];
-    let totalCompressed = 0, sawIdat = false, afterIdat = false, palette = false;
+    let totalCompressed = 0, sawIdat = false, afterIdat = false, paletteEntries = 0;
     for (let at = 8; at + 12 <= bytes.length;) {
       const n = u32(at), name = String.fromCharCode(...bytes.subarray(at + 4, at + 8));
       if (name === "IHDR" && at !== 8) return false;
-      if (name === "PLTE") { if (sawIdat) return false; palette = true; }
+      if (name === "PLTE") {
+        // PNG palettes have 1..256 RGB triplets, appear once before IDAT, and
+        // are forbidden in grayscale images. Indexed depth limits entry count.
+        if (sawIdat || paletteEntries || color === 0 || color === 4
+          || n === 0 || n % 3 !== 0 || n > 3 * 256
+          || (color === 3 && n / 3 > 2 ** depth)) return false;
+        paletteEntries = n / 3;
+      }
       if (name === "IDAT") {
         if (afterIdat) return false;
         sawIdat = true;
@@ -123,7 +130,7 @@ async function hasInflatablePngImageData(bytes: Uint8Array): Promise<boolean> {
       if (name === "IEND") break;
       at += n + 12;
     }
-    if (!sawIdat || totalCompressed === 0 || (color === 3 && !palette)) return false;
+    if (!sawIdat || totalCompressed === 0 || (color === 3 && !paletteEntries)) return false;
     const passes = interlace === 0 ? [[0, 0, 1, 1]] : [
       [0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4],
       [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2],
