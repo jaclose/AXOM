@@ -233,4 +233,73 @@ describe("saved-work recovery without downloading content", () => {
   });
 
 
+  it("exports 4097 verified small images as a recoverable ZIP and certifies only after complete coverage", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    const images = Array.from({ length: 4097 }, (_, index) => ({
+      ...attachment, id: `figure-${index}`, blobKey: `image-${index}`,
+    }));
+    state.questions[0].attachments = images;
+    dispose();
+    // Real exporter and ZIP preflight run; a synthetic loader supplies each
+    // immutable key without thousands of unrelated IndexedDB writes.
+    dispose = setMissingAttachmentLoader(async () => ({
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "q", updatedAt: attachment.updatedAt,
+    }));
+
+    const result = await exportStateWithAttachments(state);
+    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
+    expect(result).toMatchObject({ attachmentCount: 4097, missingBlobKeys: [], originalCount: 0 });
+    expect(lastBackupAt()).not.toBeNull();
+    const portable = await readPortableBackup(new File([exported!], filename));
+    expect(JSON.parse(portable.rawText).questions[0].attachments).toHaveLength(4097);
+    expect(JSON.parse(portable.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
+    const staged = await portable.restoreMedia([{ id: "q", attachments: [images[0]] }]);
+    expect(staged).toMatchObject({ restored: 1, skipped: 4096 });
+    expect(new Uint8Array(await (await getQuestionAttachmentBlob(images[0].blobKey, { localOnly: true }))!.blob.arrayBuffer()))
+      .toEqual(PNG_BYTES);
+    await staged.rollback();
+    expect(await getQuestionAttachmentBlob(images[0].blobKey, { localOnly: true })).toBeUndefined();
+  }, 90_000);
+  it("falls back to a valid ZIP when the serialized JSON exceeds its import byte limit", async () => {
+    localStorage.clear();
+    const state = makeSeed();
+    state.documents = []; state.questions = [];
+    const nativeSize = Object.getOwnPropertyDescriptor(NativeBlob.prototype, "size")!.get!;
+    let simulatedOversize = false;
+    vi.spyOn(NativeBlob.prototype, "size", "get").mockImplementation(function (this: Blob) {
+      const actual = nativeSize.call(this) as number;
+      if (!simulatedOversize && this.type === "application/json") {
+        simulatedOversize = true;
+        return 256 * 1024 * 1024 + 1;
+      }
+      return actual;
+    });
+    const result = await exportStateWithAttachments(state);
+    expect(simulatedOversize).toBe(true);
+    expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [], originalCount: 0 });
+    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
+    expect(lastBackupAt()).not.toBeNull();
+    const imported = await readPortableBackup(new File([exported!], filename));
+    expect(parseImport(imported.rawText).profile.userId).toBe(state.profile.userId);
+  });
+
+  it("refuses an unimportable oversized ZIP workspace before downloading or marking success", async () => {
+    localStorage.clear();
+    const { state } = await fixture(); // An original-backed export chooses ZIP.
+    const nativeSize = Object.getOwnPropertyDescriptor(NativeBlob.prototype, "size")!.get!;
+    vi.spyOn(NativeBlob.prototype, "size", "get").mockImplementation(function (this: Blob) {
+      const actual = nativeSize.call(this) as number;
+      return this.type === "application/json" ? 128 * 1024 * 1024 + 1 : actual;
+    });
+    await expect(exportStateWithAttachments(state))
+      .rejects.toThrow(/ZIP workspace exceeds the 128 MB recovery safety limit/i);
+    expect(exported).toBeUndefined();
+    expect(filename).toBe("");
+    expect(lastBackupAt()).toBeNull();
+  });
+
+
 });

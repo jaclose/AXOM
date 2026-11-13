@@ -16,6 +16,7 @@ type References = ReadonlyArray<{ id: string; attachments?: readonly QuestionIma
 type MediaEntry = { file: string; metadata: Omit<QuestionAttachmentExportPayload, "base64"> };
 type OriginalEntry = { file: string; documentId: string; sha256: string; byteSize: number; mimeType: string };
 const MAX_ORIGINAL_BYTES = 128 * 1024 * 1024;
+export const MAX_ZIP_WORKSPACE_BYTES = MAX_ORIGINAL_BYTES;
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
@@ -23,8 +24,8 @@ const FORMAT = "axom-media-backup";
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
 // Small JSON backups include base64 inline; reject unbounded parsing/inflate.
 // ZIP remains the supported format for larger original exports.
-const MAX_JSON_BACKUP_BYTES = 256 * 1024 * 1024;
-const MAX_JSON_MEDIA_RECORDS = 4096;
+export const MAX_JSON_BACKUP_BYTES = 256 * 1024 * 1024;
+export const MAX_JSON_MEDIA_RECORDS = 4096;
 const MAX_JSON_MEDIA_BYTES = LARGE_MEDIA_BACKUP_BYTES;
 
 type MediaReference = { metadata: Omit<QuestionAttachmentExportPayload, "base64">; conflicting: boolean };
@@ -289,7 +290,13 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
       originals.push({ file, documentId: document.id, sha256: document.checksum!.replace(/^sha256:/, ""), byteSize: bytes.byteLength, mimeType: blob.type });
     } catch { missingOriginalIds.push(document.id); }
   }
-  zip.file("workspace.json", JSON.stringify({ ...payload, _backupFormat: FORMAT, _backupVersion: 2, media, originals }));
+  // The ZIP reader limits the uncompressed workspace.json entry to 128 MiB.
+  // Do not produce a backup the same application would refuse to restore.
+  const workspaceJson = JSON.stringify({ ...payload, _backupFormat: FORMAT, _backupVersion: 2, media, originals });
+  if (new Blob([workspaceJson], { type: "application/json" }).size > MAX_ZIP_WORKSPACE_BYTES) {
+    throw new Error("The ZIP workspace exceeds the 128 MB recovery safety limit. No backup was downloaded or certified.");
+  }
+  zip.file("workspace.json", workspaceJson);
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true });
   if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed during export. Start a new export from the current workspace.");
   return { blob, attachmentCount: media.length, missingBlobKeys, originalCount: originals.length, missingOriginalIds };
