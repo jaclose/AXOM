@@ -479,6 +479,12 @@ const PRIVATE_NESTED_DEVICE_URI = /(?:^|[^a-z0-9])(?:file:\/+|content:\/\/)/i;
 // Browser object URLs and data URIs can embed private or unlicensed bytes.
 // They are not transferable source citations, even inside public URL parameters.
 const PRIVATE_INLINE_DOCUMENT_URI = /(?:^|[^a-z0-9])(?:blob:(?:https?:\/\/|null\/)|data:[^\s,;]*[,;])/i;
+// Reject residual encoded scheme delimiters at any percent-nesting depth. The
+// usual three decode passes are bounded and can otherwise miss a fourth layer.
+const PRIVATE_RESIDUAL_URI_SCHEME = /(?:^|[^a-z0-9])(?:file|content|data|blob)%(?:25)*3a/i;
+// For fully percent-encoded schemes whose letters are also hidden, hold
+// anomalous 4+ layers for manual source review instead of guessing provenance.
+const PRIVATE_EXCESSIVE_PERCENT_NESTING = /%(?:25){3,}[0-9a-f]{2}/i;
 const PUBLIC_HTTP_CITATION_URL = /https?:\/\/[^\s<>"'|;,]+/gi;
 const PRIVATE_DEVICE_CITATION = /(?:^|[^a-z0-9/@])(?:file:\/+|content:\/\/|\/\/[^\s\x2f]+\/|\/[a-z0-9._~-]+(?:\/|$)|~\/|[a-z]:[\\/])|\\\\/i;
 
@@ -492,6 +498,7 @@ export function hasPrivateDeviceCitation(citation: string | undefined): boolean 
     if (PRIVATE_HTTP_CITATION_USERINFO.test(value)) return true;
     if (PRIVATE_NESTED_DEVICE_URI.test(value)) return true;
     if (PRIVATE_INLINE_DOCUMENT_URI.test(value)) return true;
+    if (PRIVATE_RESIDUAL_URI_SCHEME.test(value) || PRIVATE_EXCESSIVE_PERCENT_NESTING.test(value)) return true;
     const withoutPublicUrls = value.replace(PUBLIC_HTTP_CITATION_URL, " ");
     if (PRIVATE_DEVICE_CITATION.test(withoutPublicUrls)) return true;
     if (pass === 3) break;
