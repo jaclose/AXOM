@@ -66,6 +66,30 @@ function palettePng(palettes: readonly Uint8Array[], options: {
   ]);
 }
 
+/** Pack one nonzero sample in the final Adam7 pass while all earlier
+ * passes contain legal index-zero pixels. This catches pass-order blind spots. */
+function lateAdam7IndexedRows(width: number, height: number, depth: 1 | 2 | 4 | 8): Uint8Array {
+  const passes = [
+    [0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4],
+    [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2],
+  ];
+  const raw: number[] = [];
+  for (const [pass, [x, y, dx, dy]] of passes.entries()) {
+    const w = Math.max(0, Math.ceil((width - x) / dx));
+    const h = Math.max(0, Math.ceil((height - y) / dy));
+    if (!w || !h) continue;
+    for (let row = 0; row < h; row++) {
+      const packed = new Uint8Array(Math.ceil(w * depth / 8));
+      if (pass === 6 && row === h - 1) {
+        const bit = (w - 1) * depth;
+        packed[bit >>> 3] = 1 << (8 - depth - (bit & 7));
+      }
+      raw.push(0, ...packed); // filter None
+    }
+  }
+  return Uint8Array.from(raw);
+}
+
 const pngBlob = () => new Blob([PNG_BYTES.buffer as ArrayBuffer], { type: "image/png" });
 const attachment: QuestionImageAttachment = { id: "figure", blobKey: "private-library:figure", fileName: "figure.png", mimeType: "image/png", byteSize: PNG_BYTES.length, altText: "Test figure", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z", role: "question" };
 const refs = [{ id: "held-question", attachments: [attachment] }];
@@ -194,6 +218,34 @@ describe("portable binary media backup", () => {
         expect(zip.missingBlobKeys).toEqual([attachment.blobKey]);
         expect(json.payloads).toEqual([]);
         expect(json.missingBlobKeys).toEqual([attachment.blobKey]);
+      }
+    }
+  });
+
+  it("checks nonfirst Adam7 passes and cross-byte packed palette indices", async () => {
+    const palettes = [
+      Uint8Array.from([12, 34, 56]), // index 1 missing
+      Uint8Array.from([12, 34, 56, 78, 90, 12]), // index 1 present
+    ];
+    for (const depth of [1, 2, 4, 8] as const) {
+      const rows = lateAdam7IndexedRows(9, 5, depth);
+      for (const palette of palettes) {
+        const valid = palette.length === 6;
+        const bytes = palettePng([palette], {
+          bitDepth: depth, width: 9, height: 5, interlace: 1, inflatedRows: rows,
+        });
+        const references = [{ id: "held-question", attachments: [{ ...attachment, byteSize: bytes.length }] }];
+        await putQuestionAttachmentBlob(attachment.blobKey, {
+          blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+          mimeType: "image/png", byteSize: bytes.length,
+          questionId: "held-question", updatedAt: attachment.updatedAt,
+        });
+        const zip = await createMediaBackupArchive({}, references);
+        const json = await collectVerifiedMediaBackupPayloads(references);
+        expect(zip.attachmentCount, `Adam7 depth ${depth} palette ${palette.length / 3}`).toBe(valid ? 1 : 0);
+        expect(zip.missingBlobKeys).toEqual(valid ? [] : [attachment.blobKey]);
+        expect(json.payloads.length).toBe(valid ? 1 : 0);
+        expect(json.missingBlobKeys).toEqual(valid ? [] : [attachment.blobKey]);
       }
     }
   });
