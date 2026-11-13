@@ -148,6 +148,43 @@ describe("portable binary media backup", () => {
     }
   });
 
+
+  it("round-trips images with two verified originals and supports staged image rollback", async () => {
+    const firstBlob = new Blob(["first source"], { type: "text/plain" });
+    const secondBlob = new Blob(["second source"], { type: "text/plain" });
+    const document = async (id: string, blob: Blob): Promise<SourceDocument> => ({
+      id, title: id, fileName: `${id}.txt`, fileType: "text/plain",
+      uploadedAt: "2026-10-13", rawText: await blob.text(),
+      sizeBytes: blob.size, checksum: await sha256Hex(await blob.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    });
+    const first = await document("first-original", firstBlob);
+    const second = await document("second-original", secondBlob);
+    await saveSourceOriginal(first, firstBlob);
+    await saveSourceOriginal(second, secondBlob);
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({ documents: [first, second] }, refs, [first, second]);
+    expect(exported).toMatchObject({
+      attachmentCount: 1, originalCount: 2, missingBlobKeys: [], missingOriginalIds: [],
+    });
+    const portable = await readPortableBackup(new File([exported.blob], "mixed-originals.zip"));
+    await deleteSourceOriginal(first.id);
+    await deleteSourceOriginal(second.id);
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    const staged = await portable.restoreMedia(refs);
+    expect(staged).toMatchObject({ restored: 1, skipped: 0 });
+    expect(await portable.restoreOriginals([first, second])).toEqual({ restored: 2, skipped: 0 });
+    expect(await (await readSourceOriginal(first.id, first.checksum))?.text()).toBe("first source");
+    expect(await (await readSourceOriginal(second.id, second.checksum))?.text()).toBe("second source");
+    const recovered = await getQuestionAttachmentBlob(attachment.blobKey);
+    expect(new Uint8Array(await recovered!.blob.arrayBuffer())).toEqual(PNG_BYTES);
+    await staged.rollback();
+    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
+  });
+
   it("round-trips distinct question references to one shared image without embedding base64 in workspace JSON", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "held-question", updatedAt: attachment.updatedAt });
     const secondAttachment = { ...attachment, id: "figure-second", assetId: "source-page-second" };
