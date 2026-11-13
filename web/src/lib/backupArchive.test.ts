@@ -121,6 +121,56 @@ describe("portable binary media backup", () => {
     expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
   });
 
+  it.each(["duplicate storage key", "duplicate archive path"] as const)(
+    "rejects a ZIP with %s media entries before exposing workspace state", async kind => {
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const exported = await createMediaBackupArchive({}, refs);
+      const { default: JSZip } = await import("jszip");
+      const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+      const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+      const original = manifest.media[0];
+      if (kind === "duplicate storage key") {
+        zip.file("media/1", PNG_BYTES);
+        manifest.media.push({ ...original, file: "media/1" });
+      } else {
+        manifest.media.push({
+          ...original,
+          metadata: { ...original.metadata, blobKey: "private-library:another-figure" },
+        });
+      }
+      zip.file("workspace.json", JSON.stringify(manifest));
+      const ambiguous = await zip.generateAsync({ type: "blob" });
+      await expect(readPortableBackup(new File([ambiguous], "ambiguous.zip")))
+        .rejects.toThrow(/duplicate image/i);
+    },
+  );
+
+  it("accepts distinct legacy ZIP media IDs when both omit an explicit blobKey", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({}, refs);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+    const original = manifest.media[0];
+    delete original.metadata.blobKey;
+    manifest.media.push({
+      file: "media/1",
+      metadata: { ...original.metadata, id: "legacy-second", questionId: "second-use" },
+    });
+    zip.file("media/1", PNG_BYTES);
+    manifest._backupVersion = 1;
+    zip.file("workspace.json", JSON.stringify(manifest));
+    const legacy = await zip.generateAsync({ type: "blob" });
+    await expect(readPortableBackup(new File([legacy], "legacy.zip")))
+      .resolves.toMatchObject({ rawText: expect.any(String), restoreMedia: expect.any(Function) });
+  });
+
   it("reports missing images and retains compatibility with existing JSON backups", async () => {
     expect((await createMediaBackupArchive({}, refs)).missingBlobKeys).toEqual([attachment.blobKey]);
     const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: PNG_BASE64 }] };
