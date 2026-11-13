@@ -50,13 +50,19 @@ function detailRows(logs: StudyLog[]) {
   ];
 }
 
-/** Export the latest event first, even if imported logs use different UTC offsets. */
+/** Export valid instants newest first, then malformed imported timestamps lexically. */
 function compareExportTimestampDesc(a: StudyLog, b: StudyLog): number {
   const aTime = Date.parse(a.ts);
   const bTime = Date.parse(b.ts);
-  return Number.isFinite(aTime) && Number.isFinite(bTime)
-    ? bTime - aTime
-    : b.ts.localeCompare(a.ts);
+  const aValid = Number.isFinite(aTime);
+  const bValid = Number.isFinite(bTime);
+
+  // Never mix epoch and lexical comparisons: that creates non-transitive cycles.
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  if (aValid && bValid && aTime !== bTime) return bTime - aTime;
+
+  const timestampOrder = b.ts.localeCompare(a.ts);
+  return timestampOrder || a.id.localeCompare(b.id);
 }
 
 function appendSheet(XLSX: XlsxModule, wb: WorkBook, name: string, rows: unknown[][], widths: number[]) {
