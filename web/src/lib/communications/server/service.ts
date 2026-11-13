@@ -62,7 +62,35 @@ export class CommunicationsService {
     checked(await this.db.from("communication_tokens").upsert({ token_hash: await hashToken(token), user_id: id, category, expires_at: new Date(Date.now() + 400 * 86400000).toISOString() }));
     return `${this.env.SUPABASE_URL}/functions/v1/communications?action=unsubscribe&token=${token}`;
   }
+  // Deletion admission and cancellation are distinct from generic essential-mail consent.
+  // Revalidate the exact request and job before outbound I/O: queued jobs can outlive
+  // their original consent, and a worker may have claimed one before cancellation.
+  private async deletionNoticeMaySend(job: EmailJob): Promise<boolean> {
+    if (job.type !== "deletion_requested" && job.type !== "deletion_scheduled") return true;
+    const key = /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(requested|scheduled)$/i.exec(job.idempotency_key);
+    const expected = job.type === "deletion_requested" ? "requested" : "scheduled";
+    const request = key && key[2] === expected
+      ? checked(await this.db.from("privacy_requests").select("id,status,actor_session_id")
+        .eq("id", key[1]).eq("user_id", job.user_id).eq("kind", "deletion").maybeSingle())
+      : null;
+    const current = checked(await this.db.from("email_jobs").select("status,first_attempt_at")
+      .eq("id", job.id).eq("user_id", job.user_id).maybeSingle());
+    if (request?.status === "scheduled" && request.actor_session_id && current?.status === "processing") {
+      return true;
+    }
+    // Unattempted jobs can be closed; ambiguous prior attempts require reconciliation.
+    // Never overwrite a job already cancelled, sent, or updated by another worker.
+    if (current?.status === "processing") {
+      const attempted = Boolean(current.first_attempt_at || job.first_attempt_at);
+      checked(await this.db.from("email_jobs").update({
+        status: attempted ? "failed" : "cancelled",
+        failure_code: attempted ? "delivery-reconciliation-required" : "deletion-consent-not-active",
+      }).eq("id", job.id).eq("user_id", job.user_id).eq("status", "processing"));
+    }
+    return false;
+  }
   async sendAxomEmail(job: EmailJob): Promise<void> {
+    if (!(await this.deletionNoticeMaySend(job))) return;
     if (job.campaign_id) { const campaign = required(await this.db.from("email_campaigns").select("status").eq("id", job.campaign_id).single()); if (campaign.status === "cancelled") { checked(await this.db.from("email_jobs").update({ status: "cancelled" }).eq("id", job.id)); return; } }
     const user = await this.user(job.user_id); const category = TEMPLATE_CATEGORY[job.type];
     const [prefs, suppression, deletion, context] = await Promise.all([this.preferenceRows(job.user_id), this.db.from("email_suppressions").select("email").eq("email", (user.email ?? "").toLowerCase()).maybeSingle(), this.db.from("privacy_requests").select("id").eq("user_id", job.user_id).eq("kind", "deletion").in("status", ["scheduled", "processing", "failed"]).limit(1), this.context(job.user_id)]);
@@ -87,6 +115,8 @@ export class CommunicationsService {
       // Persist before I/O: changing a retry body would violate provider idempotency.
       required(await this.db.from("email_jobs").update({ delivery_payload: payload, first_attempt_at: new Date().toISOString() }).eq("id", job.id).eq("status", "processing").select("id").single());
     }
+    // Cancellation can win while personalization/template I/O is in progress.
+    if (!(await this.deletionNoticeMaySend(job))) return;
     const providerId = await this.provider.sendPrepared(payload, job.idempotency_key, job.variables.test);
     checked(await this.db.from("email_jobs").update({ status: "sent", provider_id: providerId, sent_at: new Date().toISOString(), failure_code: null }).eq("id", job.id).eq("status", "processing"));
     checked(await this.db.from("email_send_log").upsert({ job_id: job.id, attempt: job.attempts, outcome: "sent", provider_id: providerId }, { onConflict: "job_id,attempt" }));

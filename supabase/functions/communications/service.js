@@ -168,7 +168,7 @@ function m(e, t) {
 	};
 }
 //#endregion
-//#region ../AXOM-mothership-vault-session-20261107/web/node_modules/react/cjs/react.production.min.js
+//#region web/node_modules/react/cjs/react.production.min.js
 var h = /* @__PURE__ */ e(((e) => {
 	var t = Symbol.for("react.element"), n = Symbol.for("react.portal"), r = Symbol.for("react.fragment"), i = Symbol.for("react.strict_mode"), a = Symbol.for("react.profiler"), o = Symbol.for("react.provider"), s = Symbol.for("react.context"), c = Symbol.for("react.forward_ref"), l = Symbol.for("react.suspense"), u = Symbol.for("react.memo"), d = Symbol.for("react.lazy"), f = Symbol.iterator;
 	function p(e) {
@@ -5025,7 +5025,21 @@ var St = class {
 			expires_at: new Date(Date.now() + 400 * 864e5).toISOString()
 		})), `${this.env.SUPABASE_URL}/functions/v1/communications?action=unsubscribe&token=${r}`;
 	}
+	async deletionNoticeMaySend(e) {
+		if (e.type !== "deletion_requested" && e.type !== "deletion_scheduled") return !0;
+		let t = /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(requested|scheduled)$/i.exec(e.idempotency_key), n = e.type === "deletion_requested" ? "requested" : "scheduled", r = t && t[2] === n ? J(await this.db.from("privacy_requests").select("id,status,actor_session_id").eq("id", t[1]).eq("user_id", e.user_id).eq("kind", "deletion").maybeSingle()) : null, i = J(await this.db.from("email_jobs").select("status,first_attempt_at").eq("id", e.id).eq("user_id", e.user_id).maybeSingle());
+		if (r?.status === "scheduled" && r.actor_session_id && i?.status === "processing") return !0;
+		if (i?.status === "processing") {
+			let t = !!(i.first_attempt_at || e.first_attempt_at);
+			J(await this.db.from("email_jobs").update({
+				status: t ? "failed" : "cancelled",
+				failure_code: t ? "delivery-reconciliation-required" : "deletion-consent-not-active"
+			}).eq("id", e.id).eq("user_id", e.user_id).eq("status", "processing"));
+		}
+		return !1;
+	}
 	async sendAxomEmail(e) {
+		if (!await this.deletionNoticeMaySend(e)) return;
 		if (e.campaign_id && Y(await this.db.from("email_campaigns").select("status").eq("id", e.campaign_id).single()).status === "cancelled") {
 			J(await this.db.from("email_jobs").update({ status: "cancelled" }).eq("id", e.id));
 			return;
@@ -5095,6 +5109,7 @@ var St = class {
 				first_attempt_at: (/* @__PURE__ */ new Date()).toISOString()
 			}).eq("id", e.id).eq("status", "processing").select("id").single());
 		}
+		if (!await this.deletionNoticeMaySend(e)) return;
 		let f = await this.provider.sendPrepared(u, e.idempotency_key, e.variables.test);
 		J(await this.db.from("email_jobs").update({
 			status: "sent",
