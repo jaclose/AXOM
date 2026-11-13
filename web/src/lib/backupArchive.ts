@@ -21,6 +21,11 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
 }
 const FORMAT = "axom-media-backup";
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
+// Small JSON backups include base64 inline; reject unbounded parsing/inflate.
+// ZIP remains the supported format for larger original exports.
+const MAX_JSON_BACKUP_BYTES = 256 * 1024 * 1024;
+const MAX_JSON_MEDIA_RECORDS = 4096;
+const MAX_JSON_MEDIA_BYTES = LARGE_MEDIA_BACKUP_BYTES;
 
 type MediaReference = { metadata: Omit<QuestionAttachmentExportPayload, "base64">; conflicting: boolean };
 
@@ -299,23 +304,55 @@ export interface PortableBackupRead {
 /** Read and validate a portable copy before any workspace state is adopted. */
 export async function readPortableBackup(file: File): Promise<PortableBackupRead> {
   if (!file.name.toLowerCase().endsWith(".zip")) {
+    // Guard before allocating the whole JSON string; older oversized files
+    // remain unchanged so they can be handled without destructive recovery.
+    if (file.size > MAX_JSON_BACKUP_BYTES) {
+      throw new Error("This JSON backup exceeds the 256 MB safety limit. No workspace data has been changed.");
+    }
     const rawText = await file.text();
     const parsed = JSON.parse(rawText) as unknown;
-    const payloads = extractQuestionAttachmentPayloads(parsed);
     const declared = parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)[ATTACHMENT_EXPORT_KEY] : undefined;
+    if (Array.isArray(declared) && declared.length > MAX_JSON_MEDIA_RECORDS) {
+      throw new Error("The JSON backup contains too many image records. No workspace data has been changed.");
+    }
+    const payloads = extractQuestionAttachmentPayloads(parsed);
     // Do not silently discard malformed records from a portable JSON image
     // list, or expose a workspace whose embedded bytes cannot be restored.
     if (declared !== undefined && (!Array.isArray(declared) || declared.length !== payloads.length)) {
       throw new Error("The backup contains an invalid or missing image record.");
     }
+    // Check the aggregate declared work before decoding or inflating any image.
+    // Count every record, including duplicates, since each costs parsing work.
+    let declaredMediaBytes = 0;
+    for (const payload of payloads) {
+      declaredMediaBytes += payload.byteSize;
+      if (!Number.isSafeInteger(declaredMediaBytes) || declaredMediaBytes > MAX_JSON_MEDIA_BYTES) {
+        throw new Error("The JSON backup's total image size exceeds the 128 MB safety limit. No workspace data has been changed.");
+      }
+    }
+    const verified = new Map<string, { mimeType: string; byteSize: number; bytes: Uint8Array }>();
     for (const payload of payloads) {
       const bytes = base64ToBytes(payload.base64);
-      if (!bytes || bytes.byteLength !== payload.byteSize
-        || !hasExpectedImageStructure(bytes, payload.mimeType)
+      if (!bytes || bytes.byteLength !== payload.byteSize) {
+        throw new Error("A backup image failed its integrity check. No workspace data has been changed.");
+      }
+      const prior = verified.get(payload.blobKey);
+      // Immutable storage keys can be shared by several question references.
+      // Equal bytes are permitted; conflicting metadata or bytes must fail
+      // BEFORE workspace adoption, not only during side-effectful staging.
+      if (prior) {
+        if (prior.mimeType !== payload.mimeType || prior.byteSize !== payload.byteSize
+          || prior.bytes.some((byte, index) => byte !== bytes[index])) {
+          throw new Error("The JSON backup contains conflicting image records for one storage key. No workspace data has been changed.");
+        }
+        continue;
+      }
+      if (!hasExpectedImageStructure(bytes, payload.mimeType)
         || (payload.mimeType === "image/png" && !(await hasInflatablePngImageData(bytes)))) {
         throw new Error("A backup image failed its integrity check. No workspace data has been changed.");
       }
+      verified.set(payload.blobKey, { mimeType: payload.mimeType, byteSize: payload.byteSize, bytes });
     }
     return { rawText, restoreMedia: async refs => {
       assertConsistentMediaReferences(refs);
