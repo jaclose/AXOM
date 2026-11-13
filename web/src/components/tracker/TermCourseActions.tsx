@@ -41,7 +41,9 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
         error: cause instanceof Error ? cause.message : "Saved course details could not be read." }); });
     return () => { cancelled = true; };
   }, [term, accountId, needsCatalog, catalogRetry]);
-  const practiceCatalog = legacyCatalog ?? courses;
+  // A visible catalog page is not proof for older termless receipts when the
+  // complete term lookup is pending or has failed. Keep explicit-term receipts.
+  const practiceCatalog = needsCatalog ? (legacyCatalog ?? []) : courses;
   const selection = termQuizSelection(term, accountId, workspace, practiceCatalog);
   // A failed lookup must not hide questions whose downloaded receipt already
   // identifies this term. Unknown older receipts stay out of the selection.
