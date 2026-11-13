@@ -129,8 +129,8 @@ export function readCourseQuizLaunch(questions: readonly QuestionRecord[]): Cour
     for (const question of questions) {
       if (!requestedIds.has(question.id)) continue;
       if (hasDeclaredCourseScopeConflict(question, {
-        module: value.module, week: typeof value.week === "number" ? value.week : undefined,
-        courseId: typeof value.courseId === "string" ? value.courseId : undefined,
+        module: value.module, week: "week" in value && typeof value.week === "number" ? value.week : undefined,
+        courseId: "courseId" in value && typeof value.courseId === "string" ? value.courseId : undefined,
       })) return null;
       if (seenOnDevice.has(question.id)) duplicateOnDevice.add(question.id);
       seenOnDevice.add(question.id);
