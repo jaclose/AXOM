@@ -45,6 +45,53 @@ function mediaReferences(references: References): MediaReference[] {
   return [...byKey.values()];
 }
 
+
+/** Structural image validation before certifying backup completeness.
+ * The attachment's MIME and byte size are labels, not evidence of image bytes.
+ * For PNG, validate every chunk CRC to detect same-length damaged content.
+ * These checks do not authenticate provenance or replace a source checksum. */
+function hasExpectedImageStructure(bytes: Uint8Array, mime: string): boolean {
+  const has = (offset: number, ...values: number[]) =>
+    offset + values.length <= bytes.length && values.every((value, i) => bytes[offset + i] === value);
+  const be32 = (at: number) =>
+    ((bytes[at] * 0x1000000 + (bytes[at + 1] << 16) + (bytes[at + 2] << 8) + bytes[at + 3]) >>> 0);
+  if (mime === "image/png") {
+    if (!has(0, 137, 80, 78, 71, 13, 10, 26, 10)) return false;
+    let offset = 8;
+    let first = true;
+    let sawImageData = false;
+    while (offset + 12 <= bytes.length) {
+      const length = be32(offset);
+      if (length > bytes.length - offset - 12) return false;
+      const name = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+      if (first && (name !== "IHDR" || length !== 13
+        || be32(offset + 8) === 0 || be32(offset + 12) === 0)) return false;
+      let crc = 0xffffffff;
+      for (let i = offset + 4; i < offset + 8 + length; i++) {
+        crc ^= bytes[i];
+        for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+      }
+      if (((crc ^ 0xffffffff) >>> 0) !== be32(offset + 8 + length)) return false;
+      offset += length + 12;
+      first = false;
+      if (name === "IDAT") sawImageData = true;
+      if (name === "IEND") return sawImageData && length === 0 && offset === bytes.length;
+    }
+    return false;
+  }
+  if (mime === "image/jpeg") return bytes.length >= 4
+    && has(0, 0xff, 0xd8, 0xff) && has(bytes.length - 2, 0xff, 0xd9);
+  if (mime === "image/gif") return bytes.length >= 14
+    && has(0, 71, 73, 70, 56) && (bytes[4] === 55 || bytes[4] === 57)
+    && bytes[5] === 97 && (bytes[6] | bytes[7]) !== 0
+    && (bytes[8] | bytes[9]) !== 0 && bytes[bytes.length - 1] === 0x3b;
+  if (mime === "image/webp") return bytes.length >= 20
+    && has(0, 82, 73, 70, 70) && has(8, 87, 69, 66, 80)
+    && ((bytes[4] + bytes[5] * 256 + bytes[6] * 65536 + bytes[7] * 16777216) >>> 0) === bytes.length - 8
+    && has(12, 86, 80, 56) && [32, 76, 88].includes(bytes[15]);
+  return false;
+}
+
 /** The same byte/metadata admission check protects both ZIP and JSON exports.
  * A readable storage record is not proof that it matches the learner's reference. */
 async function verifiedMediaBlob(
@@ -57,7 +104,7 @@ async function verifiedMediaBlob(
   if (!Number.isSafeInteger(metadata.byteSize) || metadata.byteSize <= 0
     || metadata.byteSize > MAX_QUESTION_ATTACHMENT_BYTES
     || bytes.byteLength !== metadata.byteSize || record.byteSize !== metadata.byteSize
-    || record.mimeType !== metadata.mimeType) throw new Error("Image record does not match its reference");
+    || record.mimeType !== metadata.mimeType || !hasExpectedImageStructure(bytes, metadata.mimeType)) throw new Error("Image record does not match its reference");
   return { blob: record.blob, bytes };
 }
 

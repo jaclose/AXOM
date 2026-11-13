@@ -8,7 +8,10 @@ import { closeWorkspace, openEmptyWorkspace } from "./question-content/persisten
 import { createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
-const attachment: QuestionImageAttachment = { id: "figure", blobKey: "private-library:figure", fileName: "figure.png", mimeType: "image/png", byteSize: 4, altText: "Test figure", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z", role: "question" };
+const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
+const PNG_BYTES = Uint8Array.from(atob(PNG_BASE64), char => char.charCodeAt(0));
+const pngBlob = () => new Blob([PNG_BYTES.buffer as ArrayBuffer], { type: "image/png" });
+const attachment: QuestionImageAttachment = { id: "figure", blobKey: "private-library:figure", fileName: "figure.png", mimeType: "image/png", byteSize: PNG_BYTES.length, altText: "Test figure", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z", role: "question" };
 const refs = [{ id: "held-question", attachments: [attachment] }];
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
 afterEach(async () => {
@@ -18,10 +21,10 @@ afterEach(async () => {
 
 describe("portable binary media backup", () => {
   it("round-trips distinct question references to one shared image without embedding base64 in workspace JSON", async () => {
-    await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+    await putQuestionAttachmentBlob(attachment.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "held-question", updatedAt: attachment.updatedAt });
     const secondAttachment = { ...attachment, id: "figure-second", assetId: "source-page-second" };
     const references = [...refs, { id: "second-use", attachments: [secondAttachment] }];
-    expect(mediaBackupBytes(references)).toBe(4);
+    expect(mediaBackupBytes(references)).toBe(PNG_BYTES.length);
     const exported = await createMediaBackupArchive({ _app: "AXOM", documents: [{ rawText: "kept" }] }, references);
     expect(exported.attachmentCount).toBe(1); expect(exported.missingBlobKeys).toEqual([]);
     const backup = await readPortableBackup(new File([exported.blob], "backup.zip"));
@@ -31,7 +34,7 @@ describe("portable binary media backup", () => {
     const staged = await backup.restoreMedia(references);
     expect(staged).toMatchObject({ restored: 1, skipped: 0 });
     const restored = await getQuestionAttachmentBlob(attachment.blobKey);
-    expect(await restored!.blob.text()).toBe("AXOM");
+    expect(new Uint8Array(await restored!.blob.arrayBuffer())).toEqual(PNG_BYTES);
     expect(restored!.questionId).toBe("second-use");
     expect(await backup.restoreMedia(references)).toMatchObject({ restored: 0, skipped: 1 });
     await staged.rollback();
@@ -40,7 +43,7 @@ describe("portable binary media backup", () => {
 
   it("reports missing images and retains compatibility with existing JSON backups", async () => {
     expect((await createMediaBackupArchive({}, refs)).missingBlobKeys).toEqual([attachment.blobKey]);
-    const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }] };
+    const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: PNG_BASE64 }] };
     const backup = await readPortableBackup(new File([JSON.stringify(payload)], "older.json"));
     expect(await backup.restoreMedia(refs)).toMatchObject({ restored: 1, skipped: 0 });
   });
@@ -65,17 +68,46 @@ describe("portable binary media backup", () => {
   });
 
 
+  it("rejects a CRC-correct PNG container without required image-data chunks", async () => {
+    const withoutImageData = new Uint8Array([
+      ...PNG_BYTES.subarray(0, 33), ...PNG_BYTES.subarray(58),
+    ]);
+    const expected = { ...attachment, byteSize: withoutImageData.byteLength };
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([withoutImageData.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: withoutImageData.byteLength,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const result = await createMediaBackupArchive({}, [{ id: "held-question", attachments: [expected] }]);
+    expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+  });
+
+  it("does not certify a same-size fake PNG or a byte-corrupted valid PNG as backed up", async () => {
+    for (const bytes of [
+      new Uint8Array(PNG_BYTES.length).fill(0x58),
+      (() => { const altered = new Uint8Array(PNG_BYTES); altered[45] ^= 1; return altered; })(),
+    ]) {
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }),
+        mimeType: "image/png", byteSize: PNG_BYTES.length,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const result = await createMediaBackupArchive({}, refs);
+      expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+    }
+  });
+
   it.each([
     { conflict: "MIME", changes: { mimeType: "image/jpeg" } },
     { conflict: "byte size", changes: { byteSize: 6 } },
   ] as const)("holds a shared storage key with contradictory $conflict instead of certifying its ZIP bytes", async ({ changes }) => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
-      blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4,
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
       questionId: "held-question", updatedAt: attachment.updatedAt,
     });
     const conflictingAttachment: QuestionImageAttachment = { ...attachment, ...changes, id: "other-figure" };
     const references = [...refs, { id: "other-question", attachments: [conflictingAttachment] }];
-    expect(mediaBackupBytes(references)).toBe(4);
+    expect(mediaBackupBytes(references)).toBe(PNG_BYTES.length);
     const exported = await createMediaBackupArchive({ _app: "AXOM" }, references);
     expect(exported.attachmentCount).toBe(0);
     expect(exported.missingBlobKeys).toEqual([attachment.blobKey]);
@@ -92,7 +124,7 @@ describe("portable binary media backup", () => {
   it("fails closed on conflicting references when restoring an older JSON backup", async () => {
     const payload = {
       _app: "AXOM",
-      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }],
+      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: PNG_BASE64 }],
     };
     const backup = await readPortableBackup(new File([JSON.stringify(payload)], "older.json"));
     const conflictingAttachment: QuestionImageAttachment = {
@@ -105,16 +137,16 @@ describe("portable binary media backup", () => {
 
   it("never overwrites existing bytes when a portable backup reuses their blob key", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
-      blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4,
+      blob: new Blob([new Uint8Array(PNG_BYTES.length).fill(0x53).buffer as ArrayBuffer], { type: "image/png" }), mimeType: "image/png", byteSize: PNG_BYTES.length,
       questionId: "held-question", updatedAt: attachment.updatedAt,
     });
     const payload = {
       _app: "AXOM",
-      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }],
+      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: PNG_BASE64 }],
     };
     const backup = await readPortableBackup(new File([JSON.stringify(payload)], "collision.json"));
     await expect(backup.restoreMedia(refs)).rejects.toThrow("existing storage key with different bytes");
-    expect(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.text()).toBe("SAFE");
+    expect(new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.arrayBuffer())[0]).toBe(0x53);
   });
 
   it("round-trips verified originals, retries safely and preserves a newer local edition", async () => {
