@@ -94,7 +94,12 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   }
   const counts = new Map<string, number>();
   for (const question of workspace.questions) counts.set(question.id, (counts.get(question.id) ?? 0) + 1);
-  const deferred = new Set(workspace.deferredContent?.questions.map(question => question.id) ?? []);
+  // A deferred buffer is account-scoped. Foreign-account recovery data must
+  // not hide already installed, receipt-authorized questions for this account.
+  // Missing owner metadata stays conservatively deferred until recovered.
+  const deferred = new Set(workspace.deferredContent &&
+    (!workspace.deferredContent.accountId || workspace.deferredContent.accountId === accountId)
+    ? workspace.deferredContent.questions.map(question => question.id) : []);
   return { scopeKind: "term", module: term, term, setIds: [...setIds], questionIds: workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
     && (!question.setId || (setCounts.get(question.setId) === 1
