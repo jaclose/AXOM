@@ -93,7 +93,7 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
   }
   return <GlassCard pad className="qsl-review-queue">
     <PanelHeader headingLevel={2} title="Question Set Library review" sub="Learner submissions appear in search only after academic review."
-      action={<GButton size="sm" disabled={loading || (busy && !!preview)} onClick={refreshQueue}><RefreshCw size={16} aria-hidden="true" /> Refresh</GButton>} />
+      action={<GButton size="sm" disabled={loading || (busy && !!preview)} onClick={() => refreshQueue()}><RefreshCw size={16} aria-hidden="true" /> Refresh</GButton>} />
     {loading && <p role="status">Checking academic review access…</p>}
     {!loading && !reviewer && !error && <p className="sub">This operator account has no academic reviewer permission. Host access alone cannot approve medical content.</p>}
     {reviewer && !loading && queue.length === 0 && <p className="sub">No learner Question Sets await review.</p>}
