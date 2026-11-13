@@ -259,11 +259,19 @@ async function installPublicShell() {
     }
   }));
   installProgress.phase = "manifest-write";
-  // A quota-limited metadata write must not prevent a valid update installing.
-  await cache.put(RETAINED_MANIFEST_KEY,
-    new Response(JSON.stringify({ version: 1, chunks: RETAINED_CHUNKS }), {
-      headers: { "content-type": "application/json" },
-    })).catch(() => {});
+  // Future workers need this generation's immutable JS/CSS identities to
+  // safely replay no-store code after a deployment. If any are recorded,
+  // a failed manifest write must abort this install: the install listener
+  // removes only the newly created cache, preserving older/private data.
+  // A truly empty inventory is optional and may fail under storage pressure.
+  try {
+    await cache.put(RETAINED_MANIFEST_KEY,
+      new Response(JSON.stringify({ version: 1, chunks: RETAINED_CHUNKS }), {
+        headers: { "content-type": "application/json" },
+      }));
+  } catch (error) {
+    if (RETAINED_CHUNKS.length > 0) throw error;
+  }
   installProgress.phase = "shell-write";
   for (const { path, response } of validated) await cache.put(path, response);
   installProgress.phase = "complete";
