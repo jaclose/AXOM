@@ -108,6 +108,14 @@ describe("Question Set share boundary", () => {
     ["encoded local URI", "file%3A%2F%2F%2FUsers%2FExample%2Fprivate.pdf"],
     ["external disk", "/Volumes/JDabSSD/private.pdf"],
     ["Linux external mount", "/mnt/private-source/file.pdf"],
+    ["root directory", "source:/root/study/private.pdf"],
+    ["temporary directory", "source:/tmp/private.pdf"],
+    ["iOS mobile directory", "/var/mobile/Containers/private.pdf"],
+    ["Android storage", "/storage/emulated/0/private.pdf"],
+    ["opt directory", "source:/opt/exams/private.pdf"],
+    ["arbitrary absolute folder", "source:/unpublished/private.pdf"],
+    ["slash-style network share", "//campus-server/share/private.pdf"],
+    ["encoded arbitrary root", "source%3A%2Froot%2Fprivate.pdf"],
   ])("refuses %s citation in a new public snapshot without modifying source evidence", (_label, citation) => {
     const source = question("q1", { citation });
     const before = JSON.stringify(source);
@@ -115,6 +123,16 @@ describe("Question Set share boundary", () => {
       .toThrow(/citation contains a private local file path/i);
     expect(JSON.stringify(source)).toBe(before);
     expect(source.correctKey).toBe("B");
+  });
+
+  it.each([
+    "https://example.edu/research?source=/home/public-notes",
+    "https://example.edu/tmp/lecture.pdf",
+    "DOI:10.1000/abc",
+  ])("preserves public path-like sources (%s)", citation => {
+    const value = createQuestionSetShare(questionSet(), [question("q1", { citation })], NOW);
+    expect(value.questions[0].citation).toBe(citation);
+    expect(value.questions[0].correctKey).toBe("B");
   });
 
   it("retains legitimate public web and bibliographic citations in a shared snapshot", () => {
