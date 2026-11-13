@@ -21,7 +21,8 @@ function snapshot() {
   }, [{
     id: "q-1", source: "manual", stem: "A synthetic question?",
     options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }],
-    correctKey: "A", status: "unseen", tags: [], attempts: [], createdAt: now, updatedAt: now,
+    correctKey: "A", explanation: "The first synthetic option matches the explicitly defined test observation.",
+    status: "unseen", tags: [], attempts: [], createdAt: now, updatedAt: now,
   }], now);
 }
 
@@ -304,6 +305,32 @@ describe("searchable Question Set client boundary", () => {
     service(rpc);
     await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
       .rejects.toThrow(/confirmed answer/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["key-only", "Answer: A"],
+    ["source-only", "Source: page 4"],
+    ["unexplained slide marker", "PowerPoint slide note 12 explicitly marks A. The supplied notes do not provide a teaching rationale."],
+  ])("holds %s explanation before any public submission RPC", async (_label, explanation) => {
+    const value = snapshot();
+    value.questions[0].explanation = explanation;
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/teaching explanation prose/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("checks explanation readiness for every question, not only the first", async () => {
+    const value = snapshot();
+    value.questions.push({ ...value.questions[0], id: "shared-question-2", explanation: "Explanation pending." });
+    value.orderedQuestionIds.push("shared-question-2");
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/teaching explanation prose/);
     expect(rpc).not.toHaveBeenCalled();
   });
 
