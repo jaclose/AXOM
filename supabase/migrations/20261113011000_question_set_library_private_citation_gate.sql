@@ -12,6 +12,7 @@ language plpgsql immutable strict set search_path = '' as $$
 declare
   v_value text := pg_catalog.btrim(p_citation);
   v_decoded text;
+  v_without_public_urls text;
   v_match text[];
   v_token text;
   v_at integer;
@@ -20,11 +21,21 @@ declare
   v_replacements integer := 0;
   v_pass integer;
 begin
-  -- Match only token-boundary paths, not /home/ or /Volumes/ appearing
-  -- inside ordinary HTTPS URLs. Also recognize Windows UNC shares.
+  -- Remove public URL spans before inspecting path-shaped citation tokens.
+  -- A URL query may legitimately contain /home/ or other path values;
+  -- a separately labeled local source after whitespace or punctuation
+  -- must still be rejected. Avoid scanning all URL path/query components
+  -- as if they were device-local file references.
   for v_pass in 0..3 loop
-    if v_value ~* $path$(^|[^a-z0-9/@])(file:/+|content://|/(users|home|private|volumes|mnt|media)/|~/|[a-z]:[/\\])$path$
-       or pg_catalog.strpos(v_value, E'\\\\') > 0 then
+    v_without_public_urls := pg_catalog.regexp_replace(
+      v_value, $url$https?://[^[:space:]<>"'|;,]+$url$, ' ', 'gi');
+    -- Recognize arbitrary absolute POSIX roots, slash-style UNC locations,
+    -- file/content URIs, home-relative paths and Windows drive/UNC paths.
+    -- Require a token boundary so bibliographic identifiers such as
+    -- DOI:10.1234/foo are not mistaken for private paths.
+    if v_without_public_urls ~*
+         $path$(^|[^a-z0-9/@])(file:/+|content://|//[^/[:space:]]+/|/[a-z0-9._~-]+(/|$)|~/|[a-z]:[/\\])$path$
+       or pg_catalog.strpos(v_without_public_urls, E'\\\\') > 0 then
       return true;
     end if;
     exit when v_pass = 3;
@@ -45,8 +56,11 @@ begin
       v_at := pg_catalog.strpos(pg_catalog.substr(v_value, v_cursor), v_token);
       v_byte := pg_catalog.get_byte(pg_catalog.decode(v_match[1], 'hex'), 0);
       if v_byte < 32 or v_byte = 127 then return true; end if;
+      -- High-bit percent octets form UTF-8 sequences. Preserve them
+      -- instead of calling chr(128..255), which PostgreSQL rejects in UTF-8.
+      -- ASCII path delimiters are still decoded in the same pass.
       v_decoded := v_decoded || pg_catalog.substr(v_value, v_cursor, v_at - 1)
-        || pg_catalog.chr(v_byte);
+        || case when v_byte > 127 then v_token else pg_catalog.chr(v_byte) end;
       v_cursor := v_cursor + v_at + 2;
     end loop;
     v_decoded := v_decoded || pg_catalog.substr(v_value, v_cursor);
