@@ -6,7 +6,7 @@ import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { assertRestorableZipBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
@@ -665,6 +665,44 @@ describe("portable binary media backup", () => {
     await expect(readPortableBackup(new File([await forged.generateAsync({ type: "arraybuffer" })], "duplicate.zip"))).rejects.toThrow("invalid or missing original-file");
     await deleteSourceOriginal(document.id);
     expect(await createMediaBackupArchive({ documents: [document] }, [], [document])).toMatchObject({ originalCount: 0, missingOriginalIds: [document.id] });
+  });
+
+  it("rejects over-budget unique ZIP media before attempting to load missing image bytes", async () => {
+    // 29,999 media entries + media/ + workspace.json would exceed the reader's 30K cap.
+    const manyReferences = Array.from({ length: MAX_ZIP_BACKUP_ENTRIES - 1 }, (_, index) => ({
+      id: `held-question-${index}`,
+      attachments: [{ ...attachment, id: `figure-${index}`, blobKey: `private-library:figure-${index}` }],
+    }));
+    await expect(createMediaBackupArchive({}, manyReferences)).rejects.toThrow("30,000 file entries");
+  });
+
+  it("preflights the additional originals/ folder before reading a doomed mixed archive", async () => {
+    // 29,997 unique images + one eligible original + two folders + workspace.json = 30,001.
+    const manyReferences = Array.from({ length: MAX_ZIP_BACKUP_ENTRIES - 3 }, (_, index) => ({
+      id: `held-question-${index}`,
+      attachments: [{ ...attachment, id: `figure-${index}`, blobKey: `private-library:figure-${index}` }],
+    }));
+    const document: SourceDocument = {
+      id: "candidate-original", title: "Candidate", fileName: "candidate.txt", fileType: "text/plain",
+      uploadedAt: "2026-11-13", rawText: "", sizeBytes: 1, checksum: "a".repeat(64),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await expect(createMediaBackupArchive({}, manyReferences, [document])).rejects.toThrow("30,000 file entries");
+  });
+
+  it("does not count repeated question references as distinct ZIP media entries", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question-0", updatedAt: attachment.updatedAt,
+    });
+    const repeatedReferences = Array.from({ length: MAX_ZIP_BACKUP_ENTRIES + 1 }, (_, index) => ({
+      id: `held-question-${index}`, attachments: [attachment],
+    }));
+    const exported = await createMediaBackupArchive({}, repeatedReferences);
+    expect(exported).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    expect(Object.keys(zip.files)).toHaveLength(3); // workspace.json, media/, media/0
   });
 
   it("rejects unrelated ZIPs and missing media before allowing a workspace restore", async () => {
