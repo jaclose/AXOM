@@ -1,4 +1,4 @@
-import { listAcademicCourses, type AcademicCourse } from "./client";
+import { getAcademicCourse, listAcademicCourses, type AcademicCourse } from "./client";
 import { academicAccountScope } from "./accountScope";
 import { ACADEMIC_REFERENCE_TYPE, readDownloadReference, type DownloadReference, type DownloadWorkspace } from "./downloadReference";
 import { questionMappingStatus } from "../questions";
@@ -22,18 +22,44 @@ export async function listTermCourses(term: string, accountId: string,
   const courses: AcademicCourse[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined;
+  let previousPageCursor: AcademicCourse | undefined;
   try {
     for (;;) {
       check();
       const page = await listAcademicCourses("", term, cursor);
       check();
+      // Keyset pagination uses the prior page's collection row to locate the
+      // next page. If that row is withdrawn/deleted between RPCs, SQL returns
+      // an empty page, indistinguishable from the real end of the catalog.
+      // Recheck the cursor through the existing account-authorized detail RPC
+      // before treating ANY subsequent page (including []) as complete.
+      if (previousPageCursor) {
+        let liveCursor: AcademicCourse;
+        try {
+          liveCursor = await getAcademicCourse(previousPageCursor.id, accountId);
+        } catch {
+          check();
+          throw new Error("The term catalog could not be verified. Retry to read the complete term.");
+        }
+        check();
+        if (liveCursor.id !== previousPageCursor.id
+          || liveCursor.current_revision_id !== previousPageCursor.current_revision_id
+          || liveCursor.term !== previousPageCursor.term
+          || liveCursor.module !== previousPageCursor.module
+          || liveCursor.title !== previousPageCursor.title
+          || liveCursor.visibility !== previousPageCursor.visibility
+          || liveCursor.review_status !== previousPageCursor.review_status) {
+          throw new Error("The term catalog changed while loading. Retry to read the complete term.");
+        }
+      }
       if (page.some(course => termIdentity(course.term) !== termIdentity(term) || seen.has(course.id))
         || new Set(page.map(course => course.id)).size !== page.length) {
         throw new Error("The term catalog changed while loading. Retry to read the complete term.");
       }
       for (const course of page) { seen.add(course.id); courses.push(course); }
       if (page.length < 24) return courses;
-      cursor = page.at(-1)!.id;
+      previousPageCursor = page.at(-1)!;
+      cursor = previousPageCursor.id;
     }
   } finally { scope.dispose(); }
 }

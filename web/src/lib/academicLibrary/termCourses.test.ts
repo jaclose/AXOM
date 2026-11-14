@@ -5,8 +5,8 @@ import type { QuestionRecord } from "../questions";
 import type { DownloadReference, DownloadWorkspace } from "./downloadReference";
 import type { Course, Term } from "../types";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), assertCurrent: vi.fn(), dispose: vi.fn() }));
-vi.mock("./client", () => ({ listAcademicCourses: mocks.list }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), lookup: vi.fn(), assertCurrent: vi.fn(), dispose: vi.fn() }));
+vi.mock("./client", () => ({ listAcademicCourses: mocks.list, getAcademicCourse: mocks.lookup }));
 vi.mock("./accountScope", () => ({ academicAccountScope: (key: string) => ({ key, assertCurrent: mocks.assertCurrent, dispose: mocks.dispose }) }));
 vi.mock("../store", () => ({ useStore: { getState: vi.fn() } }));
 vi.mock("../sync/contentDownloads", () => ({ downloadAccountContent: vi.fn() }));
@@ -25,7 +25,10 @@ const receipt = (index: number, questionIds: string[], patch: Partial<DownloadRe
 });
 const workspace = (documents: SourceDocument[], questions: QuestionRecord[]): DownloadWorkspace & { courses: Course[]; terms: Term[] } => ({ documents, questions, questionSets: [], terms: [], courses: [] });
 
-beforeEach(() => { vi.clearAllMocks(); mocks.list.mockReset(); mocks.assertCurrent.mockReset(); });
+beforeEach(() => {
+  vi.clearAllMocks(); mocks.list.mockReset(); mocks.lookup.mockReset(); mocks.assertCurrent.mockReset();
+  mocks.lookup.mockImplementation(async (id: string) => course(Number(id.replace("course-", ""))));
+});
 
 describe("complete term catalog", () => {
   it("reads beyond 24 courses using the cursor with no search filter", async () => {
@@ -33,11 +36,30 @@ describe("complete term catalog", () => {
     mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([course(24), course(25)]);
     expect(await listTermCourses("Term 1", "account")).toHaveLength(26);
     expect(mocks.list.mock.calls).toEqual([["", "Term 1", undefined], ["", "Term 1", "course-23"]]);
+    expect(mocks.lookup).toHaveBeenCalledExactlyOnceWith("course-23", "account");
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
   it("requests the terminal empty page for an exact multiple of 24", async () => {
     mocks.list.mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => course(index))).mockResolvedValueOnce([]);
     expect(await listTermCourses("Term 1", "account")).toHaveLength(24);
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+  it("refuses a silently truncated catalog if the previous page's cursor was withdrawn", async () => {
+    // The SQL cursor_row CTE is empty after withdrawal; academic_catalog then
+    // returns [] even though later term courses still exist.
+    const first = Array.from({ length: 24 }, (_, index) => course(index));
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([]);
+    mocks.lookup.mockRejectedValueOnce(new Error("This course is unavailable to this account."));
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow(/catalog could not be verified/);
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(mocks.lookup).toHaveBeenCalledExactlyOnceWith("course-23", "account");
+  });
+  it("rejects changed revision or sort placement at the page boundary instead of accepting an incomplete term", async () => {
+    const first = Array.from({ length: 24 }, (_, index) => course(index));
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([course(24)]);
+    mocks.lookup.mockResolvedValueOnce({ ...course(23), title: "Renamed during pagination",
+      current_revision_id: "new-revision" });
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow(/catalog changed while loading/);
     expect(mocks.list).toHaveBeenCalledTimes(2);
   });
   it("rejects repeated pages rather than looping or silently truncating", async () => {
