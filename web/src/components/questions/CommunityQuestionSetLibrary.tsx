@@ -94,6 +94,9 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   const [previewError, setPreviewError] = useState("");
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
+  // Learners can inspect every approved question without rendering a large
+  // Question Set at once or revealing answer-bearing notes by default.
+  const [previewVisibleCount, setPreviewVisibleCount] = useState(3);
   const [liking, setLiking] = useState<string>();
   // React may not have committed the disabled state when a second click runs.
   // Reserve the mutation synchronously, and release it only for its own request.
@@ -114,6 +117,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     setQuery({ owner: accountId, input: "", search: "" });
     setSets([]); setListingAccountId(undefined); setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
+    setPreviewVisibleCount(3);
     setLiking(undefined); setOffset(0);
   }, [accountId]);
 
@@ -167,6 +171,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   }
   async function open(id: string) {
     if (!accountId || useAccount.getState().user?.id !== accountId) return;
+    setPreviewVisibleCount(3);
     // A second selection supersedes the first immediately, including in the
     // same React batch. It must not inherit the previous result or error.
     cancelPendingPreview();
@@ -314,10 +319,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   const visibleError = visibleListing ? error : "";
   const activePreview = accountId && previewAccountId === accountId
     && useAccount.getState().user?.id === accountId ? preview : undefined;
-  // The modal shows only three questions, but source coverage must reflect
-  // the entire reviewed publication, including questions not shown below.
+  // Review badges cover the entire immutable publication, not just the
+  // current preview window. Presence never establishes source correctness.
   // This is a citation-presence count, never an academic verification score.
   const previewCitationTotal = activePreview?.snapshot.questions.length ?? 0;
+  const visiblePreviewQuestions = Math.min(previewCitationTotal, previewVisibleCount);
   const previewCitationCount = activePreview?.snapshot.questions.filter(question => Boolean(question.citation?.trim())).length ?? 0;
   // A general explanation is not evidence for every choice. Count only
   // questions with an actual, nonblank rationale for each recorded option.
@@ -343,6 +349,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       return;
     }
     cancelPendingPreview();
+    setPreviewVisibleCount(3);
     setPreview(undefined); setPreviewAccountId(undefined); setPreviewError("");
     onPractice(set);
   }
@@ -383,6 +390,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     </>}
     {(opening || activePreview || previewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => {
       cancelPendingPreview(); setOpening(false); setPreview(undefined); setPreviewAccountId(undefined); setPreviewError("");
+      setPreviewVisibleCount(3);
     }}>
       <div className="qsl-preview stack gap12" aria-busy={opening || importing}>
         {opening && <p role="status">Opening this Question Set…</p>}
@@ -392,14 +400,14 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             <summary tabIndex={0}>Reveal set topic tags</summary>
             <p>{topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
           </details>
-          <p className="sub">Preview the first three questions. Recorded citations and visual hints may reveal answers; open a question's teaching notes to inspect them.</p>
+          <p className="sub">Review questions three at a time before importing. Recorded citations and visual hints may reveal answers; open each question's teaching notes to inspect them.</p>
           {previewCitationCount < previewCitationTotal && <p className="qsl-preview-source-warning">
-            Source citations recorded for {previewCitationCount} of {previewCitationTotal} questions. The first-three preview may not show every citation gap. A recorded citation does not establish medical accuracy.
+            Source citations recorded for {previewCitationCount} of {previewCitationTotal} questions. This count covers the entire set, not just the displayed questions. A recorded citation does not establish medical accuracy.
           </p>}
           {previewCompleteRationaleCount < previewCitationTotal && <p className="qsl-preview-source-warning">
-            Choice-by-choice rationales recorded for all options in {previewCompleteRationaleCount} of {previewCitationTotal} questions. The first-three preview may not show every rationale gap. Recorded text is not a substitute for source verification.
+            Choice-by-choice rationales recorded for all options in {previewCompleteRationaleCount} of {previewCitationTotal} questions. This count covers the entire set, not just the displayed questions. Recorded text is not a substitute for source verification.
           </p>}
-          <ol>{activePreview.snapshot.questions.slice(0, 3).map((question, index) => <li key={question.id}>
+          <ol>{activePreview.snapshot.questions.slice(0, visiblePreviewQuestions).map((question, index) => <li key={question.id}>
             <b>{question.stem}</b>
             <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
             {question.citation
@@ -436,6 +444,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
               </div>
             </details>
           </li>)}</ol>
+          <p className="sub" role="status">Showing ${visiblePreviewQuestions} of ${previewCitationTotal} questions.</p>
+          {visiblePreviewQuestions < previewCitationTotal && <GhostButton disabled={importing}
+            onClick={() => setPreviewVisibleCount(current => Math.min(previewCitationTotal, current + 3))}>
+            Show next {Math.min(3, previewCitationTotal - visiblePreviewQuestions)} questions
+          </GhostButton>}
           <GButton variant="primary" disabled={importing || imported} onClick={() => void add()}>
             <Download size={16} aria-hidden="true" /> {imported ? "Already in my AXOM" : importing ? "Saving…" : "Add to my AXOM"}
           </GButton>
