@@ -516,6 +516,67 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
   });
 
+  it.each([
+    ["answer label", "Answer: A"],
+    ["citation only", "Source: page 4"],
+    ["no teaching rationale", "Explanation pending."],
+    ["absent explanation", undefined],
+  ])("prevents academic approval of a pending set with %s", async (_label, explanation) => {
+    // Legacy pending submissions may predate the publisher egress guard.
+    // They are still inspectable/rejectable, but not safe to approve.
+    const original = snapshot();
+    original.questions[0].explanation = explanation;
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending",
+      snapshot_payload: original, review_revision: 1,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked source and rights"))
+      .rejects.toThrow(/not ready for approval.*teaching explanation prose/i);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+  });
+
+  it("prevents academic approval when an older pending submission has no answer key", async () => {
+    const original = snapshot();
+    delete original.questions[0].correctKey;
+    delete original.questions[0].correctAnswerText;
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending",
+      snapshot_payload: original, review_revision: 1,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked source and rights"))
+      .rejects.toThrow(/not ready for approval.*confirmed answer/i);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("still permits returning an unready pending set for revision without positive attestations", async () => {
+    const original = snapshot();
+    delete original.questions[0].correctKey;
+    delete original.questions[0].correctAnswerText;
+    original.questions[0].explanation = "Answer pending.";
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: {
+        id: entryId, title: original.title, question_count: 1, status: "pending",
+        snapshot_payload: original, review_revision: 1,
+      }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, false, "Missing verified key and rationale"))
+      .resolves.toBeUndefined();
+    expect(rpc).toHaveBeenNthCalledWith(2, "review_question_set_library", {
+      p_id: entryId, p_approved: false, p_reason: "Missing verified key and rationale",
+      p_expected_snapshot: original, p_expected_revision: 1,
+    });
+  });
+
   it("submits an unchanged pending revision using the source-reviewed decision only", async () => {
     const original = snapshot();
     const reviewed = { id: entryId, snapshot: original,
