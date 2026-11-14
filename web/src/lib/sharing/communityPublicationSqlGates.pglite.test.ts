@@ -74,6 +74,7 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
         stem: "Which synthetic option is marked in the source?",
         options: [{ key: "A", text: "Marked" }, { key: "B", text: "Not marked" }],
         correctKey: "A",
+        explanation: "Synthetic teaching rationale: A matches the source-defined fixture rule, whereas B does not.",
         tags: [],
         citation: "PMID: 123456",
       }],
@@ -155,7 +156,9 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
       questions: [{
         id: "r101-q1", stem: "Which synthetic label is keyed?",
         options: [{ key: "A", text: "Keyed" }, { key: "B", text: "Not keyed" }],
-        correctKey: "A", tags: [], citation: "PMID: 123456",
+        correctKey: "A",
+        explanation: "Synthetic teaching rationale: the source-defined rule marks A but not B.",
+        tags: [], citation: "PMID: 123456",
       }],
       createdAt: "2026-11-13T08:00:00Z",
       copyrightNotice: "Original synthetic test material",
@@ -298,7 +301,9 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
       questions: [{
         id: "independent-q1", stem: "Which source-marked synthetic option is keyed?",
         options: [{ key: "A", text: "Recorded answer" }, { key: "B", text: "Distractor" }],
-        correctKey: "A", tags: [], citation: "PMID: 123456",
+        correctKey: "A",
+        explanation: "Synthetic teaching rationale: the source-defined rule marks A but not B.",
+        tags: [], citation: "PMID: 123456",
       }],
       createdAt: "2026-11-13T10:00:00Z",
       copyrightNotice: "Original synthetic testing material",
@@ -351,6 +356,102 @@ describe("Community Question Set publication SQL admission (isolated PostgreSQL)
       "select public.authorize_question_set_library_import($1,2::bigint,$2::jsonb) value",
       [entry.id, JSON.stringify(snapshot)]);
     expect(receipt.value).toMatchObject({ id: entry.id, review_revision: 2 });
+  }, 60_000);
+
+
+  it("enforces teaching rationale across direct RPC admission, historical review and resubmission", async () => {
+    const author = "d1111111-1111-4111-8111-111111111111";
+    const reviewer = "d3333333-3333-4333-8333-333333333333";
+    const learner = "d2222222-2222-4222-8222-222222222222";
+    await db.query(
+      "insert into auth.users(id,email) values($1,'r128-author@example.test'),($2,'r128-reviewer@example.test'),($3,'r128-learner@example.test')",
+      [author, reviewer, learner],
+    );
+    await db.query("insert into public.academic_reviewers(user_id) values($1)", [reviewer]);
+    async function as<T = Record<string, unknown>>(who: string, sql: string, params: unknown[] = []): Promise<T[]> {
+      await db.exec("reset role;");
+      await db.query("select set_config('request.jwt.claim.sub',$1,false)", [who]);
+      await db.exec("set role authenticated;");
+      try { return (await db.query<T>(sql, params)).rows; }
+      finally { await db.exec("reset role;"); }
+    }
+    const safe = {
+      shareFormatVersion: 1, title: "Synthetic explanation admission R128", tags: [],
+      orderedQuestionIds: ["r128-q1"],
+      questions: [{
+        id: "r128-q1", stem: "Which synthetic option matches the source-defined rule?",
+        options: [{ key: "A", text: "Source-marked option" }, { key: "B", text: "Unmarked option" }],
+        correctKey: "A", tags: [], citation: "PMID: 123456",
+        explanation: "Synthetic rule: option A matches the explicitly marked criterion; option B does not.",
+      }],
+      createdAt: "2026-11-14T11:00:00Z",
+      copyrightNotice: "Original synthetic teaching fixture",
+    };
+    const submit = async (source: string, snapshot: unknown) => {
+      const [row] = await as<{ id: string }>(author,
+        "select public.submit_question_set_library($1,$2::jsonb,'Synthetic fixture author',true,true) id",
+        [source, JSON.stringify(snapshot)]);
+      return row.id;
+    };
+    const decide = (id: string, snapshot: unknown, revision: number, approved: boolean) =>
+      as(reviewer, "select public.review_question_set_library($1,$2,$3,$4::jsonb,$5::bigint)",
+        [id, approved, "Independently inspected original synthetic rights, answer and explanation", JSON.stringify(snapshot), revision]);
+
+    const invalidCases: Array<[string, unknown]> = [
+      ["omitted", undefined], ["empty", ""], ["whitespace", "  \n  "],
+      ["key-only", "Correct option is A."], ["slide-only", "See lecture slide 12."],
+      ["source-only", "Source: PMID 123456"], ["pending", "Rationale: pending"],
+      ["numeric", 123], ["short", "Reason"],
+    ];
+    for (const [name, explanation] of invalidCases) {
+      const question: Record<string, unknown> = { ...safe.questions[0], explanation };
+      if (explanation === undefined) delete question.explanation;
+      await expect(submit("r128-invalid-" + name, { ...safe, questions: [question] }))
+        .rejects.toThrow(/teaching explanation/i);
+    }
+    const entry = await submit("r128-reviewed", safe);
+    expect(await as<{ id: string }>(learner,
+      "select id from public.list_question_set_library($1,0)", ["Synthetic explanation admission R128"]))
+      .toEqual([]);
+    await expect(as(learner, "select public.get_question_set_library($1)", [entry]))
+      .rejects.toThrow(/unavailable/i);
+    await decide(entry, safe, 1, true);
+    const [receipt] = await as<{ value: { id: string; review_revision: number; snapshot_payload: typeof safe } }>(
+      learner, "select public.authorize_question_set_library_import($1,2::bigint,$2::jsonb) value",
+      [entry, JSON.stringify(safe)]);
+    expect(receipt.value).toMatchObject({ id: entry, review_revision: 2, snapshot_payload: safe });
+
+    // Insert a real pending row first. Modify only this disposable SQL fixture
+    // with user triggers disabled to mimic a historical key-only submission.
+    const legacyId = await submit("r128-legacy", safe);
+    const legacy = { ...safe, questions: [{ ...safe.questions[0], explanation: "Answer: A" }] };
+    await db.exec("alter table public.question_set_library_entries disable trigger user;");
+    try {
+      await db.query("update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
+        [JSON.stringify(legacy), legacyId]);
+    } finally {
+      await db.exec("alter table public.question_set_library_entries enable trigger user;");
+    }
+    const [before] = (await db.query<{ status: string; review_revision: number }>(
+      "select status,review_revision from public.question_set_library_entries where id=$1", [legacyId])).rows;
+    await expect(decide(legacyId, legacy, before.review_revision, true))
+      .rejects.toThrow(/teaching explanation/i);
+    const [stillHeld] = (await db.query<{ status: string; review_revision: number; snapshot_payload: typeof safe }>(
+      "select status,review_revision,snapshot_payload from public.question_set_library_entries where id=$1",
+      [legacyId])).rows;
+    expect(stillHeld).toMatchObject({ ...before, snapshot_payload: legacy });
+    // Rejection remains possible. Rejected evidence cannot be resubmitted
+    // without substantive teaching text.
+    await decide(legacyId, legacy, before.review_revision, false);
+    await expect(submit("r128-legacy", { ...legacy, title: "Invalid revised edition" }))
+      .rejects.toThrow(/teaching explanation/i);
+    const resubmittedId = await submit("r128-legacy", safe);
+    expect(resubmittedId).toBe(legacyId);
+    const [resubmitted] = (await db.query<{ status: string; snapshot_payload: typeof safe }>(
+      "select status,snapshot_payload from public.question_set_library_entries where id=$1", [legacyId])).rows;
+    expect(resubmitted).toMatchObject({ status: "pending", snapshot_payload: safe });
+    await expect(as(learner, "select public.get_question_set_library($1)", [legacyId]))
+      .rejects.toThrow(/unavailable/i);
   }, 60_000);
 
 });

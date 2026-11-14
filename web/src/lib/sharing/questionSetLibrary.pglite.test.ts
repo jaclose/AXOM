@@ -33,6 +33,7 @@ function snapshot(): Snapshot {
       options: [{ key: "A", text: "First option" }, { key: "B", text: "Second option" }],
       correctKey: "B",
       correctAnswerText: "Second option",
+      explanation: "Synthetic rule: the second option matches the source-marked answer; the first does not.",
       tags: ["sample"],
     }],
     createdAt: "2026-11-01T12:00:00.000Z",
