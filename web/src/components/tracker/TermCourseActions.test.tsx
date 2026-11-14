@@ -175,6 +175,16 @@ describe("term course actions", () => {
     expect(mocks.launch).toHaveBeenCalledWith({ module: "Term 5", term: "Term 5", questionIds: ["ready-question"], setIds: ["ready-set"] });
     expect(screen.getByRole("alert").textContent).toBe("Finish your current quiz first.");
   });
+  it("rejects a stale Practice click after the learner account changes before the parent rerenders", () => {
+    mount();
+    expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(false);
+    // Simulate the account-store transition before React receives new parent props.
+    // The stale button must not hand the previous learner's selection to QBank.
+    switchAccount("another-learner");
+    fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
+    expect(mocks.launch).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("The account changed.");
+  });
   it.each([0, 2001])("disables practice for %s ready questions", count => {
     mocks.questionIds = Array.from({ length: count }, (_, index) => `question-${index}`);
     mount(); expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(true);
