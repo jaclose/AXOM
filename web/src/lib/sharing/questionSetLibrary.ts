@@ -65,8 +65,11 @@ function containsPrivateInlineReference(snapshot: SharedQuestionSetSnapshot): bo
       ...Object.values(question.choiceRationales ?? {}),
     ]),
   ];
-  return fields.some(value => typeof value === "string"
-    && INLINE_PRIVATE_REFERENCE.test(value) && hasPrivateDeviceCitation(value));
+  return fields.some(value => typeof value === "string" && containsPrivateInlineText(value));
+}
+
+function containsPrivateInlineText(value: string): boolean {
+  return INLINE_PRIVATE_REFERENCE.test(value) && hasPrivateDeviceCitation(value);
 }
 
 async function withAccount<T>(accountId: string, action: (client: Awaited<ReturnType<typeof accountOperationClient>>["client"]) => Promise<T>): Promise<T> {
@@ -232,6 +235,10 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
     throw new Error("Question Set citation contains a private local file path, inline document URI or URL credentials and cannot be published.");
   if (containsPrivateInlineReference(submittedSnapshot))
     throw new Error("Question Set teaching text contains a private local file or inline media reference. Remove it before publishing.");
+  // Creator credit is public listing metadata, outside the shared snapshot.
+  // Apply the same device/inline-media privacy boundary before the RPC.
+  if (containsPrivateInlineText(credit))
+    throw new Error("Public creator credit contains a private file, inline media reference or URL credentials. Remove it before publishing.");
   if (!submittedSnapshot.questions.length || submittedSnapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
   // The dialog filters missing/placeholder rationales, but other callers can
