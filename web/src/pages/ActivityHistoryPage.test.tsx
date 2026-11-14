@@ -119,6 +119,40 @@ describe("Activity History workbook download feedback", () => {
     }
   });
 
+  it("announces a session change and moves focus from removed filters into the notice", () => {
+    render(<ActivityHistoryPage />);
+    const typeSelect = screen.getByLabelText("Activity type") as HTMLSelectElement;
+    typeSelect.focus();
+    expect(document.activeElement).toBe(typeSelect);
+
+    act(() => { switchAccount("account-B"); });
+
+    const notice = screen.getByRole("status");
+    expect(notice.textContent).toContain("Activity History session changed");
+    expect(notice.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(notice);
+    expect(screen.queryByLabelText("Activity type")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+  });
+
+  it("does not steal focus outside Activity History when the account changes", () => {
+    render(<ActivityHistoryPage />);
+    const elsewhere = document.createElement("button");
+    elsewhere.type = "button";
+    document.body.appendChild(elsewhere);
+    try {
+      elsewhere.focus();
+      expect(document.activeElement).toBe(elsewhere);
+
+      act(() => { switchAccount("account-B"); });
+
+      expect(screen.getByRole("status")).toBeTruthy();
+      expect(document.activeElement).toBe(elsewhere);
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
   it("revokes account A's rendered notes, stats, filters and export on A→B→A", () => {
     const originalLogs = fixture.logs;
     fixture.logs = [
