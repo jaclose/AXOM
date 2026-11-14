@@ -142,3 +142,24 @@ it("scrolls the course surface without shifting the app shell", () => {
   expect(surface.scrollTop).toBe(0);
   expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
 });
+
+it("My Courses uses the complete collection-bound receipt, not just a shared revision document ID", () => {
+  const revision = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const first = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "A", module: "Module A",
+    term: "Term 4", visibility: "shared", review_status: "approved", current_revision_id: revision,
+    owned: false, ready_questions: 1, review_questions: 0 };
+  const second = { ...first, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", title: "B", module: "Module B" };
+  mocks.connected = [first, second];
+  const rawText = JSON.stringify({ accountId: "owner", collectionId: first.id, revisionId: revision, status: "complete",
+    templateIds: [], documentIds: [], questionIds: [], setIds: [],
+    bindings: { originals: [], sources: [], assets: [] } });
+  mocks.useStore.mockReturnValue({ ...workspace(), documents: [{
+    id: `academic-${revision}`, rawText, fileType: "axom-academic-reference", title: "Downloaded course reference",
+    fileName: "course-reference.json", uploadedAt: "2026-11-14", sizeBytes: rawText.length,
+    tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+  }] });
+  render(<CourseLibrary onClose={vi.fn()} onTemplate={vi.fn()} onOpen={vi.fn()} onCreate={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "My Courses" }));
+  expect(screen.getByRole("button", { name: "Preview Module A, Term 4" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Preview Module B, Term 4" })).toBeNull();
+});
