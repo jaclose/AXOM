@@ -476,9 +476,11 @@ const PRIVATE_HTTP_CITATION_USERINFO = /https?:\/\/[^\s/?#<>"'|;,]+@/i;
 // Public web URLs are otherwise masked below to spare ordinary paths like
 // /home/ in a legitimate citation. A token in a URL query/fragment is not a
 // public citation: match high-risk credential parameter names before masking,
-// including after each bounded percent-decoding pass.
+// including after each bounded percent-decoding pass. Signed-URL query keys
+// (S3, Google Cloud Storage and Azure SAS) also grant bearer access even when
+// the URL has no ordinary token/password field.
 const PRIVATE_HTTP_CITATION_QUERY_CREDENTIAL =
-  /https?:\/\/[^\s<>"'|,]*[?&#;](?:access[_-]?token|api[_-]?key|x[_-]?api[_-]?key|token|id[_-]?token|refresh[_-]?token|auth(?:orization)?[_-]?token|client[_-]?secret|private[_-]?key|session[_-]?(?:token|key)|bearer[_-]?token|password|secret)=/i;
+  /https?:\/\/[^\s<>"'|,]*[?&#;](?:access[_-]?token|api[_-]?key|x[_-]?api[_-]?key|token|id[_-]?token|refresh[_-]?token|auth(?:orization)?[_-]?token|client[_-]?secret|private[_-]?key|session[_-]?(?:token|key)|bearer[_-]?token|password|secret|x[_-]?amz[_-]?(?:signature|security[_-]?token)|x[_-]?goog[_-]?signature|awsaccesskeyid|googleaccessid|signature|sig)=/i;
 
 // A public HTTPS wrapper does not make a nested device URI safe to publish.
 // Check these explicit schemes before masking ordinary public URL spans.
