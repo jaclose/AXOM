@@ -43,7 +43,7 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
   const virtual = new Map<string, Uint8Array>(), aliases = new Map<string, string>();
   const sources: PrivateLibraryCatalog["sources"] = [], fingerprints: string[] = [];
   const referencedQuestionPaths = new Set<string>();
-  const seenSource = new Map<string, string>();
+  const seenSource = new Map<string, { fingerprint: string; manifestPath: string }>();
   for (const manifestPath of root.manifestPaths) {
     const base = parent(manifestPath), issues: PackageIssue[] = [];
     const manifestBytes = await readSelected(manifestPath);
@@ -74,11 +74,14 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
     if (!checksum) throw new Error(`${manifest.bank.title} needs its original source file or a source checksum in its existing provenance. Use normal file import to prepare it.`);
     if (declared.size && !declared.has(checksum)) throw new Error(`The original for ${manifest.bank.title} does not match its recorded checksum.`);
     const fingerprint = hex(await sha256(encode([manifest, object(rawQuestions)])));
-    if (seenSource.has(checksum)) {
-      if (seenSource.get(checksum) !== fingerprint) throw new Error("Two different packages describe the same source. Import or reconcile those versions separately; one must not replace the other silently.");
+    const previous = seenSource.get(checksum);
+    if (previous) {
+      if (previous.fingerprint !== fingerprint) {
+        throw new Error(`Two different packages describe the same source: ${sourceName}. The entries ${previous.manifestPath} and ${manifestPath} disagree. Choose one complete version, not a folder containing both. Nothing was installed.`);
+      }
       continue; // Exact source/package duplicates refer to the first copy, never add questions.
     }
-    seenSource.set(checksum, fingerprint); fingerprints.push(fingerprint);
+    seenSource.set(checksum, { fingerprint, manifestPath }); fingerprints.push(fingerprint);
     const prefix = `_axom-input/${checksum}`, assetDirectory = safeInputPath(manifest.assetsDirectory.replace(/\/$/, ""));
     const assetChecks = new Map<string, { checksum: string; byteSize: number; mimeType: string; width?: number; height?: number }>();
     for (const question of parsed.questions) {

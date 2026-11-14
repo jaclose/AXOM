@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { test, expect, seedOnboarded, reloadAfterSave } from "./fixtures";
@@ -54,6 +55,7 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: "Install prepared library", exact: true }).click();
     await (await chooser).setFiles({ name: "slides-test.zip", mimeType: "application/zip", buffer: await bundle() });
+    await confirmPreparedImport(page);
     await expect(page.getByRole("region", { name: "Prepared library" }).getByRole("status")).toContainText("Library installed.");
     await page.evaluate(async (stem) => {
       type Question = { id: string; content?: { id?: string } };

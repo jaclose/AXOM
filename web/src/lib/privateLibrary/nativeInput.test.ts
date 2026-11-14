@@ -166,7 +166,8 @@ describe("local native packages without a user-authored catalog", () => {
     expect((await first(files)).catalog.sources).toHaveLength(1);
     const body = decode(files.get("Outer/copy/questions.json")!); body.questions[0].correctAnswer.labels = ["B"];
     files.set("Outer/copy/questions.json", encode(body));
-    await expect(reader(files)).rejects.toThrow("different packages describe the same source");
+    await expect(reader(files)).rejects.toThrow(/different packages describe the same source.*Example\.pdf/i);
+    await expect(reader(files)).rejects.toThrow(/Outer\/bank\/manifest\.json.*Outer\/copy\/manifest\.json/);
   });
   it("preserves an existing wrapped catalog instead of generating a competing one", async () => {
     const original = encode({ format: "axom-private-library", schemaVersion: 1, id: "existing", version: "v1", templates: [], sources: [] });

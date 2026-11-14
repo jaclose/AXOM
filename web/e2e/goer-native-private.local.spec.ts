@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 // Private, source-backed GOER native-library acceptance. Original material and
 // screenshots remain on the authorized local machine in ignored artifacts.
 // The test verifies LOCAL workspace persistence, not private cloud readback.
@@ -25,6 +26,7 @@ test("five canonical GOER sources install private ready questions and figures, s
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: button, exact: true }).click();
     await (await chooser).setFiles(sourceDir!);
+    await confirmPreparedImport(page);
     await expect(library.getByRole("status")).toContainText("Library installed.", { timeout: 55_000 });
     await expect(library.getByRole("alert")).toHaveCount(0);
   };

@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 // Opt in with AXOM_PRIVATE_BUNDLE. No workspace seeding: first-run setup and
 // the production library installer are the only writes preceding acceptance.
 import { test as base, expect } from "@playwright/test";
@@ -64,6 +65,7 @@ test("prepared private collection installs through first run and remains usable 
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: folder ? "Install prepared folder" : "Install prepared library", exact: true }).click();
   await (await chooser).setFiles(bundle!);
+    await confirmPreparedImport(page);
   console.log("Private bundle selected through file chooser");
   const library = page.getByRole("region", { name: "Prepared library", exact: true });
   let reportedBatch = -1;
@@ -183,6 +185,7 @@ test("prepared private collection installs through first run and remains usable 
   if (!await library.isVisible()) await page.getByText("Import status and source review", { exact: true }).click();
   await page.getByRole("button", { name: folder ? "Install prepared folder" : "Update library", exact: true }).click();
   await (await repeat).setFiles(bundle!);
+    await confirmPreparedImport(page);
   await expect(library.getByRole("status")).toContainText("Library installed.", { timeout: 300_000 });
   expect(await counts()).toEqual(studied);
   expect(errors).toEqual([]);
