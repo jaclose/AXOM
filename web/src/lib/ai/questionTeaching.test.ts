@@ -254,8 +254,8 @@ describe("review-gated explanation drafting", () => {
     } }],
     ["keyword fragment token", { keywords: ["vascular media", "https://example.edu/histology#token=DEMO_NOT_SECRET"] }],
     ["encoded token parameter", { explanation: "The tunica media has concentric contractile smooth muscle cells; source https://example.edu/arteries?%74oken=DEMO_NOT_SECRET." }],
-  ] as Array<[string, Record<string, unknown>]>)
-  ("blocks generated %s before returning a provisional review draft", async (_label, patch) => {
+  ] as Array<[string, Record<string, unknown>]>)(
+    "blocks generated %s before returning a provisional review draft", async (_label, patch) => {
     const source = question();
     const model = provider({
       explanation: "The media contains vascular smooth muscle that controls arterial caliber and resistance.",
