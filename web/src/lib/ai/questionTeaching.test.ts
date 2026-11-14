@@ -83,6 +83,12 @@ describe("review-gated explanation drafting", () => {
     ["inlined PDF data in stem", { stem: "Exhibit data:application/pdf;base64,JVBERi0x" }],
     ["URL credentials in stem", { stem: "Source https://student:secret@example.edu/notes" }],
     ["encoded device URI in topic", { topic: "file%3A%2F%2F%2FUsers%2Fstudent%2Fprivate.pdf" }],
+    ["S3 signed source in stem", { stem: "Reference https://bucket.s3.amazonaws.com/lecture.pdf?X-Amz-Signature=DEMO_NOT_SECRET" }],
+    ["Google Cloud signed source in topic", { topic: "https://storage.googleapis.com/bucket/case?X-Goog-Signature=DEMO_NOT_SECRET" }],
+    ["Azure SAS access link in choice", { options: [
+      { key: "A", text: "https://cdn.example.edu/case?sv=2026-01-01&sig=DEMO_NOT_SECRET" },
+      { key: "B", text: "Benign control" }, { key: "C", text: "Second control" },
+    ] }],
   ] as Array<[string, Partial<QuestionRecord>]>)(
     "blocks %s before external AI inference, even when called directly", async (_label, patch) => {
     const source = question(patch);
@@ -254,6 +260,13 @@ describe("review-gated explanation drafting", () => {
     } }],
     ["keyword fragment token", { keywords: ["vascular media", "https://example.edu/histology#token=DEMO_NOT_SECRET"] }],
     ["encoded token parameter", { explanation: "The tunica media has concentric contractile smooth muscle cells; source https://example.edu/arteries?%74oken=DEMO_NOT_SECRET." }],
+    ["S3 signed explanation source", { explanation: "The tunica media governs arterial resistance; source https://bucket.s3.amazonaws.com/histology?X-Amz-Signature=DEMO_NOT_SECRET." }],
+    ["Google signed choice rationale source", { choiceRationales: {
+      A: "The media contains vascular smooth muscle.",
+      B: "The intima contains endothelium; source https://storage.googleapis.com/exhibit?X-Goog-Signature=DEMO_NOT_SECRET",
+      C: "The adventitia provides outer connective tissue support.",
+    } }],
+    ["Azure SAS explanation source", { explanation: "The tunica media contracts to regulate vessel caliber; source https://cdn.example.edu/artery?sv=2026-01-01&sig=DEMO_NOT_SECRET." }],
   ] as Array<[string, Record<string, unknown>]>)(
     "blocks generated %s before returning a provisional review draft", async (_label, patch) => {
     const source = question();
