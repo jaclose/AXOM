@@ -478,6 +478,65 @@ describe("Community Question Set Library", () => {
     await waitFor(() => expect(mock.observers.size).toBe(0));
   });
 
+  it("does not skip discovery pages on repeated Load more clicks before React commits", async () => {
+    const first = Array.from({ length: 24 }, (_, index) => ({
+      ...summary, id: `first-${index}`, title: `First page ${index}`,
+    }));
+    const second = Array.from({ length: 24 }, (_, index) => ({
+      ...summary, id: `second-${index}`, title: `Second page ${index}`,
+    }));
+    let finishSecond!: (value: typeof first) => void;
+    mock.search.mockResolvedValueOnce(first);
+    mock.search.mockImplementationOnce(() => new Promise(resolve => { finishSecond = resolve; }));
+    mock.search.mockResolvedValueOnce([]);
+    render(<CommunityQuestionSetLibrary />);
+    const load = await screen.findByRole("button", { name: "Load more sets" });
+
+    act(() => {
+      fireEvent.click(load);
+      fireEvent.click(load);
+    });
+    await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-1", "", 24));
+    expect(mock.search.mock.calls.filter(([, , page]) => page === 24)).toHaveLength(1);
+    expect(mock.search.mock.calls.some(([, , page]) => page === 48)).toBe(false);
+
+    await act(async () => { finishSecond(second); });
+    expect(await screen.findByRole("heading", { name: "Second page 23" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Load more sets" }));
+    await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-1", "", 48));
+    expect(mock.search.mock.calls.filter(([, , page]) => page === 24)).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "First page 0" })).toBeTruthy();
+  });
+
+  it("retries the failed discovery page rather than advancing past missing publications", async () => {
+    const page = Array.from({ length: 24 }, (_, index) => ({
+      ...summary, id: `page0-${index}`, title: `Page zero ${index}`,
+    }));
+    mock.search.mockResolvedValueOnce(page);
+    mock.search.mockRejectedValueOnce(new Error("Page temporarily unavailable"));
+    mock.search.mockResolvedValueOnce([{ ...summary, title: "Recovered page 24" }]);
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load more sets" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Page temporarily unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Load more sets" }));
+    expect(await screen.findByRole("heading", { name: "Recovered page 24" })).toBeTruthy();
+    expect(mock.search.mock.calls.filter(([, , pageOffset]) => pageOffset === 24)).toHaveLength(2);
+    expect(mock.search.mock.calls.some(([, , pageOffset]) => pageOffset === 48)).toBe(false);
+    expect(screen.getByRole("heading", { name: "Page zero 0" })).toBeTruthy();
+  });
+
+  it("refuses a stale account's pagination click before a new session renders", async () => {
+    mock.search.mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => ({
+      ...summary, id: `account-a-${index}`, title: `Account A page ${index}`,
+    })));
+    render(<CommunityQuestionSetLibrary />);
+    const load = await screen.findByRole("button", { name: "Load more sets" });
+    mock.accountId = "account-2";
+    fireEvent.click(load);
+    expect(mock.search).toHaveBeenCalledTimes(1);
+    expect(mock.search).not.toHaveBeenCalledWith("account-2", "", 24);
+  });
+
   it("uses the latest same-batch preview selection despite out-of-order responses", async () => {
     const another = { ...summary, id: "00000000-0000-4000-8000-000000000022", title: "Second synthetic set" };
     const nextSnapshot = { ...snapshot, title: another.title, questions: [{
