@@ -68,15 +68,14 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
   const mounted = useRef(true);
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
-  // A click-time-only scope cannot detect A → B → A completed before React
-  // commits the new account props. Observe the entire mounted UI lifetime,
-  // so an old button cannot authorize a quiz even after A becomes current again.
-  const practiceScopeRef = useRef<ReturnType<typeof academicAccountScope> | null>(null);
+  // A click-time-only scope cannot detect A → B → A before parent props commit.
+  // Both Download and Practice must use the same mounted-lifetime witness.
+  const accountLifetimeScopeRef = useRef<ReturnType<typeof academicAccountScope> | null>(null);
   useEffect(() => {
     const scope = academicAccountScope(accountId);
-    practiceScopeRef.current = useAccount.getState().user?.id === accountId ? scope : null;
+    accountLifetimeScopeRef.current = useAccount.getState().user?.id === accountId ? scope : null;
     return () => {
-      if (practiceScopeRef.current === scope) practiceScopeRef.current = null;
+      if (accountLifetimeScopeRef.current === scope) accountLifetimeScopeRef.current = null;
       scope.dispose();
     };
   }, [accountId]);
@@ -93,6 +92,16 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
 
   async function download() {
     if (running.current || disabled) return;
+    // An old A button must not start fresh network work after A → B → A.
+    // Check the observer created for this mount *before* setting the busy lock.
+    try {
+      const mountedScope = accountLifetimeScopeRef.current;
+      if (!mountedScope) throw new Error("The account changed. Reopen this course in your current account.");
+      mountedScope.assertCurrent();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The account changed. Reopen this course.");
+      return;
+    }
     running.current = true; stopped.current = false;
     setBusy(true); setStopping(false); onBusyChange(true);
     setMessage(`Reading all courses in ${term}…`); setError(""); setFailures([]);
@@ -154,7 +163,7 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
     // The account store can change before React commits new CourseLibrary
     // props. A stale Practice button must not launch the previous learner's
     // selected questions, even during that brief transition.
-    const scope = practiceScopeRef.current;
+    const scope = accountLifetimeScopeRef.current;
     try {
       if (!scope) throw new Error("The account changed. Reopen this course in your current account.");
       scope.assertCurrent();
