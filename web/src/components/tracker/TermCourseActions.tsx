@@ -139,8 +139,20 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
   }
   function practice() {
     setError("");
-    try { launchCourseQuiz(termQuizSelection(term, accountId, useStore.getState(), practiceCatalog)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Practice could not be opened."); }
+    // The account store can change before React commits new CourseLibrary
+    // props. A stale Practice button must not launch the previous learner's
+    // selected questions, even during that brief transition.
+    const scope = academicAccountScope(accountId);
+    try {
+      scope.assertCurrent();
+      const currentSelection = termQuizSelection(term, accountId, useStore.getState(), practiceCatalog);
+      scope.assertCurrent();
+      launchCourseQuiz(currentSelection);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Practice could not be opened.");
+    } finally {
+      scope.dispose();
+    }
   }
   const overLimit = selection.questionIds.length > MAX_COURSE_QUIZ_QUESTIONS
     || selection.setIds.length > MAX_COURSE_QUIZ_QUESTIONS;
