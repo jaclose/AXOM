@@ -33,6 +33,7 @@ export function ActivityHistoryPage() {
   const historyRoot = useRef<HTMLDivElement>(null);
   const sessionNotice = useRef<HTMLDivElement>(null);
   const focusNoticeOnRevoke = useRef(false);
+  const focusHistoryOnReveal = useRef(false);
   useLayoutEffect(() => {
     unmounted.current = false;
     const revokeIfChanged = (state: ReturnType<typeof useAccount.getState>) => {
@@ -54,6 +55,15 @@ export function ActivityHistoryPage() {
     // Do not steal focus from another part of the application.
     if (viewRevoked && focusNoticeOnRevoke.current) sessionNotice.current?.focus();
   }, [viewRevoked]);
+  useLayoutEffect(() => {
+    // The consent control disappears on reveal. If it held keyboard focus,
+    // announce the newly available ledger through its named region instead
+    // of leaving focus on the document body.
+    if (deviceHistoryRevealed && !viewRevoked && focusHistoryOnReveal.current) {
+      focusHistoryOnReveal.current = false;
+      historyRoot.current?.focus();
+    }
+  }, [deviceHistoryRevealed, viewRevoked]);
   const accountIsStale = () => unmounted.current || switchedAccount.current
     || (useAccount.getState().user?.id ?? null) !== mountedAccountId.current
     || useAccount.getState().link !== mountedDeviceLink.current;
@@ -130,7 +140,10 @@ export function ActivityHistoryPage() {
             hint="This device may retain study activity from a different account. You can view the local history without moving, deleting or linking those records to your account."
           />
           <GButton size="sm" variant="primary" onClick={() => {
-            if (!accountIsStale()) setDeviceHistoryRevealed(true);
+            if (!accountIsStale()) {
+              focusHistoryOnReveal.current = historyRoot.current?.contains(document.activeElement) ?? false;
+              setDeviceHistoryRevealed(true);
+            }
           }}>Show device history</GButton>
         </GlassCard>
       </div>
@@ -138,7 +151,7 @@ export function ActivityHistoryPage() {
   }
 
   return (
-    <div className="stack gap16" ref={historyRoot}>
+    <div className="stack gap16" ref={historyRoot} role="region" aria-label="Activity History" tabIndex={-1}>
       <GlassCard pad>
         <PanelHeader title="Activity History" sub="Study events saved on this device, including work retained after sign-out. Exports are device-local."
           action={<GButton size="sm" variant="primary" onClick={handleExport} disabled={!filtered.length || exportPending} aria-busy={exportPending}><Download size={ICON_SIZE.body} /> {exportPending ? "Exporting..." : "Export .xlsx"}</GButton>} />
