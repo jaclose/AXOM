@@ -35,6 +35,21 @@ export function assertRestorableZipBudget(entryCount: number, expandedBytes: num
     throw new ZipExportBudgetExceeded("The ZIP archive size exceeds the 2 GB recovery safety limit. No backup was downloaded or certified.");
   }
 }
+/** Account for the actual admitted files, not just referenced candidate keys.
+ * A missing or corrupt asset belongs in the omission report, and must not
+ * block a restorable partial rescue. JSZip creates one directory per populated
+ * media/original category; the workspace manifest is always present. */
+export function assertRestorableZipEntryCounts(mediaCount: number, originalCount: number): void {
+  if (!Number.isSafeInteger(mediaCount) || mediaCount < 0
+    || !Number.isSafeInteger(originalCount) || originalCount < 0) {
+    throw new ZipExportBudgetExceeded("The ZIP backup exceeds 30,000 file entries. No backup was downloaded or certified.");
+  }
+  assertRestorableZipBudget(
+    1 + mediaCount + originalCount
+      + Number(mediaCount > 0) + Number(originalCount > 0),
+    0,
+  );
+}
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
@@ -284,16 +299,9 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   options = { ...options, scope };
   const referencedMedia = mediaReferences(references);
   const eligibleOriginals = backupOriginalDocuments(documents);
-  const possibleMediaCount = referencedMedia.filter(entry => !entry.conflicting).length;
-  // JSZip adds media/ and originals/ directories on first file, plus workspace.json.
-  // Check the complete-backup upper bound *before* reading/inflating any binary.
-  // Missing files could yield a smaller partial archive, but cannot make a
-  // complete export with this many distinct candidates restorable.
-  assertRestorableZipBudget(
-    1 + possibleMediaCount + eligibleOriginals.length
-      + Number(possibleMediaCount > 0) + Number(eligibleOriginals.length > 0),
-    0,
-  );
+  // Speculative candidate counts cannot reject a partial rescue: unavailable
+  // files are explicitly reported and omitted. Budget each admitted ZIP member
+  // after verifying its bytes, before writing the entry or claiming success.
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
@@ -310,6 +318,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     try {
       const { bytes } = await verifiedMediaBlob(metadata, options);
       reserveExpandedBytes(bytes.byteLength);
+      assertRestorableZipEntryCounts(media.length + 1, 0);
       const file = `media/${media.length}`;
       zip.file(file, bytes); media.push({ file, metadata });
     } catch (error) {
@@ -330,6 +339,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
       assertRestorableZipBudget(0, expandedBytes + blob.size);
       const bytes = new Uint8Array(await blob.arrayBuffer());
       reserveExpandedBytes(bytes.byteLength);
+      assertRestorableZipEntryCounts(media.length, originals.length + 1);
       const file = `originals/${originals.length}`;
       zip.file(file, bytes);
       originals.push({ file, documentId: document.id, sha256: document.checksum!.replace(/^sha256:/, ""), byteSize: bytes.byteLength, mimeType: blob.type });
