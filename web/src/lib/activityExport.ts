@@ -9,7 +9,12 @@ const HEADER = {
   alignment: { horizontal: "center", vertical: "center", wrapText: true },
 };
 
-export async function exportActivityWorkbook(logs: StudyLog[], assertCurrent?: () => void) {
+/** Optional workbook writer retains the existing XLSX test seam; account guard is a distinct third argument. */
+export async function exportActivityWorkbook(
+  logs: StudyLog[],
+  saveWorkbook?: (workbook: WorkBook, filename: string) => void,
+  assertCurrent?: () => void,
+) {
   const XLSX = await import("xlsx-js-style");
   // Lazy module loading crosses an async boundary. Do not serialize a previous account after it.
   assertCurrent?.();
@@ -27,7 +32,9 @@ export async function exportActivityWorkbook(logs: StudyLog[], assertCurrent?: (
   const stamp = new Date().toISOString().slice(0, 10);
   // Last possible check before the synchronous download side effect.
   assertCurrent?.();
-  XLSX.writeFile(wb, `axom-activity-history-${stamp}.xlsx`);
+  const filename = `axom-activity-history-${stamp}.xlsx`;
+  if (saveWorkbook) saveWorkbook(wb, filename);
+  else XLSX.writeFile(wb, filename);
 }
 
 function overviewRows(logs: StudyLog[]) {
