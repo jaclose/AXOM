@@ -1543,6 +1543,65 @@ class SourceLedgerTests(unittest.TestCase):
             finally:
                 ledger.ROOTS = old_roots
 
+    def test_agent2_rejects_all_duplicate_native_source_sha_claims(self):
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            folder = pathlib.Path(root)
+            original = folder / "source.pdf"
+            original.write_bytes(b"original-questions")
+            sha = digest("original-questions")
+            dispositions = {"sources": [{"sha256": sha, "kind": "question-source",
+                                         "status": "review-required", "readyCount": 0, "reviewCount": 2}]}
+            canonical = [{"bank_id": "bank", "questions": 2, "source_path": str(original)}]
+            rows = [{"source_sha256": sha, "original_path": str(original)}]
+            audit_path = folder / "audit.json"
+            audit_path.write_text(json.dumps({"native": [
+                {"bankId": "bank", "sourceSha256": sha, "questionRecords": 2,
+                 "ready": 2, "needsReview": 0, "sourceVerified": True, "cloudVerified": False},
+                {"bankId": "bank", "sourceSha256": sha, "questionRecords": 2,
+                 "ready": 1, "needsReview": 1, "sourceVerified": True, "cloudVerified": False},
+            ], "raw": []}))
+            result = enriched.merge_agent2_assessment(dispositions, canonical, rows, audit_path)
+            self.assertEqual(result["assessed_source_count"], 0)
+            self.assertEqual(result["assessed_ready_not_installed"], 0)
+            self.assertEqual(result["ambiguous_source_hashes"], [sha])
+            self.assertEqual(len(result["rejected_audit_rows"]), 2)
+            self.assertEqual(dispositions["sources"][0]["status"], "review-required")
+            self.assertEqual(dispositions["sources"][0]["readyCount"], 0)
+
+    def test_agent2_rejects_raw_duplicate_sha_with_prefix_or_cross_format(self):
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            folder = pathlib.Path(root)
+            original = folder / "questions.txt"
+            original.write_bytes(b"original-questions")
+            sha = digest("original-questions")
+            def assess(native, raw):
+                dispositions = {"sources": [{"sha256": sha, "kind": "question-source",
+                                             "status": "review-required", "readyCount": 0}]}
+                audit_path = folder / "audit.json"
+                audit_path.write_text(json.dumps({"native": native, "raw": raw}))
+                result = enriched.merge_agent2_assessment(
+                    dispositions,
+                    [{"bank_id": "bank", "questions": 2, "source_path": str(original)}],
+                    [{"original_path": str(original), "source_sha256": sha}], audit_path)
+                self.assertEqual(result["ambiguous_source_hashes"], [sha])
+                self.assertEqual(result["assessed_ready_not_installed"], 0)
+                self.assertEqual(result["assessed_source_count"], 0)
+                self.assertEqual(dispositions["sources"][0]["readyCount"], 0)
+            raw = {"sha256": sha, "questionsDetected": 2, "ready": 2,
+                   "needsReview": 0, "sourceVerified": True, "cloudVerified": False}
+            assess([], [raw, {**raw, "sha256": "sha256:" + sha}])
+            native = {"bankId": "bank", "sourceSha256": sha, "questionRecords": 2,
+                      "ready": 2, "needsReview": 0, "sourceVerified": True, "cloudVerified": False}
+            assess([native], [raw])
+
+    def test_agent2_malformed_audit_top_level_fails_closed(self):
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            audit_path = pathlib.Path(root) / "audit.json"
+            audit_path.write_text("[]")
+            result = enriched.merge_agent2_assessment({"sources": []}, [], [], audit_path)
+            self.assertEqual(result["status"], "unreadable_agent2_audit")
+            self.assertFalse(result["validated_sources"])
+
     def test_existing_templates_still_parse_547(self):
         if not (ledger.HOME / "Developer/AXOM/AXOM Templates Completed").is_dir():
             self.skipTest("real source root unavailable")
