@@ -15,6 +15,10 @@ MAX_HINT_SOURCE_BYTES = 64 * 1024 * 1024
 def _sha(txt):
     return hashlib.sha256(txt.encode("utf-8")).hexdigest()
 
+def _valid_source_sha(value):
+    """A source identity requires a scanned, canonical SHA-256, not a label."""
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
 def _pdf_first_question(row, secure_open=None):
     """Unverified correspondence hint from an authorized post-inventory file handle.
 
@@ -144,13 +148,17 @@ def canonicalize_queue(rows, packages, jobs):
     package_by_dir = {p["package"]:p for p in packages}
     for job in jobs:
         path = job["source_path"]
+        invalid_raw_sha = False
         if job["input_mode"] == "native_package_folder":
             p = package_by_dir.get(path)
             key = "pkg:" + p["canonical_package_key"] if p else "pkgpath:" + path
         else:
             ids = job.get("source_ids") or []
             row = row_lookup.get(ids[0]) if ids else None
-            key = "byte:" + row["source_sha256"] if row and row.get("source_sha256") else "path:" + path
+            sha = row.get("source_sha256") if row else None
+            verified_sha = _valid_source_sha(sha)
+            key = "byte:" + sha if verified_sha else "path:" + path
+            invalid_raw_sha = row is not None and sha is not None and sha != "" and not verified_sha
         if key in canonical_jobs:
             primary = canonical_jobs[key]
             primary["equivalent_paths"].append(path)
@@ -163,6 +171,11 @@ def canonicalize_queue(rows, packages, jobs):
             cloned["equivalent_paths"] = []
             cloned["mirror_review_issues"] = []
             cloned["canonical_input_key"] = key
+            if invalid_raw_sha:
+                # A malformed identifier neither proves byte identity nor
+                # authorizes routine extraction as a valid source snapshot.
+                cloned["status"] = "requires_source_review"
+                cloned["unresolved"] = "source_digest_unverified"
             canonical_jobs[key] = cloned
     # Byte-identical files can be copied into different academic folders.
     # Preserve every original filing as evidence; never silently assign all
@@ -310,7 +323,8 @@ def evidence_counts(rows, canonical, pairs, canonical_jobs):
     original_q = sum(p["questions"] for p in verified)
     original_ans = sum(p["questions_with_answer_fields"] for p in verified)
     docs = [r for r in rows if r["document_type"] in QUESTION_TYPES]
-    sha_count = len({r["source_sha256"] for r in docs if r.get("source_sha256")})
+    sha_count = len({r["source_sha256"] for r in docs
+                     if _valid_source_sha(r.get("source_sha256"))})
     return dict(
         canonical_native_packages=len(verified),
         native_snapshot_review_held_packages=len(held),
@@ -329,13 +343,19 @@ def build_lead_dispositions(rows, canonical):
     """One explicit source-kind and state for every SHA in Agent 0's acceptance gate."""
     groups = collections.defaultdict(list)
     bypath = {r["original_path"]:r for r in rows}
+    invalid_sha_rows = []
     for r in rows:
-        if r.get("source_sha256"): groups[r["source_sha256"]].append(r)
+        sha = r.get("source_sha256")
+        if _valid_source_sha(sha):
+            groups[sha].append(r)
+        elif sha is not None and sha != "":
+            invalid_sha_rows.append(r)
     package_original = collections.defaultdict(list)
     for p in canonical:
         original = bypath.get(p.get("source_path"))
-        if original and original.get("source_sha256"):
+        if original and _valid_source_sha(original.get("source_sha256")):
             # A SHA identifies source bytes, not a unique native package.
+            # Malformed external metadata is held outside this hash-keyed index.
             package_original[original["source_sha256"]].append(p)
     precedence = {
         "pq": 0, "imcq": 0, "esoft": 0, "small_group": 1, "review_questions": 1,
@@ -413,7 +433,11 @@ def build_lead_dispositions(rows, canonical):
         result.append(entry)
     return dict(sources=result, notes={
         "scope":"All distinct SHA256 entries in master-source-manifest.jsonl, not all un-hashed academic references.",
-        "missing_sha_file_count":sum(not r.get("source_sha256") for r in rows),
+        "missing_sha_file_count":sum(r.get("source_sha256") is None
+                                     or r.get("source_sha256") == "" for r in rows),
+        "invalid_sha_file_count":len(invalid_sha_rows),
+        "invalid_sha_holds":[{"source_id":r.get("source_id"),
+                              "reason":"source_digest_unverified"} for r in invalid_sha_rows],
         "cloud_reads":"not_performed",
         "ready_count_explanation":"readyCount=0 for source-labelled questions awaiting reviewed answers; local packages have questions but no cloud receipt."
     })
