@@ -166,7 +166,7 @@ export async function draftQuestionExplanation(
   if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords].some(hasPrivateDeviceCitation)) {
     throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
   }
-  if (proposedKeywords.some(keyword => !isCommunitySubjectKeyword(keyword))) {
+  if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
     throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
   }
   // Keywords are subject phrases, never rights attestations or visual-intent
