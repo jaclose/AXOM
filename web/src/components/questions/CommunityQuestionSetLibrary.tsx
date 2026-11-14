@@ -79,6 +79,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   const search = query.owner === accountId ? query.search : "";
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
+  // Only advance discovery pagination after its preceding page succeeded.
+  // Reserve each Load more click synchronously: repeated clicks in one React
+  // batch must not skip page 24 (or retry page 48 after a failed page 24).
+  const lastSuccessfulPageOffset = useRef(0);
+  const pendingPageAdvance = useRef<{ accountId: string; offset: number } | null>(null);
   const [sets, setSets] = useState<LibraryQuestionSet[]>([]);
   // Discovery rows include the viewer's like state. An A → B render must
   // never display A's rows while the account-change reset effect is pending.
@@ -119,6 +124,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   useEffect(() => {
     cancelPendingPreview();
     pendingRevealFocus.current = null;
+    lastSuccessfulPageOffset.current = 0;
+    pendingPageAdvance.current = null;
     setQuery({ owner: accountId, input: "", search: "" });
     setSets([]); setListingAccountId(undefined); setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
@@ -143,6 +150,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     // effect cleanup alone cannot invalidate the earlier response.
     const session = observeAccountSession(accountId, () => {
       if (!alive) return;
+      pendingPageAdvance.current = null;
+      lastSuccessfulPageOffset.current = 0;
       setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
     });
     if (!session.current()) {
@@ -156,12 +165,17 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     void searchQuestionSetLibrary(accountId, search, offset).then(page => {
       if (!alive || !session.current()) return;
       setSets(current => offset === 0 ? page : [...current, ...page.filter(item => !current.some(existing => existing.id === item.id))]);
+      lastSuccessfulPageOffset.current = offset;
       setMore(page.length === 24 && offset < 1000);
     }).catch(cause => {
       if (alive && session.current())
         setError(cause instanceof Error ? cause.message : "The library could not be loaded.");
     }).finally(() => {
-      if (alive && session.current()) setLoading(false);
+      if (alive && session.current()) {
+        if (pendingPageAdvance.current?.accountId === accountId
+          && pendingPageAdvance.current.offset === offset) pendingPageAdvance.current = null;
+        setLoading(false);
+      }
       session.stop();
     });
     return () => { alive = false; session.stop(); };
@@ -170,9 +184,25 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!accountId || useAccount.getState().user?.id !== accountId) return;
+    // Hold pagination until the new query's first page finishes. The old
+    // Load more handler may still fire before React commits the reset.
+    pendingPageAdvance.current = { accountId, offset: 0 };
+    lastSuccessfulPageOffset.current = 0;
+    setMore(false);
     setOffset(0);
     setQuery({ owner: accountId, input, search: input.trim() });
     setRefresh(value => value + 1);
+  }
+  function loadMore() {
+    if (!accountId || useAccount.getState().user?.id !== accountId
+      || listingAccountId !== accountId || loading || !more || pendingPageAdvance.current) return;
+    const nextOffset = lastSuccessfulPageOffset.current + 24;
+    if (nextOffset > 1000) return;
+    pendingPageAdvance.current = { accountId, offset: nextOffset };
+    // Retrying a failed request must request the same unreceived page,
+    // not silently skip ahead to the next 24 publications.
+    if (offset === nextOffset) setRefresh(value => value + 1);
+    else setOffset(nextOffset);
   }
   async function open(id: string) {
     if (!accountId || useAccount.getState().user?.id !== accountId) return;
@@ -374,7 +404,13 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   return <GlassCard pad className="qsl-library">
     <PanelHeader headingLevel={2} title="Find a Question Set"
       sub="Learner sets beyond AXOM's course collection. Each is reviewed before listing."
-      action={<GButton size="sm" disabled={!accountId || visibleLoading} onClick={() => { setOffset(0); setRefresh(value => value + 1); }}>
+      action={<GButton size="sm" disabled={!accountId || visibleLoading} onClick={() => {
+        // Block an old Load more click in the same batch as Refresh.
+        pendingPageAdvance.current = accountId ? { accountId, offset: 0 } : null;
+        lastSuccessfulPageOffset.current = 0;
+        setMore(false);
+        setOffset(0); setRefresh(value => value + 1);
+      }}>
         <RefreshCw size={16} aria-hidden="true" /> Refresh
       </GButton>} />
     {!accountId ? <p>Sign in through Account to search and save learner Question Sets.</p> : <>
@@ -402,7 +438,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             aria-pressed={set.liked} onClick={() => void like(set)}><Heart size={16} fill={set.liked ? "currentColor" : "none"} aria-hidden="true" /> {set.likes}</GhostButton>
         </div>
       </article>)}</div>
-      {visibleListing && more && <GButton disabled={visibleLoading} onClick={() => setOffset(value => value + 24)}>Load more sets</GButton>}
+      {visibleListing && more && <GButton disabled={visibleLoading} onClick={loadMore}>Load more sets</GButton>}
       <p className="sub">Import copies the reviewed listing into your private AXOM. It does not connect your attempts, notes or files to the contributor.</p>
     </>}
     {(opening || activePreview || previewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => {
