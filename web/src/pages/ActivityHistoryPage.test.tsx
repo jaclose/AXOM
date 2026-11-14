@@ -369,6 +369,20 @@ describe("Activity History workbook download feedback", () => {
     }
   });
 
+  it("moves focus from an invalidated device-history consent button to the session notice", () => {
+    switchAccount("account-B", "unlinked");
+    render(<ActivityHistoryPage />);
+    const button = screen.getByRole("button", { name: "Show device history" });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+
+    act(() => { switchAccount("account-A", "linked"); });
+
+    const notice = screen.getByRole("status");
+    expect(notice.textContent).toContain("Activity History session changed");
+    expect(document.activeElement).toBe(notice);
+  });
+
   it("re-guards a fresh unlinked mount and revokes revealed notes when the account changes", () => {
     const originalLogs = fixture.logs;
     fixture.logs = [{ ...originalLogs[0], note: "private-device-note-after-switch" }];
