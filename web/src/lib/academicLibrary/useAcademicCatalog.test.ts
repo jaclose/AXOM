@@ -58,3 +58,44 @@ it("keeps the open course mounted during same-account refresh, but clears it for
   rerender({ query: "different" });
   expect(result.current.courses).toEqual([]);
 });
+
+it("fails closed when two direct catalog cards share one revision on the first page", async () => {
+  vi.useFakeTimers();
+  vi.mocked(listAcademicCourses).mockResolvedValueOnce([
+    course("first-collection"), { ...course("second-collection"), current_revision_id: "first-collection" },
+  ]);
+  const { result } = renderHook(() => useAcademicCatalog("a", "", ""));
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses).toEqual([]);
+  expect(result.current.more).toBe(false);
+  expect(result.current.error).toMatch(/catalog.*changed/i);
+});
+
+it("hides previously listed cards when a later page reuses an earlier revision identity", async () => {
+  vi.useFakeTimers();
+  vi.mocked(listAcademicCourses).mockResolvedValueOnce(Array.from({ length: 24 }, (_, i) => course(`collection-${i}`)))
+    .mockResolvedValueOnce([{ ...course("new-collection"), current_revision_id: "collection-0" }]);
+  const { result } = renderHook(() => useAcademicCatalog("a", "", ""));
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses).toHaveLength(24);
+  await act(async () => { await result.current.loadMore(); });
+  expect(result.current.courses).toEqual([]);
+  expect(result.current.more).toBe(false);
+  expect(result.current.error).toMatch(/catalog.*changed/i);
+});
+
+it("clears old cards when a same-account refresh returns conflicting revisions", async () => {
+  vi.useFakeTimers();
+  vi.mocked(listAcademicCourses).mockResolvedValueOnce([course("previously-valid")])
+    .mockResolvedValueOnce([
+      course("new-first"), { ...course("new-second"), current_revision_id: "new-first" },
+    ]);
+  const { result } = renderHook(() => useAcademicCatalog("a", "", ""));
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses.map(c => c.id)).toEqual(["previously-valid"]);
+  act(() => result.current.retry());
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses).toEqual([]);
+  expect(result.current.more).toBe(false);
+  expect(result.current.error).toMatch(/catalog.*changed/i);
+});

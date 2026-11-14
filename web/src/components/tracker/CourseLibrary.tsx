@@ -12,6 +12,7 @@ import { CoursePlan } from "./CoursePlan";
 import { ConnectedCoursePlan } from "./ConnectedCoursePlan";
 import { useAccount } from "../../lib/account/accountStore";
 import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog";
+import { isAcademicCourseDownloaded } from "../../lib/academicLibrary/downloadReference";
 import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-library.css";
 import { AcademicCourseUpload } from "./AcademicCourseUpload";
@@ -74,7 +75,8 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   const mine = (book: CourseBook) => book.templateIds?.length ? (book.loadedActivities ?? 0) > 0 : book.origin === "workspace" && book.count > 0;
   const available = (book: CourseBook) => Boolean(book.templateIds?.length || book.count || bankFor(book)?.ready);
   // A shared label does not prove shared identity. Keep the local route in My Courses.
-  const connectedShown = connected.filter(course => view !== "mine" || s.documents.some(document => document.id === `academic-${course.current_revision_id}`));
+  const connectedShown = connected.filter(course => view !== "mine"
+    || (Boolean(accountId) && isAcademicCourseDownloaded(course, accountId!, s)));
   const shown = books.filter(book => (!term || book.term === term) && (view === "all" || (view === "mine" ? mine(book) : available(book)))
     && `${book.title} ${book.courseName ?? ""} ${book.courseCode ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
     // An account collection and an already-loaded local course can share a
