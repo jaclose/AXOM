@@ -349,7 +349,12 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       const { attachmentCount, missingBlobKeys, originalCount, missingOriginalIds, deferredSourceCount } = await exportStateWithAttachments(useStore.getState(), scope);
       const missing = missingBlobKeys.length
         ? ` ${missingBlobKeys.length} image attachments could not be read and were exported as metadata only.` : "";
-      setMsg(`${scope === "saved-work" ? "Downloaded your saved-work copy. Only files already on this device are included." : "Downloaded your backup file."}${deferredSourceCount ? ` ${deferredSourceCount} sources remain as download references and need the original account and content access.` : ""}${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${originalCount ? ` Includes ${originalCount} original files.` : ""}${missing}${missingOriginalIds.length ? ` ${missingOriginalIds.length} original files were unavailable or exceeded the portable file limit. Their source references are included.` : ""}`);
+      // An anchor click can be ignored, cancelled, blocked or routed to a location
+      // unknown to the app. Never report that an OS-level download was completed.
+      const partial = deferredSourceCount > 0 || missingBlobKeys.length > 0 || missingOriginalIds.length > 0;
+      setMsg(`${scope === "saved-work"
+        ? "AXOM asked this browser to download your saved-work copy. Only files already on this device are included."
+        : "AXOM asked this browser to download your backup."} Check that the file exists and can be opened and restored before relying on it.${partial && scope === "complete" ? " This copy is incomplete, not a verified full backup." : ""}${deferredSourceCount ? ` ${deferredSourceCount} sources remain as download references and need the original account and content access.` : ""}${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${originalCount ? ` Includes ${originalCount} original files.` : ""}${missing}${missingOriginalIds.length ? ` ${missingOriginalIds.length} original files were unavailable or exceeded the portable file limit. Their source references are included.` : ""}`);
       return true;
     } catch (error) {
       setMsg(`Backup was not exported. ${error instanceof Error ? error.message : "Try again after checking storage."}${scope === "complete" ? " Export saved work to keep a copy without downloading course files." : ""}`);
