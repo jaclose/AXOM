@@ -117,6 +117,34 @@ describe("Community Question Set Library", () => {
     await waitFor(() => expect(mock.like).toHaveBeenCalledWith("account-1", summary.id, true));
   });
 
+  it.each([
+    { notice: "Contributor assertion: original text only; external figures excluded.", label: "specific" },
+    { notice: "Share only material you have permission to distribute.", label: "generic" },
+  ])("reveals the $label publication rights notice without representing it as verified license evidence", async ({ notice }) => {
+    const approved = { ...snapshot, copyrightNotice: notice };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: approved, contentDigest: "c".repeat(64),
+      status: "approved", reviewRevision: 8,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    const disclosure = screen.getByText(`Recorded snapshot notice: ${notice}`).closest("details");
+    expect(disclosure?.open).toBe(false);
+    expect(disclosure?.textContent).toContain("not proof of a redistribution license");
+    fireEvent.click(screen.getByText("Reveal publication rights notice"));
+    expect(disclosure?.open).toBe(true);
+    // Inspection is read-only. Import is still authorized from the same
+    // revision-bound server snapshot, with the original notice unchanged.
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(approved);
+    expect(mock.authorize.mock.calls[0][1]).toMatchObject({
+      contentDigest: "c".repeat(64), reviewRevision: 8,
+    });
+    expect(mock.commit.mock.calls[0][0].snapshot.questions[0].correctKey).toBe("B");
+  });
+
   it("keeps answer-bearing authored tags, citations and visual keywords behind deliberate reveal without changing import evidence", async () => {
     const answerBearing = {
       ...snapshot, tags: ["Axillary nerve"],
