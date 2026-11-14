@@ -36,6 +36,7 @@ beforeEach(async () => {
   dispose = setMissingAttachmentLoader(attemptedDownload);
 });
 afterEach(async () => {
+  setQuestionAttachmentAccount(undefined); // Clean up even when a scoped fixture throws during setup.
   dispose();
   await new Promise<void>(resolve => { const request = indexedDB.deleteDatabase(SOURCE_ORIGINALS_DB); request.onsuccess = () => resolve(); });
   await closeWorkspace(); vi.restoreAllMocks(); vi.unstubAllGlobals();
@@ -166,13 +167,14 @@ describe("saved-work recovery without downloading content", () => {
       localStorage.clear();
       let state = makeSeed();
       state.questions = []; state.documents = [];
+      // Originals must be stored under the same account that initiates export.
+      setQuestionAttachmentAccount("account-a");
       if (extension === "zip") {
         const source = await fixture();
         state = source.state;
         state.questions[0].attachments = [];
         await saveSourceOriginal(state.documents[0], source.original);
       }
-      setQuestionAttachmentAccount("account-a");
       const revoke = vi.spyOn(URL, "revokeObjectURL");
       vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementationOnce(function (this: HTMLAnchorElement) {
         filename = this.download;
@@ -198,6 +200,8 @@ describe("saved-work recovery without downloading content", () => {
       localStorage.clear();
       let state = makeSeed();
       state.questions = []; state.documents = [];
+      // Originals must be stored under the same account that initiates export.
+      setQuestionAttachmentAccount("account-a");
       if (extension === "zip") {
         const source = await fixture();
         state = source.state;
@@ -205,7 +209,6 @@ describe("saved-work recovery without downloading content", () => {
         await saveSourceOriginal(state.documents[0], source.original);
       }
       const revoke = vi.spyOn(URL, "revokeObjectURL");
-      setQuestionAttachmentAccount("account-a");
       vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementationOnce(() => { throw new Error("Browser blocked download"); });
       try {
@@ -228,6 +231,8 @@ describe("saved-work recovery without downloading content", () => {
       localStorage.clear();
       let state = makeSeed();
       state.questions = []; state.documents = [];
+      // Originals must be stored under the same account that initiates export.
+      setQuestionAttachmentAccount("account-a");
       if (extension === "zip") {
         const source = await fixture();
         state = source.state;
@@ -235,9 +240,10 @@ describe("saved-work recovery without downloading content", () => {
         await saveSourceOriginal(state.documents[0], source.original);
       }
       const revoke = vi.spyOn(URL, "revokeObjectURL");
-      setQuestionAttachmentAccount("account-a");
       try {
-        await exportStateWithAttachments(state);
+        const completed = await exportStateWithAttachments(state);
+        expect(completed.missingBlobKeys).toEqual([]);
+        expect(completed.missingOriginalIds).toEqual([]);
         const requestedAt = lastBackupAt();
         expect(requestedAt).not.toBeNull();
         expect(revoke).not.toHaveBeenCalled(); // Stable-account download grace period.
