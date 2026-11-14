@@ -158,5 +158,12 @@ export async function draftQuestionExplanation(
       .slice(0, 8)
     : [];
 
+  // AI text is untrusted, including model-suggested references. Do not surface
+  // private local paths, inline document URIs or credential-bearing URLs through
+  // draft reviews and into a later Community publication attempt.
+  if ([explanation, ...Object.values(choiceRationales), ...keywords].some(hasPrivateDeviceCitation)) {
+    throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
+  }
+
   return { questionId: question.id, explanation, choiceRationales, keywords, sourceFingerprint };
 }
