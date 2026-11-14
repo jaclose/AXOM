@@ -1,7 +1,7 @@
 import { contentMetadata, readDeferredContent } from "./sync/deferredContent";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
-import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope } from "./questionAttachmentScope";
 import { backupOriginalDocuments, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, MAX_JSON_BACKUP_BYTES, MAX_JSON_MEDIA_RECORDS, mediaBackupBytes } from "./backupArchive";
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
@@ -158,12 +158,34 @@ function downloadBackupPayload(payload: Record<string, unknown>, scope: BackupSc
 
 function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: BackupScope = "complete") {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const stamp = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `${BRAND.productName.toLowerCase()}-${scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
-  a.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  let released = false;
+  let releaseTimer: number | undefined;
+  let unsubscribe: (() => void) | undefined;
+  const release = () => {
+    if (released) return;
+    released = true;
+    unsubscribe?.();
+    unsubscribe = undefined;
+    if (releaseTimer !== undefined) window.clearTimeout(releaseTimer);
+    // Blob URL cleanup must never mask the original download or account error.
+    try { URL.revokeObjectURL(url); } catch { /* Best effort, including browser shutdown. */ }
+  };
+  try {
+    // Origin-local blob URLs are not account-scoped. Invalidate the previous
+    // workspace's URL immediately when A→B or device-link ownership changes.
+    unsubscribe = subscribeQuestionAttachmentScope(release);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `${BRAND.productName.toLowerCase()}-${scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
+    a.click();
+    // Retain the normal browser download grace period only for an unchanged
+    // account. A synchronous click handler may have already revoked the URL.
+    if (!released) releaseTimer = window.setTimeout(release, 30_000);
+  } catch (error) {
+    release(); // A throwing click must not retain a large backup Blob indefinitely.
+    throw error;
+  }
   // The caller certifies completion only after checking omitted binary assets.
 }
 
