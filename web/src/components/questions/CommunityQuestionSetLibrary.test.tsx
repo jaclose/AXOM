@@ -373,8 +373,10 @@ describe("Community Question Set Library", () => {
 
     const close = screen.getByRole("button", { name: "Close" });
     const answer = screen.getByText("Reveal recorded answer and teaching notes");
+    const rights = screen.getByText("Reveal publication rights notice");
     const topics = screen.getByText("Reveal set topic tags");
     expect(answer.closest("details")?.open).toBe(false);
+    expect(rights.closest("details")?.open).toBe(false);
     expect(topics.closest("details")?.open).toBe(false);
 
     // Modal only enumerates buttons, inputs and [tabindex] for its focus trap.
@@ -386,11 +388,21 @@ describe("Community Question Set Library", () => {
     // focus traversal here and the disclosure's toggle via its click default.
     fireEvent.click(answer);
     expect(answer.closest("details")?.open).toBe(true);
+    // Rights were added between teaching and tags. Preserve that reachable
+    // disclosure rather than skipping it in the keyboard acceptance path.
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(rights);
+    fireEvent.click(rights);
+    expect(rights.closest("details")?.open).toBe(true);
+    expect(screen.getByText("Recorded snapshot notice: Synthetic test content").closest("details")).toBe(rights.closest("details"));
+    expect(screen.getByText(/not proof of a redistribution license/).closest("details")).toBe(rights.closest("details"));
     await user.tab({ shift: true });
     expect(document.activeElement).toBe(topics);
     fireEvent.click(topics);
     expect(topics.closest("details")?.open).toBe(true);
+    // Import still commits the exact reviewed snapshot, not any preview state.
     expect(mock.commit).toHaveBeenCalledOnce();
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(snapshot);
   });
 
   it("redacts previous-account discovery rows and liked state in the first B commit", async () => {
