@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Download, History } from "lucide-react";
 import { useStore } from "../lib/store";
 import { useAccount } from "../lib/account/accountStore";
@@ -26,14 +26,18 @@ export function ActivityHistoryPage() {
   // Treat device-link changes as a context switch, even if the user ID stays the same.
   const switchedAccount = useRef(false);
   const unmounted = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     unmounted.current = false;
-    const unsubscribe = useAccount.subscribe((state) => {
+    const revokeIfChanged = (state: ReturnType<typeof useAccount.getState>) => {
       if ((state.user?.id ?? null) !== mountedAccountId.current || state.link !== mountedDeviceLink.current) {
         switchedAccount.current = true;
         setViewRevoked(true);
       }
-    });
+    };
+    const unsubscribe = useAccount.subscribe(revokeIfChanged);
+    // Reconcile a transition occurring after render but before subscription.
+    // Layout effects flush this revocation before the first browser paint.
+    revokeIfChanged(useAccount.getState());
     return () => { unmounted.current = true; unsubscribe(); };
   }, []);
   const accountIsStale = () => unmounted.current || switchedAccount.current
