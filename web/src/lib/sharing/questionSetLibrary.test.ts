@@ -308,6 +308,42 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["local file", "file:///Users/author/private-source.pdf"],
+    ["browser object URL", "blob:https://example.edu/private-preview"],
+    ["embedded data", "data:text/plain;base64,YWJj"],
+    ["network share", "//intranet/private/credit.txt"],
+    ["source-labeled device path", "source:/mnt/private/author.txt"],
+    ["HTTP URL credentials", "https://creator:secret@example.edu/profile"],
+    ["encoded local file", "file%253A%252F%252F%252FUsers%252Fauthor%252Fprivate.pdf"],
+  ])("blocks %s in public creator credit before the submission RPC", async (_label, credit) => {
+    const value = snapshot();
+    const original = JSON.stringify(value);
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, credit, confirmed))
+      .rejects.toThrow(/Public creator credit contains a private file/i);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(JSON.stringify(value)).toBe(original);
+  });
+
+  it.each([
+    "Department of Pathology / Histology",
+    "Faculty reviewer, Example University",
+    "https://example.edu/faculty/author",
+    "Dr. Example (CC BY 4.0 attribution)",
+  ])("allows safe public creator credit (%s)", async credit => {
+    const value = snapshot();
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, credit, confirmed))
+      .resolves.toBe(entryId);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_question_set_library", expect.objectContaining({
+      p_credit: credit,
+      p_snapshot: value,
+    }));
+  });
+
   it("retains public medical prose, mechanism URLs and slash-delimited terminology", async () => {
     const value = snapshot();
     value.questions[0].stem = "Compare the CD4/CD8 ratio and MHC I/II mechanisms. https://example.edu/review";
