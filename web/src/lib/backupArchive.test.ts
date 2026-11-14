@@ -1047,7 +1047,12 @@ describe("portable binary media backup", () => {
   it("holds JPEG containers with no frame or image scan instead of certifying ZIP or JSON recovery", async () => {
     const malformed = [
       Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
-      Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xd9]),
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xd9]),
+      // Well-formed 1x1 frame segment, but no image scan payload.
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 8, 0, 1, 0, 1, 1, 1, 0x11, 0, 0xff, 0xd9]),
+      // Correct frame and SOS headers, but no entropy bytes between SOS and EOI.
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 8, 0, 1, 0, 1, 1, 1, 0x11, 0,
+        0xff, 0xda, 0x00, 0x08, 1, 1, 0, 0, 0x3f, 0, 0xff, 0xd9]),
     ];
     for (const [index, bytes] of malformed.entries()) {
       const jpeg = { ...attachment, id: `jpeg-corrupt-${index}`,
@@ -1065,6 +1070,18 @@ describe("portable binary media backup", () => {
       expect(exported).toMatchObject({ attachmentCount: 0, missingBlobKeys: [jpeg.blobKey] });
       const zip = await readPortableBackup(new File([exported.blob], "incomplete-jpeg.zip"));
       expect(zip.rawText).toContain('"media":[]');
+      // A forged ZIP bypassing export must fail before workspace adoption.
+      const { default: JSZip } = await import("jszip");
+      const hostile = new JSZip();
+      hostile.file("media/0", bytes);
+      hostile.file("workspace.json", JSON.stringify({
+        _backupFormat: "axom-media-backup", _backupVersion: 2,
+        media: [{ file: "media/0", metadata: { ...jpeg, questionId: "held-question" } }],
+        originals: [],
+      }));
+      const hostileBlob = await hostile.generateAsync({ type: "blob" });
+      await expect(readPortableBackup(new File([hostileBlob], "fake-jpeg.zip")))
+        .rejects.toThrow(/image.*integrity/i);
     }
   });
 
