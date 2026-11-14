@@ -26,6 +26,21 @@ type CourseIdentity = Pick<AcademicCourse, "id" | "current_revision_id">;
 const unsettledReferences = new Set<string>();
 const referenceKey = (accountId: string, revisionId: string) => `${accountId}:${revisionId}`;
 
+/** The document key contains only the revision. Never let another collection
+ * or account replace an existing receipt at that key, even during a retry. */
+function assertReferenceSlotIdentity(identity: Pick<DownloadReference, "collectionId" | "revisionId" | "accountId">): void {
+  const matching = useStore.getState().documents.filter(document => document.id === `academic-${identity.revisionId}`);
+  if (!matching.length) return;
+  let existing: { collectionId?: unknown; revisionId?: unknown; accountId?: unknown } | undefined;
+  try { existing = JSON.parse(matching[0].rawText) as typeof existing; } catch { /* preserve unrecognized data */ }
+  if (matching.length !== 1 || matching[0].fileType !== ACADEMIC_REFERENCE_TYPE
+    || existing?.collectionId !== identity.collectionId
+    || existing?.revisionId !== identity.revisionId
+    || existing?.accountId !== identity.accountId) {
+    throw new Error("This revision already has a different collection or account reference. Resolve the conflicting saved course before retrying.");
+  }
+}
+
 /** A deferred buffer belongs to its originating account. Foreign recovery IDs
  * cannot invalidate an already-installed course, while unknown owners remain
  * held conservatively instead of being treated as current-account proof. */
@@ -55,6 +70,7 @@ export function readDownloadReference(documents: readonly SourceDocument[], cour
 
 export async function saveDownloadReference(value: DownloadReference, assertCurrent: () => void): Promise<void> {
   assertCurrent();
+  assertReferenceSlotIdentity(value);
   const checkpoint = getVaultWriteCheckpoint();
   const rawText = JSON.stringify(value);
   const key = referenceKey(value.accountId, value.revisionId);
@@ -93,6 +109,7 @@ export async function downloadCourseQuestions(course: AcademicCourse, accountId:
   try {
     scope.assertCurrent();
     if (!accountId || scope.key !== accountId) throw new Error("Sign in again before downloading these questions.");
+    assertReferenceSlotIdentity({ collectionId: course.id, revisionId: course.current_revision_id, accountId });
     let saved = readDownloadReference(useStore.getState().documents, course, accountId);
     if (saved && hasDeferredReferenceMembers(saved, accountId, useStore.getState().deferredContent)) {
       progress("Downloading these questions and your saved progress…");
