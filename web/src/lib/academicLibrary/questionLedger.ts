@@ -25,6 +25,8 @@ export interface QuestionLedger {
   leftOut: Array<LedgerCount & { reason: string }>;
   /** Packages whose catalog ready/held counts disagree with their own rows. The uploader refuses them. */
   mismatched: Array<{ id: string; name: string; rows: number; ready: number; held: number }>;
+  /** Bank-bearing original source IDs repeated in the catalog, including empty banks. */
+  duplicateSourceIds: string[];
   /** Rows placed nowhere or more than once. Zero when every question is accounted for. */
   unaccounted: number;
 }
@@ -41,7 +43,16 @@ function add(count: LedgerCount, source: PublicationSource) {
 
 export function accountQuestions(inventory: PublicationInventory, plan: PublicationPlan): QuestionLedger {
   const withQuestions = inventory.sources.filter(source => source.hasBank);
-  const byId = new Map(withQuestions.map(source => [source.id, source]));
+  // Two bank-bearing catalog rows with the same original ID cannot be
+  // reconciled by selecting the last record. Hold both until source review.
+  const countsById = new Map<string, number>();
+  for (const source of withQuestions) countsById.set(source.id, (countsById.get(source.id) ?? 0) + 1);
+  // A duplicate source identity is unsafe even when its question packages are
+  // empty. Keep truthful row totals and expose the collision independently.
+  const duplicateSourceIds = [...countsById].filter(([, count]) => count > 1)
+    .map(([id]) => id).sort((a, b) => a.localeCompare(b));
+  const duplicateIds = new Set(duplicateSourceIds);
+  const byId = new Map(withQuestions.filter(source => !duplicateIds.has(source.id)).map(source => [source.id, source]));
   const placements = new Map<string, number>();
   const place = (id: string) => placements.set(id, (placements.get(id) ?? 0) + 1);
 
@@ -78,9 +89,12 @@ export function accountQuestions(inventory: PublicationInventory, plan: Publicat
   let unaccounted = 0;
   for (const source of withQuestions) {
     const times = placements.get(source.id) ?? 0;
-    if (times !== 1) unaccounted += rowsOf(source) * Math.max(1, Math.abs(times - 1));
+    // Keep every conflicting catalog row in the denominator, regardless of
+    // whether a plan happened to reference its ambiguous original ID once.
+    if (duplicateIds.has(source.id)) unaccounted += rowsOf(source);
+    else if (times !== 1) unaccounted += rowsOf(source) * Math.max(1, Math.abs(times - 1));
   }
   const mismatched = withQuestions.filter(source => source.rows !== undefined && source.ready + source.review !== source.rows)
     .map(source => ({ id: source.id, name: source.name, rows: source.rows!, ready: source.ready, held: source.review }));
-  return { total, courses, inCourses, leftOut, mismatched, unaccounted };
+  return { total, courses, inCourses, leftOut, mismatched, unaccounted, duplicateSourceIds };
 }
