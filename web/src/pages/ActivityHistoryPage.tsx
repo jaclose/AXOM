@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, History } from "lucide-react";
 import { useStore } from "../lib/store";
+import { useAccount } from "../lib/account/accountStore";
 import { GlassCard, GButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Field, SelectField } from "../components/ui/Modal";
 import { exportActivityWorkbook } from "../lib/activityExport";
@@ -15,6 +16,23 @@ export function ActivityHistoryPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [exportPending, setExportPending] = useState(false);
+  // This mounted view owns its original account. Re-enter Activity History after switching accounts.
+  // Track intermediate transitions too: comparing the current ID alone misses A → B → A.
+  const mountedAccountId = useRef(useAccount.getState().user?.id ?? null);
+  const switchedAccount = useRef(false);
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false;
+    const unsubscribe = useAccount.subscribe((state) => {
+      if ((state.user?.id ?? null) !== mountedAccountId.current) switchedAccount.current = true;
+    });
+    return () => { unmounted.current = true; unsubscribe(); };
+  }, []);
+  const accountIsStale = () => unmounted.current || switchedAccount.current
+    || (useAccount.getState().user?.id ?? null) !== mountedAccountId.current;
+  const assertCurrentAccount = () => {
+    if (accountIsStale()) throw new Error("Activity export canceled because the account changed.");
+  };
   const types = useMemo(() => [...new Set(logs.map((log) => log.type).sort())], [logs]);
   const filtered = logs.filter((log) =>
     (type === null || log.type === type)
@@ -28,15 +46,14 @@ export function ActivityHistoryPage() {
     if (exportPending || !filtered.length) return;
     setExportPending(true);
     try {
-      await exportActivityWorkbook(filtered);
+      assertCurrentAccount();
+      await exportActivityWorkbook(filtered, undefined, assertCurrentAccount);
     } catch {
-      pushToast({
-        title: "Activity export failed",
-        body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.",
-        tone: "warn",
-      });
+      if (!unmounted.current) pushToast(accountIsStale()
+        ? { title: "Activity export canceled", body: "Your account changed. Reopen Activity History before exporting again.", tone: "warn" }
+        : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
     } finally {
-      setExportPending(false);
+      if (!unmounted.current) setExportPending(false);
     }
   }
 
