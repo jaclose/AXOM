@@ -733,7 +733,7 @@ describe("portable binary media backup", () => {
       MAX_ZIP_BACKUP_ENTRIES - 1, 0,
       async () => MAX_ZIP_BACKUP_BYTES,
       async () => null,
-    )).rejects.toThrow("expanded size");
+    )).rejects.toThrow("archive size"); // Expanded bytes fit exactly; streamed ZIP overhead does not.
   }, 30_000);
 
   it("pins missing-candidate availability against a second-pass storage race", async () => {
@@ -749,9 +749,10 @@ describe("portable binary media backup", () => {
     expect(availability?.mediaAvailable.filter(Boolean)).toHaveLength(MAX_ZIP_BACKUP_ENTRIES - 2);
   }, 30_000);
 
-  it("preflights a possible 2 GiB byte overflow even when ZIP file count fits", async () => {
-    // 300 candidate images each declare 8 MiB: fewer than 30,000 entries,
-    // but all-present bytes exceed 2 GiB before any workspace manifest.
+  it("rejects streamed ZIP size overflow even when ZIP file count fits", async () => {
+    // 300 candidate images each declare 8 MiB: fewer than 30,000 entries.
+    // At image 256, expanded bytes reach exactly 2 GiB, while the mandatory
+    // ZIP headers/directories exceed the serialized archive limit first.
     const declaredBytes = 300 * 8 * 1024 * 1024;
     expect(declaredBytes).toBeGreaterThan(MAX_ZIP_BACKUP_BYTES);
     let inspected = 0;
@@ -760,8 +761,8 @@ describe("portable binary media backup", () => {
       async () => { inspected += 1; return 8 * 1024 * 1024; },
       async () => { throw new Error("Unexpected original probe"); },
       declaredBytes,
-    )).rejects.toThrow(/expanded size/);
-    expect(inspected).toBe(257); // 256 x 8 MiB fits; 257th exceeds 2 GiB.
+    )).rejects.toThrow(/archive size/);
+    expect(inspected).toBe(256); // The 256th probe crosses the stricter streamed archive budget.
 
     inspected = 0;
     const partial = await preflightRestorableZipCandidateBudget(
