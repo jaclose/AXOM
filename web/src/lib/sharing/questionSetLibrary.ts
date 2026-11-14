@@ -45,6 +45,30 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 const boundedText = (value: unknown, max: number): value is string => typeof value === "string" && value.length <= max;
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
+/** Text-only shares cannot smuggle a device file or embedded image/document
+ * through a question stem, choice, rationale or tag. Normal medical prose,
+ * slash-delimited concepts and public source links remain valid.
+ *
+ * First look for an explicit private URI/path marker, then reuse the same
+ * bounded encoded-URI validator used by publication citations. Do not apply
+ * the broader citation path heuristic indiscriminately to anatomy prose.
+ */
+const INLINE_PRIVATE_REFERENCE = /(?:file|content|blob|data)(?::|%(?:25)*3a)|\/(?:Users|home|Volumes)\/|~\/|[a-z]:\\|\\\\/i;
+
+function containsPrivateInlineReference(snapshot: SharedQuestionSetSnapshot): boolean {
+  const fields = [
+    snapshot.title, snapshot.copyrightNotice, ...snapshot.tags,
+    ...snapshot.questions.flatMap(question => [
+      question.stem, question.explanation, question.system, question.topic,
+      question.objective, question.category, question.subcategory, ...question.tags,
+      ...question.options.map(option => option.text),
+      ...Object.values(question.choiceRationales ?? {}),
+    ]),
+  ];
+  return fields.some(value => typeof value === "string"
+    && INLINE_PRIVATE_REFERENCE.test(value) && hasPrivateDeviceCitation(value));
+}
+
 async function withAccount<T>(accountId: string, action: (client: Awaited<ReturnType<typeof accountOperationClient>>["client"]) => Promise<T>): Promise<T> {
   const operation = await accountOperationClient();
   if (operation.userId !== accountId) throw new Error("The signed-in account changed. Reopen the Question Set Library.");
@@ -206,6 +230,8 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   // Historical approved sets remain readable/importable unchanged.
   if (submittedSnapshot.questions.some(question => hasPrivateDeviceCitation(question.citation)))
     throw new Error("Question Set citation contains a private local file path, inline document URI or URL credentials and cannot be published.");
+  if (containsPrivateInlineReference(submittedSnapshot))
+    throw new Error("Question Set teaching text contains a private local file or inline media reference. Remove it before publishing.");
   if (!submittedSnapshot.questions.length || submittedSnapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
   // The dialog filters missing/placeholder rationales, but other callers can
