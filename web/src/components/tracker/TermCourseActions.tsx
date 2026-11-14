@@ -109,8 +109,15 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
     // The controls can already be unmounted by preview navigation when the
     // account changes. Keep this listener alive for the request's lifetime so
     // the previous learner's lock is released immediately, not at settlement.
+    // A stale account request may settle after B has started its own download.
+    // Release A's original lock exactly once: later B account-store emissions
+    // are not permission for A to clear B's active lock.
+    let abandonedLockReleased = false;
     const unsubscribeAccount = useAccount.subscribe(state => {
-      if (state.user?.id !== accountId) onBusyChangeRef.current(false);
+      if (!abandonedLockReleased && state.user?.id !== accountId) {
+        abandonedLockReleased = true;
+        onBusyChangeRef.current(false);
+      }
     });
     let completed = 0;
     let skipped = 0;
