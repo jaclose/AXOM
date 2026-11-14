@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -107,6 +108,7 @@ for (const { width, height, theme } of [
     const chooser = page.waitForEvent("filechooser");
     await library.getByRole("button", { name: "Install prepared library", exact: true }).click();
     await (await chooser).setFiles({ name: "synthetic-flat-export.zip", mimeType: "application/zip", buffer });
+    await confirmPreparedImport(page);
     await expect(library.getByRole("status")).toContainText("Library installed.", { timeout: 90_000 });
     const installed = await snapshot(page);
     expect(installed.questions).toHaveLength(1);
@@ -160,6 +162,7 @@ for (const { width, height, theme } of [
     const repeatChooser = page.waitForEvent("filechooser");
     await library.getByRole("button", { name: "Update library", exact: true }).click();
     await (await repeatChooser).setFiles({ name: "synthetic-flat-export.zip", mimeType: "application/zip", buffer });
+    await confirmPreparedImport(page);
     await expect(library.getByRole("status")).toContainText("Library installed.", { timeout: 90_000 });
     expect(await snapshot(page)).toEqual(installed);
 
