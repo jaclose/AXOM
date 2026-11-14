@@ -286,6 +286,14 @@ export async function reviewQuestionSetSubmission(
     || data.review_revision !== reviewed.reviewRevision
     || await sharedQuestionSetDigest(data.snapshot_payload) !== reviewed.contentDigest)
     throw new Error("The pending Question Set changed since inspection. Reopen and review the current answers.");
+  // Older pending submissions can predate the publisher-side explanation
+  // admission gate. A moderator may return these for revision, but must not
+  // promote keyless or placeholder-only records into learner discovery.
+  // This is a local approval preflight, not proof of medical/source review;
+  // the server RPC still independently enforces reviewer authority and revision.
+  if (approved && data.snapshot_payload.questions.some(question =>
+    !question.correctKey || !hasExplanationProse(question.explanation)))
+    throw new Error("This Question Set is not ready for approval: each question needs a confirmed answer and teaching explanation prose. Return it for revision.");
   await operation.assertCurrent();
   const decision = await operation.client.rpc("review_question_set_library", {
     p_id: reviewed.id, p_approved: approved, p_reason: reason.trim(),
