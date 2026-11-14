@@ -33,6 +33,13 @@ export function ActivityHistoryPage() {
   const assertCurrentAccount = () => {
     if (accountIsStale()) throw new Error("Activity export canceled because the account changed.");
   };
+  // A restore or new study event can replace the log snapshot without switching users.
+  // The async XLSX import must not download rows from a superseded workspace.
+  const historyIsStale = () => useStore.getState().logs !== logs;
+  const assertCurrentExport = () => {
+    assertCurrentAccount();
+    if (historyIsStale()) throw new Error("Activity export canceled because study history changed.");
+  };
   const types = useMemo(() => [...new Set(logs.map((log) => log.type).sort())], [logs]);
   const filtered = logs.filter((log) =>
     (type === null || log.type === type)
@@ -54,12 +61,14 @@ export function ActivityHistoryPage() {
       )) return;
     setExportPending(true);
     try {
-      assertCurrentAccount();
-      await exportActivityWorkbook(filtered, undefined, assertCurrentAccount);
+      assertCurrentExport();
+      await exportActivityWorkbook(filtered, undefined, assertCurrentExport);
     } catch {
       if (!unmounted.current) pushToast(accountIsStale()
         ? { title: "Activity export canceled", body: "Your account changed. Reopen Activity History before exporting again.", tone: "warn" }
-        : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
+        : historyIsStale()
+          ? { title: "Activity export canceled", body: "Your study history changed. Reopen Activity History before exporting the current records.", tone: "warn" }
+          : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
     } finally {
       if (!unmounted.current) setExportPending(false);
     }
