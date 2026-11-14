@@ -83,3 +83,19 @@ it("hides previously listed cards when a later page reuses an earlier revision i
   expect(result.current.more).toBe(false);
   expect(result.current.error).toMatch(/catalog.*changed/i);
 });
+
+it("clears old cards when a same-account refresh returns conflicting revisions", async () => {
+  vi.useFakeTimers();
+  vi.mocked(listAcademicCourses).mockResolvedValueOnce([course("previously-valid")])
+    .mockResolvedValueOnce([
+      course("new-first"), { ...course("new-second"), current_revision_id: "new-first" },
+    ]);
+  const { result } = renderHook(() => useAcademicCatalog("a", "", ""));
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses.map(c => c.id)).toEqual(["previously-valid"]);
+  act(() => result.current.retry());
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses).toEqual([]);
+  expect(result.current.more).toBe(false);
+  expect(result.current.error).toMatch(/catalog.*changed/i);
+});
