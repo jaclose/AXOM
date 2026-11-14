@@ -343,8 +343,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     try {
       await setQuestionSetLibraryLike(accountId, set.id, !set.liked);
       if (!session.current()) return;
-      setSets(current => current.map(item => item.id === set.id
-        ? { ...item, liked: !item.liked, likes: item.likes + (item.liked ? -1 : 1) } : item));
+      // A search refresh may already contain the server-accepted like state.
+      // Apply this acknowledgement only to rows still showing the state that
+      // initiated the request; otherwise a late response would flip it back.
+      setSets(current => current.map(item => item.id === set.id && item.liked === set.liked
+        ? { ...item, liked: !set.liked, likes: item.likes + (set.liked ? -1 : 1) } : item));
     } catch (cause) {
       if (session.current())
         setError(cause instanceof Error ? cause.message : "Your like could not be saved.");
