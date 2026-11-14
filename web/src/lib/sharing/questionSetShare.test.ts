@@ -162,6 +162,10 @@ describe("Question Set share boundary", () => {
     ["legacy signed URL signature", "https://example.edu/lesson?Signature=DEMO_NOT_SECRET"],
     ["encoded signed parameter", "https://example.edu/lesson?X%2DAmz%2DSignature=DEMO_NOT_SECRET"],
     ["double-encoded signed parameter", "https://example.edu/lesson?X%252DAmz%252DSignature=DEMO_NOT_SECRET"],
+    ["comma in query before bearer token", "https://example.edu/case?q=CD4,CD8&token=DEMO_NOT_SECRET"],
+    ["comma in path before signed grant", "https://example.edu/case,figure2?X-Amz-Signature=DEMO_NOT_SECRET"],
+    ["comma in HTTP userinfo", "https://student,team:demo-password@example.edu/lesson"],
+    ["semicolon in HTTP userinfo", "https://student;team:demo-password@example.edu/lesson"],
   ])("holds %s in source citations before creating a public Question Set", (_label, citation) => {
     const source = question("q1", { citation });
     const initial = JSON.stringify(source);
@@ -180,6 +184,8 @@ describe("Question Set share boundary", () => {
     "Data: available upon request",
     "https://example.edu/paper?format=data",
     "https://example.edu/paper?term=alpha%3Abeta&name=%C3%A9tude",
+    "https://example.edu/paper?q=CD4,CD8&format=public",
+    "https://example.edu/case,figure2?format=public",
     "DOI: 10.1000/escaped%2520space",
   ])("preserves public path-like sources (%s)", citation => {
     const value = createQuestionSetShare(questionSet(), [question("q1", { citation })], NOW);
