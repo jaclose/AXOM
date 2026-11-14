@@ -1043,4 +1043,71 @@ describe("portable binary media backup", () => {
     zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: 1, media: [{ file: "media/0", metadata: { ...attachment, questionId: "held-question" } }] }));
     await expect(readPortableBackup(new File([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer], "damaged.zip"))).rejects.toThrow("invalid or missing image");
   });
+
+  it("holds JPEG containers with no frame or image scan instead of certifying ZIP or JSON recovery", async () => {
+    const malformed = [
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xd9]),
+      // Well-formed 1x1 frame segment, but no image scan payload.
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 8, 0, 1, 0, 1, 1, 1, 0x11, 0, 0xff, 0xd9]),
+      // Correct frame and SOS headers, but no entropy bytes between SOS and EOI.
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 8, 0, 1, 0, 1, 1, 1, 0x11, 0,
+        0xff, 0xda, 0x00, 0x08, 1, 1, 0, 0, 0x3f, 0, 0xff, 0xd9]),
+    ];
+    for (const [index, bytes] of malformed.entries()) {
+      const jpeg = { ...attachment, id: `jpeg-corrupt-${index}`,
+        blobKey: `private-library:jpeg-corrupt-${index}`,
+        fileName: "damaged.jpg", mimeType: "image/jpeg" as const, byteSize: bytes.byteLength };
+      await putQuestionAttachmentBlob(jpeg.blobKey, {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: "image/jpeg" }),
+        mimeType: jpeg.mimeType, byteSize: jpeg.byteSize,
+        questionId: "held-question", updatedAt: jpeg.updatedAt,
+      });
+      const jpegRefs = [{ id: "held-question", attachments: [jpeg] }];
+      expect(await collectVerifiedMediaBackupPayloads(jpegRefs))
+        .toMatchObject({ payloads: [], missingBlobKeys: [jpeg.blobKey] });
+      const exported = await createMediaBackupArchive({}, jpegRefs);
+      expect(exported).toMatchObject({ attachmentCount: 0, missingBlobKeys: [jpeg.blobKey] });
+      const zip = await readPortableBackup(new File([exported.blob], "incomplete-jpeg.zip"));
+      expect(zip.rawText).toContain('"media":[]');
+      // A forged ZIP bypassing export must fail before workspace adoption.
+      const { default: JSZip } = await import("jszip");
+      const hostile = new JSZip();
+      hostile.file("media/0", bytes);
+      hostile.file("workspace.json", JSON.stringify({
+        _backupFormat: "axom-media-backup", _backupVersion: 2,
+        media: [{ file: "media/0", metadata: { ...jpeg, questionId: "held-question" } }],
+        originals: [],
+      }));
+      const hostileBlob = await hostile.generateAsync({ type: "blob" });
+      await expect(readPortableBackup(new File([hostileBlob], "fake-jpeg.zip")))
+        .rejects.toThrow(/image.*integrity/i);
+    }
+  });
+
+  it("preserves a real baseline JPEG through verified JSON and ZIP backup restoration", async () => {
+    // A genuine 1x1 RGB JPEG, not a marker-only mock with no compressed scan.
+    const jpegBase64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAf/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AKhAIf/Z";
+    const jpegBytes = Uint8Array.from(atob(jpegBase64), char => char.charCodeAt(0));
+    const jpeg = { ...attachment, id: "jpeg-valid", blobKey: "private-library:jpeg-valid",
+      fileName: "figure.jpg", mimeType: "image/jpeg" as const, byteSize: jpegBytes.byteLength };
+    const jpegRefs = [{ id: "held-question", attachments: [jpeg] }];
+    await putQuestionAttachmentBlob(jpeg.blobKey, {
+      blob: new Blob([jpegBytes.buffer as ArrayBuffer], { type: "image/jpeg" }),
+      mimeType: jpeg.mimeType, byteSize: jpeg.byteSize,
+      questionId: "held-question", updatedAt: jpeg.updatedAt,
+    });
+    const json = await collectVerifiedMediaBackupPayloads(jpegRefs);
+    expect(json).toMatchObject({ missingBlobKeys: [] });
+    expect(json.payloads).toHaveLength(1);
+    const exported = await createMediaBackupArchive({}, jpegRefs);
+    expect(exported).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+    const read = await readPortableBackup(new File([exported.blob], "verified-jpeg.zip"));
+    await deleteQuestionAttachmentBlobs([jpeg.blobKey]);
+    const restored = await read.restoreMedia(jpegRefs);
+    expect(restored.restored).toBe(1);
+    const fetched = await getQuestionAttachmentBlob(jpeg.blobKey);
+    expect(new Uint8Array(await fetched!.blob.arrayBuffer())).toEqual(jpegBytes);
+  });
+
 });
