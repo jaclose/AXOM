@@ -77,12 +77,12 @@ function containsPrivateInlineText(value: string): boolean {
 // of medical accuracy or evidence: author and academic review still apply.
 // Keep this only at new submission/legacy pending approval boundaries so
 // already-approved historical content remains unchanged.
-const COMMUNITY_NON_RATIONALE_LINE = /^(?:[A-J]|(?:the\\s+)?(?:correct|right)\\s+(?:option|choice)\\s*(?:(?:is|:)\\s*)?\\(?[A-J]\\)?|(?:option|choice)\\s*(?:(?:is|:)\\s*)?\\(?[A-J]\\)?(?:\\s+is\\s+(?:correct|right))?|it\\s+is\\s+\\(?[A-J]\\)?|tbd|todo|n\\/?a|(?:explanation|rationale)\\s*[:=]?\\s*(?:is\\s+)?(?:pending|missing|tbd|todo|to\\s+be\\s+(?:added|written|provided)|under\\s+review|will\\s+be\\s+added|coming\\s+soon)|(?:source|answer)\\s+verification\\s+(?:pending|required)|(?:needs|awaiting)\\s+(?:review|verification)|no\\s+(?:teaching\\s+)?(?:explanation|rationale)\\s+(?:(?:has\\s+been|was|is)\\s+)?(?:provided|supplied|recorded|available)|(?:see|refer\\s+to)\\s+(?:lecture\\s+)?(?:slide|page)\\s*#?\\d+)\\s*[.!;:]*$/i;
+const COMMUNITY_NON_RATIONALE_LINE = /^(?:[A-J]|(?:the\s+)?(?:correct|right)\s+(?:option|choice)\s*(?:(?:is|:)\s*)?\(?[A-J]\)?|(?:option|choice)\s*(?:(?:is|:)\s*)?\(?[A-J]\)?(?:\s+is\s+(?:correct|right))?|it\s+is\s+\(?[A-J]\)?|tbd|todo|n\/?a|(?:explanation|rationale)\s*[:=]?\s*(?:is\s+)?(?:pending|missing|tbd|todo|to\s+be\s+(?:added|written|provided)|under\s+review|will\s+be\s+added|coming\s+soon)|(?:source|answer)\s+verification\s+(?:pending|required)|(?:needs|awaiting)\s+(?:review|verification)|no\s+(?:teaching\s+)?(?:explanation|rationale)\s+(?:(?:has\s+been|was|is)\s+)?(?:provided|supplied|recorded|available)|(?:see|refer\s+to)\s+(?:lecture\s+)?(?:slide|page)\s*#?\d+)\s*[.!;:]*$/i;
 
 function hasCommunityTeachingRationale(value: string | undefined): boolean {
   if (!hasExplanationProse(value)) return false;
-  return value!.split(/\\r?\\n/).some(raw => {
-    const line = raw.trim().replace(/^[-*]\\s+/, "");
+  return value!.split(/\r?\n/).some(raw => {
+    const line = raw.trim().replace(/^[-*]\s+/, "");
     return hasExplanationProse(line) && !COMMUNITY_NON_RATIONALE_LINE.test(line);
   });
 }
