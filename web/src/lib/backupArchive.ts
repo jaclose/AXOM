@@ -439,7 +439,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
         documentId: document.id,
         sha256: document.checksum!.replace(/^sha256:/, ""),
         byteSize: MAX_ORIGINAL_BYTES,
-        mimeType: "\\\\".repeat(255),
+        mimeType: "\\".repeat(255),
       })], { type: "application/json" }).size + Number(admittedIndex > 0);
     },
   );
