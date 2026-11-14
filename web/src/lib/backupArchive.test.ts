@@ -1089,8 +1089,19 @@ describe("portable binary media backup", () => {
     // A genuine 1x1 RGB JPEG, not a marker-only mock with no compressed scan.
     // Pillow-generated 1×1 RGB baseline JPEG (287 bytes; SHA-256 03cc6abc…c728).
     // Segment lengths were verified; the previous hand-copied fixture had stray DQT bytes.
-    const jpegBase64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABQb/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCTgKoO/9k=";
+    // Encoder-produced 287-byte fixture, split into fixed chunks to avoid accidental truncation.
+    const jpegBase64 = [
+      "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQO",
+      "DwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcH",
+      "BwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgo",
+      "KCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAA",
+      "AAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAA",
+      "AAAABQb/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCTgKoO/9k=",
+    ].join("");
     const jpegBytes = Uint8Array.from(atob(jpegBase64), char => char.charCodeAt(0));
+    expect(jpegBytes.byteLength).toBe(287);
+    expect(await sha256Hex(jpegBytes.buffer as ArrayBuffer))
+      .toBe("03cc6abccd8c5f7a8db7515de080e595ea020c00c4553bec5c6f39c32fadc728");
     const jpeg = { ...attachment, id: "jpeg-valid", blobKey: "private-library:jpeg-valid",
       fileName: "figure.jpg", mimeType: "image/jpeg" as const, byteSize: jpegBytes.byteLength };
     const jpegRefs = [{ id: "held-question", attachments: [jpeg] }];
