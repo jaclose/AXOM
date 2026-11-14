@@ -1,6 +1,7 @@
 import type { AIProvider } from "./types";
 import { questionPracticeReadiness } from "../questionFilters";
 import { hasPrivateDeviceCitation } from "../sharing/questionSetShare";
+import { isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
 import type { QuestionRecord } from "../questions";
 
 /**
@@ -152,18 +153,26 @@ export async function draftQuestionExplanation(
     }
     choiceRationales[key] = value.trim();
   }
-  const keywords = Array.isArray(raw.keywords)
+  // Inspect *all* raw model suggestions before truncation or the eight-tag
+  // limit. Otherwise an unsafe ninth keyword or an overlong signed URL can be
+  // silently dropped and evade the generated-output integrity gate.
+  const proposedKeywords = Array.isArray(raw.keywords)
     ? raw.keywords.filter((value): value is string => typeof value === "string")
-      .map(value => value.trim().toLowerCase()).filter(value => value.length >= 3 && value.length <= 64)
-      .slice(0, 8)
     : [];
 
   // AI text is untrusted, including model-suggested references. Do not surface
   // private local paths, inline document URIs or credential-bearing URLs through
   // draft reviews and into a later Community publication attempt.
-  if ([explanation, ...Object.values(choiceRationales), ...keywords].some(hasPrivateDeviceCitation)) {
+  if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords].some(hasPrivateDeviceCitation)) {
     throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
   }
+  if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
+    throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
+  }
+  // Keywords are subject phrases, never rights attestations or visual-intent
+  // decisions. Retain deterministic distinct suggestions for explicit review.
+  const keywords = [...new Set(proposedKeywords.map(value => value.trim().toLowerCase())
+    .filter(value => value.length >= 3 && value.length <= 64))].slice(0, 8);
 
   return { questionId: question.id, explanation, choiceRationales, keywords, sourceFingerprint };
 }

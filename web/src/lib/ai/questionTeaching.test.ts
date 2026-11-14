@@ -402,4 +402,59 @@ describe("review-gated explanation drafting", () => {
     expect(questionExplanationFingerprint({ ...original, stem: "Changed stem" })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, explanation: "User wrote a rationale" })).not.toBe(fingerprint);
   });
+  it.each([
+    ["oversized private keyword omitted by the old length filter", ["vascular tone", `https://example.edu/study?access_token=${"X".repeat(80)}`]],
+    ["private ninth keyword past the eight-suggestion cap", [
+      "vascular tone", "arterial caliber", "smooth muscle", "tunica media",
+      "intima", "adventitia", "vascular histology", "peripheral resistance",
+      "file:///Users/student/private-review.pdf",
+    ]],
+  ])("rejects %s before keyword normalization or truncation", async (_label, keywords) => {
+    const source = question();
+    const model = provider({
+      explanation: "The arterial tunica media has smooth muscle controlling vascular caliber and peripheral resistance.",
+      choiceRationales: {
+        A: "The tunica media contains contractile vascular smooth muscle.",
+        B: "The tunica intima is the endothelial inner lining.",
+        C: "The tunica adventitia is outer supporting connective tissue.",
+      },
+      keywords,
+    });
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/private file|inline media|URL credentials/i);
+    expect(source.explanation).toBeUndefined();
+    expect(source.correctKey).toBe("A");
+  });
+
+  it.each(["visual:intent:histology", "rights:approved", "source:reviewed", "https://example.edu/source"])(
+    "rejects source, rights and visual metadata disguised as an AI keyword: %s", async keyword => {
+      const model = provider({
+        explanation: "The arterial tunica media contains smooth muscle responsible for changing vascular diameter and resistance.",
+        choiceRationales: {
+          A: "The tunica media contains the contractile smooth muscle cells.",
+          B: "The tunica intima contains endothelial cells.",
+          C: "The tunica adventitia contains outer supportive tissue.",
+        },
+        keywords: [keyword],
+      });
+      await expect(draftQuestionExplanation(model, question()))
+        .rejects.toThrow(/publication metadata or citations/i);
+    },
+  );
+
+  it("retains distinct reviewed subject keyword proposals in deterministic order", async () => {
+    const model = provider({
+      explanation: "The arterial tunica media contains smooth muscle that regulates resistance through changes in vessel caliber.",
+      choiceRationales: {
+        A: "The tunica media contains contractile vascular smooth muscle.",
+        B: "The tunica intima primarily forms the endothelium.",
+        C: "The tunica adventitia provides outer support.",
+      },
+      keywords: [" Tunica Media ", "tunica media", "", "Vascular Tone", "CD4/CD8", "Histology: arteries"],
+    });
+    const result = await draftQuestionExplanation(model, question());
+    expect(result.keywords).toEqual(["tunica media", "vascular tone", "cd4/cd8", "histology: arteries"]);
+  });
+
+
 });
