@@ -2,6 +2,7 @@
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hasWorkspaceHydrationReceipt, recordWorkspaceHydration } from "../workspaceHydrationReceipt";
+import type { LinkState } from "./accountStore";
 
 const rpc = vi.fn();
 const tables: Record<string, unknown[]> = { workspace_revisions: [], account_devices: [], account_profiles: [], workspaces: [] };
@@ -168,6 +169,67 @@ describe("lossless account and device-link transition epoch", () => {
         { user: "epoch-A", epoch: initial + 2 },
       ]);
     } finally { unsubscribe(); }
+  });
+
+  it("never rolls back the epoch when a nested functional update switches A→B→A", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const initial = useAccount.getState().identityEpoch;
+    const seen: Array<{ account: string | undefined; epoch: number }> = [];
+    const unsubscribe = useAccount.subscribe(state => {
+      seen.push({ account: state.user?.id, epoch: state.identityEpoch });
+    });
+    try {
+      useAccount.setState(previous => {
+        useAccount.setState({ user: accountB });
+        return { user: previous.user };
+      });
+      expect(seen).toEqual([
+        { account: "epoch-B", epoch: initial + 1 },
+        { account: "epoch-A", epoch: initial + 2 },
+      ]);
+      expect(useAccount.getState()).toMatchObject({ user: accountA, identityEpoch: initial + 2 });
+    } finally { unsubscribe(); }
+  });
+
+  it("counts nested account and link transitions separately, without undercount", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const initial = useAccount.getState().identityEpoch;
+    const seen: Array<{ account: string | undefined; link: LinkState; epoch: number }> = [];
+    const unsubscribe = useAccount.subscribe(state => {
+      seen.push({ account: state.user?.id, link: state.link, epoch: state.identityEpoch });
+    });
+    try {
+      useAccount.setState(() => {
+        useAccount.setState({ user: accountB });
+        return { link: "unlinked" };
+      });
+      expect(seen).toEqual([
+        { account: "epoch-B", link: "linked", epoch: initial + 1 },
+        { account: "epoch-B", link: "unlinked", epoch: initial + 2 },
+      ]);
+    } finally { unsubscribe(); }
+  });
+
+  it("applies a captured same-state result after an inner identity transition", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const initial = useAccount.getState().identityEpoch;
+    useAccount.setState(previous => {
+      useAccount.setState({ user: accountB });
+      return previous;
+    });
+    expect(useAccount.getState()).toMatchObject({ user: accountA, identityEpoch: initial + 2 });
+  });
+
+  it("preserves full-replace semantics when a nested update changes the owner", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const initial = useAccount.getState().identityEpoch;
+    const priorSignIn = useAccount.getState().signIn;
+    useAccount.setState(previous => {
+      useAccount.setState({ user: accountB });
+      return { ...previous, phase: "recovering-password" };
+    }, true);
+    expect(useAccount.getState()).toMatchObject({ user: accountA, link: "linked", phase: "recovering-password", identityEpoch: initial + 2 });
+    expect(useAccount.getState().signIn).toBe(priorSignIn);
   });
 
   it("preserves Zustand's functional same-state no-op without notifying subscribers", () => {
