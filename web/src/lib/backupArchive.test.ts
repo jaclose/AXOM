@@ -6,7 +6,7 @@ import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, assertRestorableZipEntryCounts, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { MAX_ZIP_BACKUP_BYTES, MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, assertRestorableZipEntryCounts, preflightRestorableZipCandidateBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
@@ -666,6 +666,88 @@ describe("portable binary media backup", () => {
     await deleteSourceOriginal(document.id);
     expect(await createMediaBackupArchive({ documents: [document] }, [], [document])).toMatchObject({ originalCount: 0, missingOriginalIds: [document.id] });
   });
+
+  it("preflights 29,999 present near-limit images serially before ZIP allocation", async () => {
+    // 29,999 verified image files + media/ + workspace.json = 30,001.
+    // No 2 GiB fixture is needed: the candidate probe reports verified sizes
+    // without allocating or retaining each binary payload in the archive.
+    let active = 0;
+    let peakActive = 0;
+    let inspected = 0;
+    await expect(preflightRestorableZipCandidateBudget(
+      MAX_ZIP_BACKUP_ENTRIES - 1, 0,
+      async () => {
+        active += 1;
+        peakActive = Math.max(peakActive, active);
+        await Promise.resolve();
+        active -= 1;
+        inspected += 1;
+        return 64 * 1024;
+      },
+      async () => { throw new Error("unexpected original probe"); },
+    )).rejects.toThrow("30,000 file entries");
+    expect(inspected).toBe(MAX_ZIP_BACKUP_ENTRIES - 1);
+    expect(peakActive).toBe(1);
+  }, 30_000);
+
+  it("preserves partial near-cap recovery and skips binary probing when the candidate count fits", async () => {
+    let inspected = 0;
+    const availability = await preflightRestorableZipCandidateBudget(
+      MAX_ZIP_BACKUP_ENTRIES - 1, 0,
+      async index => {
+        inspected += 1;
+        return index % 2 ? 64 * 1024 : null; // unavailable or corrupt, not admitted
+      },
+      async () => null,
+    );
+    expect(inspected).toBe(MAX_ZIP_BACKUP_ENTRIES - 1);
+    expect(availability?.mediaAvailable.filter(Boolean)).toHaveLength(14_999);
+    expect(availability?.mediaAvailable[0]).toBe(false);
+    expect(availability?.mediaAvailable[1]).toBe(true);
+    let unnecessaryReads = 0;
+    const skipped = await preflightRestorableZipCandidateBudget(
+      MAX_ZIP_BACKUP_ENTRIES - 2, 0,
+      async () => { unnecessaryReads += 1; return 64 * 1024; },
+      async () => { unnecessaryReads += 1; return 1; },
+    );
+    expect(skipped).toBeNull();
+    expect(unnecessaryReads).toBe(0);
+  }, 30_000);
+
+  it("counts verified originals and bytes without retaining candidate buffers", async () => {
+    // Mixed media/originals need both auto-created directories.
+    const mediaCandidates = MAX_ZIP_BACKUP_ENTRIES - 3;
+    await expect(preflightRestorableZipCandidateBudget(
+      mediaCandidates, 1,
+      async () => 1,
+      async () => 1,
+    )).rejects.toThrow("30,000 file entries");
+
+    await expect(preflightRestorableZipCandidateBudget(
+      mediaCandidates, 1,
+      async index => index === 0 ? null : 1,
+      async () => 1,
+    )).resolves.toMatchObject({ originalsAvailable: [true] });
+
+    await expect(preflightRestorableZipCandidateBudget(
+      MAX_ZIP_BACKUP_ENTRIES - 1, 0,
+      async () => MAX_ZIP_BACKUP_BYTES,
+      async () => null,
+    )).rejects.toThrow("expanded size");
+  }, 30_000);
+
+  it("pins missing-candidate availability against a second-pass storage race", async () => {
+    // A missing item becoming readable after preflight may not expand the
+    // second-pass candidate set and cause a late 2 GiB memory failure.
+    const availability = await preflightRestorableZipCandidateBudget(
+      MAX_ZIP_BACKUP_ENTRIES - 1, 0,
+      async index => index === 0 ? null : 64 * 1024,
+      async () => null,
+    );
+    expect(availability?.mediaAvailable[0]).toBe(false);
+    expect(availability?.mediaAvailable[1]).toBe(true);
+    expect(availability?.mediaAvailable.filter(Boolean)).toHaveLength(MAX_ZIP_BACKUP_ENTRIES - 2);
+  }, 30_000);
 
   it("counts only verified ZIP entries, including actual JSZip directories and workspace", () => {
     // Metadata candidates are not admitted files: absent or invalid binary
