@@ -282,6 +282,18 @@ export function mediaBackupBytes(references: References): number {
 export async function createMediaBackupArchive(payload: Record<string, unknown>, references: References, documents: readonly SourceDocument[] = [], options: AttachmentReadOptions = {}) {
   const scope = options.scope ?? getQuestionAttachmentScope();
   options = { ...options, scope };
+  const referencedMedia = mediaReferences(references);
+  const eligibleOriginals = backupOriginalDocuments(documents);
+  const possibleMediaCount = referencedMedia.filter(entry => !entry.conflicting).length;
+  // JSZip adds media/ and originals/ directories on first file, plus workspace.json.
+  // Check the complete-backup upper bound *before* reading/inflating any binary.
+  // Missing files could yield a smaller partial archive, but cannot make a
+  // complete export with this many distinct candidates restorable.
+  assertRestorableZipBudget(
+    1 + possibleMediaCount + eligibleOriginals.length
+      + Number(possibleMediaCount > 0) + Number(eligibleOriginals.length > 0),
+    0,
+  );
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
@@ -290,7 +302,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     assertRestorableZipBudget(0, expandedBytes + bytes);
     expandedBytes += bytes;
   };
-  for (const { metadata, conflicting } of mediaReferences(references)) {
+  for (const { metadata, conflicting } of referencedMedia) {
     if (conflicting) {
       missingBlobKeys.push(metadata.blobKey);
       continue;
@@ -309,7 +321,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   }
   const originals: OriginalEntry[] = [];
   const missingOriginalIds: string[] = [];
-  for (const document of backupOriginalDocuments(documents)) {
+  for (const document of eligibleOriginals) {
     try {
       const blob = await readSourceOriginal(document.id, document.checksum, options);
       if (!blob || blob.size > MAX_ORIGINAL_BYTES) throw new Error("Original unavailable or too large");
