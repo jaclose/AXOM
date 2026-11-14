@@ -353,8 +353,9 @@ def build_lead_dispositions(rows, canonical):
     package_original = collections.defaultdict(list)
     for p in canonical:
         original = bypath.get(p.get("source_path"))
-        if original and original.get("source_sha256"):
+        if original and _valid_source_sha(original.get("source_sha256")):
             # A SHA identifies source bytes, not a unique native package.
+            # Malformed external metadata is held outside this hash-keyed index.
             package_original[original["source_sha256"]].append(p)
     precedence = {
         "pq": 0, "imcq": 0, "esoft": 0, "small_group": 1, "review_questions": 1,
