@@ -21,4 +21,27 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(mergeReviewedCommunityKeywords(original, "tag-1")).toEqual(original);
     expect(mergeReviewedCommunityKeywords(original, " ")).toEqual(original);
   });
+  it.each([
+    "visual:intent:histology",
+    "rights:approved",
+    "source:reviewed",
+    "license:cc-by",
+    "moderation:approved",
+    "answer-key:verified",
+    "https://example.edu/article",
+    "Arterial reference https://example.edu/case",
+    "https://example.edu/case?token=DEMO_NOT_SECRET",
+  ])("rejects reserved publication metadata and citation references (%s)", keyword => {
+    expect(() => mergeReviewedCommunityKeywords(["original"], keyword))
+      .toThrow(/subject phrases.*publication metadata/i);
+  });
+
+  it("preserves existing legacy metadata without letting AI proposals create more", () => {
+    const original = ["visual:intent:anatomy", "rights:reviewed", "CD4/CD8"];
+    expect(mergeReviewedCommunityKeywords(original, "Histology: vessel layers, CD4/CD8"))
+      .toEqual([...original, "histology: vessel layers"]);
+    expect(original).toEqual(["visual:intent:anatomy", "rights:reviewed", "CD4/CD8"]);
+  });
+
+
 });
