@@ -11,13 +11,13 @@ import { ICON_SIZE } from "../lib/iconSize";
 
 export function ActivityHistoryPage() {
   const logs = useStore((s) => s.logs);
-  const [type, setType] = useState("All");
+  const [type, setType] = useState<string | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [exportPending, setExportPending] = useState(false);
-  const types = useMemo(() => ["All", ...new Set(logs.map((log) => log.type).sort())], [logs]);
+  const types = useMemo(() => [...new Set(logs.map((log) => log.type).sort())], [logs]);
   const filtered = logs.filter((log) =>
-    (type === "All" || log.type === type)
+    (type === null || log.type === type)
     && (!from || log.dayKey >= from)
     && (!to || log.dayKey <= to),
   );
@@ -46,8 +46,10 @@ export function ActivityHistoryPage() {
         <PanelHeader title="Activity History" sub="Every local study event with filters and spreadsheet export"
           action={<GButton size="sm" variant="primary" onClick={handleExport} disabled={!filtered.length || exportPending} aria-busy={exportPending}><Download size={ICON_SIZE.body} /> {exportPending ? "Exporting..." : "Export .xlsx"}</GButton>} />
         <div className="activity-history-filters">
-          <SelectField label="Activity type" value={type} onChange={(e) => setType(e.target.value)}>
-            {types.map((item) => <option key={item}>{item}</option>)}
+          <SelectField label="Activity type" value={type === null ? "all" : `type:${type}`}
+            onChange={(e) => setType(e.target.value === "all" ? null : e.target.value.slice(5))}>
+            <option value="all">All activity types</option>
+            {types.map((item) => <option key={item} value={`type:${item}`}>{item}</option>)}
           </SelectField>
           <Field label="From" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           <Field label="To" type="date" value={to} onChange={(e) => setTo(e.target.value)} />

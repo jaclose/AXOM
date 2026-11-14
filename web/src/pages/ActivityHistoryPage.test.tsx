@@ -48,7 +48,8 @@ describe("Activity History workbook download feedback", () => {
       .mockResolvedValueOnce(undefined);
     render(<ActivityHistoryPage />);
 
-    fireEvent.change(screen.getByLabelText("Activity type"), { target: { value: "Anki" } });
+    const ankiOption = screen.getByRole("option", { name: "Anki" }) as HTMLOptionElement;
+    fireEvent.change(screen.getByLabelText("Activity type"), { target: { value: ankiOption.value } });
     const button = screen.getByRole("button", { name: /Export .xlsx/i });
     fireEvent.click(button);
 
@@ -82,6 +83,33 @@ describe("Activity History workbook download feedback", () => {
       expect(rendered).toEqual(ids);
     } finally {
       fixture.logs = original;
+    }
+  });
+
+  it("filters and exports a literal All activity independently from the all-types option", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [
+      { id: "all-event", type: "All", ts: "2026-11-13T14:00:00Z", dayKey: "2026-11-13", minutes: 17, cards: 4 },
+      { id: "reading-event", type: "Reading", ts: "2026-11-13T13:00:00Z", dayKey: "2026-11-13", minutes: 29, cards: 0 },
+    ];
+    try {
+      render(<ActivityHistoryPage />);
+      expect(document.querySelectorAll(".activity-history-row")).toHaveLength(2);
+      const typeSelect = screen.getByLabelText("Activity type");
+      const literalAll = screen.getByRole("option", { name: /^All$/ }) as HTMLOptionElement;
+      fireEvent.change(typeSelect, { target: { value: literalAll.value } });
+
+      const rows = [...document.querySelectorAll(".activity-history-row")];
+      expect(rows).toHaveLength(1);
+      expect(rows[0].textContent).toContain("All");
+      fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+      expect(fixture.exportWorkbook).toHaveBeenCalledWith([fixture.logs[0]]);
+
+      const showAll = screen.getByRole("option", { name: "All activity types" }) as HTMLOptionElement;
+      fireEvent.change(typeSelect, { target: { value: showAll.value } });
+      expect(document.querySelectorAll(".activity-history-row")).toHaveLength(2);
+    } finally {
+      fixture.logs = originalLogs;
     }
   });
 
