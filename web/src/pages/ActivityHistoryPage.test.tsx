@@ -369,6 +369,39 @@ describe("Activity History workbook download feedback", () => {
     }
   });
 
+  it("focuses and announces the newly revealed History region after disclosure", () => {
+    switchAccount("account-B", "unlinked");
+    render(<ActivityHistoryPage />);
+    const disclosure = screen.getByRole("button", { name: "Show device history" });
+    disclosure.focus();
+    expect(document.activeElement).toBe(disclosure);
+
+    fireEvent.click(disclosure);
+
+    const region = screen.getByRole("region", { name: "Activity History" });
+    expect(document.activeElement).toBe(region);
+    expect(region.getAttribute("tabindex")).toBe("-1");
+    expect(screen.getByRole("button", { name: /Export .xlsx/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show device history" })).toBeNull();
+  });
+
+  it("preserves unrelated keyboard focus when a disclosure action is invoked without focused consent", () => {
+    switchAccount("account-B", "unlinked");
+    render(<ActivityHistoryPage />);
+    const elsewhere = document.createElement("button");
+    elsewhere.type = "button";
+    document.body.appendChild(elsewhere);
+    try {
+      elsewhere.focus();
+      expect(document.activeElement).toBe(elsewhere);
+      fireEvent.click(screen.getByRole("button", { name: "Show device history" }));
+      expect(screen.getByRole("region", { name: "Activity History" })).toBeTruthy();
+      expect(document.activeElement).toBe(elsewhere);
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
   it("moves focus from an invalidated device-history consent button to the session notice", () => {
     switchAccount("account-B", "unlinked");
     render(<ActivityHistoryPage />);
