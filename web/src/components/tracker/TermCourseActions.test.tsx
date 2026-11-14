@@ -184,6 +184,24 @@ describe("term course actions", () => {
     expect(mocks.launch).toHaveBeenCalledWith({ module: "Term 5", term: "Term 5", questionIds: ["ready-question"], setIds: ["ready-set"] });
     expect(screen.getByRole("alert").textContent).toBe("Finish your current quiz first.");
   });
+  it("blocks a stale Download after A→B→A before parent props commit, but permits a fresh mount", async () => {
+    const view = mount();
+    const staleButton = screen.getByRole("button", { name: "Download Term 5" });
+    switchAccount("another-learner");
+    switchAccount("learner");
+    fireEvent.click(staleButton);
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(onBusyChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("The account changed.");
+
+    view.unmount();
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a stale Practice click after the learner account changes before the parent rerenders", () => {
     mount();
     expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(false);
