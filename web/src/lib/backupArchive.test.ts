@@ -810,6 +810,68 @@ describe("portable binary media backup", () => {
     expect(sparse?.mediaAvailable.filter(Boolean)).toHaveLength(1);
   });
 
+  it("reserves projected media descriptors before near-2 GiB ZIP binary retention", async () => {
+    // R90 accepted 256 x (8 MiB - 1) plus the empty manifest, but writing
+    // descriptors for admitted images makes the expanded ZIP exceed 2 GiB.
+    const candidateCount = 256;
+    const size = 8 * 1024 * 1024 - 1;
+    const baselineJson = JSON.stringify({
+      _backupFormat: "axom-media-backup", _backupVersion: 2, media: [], originals: [],
+    });
+    const baselineBytes = new Blob([baselineJson]).size;
+    const manifestDelta = (candidateIndex: number, admittedIndex: number) => (
+      new Blob([JSON.stringify({
+        file: `media/${admittedIndex}`,
+        metadata: { ...attachment, questionId: `question-${candidateIndex}`, blobKey: `private-library:media-${candidateIndex}`, byteSize: size },
+      })]).size + Number(admittedIndex > 0)
+    );
+    const projectedJsonBytes = baselineBytes
+      + Array.from({ length: candidateCount }, (_, i) => manifestDelta(i, i)).reduce((a, b) => a + b, 0);
+    expect(candidateCount * size + baselineBytes).toBeLessThanOrEqual(MAX_ZIP_BACKUP_BYTES);
+    expect(candidateCount * size + projectedJsonBytes).toBeGreaterThan(MAX_ZIP_BACKUP_BYTES);
+    let inspected = 0;
+    await expect(preflightRestorableZipCandidateBudget(
+      candidateCount, 0,
+      async () => { inspected += 1; return size; },
+      async () => null,
+      MAX_ZIP_BACKUP_BYTES + 1,
+      baselineBytes,
+      manifestDelta,
+    )).rejects.toThrow(/expanded size/);
+    expect(inspected).toBe(candidateCount); // failure occurs before any JSZip media retention
+
+    inspected = 0;
+    const sparse = await preflightRestorableZipCandidateBudget(
+      candidateCount, 0,
+      async index => { inspected += 1; return index % 2 === 0 ? size : null; },
+      async () => null,
+      MAX_ZIP_BACKUP_BYTES + 1,
+      baselineBytes,
+      manifestDelta,
+    );
+    expect(inspected).toBe(candidateCount);
+    expect(sparse?.mediaAvailable.filter(Boolean)).toHaveLength(candidateCount / 2);
+    expect(sparse?.mediaAvailable[1]).toBe(false);
+  });
+
+  it("reserves only admitted original descriptors in byte-risk ZIP preflight", async () => {
+    // Original data can be near the expanded limit even with just 17 records.
+    // Their manifest entries must participate in the first-pass budget.
+    const size = 128 * 1024 * 1024 - 1;
+    const originalDescriptor = (_index: number, admittedIndex: number) => (
+      64 + Number(admittedIndex > 0)
+    );
+    await expect(preflightRestorableZipCandidateBudget(
+      0, 17, async () => null, async () => size,
+      MAX_ZIP_BACKUP_BYTES + 1, 10, undefined, originalDescriptor,
+    )).rejects.toThrow(/expanded size/);
+    const sparse = await preflightRestorableZipCandidateBudget(
+      0, 17, async () => null, async index => index % 2 === 0 ? size : null,
+      MAX_ZIP_BACKUP_BYTES + 1, 10, undefined, originalDescriptor,
+    );
+    expect(sparse?.originalsAvailable.filter(Boolean)).toHaveLength(9);
+  });
+
   it("exports a partial, restorable ZIP when declared media bytes exceed 2 GiB but most blobs are absent", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
