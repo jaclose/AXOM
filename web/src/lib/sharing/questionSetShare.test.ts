@@ -148,6 +148,22 @@ describe("Question Set share boundary", () => {
   });
 
   it.each([
+    ["access token query", "https://example.edu/histology?access_token=DEMO_NOT_SECRET"],
+    ["API key query", "https://example.edu/histology?api_key=DEMO_NOT_SECRET"],
+    ["fragment token", "https://example.edu/histology#token=DEMO_NOT_SECRET"],
+    ["encoded key", "https://example.edu/histology?%61pi%5fkey=DEMO_NOT_SECRET"],
+    ["double-encoded key", "https://example.edu/histology?%2561pi%255fkey=DEMO_NOT_SECRET"],
+    ["nested redirect token", "https://example.edu/redirect?next=https%3A%2F%2Fstudy.example.edu%2F%3Ftoken%3DDEMO_NOT_SECRET"],
+    ["client secret query", "https://example.edu/lesson?client_secret=DEMO_NOT_SECRET"],
+  ])("holds %s in source citations before creating a public Question Set", (_label, citation) => {
+    const source = question("q1", { citation });
+    const initial = JSON.stringify(source);
+    expect(() => createQuestionSetShare(questionSet(), [source], NOW))
+      .toThrow(/citation contains a private local file path/i);
+    expect(JSON.stringify(source)).toBe(initial);
+  });
+
+  it.each([
     "https://example.edu/research?source=/home/public-notes",
     "https://example.edu/tmp/lecture.pdf",
     "DOI:10.1000/abc",

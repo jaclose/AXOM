@@ -96,6 +96,20 @@ describe("review-gated explanation drafting", () => {
     expect(source.id).toBe("q1");
   });
 
+  it.each([
+    ["access-token query", "Question reference https://example.edu/arteries?access_token=DEMO_NOT_SECRET"],
+    ["encoded API-key query", "Question reference https://example.edu/arteries?%61pi%5fkey=DEMO_NOT_SECRET"],
+    ["fragment token", "Question reference https://example.edu/arteries#token=DEMO_NOT_SECRET"],
+  ])("blocks %s before provider inference", async (_label, stem) => {
+    const source = question({ stem });
+    const model = provider({});
+    expect(eligibleForExplanationDraft(source)).toBe(false);
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/private file|inline media|URL credentials/i);
+    expect(model.completeJson).not.toHaveBeenCalled();
+    expect(source.correctKey).toBe("A");
+  });
+
   it("keeps ordinary clinical slash terms and public HTTPS citations eligible for AI drafts", async () => {
     const source = question({
       stem: "For the CD4/CD8 ratio in MHC I/II signaling, which arterial layer contains smooth muscle?",
@@ -230,6 +244,35 @@ describe("review-gated explanation drafting", () => {
       expect(source.explanation).toBeUndefined();
     },
   );
+
+  it.each([
+    ["explanation access token", { explanation: "The tunica media controls vascular resistance; source https://example.edu/histology?access_token=DEMO_NOT_SECRET." }],
+    ["choice rationale API key", { choiceRationales: {
+      A: "The media contains the contractile smooth muscle.",
+      B: "The intima contains endothelium; reference https://example.edu/artery?api_key=DEMO_NOT_SECRET",
+      C: "The adventitia provides connective tissue support.",
+    } }],
+    ["keyword fragment token", { keywords: ["vascular media", "https://example.edu/histology#token=DEMO_NOT_SECRET"] }],
+    ["encoded token parameter", { explanation: "The tunica media has concentric contractile smooth muscle cells; source https://example.edu/arteries?%74oken=DEMO_NOT_SECRET." }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    "blocks generated %s before returning a provisional review draft", async (_label, patch) => {
+    const source = question();
+    const model = provider({
+      explanation: "The media contains vascular smooth muscle that controls arterial caliber and resistance.",
+      choiceRationales: {
+        A: "The media contains the vascular smooth muscle.",
+        B: "The intima primarily contains the endothelial lining.",
+        C: "The adventitia mainly supplies connective tissue.",
+      },
+      keywords: ["vascular smooth muscle"],
+      ...patch,
+    });
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/private file|inline media|URL credentials/i);
+    expect(model.completeJson).toHaveBeenCalledOnce();
+    expect(source.correctKey).toBe("A");
+    expect(source.explanation).toBeUndefined();
+  });
 
   it("permits public source links and clinical slash notation in generated draft prose", async () => {
     const model = provider({

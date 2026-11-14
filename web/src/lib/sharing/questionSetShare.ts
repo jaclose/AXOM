@@ -473,6 +473,13 @@ function toShared(question: QuestionRecord, shareId = question.id): SharedQuesti
 // HTTP(S) URL authority userinfo may contain a password or private email.
 // Never hide it behind the public-URL exemption, including nested URLs.
 const PRIVATE_HTTP_CITATION_USERINFO = /https?:\/\/[^\s/?#<>"'|;,]+@/i;
+// Public web URLs are otherwise masked below to spare ordinary paths like
+// /home/ in a legitimate citation. A token in a URL query/fragment is not a
+// public citation: match high-risk credential parameter names before masking,
+// including after each bounded percent-decoding pass.
+const PRIVATE_HTTP_CITATION_QUERY_CREDENTIAL =
+  /https?:\/\/[^\s<>"'|,]*[?&#;](?:access[_-]?token|api[_-]?key|x[_-]?api[_-]?key|token|id[_-]?token|refresh[_-]?token|auth(?:orization)?[_-]?token|client[_-]?secret|private[_-]?key|session[_-]?(?:token|key)|bearer[_-]?token|password|secret)=/i;
+
 // A public HTTPS wrapper does not make a nested device URI safe to publish.
 // Check these explicit schemes before masking ordinary public URL spans.
 const PRIVATE_NESTED_DEVICE_URI = /(?:^|[^a-z0-9])(?:file:\/+|content:\/\/)/i;
@@ -495,7 +502,7 @@ export function hasPrivateDeviceCitation(citation: string | undefined): boolean 
   // Apply at most three ASCII percent-decoding rounds. PostgreSQL preserves
   // percent-encoded UTF-8 octets, and fails closed on controls/oversized input.
   for (let pass = 0; pass <= 3; pass += 1) {
-    if (PRIVATE_HTTP_CITATION_USERINFO.test(value)) return true;
+    if (PRIVATE_HTTP_CITATION_USERINFO.test(value) || PRIVATE_HTTP_CITATION_QUERY_CREDENTIAL.test(value)) return true;
     if (PRIVATE_NESTED_DEVICE_URI.test(value)) return true;
     if (PRIVATE_INLINE_DOCUMENT_URI.test(value)) return true;
     if (PRIVATE_RESIDUAL_URI_SCHEME.test(value) || PRIVATE_EXCESSIVE_PERCENT_NESTING.test(value)) return true;
