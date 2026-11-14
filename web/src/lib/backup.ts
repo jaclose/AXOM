@@ -106,6 +106,7 @@ export async function exportStateWithAttachments(
     const result = await createMediaBackupArchive(payload, references, metadata.documents, options);
     assertExportIdentity();
     downloadBackupBlob(result.blob, "zip", scope);
+    assertExportIdentity(); // A synchronous click handler may change the active account.
     if (scope === "complete" && !deferredSourceCount && !result.missingBlobKeys.length && !result.missingOriginalIds.length) markBackupDone();
     return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount };
   };
@@ -138,6 +139,7 @@ export async function exportStateWithAttachments(
   if (jsonBlob.size > MAX_JSON_BACKUP_BYTES) return exportZip();
   assertExportIdentity();
   downloadBackupBlob(jsonBlob, "json", scope);
+  assertExportIdentity(); // Never certify another account after a click-time switch.
   if (scope === "complete" && !deferredSourceCount && !missingBlobKeys.length) markBackupDone();
   return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount };
 }
@@ -165,16 +167,25 @@ function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: Backup
   // The caller certifies completion only after checking omitted binary assets.
 }
 
-/** Record when the user last exported, for the data-health panel. */
+/** A legacy device-only receipt never proves another account was backed up.
+ * Each signed-in identity has its own local marker. Do not migrate ambiguous
+ * pre-account history into an account, or clear any existing receipts. */
+function backupReceiptKey(): string {
+  const accountId = getQuestionAttachmentScope().accountId;
+  return accountId ? `${STORAGE_KEYS.lastBackupAt}:account:${accountId}` : STORAGE_KEYS.lastBackupAt;
+}
+
+/** Record when this local account or device last initiated a complete export.
+ * This is not confirmation that the browser saved the file to disk. */
 export function markBackupDone(at: Date = new Date()) {
   try {
-    localStorage.setItem(STORAGE_KEYS.lastBackupAt, at.toISOString());
+    localStorage.setItem(backupReceiptKey(), at.toISOString());
   } catch { /* best effort */ }
 }
 
 export function lastBackupAt(): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEYS.lastBackupAt);
+    return localStorage.getItem(backupReceiptKey());
   } catch {
     return null;
   }
