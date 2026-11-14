@@ -439,6 +439,39 @@ describe("Community Question Set Library", () => {
     expect(screen.getByRole("button", { name: "Like " + revalidated.title }).getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("drops stale search-field edits dispatched after A to B to A revokes the old listing", async () => {
+    const fresh = { ...summary, id: "00000000-0000-4000-8000-000000000044",
+      title: "Fresh session listing" };
+    mock.search.mockResolvedValueOnce([summary]).mockResolvedValueOnce([fresh]);
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: summary.title });
+    const searchField = screen.getByRole("searchbox", { name: "Search Community Question Sets" }) as HTMLInputElement;
+    await user.type(searchField, "unsent private draft");
+    const staleSubmit = screen.getByRole("button", { name: "Search" });
+
+    // A completed listing still has event handlers attached to the old DOM
+    // until React commits its reset. A stale edit must not resurrect the
+    // prior session's private search or dispatch it to the restored account.
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+      fireEvent.change(searchField, { target: { value: "stale edit from revoked session" } });
+      fireEvent.click(staleSubmit);
+    });
+    await screen.findByRole("heading", { name: fresh.title });
+    expect(searchField.value).toBe("");
+    expect(mock.search).toHaveBeenCalledTimes(2);
+    expect(mock.search).toHaveBeenLastCalledWith("account-1", "", 0);
+
+    // Revalidated discovery accepts fresh user input in the restored session.
+    await user.type(searchField, "fresh topic");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(mock.search).toHaveBeenLastCalledWith("account-1", "fresh topic", 0));
+  });
+
   it("redacts previous-account discovery rows and liked state in the first B commit", async () => {
     const privateA = { ...summary, title: "Account A private liked set", liked: true, likes: 9 };
     const publicB = { ...summary, id: "00000000-0000-4000-8000-000000000022",

@@ -465,10 +465,16 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       <form className="qsl-search" onSubmit={submitSearch} role="search">
         <label className="sr-only" htmlFor="qsl-search-input">Search Community Question Sets</label>
         <Search size={17} aria-hidden="true" />
-        <input id="qsl-search-input" type="search" value={input} maxLength={100} onChange={event => setQuery(current => ({
-          owner: accountId, input: event.target.value,
-          search: current.owner === accountId ? current.search : "",
-        }))} placeholder="Search title, topic or contributor" />
+        <input id="qsl-search-input" type="search" value={input} maxLength={100} onChange={event => {
+          // A stale input can dispatch before React rerenders after A → B → A.
+          // Treat edits as account-scoped activity, just like Search/Refresh.
+          if (!accountId || listingSessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
+          const nextInput = event.target.value;
+          setQuery(current => ({
+            owner: accountId, input: nextInput,
+            search: current.owner === accountId ? current.search : "",
+          }));
+        }} placeholder="Search title, topic or contributor" />
         <GButton size="sm" type="submit" disabled={visibleLoading}>Search</GButton>
       </form>
       {visibleLoading && <p role="status">Loading Question Sets…</p>}
