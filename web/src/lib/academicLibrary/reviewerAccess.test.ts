@@ -81,7 +81,7 @@ describe("academic reviewer permission refresh", () => {
 
   it("does not authorize a stale account identity or cache its failure permanently", async () => {
     mocks.operation.mockResolvedValueOnce({ userId: "other-account", client: { rpc: mocks.rpc }, assertCurrent: mocks.assertCurrent })
-      .mockResolvedValueOnce({ userId: "r87-current-account", client: { rpc: mocks.rpc } });
+      .mockResolvedValueOnce({ userId: "r87-current-account", client: { rpc: mocks.rpc }, assertCurrent: mocks.assertCurrent });
     mocks.rpc.mockResolvedValue({ data: true, error: null });
 
     expect(await isAcademicReviewer("r87-current-account")).toBe(false);
