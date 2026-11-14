@@ -83,8 +83,8 @@ describe("review-gated explanation drafting", () => {
     ["inlined PDF data in stem", { stem: "Exhibit data:application/pdf;base64,JVBERi0x" }],
     ["URL credentials in stem", { stem: "Source https://student:secret@example.edu/notes" }],
     ["encoded device URI in topic", { topic: "file%3A%2F%2F%2FUsers%2Fstudent%2Fprivate.pdf" }],
-  ] as Array<[string, Partial<QuestionRecord>]>)
-  ("blocks %s before external AI inference, even when called directly", async (_label, patch) => {
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "blocks %s before external AI inference, even when called directly", async (_label, patch) => {
     const source = question(patch);
     const model = provider({});
     expect(eligibleForExplanationDraft(source)).toBe(false);
@@ -116,6 +116,39 @@ describe("review-gated explanation drafting", () => {
     expect(result.choiceRationales.B).toContain("endothelial");
     expect(model.completeJson).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ["confirmed answer", (source: QuestionRecord) => { source.correctKey = "B"; }],
+    ["source citation", (source: QuestionRecord) => { source.citation = "Different source evidence"; }],
+    ["distractor wording", (source: QuestionRecord) => { source.options[1].text = "Revised distractor"; }],
+  ] as Array<[string, (source: QuestionRecord) => void]>)(
+    "rejects an AI explanation when %s changes during provider inference", async (_field, revise) => {
+      const source = question();
+      let finish!: (result: unknown) => void;
+      const pending = new Promise<unknown>(resolve => { finish = resolve; });
+      const model = provider({});
+      model.completeJson = vi.fn(() => pending);
+      const generating = draftQuestionExplanation(model, source);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(model.completeJson).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: expect.stringContaining("Confirmed answer: A. Tunica media"),
+      }));
+      // A concurrent edit arrives after the provider saw the verified key but
+      // before its answer returns. No stale teaching proposal may be accepted.
+      revise(source);
+      finish({
+        explanation: "The tunica media contains smooth muscle that regulates the vessel diameter and arterial resistance.",
+        choiceRationales: {
+          A: "The media contains concentric smooth muscle.",
+          B: "The intima is primarily the endothelial lining.",
+          C: "The adventitia is chiefly supporting connective tissue.",
+        },
+        keywords: ["arterial histology"],
+      });
+      await expect(generating).rejects.toThrow(/changed while.*draft/i);
+      expect(source.explanation).toBeUndefined();
+    },
+  );
 
   it("invalidates drafts when source evidence or provenance changes without a timestamp bump", () => {
     const original = question({
