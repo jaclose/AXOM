@@ -415,6 +415,8 @@ describe("Community Question Set Library", () => {
     expect(await screen.findByRole("heading", { name: earlier.title })).toBeTruthy();
     await user.type(screen.getByRole("searchbox", { name: "Search Community Question Sets" }), "private unsent search");
     await waitFor(() => expect(mock.observers.size).toBe(1));
+    const stalePreviewButton = screen.getByRole("button", { name: "Preview set" });
+    const staleLikeButton = screen.getByRole("button", { name: "Unlike " + earlier.title });
 
     // No React render occurs while B is active. ID equality after the round
     // trip must not grant old-session listings, likes or private input access.
@@ -423,7 +425,12 @@ describe("Community Question Set Library", () => {
       mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
       mock.accountId = "account-1";
       mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+      // Stale DOM nodes may still dispatch before React commits its reset.
+      fireEvent.click(stalePreviewButton);
+      fireEvent.click(staleLikeButton);
     });
+    expect(mock.preview).not.toHaveBeenCalled();
+    expect(mock.like).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: earlier.title })).toBeNull();
     expect((screen.getByRole("searchbox", { name: "Search Community Question Sets" }) as HTMLInputElement).value).toBe("");
     expect(await screen.findByRole("heading", { name: revalidated.title })).toBeTruthy();
