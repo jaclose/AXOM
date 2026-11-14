@@ -106,12 +106,31 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
     {reviewer && !loading && preview && <Modal title={`Review ${preview.snapshot.title}`} onClose={busy ? () => {} : () => setPreview(undefined)}>
       <div className="qsl-review-detail stack gap12">
         <p><BookOpenCheck size={17} aria-hidden="true" /> {preview.snapshot.questions.length} questions. The contributor attested to rights and answer review. Check that evidence yourself before approval.</p>
+        <p><b>Recorded publication rights notice:</b> {preview.snapshot.copyrightNotice || "No rights notice supplied"}</p>
+        <p className="sub">The contributor's notice and attestation are not independently verified redistribution permission. Check original-source and third-party image rights before approving.</p>
         <ol>{preview.snapshot.questions.slice(0, shown).map(question => <li key={question.id}>
           <b>{question.stem}</b>
-          <ul>{question.options.map(option => <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
+          <ul>{question.options.map(option => {
+            // The stored rationales are keyed by answer choice, not list
+            // position. Inspect own entries only; never infer missing text.
+            const rationale = Object.entries(question.choiceRationales ?? {})
+              .find(([key]) => key.trim().toUpperCase() === option.key.trim().toUpperCase())?.[1];
+            return <li key={option.key}>
+              {option.key}. {option.text}
+              {rationale
+                ? <p><b>Recorded choice rationale:</b> {rationale}
+                  {rationale.startsWith("AXOM AI-assisted rationale")
+                    && <small className="qsl-preview-ai-warning"> AI-assisted rationale: independently verify the source claim.</small>}
+                </p>
+                : <p className="sub">No choice-specific rationale recorded. Verify this choice against the source.</p>}
+            </li>;
+          })}</ul>
           <p>Answer: <b>{question.correctKey ?? "Unresolved"}</b></p>
-          {question.explanation && <p>{question.explanation}</p>}
-          <small>Source: {question.citation || "No citation supplied"}</small>
+          {question.explanation?.startsWith("AXOM AI-assisted explanation")
+            && <p className="qsl-preview-ai-warning">AI-assisted explanation: source and medical claims require independent review.</p>}
+          {question.explanation ? <p>{question.explanation}</p>
+            : <p className="sub">No teaching explanation recorded. Return this submission for revision before approval.</p>}
+          <small>Source: {question.citation || "No citation supplied. Check the original source before approval."}</small>
         </li>)}</ol>
         {shown < preview.snapshot.questions.length && <GhostButton disabled={busy} onClick={() => setShown(value => Math.min(value + 20, preview.snapshot.questions.length))}>Show next 20 questions</GhostButton>}
         <p className="sub">{Math.min(shown, preview.snapshot.questions.length)} of {preview.snapshot.questions.length} questions displayed for inspection. Approval requires displaying the full set and checking its rights and answer evidence. A documented rejection does not require an affirmative attestation.</p>
