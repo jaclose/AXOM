@@ -88,6 +88,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   // Discovery rows include the viewer's like state. An A → B render must
   // never display A's rows while the account-change reset effect is pending.
   const [listingAccountId, setListingAccountId] = useState<string>();
+  // A revoked session must reject clicks on old DOM nodes before React renders.
+  const listingSessionRevoked = useRef(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [more, setMore] = useState(false);
@@ -137,6 +139,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     pendingRevealFocus.current = null;
     lastSuccessfulPageOffset.current = 0;
     pendingPageAdvance.current = null;
+    listingSessionRevoked.current = true;
     setQuery({ owner: accountId, input: "", search: "" });
     setSets([]); setListingAccountId(undefined); setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
@@ -162,6 +165,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     // effect cleanup alone cannot invalidate the earlier response.
     const session = observeAccountSession(accountId, () => {
       if (!alive) return;
+      listingSessionRevoked.current = true;
       pendingPageAdvance.current = null;
       lastSuccessfulPageOffset.current = 0;
       setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
@@ -177,6 +181,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
       return;
     }
+    listingSessionRevoked.current = false;
     setListingAccountId(accountId);
     if (offset === 0) setSets([]);
     setLoading(true); setError("");
@@ -203,7 +208,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!accountId || useAccount.getState().user?.id !== accountId) return;
+    if (!accountId || listingSessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
     // Hold pagination until the new query's first page finishes. The old
     // Load more handler may still fire before React commits the reset.
     pendingPageAdvance.current = { accountId, offset: 0 };
@@ -214,7 +219,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     setRefresh(value => value + 1);
   }
   function loadMore() {
-    if (!accountId || useAccount.getState().user?.id !== accountId
+    if (!accountId || listingSessionRevoked.current || useAccount.getState().user?.id !== accountId
       || listingAccountId !== accountId || loading || !more || pendingPageAdvance.current) return;
     const nextOffset = lastSuccessfulPageOffset.current + 24;
     if (nextOffset > 1000) return;
@@ -225,7 +230,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     else setOffset(nextOffset);
   }
   async function open(id: string) {
-    if (!accountId || useAccount.getState().user?.id !== accountId) return;
+    if (!accountId || listingSessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
     pendingRevealFocus.current = null;
     setPreviewVisibleCount(3);
     // A second selection supersedes the first immediately, including in the
@@ -352,7 +357,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     }
   }
   async function like(set: LibraryQuestionSet) {
-    if (!accountId || useAccount.getState().user?.id !== accountId || liking || likingOperation.current) return;
+    if (!accountId || listingSessionRevoked.current || useAccount.getState().user?.id !== accountId || liking || likingOperation.current) return;
     const operation = Symbol("community-like");
     likingOperation.current = operation;
     const likingAccount = accountId;
@@ -389,7 +394,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   // Render-time ownership gating protects the committed DOM *before* passive
   // effects can clear account A's cached result, error and pagination state.
   const visibleListing = Boolean(accountId && listingAccountId === accountId
-    && useAccount.getState().user?.id === accountId);
+    && !listingSessionRevoked.current && useAccount.getState().user?.id === accountId);
   const visibleSets = visibleListing ? sets : [];
   const visibleLoading = visibleListing && loading;
   const visibleError = visibleListing ? error : "";
@@ -447,6 +452,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     <PanelHeader headingLevel={2} title="Find a Question Set"
       sub="Learner sets beyond AXOM's course collection. Each is reviewed before listing."
       action={<GButton size="sm" disabled={!accountId || visibleLoading} onClick={() => {
+        if (!accountId || listingSessionRevoked.current || useAccount.getState().user?.id !== accountId) return;
         // Block an old Load more click in the same batch as Refresh.
         pendingPageAdvance.current = accountId ? { accountId, offset: 0 } : null;
         lastSuccessfulPageOffset.current = 0;
