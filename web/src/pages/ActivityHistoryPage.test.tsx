@@ -2,12 +2,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActivityHistoryPage } from "./ActivityHistoryPage";
+import type { StudyLog } from "../lib/types";
 
 const fixture = vi.hoisted(() => ({
   logs: [
     { id: "anki-a", type: "Anki", ts: "2026-11-13T13:00:00Z", dayKey: "2026-11-13", minutes: 25, cards: 80 },
     { id: "read-b", type: "Reading", ts: "2026-11-12T13:00:00Z", dayKey: "2026-11-12", minutes: 15, cards: 0 },
-  ],
+  ] as StudyLog[],
   exportWorkbook: vi.fn(),
   pushToast: vi.fn(),
   accountId: "account-A" as string | null,
