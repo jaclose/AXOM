@@ -150,6 +150,46 @@ describe("review-gated explanation drafting", () => {
     },
   );
 
+  it("does not contact the AI provider for an already-cancelled request", async () => {
+    const source = question();
+    const model = provider({});
+    const controller = new AbortController();
+    controller.abort();
+    await expect(draftQuestionExplanation(model, source, controller.signal))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(model.completeJson).not.toHaveBeenCalled();
+    expect(source.correctKey).toBe("A");
+    expect(source.explanation).toBeUndefined();
+  });
+
+  it("discards a late AI response after cancellation even when the provider ignores the signal", async () => {
+    const source = question();
+    const controller = new AbortController();
+    let finish!: (result: unknown) => void;
+    const pending = new Promise<unknown>(resolve => { finish = resolve; });
+    const model = provider({});
+    model.completeJson = vi.fn(() => pending);
+    const generating = draftQuestionExplanation(model, source, controller.signal);
+    expect(model.completeJson).toHaveBeenCalledWith(expect.objectContaining({
+      signal: controller.signal,
+      prompt: expect.stringContaining("Confirmed answer: A. Tunica media"),
+    }));
+    controller.abort();
+    finish({
+      explanation: "The arterial tunica media contains smooth muscle which controls blood vessel diameter and resistance.",
+      choiceRationales: {
+        A: "The media contains the vascular smooth muscle cells.",
+        B: "The intima predominantly contains the endothelial lining.",
+        C: "The adventitia mainly provides connective tissue support.",
+      },
+      keywords: ["vascular smooth muscle"],
+    });
+    await expect(generating).rejects.toMatchObject({ name: "AbortError" });
+    // Neither a late inference response nor cancellation edits source keys or prose.
+    expect(source.correctKey).toBe("A");
+    expect(source.explanation).toBeUndefined();
+  });
+
   it("invalidates drafts when source evidence or provenance changes without a timestamp bump", () => {
     const original = question({
       sourceDocumentId: "source-pdf-1",

@@ -69,11 +69,19 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** A cancelled provider may still resolve; never accept a late AI draft. */
+function assertDraftNotCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException("AI explanation drafting was cancelled.", "AbortError");
+  }
+}
+
 export async function draftQuestionExplanation(
   provider: AIProvider,
   question: QuestionRecord,
   signal?: AbortSignal,
 ): Promise<QuestionExplanationDraft> {
+  assertDraftNotCancelled(signal);
   if (questionPracticeReadiness(question) !== "ready" || !question.correctKey) {
     throw new Error("A reviewed answer is required before an explanation can be drafted.");
   }
@@ -111,6 +119,10 @@ export async function draftQuestionExplanation(
     maxTokens: 1800,
     signal,
   });
+
+  // Providers may ignore AbortSignal (or finish after cancellation). Keep
+  // the service boundary closed even if a caller forgets to recheck.
+  assertDraftNotCancelled(signal);
 
   // Provider latency must not allow a reviewed key, distractor, or source
   // receipt to change while the response is in flight. A generated rationale
