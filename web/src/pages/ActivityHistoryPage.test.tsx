@@ -170,4 +170,24 @@ describe("Activity History workbook download feedback", () => {
     expect(fixture.pushToast).not.toHaveBeenCalled();
   });
 
+  it("enforces the account check at the real XLSX writer boundary", async () => {
+    const actual = await vi.importActual<typeof import("../lib/activityExport")>("../lib/activityExport");
+    const saveWorkbook = vi.fn();
+    let checks = 0;
+    const invalidatedAtWrite = () => {
+      checks++;
+      if (checks === 2) throw new Error("Account changed before workbook download");
+    };
+    await expect(actual.exportActivityWorkbook(fixture.logs, saveWorkbook, invalidatedAtWrite))
+      .rejects.toThrow("Account changed before workbook download");
+    expect(checks).toBe(2);
+    expect(saveWorkbook).not.toHaveBeenCalled();
+
+    const assertCurrent = vi.fn();
+    await expect(actual.exportActivityWorkbook(fixture.logs, saveWorkbook, assertCurrent))
+      .resolves.toBeUndefined();
+    expect(assertCurrent).toHaveBeenCalledTimes(2);
+    expect(saveWorkbook).toHaveBeenCalledTimes(1);
+  });
+
 });
