@@ -14,14 +14,28 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   launch: vi.fn(),
   state: undefined as unknown as Workspace,
+  activeAccountId: "account-a",
+  accountListeners: new Set<(state: { user?: { id: string } }) => void>(),
 }));
 vi.mock("../../lib/store", () => ({
   useStore: Object.assign(() => mocks.state, { getState: () => mocks.state }),
 }));
 vi.mock("../../lib/academicLibrary/client", () => ({ listAcademicCourses: vi.fn() }));
-vi.mock("../../lib/academicLibrary/accountScope", () => ({
-  academicAccountScope: (key: string) => ({ key, assertCurrent: () => {}, dispose: () => {} }),
-}));
+vi.mock("../../lib/account/accountStore", () => {
+  const snapshot = () => ({ user: { id: mocks.activeAccountId } });
+  // Use the real academicAccountScope with a faithful bound-store mock, not
+  // a no-op scope that bypasses account transition authorization.
+  return { useAccount: Object.assign(
+    (select: (state: ReturnType<typeof snapshot>) => unknown) => select(snapshot()),
+    {
+      getState: snapshot,
+      subscribe: (listener: (state: { user?: { id: string } }) => void) => {
+        mocks.accountListeners.add(listener);
+        return () => { mocks.accountListeners.delete(listener); };
+      },
+    },
+  ) };
+});
 vi.mock("../../lib/sync/contentDownloads", () => ({ downloadAccountContent: vi.fn() }));
 vi.mock("../../lib/localVault", () => ({
   getVaultWriteCheckpoint: vi.fn(), flushLocalVaultWrites: vi.fn(), assertVaultWritesSince: vi.fn(),
@@ -69,6 +83,10 @@ function workspace(documents: SourceDocument[], ids: string[]): Workspace {
   };
 }
 const onBusyChange = vi.fn();
+function switchAccount(accountId: string) {
+  mocks.activeAccountId = accountId;
+  for (const listener of [...mocks.accountListeners]) listener({ user: { id: accountId } });
+}
 function actions(accountId: string, courses: readonly AcademicCourse[] = []) {
   return <TermCourseActions term="Term 5" accountId={accountId}
     courses={courses} disabled={false} onBusyChange={onBusyChange} />;
@@ -77,6 +95,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.list.mockReset();
   mocks.state = workspace([], []);
+  mocks.activeAccountId = "account-a";
+  mocks.accountListeners.clear();
 });
 afterEach(cleanup);
 
@@ -113,6 +133,7 @@ describe("term practice with real account-scoped receipt selection", () => {
     await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(1));
     expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(true);
 
+    switchAccount("account-b");
     view.rerender(actions("account-b"));
     expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(false));
@@ -123,6 +144,7 @@ describe("term practice with real account-scoped receipt selection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
     expect(mocks.launch.mock.calls.at(-1)?.[0].questionIds).toEqual(["b-question"]);
 
+    switchAccount("account-a");
     view.rerender(actions("account-a"));
     expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect((screen.getByRole("button", { name: "Practice Term 5" }) as HTMLButtonElement).disabled).toBe(false));

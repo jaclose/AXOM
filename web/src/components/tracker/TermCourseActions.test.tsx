@@ -17,14 +17,23 @@ vi.mock("../../lib/account/accountStore", () => ({ useAccount: {
   },
 } }));
 vi.mock("../../lib/academicLibrary/accountScope", () => ({ academicAccountScope: (accountId: string) => {
+  // Match the real scope contract: a switch away and back permanently invalidates
+  // the same scope instance, even if the account ID matches again at click time.
   let switched = false;
+  const onAccountChange = (state: { user?: { id: string } }) => {
+    if (state.user?.id !== accountId) switched = true;
+  };
+  mocks.accountListeners.add(onAccountChange);
   return { assertCurrent: () => {
     if (switched || mocks.activeAccount !== accountId) {
       switched = true;
       throw new Error("The account changed.");
     }
     mocks.assertCurrent();
-  }, dispose: mocks.dispose };
+  }, dispose: () => {
+    mocks.accountListeners.delete(onAccountChange);
+    mocks.dispose();
+  } };
 } }));
 vi.mock("../../lib/academicLibrary/downloadReference", () => ({ downloadCourseQuestions: mocks.download,
   isAcademicCourseDownloaded: (course: AcademicCourse) => mocks.downloaded.has(course.id) }));
@@ -184,6 +193,29 @@ describe("term course actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
     expect(mocks.launch).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("The account changed.");
+  });
+  it("rejects a stale Practice click after A→B→A while the original term controls remain mounted", () => {
+    mount();
+    const oldButton = screen.getByRole("button", { name: "Practice Term 5" });
+    expect(oldButton.hasAttribute("disabled")).toBe(false);
+    // The store leaves A and returns to A before React receives new parent
+    // props. A click-time-only scope falsely treats the old UI as fresh.
+    switchAccount("another-learner");
+    switchAccount("learner");
+    fireEvent.click(oldButton);
+    expect(mocks.launch).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("The account changed.");
+  });
+  it("allows current-account practice again after the stale term controls are remounted", () => {
+    const view = mount();
+    switchAccount("another-learner");
+    switchAccount("learner");
+    fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
+    expect(mocks.launch).not.toHaveBeenCalled();
+    view.unmount();
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
+    expect(mocks.launch).toHaveBeenCalledTimes(1);
   });
   it.each([0, 2001])("disables practice for %s ready questions", count => {
     mocks.questionIds = Array.from({ length: count }, (_, index) => `question-${index}`);
