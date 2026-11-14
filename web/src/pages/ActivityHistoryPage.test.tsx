@@ -12,13 +12,13 @@ const fixture = vi.hoisted(() => ({
   pushToast: vi.fn(),
   accountId: "account-A" as string | null,
   link: "linked" as "linked" | "unlinked" | "linked-elsewhere",
-  accountSubscribers: new Set<(state: { user: { id: string } | null }) => void>(),
+  accountSubscribers: new Set<(state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere" }) => void>(),
 }));
 
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: {
     getState: () => ({ user: fixture.accountId ? { id: fixture.accountId } : null, link: fixture.link }),
-    subscribe: (listener: (state: { user: { id: string } | null }) => void) => {
+    subscribe: (listener: (state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere" }) => void) => {
       fixture.accountSubscribers.add(listener);
       return () => { fixture.accountSubscribers.delete(listener); };
     },
@@ -37,7 +37,7 @@ vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
 function switchAccount(accountId: string | null, link: typeof fixture.link = accountId ? "linked" : "unlinked") {
   fixture.accountId = accountId;
   fixture.link = link;
-  for (const listener of fixture.accountSubscribers) listener({ user: accountId ? { id: accountId } : null });
+  for (const listener of fixture.accountSubscribers) listener({ user: accountId ? { id: accountId } : null, link });
 }
 
 beforeEach(() => {
@@ -284,5 +284,63 @@ describe("Activity History workbook download feedback", () => {
     await waitFor(() => expect(fixture.exportWorkbook).toHaveBeenCalledTimes(2));
     expect(confirm).not.toHaveBeenCalled();
   });
+
+  it("cancels a pending export if the device link changes without an account-ID or log change", async () => {
+    let release!: () => void;
+    const saved = vi.fn();
+    fixture.exportWorkbook.mockImplementationOnce(async (_logs: unknown, _writer: unknown, assertCurrent: () => void) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      assertCurrent();
+      saved();
+    });
+    const originalLogs = fixture.logs;
+    render(<ActivityHistoryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    expect(fixture.exportWorkbook).toHaveBeenCalledTimes(1);
+
+    switchAccount("account-A", "unlinked");
+    expect(fixture.accountId).toBe("account-A");
+    expect(fixture.logs).toBe(originalLogs);
+    release();
+
+    await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Activity export canceled", tone: "warn" }),
+    ));
+    expect(saved).not.toHaveBeenCalled();
+    expect(fixture.logs).toBe(originalLogs);
+  });
+
+  it("keeps an export revoked across linked to unlinked to linked transitions", async () => {
+    let release!: () => void;
+    const saved = vi.fn();
+    fixture.exportWorkbook.mockImplementationOnce(async (_logs: unknown, _writer: unknown, assertCurrent: () => void) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      assertCurrent();
+      saved();
+    });
+    render(<ActivityHistoryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    switchAccount("account-A", "unlinked");
+    switchAccount("account-A", "linked");
+    release();
+
+    await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Activity export canceled", tone: "warn" }),
+    ));
+    expect(saved).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale mounted History view after a same-account link transition before click", async () => {
+    render(<ActivityHistoryPage />);
+    switchAccount("account-A", "unlinked");
+    const consent = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Activity export canceled", tone: "warn" }),
+    ));
+    expect(fixture.exportWorkbook).not.toHaveBeenCalled();
+    expect(consent).not.toHaveBeenCalled();
+  });
+
 
 });
