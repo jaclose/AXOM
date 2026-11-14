@@ -109,9 +109,12 @@ export function frequentActivityShortcuts(
 function compareActivityTimeDesc(a: string, b: string): number {
   const aTime = Date.parse(a);
   const bTime = Date.parse(b);
-  return Number.isFinite(aTime) && Number.isFinite(bTime)
-    ? bTime - aTime
-    : b.localeCompare(a);
+  const aValid = Number.isFinite(aTime);
+  const bValid = Number.isFinite(bTime);
+  // Keep valid instants ahead of malformed imports. Mixing epoch and lexical
+  // comparisons within a pair creates non-transitive ordering (A < B < C < A).
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  return aValid ? bTime - aTime : b.localeCompare(a);
 }
 
 function compareLogRecency(a: Pick<StudyLog, "ts" | "id">, b: Pick<StudyLog, "ts" | "id">): number {
