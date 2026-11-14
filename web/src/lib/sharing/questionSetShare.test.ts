@@ -155,6 +155,13 @@ describe("Question Set share boundary", () => {
     ["double-encoded key", "https://example.edu/histology?%2561pi%255fkey=DEMO_NOT_SECRET"],
     ["nested redirect token", "https://example.edu/redirect?next=https%3A%2F%2Fstudy.example.edu%2F%3Ftoken%3DDEMO_NOT_SECRET"],
     ["client secret query", "https://example.edu/lesson?client_secret=DEMO_NOT_SECRET"],
+    ["S3 presigned signature", "https://bucket.s3.amazonaws.com/lecture.pdf?X-Amz-Signature=DEMO_NOT_SECRET"],
+    ["S3 temporary security token", "https://bucket.s3.amazonaws.com/lecture.pdf?X-Amz-Security-Token=DEMO_NOT_SECRET"],
+    ["Google Cloud signed signature", "https://storage.googleapis.com/bucket/case.png?X-Goog-Signature=DEMO_NOT_SECRET"],
+    ["Azure SAS signature", "https://cdn.example.edu/case.pdf?sv=2026-01-01&sig=DEMO_NOT_SECRET"],
+    ["legacy signed URL signature", "https://example.edu/lesson?Signature=DEMO_NOT_SECRET"],
+    ["encoded signed parameter", "https://example.edu/lesson?X%2DAmz%2DSignature=DEMO_NOT_SECRET"],
+    ["double-encoded signed parameter", "https://example.edu/lesson?X%252DAmz%252DSignature=DEMO_NOT_SECRET"],
   ])("holds %s in source citations before creating a public Question Set", (_label, citation) => {
     const source = question("q1", { citation });
     const initial = JSON.stringify(source);
