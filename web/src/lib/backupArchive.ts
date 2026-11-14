@@ -65,15 +65,20 @@ export async function preflightRestorableZipCandidateBudget(
   originalCandidates: number,
   probeMediaBytes: (index: number) => Promise<number | null>,
   probeOriginalBytes: (index: number) => Promise<number | null>,
-): Promise<void> {
+): Promise<{ mediaAvailable: boolean[]; originalsAvailable: boolean[] } | null> {
   if (!Number.isSafeInteger(mediaCandidates) || mediaCandidates < 0
     || !Number.isSafeInteger(originalCandidates) || originalCandidates < 0) {
     throw new ZipExportBudgetExceeded("Invalid ZIP backup candidate count. No backup was downloaded or certified.");
   }
   const worstCaseEntries = 1 + mediaCandidates + originalCandidates
     + Number(mediaCandidates > 0) + Number(originalCandidates > 0);
-  if (worstCaseEntries <= MAX_ZIP_BACKUP_ENTRIES) return;
+  if (worstCaseEntries <= MAX_ZIP_BACKUP_ENTRIES) return null;
 
+  // Snapshot actual verified availability. Never add a file that was absent
+  // from the preflight simply because storage changed before the second pass:
+  // that could inflate the retained archive beyond the checked entry count.
+  const mediaAvailable = new Array<boolean>(mediaCandidates).fill(false);
+  const originalsAvailable = new Array<boolean>(originalCandidates).fill(false);
   let admittedMedia = 0, admittedOriginals = 0, expandedBytes = 0;
   const record = (bytes: number, isMedia: boolean) => {
     if (!Number.isSafeInteger(bytes) || bytes < 0) {
@@ -87,12 +92,19 @@ export async function preflightRestorableZipCandidateBudget(
   };
   for (let i = 0; i < mediaCandidates; i++) {
     const size = await probeMediaBytes(i);
-    if (size !== null) record(size, true);
+    if (size !== null) {
+      record(size, true);
+      mediaAvailable[i] = true;
+    }
   }
   for (let i = 0; i < originalCandidates; i++) {
     const size = await probeOriginalBytes(i);
-    if (size !== null) record(size, false);
+    if (size !== null) {
+      record(size, false);
+      originalsAvailable[i] = true;
+    }
   }
+  return { mediaAvailable, originalsAvailable };
 }
 
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
@@ -347,7 +359,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   // Candidate metadata cannot prove that an image is readable. Only when the
   // entry ceiling could be breached, validate/count real candidates without
   // retaining their bytes in JSZip. Preserve missing-file partial rescue.
-  await preflightRestorableZipCandidateBudget(
+  const preflight = await preflightRestorableZipCandidateBudget(
     referencedMedia.length, eligibleOriginals.length,
     async index => {
       const { metadata, conflicting } = referencedMedia[index];
@@ -379,8 +391,8 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     assertRestorableZipBudget(0, expandedBytes + bytes);
     expandedBytes += bytes;
   };
-  for (const { metadata, conflicting } of referencedMedia) {
-    if (conflicting) {
+  for (const [index, { metadata, conflicting }] of referencedMedia.entries()) {
+    if (conflicting || (preflight && !preflight.mediaAvailable[index])) {
       missingBlobKeys.push(metadata.blobKey);
       continue;
     }
@@ -399,7 +411,11 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   }
   const originals: OriginalEntry[] = [];
   const missingOriginalIds: string[] = [];
-  for (const document of eligibleOriginals) {
+  for (const [index, document] of eligibleOriginals.entries()) {
+    if (preflight && !preflight.originalsAvailable[index]) {
+      missingOriginalIds.push(document.id);
+      continue;
+    }
     try {
       const blob = await readSourceOriginal(document.id, document.checksum, options);
       if (!blob || blob.size > MAX_ORIGINAL_BYTES) throw new Error("Original unavailable or too large");
