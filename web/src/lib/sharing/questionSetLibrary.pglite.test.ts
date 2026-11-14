@@ -33,6 +33,7 @@ function snapshot(): Snapshot {
       options: [{ key: "A", text: "First option" }, { key: "B", text: "Second option" }],
       correctKey: "B",
       correctAnswerText: "Second option",
+      explanation: "Synthetic rule: the second option matches the source-marked answer; the first does not.",
       tags: ["sample"],
     }],
     createdAt: "2026-11-01T12:00:00.000Z",
@@ -294,7 +295,7 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     await expect(db.query(
       "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
       [JSON.stringify(malformed), id],
-    )).rejects.toThrow(/invalid scalar types/i);
+    )).rejects.toThrow(/invalid scalar types|requires a reviewed answer/i);
     const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
       OWNER, "select public.get_question_set_library($1) value", [id],
     );
@@ -388,7 +389,11 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       await expect(db.query(
         "update public.question_set_library_entries set snapshot_payload=$1::jsonb where id=$2",
         [JSON.stringify(altered), id],
-      ), label).rejects.toThrow(/inconsistent membership or answer evidence/i);
+      ), label).rejects.toThrow(label === "empty reviewed set"
+        ? /inconsistent membership or answer evidence|requires keyed questions with teaching explanations/i
+        : label === "blank reviewed key"
+          ? /inconsistent membership or answer evidence|requires a reviewed answer/i
+          : /inconsistent membership or answer evidence/i);
     }
     const [readback] = await as<{ value: { snapshot_payload: Snapshot; review_revision: number } }>(
       OWNER, "select public.get_question_set_library($1) value", [id],

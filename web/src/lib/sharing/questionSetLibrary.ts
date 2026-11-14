@@ -83,7 +83,7 @@ function hasCommunityTeachingRationale(value: string | undefined): boolean {
   if (!hasExplanationProse(value)) return false;
   return value!.split(/\r?\n/).some(raw => {
     const line = raw.trim().replace(/^[-*]\s+/, "");
-    return hasExplanationProse(line) && !COMMUNITY_NON_RATIONALE_LINE.test(line);
+    return line.length >= 12 && hasExplanationProse(line) && !COMMUNITY_NON_RATIONALE_LINE.test(line);
   });
 }
 
