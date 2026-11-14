@@ -10,7 +10,7 @@ export function isCommunitySubjectKeyword(value: string): boolean {
   const candidate = value.trim();
   return Boolean(candidate)
     && !RESERVED_PUBLICATION_KEYWORD.test(candidate)
-    && !/^https?:\/\//i.test(candidate)
+    && !/https?:\/\//i.test(candidate)
     && !hasPrivateDeviceCitation(candidate);
 }
 
