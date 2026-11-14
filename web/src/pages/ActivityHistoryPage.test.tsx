@@ -122,7 +122,7 @@ describe("Activity History workbook download feedback", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].textContent).toContain("All");
       fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
-      expect(fixture.exportWorkbook).toHaveBeenCalledWith([fixture.logs[0]], expect.any(Function));
+      expect(fixture.exportWorkbook).toHaveBeenCalledWith([fixture.logs[0]], undefined, expect.any(Function));
 
       const showAll = screen.getByRole("option", { name: "All activity types" }) as HTMLOptionElement;
       fireEvent.change(typeSelect, { target: { value: showAll.value } });
@@ -135,7 +135,7 @@ describe("Activity History workbook download feedback", () => {
   it("cancels a pending A export after A→B→A, before the writer saves any file", async () => {
     let release!: () => void;
     const saved = vi.fn();
-    fixture.exportWorkbook.mockImplementationOnce(async (_logs: unknown, assertCurrent: () => void) => {
+    fixture.exportWorkbook.mockImplementationOnce(async (_logs: unknown, _writer: unknown, assertCurrent: () => void) => {
       await new Promise<void>((resolve) => { release = resolve; });
       assertCurrent();
       saved();
