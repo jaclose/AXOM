@@ -1798,6 +1798,51 @@ class SourceLedgerTests(unittest.TestCase):
         result = enriched.ordered_import_batches([job], [], [row])
         self.assertEqual(result["processing_order"][3]["jobs"][0]["score"], 3)
 
+    def test_invalid_digest_mirrors_are_separate_held_source_jobs(self):
+        # A syntactically invalid checksum is not an identity: two different
+        # source paths must not be collapsed into a fictitious byte mirror.
+        for sha in ("not-a-sha", ["not-a-sha"], {"digest": "not-a-sha"}):
+            with self.subTest(sha=repr(sha)):
+                rows = [dict(source_id=sid, original_path="/synthetic/" + sid + ".pdf",
+                             source_sha256=sha, academic_term="T4",
+                             module="DERS", week=16, document_type="pq",
+                             file_extension=".pdf", priority=2)
+                        for sid in ("first", "second")]
+                jobs = [dict(input_mode="pdf_original_extract_with_review",
+                             source_path=row["original_path"], source_ids=[row["source_id"]],
+                             priority=2, expected_questions=None, status="queued_for_review")
+                        for row in rows]
+                canonical = enriched.canonicalize_queue(rows, [], jobs)
+                self.assertEqual(len(canonical), 2)
+                self.assertEqual({j["canonical_input_key"] for j in canonical},
+                                 {"path:/synthetic/first.pdf", "path:/synthetic/second.pdf"})
+                self.assertEqual({j["source_ids"][0] for j in canonical}, {"first", "second"})
+                self.assertTrue(all(j["status"] == "requires_source_review" and
+                                    j["unresolved"] == "source_digest_unverified"
+                                    for j in canonical))
+                batches = enriched.ordered_import_batches(canonical, [], rows)["processing_order"]
+                self.assertEqual(batches[3]["job_count"], 0)
+                self.assertEqual(batches[5]["job_count"], 2)
+
+    def test_invalid_digest_inventory_is_not_unique_sha_evidence(self):
+        valid_sha = digest("verified synthetic source")
+        rows = [dict(source_id="valid", source_sha256=valid_sha,
+                     original_path="/synthetic/valid.pdf", document_type="pq", priority=2),
+                dict(source_id="bad-string", source_sha256="not-a-sha",
+                     original_path="/synthetic/bad-string.pdf", document_type="pq", priority=2),
+                dict(source_id="bad-list", source_sha256=["not-a-sha"],
+                     original_path="/synthetic/bad-list.pdf", document_type="pq", priority=2),
+                dict(source_id="missing", source_sha256=None,
+                     original_path="/synthetic/missing.pdf", document_type="pq", priority=2)]
+        stats = enriched.evidence_counts(rows, [], [], [])
+        self.assertEqual(stats["unique_pdf_and_office_source_sha"], 1)
+        lead = enriched.build_lead_dispositions(rows, [])
+        self.assertEqual([r["sha256"] for r in lead["sources"]], [valid_sha])
+        self.assertEqual(lead["notes"]["invalid_sha_file_count"], 2)
+        self.assertEqual(lead["notes"]["missing_sha_file_count"], 1)
+        self.assertEqual({h["source_id"] for h in lead["notes"]["invalid_sha_holds"]},
+                         {"bad-string", "bad-list"})
+
     def test_unresolved_raw_mirror_cannot_appear_ready_in_priority_batches(self):
         sha = digest("same source")
         rows = [dict(source_id=n, source_sha256=sha,
