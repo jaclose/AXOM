@@ -1843,6 +1843,16 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertEqual({h["source_id"] for h in lead["notes"]["invalid_sha_holds"]},
                          {"bad-string", "bad-list"})
 
+        # Native-package metadata may reference the malformed original path:
+        # an unhashable source digest cannot enter the package-origin index.
+        associated = dict(source_path="/synthetic/bad-list.pdf", questions=2,
+                          status="local_ready_for_agent2_review",
+                          canonical_status="canonical_distinct_question_collection",
+                          issues=[], bank_id="synthetic")
+        with_native = enriched.build_lead_dispositions(rows, [associated])
+        self.assertEqual([r["sha256"] for r in with_native["sources"]], [valid_sha])
+        self.assertEqual(with_native["notes"]["invalid_sha_file_count"], 2)
+
     def test_unresolved_raw_mirror_cannot_appear_ready_in_priority_batches(self):
         sha = digest("same source")
         rows = [dict(source_id=n, source_sha256=sha,
