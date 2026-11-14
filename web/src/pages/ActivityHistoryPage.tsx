@@ -26,10 +26,15 @@ export function ActivityHistoryPage() {
   // Treat device-link changes as a context switch, even if the user ID stays the same.
   const switchedAccount = useRef(false);
   const unmounted = useRef(false);
+  const historyRoot = useRef<HTMLDivElement>(null);
+  const sessionNotice = useRef<HTMLDivElement>(null);
+  const focusNoticeOnRevoke = useRef(false);
   useLayoutEffect(() => {
     unmounted.current = false;
     const revokeIfChanged = (state: ReturnType<typeof useAccount.getState>) => {
       if ((state.user?.id ?? null) !== mountedAccountId.current || state.link !== mountedDeviceLink.current) {
+        // Remember keyboard focus before the control disappears from the DOM.
+        if (historyRoot.current?.contains(document.activeElement)) focusNoticeOnRevoke.current = true;
         switchedAccount.current = true;
         setViewRevoked(true);
       }
@@ -40,6 +45,11 @@ export function ActivityHistoryPage() {
     revokeIfChanged(useAccount.getState());
     return () => { unmounted.current = true; unsubscribe(); };
   }, []);
+  useLayoutEffect(() => {
+    // Move focus only when the previous focused control belonged to this view.
+    // Do not steal focus from another part of the application.
+    if (viewRevoked && focusNoticeOnRevoke.current) sessionNotice.current?.focus();
+  }, [viewRevoked]);
   const accountIsStale = () => unmounted.current || switchedAccount.current
     || (useAccount.getState().user?.id ?? null) !== mountedAccountId.current
     || useAccount.getState().link !== mountedDeviceLink.current;
@@ -91,7 +101,7 @@ export function ActivityHistoryPage() {
   // is signing in. Re-entry mounts a fresh view for the current workspace.
   if (viewRevoked || accountIsStale()) {
     return (
-      <div className="stack gap16">
+      <div className="stack gap16" ref={sessionNotice} role="status" aria-live="polite" tabIndex={-1}>
         <GlassCard pad>
           <EmptyState
             icon={<History size={ICON_SIZE.display} />}
@@ -104,7 +114,7 @@ export function ActivityHistoryPage() {
   }
 
   return (
-    <div className="stack gap16">
+    <div className="stack gap16" ref={historyRoot}>
       <GlassCard pad>
         <PanelHeader title="Activity History" sub="Study events saved on this device, including work retained after sign-out. Exports are device-local."
           action={<GButton size="sm" variant="primary" onClick={handleExport} disabled={!filtered.length || exportPending} aria-busy={exportPending}><Download size={ICON_SIZE.body} /> {exportPending ? "Exporting..." : "Export .xlsx"}</GButton>} />
