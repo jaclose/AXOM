@@ -290,6 +290,23 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["Linux mount", "/mnt/study/private-lecture.pdf"],
+    ["temporary folder", "/tmp/hidden-answer-key.pdf"],
+    ["iOS container", "/var/mobile/Containers/private-slide.png"],
+    ["Android media", "/storage/emulated/0/private-scan.jpg"],
+    ["labeled arbitrary folder", "source:/unpublished/answer-key.pdf"],
+    ["network share", "//campus-server/records/notes.pdf"],
+  ])("holds %s paths in teaching text before public submission", async (_name, reference) => {
+    const value = snapshot();
+    value.questions[0].stem += ` Local copy: ${reference}`;
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/private local file or inline media reference/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("retains public medical prose, mechanism URLs and slash-delimited terminology", async () => {
     const value = snapshot();
     value.questions[0].stem = "Compare the CD4/CD8 ratio and MHC I/II mechanisms. https://example.edu/review";
@@ -609,6 +626,57 @@ describe("searchable Question Set client boundary", () => {
     await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked source and rights"))
       .rejects.toThrow(/not ready for approval.*confirmed answer/i);
     expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["citation", "stem", "metadata", "set title"] as const)(
+    "holds a legacy pending set with a private %s at academic approval", async field => {
+      const original = snapshot();
+      switch (field) {
+        case "citation":
+          original.questions[0].citation = "file:///Users/reviewer/private-source.pdf";
+          break;
+        case "stem":
+          original.questions[0].stem += " blob:https://example.edu/hidden-document";
+          break;
+        case "metadata":
+          original.questions[0].topic = "See /mnt/private-course/teaching.pdf";
+          break;
+        case "set title":
+          original.title = "Private slides /Volumes/external/private-set.pdf";
+          break;
+      }
+      const reviewed = { id: entryId, snapshot: original,
+        contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+      const rpc = vi.fn().mockResolvedValue({ data: {
+        id: entryId, title: original.title, question_count: 1, status: "pending",
+        snapshot_payload: original, review_revision: 1,
+      }, error: null });
+      service(rpc);
+      await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Reviewed the source and permission"))
+        .rejects.toThrow(/private file or inline media reference.*Return it for revision/i);
+      expect(rpc).toHaveBeenCalledTimes(1);
+      expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+    },
+  );
+
+  it("allows returning a privacy-blocked legacy submission for revision", async () => {
+    const original = snapshot();
+    original.questions[0].citation = "content://private-document/lecture";
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: {
+        id: entryId, title: original.title, question_count: 1, status: "pending",
+        snapshot_payload: original, review_revision: 1,
+      }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, false, "Remove the private source reference"))
+      .resolves.toBeUndefined();
+    expect(rpc).toHaveBeenNthCalledWith(2, "review_question_set_library", {
+      p_id: entryId, p_approved: false, p_reason: "Remove the private source reference",
+      p_expected_snapshot: original, p_expected_revision: 1,
+    });
   });
 
   it("still permits returning an unready pending set for revision without positive attestations", async () => {
