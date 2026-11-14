@@ -19,19 +19,24 @@ export function ActivityHistoryPage() {
   // This mounted view owns its original account. Re-enter Activity History after switching accounts.
   // Track intermediate transitions too: comparing the current ID alone misses A → B → A.
   const mountedAccountId = useRef(useAccount.getState().user?.id ?? null);
+  const mountedDeviceLink = useRef(useAccount.getState().link);
+  // Treat device-link changes as a context switch, even if the user ID stays the same.
   const switchedAccount = useRef(false);
   const unmounted = useRef(false);
   useEffect(() => {
     unmounted.current = false;
     const unsubscribe = useAccount.subscribe((state) => {
-      if ((state.user?.id ?? null) !== mountedAccountId.current) switchedAccount.current = true;
+      if ((state.user?.id ?? null) !== mountedAccountId.current || state.link !== mountedDeviceLink.current) {
+        switchedAccount.current = true;
+      }
     });
     return () => { unmounted.current = true; unsubscribe(); };
   }, []);
   const accountIsStale = () => unmounted.current || switchedAccount.current
-    || (useAccount.getState().user?.id ?? null) !== mountedAccountId.current;
+    || (useAccount.getState().user?.id ?? null) !== mountedAccountId.current
+    || useAccount.getState().link !== mountedDeviceLink.current;
   const assertCurrentAccount = () => {
-    if (accountIsStale()) throw new Error("Activity export canceled because the account changed.");
+    if (accountIsStale()) throw new Error("Activity export canceled because the account or device link changed.");
   };
   // A restore or new study event can replace the log snapshot without switching users.
   // The async XLSX import must not download rows from a superseded workspace.
@@ -65,7 +70,7 @@ export function ActivityHistoryPage() {
       await exportActivityWorkbook(filtered, undefined, assertCurrentExport);
     } catch {
       if (!unmounted.current) pushToast(accountIsStale()
-        ? { title: "Activity export canceled", body: "Your account changed. Reopen Activity History before exporting again.", tone: "warn" }
+        ? { title: "Activity export canceled", body: "Your account or device link changed. Reopen Activity History before exporting again.", tone: "warn" }
         : historyIsStale()
           ? { title: "Activity export canceled", body: "Your study history changed. Reopen Activity History before exporting the current records.", tone: "warn" }
           : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
