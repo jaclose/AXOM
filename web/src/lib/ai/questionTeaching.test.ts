@@ -89,6 +89,12 @@ describe("review-gated explanation drafting", () => {
       { key: "A", text: "https://cdn.example.edu/case?sv=2026-01-01&sig=DEMO_NOT_SECRET" },
       { key: "B", text: "Benign control" }, { key: "C", text: "Second control" },
     ] }],
+    ["comma-separated query before bearer token", { stem: "Source https://example.edu/case?q=CD4,CD8&token=DEMO_NOT_SECRET" }],
+    ["comma path before signed access", { topic: "https://example.edu/case,figure2?X-Amz-Signature=DEMO_NOT_SECRET" }],
+    ["semicolon in URL userinfo", { options: [
+      { key: "A", text: "https://student;team:demo-password@example.edu/lesson" },
+      { key: "B", text: "Benign control" }, { key: "C", text: "Second control" },
+    ] }],
   ] as Array<[string, Partial<QuestionRecord>]>)(
     "blocks %s before external AI inference, even when called directly", async (_label, patch) => {
     const source = question(patch);
@@ -267,6 +273,13 @@ describe("review-gated explanation drafting", () => {
       C: "The adventitia provides outer connective tissue support.",
     } }],
     ["Azure SAS explanation source", { explanation: "The tunica media contracts to regulate vessel caliber; source https://cdn.example.edu/artery?sv=2026-01-01&sig=DEMO_NOT_SECRET." }],
+    ["comma-delimited token in explanation", { explanation: "The tunica media constricts to regulate vascular resistance. Source https://example.edu/case?q=CD4,CD8&token=DEMO_NOT_SECRET" }],
+    ["comma path signed link in choice rationale", { choiceRationales: {
+      A: "The media contains concentric vascular smooth muscle.",
+      B: "The intima has the endothelial lining. See https://example.edu/case,figure2?X-Amz-Signature=DEMO_NOT_SECRET",
+      C: "The adventitia provides structural connective tissue.",
+    } }],
+    ["comma userinfo in generated keyword", { keywords: ["vascular media", "https://student,team:demo-password@example.edu/lesson"] }],
   ] as Array<[string, Record<string, unknown>]>)(
     "blocks generated %s before returning a provisional review draft", async (_label, patch) => {
     const source = question();
