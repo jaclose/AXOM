@@ -525,6 +525,25 @@ describe("Community Question Set Library", () => {
     expect(screen.getByRole("heading", { name: "Page zero 0" })).toBeTruthy();
   });
 
+  it("does not paginate stale listings during an immediate Refresh", async () => {
+    const page = Array.from({ length: 24 }, (_, index) => ({
+      ...summary, id: `old-${index}`, title: `Old listing ${index}`,
+    }));
+    let finishRefresh!: (value: typeof page) => void;
+    mock.search.mockResolvedValueOnce(page);
+    mock.search.mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve; }));
+    render(<CommunityQuestionSetLibrary />);
+    const load = await screen.findByRole("button", { name: "Load more sets" });
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      fireEvent.click(load);
+    });
+    await waitFor(() => expect(mock.search).toHaveBeenCalledTimes(2));
+    expect(mock.search.mock.calls.every(([, , requestedOffset]) => requestedOffset === 0)).toBe(true);
+    await act(async () => { finishRefresh([]); });
+    expect(screen.queryByRole("button", { name: "Load more sets" })).toBeNull();
+  });
+
   it("refuses a stale account's pagination click before a new session renders", async () => {
     mock.search.mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => ({
       ...summary, id: `account-a-${index}`, title: `Account A page ${index}`,
