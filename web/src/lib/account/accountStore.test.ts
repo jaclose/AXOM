@@ -170,6 +170,18 @@ describe("lossless account and device-link transition epoch", () => {
     } finally { unsubscribe(); }
   });
 
+  it("preserves Zustand's functional same-state no-op without notifying subscribers", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const original = useAccount.getState();
+    const listener = vi.fn();
+    const unsubscribe = useAccount.subscribe(listener);
+    try {
+      useAccount.setState(state => state);
+      expect(useAccount.getState()).toBe(original);
+      expect(listener).not.toHaveBeenCalled();
+    } finally { unsubscribe(); }
+  });
+
   it("counts SDK identity reversals but not a same-account token refresh", async () => {
     let emit: (event: string, value: unknown) => void = () => undefined;
     auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {

@@ -234,6 +234,8 @@ export const useAccount = create<AccountState>((originalSet, get, api) => {
   const set = ((partial: AccountState | Partial<AccountState> | ((state: AccountState) => AccountState | Partial<AccountState>), replace?: boolean) => {
     const previous = get();
     const patch = typeof partial === "function" ? partial(previous) : partial;
+    // Zustand treats a functional update returning the same state as a no-op.
+    if (Object.is(patch, previous)) return;
     const next = replace ? patch as AccountState : { ...previous, ...patch };
     const changed = (previous.user?.id ?? null) !== (next.user?.id ?? null)
       || previous.link !== next.link;
