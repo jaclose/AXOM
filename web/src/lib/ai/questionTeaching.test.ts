@@ -190,6 +190,62 @@ describe("review-gated explanation drafting", () => {
     expect(source.explanation).toBeUndefined();
   });
 
+  it.each([
+    ["file URI in the explanation", {
+      explanation: "The tunica media contracts to alter vascular resistance, as detailed in file:///Users/student/private-notes.pdf.",
+    }],
+    ["content URI in a choice rationale", {
+      choiceRationales: {
+        A: "The media contains arterial smooth muscle.",
+        B: "The endothelial intima differs from the media; see content://private.provider/lesson/12.",
+        C: "The adventitia supplies outer connective tissue.",
+      },
+    }],
+    ["encoded private citation in the explanation", {
+      explanation: "Smooth muscle in the tunica media regulates vessel caliber. Source: file%3A%2F%2F%2FUsers%2Fstudent%2Fprivate.pdf",
+    }],
+    ["browser object URL in a generated keyword", {
+      keywords: ["vascular tone", "blob:https://example.edu/abcdef12"],
+    }],
+    ["credentials in a generated reference", {
+      explanation: "The tunica media has the contractile smooth muscle layer; reference https://student:secret@example.edu/artery.",
+    }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    "rejects AI-generated %s instead of exposing unsafe draft text", async (_label, patch) => {
+      const source = question();
+      const model = provider({
+        explanation: "The tunica media contains vascular smooth muscle that controls vessel diameter and resistance.",
+        choiceRationales: {
+          A: "Tunica media contains layers of vascular smooth muscle.",
+          B: "Tunica intima primarily contains the endothelial lining.",
+          C: "Tunica adventitia primarily provides supporting connective tissue.",
+        },
+        keywords: ["vascular smooth muscle"],
+        ...patch,
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/private file|inline media|URL credentials/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(source.correctKey).toBe("A");
+      expect(source.explanation).toBeUndefined();
+    },
+  );
+
+  it("permits public source links and clinical slash notation in generated draft prose", async () => {
+    const model = provider({
+      explanation: "The tunica media controls arterial caliber via vascular smooth muscle. Reference: https://example.edu/arterial-histology.",
+      choiceRationales: {
+        A: "The media has smooth muscle, unlike the other vessel wall layers.",
+        B: "The intima has the endothelial lining, not the main muscle layer.",
+        C: "The adventitia consists mainly of outer connective tissue support.",
+      },
+      keywords: ["cd4/cd8", "vascular smooth muscle"],
+    });
+    const result = await draftQuestionExplanation(model, question());
+    expect(result.explanation).toContain("https://example.edu/arterial-histology");
+    expect(result.keywords).toContain("cd4/cd8");
+  });
+
   it("invalidates drafts when source evidence or provenance changes without a timestamp bump", () => {
     const original = question({
       sourceDocumentId: "source-pdf-1",
