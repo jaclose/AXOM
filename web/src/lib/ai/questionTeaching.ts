@@ -112,6 +112,13 @@ export async function draftQuestionExplanation(
     signal,
   });
 
+  // Provider latency must not allow a reviewed key, distractor, or source
+  // receipt to change while the response is in flight. A generated rationale
+  // belongs only to the exact question revision submitted for inference.
+  // Recheck before accepting even a schema-valid provider response.
+  if (questionExplanationFingerprint(question) !== sourceFingerprint) {
+    throw new Error("The question changed while its AI explanation was being drafted. Reopen it and request a new draft.");
+  }
   if (!object(raw) || Object.keys(raw).some(key => !["explanation", "choiceRationales", "keywords"].includes(key))) {
     throw new Error("The model returned an invalid explanation proposal.");
   }
