@@ -369,4 +369,55 @@ describe("term course actions", () => {
     expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["GOER", "GOER", "CPR", "RHPS"]);
   });
 
+  it("shows per-source progress without losing the term course ordinal", async () => {
+    const active = deferred();
+    let report: ((message: string) => void) | undefined;
+    mocks.download.mockImplementationOnce(async (_entry: AcademicCourse, _account: string, progress: (message: string) => void) => {
+      report = progress;
+      progress("Preparing your library · 1 of 4 sources · checking original");
+      await active.promise;
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER · Preparing your library · 1 of 4 sources · checking original");
+    await act(async () => { report?.("Finalizing local library catalog…"); });
+    expect(screen.getByText("Downloading 1 of 3: GOER · Finalizing local library catalog…")).toBeTruthy();
+    await act(async () => active.resolve());
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+  });
+
+  it("ignores late source progress from a switched account while the old download settles", async () => {
+    const active = deferred();
+    let report: ((message: string) => void) | undefined;
+    mocks.download.mockImplementationOnce(async (_entry: AcademicCourse, _account: string, progress: (message: string) => void) => {
+      report = progress;
+      await active.promise;
+    });
+    const view = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    switchAccount("another-learner");
+    await act(async () => { report?.("Private source label from old account"); });
+    expect(screen.queryByText(/Private source label from old account/)).toBeNull();
+    view.rerender(<TermCourseActions term="Term 5" accountId="another-learner"
+      courses={courses} disabled={false} onBusyChange={onBusyChange} />);
+    await act(async () => { report?.("Another late private source label"); });
+    expect(screen.queryByText(/Another late private source label/)).toBeNull();
+    await act(async () => active.resolve());
+    expect(screen.queryByText(/private source label/i)).toBeNull();
+  });
+
+  it("does not let a settled source callback overwrite the final term summary", async () => {
+    let report: ((message: string) => void) | undefined;
+    mocks.download.mockImplementationOnce(async (_entry: AcademicCourse, _account: string, progress: (message: string) => void) => {
+      report = progress;
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    await act(async () => { report?.("Old source callback after completion"); });
+    expect(screen.queryByText(/Old source callback after completion/)).toBeNull();
+    expect(screen.getByText("Download complete. 3 downloaded, 0 already on this device.")).toBeTruthy();
+  });
+
 });
