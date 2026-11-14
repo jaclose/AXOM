@@ -809,6 +809,34 @@ describe("Community Question Set Library", () => {
     expect(mock.observers.size).toBe(0);
   });
 
+  it.each([
+    { initialLiked: false, initialLikes: 2, refreshedLikes: 3 },
+    { initialLiked: true, initialLikes: 3, refreshedLikes: 2 },
+  ])("keeps the refreshed like state when a delayed acknowledgement settles (initial liked: $initialLiked)",
+    async ({ initialLiked, initialLikes, refreshedLikes }) => {
+      let finishLike!: (value: unknown) => void;
+      mock.like.mockImplementationOnce(() => new Promise(resolve => { finishLike = resolve; }));
+      mock.search.mockResolvedValueOnce([{ ...summary, liked: initialLiked, likes: initialLikes }]);
+      mock.search.mockResolvedValueOnce([{ ...summary, liked: !initialLiked, likes: refreshedLikes }]);
+      render(<CommunityQuestionSetLibrary />);
+      const originalAction = `${initialLiked ? "Unlike" : "Like"} Synthetic practice`;
+      fireEvent.click(await screen.findByRole("button", { name: originalAction }));
+      expect(mock.like).toHaveBeenCalledWith("account-1", summary.id, !initialLiked);
+
+      // Refresh receives the already-accepted server state while the older
+      // mutation promise is still pending. Its late completion is not a
+      // second toggle and must not corrupt the server-returned counter.
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      const refreshedAction = `${initialLiked ? "Like" : "Unlike"} Synthetic practice`;
+      await screen.findByRole("button", { name: refreshedAction });
+      expect(screen.getByRole("button", { name: refreshedAction }).textContent).toContain(String(refreshedLikes));
+      await act(async () => { finishLike(undefined); });
+      const settled = screen.getByRole("button", { name: refreshedAction });
+      expect(settled.getAttribute("aria-pressed")).toBe(String(!initialLiked));
+      expect(settled.textContent).toContain(String(refreshedLikes));
+      expect(mock.like).toHaveBeenCalledTimes(1);
+    });
+
   it("sends only one like RPC for rapid clicks before React commits the disabled state", async () => {
     let resolveLike!: (value: unknown) => void;
     mock.like.mockImplementationOnce(() => new Promise(resolve => { resolveLike = resolve; }));
