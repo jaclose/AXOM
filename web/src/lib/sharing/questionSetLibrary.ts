@@ -53,7 +53,7 @@ const count = (value: unknown): value is number => typeof value === "number" && 
  * bounded encoded-URI validator used by publication citations. Do not apply
  * the broader citation path heuristic indiscriminately to anatomy prose.
  */
-const INLINE_PRIVATE_REFERENCE = /(?:file|content|blob|data)(?::|%(?:25)*3a)|\/(?:Users|home|Volumes)\/|~\/|[a-z]:\\|\\\\/i;
+const INLINE_PRIVATE_REFERENCE = /(?:file|content|blob|data)(?::|%(?:25)*3a)|\/(?:Users|home|Volumes|mnt|root|tmp|opt)\/|\/var\/mobile\/|\/storage\/emulated\/|\/\/[a-z0-9._~-]+\/|(?:source|path|file)\s*[:=]\s*\/[a-z0-9._~-]+|~\/|[a-z]:\\|\\\\/i;
 
 function containsPrivateInlineReference(snapshot: SharedQuestionSetSnapshot): boolean {
   const fields = [
@@ -320,6 +320,14 @@ export async function reviewQuestionSetSubmission(
   if (approved && data.snapshot_payload.questions.some(question =>
     !question.correctKey || !hasExplanationProse(question.explanation)))
     throw new Error("This Question Set is not ready for approval: each question needs a confirmed answer and teaching explanation prose. Return it for revision.");
+  // Older pending submissions may also predate the outbound media/privacy gate.
+  // Refuse their approval, but allow the moderator to return them for revision.
+  // Do not change historical approved snapshots or learner import behavior.
+  if (approved && (
+    data.snapshot_payload.questions.some(question => hasPrivateDeviceCitation(question.citation))
+    || containsPrivateInlineReference(data.snapshot_payload)
+  ))
+    throw new Error("This Question Set contains a private file or inline media reference and cannot be approved. Return it for revision.");
   await operation.assertCurrent();
   const decision = await operation.client.rpc("review_question_set_library", {
     p_id: reviewed.id, p_approved: approved, p_reason: reason.trim(),
