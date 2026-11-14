@@ -165,6 +165,12 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       pendingPageAdvance.current = null;
       lastSuccessfulPageOffset.current = 0;
       setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
+      // A signed-out/in A → B → A transition can happen before React renders.
+      // Revoke both retained likes and unsent private search text, then require
+      // a new server read in the new session instead of reusing old rows.
+      setQuery({ owner: accountId, input: "", search: "" });
+      setOffset(0);
+      setRefresh(value => value + 1);
     });
     if (!session.current()) {
       session.stop();
@@ -188,7 +194,9 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
           && pendingPageAdvance.current.offset === offset) pendingPageAdvance.current = null;
         setLoading(false);
       }
-      session.stop();
+      // The resolved listing still holds account-specific like state and
+      // search input. Keep observing until the effect is replaced or unmounts;
+      // stopping at request completion leaves an unrendered A → B → A gap.
     });
     return () => { alive = false; session.stop(); };
   }, [accountId, search, offset, refresh]);
