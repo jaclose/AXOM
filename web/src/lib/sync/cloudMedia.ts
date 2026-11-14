@@ -22,6 +22,23 @@ export interface CloudMediaReference {
 }
 
 type Reference = { questionId: string; attachment: QuestionImageAttachment; checksum?: string };
+const IMMUTABLE_LIBRARY_KEY = /^private-library:sha256:([a-f0-9]{64})$/;
+
+/** Historical checkpoints may retain a later source-record timestamp for an
+ * immutable SHA-addressed image. Only those exact digest keys can ignore the
+ * timestamp difference; mutable attachment keys must match strictly. */
+export function matchesMediaReceipt(
+  blobKey: string,
+  known: CloudMediaReference,
+  attachment: QuestionImageAttachment,
+  checksum?: string,
+): boolean {
+  const immutableHash = IMMUTABLE_LIBRARY_KEY.exec(blobKey)?.[1];
+  return known.blobKey === blobKey
+    && known.byteSize === attachment.byteSize
+    && (known.updatedAt === attachment.updatedAt || (immutableHash !== undefined && immutableHash === known.hash))
+    && (checksum === undefined || checksum === known.hash);
+}
 export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
   state = contentMetadata(state);
   const refs = new Map<string, Reference>();
@@ -31,24 +48,41 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
       // A source checksum attests image bytes, not academic ownership. It may
       // not authorize a revocable course binding for a new local attachment.
       const declared = content?.assets.find(asset => asset.id === attachment.assetId)?.checksum;
-      const checksum = declared?.replace(/^sha256:/, "");
-      if (checksum !== undefined && !/^[a-f0-9]{64}$/.test(checksum)) {
+      const sourceChecksum = declared?.replace(/^sha256:/, "");
+      if (sourceChecksum !== undefined && !/^[a-f0-9]{64}$/.test(sourceChecksum)) {
         throw new Error("A source image has an invalid declared checksum. The workspace has not been marked protected.");
       }
+      // This key is an immutable byte digest, unlike a mutable image ID.
+      // It must agree with any stronger source-declared checksum, and may
+      // legitimately be reused by questions or reviews saved at other times.
+      const originalHash = IMMUTABLE_LIBRARY_KEY.exec(attachment.blobKey)?.[1];
+      if (originalHash && sourceChecksum && sourceChecksum !== originalHash) {
+        throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
+      }
+      const checksum = sourceChecksum ?? originalHash;
       const prior = refs.get(attachment.blobKey);
       if (prior) {
-        // Several questions may share one original, but every reference must
-        // agree on its identity. Do not let Map.set discard conflicting evidence.
+        // Only digest-addressed originals can be reused across different
+        // review timestamps. Mutable keys must retain exact timestamp checks.
         if (prior.attachment.byteSize !== attachment.byteSize
-          || prior.attachment.updatedAt !== attachment.updatedAt
+          || (!originalHash && prior.attachment.updatedAt !== attachment.updatedAt)
           || prior.attachment.mimeType !== attachment.mimeType
-          || (prior.checksum && checksum && prior.checksum !== checksum)) {
+          || (prior.checksum && checksum && prior.checksum !== checksum)
+          || (originalHash && (!Number.isFinite(Date.parse(prior.attachment.updatedAt))
+            || !Number.isFinite(Date.parse(attachment.updatedAt))))) {
           throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
         }
-        // Keep the last referencing question for cloud-cache reconstruction,
-        // while retaining a source checksum declared by any earlier reference.
-        refs.set(attachment.blobKey, { questionId: question.id, attachment,
-          checksum: checksum ?? prior.checksum });
+        // Canonicalize the revision timestamp independent of iteration order
+        // while preserving historical last-reference ownership (questionId).
+        // Changing this owner would break cloud restore and staged rollback.
+        const canonicalUpdatedAt = originalHash
+          && Date.parse(prior.attachment.updatedAt) < Date.parse(attachment.updatedAt)
+          ? prior.attachment.updatedAt : attachment.updatedAt;
+        refs.set(attachment.blobKey, {
+          questionId: question.id,
+          attachment: originalHash ? { ...attachment, updatedAt: canonicalUpdatedAt } : attachment,
+          checksum: checksum ?? prior.checksum,
+        });
       } else {
         refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum });
       }
@@ -81,9 +115,7 @@ export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): C
   const expected = workspaceMedia(state);
   if (manifest.length !== expected.size || manifest.some((entry) => {
     const source = expected.get(entry.blobKey);
-    return !source || source.attachment.byteSize !== entry.byteSize
-      || source.attachment.updatedAt !== entry.updatedAt
-      || (source.checksum !== undefined && source.checksum !== entry.hash);
+    return !source || !matchesMediaReceipt(entry.blobKey, entry, source.attachment, source.checksum);
   })) throw new Error("This protected version has an incomplete image index. Your current workspace is unchanged.");
   return manifest;
 }
@@ -122,8 +154,7 @@ export async function findMissingWorkspaceMedia(
       await assertCurrent();
       if (record?.blob.size === attachment.byteSize) continue;
       const known = prior.get(blobKey);
-      if (!record && known && known.byteSize === attachment.byteSize
-        && known.updatedAt === attachment.updatedAt && (checksum === undefined || checksum === known.hash)
+      if (!record && known && matchesMediaReceipt(blobKey, known, attachment, checksum)
         && (!known.academic || (known.academic.sha256 === known.hash && academicBindings.has(
           JSON.stringify([known.academic.revisionId, known.academic.path, known.academic.sha256]))))) continue;
       const stem = questions.get(questionId)?.stem;
@@ -315,9 +346,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         const knownAcademic = known?.academic && known.academic.sha256 === known.hash
           && hasAcademicBinding(known.academic) ? known.academic : undefined;
         const record = await getQuestionAttachmentBlob(blobKey, { localOnly: true, accountId: userId });
-        if (!record && known
-          && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
-          && (checksum === undefined || checksum === known.hash)
+        if (!record && known && matchesMediaReceipt(blobKey, known, attachment, checksum)
           && (!known.academic || knownAcademic)) {
           // contentMetadata includes metadata for deferred questions. They
           // can reach this no-local-Blob path rather than the deferred queue.
@@ -360,7 +389,7 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         // A former academic-only reference is not proof that a private
         // workspace-media object exists after its academic binding disappears.
         const safeReuse = known && known.hash === hash
-          && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt
+          && matchesMediaReceipt(blobKey, known, attachment, checksum)
           && (!known.academic || academic);
         if (academic || safeReuse) {
           // A retained local Blob only proves its own bytes. The remote
