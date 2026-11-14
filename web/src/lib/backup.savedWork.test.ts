@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
-import { exportStateWithAttachments, lastBackupAt, parseImport } from "./backup";
+import { exportStateWithAttachments, lastBackupAt, markBackupDone, parseImport } from "./backup";
 import { readPortableBackup } from "./backupArchive";
 import { setQuestionAttachmentAccount } from "./questionAttachmentScope";
 import { makeSeed } from "./seed";
@@ -126,6 +126,69 @@ describe("saved-work recovery without downloading content", () => {
     expect(filename).toMatch(/^axom-backup-.*\.json$/);
     expect(lastBackupAt()).toBeNull();
   });
+  it("keeps complete-backup receipts isolated across device and A/B/A account ownership", async () => {
+    localStorage.clear();
+    setQuestionAttachmentAccount(undefined);
+    const legacyDate = new Date("2026-10-01T00:00:00.000Z");
+    markBackupDone(legacyDate);
+    expect(lastBackupAt()).toBe(legacyDate.toISOString());
+
+    const complete = makeSeed();
+    complete.questions = []; complete.documents = [];
+    try {
+      setQuestionAttachmentAccount("account-a");
+      expect(lastBackupAt()).toBeNull(); // Device-only history cannot certify an account.
+      await exportStateWithAttachments(complete);
+      const accountABackup = lastBackupAt();
+      expect(accountABackup).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
+
+      setQuestionAttachmentAccount("account-b");
+      expect(lastBackupAt()).toBeNull();
+      const { state: incomplete } = await fixture();
+      const result = await exportStateWithAttachments(incomplete);
+      expect(result.missingBlobKeys).toEqual(["offline-figure", "unavailable-image"]);
+      expect(result.missingOriginalIds).toEqual(["document"]);
+      expect(lastBackupAt()).toBeNull(); // B's partial ZIP cannot borrow A's success.
+
+      await exportStateWithAttachments(complete);
+      expect(lastBackupAt()).not.toBeNull();
+      setQuestionAttachmentAccount("account-a");
+      expect(lastBackupAt()).toBe(accountABackup);
+    } finally {
+      setQuestionAttachmentAccount(undefined);
+    }
+    expect(lastBackupAt()).toBe(legacyDate.toISOString());
+  });
+
+  it.each(["json", "zip"] as const)(
+    "does not attribute an %s backup to another account when it changes during the download click",
+    async (extension) => {
+      localStorage.clear();
+      let state = makeSeed();
+      state.questions = []; state.documents = [];
+      if (extension === "zip") {
+        const source = await fixture();
+        state = source.state;
+        state.questions[0].attachments = [];
+        await saveSourceOriginal(state.documents[0], source.original);
+      }
+      setQuestionAttachmentAccount("account-a");
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementationOnce(function (this: HTMLAnchorElement) {
+        filename = this.download;
+        setQuestionAttachmentAccount("account-b");
+      });
+      try {
+        await expect(exportStateWithAttachments(state)).rejects.toThrow("account changed during export");
+        expect(filename.endsWith(`.${extension}`)).toBe(true);
+        expect(lastBackupAt()).toBeNull(); // B was never backed up.
+        setQuestionAttachmentAccount("account-a");
+        expect(lastBackupAt()).toBeNull(); // A's interrupted operation was not certified.
+      } finally {
+        setQuestionAttachmentAccount(undefined);
+      }
+    },
+  );
+
   it("deduplicates compatible shared keys in a complete JSON backup and restores their bytes", async () => {
     localStorage.clear();
     const { state } = await fixture();
