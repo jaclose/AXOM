@@ -53,7 +53,7 @@ const count = (value: unknown): value is number => typeof value === "number" && 
  * bounded encoded-URI validator used by publication citations. Do not apply
  * the broader citation path heuristic indiscriminately to anatomy prose.
  */
-const INLINE_PRIVATE_REFERENCE = /(?:file|content|blob|data)(?::|%(?:25)*3a)|\/(?:Users|home|Volumes|mnt|root|tmp|opt)\/|\/var\/mobile\/|\/storage\/emulated\/|\/\/[a-z0-9._~-]+\/|(?:source|path|file)\s*[:=]\s*\/[a-z0-9._~-]+|~\/|[a-z]:\\|\\\\/i;
+const INLINE_PRIVATE_REFERENCE = /https?:\/\/[^\s/?#<>"\'|;,]+@|(?:file|content|blob|data)(?::|%(?:25)*3a)|\/(?:Users|home|Volumes|mnt|root|tmp|opt)\/|\/var\/mobile\/|\/storage\/emulated\/|\/\/[a-z0-9._~-]+\/|(?:source|path|file)\s*[:=]\s*\/[a-z0-9._~-]+|~\/|[a-z]:\\|\\\\/i;
 
 function containsPrivateInlineReference(snapshot: SharedQuestionSetSnapshot): boolean {
   const fields = [
