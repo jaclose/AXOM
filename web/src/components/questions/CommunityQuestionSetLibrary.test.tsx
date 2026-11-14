@@ -515,9 +515,11 @@ describe("Community Question Set Library", () => {
       mock.accountId = "account-1";
       mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
     });
-    expect(screen.queryByText("Loading Question Sets…")).toBeNull();
     await act(async () => { resolveSearch([{ ...summary, liked: true }]); });
-    expect(screen.queryByRole("heading", { name: "Synthetic practice" })).toBeNull();
+    // The old response is discarded. A fresh default listing may be visible,
+    // but its liked state must come from the new account session.
+    expect(await screen.findByRole("heading", { name: "Synthetic practice" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Like Synthetic practice" }).getAttribute("aria-pressed")).toBe("false");
     expect(mock.observers.size).toBe(1);
   });
 
@@ -720,8 +722,8 @@ describe("Community Question Set Library", () => {
     expect(mock.commit).not.toHaveBeenCalled();
     expect(mock.observers.size).toBe(1);
 
-    // A fresh explicit preview is valid for the restored account session.
-    fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
+    // A fresh explicit preview is valid only after the refreshed listing loads.
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
     expect(await screen.findByText("Which synthetic answer is supported?")).toBeTruthy();
     await waitFor(() => expect(mock.observers.size).toBe(2));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
