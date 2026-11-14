@@ -347,12 +347,60 @@ describe("Activity History workbook download feedback", () => {
     expect(saveWorkbook).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps retained device notes private until an unlinked B explicitly reveals them", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [{ ...originalLogs[0], note: "previous-account-device-note" }];
+    switchAccount("account-B", "unlinked");
+    try {
+      render(<ActivityHistoryPage />);
+      expect(screen.getByText("Device history needs confirmation")).toBeTruthy();
+      expect(screen.queryByText(/previous-account-device-note/)).toBeNull();
+      expect(screen.queryByLabelText("Activity type")).toBeNull();
+      expect(screen.queryByText("25")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+      expect(fixture.logs).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Show device history" }));
+      expect(screen.getByText(/previous-account-device-note/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Export .xlsx/i })).toBeTruthy();
+      expect(fixture.logs).toHaveLength(1);
+    } finally {
+      fixture.logs = originalLogs;
+    }
+  });
+
+  it("re-guards a fresh unlinked mount and revokes revealed notes when the account changes", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [{ ...originalLogs[0], note: "private-device-note-after-switch" }];
+    switchAccount("account-B", "unlinked");
+    try {
+      render(<ActivityHistoryPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Show device history" }));
+      expect(screen.getByText(/private-device-note-after-switch/)).toBeTruthy();
+
+      act(() => { switchAccount("account-A", "linked"); });
+      expect(screen.queryByText(/private-device-note-after-switch/)).toBeNull();
+      expect(screen.getByText("Activity History session changed")).toBeTruthy();
+
+      cleanup();
+      switchAccount("account-B", "unlinked");
+      render(<ActivityHistoryPage />);
+      expect(screen.getByText("Device history needs confirmation")).toBeTruthy();
+      expect(screen.queryByText(/private-device-note-after-switch/)).toBeNull();
+      expect(fixture.logs).toHaveLength(1);
+    } finally {
+      fixture.logs = originalLogs;
+    }
+  });
+
   it("asks before exporting retained device work after an unlinked B sign-in, without deleting A logs", async () => {
     // Signing out leaves the device study logs intact. A fresh B view must not silently export them.
     switchAccount(null, "unlinked");
     switchAccount("account-B", "unlinked");
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(<ActivityHistoryPage />);
+    expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show device history" }));
 
     const button = screen.getByRole("button", { name: /Export .xlsx/i });
     fireEvent.click(button);
@@ -371,7 +419,8 @@ describe("Activity History workbook download feedback", () => {
     switchAccount("account-B", "linked-elsewhere");
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<ActivityHistoryPage />);
-
+    expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show device history" }));
     fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(fixture.exportWorkbook).not.toHaveBeenCalled();
