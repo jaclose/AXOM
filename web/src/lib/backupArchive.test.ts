@@ -786,6 +786,30 @@ describe("portable binary media backup", () => {
     expect(fastPathReads).toBe(0);
   });
 
+  it("includes mandatory workspace JSON in near-2 GiB verified-byte preflight", async () => {
+    // 256 x 8 MiB equals 2 GiB, leaving no room for even the smallest
+    // workspace.json. Reject in probe phase, before JSZip retains those bytes.
+    let inspected = 0;
+    await expect(preflightRestorableZipCandidateBudget(
+      300, 0,
+      async () => { inspected += 1; return 8 * 1024 * 1024; },
+      async () => null,
+      MAX_ZIP_BACKUP_BYTES + 1,
+      1,
+    )).rejects.toThrow(/expanded size/);
+    expect(inspected).toBe(256);
+
+    // Metadata-only recovery remains acceptable when the actual bytes fit.
+    const sparse = await preflightRestorableZipCandidateBudget(
+      300, 0,
+      async index => index === 0 ? 8 * 1024 * 1024 : null,
+      async () => null,
+      MAX_ZIP_BACKUP_BYTES + 1,
+      1,
+    );
+    expect(sparse?.mediaAvailable.filter(Boolean)).toHaveLength(1);
+  });
+
   it("exports a partial, restorable ZIP when declared media bytes exceed 2 GiB but most blobs are absent", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
