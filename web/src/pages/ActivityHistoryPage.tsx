@@ -66,12 +66,27 @@ export function ActivityHistoryPage() {
           <EmptyState icon={<History size={ICON_SIZE.display} />} title="No activity matches" hint="Clear filters or log study time from Productivity." />
         ) : (
           <div className="activity-history-list">
-            {filtered.slice().sort((a, b) => b.ts.localeCompare(a.ts)).map((log) => <ActivityRow key={log.id} log={log} />)}
+            {filtered.slice().sort(compareStudyLogsNewestFirst).map((log) => <ActivityRow key={log.id} log={log} />)}
           </div>
         )}
       </GlassCard>
     </div>
   );
+}
+
+
+/** Keep the visible ledger chronologically consistent with the XLSX ordering. */
+function compareStudyLogsNewestFirst(a: StudyLog, b: StudyLog): number {
+  const aTime = Date.parse(a.ts);
+  const bTime = Date.parse(b.ts);
+  const aValid = Number.isFinite(aTime);
+  const bValid = Number.isFinite(bTime);
+
+  // Mixing epoch and lexical branches in one comparison creates sort cycles.
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  if (aValid && bValid && aTime !== bTime) return bTime - aTime;
+
+  return b.ts.localeCompare(a.ts) || a.id.localeCompare(b.id);
 }
 
 function HistoryStat({ label, value }: { label: string; value: number }) {
