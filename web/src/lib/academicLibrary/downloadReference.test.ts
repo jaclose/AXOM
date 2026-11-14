@@ -14,7 +14,7 @@ vi.mock("./client", () => ({ downloadAcademicCourse: mocks.download, enrollAcade
 vi.mock("../sync/contentDownloads", () => ({ downloadAccountContent: mocks.hydrate }));
 vi.mock("../localVault", () => ({ getVaultWriteCheckpoint: () => 5, flushLocalVaultWrites: mocks.flush, assertVaultWritesSince: mocks.durable }));
 vi.mock("./accountScope", () => ({ academicAccountScope: (key: string) => ({ key, assertCurrent: mocks.assertCurrent, dispose: mocks.dispose }) }));
-import { downloadCourseQuestions, isAcademicCourseDownloaded, readDownloadReference } from "./downloadReference";
+import { downloadCourseQuestions, isAcademicCourseDownloaded, readDownloadReference, saveDownloadReference } from "./downloadReference";
 
 const course: AcademicCourse = { id: "course", current_revision_id: "revision", title: "GOER", module: "GOER", term: "Term 1",
   visibility: "shared", review_status: "approved", owned: false, ready_questions: 1, review_questions: 0 };
@@ -79,6 +79,24 @@ describe("academic download references", () => {
 });
 
 describe("shared questions-only download", () => {
+  it("rejects a different collection claiming an installed revision before fetching or overwriting", async () => {
+    await expect(downloadCourseQuestions({ ...course, id: "foreign-collection" }, "account")).rejects.toThrow(/revision.*different collection/i);
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(mocks.state.addDocument).not.toHaveBeenCalled();
+    expect(readDownloadReference(mocks.state.documents, course, "account")).toEqual(saved);
+  });
+  it("preserves a foreign account's revision receipt instead of overwriting its slot", async () => {
+    mocks.state.documents = [receipt({ accountId: "another-account" }), doc("source"), doc("template")];
+    await expect(downloadCourseQuestions(course, "account")).rejects.toThrow(/revision.*different collection or account/i);
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(mocks.state.addDocument).not.toHaveBeenCalled();
+  });
+  it("guards the durable writer if an identity conflict appears after download begins", async () => {
+    await expect(saveDownloadReference({ ...saved, collectionId: "different-collection" }, mocks.assertCurrent))
+      .rejects.toThrow(/revision.*different collection/i);
+    expect(mocks.state.addDocument).not.toHaveBeenCalled();
+    expect(mocks.flush).not.toHaveBeenCalled();
+  });
   it("skips installed files, adds offline term scope and never enrolls weeks", async () => {
     const result = await downloadCourseQuestions(course, "account");
     expect(result).toMatchObject({ term: "Term 1", module: "GOER" });
