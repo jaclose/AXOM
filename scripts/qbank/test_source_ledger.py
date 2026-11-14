@@ -1598,6 +1598,48 @@ class SourceLedgerTests(unittest.TestCase):
                       "ready": 2, "needsReview": 0, "sourceVerified": True, "cloudVerified": False}
             assess([native], [raw])
 
+    def test_agent2_malformed_native_identity_is_held_without_losing_valid_evidence(self):
+        # External parser receipts are JSON and can contain unhashable nested
+        # identifiers; one malformed row must not abort the complete review.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            folder = pathlib.Path(root)
+            original = folder / "questions.txt"
+            original.write_bytes(b"valid-source")
+            valid_sha, malformed_sha = digest("valid-source"), digest("unapproved-source")
+            original_disposition = {"sha256": malformed_sha, "kind": "question-source",
+                                    "status": "review-required", "readyCount": 0}
+            dispositions = {"sources": [
+                {"sha256": valid_sha, "kind": "question-source",
+                 "status": "review-required", "readyCount": 0},
+                original_disposition,
+            ]}
+            valid = {"bankId": "valid-bank", "sourceSha256": valid_sha,
+                     "questionRecords": 2, "ready": 2, "needsReview": 0,
+                     "sourceVerified": True, "cloudVerified": False}
+            malformed = [
+                {**valid, "sourceSha256": ["nested", malformed_sha]},
+                {**valid, "sourceSha256": {"sha256": malformed_sha}},
+                {**valid, "bankId": ["invalid-bank"], "sourceSha256": malformed_sha},
+                {**valid, "bankId": {"id": "invalid-bank"}, "sourceSha256": malformed_sha},
+            ]
+            audit_path = folder / "audit.json"
+            audit_path.write_text(json.dumps({"native": malformed + [valid], "raw": []}))
+            result = enriched.merge_agent2_assessment(
+                dispositions,
+                [{"bank_id": "valid-bank", "questions": 2, "source_path": str(original),
+                  "canonical_status": "canonical_distinct_question_collection",
+                  "status": "local_ready_for_agent2_review", "issues": []}],
+                [{"source_sha256": valid_sha, "original_path": str(original)}],
+                audit_path,
+            )
+            self.assertEqual(result["status"], "audit_assessed_without_upload")
+            self.assertEqual(result["assessed_source_count"], 1)
+            self.assertEqual(result["assessed_ready_not_installed"], 2)
+            self.assertEqual(result["rejected_audit_rows"].count("native_record_invalid_identity"), 4)
+            self.assertEqual(dispositions["sources"][0]["readyCount"], 2)
+            self.assertEqual(original_disposition["status"], "review-required")
+            self.assertEqual(original_disposition["readyCount"], 0)
+
     def test_agent2_malformed_audit_top_level_fails_closed(self):
         with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
             audit_path = pathlib.Path(root) / "audit.json"

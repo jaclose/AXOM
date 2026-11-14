@@ -631,6 +631,12 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
         if not isinstance(item,dict):
             rejected.append("native_row_not_object");continue
         bank_id,sha=item.get("bankId"),item.get("sourceSha256")
+        # An external parser's nested JSON identifiers must not become
+        # unhashable keys or abort reconciliation for unrelated valid sources.
+        if (not isinstance(bank_id,str) or not bank_id.strip()
+                or not isinstance(sha,str) or not re.fullmatch(r"[a-f0-9]{64}",sha)):
+            rejected.append("native_record_invalid_identity")
+            continue
         if sha in ambiguous_audit_shas:
             rejected.append("duplicate_source_sha_assessment:" + sha)
             continue
