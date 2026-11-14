@@ -14,12 +14,17 @@ const fixture = vi.hoisted(() => ({
   accountId: "account-A" as string | null,
   link: "linked" as "linked" | "unlinked" | "linked-elsewhere",
   accountSubscribers: new Set<(state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere" }) => void>(),
+  beforeSubscribe: null as (() => void) | null,
 }));
 
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: {
     getState: () => ({ user: fixture.accountId ? { id: fixture.accountId } : null, link: fixture.link }),
     subscribe: (listener: (state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere" }) => void) => {
+      // A sign-in can finish during React commit before the listener is installed.
+      const beforeSubscribe = fixture.beforeSubscribe;
+      fixture.beforeSubscribe = null;
+      beforeSubscribe?.();
       fixture.accountSubscribers.add(listener);
       return () => { fixture.accountSubscribers.delete(listener); };
     },
@@ -45,6 +50,7 @@ beforeEach(() => {
   fixture.accountId = "account-A";
   fixture.link = "linked";
   fixture.accountSubscribers.clear();
+  fixture.beforeSubscribe = null;
   fixture.exportWorkbook.mockReset();
   fixture.pushToast.mockReset();
 });
@@ -92,6 +98,26 @@ describe("Activity History workbook download feedback", () => {
     expect(fixture.pushToast).toHaveBeenCalledTimes(1);
   });
 
+
+  it("redacts an account change between initial render and account subscription", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [{ ...originalLogs[0], note: "A-only-note-before-subscription" }];
+    // Deliver B before useAccount.subscribe registers its listener: passive-effect
+    // listeners alone cannot observe this missed transition.
+    fixture.beforeSubscribe = () => { switchAccount("account-B"); };
+    try {
+      render(<ActivityHistoryPage />);
+      expect(fixture.accountId).toBe("account-B");
+      expect(screen.queryByText(/A-only-note-before-subscription/)).toBeNull();
+      expect(screen.getByText("Activity History session changed")).toBeTruthy();
+      expect(screen.queryByLabelText("Activity type")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+      expect(fixture.logs).toHaveLength(1);
+    } finally {
+      fixture.logs = originalLogs;
+      fixture.beforeSubscribe = null;
+    }
+  });
 
   it("revokes account A's rendered notes, stats, filters and export on A→B→A", () => {
     const originalLogs = fixture.logs;
