@@ -26,7 +26,10 @@ vi.mock("../lib/account/accountStore", () => ({
 }));
 
 vi.mock("../lib/store", () => ({
-  useStore: (select: (state: { logs: typeof fixture.logs }) => unknown) => select({ logs: fixture.logs }),
+  useStore: Object.assign(
+    (select: (state: { logs: typeof fixture.logs }) => unknown) => select({ logs: fixture.logs }),
+    { getState: () => ({ logs: fixture.logs }) },
+  ),
 }));
 vi.mock("../lib/activityExport", () => ({ exportActivityWorkbook: fixture.exportWorkbook }));
 vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
@@ -153,6 +156,50 @@ describe("Activity History workbook download feedback", () => {
       expect.objectContaining({ title: "Activity export canceled", tone: "warn" }),
     ));
     expect(saved).not.toHaveBeenCalled();
+  });
+
+  it("cancels an in-flight XLSX write after same-account study history is replaced", async () => {
+    let release!: () => void;
+    const saved = vi.fn();
+    fixture.exportWorkbook.mockImplementationOnce(async (_logs: unknown, _writer: unknown, assertCurrent: () => void) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      assertCurrent();
+      saved();
+    });
+    const originalLogs = fixture.logs;
+    try {
+      render(<ActivityHistoryPage />);
+      fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+      expect(fixture.exportWorkbook).toHaveBeenCalledTimes(1);
+
+      // Restoring a workspace under the same authenticated account replaces its logs.
+      fixture.logs = [{ ...originalLogs[0], id: "new-workspace", minutes: 5 }];
+      expect(fixture.accountId).toBe("account-A");
+      release();
+
+      await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Activity export canceled", tone: "warn" }),
+      ));
+      expect(saved).not.toHaveBeenCalled();
+      expect(fixture.logs[0].id).toBe("new-workspace");
+    } finally {
+      fixture.logs = originalLogs;
+    }
+  });
+
+  it("rejects a stale visible History view when local logs change before an export click", async () => {
+    const originalLogs = fixture.logs;
+    try {
+      render(<ActivityHistoryPage />);
+      fixture.logs = originalLogs.slice();
+      fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+      await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Activity export canceled" }),
+      ));
+      expect(fixture.exportWorkbook).not.toHaveBeenCalled();
+    } finally {
+      fixture.logs = originalLogs;
+    }
   });
 
   it("refuses stale mounted export after account switch, while preserving local-only exports", async () => {
