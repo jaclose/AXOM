@@ -749,6 +749,68 @@ describe("portable binary media backup", () => {
     expect(availability?.mediaAvailable.filter(Boolean)).toHaveLength(MAX_ZIP_BACKUP_ENTRIES - 2);
   }, 30_000);
 
+  it("preflights a possible 2 GiB byte overflow even when ZIP file count fits", async () => {
+    // 300 candidate images each declare 8 MiB: fewer than 30,000 entries,
+    // but all-present bytes exceed 2 GiB before any workspace manifest.
+    const declaredBytes = 300 * 8 * 1024 * 1024;
+    expect(declaredBytes).toBeGreaterThan(MAX_ZIP_BACKUP_BYTES);
+    let inspected = 0;
+    await expect(preflightRestorableZipCandidateBudget(
+      300, 0,
+      async () => { inspected += 1; return 8 * 1024 * 1024; },
+      async () => { throw new Error("Unexpected original probe"); },
+      declaredBytes,
+    )).rejects.toThrow(/expanded size/);
+    expect(inspected).toBe(257); // 256 x 8 MiB fits; 257th exceeds 2 GiB.
+
+    inspected = 0;
+    const partial = await preflightRestorableZipCandidateBudget(
+      300, 0,
+      async index => { inspected += 1; return index % 2 === 0 ? null : 8 * 1024 * 1024; },
+      async () => null,
+      declaredBytes,
+    );
+    expect(inspected).toBe(300);
+    expect(partial?.mediaAvailable.filter(Boolean)).toHaveLength(150);
+    expect(partial?.mediaAvailable[0]).toBe(false);
+
+    // The fast path remains single-pass when both budgets are safely below cap.
+    let fastPathReads = 0;
+    const skipped = await preflightRestorableZipCandidateBudget(
+      300, 0,
+      async () => { fastPathReads += 1; return 1; },
+      async () => { fastPathReads += 1; return 1; },
+      MAX_ZIP_BACKUP_BYTES - 1,
+    );
+    expect(skipped).toBeNull();
+    expect(fastPathReads).toBe(0);
+  });
+
+  it("exports a partial, restorable ZIP when declared media bytes exceed 2 GiB but most blobs are absent", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const missing = Array.from({ length: 260 }, (_, index) => ({
+      id: `unavailable-q-${index}`,
+      attachments: [{
+        ...attachment, id: `unavailable-media-${index}`,
+        blobKey: `private-library:unavailable-${index}`,
+        byteSize: 8 * 1024 * 1024,
+      }],
+    }));
+    const exported = await createMediaBackupArchive(
+      { recoveryMarker: "byte-budget-partial" }, [...refs, ...missing],
+    );
+    expect(exported.attachmentCount).toBe(1);
+    expect(exported.missingBlobKeys).toHaveLength(260);
+    const portable = await readPortableBackup(new File([exported.blob], "byte-budget-partial.zip"));
+    expect(JSON.parse(portable.rawText)).toMatchObject({ recoveryMarker: "byte-budget-partial" });
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    expect(Object.keys(zip.files)).toHaveLength(3); // workspace.json, media/, media/0
+  });
+
   it("counts only verified ZIP entries, including actual JSZip directories and workspace", () => {
     // Metadata candidates are not admitted files: absent or invalid binary
     // records must remain diagnosable in a recoverable partial backup.
