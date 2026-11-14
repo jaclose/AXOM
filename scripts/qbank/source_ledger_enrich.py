@@ -582,6 +582,8 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
         return dict(status="no_agent2_audit", validated_sources=[], rejected_audit_rows=[])
     try:
         audit=json.loads(audit_path.read_text(encoding="utf8"))
+        if not isinstance(audit,dict):
+            raise ValueError("audit_object_schema_mismatch")
         native=audit.get("native", [])
         raw=audit.get("raw",[])
         if not isinstance(native,list) or not isinstance(raw,list):
@@ -589,6 +591,20 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
     except (OSError,ValueError,TypeError) as error:
         return dict(status="unreadable_agent2_audit", validated_sources=[],
                     rejected_audit_rows=[str(error)])
+    # Independent parser evidence must be unique per scanned original SHA.
+    # Duplicate native/native, raw/raw, or native/raw claims are ambiguous,
+    # even when their reported counts agree. Reject *all* conflicting rows.
+    audit_sha_claims=collections.Counter()
+    for item in native:
+        sha=item.get("sourceSha256") if isinstance(item,dict) else None
+        if isinstance(sha,str) and re.fullmatch(r"[a-f0-9]{64}",sha):
+            audit_sha_claims[sha]+=1
+    for item in raw:
+        value=item.get("sha256") if isinstance(item,dict) else None
+        sha=value.removeprefix("sha256:") if isinstance(value,str) else None
+        if sha and re.fullmatch(r"[a-f0-9]{64}",sha):
+            audit_sha_claims[sha]+=1
+    ambiguous_audit_shas={sha for sha,count in audit_sha_claims.items() if count>1}
     rows_by_path={r["original_path"]:r for r in rows}
     bysha={r["sha256"]:r for r in dispositions["sources"]}
     accepted=[];rejected=[]
@@ -615,6 +631,9 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
         if not isinstance(item,dict):
             rejected.append("native_row_not_object");continue
         bank_id,sha=item.get("bankId"),item.get("sourceSha256")
+        if sha in ambiguous_audit_shas:
+            rejected.append("duplicate_source_sha_assessment:" + sha)
+            continue
         source=bysha.get(sha)
         key=(bank_id,sha)
         pkg=expected.get(key)
@@ -647,6 +666,9 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
             rejected.append("raw_row_not_object");continue
         raw_sha=item.get("sha256")
         sha=raw_sha.removeprefix("sha256:") if isinstance(raw_sha,str) else None
+        if sha in ambiguous_audit_shas:
+            rejected.append("duplicate_source_sha_assessment:" + sha)
+            continue
         if sha in blocked_native_source_shas:
             rejected.append("raw_record_native_source_review_hold:" + str(item.get("file")));continue
         detected=item.get("questionsDetected")
@@ -669,7 +691,8 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
                               if key not in ambiguous and key[1] not in ambiguous_source_shas
                               and not held_native_package(pkg))
     return dict(status="audit_assessed_without_upload",validated_sources=accepted,
-                rejected_audit_rows=rejected, canonical_native_packages=eligible_native_count,
+                rejected_audit_rows=rejected, ambiguous_source_hashes=sorted(ambiguous_audit_shas),
+                canonical_native_packages=eligible_native_count,
                 assessed_source_count=len(accepted),
                 assessed_questions_detected=sum(x["detected"] for x in accepted),
                 assessed_ready_not_installed=sum(x["ready"] for x in accepted),
