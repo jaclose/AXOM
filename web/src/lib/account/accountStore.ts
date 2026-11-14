@@ -232,9 +232,14 @@ export const useAccount = create<AccountState>((originalSet, get, api) => {
   // Intercept both internal `set` and external `useAccount.setState` atomically:
   // observers must never see the changed account with an old epoch.
   const set = ((partial: AccountState | Partial<AccountState> | ((state: AccountState) => AccountState | Partial<AccountState>), replace?: boolean) => {
+    // A functional updater may synchronously make another store write.
+    // Evaluate against the invocation snapshot, then compare and commit
+    // against the latest state, as Zustand does. Using the stale snapshot
+    // here can roll the epoch backwards or miss a nested link transition.
+    const atInvocation = get();
+    const patch = typeof partial === "function" ? partial(atInvocation) : partial;
     const previous = get();
-    const patch = typeof partial === "function" ? partial(previous) : partial;
-    // Zustand treats a functional update returning the same state as a no-op.
+    // Preserve Zustand's same-state no-op, including after nested writes.
     if (Object.is(patch, previous)) return;
     const next = replace ? patch as AccountState : { ...previous, ...patch };
     const changed = (previous.user?.id ?? null) !== (next.user?.id ?? null)
