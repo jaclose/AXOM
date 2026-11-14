@@ -812,10 +812,18 @@ describe("portable binary media backup", () => {
 
   it("reserves streamed ZIP headers and directory records before near-2 GiB image retention", async () => {
     const count = 256;
-    const bytesPerImage = 8 * 1024 * 1024 - 200;
+    const bytesPerImage = 8 * 1024 * 1024 - 180;
     const workspaceBytes = 20_000;
     const expandedWithoutZipHeaders = count * bytesPerImage + workspaceBytes;
     expect(expandedWithoutZipHeaders).toBeLessThan(MAX_ZIP_BACKUP_BYTES);
+    // Even the mandatory streamed members, WITHOUT ZIP64/extra fields,
+    // exceed the serialized ceiling. This is not merely a conservative hold.
+    const minimalHeaders = 22
+      + 30 + 46 + 2 * "workspace.json".length
+      + 30 + 46 + 2 * "media/".length
+      + Array.from({ length: count }, (_, index) =>
+        30 + 46 + 16 + 2 * `media/${index}`.length).reduce((a, b) => a + b, 0);
+    expect(expandedWithoutZipHeaders + minimalHeaders).toBeGreaterThan(MAX_ZIP_BACKUP_BYTES);
     expect(expandedWithoutZipHeaders + projectedZipSerializedOverhead(count, 0))
       .toBeGreaterThan(MAX_ZIP_BACKUP_BYTES);
 
