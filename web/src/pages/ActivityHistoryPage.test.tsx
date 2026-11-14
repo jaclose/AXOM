@@ -64,4 +64,25 @@ describe("Activity History workbook download feedback", () => {
     expect(fixture.exportWorkbook.mock.calls[1][0]).toEqual([fixture.logs[0]]);
     expect(fixture.pushToast).toHaveBeenCalledTimes(1);
   });
+
+  it("renders valid instants newest first, with deterministic ties and malformed timestamps last", () => {
+    const original = fixture.logs;
+    fixture.logs = [
+      { id: "broken", type: "broken", ts: "not-a-date", dayKey: "2026-11-13", minutes: 5, cards: 0 },
+      { id: "earlier", type: "earlier", ts: "2026-11-13T15:00:00Z", dayKey: "2026-11-13", minutes: 5, cards: 0 },
+      { id: "later", type: "later", ts: "2026-11-13T12:00:00-04:00", dayKey: "2026-11-13", minutes: 5, cards: 0 },
+      { id: "tie-b", type: "tie-b", ts: "2026-11-13T16:30:00Z", dayKey: "2026-11-13", minutes: 5, cards: 0 },
+      { id: "tie-a", type: "tie-a", ts: "2026-11-13T16:30:00Z", dayKey: "2026-11-13", minutes: 5, cards: 0 },
+    ];
+    try {
+      render(<ActivityHistoryPage />);
+      const ids = ["tie-a", "tie-b", "later", "earlier", "broken"];
+      const rendered = [...document.querySelectorAll(".activity-history-row")]
+        .map((row) => ids.find((id) => row.textContent?.includes(id)));
+      expect(rendered).toEqual(ids);
+    } finally {
+      fixture.logs = original;
+    }
+  });
+
 });
