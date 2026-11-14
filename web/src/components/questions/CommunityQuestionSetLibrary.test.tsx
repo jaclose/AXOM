@@ -197,6 +197,83 @@ describe("Community Question Set Library", () => {
     expect(mock.commit).toHaveBeenCalledOnce();
   });
 
+  it("inspects all questions in bounded batches while teaching disclosures remain closed", async () => {
+    const many = {
+      ...snapshot,
+      orderedQuestionIds: Array.from({ length: 8 }, (_, i) => `shared-question-${i + 1}`),
+      questions: Array.from({ length: 8 }, (_, i) => ({
+        ...snapshot.questions[0],
+        id: `shared-question-${i + 1}`,
+        stem: `Synthetic preview question ${i + 1}?`,
+        explanation: `Synthetic explanation ${i + 1} is reviewed for this test.`,
+      })),
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: many, contentDigest: "e".repeat(64),
+      status: "approved", reviewRevision: 5,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    expect(await screen.findByText("Synthetic preview question 3?")).toBeTruthy();
+    expect(screen.queryByText("Synthetic preview question 4?")).toBeNull();
+    expect(screen.getByText("Showing 3 of 8 questions.")).toBeTruthy();
+    expect(screen.getAllByText("Reveal recorded answer and teaching notes")).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show next 3 questions" }));
+    expect(screen.getByText("Synthetic preview question 6?")).toBeTruthy();
+    expect(screen.queryByText("Synthetic preview question 7?")).toBeNull();
+    expect(screen.getByText("Showing 6 of 8 questions.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show next 2 questions" }));
+    expect(screen.getByText("Synthetic preview question 8?")).toBeTruthy();
+    expect(screen.getByText("Showing 8 of 8 questions.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Show next .* questions/ })).toBeNull();
+    expect(screen.getAllByText("Reveal recorded answer and teaching notes")).toHaveLength(8);
+    for (const disclosure of screen.getAllByText("Reveal recorded answer and teaching notes")) {
+      expect(disclosure.closest("details")?.open).toBe(false);
+    }
+    expect(mock.authorize).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mock.commit).toHaveBeenCalledOnce());
+    expect(mock.commit.mock.calls[0][0].snapshot).toEqual(many);
+    expect(mock.commit.mock.calls[0][0].identity.contentDigest).toBe("e".repeat(64));
+  });
+
+  it("resets full-set preview pagination for a new selection and a reopened publication", async () => {
+    const second = { ...summary, id: "00000000-0000-4000-8000-000000000022", title: "Second synthetic publication" };
+    const makeSnapshot = (title: string, prefix: string) => ({
+      ...snapshot, title,
+      orderedQuestionIds: Array.from({ length: 5 }, (_, i) => `${prefix}-${i + 1}`),
+      questions: Array.from({ length: 5 }, (_, i) => ({
+        ...snapshot.questions[0], id: `${prefix}-${i + 1}`, stem: `${prefix} preview question ${i + 1}?`,
+      })),
+    });
+    const firstSnapshot = makeSnapshot(summary.title, "first");
+    const secondSnapshot = makeSnapshot(second.title, "second");
+    mock.search.mockResolvedValueOnce([summary, second]);
+    mock.preview.mockImplementation((_account: string, id: string) => Promise.resolve({
+      id, snapshot: id === summary.id ? firstSnapshot : secondSnapshot,
+      contentDigest: id === summary.id ? "a".repeat(64) : "b".repeat(64),
+      status: "approved", reviewRevision: 2,
+    }));
+    render(<CommunityQuestionSetLibrary />);
+    await screen.findByRole("heading", { name: second.title });
+    fireEvent.click(screen.getAllByRole("button", { name: "Preview set" })[0]);
+    await screen.findByText("first preview question 3?");
+    fireEvent.click(screen.getByRole("button", { name: "Show next 2 questions" }));
+    expect(screen.getByText("first preview question 5?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Preview set" })[1]);
+    expect(await screen.findByText("second preview question 3?")).toBeTruthy();
+    expect(screen.queryByText("second preview question 4?")).toBeNull();
+    expect(screen.getByText("Showing 3 of 5 questions.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Preview set" })[0]);
+    expect(await screen.findByText("first preview question 3?")).toBeTruthy();
+    expect(screen.queryByText("first preview question 4?")).toBeNull();
+    expect(screen.getByRole("button", { name: "Show next 2 questions" })).toBeTruthy();
+    expect(mock.commit).not.toHaveBeenCalled();
+  });
+
   it("keeps answer and topic disclosures keyboard-reachable after import disables its only action", async () => {
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
