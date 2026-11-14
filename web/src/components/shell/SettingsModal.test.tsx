@@ -225,6 +225,44 @@ describe("Settings information architecture", () => {
     expect(screen.getByText("Accent palette")).toBeTruthy();
   });
 
+  it("labels a prior portable download request without claiming a verified backup", () => {
+    localStorage.setItem(STORAGE_KEYS.lastBackupAt, "2026-11-14T09:00:00.000Z");
+    render(<SettingsModal onClose={() => {}} initialTab="backup" />);
+    const status = screen.getByRole("region", { name: "Backup status" });
+    expect(within(status).getByText("Portable export requested")).toBeTruthy();
+    expect(status.textContent).toMatch(/check (your )?Downloads/i);
+    expect(status.textContent).toMatch(/not proof.*saved.*restored/i);
+    expect([...status.querySelectorAll(".backup-status-item.good")]
+      .some((item) => item.textContent?.includes("Portable export requested"))).toBe(false);
+  });
+
+  it("does not invent a complete portable backup without a local receipt", () => {
+    render(<SettingsModal onClose={() => {}} initialTab="backup" />);
+    const status = screen.getByRole("region", { name: "Backup status" });
+    expect(within(status).getByText("Portable export requested")).toBeTruthy();
+    expect(status.textContent).toMatch(/No export requested on this device/i);
+    expect(status.textContent).toMatch(/not proof.*saved.*restored/i);
+  });
+
+  it("reports only a browser download request when the anchor click does not save a file", async () => {
+    const RealURL = URL;
+    class TestURL extends RealURL {
+      static createObjectURL = vi.fn(() => "blob:axom-test-export");
+      static revokeObjectURL = vi.fn();
+    }
+    vi.stubGlobal("URL", TestURL);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    useStore.setState({ ...makeSeed(), questions: [], documents: [], deferredContent: undefined });
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="backup" />);
+    await user.click(screen.getByRole("button", { name: /export complete backup/i }));
+    await waitFor(() => expect(screen.getByText(/AXOM asked this browser to download your backup/i)).toBeTruthy());
+    expect(screen.getByText(/Check that the file exists and can be opened and restored/i)).toBeTruthy();
+    const status = screen.getByRole("region", { name: "Backup status" });
+    expect(within(status).getByText("Portable export requested")).toBeTruthy();
+    expect(status.textContent).not.toContain("Last portable export");
+  });
+
   it("presents portable backup actions once and keeps technical details in Advanced", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="backup" />);
