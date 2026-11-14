@@ -140,7 +140,7 @@ describe("saved-work recovery without downloading content", () => {
       expect(lastBackupAt()).toBeNull(); // Device-only history cannot certify an account.
       await exportStateWithAttachments(complete);
       const accountABackup = lastBackupAt();
-      expect(accountABackup).toMatch(/^\\d{4}-\\d{2}-\\d{2}T/);
+      expect(accountABackup).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
 
       setQuestionAttachmentAccount("account-b");
       expect(lastBackupAt()).toBeNull();
