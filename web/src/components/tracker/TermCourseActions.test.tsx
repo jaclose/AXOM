@@ -76,7 +76,7 @@ describe("term course actions", () => {
       mocks.downloaded.add(entry.id);
     });
     mount(); fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
-    await screen.findByText("Download complete. 1 downloaded, 1 already on this device, 1 failed.");
+    await screen.findByText("Download incomplete. 1 downloaded, 1 already on this device, 1 failed.");
     expect(mocks.list).toHaveBeenCalledWith("Term 5", "learner", expect.objectContaining({ shouldStop: expect.any(Function) }));
     expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["CPR", "RHPS"]);
     expect(screen.getByRole("alert").textContent).toContain("CPR: This course file is unavailable.");
@@ -367,6 +367,34 @@ describe("term course actions", () => {
     await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
     expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["GOER", "GOER", "CPR", "RHPS"]);
+  });
+
+  it("does not claim a successful download when the account catalog contains no eligible courses", async () => {
+    mocks.list.mockResolvedValueOnce([]);
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("No courses are available for Term 5 in this account's catalog. Nothing was downloaded.");
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByText(/Download complete/)).toBeNull();
+    // An empty scoped result is truthful; a subsequent explicit retry can
+    // discover newly approved courses without modifying local progress.
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports partially failed downloads as incomplete while keeping the successful receipt count", async () => {
+    mocks.download.mockImplementation(async (entry: AcademicCourse) => {
+      if (entry.id === "CPR") throw new Error("The original could not be verified.");
+      mocks.downloaded.add(entry.id);
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Download incomplete. 2 downloaded, 0 already on this device, 1 failed.");
+    expect(mocks.download.mock.calls.map(args => args[0].id)).toEqual(["GOER", "CPR", "RHPS"]);
+    expect(screen.getByRole("alert").textContent).toContain("CPR: The original could not be verified.");
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
 
   it("shows per-source progress without losing the term course ordinal", async () => {

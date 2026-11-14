@@ -119,6 +119,13 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
       const allCourses = await listTermCourses(term, accountId, {
         shouldStop: () => stopped.current, assertCurrent: scope.assertCurrent,
       });
+      scope.assertCurrent();
+      // An empty eligible catalog is not a successful download. Tell the
+      // learner why nothing arrived, without fabricating a source or receipt.
+      if (!allCourses.length && !stopped.current) {
+        if (mounted.current) setMessage(`No courses are available for ${term} in this account's catalog. Nothing was downloaded.`);
+        return;
+      }
       const pending = allCourses.filter(course => {
         if (!isAcademicCourseDownloaded(course, accountId, useStore.getState())) return true;
         skipped += 1;
@@ -153,7 +160,10 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
           acceptingProgress = false;
         }
       }
-      if (mounted.current) setMessage(`${stopped.current ? "Download stopped" : "Download complete"}. ${completed} downloaded, ${skipped} already on this device${failed ? `, ${failed} failed` : ""}.`);
+      // A completed loop with failed courses is partial, not a successful
+      // term download. Keep the exact receipt counts and retry guidance.
+      const outcome = stopped.current ? "Download stopped" : failed ? "Download incomplete" : "Download complete";
+      if (mounted.current) setMessage(`${outcome}. ${completed} downloaded, ${skipped} already on this device${failed ? `, ${failed} failed` : ""}.`);
     } catch (cause) {
       if (mounted.current) {
         if (stopped.current && (cause instanceof DOMException || cause instanceof Error) && cause.name === "AbortError") setMessage("Download stopped. Download this term again to continue.");
