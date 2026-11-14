@@ -468,6 +468,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             <summary tabIndex={0}>Reveal set topic tags</summary>
             <p>{topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
           </details>
+          <details className="qsl-preview-teaching">
+            <summary>Reveal publication rights notice</summary>
+            <p>Recorded snapshot notice: {activePreview.snapshot.copyrightNotice}</p>
+            <p className="sub">This notice is retained with the reviewed Question Set, but is not proof of a redistribution license or permission to reuse third-party images. Verify rights against the original source before redistribution.</p>
+          </details>
           <p className="sub">Review questions three at a time before importing. Recorded citations and visual hints may reveal answers; open each question's teaching notes to inspect them.</p>
           {previewCitationCount < previewCitationTotal && <p className="qsl-preview-source-warning">
             Source citations recorded for {previewCitationCount} of {previewCitationTotal} questions. This count covers the entire set, not just the displayed questions. A recorded citation does not establish medical accuracy.
