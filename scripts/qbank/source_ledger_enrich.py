@@ -378,10 +378,19 @@ def build_lead_dispositions(rows, canonical):
         elif t in QUESTION_TYPES and t != "answer_key":
             entry.update(kind="question-source",status="review-required",
                          reason="Original is queued for extraction/review; no validated parser or cloud receipt.")
-            counts = [x.get("detected_question_headings") for x in group if x.get("detected_question_headings") is not None]
-            if counts:
-                n = max(counts)
-                entry.update(questionCount=n,readyCount=0,reviewCount=n)
+            counts = [x.get("detected_question_headings") for x in group
+                      if x.get("detected_question_headings") is not None]
+            # SHA-identical originals cannot have conflicting observed heading
+            # counts. Never select the largest (or coerce malformed JSON) and
+            # advertise that unverified number as a source denominator.
+            if any(type(n) is not int or n < 0 for n in counts) or len(set(counts)) > 1:
+                entry["reason"] = (
+                    "Conflicting or invalid detected question-heading counts for one original SHA; "
+                    "reinspect every mirrored source before asserting a count."
+                )
+            elif counts:
+                n = counts[0]
+                entry.update(questionCount=n, readyCount=0, reviewCount=n)
                 entry["reason"] = "Tagged text headings and answer labels counted; no source-key validation or cloud receipt."
         elif t == "answer_key":
             entry.update(kind="answer-key",status="review-required",

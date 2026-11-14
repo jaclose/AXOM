@@ -619,6 +619,35 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertEqual(ledger.prepare_queue(rows, packages)[0]["status"],
                              "requires_package_review")
 
+    def test_conflicting_mirror_heading_counts_cannot_inflate_source_denominator(self):
+        source_sha = digest("one immutable original")
+        def source_rows(counts):
+            return [dict(source_sha256=source_sha, original_path=f"/mirror-{i}.txt",
+                         document_type="pq", priority=1,
+                         detected_question_headings=count)
+                    for i, count in enumerate(counts)]
+        for counts in ([3, 9], [3, True], [3, -1], [3, "9"], [3, [9]]):
+            with self.subTest(counts=counts):
+                result = enriched.build_lead_dispositions(source_rows(counts), [])
+                self.assertEqual(len(result["sources"]), 1)
+                source = result["sources"][0]
+                self.assertEqual(source["status"], "review-required")
+                self.assertNotIn("questionCount", source)
+                self.assertNotIn("reviewCount", source)
+                self.assertNotIn("readyCount", source)
+                self.assertIn("conflicting or invalid", source["reason"].lower())
+
+    def test_identical_mirror_heading_counts_remain_unverified_review_only(self):
+        sha = digest("same identical original")
+        rows = [dict(source_sha256=sha, original_path=f"/copy-{i}.txt",
+                     document_type="pq", priority=1, detected_question_headings=3)
+                for i in range(2)]
+        item = enriched.build_lead_dispositions(rows, [])["sources"][0]
+        self.assertEqual(item["questionCount"], 3)
+        self.assertEqual(item["readyCount"], 0)
+        self.assertEqual(item["reviewCount"], 3)
+        self.assertEqual(item["status"], "review-required")
+
     def test_dispositions_account_for_unique_sha(self):
         rows=[dict(source_sha256=digest("source"),original_path="/s.pdf",document_type="pq",priority=1,
                    extracted_status="queued",detected_question_headings=3),
