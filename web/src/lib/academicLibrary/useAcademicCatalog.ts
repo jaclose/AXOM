@@ -47,7 +47,12 @@ export function useAcademicCatalog(accountId: string | undefined, query: string,
           setPage({ scope, courses, loading: false, more: courses.length === 24, error: "" });
         }
       }).catch(cause => {
-        if (generation.current === request) setPage(current => ({ ...(current.scope === scope ? current : empty(scope)), loading: false, error: cause instanceof Error ? cause.message : "The collection could not be loaded." }));
+        if (generation.current === request) setPage(current => ({
+          ...(current.scope === scope ? current : empty(scope)),
+          loading: false,
+          ...(cause instanceof CatalogIdentityError ? { courses: [], more: false } : {}),
+          error: cause instanceof Error ? cause.message : "The collection could not be loaded.",
+        }));
       });
     }, 200);
     return () => { generation.current = request + 1; window.clearTimeout(timer); };
