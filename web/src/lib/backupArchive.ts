@@ -35,6 +35,32 @@ export function assertRestorableZipBudget(entryCount: number, expandedBytes: num
     throw new ZipExportBudgetExceeded("The ZIP archive size exceeds the 2 GB recovery safety limit. No backup was downloaded or certified.");
   }
 }
+/** Conservative JSZip STORE/streamFiles envelope for AXOM's generated ASCII paths.
+ * For every entry budget the 30-byte local and 46-byte central headers,
+ * both filenames, a 24-byte ZIP64-size streaming descriptor, and 64 bytes
+ * of optional extras in EACH header. Reserve end/ZIP64 end/locator records,
+ * even though accepted 2-GiB archives should not need ZIP64 offsets.
+ *
+ * This is an upper bound for the fixed generated filenames only; importer
+ * limits and the final measured archive-size check stay authoritative. */
+const ZIP_END_RECORD_ALLOWANCE = 22 + 56 + 20;
+function zipStoredEntryEnvelope(filename: string): number {
+  const filenameBytes = new TextEncoder().encode(filename).byteLength;
+  return 30 + 46 + 24 + 2 * filenameBytes + 2 * 64;
+}
+/** Bound serialised STORE overhead without producing a near-2-GiB archive.
+ * JSZip auto-adds category directories. File numbering uses admitted entries,
+ * not metadata candidates or gaps for missing media. */
+export function projectedZipSerializedOverhead(mediaCount: number, originalCount: number): number {
+  assertRestorableZipEntryCounts(mediaCount, originalCount);
+  let overhead = ZIP_END_RECORD_ALLOWANCE + zipStoredEntryEnvelope("workspace.json");
+  if (mediaCount > 0) overhead += zipStoredEntryEnvelope("media/");
+  if (originalCount > 0) overhead += zipStoredEntryEnvelope("originals/");
+  for (let i = 0; i < mediaCount; i++) overhead += zipStoredEntryEnvelope(`media/${i}`);
+  for (let i = 0; i < originalCount; i++) overhead += zipStoredEntryEnvelope(`originals/${i}`);
+  return overhead;
+}
+
 /** Account for the actual admitted files, not just referenced candidate keys.
  * A missing or corrupt asset belongs in the omission report, and must not
  * block a restorable partial rescue. JSZip creates one directory per populated
@@ -94,22 +120,36 @@ export async function preflightRestorableZipCandidateBudget(
   assertRestorableZipBudget(0, mandatoryWorkspaceBytes);
   let admittedMedia = 0, admittedOriginals = 0, expandedBytes = mandatoryWorkspaceBytes;
   let projectedManifestBytes = mandatoryWorkspaceBytes;
+  // Reserve ZIP transport overhead before retaining any risk-sized binaries.
+  // Incremental accounting is O(entries), unlike recomputing prior members.
+  let serializedOverhead = projectedZipSerializedOverhead(0, 0);
   const record = (bytes: number, isMedia: boolean, descriptorBytes = 0) => {
     if (!Number.isSafeInteger(bytes) || bytes < 0
       || !Number.isSafeInteger(descriptorBytes) || descriptorBytes < 0) {
       throw new ZipExportBudgetExceeded("Invalid ZIP backup candidate size. No backup was downloaded or certified.");
     }
-    // Charge only descriptors for files actually verified as present. A missing
-    // image or original must remain eligible for an honest partial rescue.
+    // Charge only descriptors and transport entries for verified present files.
+    // Missing images/originals must remain eligible for partial rescue.
     if (projectedManifestBytes + descriptorBytes > MAX_ZIP_WORKSPACE_BYTES) {
       throw new ZipExportBudgetExceeded("The ZIP workspace exceeds the 128 MB recovery safety limit. No backup was downloaded or certified.");
     }
-    if (isMedia) admittedMedia += 1;
-    else admittedOriginals += 1;
-    assertRestorableZipEntryCounts(admittedMedia, admittedOriginals);
-    assertRestorableZipBudget(0, expandedBytes + bytes + descriptorBytes);
-    expandedBytes += bytes + descriptorBytes;
+    const nextMedia = admittedMedia + Number(isMedia);
+    const nextOriginals = admittedOriginals + Number(!isMedia);
+    assertRestorableZipEntryCounts(nextMedia, nextOriginals);
+    const nextFileName = isMedia ? `media/${admittedMedia}` : `originals/${admittedOriginals}`;
+    const directoryOverhead = (isMedia && admittedMedia === 0)
+      ? zipStoredEntryEnvelope("media/")
+      : (!isMedia && admittedOriginals === 0)
+        ? zipStoredEntryEnvelope("originals/")
+        : 0;
+    const nextOverhead = serializedOverhead + directoryOverhead + zipStoredEntryEnvelope(nextFileName);
+    const nextExpanded = expandedBytes + bytes + descriptorBytes;
+    assertRestorableZipBudget(0, nextExpanded, nextExpanded + nextOverhead);
+    admittedMedia = nextMedia;
+    admittedOriginals = nextOriginals;
+    expandedBytes = nextExpanded;
     projectedManifestBytes += descriptorBytes;
+    serializedOverhead = nextOverhead;
   };
   for (let i = 0; i < mediaCandidates; i++) {
     const size = await probeMediaBytes(i);
@@ -509,7 +549,10 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   reserveExpandedBytes(workspaceBytes);
   zip.file("workspace.json", workspaceJson);
   const entryCount = Object.keys(zip.files).length;
-  assertRestorableZipBudget(entryCount, expandedBytes);
+  // No near-limit ZIP may reach generateAsync if the mandatory streamed headers,
+  // category directories, central directory and end records cannot fit.
+  assertRestorableZipBudget(entryCount, expandedBytes,
+    expandedBytes + projectedZipSerializedOverhead(media.length, originals.length));
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true });
   // STORE still adds per-file headers/central directory bytes. The generated
   // ZIP must fit the reader's file-size bound, not just its uncompressed data.
