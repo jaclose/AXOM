@@ -68,6 +68,18 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
   const mounted = useRef(true);
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
+  // A click-time-only scope cannot detect A → B → A completed before React
+  // commits the new account props. Observe the entire mounted UI lifetime,
+  // so an old button cannot authorize a quiz even after A becomes current again.
+  const practiceScopeRef = useRef<ReturnType<typeof academicAccountScope> | null>(null);
+  useEffect(() => {
+    const scope = academicAccountScope(accountId);
+    practiceScopeRef.current = useAccount.getState().user?.id === accountId ? scope : null;
+    return () => {
+      if (practiceScopeRef.current === scope) practiceScopeRef.current = null;
+      scope.dispose();
+    };
+  }, [accountId]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -142,16 +154,15 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
     // The account store can change before React commits new CourseLibrary
     // props. A stale Practice button must not launch the previous learner's
     // selected questions, even during that brief transition.
-    const scope = academicAccountScope(accountId);
+    const scope = practiceScopeRef.current;
     try {
+      if (!scope) throw new Error("The account changed. Reopen this course in your current account.");
       scope.assertCurrent();
       const currentSelection = termQuizSelection(term, accountId, useStore.getState(), practiceCatalog);
       scope.assertCurrent();
       launchCourseQuiz(currentSelection);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Practice could not be opened.");
-    } finally {
-      scope.dispose();
     }
   }
   const overLimit = selection.questionIds.length > MAX_COURSE_QUIZ_QUESTIONS
