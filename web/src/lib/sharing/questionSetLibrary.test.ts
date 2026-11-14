@@ -297,6 +297,7 @@ describe("searchable Question Set client boundary", () => {
     ["Android media", "/storage/emulated/0/private-scan.jpg"],
     ["labeled arbitrary folder", "source:/unpublished/answer-key.pdf"],
     ["network share", "//campus-server/records/notes.pdf"],
+    ["credential-bearing HTTP source", "https://learner:secret@example.edu/lecture"],
   ])("holds %s paths in teaching text before public submission", async (_name, reference) => {
     const value = snapshot();
     value.questions[0].stem += ` Local copy: ${reference}`;
@@ -628,7 +629,7 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["citation", "stem", "metadata", "set title"] as const)(
+  it.each(["citation", "stem", "metadata", "set title", "URL credentials"] as const)(
     "holds a legacy pending set with a private %s at academic approval", async field => {
       const original = snapshot();
       switch (field) {
@@ -643,6 +644,9 @@ describe("searchable Question Set client boundary", () => {
           break;
         case "set title":
           original.title = "Private slides /Volumes/external/private-set.pdf";
+          break;
+        case "URL credentials":
+          original.questions[0].explanation += " https://teacher:private@example.edu/exam";
           break;
       }
       const reviewed = { id: entryId, snapshot: original,
