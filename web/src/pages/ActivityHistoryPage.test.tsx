@@ -10,6 +10,18 @@ const fixture = vi.hoisted(() => ({
   ],
   exportWorkbook: vi.fn(),
   pushToast: vi.fn(),
+  accountId: "account-A" as string | null,
+  accountSubscribers: new Set<(state: { user: { id: string } | null }) => void>(),
+}));
+
+vi.mock("../lib/account/accountStore", () => ({
+  useAccount: {
+    getState: () => ({ user: fixture.accountId ? { id: fixture.accountId } : null }),
+    subscribe: (listener: (state: { user: { id: string } | null }) => void) => {
+      fixture.accountSubscribers.add(listener);
+      return () => { fixture.accountSubscribers.delete(listener); };
+    },
+  },
 }));
 
 vi.mock("../lib/store", () => ({
@@ -18,7 +30,14 @@ vi.mock("../lib/store", () => ({
 vi.mock("../lib/activityExport", () => ({ exportActivityWorkbook: fixture.exportWorkbook }));
 vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
 
+function switchAccount(accountId: string | null) {
+  fixture.accountId = accountId;
+  for (const listener of fixture.accountSubscribers) listener({ user: accountId ? { id: accountId } : null });
+}
+
 beforeEach(() => {
+  fixture.accountId = "account-A";
+  fixture.accountSubscribers.clear();
   fixture.exportWorkbook.mockReset();
   fixture.pushToast.mockReset();
 });
@@ -111,6 +130,44 @@ describe("Activity History workbook download feedback", () => {
     } finally {
       fixture.logs = originalLogs;
     }
+  });
+
+  it("cancels a pending A export after A→B→A, before the writer saves any file", async () => {
+    let release!: () => void;
+    const saved = vi.fn();
+    fixture.exportWorkbook.mockImplementationOnce(async (_logs: unknown, assertCurrent: () => void) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      assertCurrent();
+      saved();
+    });
+    render(<ActivityHistoryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    expect(fixture.exportWorkbook).toHaveBeenCalledTimes(1);
+    switchAccount("account-B");
+    switchAccount("account-A");
+    release();
+    await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Activity export canceled", tone: "warn" }),
+    ));
+    expect(saved).not.toHaveBeenCalled();
+  });
+
+  it("refuses stale mounted export after account switch, while preserving local-only exports", async () => {
+    render(<ActivityHistoryPage />);
+    switchAccount("account-B");
+    switchAccount("account-A");
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Activity export canceled" }),
+    ));
+    expect(fixture.exportWorkbook).not.toHaveBeenCalled();
+    cleanup();
+    fixture.pushToast.mockClear();
+    switchAccount(null);
+    render(<ActivityHistoryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    await waitFor(() => expect(fixture.exportWorkbook).toHaveBeenCalledTimes(1));
+    expect(fixture.pushToast).not.toHaveBeenCalled();
   });
 
 });
