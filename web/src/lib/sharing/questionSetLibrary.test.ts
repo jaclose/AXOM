@@ -433,6 +433,35 @@ describe("searchable Question Set client boundary", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["bare key letter", "A"],
+    ["answer-only option", "Option A is correct."],
+    ["unfinished rationale", "Explanation to be added."],
+    ["unreviewed draft notice", "Rationale: pending."],
+    ["bare slide reference", "See slide 4."],
+    ["answer-only plus citation", "Option A is correct.\nSource: Lecture 4"],
+  ])("rejects %s as a Community explanation before submission", async (_label, explanation) => {
+    const value = snapshot();
+    value.questions[0].explanation = explanation;
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/teaching explanation prose/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Option A is correct because the synthetic observation uniquely identifies this choice.",
+    "Source: Synthetic protocol\nThe first option follows directly from the explicitly defined observation.",
+  ])("permits actual teaching prose without treating it as medically reviewed (%s)", async explanation => {
+    const value = snapshot();
+    value.questions[0].explanation = explanation;
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed)).resolves.toBe(entryId);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_question_set_library", expect.anything());
+  });
+
   it("checks explanation readiness for every question, not only the first", async () => {
     const value = snapshot();
     value.questions.push({ ...value.questions[0], id: "shared-question-2", explanation: "Explanation pending." });
@@ -644,6 +673,27 @@ describe("searchable Question Set client boundary", () => {
     }, error: null });
     service(rpc);
     await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked source and rights"))
+      .rejects.toThrow(/not ready for approval.*teaching explanation prose/i);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+  });
+
+  it.each([
+    ["bare key", "A"],
+    ["answer-only claim", "Option A is correct."],
+    ["unfinished draft", "Rationale: pending."],
+    ["source slide only", "See slide 4."],
+  ])("does not approve a legacy pending set with %s", async (_label, explanation) => {
+    const original = snapshot();
+    original.questions[0].explanation = explanation;
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending",
+      snapshot_payload: original, review_revision: 1,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Reviewed source and rights"))
       .rejects.toThrow(/not ready for approval.*teaching explanation prose/i);
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());

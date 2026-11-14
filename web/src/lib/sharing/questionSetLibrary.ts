@@ -72,6 +72,21 @@ function containsPrivateInlineText(value: string): boolean {
   return INLINE_PRIVATE_REFERENCE.test(value) && hasPrivateDeviceCitation(value);
 }
 
+// Obvious answer labels and unresolved-draft notices do not teach the learner
+// why a choice is correct. This is a bounded presence heuristic, NOT a check
+// of medical accuracy or evidence: author and academic review still apply.
+// Keep this only at new submission/legacy pending approval boundaries so
+// already-approved historical content remains unchanged.
+const COMMUNITY_NON_RATIONALE_LINE = /^(?:[A-J]|(?:the\s+)?(?:correct|right)\s+(?:option|choice)\s*(?:(?:is|:)\s*)?\(?[A-J]\)?|(?:option|choice)\s*(?:(?:is|:)\s*)?\(?[A-J]\)?(?:\s+is\s+(?:correct|right))?|it\s+is\s+\(?[A-J]\)?|tbd|todo|n\/?a|(?:explanation|rationale)\s*[:=]?\s*(?:is\s+)?(?:pending|missing|tbd|todo|to\s+be\s+(?:added|written|provided)|under\s+review|will\s+be\s+added|coming\s+soon)|(?:source|answer)\s+verification\s+(?:pending|required)|(?:needs|awaiting)\s+(?:review|verification)|no\s+(?:teaching\s+)?(?:explanation|rationale)\s+(?:(?:has\s+been|was|is)\s+)?(?:provided|supplied|recorded|available)|(?:see|refer\s+to)\s+(?:lecture\s+)?(?:slide|page)\s*#?\d+)\s*[.!;:]*$/i;
+
+function hasCommunityTeachingRationale(value: string | undefined): boolean {
+  if (!hasExplanationProse(value)) return false;
+  return value!.split(/\r?\n/).some(raw => {
+    const line = raw.trim().replace(/^[-*]\s+/, "");
+    return hasExplanationProse(line) && !COMMUNITY_NON_RATIONALE_LINE.test(line);
+  });
+}
+
 async function withAccount<T>(accountId: string, action: (client: Awaited<ReturnType<typeof accountOperationClient>>["client"]) => Promise<T>): Promise<T> {
   const operation = await accountOperationClient();
   if (operation.userId !== accountId) throw new Error("The signed-in account changed. Reopen the Question Set Library.");
@@ -245,7 +260,7 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   // reach this service directly. Enforce explanation presence at final egress,
   // without treating prose as medically verified or relaxing reviewer approval.
   // Historical approved snapshots remain readable without this new admission gate.
-  if (submittedSnapshot.questions.some(question => !hasExplanationProse(question.explanation)))
+  if (submittedSnapshot.questions.some(question => !hasCommunityTeachingRationale(question.explanation)))
     throw new Error("Every submitted question needs teaching explanation prose, not only a key or source notice. Review missing explanations before submitting.");
   return withAccount(accountId, async client => {
     if (revalidateCurrent && JSON.stringify(revalidateCurrent()) !== JSON.stringify(submittedSnapshot))
@@ -325,7 +340,7 @@ export async function reviewQuestionSetSubmission(
   // This is a local approval preflight, not proof of medical/source review;
   // the server RPC still independently enforces reviewer authority and revision.
   if (approved && data.snapshot_payload.questions.some(question =>
-    !question.correctKey || !hasExplanationProse(question.explanation)))
+    !question.correctKey || !hasCommunityTeachingRationale(question.explanation)))
     throw new Error("This Question Set is not ready for approval: each question needs a confirmed answer and teaching explanation prose. Return it for revision.");
   // Older pending submissions may also predate the outbound media/privacy gate.
   // Refuse their approval, but allow the moderator to return them for revision.
