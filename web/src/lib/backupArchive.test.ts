@@ -1087,7 +1087,9 @@ describe("portable binary media backup", () => {
 
   it("preserves a real baseline JPEG through verified JSON and ZIP backup restoration", async () => {
     // A genuine 1x1 RGB JPEG, not a marker-only mock with no compressed scan.
-    const jpegBase64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAf/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AKhAIf/Z";
+    // Pillow-generated 1×1 RGB baseline JPEG (287 bytes; SHA-256 03cc6abc…c728).
+    // Segment lengths were verified; the previous hand-copied fixture had stray DQT bytes.
+    const jpegBase64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABQb/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCTgKoO/9k=";
     const jpegBytes = Uint8Array.from(atob(jpegBase64), char => char.charCodeAt(0));
     const jpeg = { ...attachment, id: "jpeg-valid", blobKey: "private-library:jpeg-valid",
       fileName: "figure.jpg", mimeType: "image/jpeg" as const, byteSize: jpegBytes.byteLength };
