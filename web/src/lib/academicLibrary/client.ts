@@ -126,19 +126,21 @@ export async function downloadAcademicCourse(revision: string, progress: (messag
   return { ...installation, bindings };
 }
 const reviewerChecks = new Map<string, Promise<boolean>>();
-/** Whether the signed-in account may approve shared courses. The server still
- * enforces review rights; this only decides which controls to offer. Asked
- * once per account per session: reviewer membership changes rarely, and a
- * reload asks again. Any failure, including a backend without the check yet,
- * offers no review controls. */
+/** The server always authorizes review. This is only a single-flight UI probe:
+ * concurrent components share an account's pending request, but a subsequent
+ * explicit Refresh must observe newly granted or revoked reviewer permission.
+ * Do not cache a denied/error result or trust a prior successful role forever. */
 export function isAcademicReviewer(accountId: string): Promise<boolean> {
-  let check = reviewerChecks.get(accountId);
-  if (!check) {
-    check = academicClient(accountId)
-      .then(client => client.rpc("academic_is_reviewer"))
-      .then(({ data, error }) => !error && data === true, () => false);
-    reviewerChecks.set(accountId, check);
-  }
+  if (!accountId) return Promise.resolve(false);
+  const pending = reviewerChecks.get(accountId);
+  if (pending) return pending;
+  const check = academicClient(accountId)
+    .then(client => client.rpc("academic_is_reviewer"))
+    .then(({ data, error }) => !error && data === true, () => false);
+  reviewerChecks.set(accountId, check);
+  void check.then(() => {
+    if (reviewerChecks.get(accountId) === check) reviewerChecks.delete(accountId);
+  });
   return check;
 }
 
