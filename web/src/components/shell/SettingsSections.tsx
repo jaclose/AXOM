@@ -272,9 +272,10 @@ export function BackupStatusCard({ snapshotCount, latestSnapshotAt, lastExported
     },
     {
       icon: Download,
-      label: "Last portable export",
-      value: lastExportedAt ? `${formatDay(lastExportedAt)}${exportAgeDays !== null && exportAgeDays > 14 ? " · consider a fresh one" : ""}` : "Never — export one to keep a copy",
-      tone: !lastExportedAt || (exportAgeDays !== null && exportAgeDays > 14) ? "warn" : "good",
+      label: "Portable export requested",
+      value: lastExportedAt ? `${formatDay(lastExportedAt)} · check your Downloads${exportAgeDays !== null && exportAgeDays > 14 ? " · consider a fresh one" : ""}` : "No export requested on this device",
+      // The browser's anchor click does not acknowledge a disk write or tested recovery.
+      tone: !lastExportedAt || (exportAgeDays !== null && exportAgeDays > 14) ? "warn" : "neutral",
     },
   ] as const;
   return (
@@ -291,7 +292,10 @@ export function BackupStatusCard({ snapshotCount, latestSnapshotAt, lastExported
       </div>
       <p>
         The live workspace saves to this browser’s local vault as you work. Automatic snapshots are safety copies taken before
-        storage updates. A portable export is the copy you keep somewhere else. Imports are checked before anything is replaced.
+        storage updates. A portable export request is not proof that the file was saved or can be restored.
+        Check Downloads and open the file before relying on it. This device's timestamp cannot verify
+        account workspace ownership, cloud protection, or recovery on another device.
+        Imports are checked before anything is replaced.
       </p>
     </section>
   );
