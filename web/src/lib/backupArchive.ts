@@ -56,8 +56,8 @@ export function assertRestorableZipEntryCounts(mediaCount: number, originalCount
  * A malformed/missing file is still eligible for an honest partial rescue.
  *
  * This second pass is deliberately conditional: ordinary backups do not pay
- * for duplicate media reads, while a provably oversized complete backup
- * fails before allocating nearly 2 GiB of retained ZIP binary members.
+ * for duplicate media reads, while count- or byte-risk backups are probed
+ * before allocating nearly 2 GiB of retained ZIP binary members.
  * Recheck the real budget when admitting each member because storage may
  * change between inspection and export. */
 export async function preflightRestorableZipCandidateBudget(
@@ -65,6 +65,8 @@ export async function preflightRestorableZipCandidateBudget(
   originalCandidates: number,
   probeMediaBytes: (index: number) => Promise<number | null>,
   probeOriginalBytes: (index: number) => Promise<number | null>,
+  conservativeExpandedBytes = 0,
+  mandatoryWorkspaceBytes = 0,
 ): Promise<{ mediaAvailable: boolean[]; originalsAvailable: boolean[] } | null> {
   if (!Number.isSafeInteger(mediaCandidates) || mediaCandidates < 0
     || !Number.isSafeInteger(originalCandidates) || originalCandidates < 0) {
@@ -72,14 +74,23 @@ export async function preflightRestorableZipCandidateBudget(
   }
   const worstCaseEntries = 1 + mediaCandidates + originalCandidates
     + Number(mediaCandidates > 0) + Number(originalCandidates > 0);
-  if (worstCaseEntries <= MAX_ZIP_BACKUP_ENTRIES) return null;
+  // Even a ZIP with fewer than 30,000 files can exceed 2 GiB before the
+  // manifest is written. A conservative upper estimate selects verification,
+  // never rejection: missing/corrupt candidates remain eligible for a
+  // restorable partial archive.
+  const possibleByteOverflow = !Number.isSafeInteger(conservativeExpandedBytes)
+    || conservativeExpandedBytes > MAX_ZIP_BACKUP_BYTES;
+  if (worstCaseEntries <= MAX_ZIP_BACKUP_ENTRIES && !possibleByteOverflow) return null;
 
   // Snapshot actual verified availability. Never add a file that was absent
   // from the preflight simply because storage changed before the second pass:
   // that could inflate the retained archive beyond the checked entry count.
   const mediaAvailable = new Array<boolean>(mediaCandidates).fill(false);
   const originalsAvailable = new Array<boolean>(originalCandidates).fill(false);
-  let admittedMedia = 0, admittedOriginals = 0, expandedBytes = 0;
+  // Even the smallest workspace.json member consumes expanded bytes. If
+  // candidates alone exactly fill 2 GiB, fail before retaining their buffers.
+  assertRestorableZipBudget(0, mandatoryWorkspaceBytes);
+  let admittedMedia = 0, admittedOriginals = 0, expandedBytes = mandatoryWorkspaceBytes;
   const record = (bytes: number, isMedia: boolean) => {
     if (!Number.isSafeInteger(bytes) || bytes < 0) {
       throw new ZipExportBudgetExceeded("Invalid ZIP backup candidate size. No backup was downloaded or certified.");
@@ -356,9 +367,34 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   options = { ...options, scope };
   const referencedMedia = mediaReferences(references);
   const eligibleOriginals = backupOriginalDocuments(documents);
-  // Candidate metadata cannot prove that an image is readable. Only when the
-  // entry ceiling could be breached, validate/count real candidates without
-  // retaining their bytes in JSZip. Preserve missing-file partial rescue.
+  // Metadata is a *conservative* trigger, not an admission decision. Media
+  // bytes are checked against their declared sizes; originals may reach
+  // MAX_ORIGINAL_BYTES regardless of stale sizeBytes metadata. Reserve the
+  // maximum permitted workspace manifest for preflight selection too.
+  // Only verified present files count towards the actual first-pass budget,
+  // preserving honest partial recovery when references have lost their blobs.
+  const potentialMediaBytes = referencedMedia.reduce((sum, { metadata }) => (
+    sum + (Number.isSafeInteger(metadata.byteSize) && metadata.byteSize >= 0
+      ? metadata.byteSize : MAX_QUESTION_ATTACHMENT_BYTES)
+  ), 0);
+  const potentialExpandedBytes = potentialMediaBytes
+    + eligibleOriginals.length * MAX_ORIGINAL_BYTES + MAX_ZIP_WORKSPACE_BYTES;
+  const candidateEntries = 1 + referencedMedia.length + eligibleOriginals.length
+    + Number(referencedMedia.length > 0) + Number(eligibleOriginals.length > 0);
+  const needsPreflight = candidateEntries > MAX_ZIP_BACKUP_ENTRIES
+    || !Number.isSafeInteger(potentialExpandedBytes)
+    || potentialExpandedBytes > MAX_ZIP_BACKUP_BYTES;
+  // The final manifest can add media/original descriptors, but cannot be
+  // smaller than this base payload. Reserve that minimum before binary reads.
+  // Calculate only on the near-cap path so ordinary exports stay single-pass.
+  const mandatoryWorkspaceBytes = needsPreflight
+    ? new Blob([JSON.stringify({
+      ...payload, _backupFormat: FORMAT, _backupVersion: 2, media: [], originals: [],
+    })], { type: "application/json" }).size
+    : 0;
+  if (mandatoryWorkspaceBytes > MAX_ZIP_WORKSPACE_BYTES) {
+    throw new ZipExportBudgetExceeded("The ZIP workspace exceeds the 128 MB recovery safety limit. No backup was downloaded or certified.");
+  }
   const preflight = await preflightRestorableZipCandidateBudget(
     referencedMedia.length, eligibleOriginals.length,
     async index => {
@@ -376,6 +412,8 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
         return blob && blob.size <= MAX_ORIGINAL_BYTES ? blob.size : null;
       } catch { return null; }
     },
+    potentialExpandedBytes,
+    mandatoryWorkspaceBytes,
   );
   if (!isQuestionAttachmentScopeCurrent(scope)) {
     throw new Error("The account changed during export. Start a new export from the current workspace.");
