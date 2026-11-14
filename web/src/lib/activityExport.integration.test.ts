@@ -1,26 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
-import { read, utils } from "xlsx-js-style";
+import { describe, expect, it } from "vitest";
+import { read, utils, write } from "xlsx-js-style";
 import { exportActivityWorkbook } from "./activityExport";
 import type { StudyLog } from "./types";
 import type { WorkBook } from "xlsx-js-style";
 
-// Keep the real XLSX writer/reader. Replace only the browser file-save side effect.
-const { written } = vi.hoisted(() => ({
-  written: [] as Array<{ filename: string; bytes: Uint8Array }>,
-}));
-
-vi.mock("xlsx-js-style", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("xlsx-js-style")>();
-  return {
-    ...actual,
-    writeFile: (workbook: WorkBook, filename: string) => {
-      written.push({
-        filename,
-        bytes: actual.write(workbook, { bookType: "xlsx", type: "buffer" }) as Uint8Array,
-      });
-    },
-  };
-});
+// Exercise the real XLSX writer and reader without mocking the dependency.
+// Only the browser's file-save side effect is replaced through the export seam.
+const written: Array<{ filename: string; bytes: Uint8Array }> = [];
 
 function worksheetRows(book: WorkBook, name: string): unknown[][] {
   const sheet = book.Sheets[name];
@@ -61,7 +47,12 @@ describe("real activity XLSX binary roundtrip", () => {
     }));
     const before = JSON.stringify(logs);
 
-    await exportActivityWorkbook(logs);
+    await exportActivityWorkbook(logs, (workbook, filename) => {
+      written.push({
+        filename,
+        bytes: write(workbook, { bookType: "xlsx", type: "buffer" }) as Uint8Array,
+      });
+    });
 
     expect(written).toHaveLength(1);
     expect(written[0].filename).toMatch(/^axom-activity-history-\d{4}-\d{2}-\d{2}\.xlsx$/);
