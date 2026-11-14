@@ -1,4 +1,18 @@
 import { normalizeTag } from "../questionTags";
+import { hasPrivateDeviceCitation } from "./questionSetShare";
+
+/** Rights, source review and visual intent are evidence, not AI-generated subject tags.
+ * Preserve existing author tags, but reject new keyword proposals that claim a
+ * publication or moderation state, carry a citation, or embed private references. */
+const RESERVED_PUBLICATION_KEYWORD = /^(?:visual|source|rights?|licen[sc]e|provenance|review|moderation|approval|publication|answer(?:-?key)?|correct(?:-?key)?)\s*:/i;
+
+export function isCommunitySubjectKeyword(value: string): boolean {
+  const candidate = value.trim();
+  return Boolean(candidate)
+    && !RESERVED_PUBLICATION_KEYWORD.test(candidate)
+    && !/^https?:\/\//i.test(candidate)
+    && !hasPrivateDeviceCitation(candidate);
+}
 
 /**
  * AI keyword proposals remain private until the publisher explicitly reviews
@@ -22,6 +36,9 @@ export function mergeReviewedCommunityKeywords(
     if ([...term].length > 64) throw new Error("A reviewed keyword exceeds 64 characters.");
     const tag = normalizeTag(term);
     if (!tag || seen.has(tag)) continue;
+    if (!isCommunitySubjectKeyword(term)) {
+      throw new Error("Reviewed keywords must be subject phrases, not publication metadata, citations or private references.");
+    }
     if (result.length >= 100) throw new Error("This question already has the maximum 100 tags.");
     result.push(tag);
     seen.add(tag);
