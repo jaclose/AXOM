@@ -27,10 +27,18 @@ function reviewPreview(size: number) {
     id, status: "pending" as const, reviewRevision: 2, contentDigest: "a".repeat(64),
     snapshot: {
       title: "Review candidate",
+      copyrightNotice: "Contributor declares original synthetic material.",
       questions: Array.from({ length: size }, (_, index) => ({
         id: `question-${index + 1}`, stem: `Vignette ${index + 1}`,
         options: [{ key: "A", text: "First option" }, { key: "B", text: "Second option" }],
-        correctKey: "A", explanation: "Source-specific rationale awaits verification.",
+        correctKey: "A",
+        explanation: index === 0
+          ? "AXOM AI-assisted explanation (verify against source): Synthetic explanation for inspection."
+          : "Source-specific rationale awaits verification.",
+        choiceRationales: index === 0
+          ? { A: "Source-matched choice A has the recorded synthetic criterion.",
+              B: "AXOM AI-assisted rationale (verify against source): Synthetic distractor reasoning." }
+          : undefined,
         citation: "Contributor supplied source",
       })),
     },
@@ -51,6 +59,20 @@ describe("Question Set academic decisions", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
     await screen.findByText("Vignette 1");
   }
+
+  it("shows rights assertions, choice-by-choice evidence gaps and AI provenance without treating them as approval", async () => {
+    await inspect();
+    expect(screen.getByText(/Recorded publication rights notice:/)).toBeTruthy();
+    expect(screen.getByText(/Contributor declares original synthetic material/)).toBeTruthy();
+    expect(screen.getByText(/not independently verified redistribution permission/i)).toBeTruthy();
+    expect(screen.getByText(/Source-matched choice A has the recorded synthetic criterion/)).toBeTruthy();
+    expect(screen.getByText(/Synthetic distractor reasoning/)).toBeTruthy();
+    expect(screen.getByText(/AI-assisted explanation: source and medical claims require independent review/i)).toBeTruthy();
+    expect(screen.getByText(/AI-assisted rationale: independently verify the source claim/i)).toBeTruthy();
+    expect(screen.getAllByText(/No choice-specific rationale recorded/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
 
   it("permits reasoned rejection without falsely attesting to distribution rights or answer correctness", async () => {
     await inspect();
