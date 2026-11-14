@@ -4,6 +4,7 @@ import { useStore } from "../lib/store";
 import { GlassCard, GButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Field, SelectField } from "../components/ui/Modal";
 import { exportActivityWorkbook } from "../lib/activityExport";
+import { pushToast } from "../lib/toast";
 import { prettyDate } from "../lib/scoring";
 import type { StudyLog } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
@@ -13,6 +14,7 @@ export function ActivityHistoryPage() {
   const [type, setType] = useState("All");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [exportPending, setExportPending] = useState(false);
   const types = useMemo(() => ["All", ...new Set(logs.map((log) => log.type).sort())], [logs]);
   const filtered = logs.filter((log) =>
     (type === "All" || log.type === type)
@@ -22,11 +24,27 @@ export function ActivityHistoryPage() {
   const minutes = filtered.reduce((sum, log) => sum + log.minutes, 0);
   const cards = filtered.reduce((sum, log) => sum + log.cards, 0);
 
+  async function handleExport() {
+    if (exportPending || !filtered.length) return;
+    setExportPending(true);
+    try {
+      await exportActivityWorkbook(filtered);
+    } catch {
+      pushToast({
+        title: "Activity export failed",
+        body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.",
+        tone: "warn",
+      });
+    } finally {
+      setExportPending(false);
+    }
+  }
+
   return (
     <div className="stack gap16">
       <GlassCard pad>
         <PanelHeader title="Activity History" sub="Every local study event with filters and spreadsheet export"
-          action={<GButton size="sm" variant="primary" onClick={() => exportActivityWorkbook(filtered)} disabled={!filtered.length}><Download size={ICON_SIZE.body} /> Export .xlsx</GButton>} />
+          action={<GButton size="sm" variant="primary" onClick={handleExport} disabled={!filtered.length || exportPending} aria-busy={exportPending}><Download size={ICON_SIZE.body} /> {exportPending ? "Exporting..." : "Export .xlsx"}</GButton>} />
         <div className="activity-history-filters">
           <SelectField label="Activity type" value={type} onChange={(e) => setType(e.target.value)}>
             {types.map((item) => <option key={item}>{item}</option>)}
