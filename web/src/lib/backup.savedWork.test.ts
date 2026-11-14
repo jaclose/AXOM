@@ -173,6 +173,7 @@ describe("saved-work recovery without downloading content", () => {
         await saveSourceOriginal(state.documents[0], source.original);
       }
       setQuestionAttachmentAccount("account-a");
+      const revoke = vi.spyOn(URL, "revokeObjectURL");
       vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementationOnce(function (this: HTMLAnchorElement) {
         filename = this.download;
         setQuestionAttachmentAccount("account-b");
@@ -180,9 +181,73 @@ describe("saved-work recovery without downloading content", () => {
       try {
         await expect(exportStateWithAttachments(state)).rejects.toThrow("account changed during export");
         expect(filename.endsWith(`.${extension}`)).toBe(true);
+        expect(revoke).toHaveBeenCalledTimes(1);
+        expect(revoke).toHaveBeenCalledWith("blob:test");
         expect(lastBackupAt()).toBeNull(); // B was never backed up.
         setQuestionAttachmentAccount("account-a");
         expect(lastBackupAt()).toBeNull(); // A's interrupted operation was not certified.
+      } finally {
+        setQuestionAttachmentAccount(undefined);
+      }
+    },
+  );
+
+  it.each(["json", "zip"] as const)(
+    "releases the temporary %s object URL when a download click throws",
+    async (extension) => {
+      localStorage.clear();
+      let state = makeSeed();
+      state.questions = []; state.documents = [];
+      if (extension === "zip") {
+        const source = await fixture();
+        state = source.state;
+        state.questions[0].attachments = [];
+        await saveSourceOriginal(state.documents[0], source.original);
+      }
+      const revoke = vi.spyOn(URL, "revokeObjectURL");
+      setQuestionAttachmentAccount("account-a");
+      vi.spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementationOnce(() => { throw new Error("Browser blocked download"); });
+      try {
+        await expect(exportStateWithAttachments(state)).rejects.toThrow("Browser blocked download");
+        expect(exported).toBeDefined();
+        expect(revoke).toHaveBeenCalledTimes(1);
+        expect(revoke).toHaveBeenCalledWith("blob:test");
+        expect(lastBackupAt()).toBeNull();
+        setQuestionAttachmentAccount("account-b");
+        expect(revoke).toHaveBeenCalledTimes(1); // Failed request left no live listener.
+      } finally {
+        setQuestionAttachmentAccount(undefined);
+      }
+    },
+  );
+
+  it.each(["json", "zip"] as const)(
+    "releases the temporary %s object URL if the account switches after a download request",
+    async (extension) => {
+      localStorage.clear();
+      let state = makeSeed();
+      state.questions = []; state.documents = [];
+      if (extension === "zip") {
+        const source = await fixture();
+        state = source.state;
+        state.questions[0].attachments = [];
+        await saveSourceOriginal(state.documents[0], source.original);
+      }
+      const revoke = vi.spyOn(URL, "revokeObjectURL");
+      setQuestionAttachmentAccount("account-a");
+      try {
+        await exportStateWithAttachments(state);
+        const requestedAt = lastBackupAt();
+        expect(requestedAt).not.toBeNull();
+        expect(revoke).not.toHaveBeenCalled(); // Stable-account download grace period.
+        setQuestionAttachmentAccount("account-b");
+        expect(revoke).toHaveBeenCalledTimes(1);
+        expect(revoke).toHaveBeenCalledWith("blob:test");
+        expect(lastBackupAt()).toBeNull();
+        setQuestionAttachmentAccount("account-a");
+        expect(lastBackupAt()).toBe(requestedAt);
+        expect(revoke).toHaveBeenCalledTimes(1); // A→B→A cannot reactivate A's URL.
       } finally {
         setQuestionAttachmentAccount(undefined);
       }
