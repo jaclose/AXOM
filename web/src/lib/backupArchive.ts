@@ -45,8 +45,10 @@ export function assertRestorableZipBudget(entryCount: number, expandedBytes: num
  * limits and the final measured archive-size check stay authoritative. */
 const ZIP_END_RECORD_ALLOWANCE = 22 + 56 + 20;
 function zipStoredEntryEnvelope(filename: string): number {
-  const filenameBytes = new TextEncoder().encode(filename).byteLength;
-  return 30 + 46 + 24 + 2 * filenameBytes + 2 * 64;
+  // All callers pass fixed generated ASCII paths (media/N, originals/N,
+  // workspace.json, and their directories), so character count is UTF-8 bytes.
+  // Avoid adding a TextEncoder requirement to offline/native recovery.
+  return 30 + 46 + 24 + 2 * filename.length + 2 * 64;
 }
 /** Bound serialised STORE overhead without producing a near-2-GiB archive.
  * JSZip auto-adds category directories. File numbering uses admitted entries,
