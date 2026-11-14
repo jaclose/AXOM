@@ -405,6 +405,33 @@ describe("Community Question Set Library", () => {
     expect(mock.commit.mock.calls[0][0].snapshot).toEqual(snapshot);
   });
 
+  it("revokes completed discovery rows, likes and unsent search after an unrendered A to B to A session", async () => {
+    const earlier = { ...summary, title: "Previously approved in session A", liked: true, likes: 7 };
+    const revalidated = { ...summary, id: "00000000-0000-4000-8000-000000000022",
+      title: "Freshly approved in restored session A", liked: false, likes: 0 };
+    mock.search.mockResolvedValueOnce([earlier]).mockResolvedValueOnce([revalidated]);
+    const user = userEvent.setup();
+    render(<CommunityQuestionSetLibrary />);
+    expect(await screen.findByRole("heading", { name: earlier.title })).toBeTruthy();
+    await user.type(screen.getByRole("searchbox", { name: "Search Community Question Sets" }), "private unsent search");
+    await waitFor(() => expect(mock.observers.size).toBe(1));
+
+    // No React render occurs while B is active. ID equality after the round
+    // trip must not grant old-session listings, likes or private input access.
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    expect(screen.queryByRole("heading", { name: earlier.title })).toBeNull();
+    expect((screen.getByRole("searchbox", { name: "Search Community Question Sets" }) as HTMLInputElement).value).toBe("");
+    expect(await screen.findByRole("heading", { name: revalidated.title })).toBeTruthy();
+    expect(mock.search).toHaveBeenCalledTimes(2);
+    expect(mock.search).toHaveBeenLastCalledWith("account-1", "", 0);
+    expect(screen.getByRole("button", { name: "Like " + revalidated.title }).getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("redacts previous-account discovery rows and liked state in the first B commit", async () => {
     const privateA = { ...summary, title: "Account A private liked set", liked: true, likes: 9 };
     const publicB = { ...summary, id: "00000000-0000-4000-8000-000000000022",
@@ -491,7 +518,7 @@ describe("Community Question Set Library", () => {
     expect(screen.queryByText("Loading Question Sets…")).toBeNull();
     await act(async () => { resolveSearch([{ ...summary, liked: true }]); });
     expect(screen.queryByRole("heading", { name: "Synthetic practice" })).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("suppresses stale search errors after an account session is revoked", async () => {
@@ -509,13 +536,15 @@ describe("Community Question Set Library", () => {
     await act(async () => { rejectSearch(new Error("Old account's private query failed")); });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText("Loading Question Sets…")).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
-  it("releases the search account subscription after a successful page", async () => {
-    render(<CommunityQuestionSetLibrary />);
+  it("observes account changes for a resolved listing until unmount", async () => {
+    const view = render(<CommunityQuestionSetLibrary />);
     expect(await screen.findByRole("heading", { name: "Synthetic practice" })).toBeTruthy();
-    await waitFor(() => expect(mock.observers.size).toBe(0));
+    await waitFor(() => expect(mock.observers.size).toBe(1));
+    view.unmount();
+    expect(mock.observers.size).toBe(0);
   });
 
   it("does not skip discovery pages on repeated Load more clicks before React commits", async () => {
@@ -628,7 +657,7 @@ describe("Community Question Set Library", () => {
     render(<CommunityQuestionSetLibrary />);
     fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
     expect((await screen.findByRole("alert")).textContent).toContain(privateFailure);
-    await waitFor(() => expect(mock.observers.size).toBe(1));
+    await waitFor(() => expect(mock.observers.size).toBe(2));
 
     // No intervening React render is required for the old session to be
     // invalidated. Equality of account IDs after the round trip is insufficient.
@@ -640,7 +669,7 @@ describe("Community Question Set Library", () => {
     });
     expect(screen.queryByText(privateFailure)).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("uses the latest same-batch preview selection despite out-of-order responses", async () => {
@@ -661,7 +690,7 @@ describe("Community Question Set Library", () => {
     expect(mock.preview).toHaveBeenCalledTimes(2);
     expect(await screen.findByText("Which second synthetic answer?")).toBeTruthy();
     // The accepted preview remains bound to its originating auth session.
-    await waitFor(() => expect(mock.observers.size).toBe(1));
+    await waitFor(() => expect(mock.observers.size).toBe(2));
     await act(async () => {
       resolveOld({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 });
     });
@@ -679,7 +708,7 @@ describe("Community Question Set Library", () => {
     expect(await screen.findByText("Which synthetic answer is supported?")).toBeTruthy();
     // The fetch has finished, but its import authorization must not outlive
     // the session that selected and reviewed this snapshot.
-    await waitFor(() => expect(mock.observers.size).toBe(1));
+    await waitFor(() => expect(mock.observers.size).toBe(2));
     act(() => {
       mock.accountId = "account-2";
       mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
@@ -689,14 +718,14 @@ describe("Community Question Set Library", () => {
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     expect(mock.commit).not.toHaveBeenCalled();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
 
     // A fresh explicit preview is valid for the restored account session.
     fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
     expect(await screen.findByText("Which synthetic answer is supported?")).toBeTruthy();
-    await waitFor(() => expect(mock.observers.size).toBe(1));
+    await waitFor(() => expect(mock.observers.size).toBe(2));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("does not reopen a dismissed preview when its request settles later", async () => {
@@ -708,7 +737,7 @@ describe("Community Question Set Library", () => {
     expect(await screen.findByText("Opening this Question Set…")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByText("Opening this Question Set…")).toBeNull();
-    await waitFor(() => expect(mock.observers.size).toBe(0));
+    await waitFor(() => expect(mock.observers.size).toBe(1));
     await act(async () => { rejectPreview(new Error("Dismissed preview request failed")); });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByText("Dismissed preview request failed")).toBeNull();
@@ -721,7 +750,7 @@ describe("Community Question Set Library", () => {
     await screen.findByRole("heading", { name: "Synthetic practice" });
     fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
     await waitFor(() => expect(mock.preview).toHaveBeenCalledOnce());
-    expect(mock.observers.size).toBe(1);
+    expect(mock.observers.size).toBe(2);
     view.unmount();
     expect(mock.observers.size).toBe(0);
   });
@@ -788,7 +817,7 @@ describe("Community Question Set Library", () => {
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
 
     // A fresh, deliberate preview may obtain its own new SQL authorization.
     fireEvent.click(screen.getByRole("button", { name: "Preview set" }));
@@ -827,7 +856,7 @@ describe("Community Question Set Library", () => {
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     await act(async () => { resolveImport({ ok: true, added: 1 }); });
     expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("discards a delayed preview even when the original account returns", async () => {
@@ -846,7 +875,7 @@ describe("Community Question Set Library", () => {
     await act(async () => { resolvePreview({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 }); });
     expect(screen.queryByText("Which synthetic answer is supported?")).toBeNull();
     expect(screen.queryByText("Opening this Question Set…")).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it.each([
@@ -892,7 +921,7 @@ describe("Community Question Set Library", () => {
     expect(mock.like).toHaveBeenCalledWith("account-1", summary.id, true);
     await act(async () => { resolveLike(undefined); });
     expect(screen.getByRole("button", { name: "Unlike Synthetic practice" }).getAttribute("aria-pressed")).toBe("true");
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("releases a revoked like reservation for a new account session without trusting the old completion", async () => {
@@ -918,7 +947,7 @@ describe("Community Question Set Library", () => {
     expect(screen.getByRole("button", { name: "Like Synthetic practice" }).getAttribute("aria-pressed")).toBe("false");
     await act(async () => { resolveNew(undefined); });
     expect(screen.getByRole("button", { name: "Unlike Synthetic practice" }).getAttribute("aria-pressed")).toBe("true");
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("does not credit a delayed like after leaving and returning to the same account", async () => {
@@ -937,7 +966,7 @@ describe("Community Question Set Library", () => {
     });
     await act(async () => { resolveLike(undefined); });
     expect((await screen.findByRole("button", { name: "Like Synthetic practice" })).getAttribute("aria-pressed")).toBe("false");
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("preserves explicit AI explanation and choice-rationale provenance through import", async () => {
@@ -1392,7 +1421,7 @@ describe("Community Question Set Library", () => {
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
     // The invalidated preview is gone, but the rejection diagnostic remains
     // session-bound until dismissed, replaced, unmounted or revoked.
-    expect(mock.observers.size).toBe(1);
+    expect(mock.observers.size).toBe(2);
   });
 
   it("rejects same-content reapproval at a newer review revision", async () => {
@@ -1426,7 +1455,7 @@ describe("Community Question Set Library", () => {
     expect(mock.authorize).toHaveBeenCalledTimes(1);
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
-    expect(mock.observers.size).toBe(1);
+    expect(mock.observers.size).toBe(2);
   });
 
   it("revokes a rejected-import diagnostic across an unrendered A to B to A account change", async () => {
@@ -1441,7 +1470,7 @@ describe("Community Question Set Library", () => {
     // The preview is revoked so no second click can reuse its approval, but
     // the diagnostic still needs an account-session observer.
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
-    await waitFor(() => expect(mock.observers.size).toBe(1));
+    await waitFor(() => expect(mock.observers.size).toBe(2));
 
     act(() => {
       mock.accountId = "account-2";
@@ -1451,7 +1480,7 @@ describe("Community Question Set Library", () => {
     });
     expect(screen.queryByText(privateDiagnostic)).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
     expect(mock.commit).not.toHaveBeenCalled();
   });
 
@@ -1462,7 +1491,7 @@ describe("Community Question Set Library", () => {
     await screen.findByText("Which synthetic answer is supported?");
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     await screen.findByText("Synthetic authorization rejection");
-    await waitFor(() => expect(mock.observers.size).toBe(1));
+    await waitFor(() => expect(mock.observers.size).toBe(2));
     view.unmount();
     expect(mock.observers.size).toBe(0);
   });
@@ -1510,7 +1539,7 @@ describe("Community Question Set Library", () => {
     });
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    expect(mock.observers.size).toBe(1);
   });
 
   it("coalesces rapid same-frame import clicks before the live approval check settles", async () => {
