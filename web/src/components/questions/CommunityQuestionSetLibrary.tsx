@@ -99,7 +99,13 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   // A preview failure can include account-specific diagnostic text. Record its
   // owner so an account switch cannot render it before effects clear state.
   const [previewError, setPreviewErrorState] = useState<{ owner: string; message: string } | null>(null);
+  // A rejected import invalidates its reviewed preview and stops that preview's
+  // auth observer. Keep a separate observer for the remaining error modal:
+  // account-ID equality after A → B → A is not the same authenticated session.
+  const detachedPreviewErrorStop = useRef<(() => void) | null>(null);
   function setPreviewError(message: string) {
+    detachedPreviewErrorStop.current?.();
+    detachedPreviewErrorStop.current = null;
     setPreviewErrorState(message && accountId ? { owner: accountId, message } : null);
   }
   const [importing, setImporting] = useState(false);
@@ -141,6 +147,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   // Never retain an auth subscription for an abandoned preview on unmount.
   useEffect(() => () => {
     previewRequest.current?.stop(); previewRequest.current = null;
+    detachedPreviewErrorStop.current?.(); detachedPreviewErrorStop.current = null;
     importOperation.current = null;
   }, []);
 
@@ -315,6 +322,19 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
           cancelPendingPreview();
         }
         setPreviewError(cause instanceof Error ? cause.message : "The set could not be added. Your saved work is unchanged.");
+        if (!listingRevalidated) {
+          // The old approval cannot be retried: its preview request token was
+          // cancelled above. Observe only the failed-import diagnostic until
+          // dismissal, replacement, unmount or any account-session departure.
+          const errorSession = observeAccountSession(importingAccount, () => {
+            if (detachedPreviewErrorStop.current !== errorSession.stop) return;
+            detachedPreviewErrorStop.current = null;
+            errorSession.stop();
+            setPreviewErrorState(null);
+          });
+          if (errorSession.current()) detachedPreviewErrorStop.current = errorSession.stop;
+          else { errorSession.stop(); setPreviewErrorState(null); }
+        }
       }
     } finally {
       const wasLatest = importOperation.current === operation;

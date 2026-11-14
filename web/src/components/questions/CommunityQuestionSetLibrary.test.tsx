@@ -1378,7 +1378,9 @@ describe("Community Question Set Library", () => {
     expect(await screen.findByText(/reviewed Question Set changed/)).toBeTruthy();
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
-    expect(mock.observers.size).toBe(0);
+    // The invalidated preview is gone, but the rejection diagnostic remains
+    // session-bound until dismissed, replaced, unmounted or revoked.
+    expect(mock.observers.size).toBe(1);
   });
 
   it("rejects same-content reapproval at a newer review revision", async () => {
@@ -1412,6 +1414,44 @@ describe("Community Question Set Library", () => {
     expect(mock.authorize).toHaveBeenCalledTimes(1);
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(mock.observers.size).toBe(1);
+  });
+
+  it("revokes a rejected-import diagnostic across an unrendered A to B to A account change", async () => {
+    const privateDiagnostic = "Private account A approval diagnostic";
+    mock.authorize.mockRejectedValueOnce(new Error(privateDiagnostic));
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(privateDiagnostic);
+    expect(mock.commit).not.toHaveBeenCalled();
+    // The preview is revoked so no second click can reuse its approval, but
+    // the diagnostic still needs an account-session observer.
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    await waitFor(() => expect(mock.observers.size).toBe(1));
+
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    expect(screen.queryByText(privateDiagnostic)).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mock.observers.size).toBe(0);
+    expect(mock.commit).not.toHaveBeenCalled();
+  });
+
+  it("releases an invalidated-import error observer on unmount", async () => {
+    mock.authorize.mockRejectedValueOnce(new Error("Synthetic authorization rejection"));
+    const view = render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Which synthetic answer is supported?");
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await screen.findByText("Synthetic authorization rejection");
+    await waitFor(() => expect(mock.observers.size).toBe(1));
+    view.unmount();
     expect(mock.observers.size).toBe(0);
   });
 
