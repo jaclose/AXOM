@@ -205,6 +205,62 @@ function mediaReferences(references: References): MediaReference[] {
 }
 
 
+/** Reject JPEGs that merely have SOI/EOI sentinels but no image data.
+ * Walk variable-length marker segments and entropy-byte stuffing without
+ * expanding pixels or trusting a metadata MIME label. This proves structural
+ * plausibility only; it is not a full image decode or source checksum. */
+function hasExpectedJpegStructure(bytes: Uint8Array): boolean {
+  if (bytes.length < 16 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return false;
+  let offset = 2, sawFrame = false, sawScan = false, sawEntropy = false, inEntropy = false;
+  while (offset < bytes.length) {
+    if (inEntropy && bytes[offset] !== 0xff) {
+      sawEntropy = true;
+      offset++;
+      continue;
+    }
+    if (bytes[offset] !== 0xff) return false;
+    let markerAt = offset + 1;
+    while (markerAt < bytes.length && bytes[markerAt] === 0xff) markerAt++;
+    if (markerAt >= bytes.length) return false;
+    const marker = bytes[markerAt];
+    offset = markerAt + 1;
+    if (marker === 0x00 || (marker >= 0xd0 && marker <= 0xd7)) {
+      if (!inEntropy) return false;
+      sawEntropy = true;
+      continue;
+    }
+    if (marker === 0xd9) return sawFrame && sawScan && sawEntropy && offset === bytes.length;
+    if (marker === 0xd8) return false; // Nested start-of-image is never an image segment.
+    if (marker === 0x01) {
+      if (inEntropy) return false;
+      continue; // TEM has no length field.
+    }
+    inEntropy = false;
+    if (offset + 2 > bytes.length) return false;
+    const segmentLength = (bytes[offset] << 8) | bytes[offset + 1];
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) return false;
+    const isFrame = marker >= 0xc0 && marker <= 0xcf
+      && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isFrame) {
+      if (sawFrame || segmentLength < 11) return false;
+      const height = (bytes[offset + 3] << 8) | bytes[offset + 4];
+      const width = (bytes[offset + 5] << 8) | bytes[offset + 6];
+      const components = bytes[offset + 7];
+      if (!width || !height || !components || segmentLength !== 8 + 3 * components) return false;
+      sawFrame = true;
+    }
+    if (marker === 0xda) {
+      if (!sawFrame || segmentLength < 8) return false;
+      const components = bytes[offset + 2];
+      if (!components || segmentLength !== 6 + 2 * components) return false;
+      sawScan = true;
+      inEntropy = true;
+    }
+    offset += segmentLength;
+  }
+  return false;
+}
+
 /** Structural image validation before certifying backup completeness.
  * The attachment's MIME and byte size are labels, not evidence of image bytes.
  * For PNG, validate every chunk CRC to detect same-length damaged content.
@@ -238,8 +294,7 @@ function hasExpectedImageStructure(bytes: Uint8Array, mime: string): boolean {
     }
     return false;
   }
-  if (mime === "image/jpeg") return bytes.length >= 4
-    && has(0, 0xff, 0xd8, 0xff) && has(bytes.length - 2, 0xff, 0xd9);
+  if (mime === "image/jpeg") return hasExpectedJpegStructure(bytes);
   if (mime === "image/gif") return bytes.length >= 14
     && has(0, 71, 73, 70, 56) && (bytes[4] === 55 || bytes[4] === 57)
     && bytes[5] === 97 && (bytes[6] | bytes[7]) !== 0
