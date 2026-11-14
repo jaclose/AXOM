@@ -16,6 +16,9 @@ export function ActivityHistoryPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [exportPending, setExportPending] = useState(false);
+  // Rendering private device history has the same lifetime boundary as exporting it.
+  // A sticky state update immediately hides the mounted ledger on account/link changes.
+  const [viewRevoked, setViewRevoked] = useState(false);
   // This mounted view owns its original account. Re-enter Activity History after switching accounts.
   // Track intermediate transitions too: comparing the current ID alone misses A → B → A.
   const mountedAccountId = useRef(useAccount.getState().user?.id ?? null);
@@ -28,6 +31,7 @@ export function ActivityHistoryPage() {
     const unsubscribe = useAccount.subscribe((state) => {
       if ((state.user?.id ?? null) !== mountedAccountId.current || state.link !== mountedDeviceLink.current) {
         switchedAccount.current = true;
+        setViewRevoked(true);
       }
     });
     return () => { unmounted.current = true; unsubscribe(); };
@@ -77,6 +81,22 @@ export function ActivityHistoryPage() {
     } finally {
       if (!unmounted.current) setExportPending(false);
     }
+  }
+
+  // Do not keep account A's notes, event types or totals visible while account B
+  // is signing in. Re-entry mounts a fresh view for the current workspace.
+  if (viewRevoked || accountIsStale()) {
+    return (
+      <div className="stack gap16">
+        <GlassCard pad>
+          <EmptyState
+            icon={<History size={ICON_SIZE.display} />}
+            title="Activity History session changed"
+            hint="Your account or device link changed. Leave and reopen Activity History to see the current workspace."
+          />
+        </GlassCard>
+      </div>
+    );
   }
 
   return (
