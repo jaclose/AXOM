@@ -122,7 +122,7 @@ export function ActivityHistoryPage() {
   // Render no totals, notes, event types, filters or export until B opts to view.
   if (mountedAccountId.current !== null && mountedDeviceLink.current !== "linked" && !deviceHistoryRevealed) {
     return (
-      <div className="stack gap16">
+      <div className="stack gap16" ref={historyRoot}>
         <GlassCard pad>
           <EmptyState
             icon={<History size={ICON_SIZE.display} />}
