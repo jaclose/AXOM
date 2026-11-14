@@ -11,12 +11,13 @@ const fixture = vi.hoisted(() => ({
   exportWorkbook: vi.fn(),
   pushToast: vi.fn(),
   accountId: "account-A" as string | null,
+  link: "linked" as "linked" | "unlinked" | "linked-elsewhere",
   accountSubscribers: new Set<(state: { user: { id: string } | null }) => void>(),
 }));
 
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: {
-    getState: () => ({ user: fixture.accountId ? { id: fixture.accountId } : null }),
+    getState: () => ({ user: fixture.accountId ? { id: fixture.accountId } : null, link: fixture.link }),
     subscribe: (listener: (state: { user: { id: string } | null }) => void) => {
       fixture.accountSubscribers.add(listener);
       return () => { fixture.accountSubscribers.delete(listener); };
@@ -30,18 +31,20 @@ vi.mock("../lib/store", () => ({
 vi.mock("../lib/activityExport", () => ({ exportActivityWorkbook: fixture.exportWorkbook }));
 vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
 
-function switchAccount(accountId: string | null) {
+function switchAccount(accountId: string | null, link: typeof fixture.link = accountId ? "linked" : "unlinked") {
   fixture.accountId = accountId;
+  fixture.link = link;
   for (const listener of fixture.accountSubscribers) listener({ user: accountId ? { id: accountId } : null });
 }
 
 beforeEach(() => {
   fixture.accountId = "account-A";
+  fixture.link = "linked";
   fixture.accountSubscribers.clear();
   fixture.exportWorkbook.mockReset();
   fixture.pushToast.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("Activity History workbook download feedback", () => {
   it("keeps the export disabled during a pending write, without a false success notice", async () => {
@@ -188,6 +191,51 @@ describe("Activity History workbook download feedback", () => {
       .resolves.toBeUndefined();
     expect(assertCurrent).toHaveBeenCalledTimes(2);
     expect(saveWorkbook).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before exporting retained device work after an unlinked B sign-in, without deleting A logs", async () => {
+    // Signing out leaves the device study logs intact. A fresh B view must not silently export them.
+    switchAccount(null, "unlinked");
+    switchAccount("account-B", "unlinked");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(<ActivityHistoryPage />);
+
+    const button = screen.getByRole("button", { name: /Export .xlsx/i });
+    fireEvent.click(button);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0][0]).toMatch(/different account/i);
+    expect(fixture.exportWorkbook).not.toHaveBeenCalled();
+    expect(fixture.logs).toHaveLength(2);
+
+    fireEvent.click(button);
+    await waitFor(() => expect(fixture.exportWorkbook).toHaveBeenCalledTimes(1));
+    expect(fixture.exportWorkbook.mock.calls[0][0]).toEqual(fixture.logs);
+    expect(fixture.pushToast).not.toHaveBeenCalled();
+  });
+
+  it("requires the same disclosure for a workspace linked elsewhere", () => {
+    switchAccount("account-B", "linked-elsewhere");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<ActivityHistoryPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(fixture.exportWorkbook).not.toHaveBeenCalled();
+  });
+
+  it("retains immediate export for linked and signed-out local-only sessions", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<ActivityHistoryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    await waitFor(() => expect(fixture.exportWorkbook).toHaveBeenCalledTimes(1));
+    expect(confirm).not.toHaveBeenCalled();
+
+    cleanup();
+    switchAccount(null, "unlinked");
+    render(<ActivityHistoryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+    await waitFor(() => expect(fixture.exportWorkbook).toHaveBeenCalledTimes(2));
+    expect(confirm).not.toHaveBeenCalled();
   });
 
 });
