@@ -439,10 +439,10 @@ describe("searchable Question Set client boundary", () => {
     ["unfinished rationale", "Explanation to be added."],
     ["unreviewed draft notice", "Rationale: pending."],
     ["bare slide reference", "See slide 4."],
-    ["answer-only plus citation", "Option A is correct.\\nSource: Lecture 4"],
+    ["answer-only plus citation", "Option A is correct.\nSource: Lecture 4"],
   ])("rejects %s as a Community explanation before submission", async (_label, explanation) => {
     const value = snapshot();
-    value.questions[0].explanation = explanation.replace(/\\\\n/g, "\\n");
+    value.questions[0].explanation = explanation;
     const rpc = vi.fn();
     service(rpc);
     await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
@@ -452,10 +452,10 @@ describe("searchable Question Set client boundary", () => {
 
   it.each([
     "Option A is correct because the synthetic observation uniquely identifies this choice.",
-    "Source: Synthetic protocol\\nThe first option follows directly from the explicitly defined observation.",
+    "Source: Synthetic protocol\nThe first option follows directly from the explicitly defined observation.",
   ])("permits actual teaching prose without treating it as medically reviewed (%s)", async explanation => {
     const value = snapshot();
-    value.questions[0].explanation = explanation.replace(/\\\\n/g, "\\n");
+    value.questions[0].explanation = explanation;
     const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
     service(rpc);
     await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed)).resolves.toBe(entryId);
