@@ -556,6 +556,53 @@ describe("Community Question Set Library", () => {
     expect(mock.search).not.toHaveBeenCalledWith("account-2", "", 24);
   });
 
+  it("redacts a failed account A preview before the first account B commit", async () => {
+    const privateFailure = "Private account A preview diagnostic";
+    mock.preview.mockRejectedValueOnce(new Error(privateFailure));
+    const leakedCommits: string[] = [];
+    const checkCommitted = () => {
+      if (mock.accountId === "account-2" && document.body.textContent?.includes(privateFailure))
+        leakedCommits.push(privateFailure);
+    };
+    const view = render(<Profiler id="community-preview-error" onRender={checkCommitted}>
+      <CommunityQuestionSetLibrary />
+    </Profiler>);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(privateFailure);
+
+    // The first new-account commit runs before the account reset effect.
+    // A failure is not an approved preview and must not bypass ownership gating.
+    act(() => {
+      mock.accountId = "account-2";
+      view.rerender(<Profiler id="community-preview-error" onRender={checkCommitted}>
+        <CommunityQuestionSetLibrary />
+      </Profiler>);
+    });
+    expect(leakedCommits).toEqual([]);
+    expect(screen.queryByText(privateFailure)).toBeNull();
+  });
+
+  it("revokes a failed preview after an unrendered A to B to A session transition", async () => {
+    const privateFailure = "Previous account session preview error";
+    mock.preview.mockRejectedValueOnce(new Error(privateFailure));
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(privateFailure);
+    await waitFor(() => expect(mock.observers.size).toBe(1));
+
+    // No intervening React render is required for the old session to be
+    // invalidated. Equality of account IDs after the round trip is insufficient.
+    act(() => {
+      mock.accountId = "account-2";
+      mock.observers.forEach(listener => listener({ user: { id: "account-2" } }));
+      mock.accountId = "account-1";
+      mock.observers.forEach(listener => listener({ user: { id: "account-1" } }));
+    });
+    expect(screen.queryByText(privateFailure)).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mock.observers.size).toBe(0);
+  });
+
   it("uses the latest same-batch preview selection despite out-of-order responses", async () => {
     const another = { ...summary, id: "00000000-0000-4000-8000-000000000022", title: "Second synthetic set" };
     const nextSnapshot = { ...snapshot, title: another.title, questions: [{

@@ -96,7 +96,12 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   // handler must not import it into a different account before React rerenders.
   const [previewAccountId, setPreviewAccountId] = useState<string>();
   const [opening, setOpening] = useState(false);
-  const [previewError, setPreviewError] = useState("");
+  // A preview failure can include account-specific diagnostic text. Record its
+  // owner so an account switch cannot render it before effects clear state.
+  const [previewError, setPreviewErrorState] = useState<{ owner: string; message: string } | null>(null);
+  function setPreviewError(message: string) {
+    setPreviewErrorState(message && accountId ? { owner: accountId, message } : null);
+  }
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
   // Learners can inspect every approved question without rendering a large
@@ -224,7 +229,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     const isCurrent = () => previewRequest.current?.token === operation && session.current();
     setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setOpening(true); setImported(false);
-    let accepted = false;
+    let keepSessionObserver = false;
     try {
       const result = await loadQuestionSetLibraryPreview(openedBy, id);
       // Both the account session and the selected request must remain current.
@@ -238,13 +243,17 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       }));
       // Keep the observer until the accepted preview is closed, replaced,
       // revoked, or unmounted. Account-ID equality is not session authority.
-      accepted = true;
+      keepSessionObserver = true;
     } catch (cause) {
-      if (isCurrent())
+      if (isCurrent()) {
         setPreviewError(cause instanceof Error ? cause.message : "This set could not be opened.");
+        // A failed preview still owns a visible modal. Keep its auth observer
+        // until dismissal so an A → B → A transition revokes the old error.
+        keepSessionObserver = true;
+      }
     } finally {
       if (previewRequest.current?.token === operation) {
-        if (!accepted) cancelPendingPreview();
+        if (!keepSessionObserver) cancelPendingPreview();
         if (session.current()) setOpening(false);
       } else {
         session.stop();
@@ -355,6 +364,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   const visibleError = visibleListing ? error : "";
   const activePreview = accountId && previewAccountId === accountId
     && useAccount.getState().user?.id === accountId ? preview : undefined;
+  const visiblePreviewError = accountId && previewError?.owner === accountId
+    && useAccount.getState().user?.id === accountId ? previewError.message : "";
   // Review badges cover the entire immutable publication, not just the
   // current preview window. Presence never establishes source correctness.
   // This is a citation-presence count, never an academic verification score.
@@ -441,7 +452,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       {visibleListing && more && <GButton disabled={visibleLoading} onClick={loadMore}>Load more sets</GButton>}
       <p className="sub">Import copies the reviewed listing into your private AXOM. It does not connect your attempts, notes or files to the contributor.</p>
     </>}
-    {(opening || activePreview || previewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => {
+    {(opening || activePreview || visiblePreviewError) && <Modal title={activePreview?.snapshot.title ?? "Question Set preview"} onClose={importing ? () => {} : () => {
       cancelPendingPreview(); pendingRevealFocus.current = null;
       setOpening(false); setPreview(undefined); setPreviewAccountId(undefined); setPreviewError("");
       setPreviewVisibleCount(3);
@@ -521,7 +532,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             </GButton>
           </>}
         </>}
-        {previewError && <p role="alert" className="qsl-error">{previewError}</p>}
+        {visiblePreviewError && <p role="alert" className="qsl-error">{visiblePreviewError}</p>}
       </div>
     </Modal>}
   </GlassCard>;
