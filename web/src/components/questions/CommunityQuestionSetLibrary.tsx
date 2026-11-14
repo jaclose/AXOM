@@ -184,8 +184,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!accountId || useAccount.getState().user?.id !== accountId) return;
-    pendingPageAdvance.current = null;
+    // Hold pagination until the new query's first page finishes. The old
+    // Load more handler may still fire before React commits the reset.
+    pendingPageAdvance.current = { accountId, offset: 0 };
     lastSuccessfulPageOffset.current = 0;
+    setMore(false);
     setOffset(0);
     setQuery({ owner: accountId, input, search: input.trim() });
     setRefresh(value => value + 1);
@@ -402,8 +405,10 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     <PanelHeader headingLevel={2} title="Find a Question Set"
       sub="Learner sets beyond AXOM's course collection. Each is reviewed before listing."
       action={<GButton size="sm" disabled={!accountId || visibleLoading} onClick={() => {
-        pendingPageAdvance.current = null;
+        // Block an old Load more click in the same batch as Refresh.
+        pendingPageAdvance.current = accountId ? { accountId, offset: 0 } : null;
         lastSuccessfulPageOffset.current = 0;
+        setMore(false);
         setOffset(0); setRefresh(value => value + 1);
       }}>
         <RefreshCw size={16} aria-hidden="true" /> Refresh
