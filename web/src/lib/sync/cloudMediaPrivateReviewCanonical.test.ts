@@ -53,6 +53,9 @@ describe("immutable private-library media across staged imports and saved review
     const state = stateFor(question("first", FIRST), question("second", SECOND));
     expect(workspaceMedia(state).size).toBe(1);
     expect(workspaceMedia(state).get(KEY)?.attachment.updatedAt).toBe(CANONICAL);
+    // Historical stored-image ownership used the last question reference.
+    // Canonicalizing immutable timestamps must not change this metadata contract.
+    expect(workspaceMedia(state).get(KEY)?.questionId).toBe("second");
     expect(validateWorkspaceMedia(state, manifest())).toHaveLength(1);
   });
 
@@ -69,6 +72,22 @@ describe("immutable private-library media across staged imports and saved review
     const alternate = question("second", SECOND);
     alternate.attachments![0].mimeType = "image/jpeg";
     expect(() => workspaceMedia(stateFor(question("first", FIRST), alternate))).toThrow();
+  });
+
+  it("rejects stale media receipts for mutable image keys and changed digest hashes", () => {
+    const mutable = question("editable", SECOND);
+    mutable.attachments![0].blobKey = "mutable-upload-1";
+    const state = stateFor(mutable);
+    const oldMutable = [{
+      blobKey: "mutable-upload-1", hash: HASH, byteSize: 12, updatedAt: FIRST,
+    }];
+    expect(() => validateWorkspaceMedia(state, oldMutable)).toThrow(/incomplete image index/);
+
+    const identicalBytesButWrongDigest = [{
+      blobKey: KEY, hash: OTHER, byteSize: 12, updatedAt: FIRST,
+    }];
+    expect(() => validateWorkspaceMedia(stateFor(question("first", FIRST)), identicalBytesButWrongDigest))
+      .toThrow(/incomplete image index/);
   });
 
   it("does not relax timestamp collisions for a non-content-addressed image", () => {

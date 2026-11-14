@@ -1,7 +1,7 @@
 import { DB_NAME, DB_VERSION, STORE_NAME, ensureVaultStores } from "../localVault";
 import { accountOperationClient } from "../account/supabase";
 import { setMissingAttachmentLoader } from "../questionAttachments";
-import { downloadCloudMediaAsset, readMediaManifest, workspaceMedia, type CloudMediaReference } from "./cloudMedia";
+import { downloadCloudMediaAsset, matchesMediaReceipt, readMediaManifest, workspaceMedia, type CloudMediaReference } from "./cloudMedia";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
 import type { NoctyriumState } from "../types";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../questionAttachmentScope";
@@ -53,7 +53,7 @@ export function installCloudMediaCache(userId: string, state: () => NoctyriumSta
       if (!reference || disposed || scope.accountId !== userId || !isQuestionAttachmentScopeCurrent(scope)) return undefined;
       const stored = await indexStore<CloudMediaReference[] | undefined>("readonly", (store) => store.get(keyFor(userId)));
       const entry = stored?.find((item) => item.blobKey === blobKey);
-      if (!entry || entry.updatedAt !== reference.attachment.updatedAt || entry.byteSize !== reference.attachment.byteSize) return undefined;
+      if (!entry || !matchesMediaReceipt(blobKey, entry, reference.attachment, reference.checksum)) return undefined;
       const operation = await accountOperationClient();
       if (operation.userId !== userId || disposed) return undefined;
       const data = await downloadCloudMediaAsset(operation.client, userId, entry);
