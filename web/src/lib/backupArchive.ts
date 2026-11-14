@@ -67,6 +67,8 @@ export async function preflightRestorableZipCandidateBudget(
   probeOriginalBytes: (index: number) => Promise<number | null>,
   conservativeExpandedBytes = 0,
   mandatoryWorkspaceBytes = 0,
+  mediaDescriptorBytes?: (candidateIndex: number, admittedIndex: number) => number,
+  originalDescriptorBytes?: (candidateIndex: number, admittedIndex: number) => number,
 ): Promise<{ mediaAvailable: boolean[]; originalsAvailable: boolean[] } | null> {
   if (!Number.isSafeInteger(mediaCandidates) || mediaCandidates < 0
     || !Number.isSafeInteger(originalCandidates) || originalCandidates < 0) {
@@ -91,27 +93,35 @@ export async function preflightRestorableZipCandidateBudget(
   // candidates alone exactly fill 2 GiB, fail before retaining their buffers.
   assertRestorableZipBudget(0, mandatoryWorkspaceBytes);
   let admittedMedia = 0, admittedOriginals = 0, expandedBytes = mandatoryWorkspaceBytes;
-  const record = (bytes: number, isMedia: boolean) => {
-    if (!Number.isSafeInteger(bytes) || bytes < 0) {
+  let projectedManifestBytes = mandatoryWorkspaceBytes;
+  const record = (bytes: number, isMedia: boolean, descriptorBytes = 0) => {
+    if (!Number.isSafeInteger(bytes) || bytes < 0
+      || !Number.isSafeInteger(descriptorBytes) || descriptorBytes < 0) {
       throw new ZipExportBudgetExceeded("Invalid ZIP backup candidate size. No backup was downloaded or certified.");
+    }
+    // Charge only descriptors for files actually verified as present. A missing
+    // image or original must remain eligible for an honest partial rescue.
+    if (projectedManifestBytes + descriptorBytes > MAX_ZIP_WORKSPACE_BYTES) {
+      throw new ZipExportBudgetExceeded("The ZIP workspace exceeds the 128 MB recovery safety limit. No backup was downloaded or certified.");
     }
     if (isMedia) admittedMedia += 1;
     else admittedOriginals += 1;
     assertRestorableZipEntryCounts(admittedMedia, admittedOriginals);
-    assertRestorableZipBudget(0, expandedBytes + bytes);
-    expandedBytes += bytes;
+    assertRestorableZipBudget(0, expandedBytes + bytes + descriptorBytes);
+    expandedBytes += bytes + descriptorBytes;
+    projectedManifestBytes += descriptorBytes;
   };
   for (let i = 0; i < mediaCandidates; i++) {
     const size = await probeMediaBytes(i);
     if (size !== null) {
-      record(size, true);
+      record(size, true, mediaDescriptorBytes?.(i, admittedMedia) ?? 0);
       mediaAvailable[i] = true;
     }
   }
   for (let i = 0; i < originalCandidates; i++) {
     const size = await probeOriginalBytes(i);
     if (size !== null) {
-      record(size, false);
+      record(size, false, originalDescriptorBytes?.(i, admittedOriginals) ?? 0);
       originalsAvailable[i] = true;
     }
   }
@@ -384,9 +394,10 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   const needsPreflight = candidateEntries > MAX_ZIP_BACKUP_ENTRIES
     || !Number.isSafeInteger(potentialExpandedBytes)
     || potentialExpandedBytes > MAX_ZIP_BACKUP_BYTES;
-  // The final manifest can add media/original descriptors, but cannot be
-  // smaller than this base payload. Reserve that minimum before binary reads.
-  // Calculate only on the near-cap path so ordinary exports stay single-pass.
+  // Start with the no-file JSON and charge exact image descriptors and a
+  // safe upper bound for each original descriptor only when that file is
+  // verified as present. Reserve all projected JSON before retaining binary
+  // ZIP entries; absent assets never consume the preflight budget.
   const mandatoryWorkspaceBytes = needsPreflight
     ? new Blob([JSON.stringify({
       ...payload, _backupFormat: FORMAT, _backupVersion: 2, media: [], originals: [],
@@ -409,11 +420,28 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
       const document = eligibleOriginals[index];
       try {
         const blob = await readSourceOriginal(document.id, document.checksum, options);
-        return blob && blob.size <= MAX_ORIGINAL_BYTES ? blob.size : null;
+        return blob && blob.size <= MAX_ORIGINAL_BYTES && blob.type.length <= 255 ? blob.size : null;
       } catch { return null; }
     },
     potentialExpandedBytes,
     mandatoryWorkspaceBytes,
+    (candidateIndex, admittedIndex) => new Blob([JSON.stringify({
+      file: `media/${admittedIndex}`,
+      metadata: referencedMedia[candidateIndex].metadata,
+    })], { type: "application/json" }).size + Number(admittedIndex > 0),
+    (candidateIndex, admittedIndex) => {
+      const document = eligibleOriginals[candidateIndex];
+      // The original's Blob MIME may differ from document.fileType. A 255
+      // printable-ASCII-character worst case, all JSON-escaped, bounds any
+      // importer-admissible MIME without guessing its value or size.
+      return new Blob([JSON.stringify({
+        file: `originals/${admittedIndex}`,
+        documentId: document.id,
+        sha256: document.checksum!.replace(/^sha256:/, ""),
+        byteSize: MAX_ORIGINAL_BYTES,
+        mimeType: "\\\\".repeat(255),
+      })], { type: "application/json" }).size + Number(admittedIndex > 0);
+    },
   );
   if (!isQuestionAttachmentScopeCurrent(scope)) {
     throw new Error("The account changed during export. Start a new export from the current workspace.");
@@ -456,7 +484,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     }
     try {
       const blob = await readSourceOriginal(document.id, document.checksum, options);
-      if (!blob || blob.size > MAX_ORIGINAL_BYTES) throw new Error("Original unavailable or too large");
+      if (!blob || blob.size > MAX_ORIGINAL_BYTES || blob.type.length > 255) throw new Error("Original unavailable or fails MIME safety limit");
       // Check the declared size before allocating original bytes, then account
       // for the actual buffer length only after the read succeeds.
       assertRestorableZipBudget(0, expandedBytes + blob.size);
