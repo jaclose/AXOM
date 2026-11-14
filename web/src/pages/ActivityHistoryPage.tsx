@@ -44,6 +44,14 @@ export function ActivityHistoryPage() {
 
   async function handleExport() {
     if (exportPending || !filtered.length) return;
+    // Account identity checks prevent stale downloads, but study logs are device-local:
+    // signing out deliberately retains them. Unlinked signed-in accounts must consent
+    // before downloading a workbook that may include a previous account's local work.
+    const account = useAccount.getState();
+    if (!accountIsStale() && account.user && account.link !== "linked"
+      && !window.confirm(
+        "This workbook contains study activity saved on this device. It may include work from a different account because this device's workspace is not linked to your signed-in account. Export this device's study history?",
+      )) return;
     setExportPending(true);
     try {
       assertCurrentAccount();
@@ -60,7 +68,7 @@ export function ActivityHistoryPage() {
   return (
     <div className="stack gap16">
       <GlassCard pad>
-        <PanelHeader title="Activity History" sub="Every local study event with filters and spreadsheet export"
+        <PanelHeader title="Activity History" sub="Study events saved on this device, including work retained after sign-out. Exports are device-local."
           action={<GButton size="sm" variant="primary" onClick={handleExport} disabled={!filtered.length || exportPending} aria-busy={exportPending}><Download size={ICON_SIZE.body} /> {exportPending ? "Exporting..." : "Export .xlsx"}</GButton>} />
         <div className="activity-history-filters">
           <SelectField label="Activity type" value={type === null ? "all" : `type:${type}`}
