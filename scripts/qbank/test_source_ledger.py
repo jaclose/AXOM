@@ -1551,7 +1551,9 @@ class SourceLedgerTests(unittest.TestCase):
             sha = digest("original-questions")
             dispositions = {"sources": [{"sha256": sha, "kind": "question-source",
                                          "status": "review-required", "readyCount": 0, "reviewCount": 2}]}
-            canonical = [{"bank_id": "bank", "questions": 2, "source_path": str(original)}]
+            canonical = [{"bank_id": "bank", "questions": 2, "source_path": str(original),
+                          "canonical_status": "canonical_distinct_question_collection",
+                          "status": "local_ready_for_agent2_review", "issues": []}]
             rows = [{"source_sha256": sha, "original_path": str(original)}]
             audit_path = folder / "audit.json"
             audit_path.write_text(json.dumps({"native": [
@@ -1581,7 +1583,9 @@ class SourceLedgerTests(unittest.TestCase):
                 audit_path.write_text(json.dumps({"native": native, "raw": raw}))
                 result = enriched.merge_agent2_assessment(
                     dispositions,
-                    [{"bank_id": "bank", "questions": 2, "source_path": str(original)}],
+                    [{"bank_id": "bank", "questions": 2, "source_path": str(original),
+                      "canonical_status": "canonical_distinct_question_collection",
+                      "status": "local_ready_for_agent2_review", "issues": []}],
                     [{"original_path": str(original), "source_sha256": sha}], audit_path)
                 self.assertEqual(result["ambiguous_source_hashes"], [sha])
                 self.assertEqual(result["assessed_ready_not_installed"], 0)
