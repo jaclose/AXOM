@@ -90,6 +90,10 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   const [listingAccountId, setListingAccountId] = useState<string>();
   // A revoked session must reject clicks on old DOM nodes before React renders.
   const listingSessionRevoked = useRef(false);
+  // Detach old form controls on session revocation. A queued DOM event may
+  // dispatch after the new session clears the revocation guard, but must not
+  // reuse the old search field or its submit handler.
+  const [listingFormEpoch, setListingFormEpoch] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [more, setMore] = useState(false);
@@ -140,6 +144,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     lastSuccessfulPageOffset.current = 0;
     pendingPageAdvance.current = null;
     listingSessionRevoked.current = true;
+    setListingFormEpoch(epoch => epoch + 1);
     setQuery({ owner: accountId, input: "", search: "" });
     setSets([]); setListingAccountId(undefined); setPreview(undefined); setPreviewAccountId(undefined);
     setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
@@ -166,6 +171,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     const session = observeAccountSession(accountId, () => {
       if (!alive) return;
       listingSessionRevoked.current = true;
+      setListingFormEpoch(epoch => epoch + 1);
       pendingPageAdvance.current = null;
       lastSuccessfulPageOffset.current = 0;
       setSets([]); setListingAccountId(undefined); setMore(false); setLoading(false); setError("");
@@ -462,7 +468,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
         <RefreshCw size={16} aria-hidden="true" /> Refresh
       </GButton>} />
     {!accountId ? <p>Sign in through Account to search and save learner Question Sets.</p> : <>
-      <form className="qsl-search" onSubmit={submitSearch} role="search">
+      <form key={listingFormEpoch} className="qsl-search" onSubmit={submitSearch} role="search">
         <label className="sr-only" htmlFor="qsl-search-input">Search Community Question Sets</label>
         <Search size={17} aria-hidden="true" />
         <input id="qsl-search-input" type="search" value={input} maxLength={100} onChange={event => {

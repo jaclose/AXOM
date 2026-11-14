@@ -462,12 +462,18 @@ describe("Community Question Set Library", () => {
       fireEvent.click(staleSubmit);
     });
     await screen.findByRole("heading", { name: fresh.title });
-    expect(searchField.value).toBe("");
+    // The old form cannot be reused after the session has been revoked,
+    // even if a queued stale input/click event arrives after the render.
+    const restoredField = screen.getByRole("searchbox", { name: "Search Community Question Sets" }) as HTMLInputElement;
+    expect(restoredField).not.toBe(searchField);
+    expect(searchField.isConnected).toBe(false);
+    expect(staleSubmit.isConnected).toBe(false);
+    expect(restoredField.value).toBe("");
     expect(mock.search).toHaveBeenCalledTimes(2);
     expect(mock.search).toHaveBeenLastCalledWith("account-1", "", 0);
 
     // Revalidated discovery accepts fresh user input in the restored session.
-    await user.type(searchField, "fresh topic");
+    await user.type(restoredField, "fresh topic");
     await user.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(mock.search).toHaveBeenLastCalledWith("account-1", "fresh topic", 0));
   });
@@ -527,7 +533,9 @@ describe("Community Question Set Library", () => {
 
     // B must not even briefly display A's term or dispatch it before a
     // post-render reset effect has had a chance to run.
-    expect(searchField.value).toBe("");
+    const accountBField = screen.getByRole("searchbox", { name: "Search Community Question Sets" }) as HTMLInputElement;
+    expect(accountBField).not.toBe(searchField);
+    expect(accountBField.value).toBe("");
     await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-2", "", 0));
     const bQueries = mock.search.mock.calls
       .filter(([account]) => account === "account-2")
@@ -535,7 +543,7 @@ describe("Community Question Set Library", () => {
     expect(bQueries.length).toBeGreaterThan(0);
     expect(bQueries.every(query => query === "")).toBe(true);
 
-    await user.type(searchField, "account-b-topic");
+    await user.type(accountBField, "account-b-topic");
     await user.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(mock.search).toHaveBeenCalledWith("account-2", "account-b-topic", 0));
   });
