@@ -47,7 +47,7 @@ export function ActivityHistoryPage() {
     setExportPending(true);
     try {
       assertCurrentAccount();
-      await exportActivityWorkbook(filtered, assertCurrentAccount);
+      await exportActivityWorkbook(filtered, undefined, assertCurrentAccount);
     } catch {
       if (!unmounted.current) pushToast(accountIsStale()
         ? { title: "Activity export canceled", body: "Your account changed. Reopen Activity History before exporting again.", tone: "warn" }
