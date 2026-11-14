@@ -178,6 +178,41 @@ describe("term course actions", () => {
     await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
+  it("releases abandoned A's busy lock only once while B remains downloading", async () => {
+    const first = deferred();
+    const second = deferred();
+    mocks.download.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const actions = (accountId: string) => <TermCourseActions term="Term 5" accountId={accountId}
+      courses={courses} disabled={false} onBusyChange={onBusyChange} />;
+    switchAccount("account-a");
+    const view = render(actions("account-a"));
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    view.unmount();
+
+    // A owns the original lock until B becomes active. The first switch
+    // correctly releases it, allowing B to begin a separate download.
+    switchAccount("account-b");
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    render(actions("account-b"));
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Downloading 1 of 3: GOER");
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    const callsDuringB = onBusyChange.mock.calls.length;
+
+    // Account stores also emit updates that do not change the account ID.
+    // A's old observer must not clear B's new lock on these later emissions.
+    act(() => switchAccount("account-b"));
+    expect(onBusyChange).toHaveBeenCalledTimes(callsDuringB);
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    await act(async () => first.resolve());
+    expect(onBusyChange).toHaveBeenCalledTimes(callsDuringB);
+    await act(async () => second.resolve());
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  });
+
   it("uses the exact quiz handoff and displays its active-quiz error", () => {
     mocks.launch.mockImplementation(() => { throw new Error("Finish your current quiz first."); });
     mount(); fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
