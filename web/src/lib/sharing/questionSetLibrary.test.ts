@@ -248,6 +248,62 @@ describe("searchable Question Set client boundary", () => {
     expect(JSON.stringify(value)).toBe(original);
   });
 
+  it.each(["stem", "choice", "rationale", "topic", "tags", "title"] as const)(
+    "holds embedded private files or media in public %s before submission", async field => {
+      const value = snapshot();
+      switch (field) {
+        case "stem":
+          value.questions[0].stem += " file:///Users/private/clinical-notes.pdf";
+          break;
+        case "choice":
+          value.questions[0].options[0].text = "See content://device/private-scan";
+          value.questions[0].correctAnswerText = "See content://device/private-scan";
+          break;
+        case "rationale":
+          value.questions[0].choiceRationales = { B: "Do not embed data:image/png;base64,AAABBB" };
+          break;
+        case "topic":
+          value.questions[0].topic = "C:\\Users\\student\\private\\case.pdf";
+          break;
+        case "tags":
+          value.questions[0].tags = ["blob:https://example.edu/private-file"];
+          break;
+        case "title":
+          value.title = "Review /Users/student/private-cases.pdf";
+          break;
+      }
+      const rpc = vi.fn();
+      service(rpc);
+      await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+        .rejects.toThrow(/teaching text contains a private local file or inline media reference/i);
+      expect(rpc).not.toHaveBeenCalled();
+    },
+  );
+
+  it("holds a nested, encoded browser object URL in an otherwise public question", async () => {
+    const value = snapshot();
+    value.questions[0].stem += " https://example.edu/view?src=blob%253Ahttps%253A%252F%252Fexample.edu%252Fprivate";
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/teaching text contains a private local file or inline media reference/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("retains public medical prose, mechanism URLs and slash-delimited terminology", async () => {
+    const value = snapshot();
+    value.questions[0].stem = "Compare the CD4/CD8 ratio and MHC I/II mechanisms. https://example.edu/review";
+    value.questions[0].explanation = "The CD4/CD8 ratio is used here as synthetic teaching text; Data: available upon request.";
+    value.questions[0].choiceRationales = { B: "This answer differs from the specified observation." };
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .resolves.toBe(entryId);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_question_set_library", expect.objectContaining({
+      p_snapshot: value,
+    }));
+  });
+
   it("permits public source references through direct new submission", async () => {
     const value = snapshot();
     value.questions[0].citation = "PMID: 123456; DOI: 10.1000/demo; https://example.edu/source";
