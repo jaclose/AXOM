@@ -19,6 +19,10 @@ export function ActivityHistoryPage() {
   // Rendering private device history has the same lifetime boundary as exporting it.
   // A sticky state update immediately hides the mounted ledger on account/link changes.
   const [viewRevoked, setViewRevoked] = useState(false);
+  // Retained device logs can belong to a different account. Viewing them requires
+  // a deliberate, mount-local choice when the signed-in workspace is not linked.
+  // This never changes study data or grants account/cloud access.
+  const [deviceHistoryRevealed, setDeviceHistoryRevealed] = useState(false);
   // This mounted view owns its original account. Re-enter Activity History after switching accounts.
   // Track intermediate transitions too: comparing the current ID alone misses A → B → A.
   const mountedAccountId = useRef(useAccount.getState().user?.id ?? null);
@@ -108,6 +112,26 @@ export function ActivityHistoryPage() {
             title="Activity History session changed"
             hint="Your account or device link changed. Leave and reopen Activity History to see the current workspace."
           />
+        </GlassCard>
+      </div>
+    );
+  }
+
+  // A newly mounted unlinked B session may still hold A's device-local logs.
+  // The XLSX export confirmation alone cannot prevent disclosure on screen.
+  // Render no totals, notes, event types, filters or export until B opts to view.
+  if (mountedAccountId.current !== null && mountedDeviceLink.current !== "linked" && !deviceHistoryRevealed) {
+    return (
+      <div className="stack gap16">
+        <GlassCard pad>
+          <EmptyState
+            icon={<History size={ICON_SIZE.display} />}
+            title="Device history needs confirmation"
+            hint="This device may retain study activity from a different account. You can view the local history without moving, deleting or linking those records to your account."
+          />
+          <GButton size="sm" variant="primary" onClick={() => {
+            if (!accountIsStale()) setDeviceHistoryRevealed(true);
+          }}>Show device history</GButton>
         </GlassCard>
       </div>
     );
