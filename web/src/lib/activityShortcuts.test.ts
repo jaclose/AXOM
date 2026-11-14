@@ -165,4 +165,37 @@ describe("activity shortcuts", () => {
       .toBe("2026-07-12T12:00:00-04:00");
   });
 
+  it("keeps mixed valid and malformed timestamps consistently ordered in every input permutation", () => {
+    const later = log("later", "Valid later", "2026-07-12T12:00:00-04:00");
+    const earlier = log("earlier", "Valid earlier", "2026-07-12T15:00:00Z");
+    const malformed = log("malformed", "Malformed timestamp", "2026-07-12T13:00:00INVALID");
+    const permutations = [
+      [later, earlier, malformed], [later, malformed, earlier],
+      [earlier, later, malformed], [earlier, malformed, later],
+      [malformed, later, earlier], [malformed, earlier, later],
+    ];
+    for (const records of permutations) {
+      expect(recentActivityShortcuts(records).map((item) => item.label))
+        .toEqual(["Valid later", "Valid earlier", "Malformed timestamp"]);
+    }
+  });
+
+  it("does not treat malformed timestamps as the latest valid use or outrank valid groups", () => {
+    const mixed = [
+      log("invalid", "Mixed", "2030-07-12T13:00:00INVALID", { minutes: 30 }),
+      log("valid-older", "Mixed", "2026-07-12T15:00:00Z", { minutes: 30 }),
+      log("valid-newer", "Mixed", "2026-07-12T12:00:00-04:00", { minutes: 30 }),
+    ];
+    const malformedOnly = [
+      log("bad-1", "Bad only", "2030-07-12T13:00:00INVALID", { minutes: 40 }),
+      log("bad-2", "Bad only", "2030-07-12T14:00:00INVALID", { minutes: 40 }),
+      log("bad-3", "Bad only", "2030-07-12T15:00:00INVALID", { minutes: 40 }),
+    ];
+    expect(frequentActivityShortcuts([...malformedOnly, ...mixed], [], 2, 3))
+      .toMatchObject([
+        { label: "Mixed", uses: 3, lastUsedAt: "2026-07-12T12:00:00-04:00" },
+        { label: "Bad only", uses: 3, lastUsedAt: "2030-07-12T15:00:00INVALID" },
+      ]);
+  });
+
 });
