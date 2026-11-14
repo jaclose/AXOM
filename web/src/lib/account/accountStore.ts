@@ -67,6 +67,8 @@ interface AccountState {
   phase: AccountPhase;
   user: AccountUser | null;
   link: LinkState;
+  /** In-memory, lossless count of account identity or device-link transitions. */
+  identityEpoch: number;
   protection: ProtectionStatus;
   lastProtectedAt?: string;
   conflictServerRevision?: number;
@@ -224,7 +226,25 @@ async function client(): Promise<SupabaseClient> {
   return value;
 }
 
-export const useAccount = create<AccountState>((set, get) => {
+export const useAccount = create<AccountState>((originalSet, get, api) => {
+  // Count every identity/link transition at the store write boundary. A final
+  // snapshot alone cannot reveal A → B → A before a consumer subscribes.
+  // Intercept both internal `set` and external `useAccount.setState` atomically:
+  // observers must never see the changed account with an old epoch.
+  const set = ((partial: AccountState | Partial<AccountState> | ((state: AccountState) => AccountState | Partial<AccountState>), replace?: boolean) => {
+    const previous = get();
+    const patch = typeof partial === "function" ? partial(previous) : partial;
+    // Zustand treats a functional update returning the same state as a no-op.
+    if (Object.is(patch, previous)) return;
+    const next = replace ? patch as AccountState : { ...previous, ...patch };
+    const changed = (previous.user?.id ?? null) !== (next.user?.id ?? null)
+      || previous.link !== next.link;
+    const guardedPatch = { ...patch, identityEpoch: previous.identityEpoch + (changed ? 1 : 0) };
+    // Preserve the caller's partial-merge vs. full-replace semantics.
+    if (replace) originalSet(guardedPatch as AccountState, true);
+    else originalSet(guardedPatch);
+  }) as typeof originalSet;
+  api.setState = set;
   function clearAccountUploadCaches() {
     clearCloudContentCache();
     clearCloudMediaUploadCache();
@@ -308,6 +328,7 @@ export const useAccount = create<AccountState>((set, get) => {
   const stored = cloudConfigured() ? readStoredSession() : null;
   return {
     ...(stored ? sessionState(stored) : { phase: cloudConfigured() ? "loading" as const : "unconfigured" as const, user: null, link: "unlinked" as const, protection: "local-only" as const }),
+    identityEpoch: 0,
     history: [],
     devices: [],
     busy: false,

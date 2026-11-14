@@ -122,6 +122,84 @@ describe("account validation", () => {
   });
 });
 
+describe("lossless account and device-link transition epoch", () => {
+  const accountA = { id: "epoch-A", email: "a@example.test", displayName: "A", emailConfirmed: true };
+  const accountB = { ...accountA, id: "epoch-B", email: "b@example.test", displayName: "B" };
+
+  it("counts every synchronous A→B→A identity reversal even when the final account matches", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const mounted = useAccount.getState().identityEpoch;
+    useAccount.setState({ user: accountB });
+    expect(useAccount.getState().identityEpoch).toBe(mounted + 1);
+    useAccount.setState({ user: accountA });
+    expect(useAccount.getState()).toMatchObject({ user: accountA, link: "linked", identityEpoch: mounted + 2 });
+  });
+
+  it("counts every linked→unlinked→linked transition without changing the user", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const mounted = useAccount.getState().identityEpoch;
+    useAccount.setState({ link: "unlinked" });
+    useAccount.setState({ link: "linked" });
+    expect(useAccount.getState()).toMatchObject({ user: accountA, link: "linked", identityEpoch: mounted + 2 });
+  });
+
+  it("does not advance for protection, profile display-name, phase or redundant identity writes", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const mounted = useAccount.getState().identityEpoch;
+    useAccount.setState({ protection: "protected" });
+    useAccount.setState({ user: { ...accountA, displayName: "Updated" } });
+    useAccount.setState({ phase: "recovering-password" });
+    useAccount.setState({ user: { ...accountA }, link: "linked" });
+    expect(useAccount.getState().identityEpoch).toBe(mounted);
+  });
+
+  it("exposes a synchronous epoch to every listener, including functional updates", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const initial = useAccount.getState().identityEpoch;
+    const seen: Array<{ user: string | undefined; epoch: number }> = [];
+    const unsubscribe = useAccount.subscribe(state => {
+      seen.push({ user: state.user?.id, epoch: state.identityEpoch });
+    });
+    try {
+      useAccount.setState(() => ({ user: accountB }));
+      useAccount.setState(() => ({ user: accountA }));
+      expect(seen).toEqual([
+        { user: "epoch-B", epoch: initial + 1 },
+        { user: "epoch-A", epoch: initial + 2 },
+      ]);
+    } finally { unsubscribe(); }
+  });
+
+  it("preserves Zustand's functional same-state no-op without notifying subscribers", () => {
+    useAccount.setState({ phase: "signed-in", user: accountA, link: "linked" });
+    const original = useAccount.getState();
+    const listener = vi.fn();
+    const unsubscribe = useAccount.subscribe(listener);
+    try {
+      useAccount.setState(state => state);
+      expect(useAccount.getState()).toBe(original);
+      expect(listener).not.toHaveBeenCalled();
+    } finally { unsubscribe(); }
+  });
+
+  it("counts SDK identity reversals but not a same-account token refresh", async () => {
+    let emit: (event: string, value: unknown) => void = () => undefined;
+    auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {
+      emit = callback;
+      callback("INITIAL_SESSION", session);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    }) as never);
+    useAccount.getState().init();
+    await vi.waitFor(() => expect(useAccount.getState().user?.id).toBe("user-1"));
+    const initial = useAccount.getState().identityEpoch;
+    emit("TOKEN_REFRESHED", { ...session, access_token: "rotated" });
+    expect(useAccount.getState().identityEpoch).toBe(initial);
+    emit("SIGNED_IN", { ...session, user: { ...session.user, id: "epoch-B" } });
+    emit("SIGNED_IN", session);
+    expect(useAccount.getState()).toMatchObject({ user: { id: "user-1" }, identityEpoch: initial + 2 });
+  });
+});
+
 describe("account lifecycle", () => {
   it("signs in without uploading or replacing local work", async () => {
     const before = useStore.getState().courses.length;
