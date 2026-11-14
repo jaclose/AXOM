@@ -444,7 +444,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
               </div>
             </details>
           </li>)}</ol>
-          <p className="sub" role="status">Showing ${visiblePreviewQuestions} of ${previewCitationTotal} questions.</p>
+          <p className="sub" role="status">Showing {visiblePreviewQuestions} of {previewCitationTotal} questions.</p>
           {visiblePreviewQuestions < previewCitationTotal && <GhostButton disabled={importing}
             onClick={() => setPreviewVisibleCount(current => Math.min(previewCitationTotal, current + 3))}>
             Show next {Math.min(3, previewCitationTotal - visiblePreviewQuestions)} questions
