@@ -692,7 +692,7 @@ describe("portable binary media backup", () => {
 
   it("preserves partial near-cap recovery and skips binary probing when the candidate count fits", async () => {
     let inspected = 0;
-    await preflightRestorableZipCandidateBudget(
+    const availability = await preflightRestorableZipCandidateBudget(
       MAX_ZIP_BACKUP_ENTRIES - 1, 0,
       async index => {
         inspected += 1;
@@ -701,12 +701,16 @@ describe("portable binary media backup", () => {
       async () => null,
     );
     expect(inspected).toBe(MAX_ZIP_BACKUP_ENTRIES - 1);
+    expect(availability?.mediaAvailable.filter(Boolean)).toHaveLength(14_999);
+    expect(availability?.mediaAvailable[0]).toBe(false);
+    expect(availability?.mediaAvailable[1]).toBe(true);
     let unnecessaryReads = 0;
-    await preflightRestorableZipCandidateBudget(
+    const skipped = await preflightRestorableZipCandidateBudget(
       MAX_ZIP_BACKUP_ENTRIES - 2, 0,
       async () => { unnecessaryReads += 1; return 64 * 1024; },
       async () => { unnecessaryReads += 1; return 1; },
     );
+    expect(skipped).toBeNull();
     expect(unnecessaryReads).toBe(0);
   }, 30_000);
 
@@ -723,13 +727,26 @@ describe("portable binary media backup", () => {
       mediaCandidates, 1,
       async index => index === 0 ? null : 1,
       async () => 1,
-    )).resolves.toBeUndefined();
+    )).resolves.toMatchObject({ originalsAvailable: [true] });
 
     await expect(preflightRestorableZipCandidateBudget(
       MAX_ZIP_BACKUP_ENTRIES - 1, 0,
       async () => MAX_ZIP_BACKUP_BYTES,
       async () => null,
     )).rejects.toThrow("expanded size");
+  }, 30_000);
+
+  it("pins missing-candidate availability against a second-pass storage race", async () => {
+    // A missing item becoming readable after preflight may not expand the
+    // second-pass candidate set and cause a late 2 GiB memory failure.
+    const availability = await preflightRestorableZipCandidateBudget(
+      MAX_ZIP_BACKUP_ENTRIES - 1, 0,
+      async index => index === 0 ? null : 64 * 1024,
+      async () => null,
+    );
+    expect(availability?.mediaAvailable[0]).toBe(false);
+    expect(availability?.mediaAvailable[1]).toBe(true);
+    expect(availability?.mediaAvailable.filter(Boolean)).toHaveLength(MAX_ZIP_BACKUP_ENTRIES - 2);
   }, 30_000);
 
   it("counts only verified ZIP entries, including actual JSZip directories and workspace", () => {
