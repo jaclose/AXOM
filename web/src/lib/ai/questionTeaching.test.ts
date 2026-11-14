@@ -73,6 +73,50 @@ describe("review-gated explanation drafting", () => {
     expect(model.completeJson).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["private file URI in stem", { stem: "Reference file:///Users/student/private-exam.pdf" }],
+    ["private content provider in a choice", { options: [
+      { key: "A", text: "content://private.provider/document/42" },
+      { key: "B", text: "Benign control" }, { key: "C", text: "Second control" },
+    ] }],
+    ["browser object URL in topic", { topic: "blob:https://example.edu/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }],
+    ["inlined PDF data in stem", { stem: "Exhibit data:application/pdf;base64,JVBERi0x" }],
+    ["URL credentials in stem", { stem: "Source https://student:secret@example.edu/notes" }],
+    ["encoded device URI in topic", { topic: "file%3A%2F%2F%2FUsers%2Fstudent%2Fprivate.pdf" }],
+  ] as Array<[string, Partial<QuestionRecord>]>)
+  ("blocks %s before external AI inference, even when called directly", async (_label, patch) => {
+    const source = question(patch);
+    const model = provider({});
+    expect(eligibleForExplanationDraft(source)).toBe(false);
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/private file|inline media|URL credentials/i);
+    expect(model.completeJson).not.toHaveBeenCalled();
+    // No local source fields, reviewed answer key, or question IDs are changed.
+    expect(source.correctKey).toBe("A");
+    expect(source.id).toBe("q1");
+  });
+
+  it("keeps ordinary clinical slash terms and public HTTPS citations eligible for AI drafts", async () => {
+    const source = question({
+      stem: "For the CD4/CD8 ratio in MHC I/II signaling, which arterial layer contains smooth muscle?",
+      topic: "MHC I/II mechanisms",
+      citation: "https://example.edu/teaching/arteries",
+    });
+    const model = provider({
+      explanation: "The tunica media contains smooth muscle that determines vessel caliber and peripheral resistance.",
+      choiceRationales: {
+        A: "The media contains concentric vascular smooth muscle.",
+        B: "The intima forms the endothelial inner lining.",
+        C: "The adventitia is predominantly supporting connective tissue.",
+      },
+      keywords: ["vascular smooth muscle"],
+    });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    const result = await draftQuestionExplanation(model, source);
+    expect(result.choiceRationales.B).toContain("endothelial");
+    expect(model.completeJson).toHaveBeenCalledOnce();
+  });
+
   it("invalidates drafts when source evidence or provenance changes without a timestamp bump", () => {
     const original = question({
       sourceDocumentId: "source-pdf-1",

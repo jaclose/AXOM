@@ -1,5 +1,6 @@
 import type { AIProvider } from "./types";
 import { questionPracticeReadiness } from "../questionFilters";
+import { hasPrivateDeviceCitation } from "../sharing/questionSetShare";
 import type { QuestionRecord } from "../questions";
 
 /**
@@ -41,13 +42,27 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
   ]);
 }
 
+/**
+ * Only stem, choice text and topic leave the device in the AI prompt.
+ * A question can be text-only yet contain a private file URI, inline media,
+ * or credentials in an embedded URL. Do not transmit those references to any
+ * provider (including when callers bypass the publish dialog).
+ *
+ * This is an outbound privacy check, not source/redistribution permission.
+ */
+function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
+  return [question.stem, question.topic, ...question.options.map(option => option.text)]
+    .some(text => hasPrivateDeviceCitation(text));
+}
+
 export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
   return questionPracticeReadiness(question) === "ready"
     && Boolean(question.correctKey)
     && !question.explanation?.trim()
     && Object.keys(question.choiceRationales ?? {}).length === 0
     && !question.attachments?.length
-    && !question.content?.assets.length;
+    && !question.content?.assets.length
+    && !containsPrivateDraftPromptReference(question);
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -64,6 +79,9 @@ export async function draftQuestionExplanation(
   }
   if (question.attachments?.length || question.content?.assets.length) {
     throw new Error("An image or media question needs its actual exhibit before a model can explain it.");
+  }
+  if (containsPrivateDraftPromptReference(question)) {
+    throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
   }
   if (question.explanation?.trim()) throw new Error("An existing explanation must never be replaced automatically.");
   if (Object.keys(question.choiceRationales ?? {}).length > 0) throw new Error("An existing choice rationale must never be replaced automatically.");
