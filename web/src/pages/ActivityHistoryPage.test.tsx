@@ -12,15 +12,16 @@ const fixture = vi.hoisted(() => ({
   exportWorkbook: vi.fn(),
   pushToast: vi.fn(),
   accountId: "account-A" as string | null,
+  identityEpoch: 0,
   link: "linked" as "linked" | "unlinked" | "linked-elsewhere",
-  accountSubscribers: new Set<(state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere" }) => void>(),
+  accountSubscribers: new Set<(state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere"; identityEpoch: number }) => void>(),
   beforeSubscribe: null as (() => void) | null,
 }));
 
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: {
-    getState: () => ({ user: fixture.accountId ? { id: fixture.accountId } : null, link: fixture.link }),
-    subscribe: (listener: (state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere" }) => void) => {
+    getState: () => ({ user: fixture.accountId ? { id: fixture.accountId } : null, link: fixture.link, identityEpoch: fixture.identityEpoch }),
+    subscribe: (listener: (state: { user: { id: string } | null; link: "linked" | "unlinked" | "linked-elsewhere"; identityEpoch: number }) => void) => {
       // A sign-in can finish during React commit before the listener is installed.
       const beforeSubscribe = fixture.beforeSubscribe;
       fixture.beforeSubscribe = null;
@@ -41,12 +42,14 @@ vi.mock("../lib/activityExport", () => ({ exportActivityWorkbook: fixture.export
 vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
 
 function switchAccount(accountId: string | null, link: typeof fixture.link = accountId ? "linked" : "unlinked") {
+  if (fixture.accountId !== accountId || fixture.link !== link) fixture.identityEpoch += 1;
   fixture.accountId = accountId;
   fixture.link = link;
-  for (const listener of fixture.accountSubscribers) listener({ user: accountId ? { id: accountId } : null, link });
+  for (const listener of fixture.accountSubscribers) listener({ user: accountId ? { id: accountId } : null, link, identityEpoch: fixture.identityEpoch });
 }
 
 beforeEach(() => {
+  fixture.identityEpoch = 0;
   fixture.accountId = "account-A";
   fixture.link = "linked";
   fixture.accountSubscribers.clear();
@@ -98,6 +101,59 @@ describe("Activity History workbook download feedback", () => {
     expect(fixture.pushToast).toHaveBeenCalledTimes(1);
   });
 
+
+  it("redacts A history after a presubscription A→B→A transition using the session epoch", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [{ ...originalLogs[0], note: "private-account-ABA-epoch" }];
+    fixture.beforeSubscribe = () => {
+      switchAccount("account-B");
+      switchAccount("account-A");
+    };
+    try {
+      render(<ActivityHistoryPage />);
+      expect(fixture.identityEpoch).toBe(2);
+      expect(fixture.accountId).toBe("account-A");
+      expect(screen.getByText("Activity History session changed")).toBeTruthy();
+      expect(screen.queryByText(/private-account-ABA-epoch/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+      expect(fixture.exportWorkbook).not.toHaveBeenCalled();
+      expect(fixture.logs).toHaveLength(1);
+    } finally {
+      fixture.logs = originalLogs;
+      fixture.beforeSubscribe = null;
+    }
+  });
+
+  it("redacts A history after a presubscription linked→unlinked→linked ABA", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [{ ...originalLogs[0], note: "private-link-ABA-epoch" }];
+    fixture.beforeSubscribe = () => {
+      switchAccount("account-A", "unlinked");
+      switchAccount("account-A", "linked");
+    };
+    try {
+      render(<ActivityHistoryPage />);
+      expect(fixture.identityEpoch).toBe(2);
+      expect(fixture.accountId).toBe("account-A");
+      expect(fixture.link).toBe("linked");
+      expect(screen.getByText("Activity History session changed")).toBeTruthy();
+      expect(screen.queryByText(/private-link-ABA-epoch/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+      expect(fixture.exportWorkbook).not.toHaveBeenCalled();
+      expect(fixture.logs).toHaveLength(1);
+    } finally {
+      fixture.logs = originalLogs;
+      fixture.beforeSubscribe = null;
+    }
+  });
+
+  it("does not revoke unchanged account and device-link updates", () => {
+    render(<ActivityHistoryPage />);
+    act(() => { switchAccount("account-A", "linked"); });
+    expect(fixture.identityEpoch).toBe(0);
+    expect(screen.queryByText("Activity History session changed")).toBeNull();
+    expect(screen.getByRole("button", { name: /Export .xlsx/i })).toBeTruthy();
+  });
 
   it("redacts an account change between initial render and account subscription", () => {
     const originalLogs = fixture.logs;

@@ -10,6 +10,11 @@ import { prettyDate } from "../lib/scoring";
 import type { StudyLog } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
 
+// Platform #727 supplies an in-memory identity/link epoch. Until FORGE combines
+// that dependency, retained identity/link comparisons remain the legacy fallback.
+type AccountWithIdentityEpoch = ReturnType<typeof useAccount.getState> & { identityEpoch?: number };
+const currentAccount = (): AccountWithIdentityEpoch => useAccount.getState() as AccountWithIdentityEpoch;
+
 export function ActivityHistoryPage() {
   const logs = useStore((s) => s.logs);
   const [type, setType] = useState<string | null>(null);
@@ -27,6 +32,9 @@ export function ActivityHistoryPage() {
   // Track intermediate transitions too: comparing the current ID alone misses A → B → A.
   const mountedAccountId = useRef(useAccount.getState().user?.id ?? null);
   const mountedDeviceLink = useRef(useAccount.getState().link);
+  // A→B→A or linked→unlinked→linked may happen before subscription; final-value
+  // checks alone cannot see those transitions. Store epoch is owned by Platform.
+  const mountedIdentityEpoch = useRef(currentAccount().identityEpoch);
   // Treat device-link changes as a context switch, even if the user ID stays the same.
   const switchedAccount = useRef(false);
   const unmounted = useRef(false);
@@ -37,7 +45,9 @@ export function ActivityHistoryPage() {
   useLayoutEffect(() => {
     unmounted.current = false;
     const revokeIfChanged = (state: ReturnType<typeof useAccount.getState>) => {
-      if ((state.user?.id ?? null) !== mountedAccountId.current || state.link !== mountedDeviceLink.current) {
+      if ((state.user?.id ?? null) !== mountedAccountId.current || state.link !== mountedDeviceLink.current
+        || (mountedIdentityEpoch.current !== undefined
+          && (state as AccountWithIdentityEpoch).identityEpoch !== mountedIdentityEpoch.current)) {
         // Remember keyboard focus before the control disappears from the DOM.
         if (historyRoot.current?.contains(document.activeElement)) focusNoticeOnRevoke.current = true;
         switchedAccount.current = true;
@@ -64,9 +74,13 @@ export function ActivityHistoryPage() {
       historyRoot.current?.focus();
     }
   }, [deviceHistoryRevealed, viewRevoked]);
-  const accountIsStale = () => unmounted.current || switchedAccount.current
-    || (useAccount.getState().user?.id ?? null) !== mountedAccountId.current
-    || useAccount.getState().link !== mountedDeviceLink.current;
+  const accountIsStale = () => {
+    const account = currentAccount();
+    return unmounted.current || switchedAccount.current
+      || (account.user?.id ?? null) !== mountedAccountId.current
+      || account.link !== mountedDeviceLink.current
+      || (mountedIdentityEpoch.current !== undefined && account.identityEpoch !== mountedIdentityEpoch.current);
+  };
   const assertCurrentAccount = () => {
     if (accountIsStale()) throw new Error("Activity export canceled because the account or device link changed.");
   };
