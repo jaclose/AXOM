@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ operation: vi.fn(), rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ operation: vi.fn(), rpc: vi.fn(), assertCurrent: vi.fn() }));
 vi.mock("../account/supabase", () => ({ accountOperationClient: mocks.operation }));
 vi.mock("../store", () => ({ useStore: { getState: vi.fn() } }));
 vi.mock("./contentReferences", () => ({ academicBindings: vi.fn() }));
@@ -11,7 +11,7 @@ vi.mock("./explanationReview", () => ({ attestAcademicExplanations: vi.fn() }));
 import { isAcademicReviewer } from "./client";
 
 function currentAccount(id: string) {
-  mocks.operation.mockResolvedValue({ userId: id, client: { rpc: mocks.rpc } });
+  mocks.operation.mockResolvedValue({ userId: id, client: { rpc: mocks.rpc }, assertCurrent: mocks.assertCurrent });
 }
 
 function pending<T>() {
@@ -22,6 +22,8 @@ function pending<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.assertCurrent.mockReset();
+  mocks.assertCurrent.mockResolvedValue(undefined);
 });
 
 describe("academic reviewer permission refresh", () => {
@@ -78,7 +80,7 @@ describe("academic reviewer permission refresh", () => {
   });
 
   it("does not authorize a stale account identity or cache its failure permanently", async () => {
-    mocks.operation.mockResolvedValueOnce({ userId: "other-account", client: { rpc: mocks.rpc } })
+    mocks.operation.mockResolvedValueOnce({ userId: "other-account", client: { rpc: mocks.rpc }, assertCurrent: mocks.assertCurrent })
       .mockResolvedValueOnce({ userId: "r87-current-account", client: { rpc: mocks.rpc } });
     mocks.rpc.mockResolvedValue({ data: true, error: null });
 
@@ -86,5 +88,30 @@ describe("academic reviewer permission refresh", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(await isAcademicReviewer("r87-current-account")).toBe(true);
     expect(mocks.rpc).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ["account change", "The signed-in account changed."],
+    ["token refresh", "The account session was refreshed."],
+  ])("does not surface an in-flight reviewer grant after %s", async (scenario, reason) => {
+    currentAccount(`r88-${scenario.replaceAll(" ", "-")}`);
+    const first = pending<{ data: boolean; error: null }>();
+    mocks.rpc.mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce({ data: true, error: null });
+
+    const check = isAcademicReviewer(`r88-${scenario.replaceAll(" ", "-")}`);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+
+    // The scoped request was originally authorized. The session changes
+    // before its response resolves; a stale true must never reach UI state.
+    mocks.assertCurrent.mockRejectedValueOnce(new Error(reason));
+    first.resolve({ data: true, error: null });
+    expect(await check).toBe(false);
+    expect(mocks.assertCurrent).toHaveBeenCalledOnce();
+
+    // A subsequent explicit check uses a new authorization operation.
+    expect(await isAcademicReviewer(`r88-${scenario.replaceAll(" ", "-")}`)).toBe(true);
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
   });
 });
