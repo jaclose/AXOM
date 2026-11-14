@@ -9,8 +9,10 @@ const HEADER = {
   alignment: { horizontal: "center", vertical: "center", wrapText: true },
 };
 
-export async function exportActivityWorkbook(logs: StudyLog[]) {
+export async function exportActivityWorkbook(logs: StudyLog[], assertCurrent?: () => void) {
   const XLSX = await import("xlsx-js-style");
+  // Lazy module loading crosses an async boundary. Do not serialize a previous account after it.
+  assertCurrent?.();
   const wb = XLSX.utils.book_new();
   wb.Props = { Title: "AXOM Activity History", Author: "AXOM", CreatedDate: new Date() };
 
@@ -23,6 +25,8 @@ export async function exportActivityWorkbook(logs: StudyLog[]) {
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
+  // Last possible check before the synchronous download side effect.
+  assertCurrent?.();
   XLSX.writeFile(wb, `axom-activity-history-${stamp}.xlsx`);
 }
 
