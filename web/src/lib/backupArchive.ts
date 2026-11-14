@@ -50,6 +50,51 @@ export function assertRestorableZipEntryCounts(mediaCount: number, originalCount
     0,
   );
 }
+/** When reference metadata could exceed the ZIP entry ceiling, inspect actual
+ * available files before retaining binary data in JSZip. The callbacks verify
+ * one candidate at a time and return its byte length, or null if unavailable.
+ * A malformed/missing file is still eligible for an honest partial rescue.
+ *
+ * This second pass is deliberately conditional: ordinary backups do not pay
+ * for duplicate media reads, while a provably oversized complete backup
+ * fails before allocating nearly 2 GiB of retained ZIP binary members.
+ * Recheck the real budget when admitting each member because storage may
+ * change between inspection and export. */
+export async function preflightRestorableZipCandidateBudget(
+  mediaCandidates: number,
+  originalCandidates: number,
+  probeMediaBytes: (index: number) => Promise<number | null>,
+  probeOriginalBytes: (index: number) => Promise<number | null>,
+): Promise<void> {
+  if (!Number.isSafeInteger(mediaCandidates) || mediaCandidates < 0
+    || !Number.isSafeInteger(originalCandidates) || originalCandidates < 0) {
+    throw new ZipExportBudgetExceeded("Invalid ZIP backup candidate count. No backup was downloaded or certified.");
+  }
+  const worstCaseEntries = 1 + mediaCandidates + originalCandidates
+    + Number(mediaCandidates > 0) + Number(originalCandidates > 0);
+  if (worstCaseEntries <= MAX_ZIP_BACKUP_ENTRIES) return;
+
+  let admittedMedia = 0, admittedOriginals = 0, expandedBytes = 0;
+  const record = (bytes: number, isMedia: boolean) => {
+    if (!Number.isSafeInteger(bytes) || bytes < 0) {
+      throw new ZipExportBudgetExceeded("Invalid ZIP backup candidate size. No backup was downloaded or certified.");
+    }
+    if (isMedia) admittedMedia += 1;
+    else admittedOriginals += 1;
+    assertRestorableZipEntryCounts(admittedMedia, admittedOriginals);
+    assertRestorableZipBudget(0, expandedBytes + bytes);
+    expandedBytes += bytes;
+  };
+  for (let i = 0; i < mediaCandidates; i++) {
+    const size = await probeMediaBytes(i);
+    if (size !== null) record(size, true);
+  }
+  for (let i = 0; i < originalCandidates; i++) {
+    const size = await probeOriginalBytes(i);
+    if (size !== null) record(size, false);
+  }
+}
+
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
@@ -299,6 +344,30 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   options = { ...options, scope };
   const referencedMedia = mediaReferences(references);
   const eligibleOriginals = backupOriginalDocuments(documents);
+  // Candidate metadata cannot prove that an image is readable. Only when the
+  // entry ceiling could be breached, validate/count real candidates without
+  // retaining their bytes in JSZip. Preserve missing-file partial rescue.
+  await preflightRestorableZipCandidateBudget(
+    referencedMedia.length, eligibleOriginals.length,
+    async index => {
+      const { metadata, conflicting } = referencedMedia[index];
+      if (conflicting) return null;
+      try {
+        const { bytes } = await verifiedMediaBlob(metadata, options);
+        return bytes.byteLength;
+      } catch { return null; }
+    },
+    async index => {
+      const document = eligibleOriginals[index];
+      try {
+        const blob = await readSourceOriginal(document.id, document.checksum, options);
+        return blob && blob.size <= MAX_ORIGINAL_BYTES ? blob.size : null;
+      } catch { return null; }
+    },
+  );
+  if (!isQuestionAttachmentScopeCurrent(scope)) {
+    throw new Error("The account changed during export. Start a new export from the current workspace.");
+  }
   // Speculative candidate counts cannot reject a partial rescue: unavailable
   // files are explicitly reported and omitted. Budget each admitted ZIP member
   // after verifying its bytes, before writing the entry or claiming success.
