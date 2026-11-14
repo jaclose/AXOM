@@ -197,6 +197,67 @@ describe("Community Question Set Library", () => {
     expect(mock.commit).toHaveBeenCalledOnce();
   });
 
+  it("hands keyboard focus to the first newly revealed question without opening its answer", async () => {
+    const user = userEvent.setup();
+    const many = {
+      ...snapshot,
+      orderedQuestionIds: Array.from({ length: 5 }, (_, i) => `shared-question-${i + 1}`),
+      questions: Array.from({ length: 5 }, (_, i) => ({
+        ...snapshot.questions[0],
+        id: `shared-question-${i + 1}`,
+        stem: `Focus handoff question ${i + 1}?`,
+      })),
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: many, contentDigest: "c".repeat(64),
+      status: "approved", reviewRevision: 3,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    await user.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Focus handoff question 3?");
+    const reveal = screen.getByRole("button", { name: "Show next 2 questions" });
+    await user.click(reveal);
+
+    // Newly inserted questions precede the old reveal button. Moving focus
+    // avoids stranding keyboard and screen-reader users after the new batch.
+    const newlyRevealed = screen.getByText("Focus handoff question 4?").closest("li");
+    expect(document.activeElement).toBe(newlyRevealed);
+    expect(newlyRevealed?.getAttribute("tabindex")).toBe("-1");
+    const disclosures = screen.getAllByText("Reveal recorded answer and teaching notes");
+    expect(disclosures).toHaveLength(5);
+    expect(disclosures[3].closest("details")?.open).toBe(false);
+    await user.tab();
+    expect(document.activeElement).toBe(disclosures[3]);
+    expect(mock.authorize).not.toHaveBeenCalled();
+    expect(mock.commit).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale reveal click after an account switch", async () => {
+    const many = {
+      ...snapshot,
+      orderedQuestionIds: Array.from({ length: 4 }, (_, i) => `shared-question-${i + 1}`),
+      questions: Array.from({ length: 4 }, (_, i) => ({
+        ...snapshot.questions[0],
+        id: `shared-question-${i + 1}`,
+        stem: `Session-scoped question ${i + 1}?`,
+      })),
+    };
+    mock.preview.mockResolvedValueOnce({
+      id: summary.id, snapshot: many, contentDigest: "d".repeat(64),
+      status: "approved", reviewRevision: 3,
+    });
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByText("Session-scoped question 3?");
+    const oldReveal = screen.getByRole("button", { name: "Show next 1 questions" });
+    // A click can arrive before React commits account B. The old closure
+    // must not mutate a private A preview during that window.
+    mock.accountId = "account-2";
+    fireEvent.click(oldReveal);
+    expect(screen.queryByText("Session-scoped question 4?")).toBeNull();
+    expect(mock.commit).not.toHaveBeenCalled();
+  });
+
   it("inspects all questions in bounded batches while teaching disclosures remain closed", async () => {
     const many = {
       ...snapshot,
