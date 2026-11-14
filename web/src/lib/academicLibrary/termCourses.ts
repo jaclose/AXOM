@@ -21,6 +21,9 @@ export async function listTermCourses(term: string, accountId: string,
   };
   const courses: AcademicCourse[] = [];
   const seen = new Set<string>();
+  // An academic download receipt is keyed by revision, so a second collection
+  // cannot claim the same revision without aliasing the first local receipt.
+  const seenRevisions = new Set<string>();
   let cursor: string | undefined;
   let previousPageCursor: AcademicCourse | undefined;
   try {
@@ -52,11 +55,13 @@ export async function listTermCourses(term: string, accountId: string,
           throw new Error("The term catalog changed while loading. Retry to read the complete term.");
         }
       }
-      if (page.some(course => termIdentity(course.term) !== termIdentity(term) || seen.has(course.id))
-        || new Set(page.map(course => course.id)).size !== page.length) {
+      if (page.some(course => termIdentity(course.term) !== termIdentity(term)
+        || seen.has(course.id) || seenRevisions.has(course.current_revision_id))
+        || new Set(page.map(course => course.id)).size !== page.length
+        || new Set(page.map(course => course.current_revision_id)).size !== page.length) {
         throw new Error("The term catalog changed while loading. Retry to read the complete term.");
       }
-      for (const course of page) { seen.add(course.id); courses.push(course); }
+      for (const course of page) { seen.add(course.id); seenRevisions.add(course.current_revision_id); courses.push(course); }
       if (page.length < 24) return courses;
       previousPageCursor = page.at(-1)!;
       cursor = previousPageCursor.id;

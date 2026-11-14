@@ -62,6 +62,24 @@ describe("complete term catalog", () => {
     await expect(listTermCourses("Term 1", "account")).rejects.toThrow(/catalog changed while loading/);
     expect(mocks.list).toHaveBeenCalledTimes(2);
   });
+  it("rejects two distinct catalog collections sharing one revision in a single page", async () => {
+    // Local academic receipts are keyed by revision, not collection. Two
+    // distinct catalog identities with the same revision could overwrite one
+    // another's receipt and make a term download appear complete.
+    mocks.list.mockResolvedValueOnce([course(0), { ...course(1), current_revision_id: "revision-0" }]);
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
+    expect(mocks.list).toHaveBeenCalledOnce();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it("rejects a repeated revision from a later cursor page while preserving valid pagination", async () => {
+    const first = Array.from({ length: 24 }, (_, index) => course(index));
+    mocks.list.mockResolvedValueOnce(first)
+      .mockResolvedValueOnce([{ ...course(24), current_revision_id: "revision-7" }]);
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(mocks.lookup).toHaveBeenCalledExactlyOnceWith("course-23", "account");
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
   it("rejects repeated pages rather than looping or silently truncating", async () => {
     const first = Array.from({ length: 24 }, (_, index) => course(index));
     mocks.list.mockResolvedValue(first);
