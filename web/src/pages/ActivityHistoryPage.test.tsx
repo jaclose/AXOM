@@ -122,7 +122,7 @@ describe("Activity History workbook download feedback", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].textContent).toContain("All");
       fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
-      expect(fixture.exportWorkbook).toHaveBeenCalledWith([fixture.logs[0]]);
+      expect(fixture.exportWorkbook).toHaveBeenCalledWith([fixture.logs[0]], expect.any(Function));
 
       const showAll = screen.getByRole("option", { name: "All activity types" }) as HTMLOptionElement;
       fireEvent.change(typeSelect, { target: { value: showAll.value } });
