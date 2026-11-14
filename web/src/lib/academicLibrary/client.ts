@@ -134,9 +134,16 @@ export function isAcademicReviewer(accountId: string): Promise<boolean> {
   if (!accountId) return Promise.resolve(false);
   const pending = reviewerChecks.get(accountId);
   if (pending) return pending;
-  const check = academicClient(accountId)
-    .then(client => client.rpc("academic_is_reviewer"))
-    .then(({ data, error }) => !error && data === true, () => false);
+  const check = accountOperationClient()
+    .then(async operation => {
+      if (operation.userId !== accountId) return false;
+      const { data, error } = await operation.client.rpc("academic_is_reviewer");
+      // A scoped request can finish after sign-out, account switch or token
+      // rotation. Never let its stale approval re-enable reviewer UI controls.
+      await operation.assertCurrent();
+      return !error && data === true;
+    })
+    .catch(() => false);
   reviewerChecks.set(accountId, check);
   void check.then(() => {
     if (reviewerChecks.get(accountId) === check) reviewerChecks.delete(accountId);
