@@ -6,10 +6,10 @@ import { buildCurriculum, SGU_CURRICULUM } from "../../lib/curricula";
 import type { CourseBook } from "../../lib/bookshelf/courseBooks";
 import { CourseLibrary } from "./CourseLibrary";
 
-const mocks = vi.hoisted(() => ({ useStore: vi.fn(), connected: [] as unknown[] }));
+const mocks = vi.hoisted(() => ({ useStore: vi.fn(), connected: [] as unknown[], accountId: "owner" }));
 vi.mock("../../lib/store", () => ({ useStore: () => mocks.useStore() }));
 vi.mock("../../lib/account/accountStore", () => {
-  const account = { user: { id: "owner" } };
+  const account = { get user() { return { id: mocks.accountId }; } };
   // The term actions retain a canonical account scope while mounted. A
   // selector-only function is not a faithful mock of Zustand's bound store.
   return { useAccount: Object.assign(
@@ -48,6 +48,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/#tracker");
   HTMLElement.prototype.scrollIntoView = vi.fn();
   mocks.connected = [];
+  mocks.accountId = "owner";
   mocks.useStore.mockReturnValue(workspace());
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -143,23 +144,54 @@ it("scrolls the course surface without shifting the app shell", () => {
   expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
 });
 
-it("My Courses uses the complete collection-bound receipt, not just a shared revision document ID", () => {
+it("My Courses requires real receipt members and the current account for each collection", () => {
   const revision = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const first = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "A", module: "Module A",
     term: "Term 4", visibility: "shared", review_status: "approved", current_revision_id: revision,
     owned: false, ready_questions: 1, review_questions: 0 };
+  // Deliberately hostile catalog fixture: the second collection reuses the
+  // first revision. A reference belongs to a collection, not to a revision
+  // string or a different signed-in learner.
   const second = { ...first, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", title: "B", module: "Module B" };
   mocks.connected = [first, second];
   const rawText = JSON.stringify({ accountId: "owner", collectionId: first.id, revisionId: revision, status: "complete",
-    templateIds: [], documentIds: [], questionIds: [], setIds: [],
+    templateIds: ["template-1"], documentIds: ["source-1"], questionIds: ["question-1"], setIds: ["set-1"],
     bindings: { originals: [], sources: [], assets: [] } });
-  mocks.useStore.mockReturnValue({ ...workspace(), documents: [{
-    id: `academic-${revision}`, rawText, fileType: "axom-academic-reference", title: "Downloaded course reference",
-    fileName: "course-reference.json", uploadedAt: "2026-11-14", sizeBytes: rawText.length,
+  const document = (id: string, text = "", fileType = "text") => ({
+    id, rawText: text, fileType, title: id, fileName: id, uploadedAt: "2026-11-14", sizeBytes: text.length,
     tags: [], linkedQuestionSetIds: [], libraryOnly: true,
-  }] });
-  render(<CourseLibrary onClose={vi.fn()} onTemplate={vi.fn()} onOpen={vi.fn()} onCreate={vi.fn()} />);
-  fireEvent.click(screen.getByRole("button", { name: "My Courses" }));
+  });
+  const loaded = { ...workspace(),
+    documents: [document(`academic-${revision}`, rawText, "axom-academic-reference"),
+      document("source-1"), document("template-1")],
+    questions: [{ id: "question-1", stem: "Synthetic question", options: [
+      { key: "A", text: "One" }, { key: "B", text: "Two" }],
+      source: "imported", correctKey: "A", status: "unseen", tags: [], attempts: [],
+      createdAt: "2026-11-14", updatedAt: "2026-11-14" }],
+    questionSets: [{ id: "set-1", title: "Synthetic set", questionIds: ["question-1"],
+      sourceDocumentIds: ["source-1"], tags: [], aiEnhanced: false, parserWarnings: [], createdAt: "2026-11-14" }],
+  };
+  mocks.useStore.mockReturnValue(loaded);
+  const props = { onClose: vi.fn(), onTemplate: vi.fn(), onOpen: vi.fn(), onCreate: vi.fn() };
+  const { rerender } = render(<CourseLibrary {...props} />);
+  // Scope the selector to the collection switch: the header's My Courses
+  // back button intentionally has the same accessible name.
+  fireEvent.click(within(screen.getByRole("group", { name: "Course collection" })).getByRole("button", { name: "My Courses" }));
   expect(screen.getByRole("button", { name: "Preview Module A, Term 4" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Preview Module B, Term 4" })).toBeNull();
+
+  mocks.accountId = "other-account";
+  rerender(<CourseLibrary {...props} />);
+  expect(screen.queryByRole("button", { name: "Preview Module A, Term 4" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Preview Module B, Term 4" })).toBeNull();
+
+  mocks.accountId = "owner";
+  rerender(<CourseLibrary {...props} />);
+  expect(screen.getByRole("button", { name: "Preview Module A, Term 4" })).toBeTruthy();
+
+  // An intact receipt without its original question is not an installed
+  // course, even when the account and revision identity still match.
+  mocks.useStore.mockReturnValue({ ...loaded, questions: [] });
+  rerender(<CourseLibrary {...props} />);
+  expect(screen.queryByRole("button", { name: "Preview Module A, Term 4" })).toBeNull();
 });
