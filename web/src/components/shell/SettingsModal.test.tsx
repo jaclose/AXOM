@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "../../lib/brand";
 import { createLocalBackup, resetLocalBackupRuntimeForTests } from "../../lib/localBackup";
 import { makeSeed, SCHEMA_VERSION } from "../../lib/seed";
+import { setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
 import { useStore } from "../../lib/store";
 import { SettingsModal } from "./SettingsModal";
 
@@ -242,6 +243,32 @@ describe("Settings information architecture", () => {
     expect(within(status).getByText("Portable export requested")).toBeTruthy();
     expect(status.textContent).toMatch(/No export requested on this device/i);
     expect(status.textContent).toMatch(/not proof.*saved.*restored/i);
+  });
+
+  it("does not certify account A or B after a click-time identity switch", async () => {
+    const RealURL = URL;
+    class TestURL extends RealURL {
+      static createObjectURL = vi.fn(() => "blob:account-switch-export");
+      static revokeObjectURL = vi.fn();
+    }
+    vi.stubGlobal("URL", TestURL);
+    useStore.setState({ ...makeSeed(), questions: [], documents: [], deferredContent: undefined });
+    setQuestionAttachmentAccount("account-a");
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {
+      setQuestionAttachmentAccount("account-b");
+    });
+    try {
+      const user = userEvent.setup();
+      render(<SettingsModal onClose={() => {}} initialTab="backup" />);
+      await user.click(screen.getByRole("button", { name: /export complete backup/i }));
+      await waitFor(() => expect(screen.getByText(/AXOM could not confirm this export/i)).toBeTruthy());
+      expect(screen.getByText(/A browser download may already have started/i)).toBeTruthy();
+      expect(screen.getByText(/account changed during export/i)).toBeTruthy();
+      expect(within(screen.getByRole("region", { name: "Backup status" }))
+        .getByText("No export requested on this device")).toBeTruthy();
+    } finally {
+      setQuestionAttachmentAccount(undefined);
+    }
   });
 
   it("reports only a browser download request when the anchor click does not save a file", async () => {
