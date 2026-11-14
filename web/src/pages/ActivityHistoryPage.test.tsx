@@ -96,7 +96,7 @@ describe("Activity History workbook download feedback", () => {
       render(<ActivityHistoryPage />);
       expect(document.querySelectorAll(".activity-history-row")).toHaveLength(2);
       const typeSelect = screen.getByLabelText("Activity type");
-      const literalAll = screen.getByRole("option", { name: "All", exact: true }) as HTMLOptionElement;
+      const literalAll = screen.getByRole("option", { name: /^All$/ }) as HTMLOptionElement;
       fireEvent.change(typeSelect, { target: { value: literalAll.value } });
 
       const rows = [...document.querySelectorAll(".activity-history-row")];
