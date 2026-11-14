@@ -407,4 +407,17 @@ describe("term course actions", () => {
     expect(screen.queryByText(/private source label/i)).toBeNull();
   });
 
+  it("does not let a settled source callback overwrite the final term summary", async () => {
+    let report: ((message: string) => void) | undefined;
+    mocks.download.mockImplementationOnce(async (_entry: AcademicCourse, _account: string, progress: (message: string) => void) => {
+      report = progress;
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Download Term 5" }));
+    await screen.findByText("Download complete. 3 downloaded, 0 already on this device.");
+    await act(async () => { report?.("Old source callback after completion"); });
+    expect(screen.queryByText(/Old source callback after completion/)).toBeNull();
+    expect(screen.getByText("Download complete. 3 downloaded, 0 already on this device.")).toBeTruthy();
+  });
+
 });
