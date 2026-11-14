@@ -644,6 +644,10 @@
 .prepared-import-sources li span:last-child { color: var(--text-60); white-space: nowrap; }
 .prepared-import-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .prepared-import-footnote { font-size: var(--fs-xs, .75rem) !important; }
+.prepared-import-receipt { margin-top: 14px; padding: clamp(14px, 2vw, 20px); border: 1px solid var(--hairline); border-radius: var(--radius-lg, 14px); }
+.prepared-import-receipt h3 { font-size: var(--fs-md, 1rem); margin: 0 0 7px; }
+.prepared-import-receipt li { margin: 6px 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+.prepared-import-receipt ul { max-height: 190px; overflow-y: auto; padding-left: 20px; }
 @media (max-width: 600px) { .prepared-import-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prepared-import-actions > button { flex: 1 1 170px; } }
 .prepared-library details { margin-top: 14px; }
 .prepared-library summary { cursor: pointer; font-size: var(--fs-sm); }

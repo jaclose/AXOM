@@ -158,6 +158,44 @@ describe("PreparedLibrary import preview and consent", () => {
     expect(mocks.installLibrary).not.toHaveBeenCalled();
   });
 
+  it("shows an auditable installed result with actual ready count, declared holds and cloud status", async () => {
+    mocks.installLibrary.mockResolvedValueOnce({
+      status: "complete", warnings: [], templateIds: [], documentIds: ["doc"],
+      questionIds: ["ready-1", "ready-2"], setIds: ["set-1"],
+    });
+    render(<PreparedLibrary />);
+    fireEvent.change(screen.getByLabelText("Prepared library bundle"), {
+      target: { files: [new File(["synthetic"], "DERS-prepared.zip")] },
+    });
+    await screen.findByRole("region", { name: "Review selected import" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm installation on this device" }));
+    const receipt = await screen.findByRole("region", { name: "Latest import result" });
+    expect(receipt.textContent).toContain("DERS-prepared.zip");
+    expect(receipt.textContent).toContain("2");
+    expect(receipt.textContent).toMatch(/ready.*on this device/i);
+    expect(receipt.textContent).toMatch(/4.*held/i);
+    expect(receipt.textContent).toMatch(/cloud.*not confirmed/i);
+    expect(receipt.textContent).toMatch(/declared.*99/i);
+  });
+
+  it("retains all partial-install warnings instead of hiding them after three items", async () => {
+    mocks.installLibrary.mockResolvedValueOnce({
+      status: "partial", warnings: ["Source A failed", "Source B failed", "Source C failed", "Source D failed"],
+      templateIds: [], documentIds: [], questionIds: ["ready-1"], setIds: [],
+    });
+    render(<PreparedLibrary />);
+    fireEvent.change(screen.getByLabelText("Prepared library bundle"), {
+      target: { files: [new File(["synthetic"], "Needs-review.zip")] },
+    });
+    await screen.findByRole("region", { name: "Review selected import" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm installation on this device" }));
+    const receipt = await screen.findByRole("region", { name: "Latest import result" });
+    expect(receipt.textContent).toMatch(/partial/i);
+    expect(receipt.textContent).toContain("4 source warnings");
+    expect(receipt.textContent).toContain("Source D failed");
+    expect(screen.getByRole("region", { name: "Review selected import" })).toBeTruthy();
+  });
+
   it("cancels a selected ZIP without writing questions or documents", async () => {
     render(<PreparedLibrary />);
     fireEvent.change(screen.getByLabelText("Prepared library bundle"), {

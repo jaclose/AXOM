@@ -265,6 +265,16 @@ export function PreparedLibrary({ externalZip }: { externalZip?: File } = {}) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedImport, setSelectedImport] = useState<{ name: string; read: LibraryReader; summary: PreparedLibraryPreview }>();
+  const [lastReceipt, setLastReceipt] = useState<{
+    filename: string;
+    status: "complete" | "partial";
+    sources: number;
+    declaredReady: number;
+    declaredHeld: number;
+    readyOnDevice: number;
+    savedSetReferences: number;
+    warnings: string[];
+  }>();
   const installInProgress = useRef(false);
   const previewRequest = useRef(0);
   const [query, setQuery] = useState("");
@@ -300,7 +310,7 @@ export function PreparedLibrary({ externalZip }: { externalZip?: File } = {}) {
   useEffect(() => {
     if (externalZip) void stageImport(externalZip.name, () => zipLibraryReader(externalZip));
   }, [externalZip, stageImport]);
-  async function install(read: LibraryReader): Promise<boolean> {
+  async function install(read: LibraryReader, selection?: { name: string; summary: PreparedLibraryPreview }): Promise<boolean> {
     if (installInProgress.current) return false;
     installInProgress.current = true;
     setBusy(true); setError("");
@@ -310,6 +320,18 @@ export function PreparedLibrary({ externalZip }: { externalZip?: File } = {}) {
         lastProgress = progress;
         setMessage(progress);
       });
+      if (selection) {
+        setLastReceipt({
+          filename: selection.name,
+          status: result.status,
+          sources: selection.summary.sources,
+          declaredReady: selection.summary.potentialReady,
+          declaredHeld: selection.summary.heldForReview,
+          readyOnDevice: result.questionIds.length,
+          savedSetReferences: result.setIds.length,
+          warnings: result.warnings,
+        });
+      }
       if (result.status === "partial") {
         setError(`${result.questionIds.length} answer-ready question${result.questionIds.length === 1 ? " remains" : "s remain"} saved on this device. ${result.warnings.slice(0, 3).join(" ")}`);
         return false;
@@ -461,11 +483,27 @@ export function PreparedLibrary({ externalZip }: { externalZip?: File } = {}) {
       <div className="prepared-import-actions">
         <GButton disabled={busy} onClick={() => {
           const selection = selectedImport;
-          void install(selection.read).then(complete => { if (complete) setSelectedImport(undefined); });
+          void install(selection.read, selection).then(complete => { if (complete) setSelectedImport(undefined); });
         }}>Confirm installation on this device</GButton>
         <GButton disabled={busy} onClick={() => { previewRequest.current += 1; setSelectedImport(undefined); setMessage(""); setError(""); }}>Cancel selected import</GButton>
       </div>
       <p className="prepared-import-footnote">Local installation is not cloud synchronization or community publication. Keep the original ZIP until your account copy is verified.</p>
+    </section>}
+    {lastReceipt && <section className="prepared-import-receipt" role="region" aria-label="Latest import result">
+      <h3>{lastReceipt.status === "complete" ? "Completed locally" : "Partial local installation"}</h3>
+      <p><strong>{lastReceipt.filename}</strong></p>
+      <div className="prepared-import-metrics">
+        <div><strong>{lastReceipt.sources}</strong><span>Source records</span></div>
+        <div><strong>{lastReceipt.readyOnDevice}</strong><span>Ready on this device</span></div>
+        <div><strong>{lastReceipt.declaredHeld}</strong><span>Declared held for review</span></div>
+        <div><strong>{lastReceipt.savedSetReferences}</strong><span>Saved set references</span></div>
+      </div>
+      <p>Package declared {lastReceipt.declaredReady} potentially ready questions. The verified ready count includes existing matching questions and must not be interpreted as newly imported questions. Held answers remain excluded from scored practice.</p>
+      {lastReceipt.warnings.length > 0 && <details open>
+        <summary>{lastReceipt.warnings.length} source warnings</summary>
+        <ul>{lastReceipt.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+      </details>}
+      <p><strong>Cloud backup: not confirmed.</strong> This result verifies local installation only. Check the account sync status and complete a reload/readback before relying on cloud restoration.</p>
     </section>}
     {(busy || message) && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
