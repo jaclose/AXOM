@@ -341,13 +341,18 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     // The imported set still offers Practice, while Add is now disabled.
     const teachingSummary = preview.getByText("Reveal recorded answer and teaching notes");
     const topicSummary = preview.getByText("Reveal set topic tags");
+    const rightsSummary = preview.getByText("Reveal publication rights notice");
     const teachingDetails = teachingSummary.locator("..");
     const topicDetails = topicSummary.locator("..");
+    const rightsDetails = rightsSummary.locator("..");
     await expect(teachingSummary).toHaveAccessibleName("Reveal recorded answer and teaching notes for question 1");
     await expect(teachingSummary).toHaveAttribute("tabindex", "0");
     await expect(topicSummary).toHaveAttribute("tabindex", "0");
+    await expect(rightsSummary).toHaveAttribute("tabindex", "0");
     await expect(teachingDetails).not.toHaveAttribute("open", "");
     await expect(topicDetails).not.toHaveAttribute("open", "");
+    await expect(rightsDetails).not.toHaveAttribute("open", "");
+    await expect(preview.getByText(/Recorded snapshot notice:/)).toBeHidden();
     await expect(preview.getByText(/Submitted answer: B/)).toBeHidden();
     await expect(preview.getByText("Source: Synthetic review fixture, page 1")).toBeHidden();
 
@@ -358,6 +363,17 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
     await expect(teachingDetails).toHaveAttribute("open", "");
     await expect(preview.getByText(/Submitted answer: B/)).toBeVisible();
     await expect(preview.getByText("Source: Synthetic review fixture, page 1")).toBeVisible();
+    // The rights disclosure sits between teaching notes and topic tags in
+    // keyboard order. It was introduced after the earlier browser expectation;
+    // skipping it falsely fails this otherwise successful SQL-backed journey.
+    await other.keyboard.press("Shift+Tab");
+    await expect(rightsSummary).toBeFocused();
+    await other.keyboard.press("Enter");
+    await expect(rightsDetails).toHaveAttribute("open", "");
+    await expect(preview.getByText(/Recorded snapshot notice:/)).toBeVisible();
+    await expect(preview.getByText(/not proof of a redistribution license/)).toBeVisible();
+    await other.keyboard.press("Space");
+    await expect(rightsDetails).not.toHaveAttribute("open", "");
     await other.keyboard.press("Shift+Tab");
     await expect(topicSummary).toBeFocused();
     await other.keyboard.press("Space");

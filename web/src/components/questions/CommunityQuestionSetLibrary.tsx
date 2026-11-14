@@ -489,7 +489,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             <p>{topicTags(activePreview.snapshot.tags).join(" · ") || "No topic tags"}</p>
           </details>
           <details className="qsl-preview-teaching">
-            <summary>Reveal publication rights notice</summary>
+            <summary tabIndex={0}>Reveal publication rights notice</summary>
             <p>Recorded snapshot notice: {activePreview.snapshot.copyrightNotice}</p>
             <p className="sub">This notice is retained with the reviewed Question Set, but is not proof of a redistribution license or permission to reuse third-party images. Verify rights against the original source before redistribution.</p>
           </details>
