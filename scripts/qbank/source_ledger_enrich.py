@@ -447,7 +447,7 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
                 6 if first.get("module") else 0,
                 4 if first.get("week") else 0,
                 3 if first.get("answer_variant") == "answered_version" else 0,
-                3 if first.get("file_size",0) <= 10*1048576 else 0,
+                3 if type(first.get("file_size")) is int and 0 <= first["file_size"] <= 10*1048576 else 0,
                 1 if first.get("source_sha256") else 0,
             ])
             descriptor.update(score=score, academic_term=first.get("academic_term"),
@@ -455,14 +455,32 @@ def ordered_import_batches(canonical_jobs, pairs, rows):
             scored.append(descriptor)
         else: triage.append(descriptor)
     scored.sort(key=lambda a:(-a["score"],a["source_path"]))
+    # Describe only current canonical jobs, never fixed historical inventory or
+    # question totals inferred from unreviewed file headings. The paired-file
+    # candidate count is a relationship count, not an additional question count.
+    high_signal, deferred = scored[:120], scored[120:]
+    def job_label(count, singular):
+        return f"{count} {singular} job" + ("" if count == 1 else "s")
     return dict(
       processing_order=[
-        dict(id="B0", description="Five distinct native GOER AXOM packages. Preserve existing asset paths and review answer evidence.", jobs=batch0),
-        dict(id="B1", description="Thirteen structured raw TXT banks; 195 detected numbered questions with answer labels, not independently verified.", jobs=batch1),
-        dict(id="B2", description=f"{len(candidate_pairs)} proposed question-only/answered PDF or workbook pair relationships; compare every numbered stem before associating any answer.", jobs=candidate_pairs),
-        dict(id="B3", description="First 120 high-signal source PDFs/Office files by explicit academic evidence, prioritizing assessed questions.", jobs=scored[:120]),
-        dict(id="B4", description="Remaining PDF/Office source candidates; use full canonical queue for eventual processing.", job_indices=[x["queue_index"] for x in scored[120:]]),
-        dict(id="B5", description="Ambiguous source files and held answer-pair relationships require manual provenance and parser review.", jobs=triage, pair_review_queue=held_pairs),
+        dict(id="B0", description=job_label(len(batch0), "native AXOM package")
+             + "; preserve existing asset paths and review answer evidence.",
+             job_count=len(batch0), jobs=batch0),
+        dict(id="B1", description=job_label(len(batch1), "structured raw TXT bank")
+             + "; headings and answer labels are unverified extraction hints, not approved questions.",
+             job_count=len(batch1), jobs=batch1),
+        dict(id="B2", description=f"{len(candidate_pairs)} proposed question-only/answered PDF or workbook pair relationships; compare every numbered stem before associating any answer.",
+             pair_count=len(candidate_pairs), jobs=candidate_pairs),
+        dict(id="B3", description=job_label(len(high_signal), "high-signal PDF/Office source")
+             + " ordered by available academic evidence; no answer-key approval inferred.",
+             job_count=len(high_signal), jobs=high_signal),
+        dict(id="B4", description=job_label(len(deferred), "remaining PDF/Office source")
+             + "; use the full canonical queue for eventual processing.",
+             job_count=len(deferred), job_indices=[x["queue_index"] for x in deferred]),
+        dict(id="B5", description=job_label(len(triage), "triage source")
+             + f" and {len(held_pairs)} held answer-pair relationships need provenance review.",
+             job_count=len(triage), held_pair_count=len(held_pairs),
+             jobs=triage, pair_review_queue=held_pairs),
       ],
       full_queue="agent-2-import-inputs-deduplicated.json",
       counting_policy="Batch pair items may overlap B3/B4 file jobs; never sum batch job counts into collection totals.",

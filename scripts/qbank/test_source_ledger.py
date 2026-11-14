@@ -1720,6 +1720,55 @@ class SourceLedgerTests(unittest.TestCase):
         self.assertIsNone(item["unresolved"])
         self.assertEqual(len(item["scope_references"]), 2)
 
+    def test_import_batch_counts_and_labels_are_input_derived(self):
+        # A fresh or partial inventory must not inherit a historical five
+        # native packages / thirteen TXT banks / 195 question headings.
+        empty = enriched.ordered_import_batches([], [], [])
+        batches = empty["processing_order"]
+        self.assertEqual([b["job_count"] for b in batches if "job_count" in b],
+                         [0, 0, 0, 0, 0])
+        self.assertIn("0 native AXOM package jobs", batches[0]["description"])
+        self.assertIn("0 structured raw TXT bank jobs", batches[1]["description"])
+        self.assertNotIn("195", repr(batches))
+        self.assertNotIn("First 120", repr(batches))
+
+        def job(kind, key):
+            return dict(canonical_input_key=key, input_mode=kind, source_path="/synthetic/" + key,
+                        source_ids=[], expected_questions=None, status="queued_for_review")
+        jobs = [job("native_package_folder", "native"),
+                job("tagged_raw_text", "txt"),
+                job("pdf_original_extract_with_review", "pdf")]
+        result = enriched.ordered_import_batches(jobs, [], [])
+        by_id = {b["id"]: b for b in result["processing_order"]}
+        self.assertEqual([by_id[k]["job_count"] for k in ("B0", "B1", "B3", "B4", "B5")],
+                         [1, 1, 1, 0, 0])
+        self.assertIn("1 native AXOM package job", by_id["B0"]["description"])
+        self.assertIn("1 structured raw TXT bank job", by_id["B1"]["description"])
+        self.assertIn("1 high-signal PDF/Office source job", by_id["B3"]["description"])
+        self.assertIn("0 remaining PDF/Office source jobs", by_id["B4"]["description"])
+        self.assertEqual(by_id["B2"]["pair_count"], 0)
+        self.assertEqual(by_id["B5"]["held_pair_count"], 0)
+        self.assertNotIn("195 detected", repr(result))
+
+    def test_import_batch_pdf_priority_requires_observed_nonnegative_file_size(self):
+        # Unknown, corrupt or bool size values cannot gain the small-file
+        # preference; a real scanned positive byte count still can.
+        job = dict(canonical_input_key="file:synthetic", input_mode="pdf_original_extract_with_review",
+                   source_path="/synthetic/PQ.pdf", source_ids=["src"], status="queued_for_review")
+        baseline = dict(source_id="src", document_type="structured_unknown",
+                        academic_term=None, module=None, week=None,
+                        answer_variant=None, source_sha256=None)
+        for invalid in (None, -1, "128", True):
+            with self.subTest(size=repr(invalid)):
+                row = dict(baseline)
+                if invalid is not None:
+                    row["file_size"] = invalid
+                result = enriched.ordered_import_batches([job], [], [row])
+                self.assertEqual(result["processing_order"][3]["jobs"][0]["score"], 0)
+        row = dict(baseline, file_size=1024)
+        result = enriched.ordered_import_batches([job], [], [row])
+        self.assertEqual(result["processing_order"][3]["jobs"][0]["score"], 3)
+
     def test_unresolved_raw_mirror_cannot_appear_ready_in_priority_batches(self):
         sha = digest("same source")
         rows = [dict(source_id=n, source_sha256=sha,
