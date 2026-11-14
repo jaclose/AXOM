@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActivityHistoryPage } from "./ActivityHistoryPage";
 
@@ -89,6 +89,52 @@ describe("Activity History workbook download feedback", () => {
     await waitFor(() => expect(fixture.exportWorkbook).toHaveBeenCalledTimes(2));
     expect(fixture.exportWorkbook.mock.calls[1][0]).toEqual([fixture.logs[0]]);
     expect(fixture.pushToast).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("revokes account A's rendered notes, stats, filters and export on A→B→A", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [
+      { ...originalLogs[0], note: "account-A-private-note" },
+      ...originalLogs.slice(1),
+    ] as typeof fixture.logs;
+    try {
+      render(<ActivityHistoryPage />);
+      expect(screen.getByText(/account-A-private-note/)).toBeTruthy();
+      expect(screen.getByLabelText("Activity type")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Export .xlsx/i })).toBeTruthy();
+
+      act(() => { switchAccount("account-B"); });
+      expect(screen.queryByText(/account-A-private-note/)).toBeNull();
+      expect(screen.queryByLabelText("Activity type")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+      expect(screen.getByText("Activity History session changed")).toBeTruthy();
+
+      act(() => { switchAccount("account-A"); });
+      expect(screen.queryByText(/account-A-private-note/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+      expect(fixture.logs).toHaveLength(2);
+    } finally {
+      fixture.logs = originalLogs;
+    }
+  });
+
+  it("revokes device-local notes on a link-only transition without losing logs", () => {
+    const originalLogs = fixture.logs;
+    fixture.logs = [{ ...originalLogs[0], note: "local-only-private-note" }] as typeof fixture.logs;
+    try {
+      render(<ActivityHistoryPage />);
+      expect(screen.getByText(/local-only-private-note/)).toBeTruthy();
+      act(() => { switchAccount("account-A", "unlinked"); });
+      expect(screen.queryByText(/local-only-private-note/)).toBeNull();
+      expect(screen.queryByLabelText("Activity type")).toBeNull();
+      act(() => { switchAccount("account-A", "linked"); });
+      expect(screen.queryByText(/local-only-private-note/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
+      expect(fixture.logs).toHaveLength(1);
+    } finally {
+      fixture.logs = originalLogs;
+    }
   });
 
   it("renders valid instants newest first, with deterministic ties and malformed timestamps last", () => {
@@ -204,12 +250,12 @@ describe("Activity History workbook download feedback", () => {
 
   it("refuses stale mounted export after account switch, while preserving local-only exports", async () => {
     render(<ActivityHistoryPage />);
-    switchAccount("account-B");
-    switchAccount("account-A");
-    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
-    await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Activity export canceled" }),
-    ));
+    act(() => {
+      switchAccount("account-B");
+      switchAccount("account-A");
+    });
+    expect(screen.getByText("Activity History session changed")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
     expect(fixture.exportWorkbook).not.toHaveBeenCalled();
     cleanup();
     fixture.pushToast.mockClear();
@@ -332,12 +378,10 @@ describe("Activity History workbook download feedback", () => {
 
   it("rejects a stale mounted History view after a same-account link transition before click", async () => {
     render(<ActivityHistoryPage />);
-    switchAccount("account-A", "unlinked");
     const consent = vi.spyOn(window, "confirm").mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
-    await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Activity export canceled", tone: "warn" }),
-    ));
+    act(() => { switchAccount("account-A", "unlinked"); });
+    expect(screen.getByText("Activity History session changed")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Export .xlsx/i })).toBeNull();
     expect(fixture.exportWorkbook).not.toHaveBeenCalled();
     expect(consent).not.toHaveBeenCalled();
   });
