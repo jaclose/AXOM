@@ -127,9 +127,18 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
       for (const [index, course] of pending.entries()) {
         scope.assertCurrent();
         if (stopped.current) break;
-        if (mounted.current) setMessage(`Downloading ${index + 1} of ${pending.length}: ${course.module}${course.title === course.module ? "" : ` (${course.title})`}`);
+        const courseProgress = `Downloading ${index + 1} of ${pending.length}: ${course.module}${course.title === course.module ? "" : ` (${course.title})`}`;
+        if (mounted.current) setMessage(courseProgress);
+        // The canonical installer exposes source-by-source integrity stages.
+        // Keep the ordinal visible, but never surface progress from a
+        // stopped, unmounted, superseded or settled learner download.
+        let acceptingProgress = true;
         try {
-          await downloadCourseQuestions(course, accountId, () => {}, scope);
+          await downloadCourseQuestions(course, accountId, phase => {
+            if (!acceptingProgress || !mounted.current || stopped.current || !phase.trim()) return;
+            try { scope.assertCurrent(); } catch { return; }
+            setMessage(`${courseProgress} · ${phase}`);
+          }, scope);
           scope.assertCurrent();
           completed += 1;
         } catch (cause) {
@@ -138,6 +147,10 @@ function ScopedTermCourseActions({ term, accountId, courses, disabled, onBusyCha
           failed += 1;
           if (mounted.current) setFailures(current => [...current, { id: course.id, title: course.title === course.module ? course.module : `${course.module}: ${course.title}`,
             reason: cause instanceof Error ? cause.message : "This course could not be downloaded. Try again when connected." }]);
+        } finally {
+          // Some readers may report after their own promise settles. Such a
+          // callback cannot overwrite the next course or final summary.
+          acceptingProgress = false;
         }
       }
       if (mounted.current) setMessage(`${stopped.current ? "Download stopped" : "Download complete"}. ${completed} downloaded, ${skipped} already on this device${failed ? `, ${failed} failed` : ""}.`);
