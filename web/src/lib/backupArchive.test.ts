@@ -6,7 +6,7 @@ import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { MAX_ZIP_BACKUP_BYTES, MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, assertRestorableZipEntryCounts, preflightRestorableZipCandidateBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { MAX_ZIP_BACKUP_BYTES, MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, assertRestorableZipEntryCounts, projectedZipSerializedOverhead, preflightRestorableZipCandidateBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
@@ -808,6 +808,75 @@ describe("portable binary media backup", () => {
       1,
     );
     expect(sparse?.mediaAvailable.filter(Boolean)).toHaveLength(1);
+  });
+
+  it("reserves streamed ZIP headers and directory records before near-2 GiB image retention", async () => {
+    const count = 256;
+    const bytesPerImage = 8 * 1024 * 1024 - 180;
+    const workspaceBytes = 20_000;
+    const expandedWithoutZipHeaders = count * bytesPerImage + workspaceBytes;
+    expect(expandedWithoutZipHeaders).toBeLessThan(MAX_ZIP_BACKUP_BYTES);
+    // Even the mandatory streamed members, WITHOUT ZIP64/extra fields,
+    // exceed the serialized ceiling. This is not merely a conservative hold.
+    const minimalHeaders = 22
+      + 30 + 46 + 2 * "workspace.json".length
+      + 30 + 46 + 2 * "media/".length
+      + Array.from({ length: count }, (_, index) =>
+        30 + 46 + 16 + 2 * `media/${index}`.length).reduce((a, b) => a + b, 0);
+    expect(expandedWithoutZipHeaders + minimalHeaders).toBeGreaterThan(MAX_ZIP_BACKUP_BYTES);
+    expect(expandedWithoutZipHeaders + projectedZipSerializedOverhead(count, 0))
+      .toBeGreaterThan(MAX_ZIP_BACKUP_BYTES);
+
+    // R91 accepted this expanded-size-positive boundary. The serialized ZIP
+    // cannot fit, so the first pass must fail before retaining binary files.
+    let inspected = 0;
+    await expect(preflightRestorableZipCandidateBudget(
+      count, 0,
+      async () => { inspected += 1; return bytesPerImage; },
+      async () => null,
+      MAX_ZIP_BACKUP_BYTES + 1,
+      workspaceBytes,
+    )).rejects.toThrow(/archive size/i);
+    expect(inspected).toBeGreaterThan(0);
+    expect(inspected).toBeLessThanOrEqual(count);
+
+    // A missing image must not consume either binary or header budget.
+    const sparse = await preflightRestorableZipCandidateBudget(
+      count, 0,
+      async index => index % 2 === 0 ? bytesPerImage : null,
+      async () => null,
+      MAX_ZIP_BACKUP_BYTES + 1,
+      workspaceBytes,
+    );
+    expect(sparse?.mediaAvailable.filter(Boolean)).toHaveLength(count / 2);
+    expect(sparse?.mediaAvailable[1]).toBe(false);
+  });
+
+  it("conservatively bounds a real STORE streaming ZIP envelope and preserves partial roundtrip", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    const workspaceJson = JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: 2, media: [], originals: [] });
+    zip.file("workspace.json", workspaceJson);
+    zip.file("media/0", PNG_BYTES);
+    zip.file("originals/0", "source");
+    const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true });
+    const expanded = new Blob([workspaceJson]).size + PNG_BYTES.length + new Blob(["source"]).size;
+    expect(blob.size - expanded).toBeGreaterThan(0);
+    expect(blob.size - expanded).toBeLessThanOrEqual(projectedZipSerializedOverhead(1, 1));
+
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const missing = { ...attachment, id: "missing", blobKey: "private-library:missing" };
+    const exported = await createMediaBackupArchive(
+      { recoveryMarker: "streamed-overhead-roundtrip" },
+      [{ id: "held-question", attachments: [attachment, missing] }],
+    );
+    expect(exported.attachmentCount).toBe(1);
+    expect(exported.missingBlobKeys).toEqual([missing.blobKey]);
+    const readback = await readPortableBackup(new File([exported.blob], "streamed-overhead-roundtrip.zip"));
+    expect(JSON.parse(readback.rawText)).toMatchObject({ recoveryMarker: "streamed-overhead-roundtrip" });
   });
 
   it("reserves projected media descriptors before near-2 GiB ZIP binary retention", async () => {
