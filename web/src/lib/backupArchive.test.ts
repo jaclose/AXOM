@@ -6,7 +6,7 @@ import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, assertRestorableZipEntryCounts, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
@@ -667,27 +667,58 @@ describe("portable binary media backup", () => {
     expect(await createMediaBackupArchive({ documents: [document] }, [], [document])).toMatchObject({ originalCount: 0, missingOriginalIds: [document.id] });
   });
 
-  it("rejects over-budget unique ZIP media before attempting to load missing image bytes", async () => {
-    // 29,999 media entries + media/ + workspace.json would exceed the reader's 30K cap.
+  it("counts only verified ZIP entries, including actual JSZip directories and workspace", () => {
+    // Metadata candidates are not admitted files: absent or invalid binary
+    // records must remain diagnosable in a recoverable partial backup.
+    expect(() => assertRestorableZipEntryCounts(MAX_ZIP_BACKUP_ENTRIES - 2, 0)).not.toThrow();
+    expect(() => assertRestorableZipEntryCounts(MAX_ZIP_BACKUP_ENTRIES - 1, 0))
+      .toThrow(/30,000 file entries/);
+    expect(() => assertRestorableZipEntryCounts(MAX_ZIP_BACKUP_ENTRIES - 4, 1)).not.toThrow();
+    expect(() => assertRestorableZipEntryCounts(MAX_ZIP_BACKUP_ENTRIES - 3, 1))
+      .toThrow(/30,000 file entries/);
+  });
+
+  it("preserves a restorable metadata-only ZIP with over-budget missing image references", async () => {
+    // R87 rejected the 29,999 *candidate keys* before discovering all were
+    // missing. Honest partial backups must report those gaps, not abort.
     const manyReferences = Array.from({ length: MAX_ZIP_BACKUP_ENTRIES - 1 }, (_, index) => ({
       id: `held-question-${index}`,
       attachments: [{ ...attachment, id: `figure-${index}`, blobKey: `private-library:figure-${index}` }],
     }));
-    await expect(createMediaBackupArchive({}, manyReferences)).rejects.toThrow("30,000 file entries");
-  });
+    const exported = await createMediaBackupArchive({ recoveryMarker: "offline-rescue" }, manyReferences);
+    expect(exported.attachmentCount).toBe(0);
+    expect(exported.missingBlobKeys).toHaveLength(MAX_ZIP_BACKUP_ENTRIES - 1);
+    expect(exported.missingBlobKeys[0]).toBe("private-library:figure-0");
+    expect(exported.missingBlobKeys.at(-1)).toBe(`private-library:figure-${MAX_ZIP_BACKUP_ENTRIES - 2}`);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    expect(Object.keys(zip.files)).toEqual(["workspace.json"]);
+    const portable = await readPortableBackup(new File([exported.blob], "partial-rescue.zip"));
+    expect(JSON.parse(portable.rawText)).toMatchObject({ recoveryMarker: "offline-rescue" });
+  }, 120_000);
 
-  it("preflights the additional originals/ folder before reading a doomed mixed archive", async () => {
-    // 29,997 unique images + one eligible original + two folders + workspace.json = 30,001.
-    const manyReferences = Array.from({ length: MAX_ZIP_BACKUP_ENTRIES - 3 }, (_, index) => ({
-      id: `held-question-${index}`,
-      attachments: [{ ...attachment, id: `figure-${index}`, blobKey: `private-library:figure-${index}` }],
-    }));
-    const document: SourceDocument = {
-      id: "candidate-original", title: "Candidate", fileName: "candidate.txt", fileType: "text/plain",
-      uploadedAt: "2026-11-13", rawText: "", sizeBytes: 1, checksum: "a".repeat(64),
-      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+  it("preserves valid images while reporting absent images and eligible originals", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const missing = { ...attachment, id: "missing-figure", blobKey: "private-library:missing-figure" };
+    const original: SourceDocument = {
+      id: "missing-original", title: "Missing original", fileName: "missing.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-13", rawText: "",
+      sizeBytes: 1, checksum: "a".repeat(64), tags: [],
+      linkedQuestionSetIds: [], libraryOnly: true,
     };
-    await expect(createMediaBackupArchive({}, manyReferences, [document])).rejects.toThrow("30,000 file entries");
+    const exported = await createMediaBackupArchive({}, [{ id: "held-question", attachments: [attachment, missing] }], [original]);
+    expect(exported).toMatchObject({
+      attachmentCount: 1, originalCount: 0,
+      missingBlobKeys: [missing.blobKey], missingOriginalIds: [original.id],
+    });
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    expect(Object.keys(zip.files)).toHaveLength(3); // workspace.json, media/, media/0
+    await expect(readPortableBackup(new File([exported.blob], "mixed-partial.zip")))
+      .resolves.toHaveProperty("restoreMedia");
   });
 
   it("does not count repeated question references as distinct ZIP media entries", async () => {
