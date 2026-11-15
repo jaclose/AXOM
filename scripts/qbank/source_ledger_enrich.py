@@ -527,6 +527,7 @@ def index_source_archives(rows, secure_open=None):
     safe opener remains held; a changed source must not supply filenames or
     candidate counts under the previous source ID.
     """
+    import stat
     import zipfile
     archives = []
     allowed = {".pdf", ".txt", ".docx", ".pptx", ".ppsx", ".xlsx", ".xls", ".csv", ".json"}
@@ -566,9 +567,16 @@ def index_source_archives(rows, secure_open=None):
                     infos = z.infolist()
                     archived["total_zip_entries"] = len(infos)
                     archived["reported_uncompressed_bytes"] = sum(i.file_size for i in infos)
-                    for i in infos:
-                        if i.is_dir():
-                            continue
+                    # Every candidate name must be unambiguous. ZipFile.open(name)
+                    # resolves duplicates by its name table, not the visually
+                    # selected central-directory row. Never promote either copy.
+                    supported = [i for i in infos if not i.is_dir()
+                                 and pathlib.Path(i.filename).suffix.casefold() in allowed]
+                    names = collections.Counter(i.filename for i in supported)
+                    partial = len(supported) > 10000
+                    if partial:
+                        archived["errors"].append("member_output_capped_at_10000")
+                    for i in supported[:10000]:
                         name = i.filename
                         # ZIP names use '/', but Windows traversal strings or
                         # drives must still be held if later tooling consumes
@@ -579,33 +587,54 @@ def index_source_archives(rows, secure_open=None):
                                   or ".." in pathlib.PurePosixPath(name).parts
                                   or ".." in win.parts)
                         ext = pathlib.Path(name).suffix.casefold()
-                        if ext not in allowed:
-                            continue
                         academic = bool(re.search(
                             r"(?i)(?:\bpq\b|practice.?q|imcq|e.?soft|examsoft|quiz|questions?|workbook|answer.?key)",
                             name))
+                        duplicate = names[name] > 1
+                        encrypted = bool(i.flag_bits & 1)
+                        symlink = i.create_system == 3 and stat.S_ISLNK(i.external_attr >> 16)
+                        hold = ("archive_member_directory_truncated" if partial else
+                                "unsafe_member_path" if unsafe else
+                                "symlink_member" if symlink else
+                                "encrypted_member" if encrypted else
+                                "duplicate_member_name" if duplicate else None)
+                        eligible = academic and hold is None
+                        # Preserve the historic virtual ID for unique members.
+                        # Ambiguous name+size+CRC identities need an offset bound
+                        # to the actual central-directory entry, even when held.
+                        identity = (str(p) + "|" + name + "|" + str(i.CRC) + "|" +
+                                    str(i.file_size))
+                        if duplicate:
+                            identity += "|" + str(i.header_offset)
                         candidate = dict(
-                            virtual_source_id=_sha(str(p) + "|" + name + "|" +
-                                                   str(i.CRC) + "|" + str(i.file_size))[:24],
+                            virtual_source_id=_sha(identity)[:24],
                             member_name=name, extension=ext, reported_byte_size=i.file_size,
                             zip_compressed_bytes=i.compress_size, crc32=f"{i.CRC:08x}",
-                            encrypted=bool(i.flag_bits & 1), unsafe_path=bool(unsafe),
-                            academic_question_hint=academic, content_sha256=None,
-                            status="metadata_only_not_extracted")
+                            encrypted=encrypted, unsafe_path=bool(unsafe),
+                            symlink_member=symlink, duplicate_member_name=duplicate,
+                            academic_question_hint=academic,
+                            question_candidate_eligible=eligible,
+                            question_candidate_hold=hold,
+                            content_sha256=None,
+                            status=("metadata_review_required" if hold else
+                                    "metadata_only_not_extracted"))
                         archived["entries"].append(candidate)
-                        if academic and not unsafe:
+                        if eligible:
                             archived["question_candidate_count"] += 1
-                        if len(archived["entries"]) >= 10000:
-                            archived["errors"].append("member_output_capped_at_10000")
-                            break
                 # A concurrent rewrite during ZIP directory reads cannot leave
                 # apparently accepted metadata attached to the old source SHA.
                 if (checksum(stream) != expected or
                         revision_signature(os.fstat(stream.fileno())) != before):
                     raise ValueError("archive_changed_during_central_directory_index")
-            r["archive_index_status"] = "central_directory_indexed"
+            archived["index_status"] = ("central_directory_partial_review_required"
+                                        if partial else "central_directory_indexed")
+            r["archive_index_status"] = archived["index_status"]
             r["archive_candidate_members"] = archived["question_candidate_count"]
             r["archive_total_entries"] = archived["total_zip_entries"]
+            if partial:
+                # Retain source identity and the bounded evidence; do not
+                # imply this incomplete list exhaustively enumerates candidates.
+                r.setdefault("unresolved_reason", "archive_member_output_cap")
         except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as err:
             # Never retain partial metadata from untrusted or changed sources.
             archived["entries"] = []
@@ -613,12 +642,35 @@ def index_source_archives(rows, secure_open=None):
             archived.pop("total_zip_entries", None)
             archived.pop("reported_uncompressed_bytes", None)
             archived["errors"].append(type(err).__name__ + ":" + str(err)[:100])
-            r["archive_index_status"] = "invalid_or_unreadable_archive"
+            archived["index_status"] = "invalid_or_unreadable_archive"
+            r["archive_index_status"] = archived["index_status"]
             r["archive_candidate_members"] = 0
             r.pop("archive_total_entries", None)
             r.setdefault("unresolved_reason", "archive_central_directory_unreadable")
         archives.append(archived)
     return archives
+
+
+def archive_metadata_metrics(archives):
+    """Archive counts refer only to hash-bound, *complete* metadata indexes.
+
+    A failed or capped archive is not a successfully indexed collection, and
+    filename hints are not verified question/answer/media coverage.
+    """
+    full = [a for a in archives if a.get("index_status") == "central_directory_indexed"]
+    return dict(
+        archives_attempted=len(archives),
+        archives_indexed=len(full),
+        archives_held_or_partial=len(archives) - len(full),
+        candidate_document_members=sum(len(a.get("entries", [])) for a in archives),
+        question_filename_hint_members=sum(a.get("question_candidate_count", 0)
+                                           for a in full),
+        held_question_hint_members=sum(
+            1 for a in archives for member in a.get("entries", [])
+            if member.get("academic_question_hint")
+            and not member.get("question_candidate_eligible")),
+        note="ZIP CRC32 and filenames are metadata hints, NOT SHA-256 content identities or extracted questions.",
+    )
 
 
 def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
