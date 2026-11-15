@@ -51,8 +51,12 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
  * cannot be responsibly explained without the missing exhibit. Keep these
  * held for manual source review, without inferring an image or answer.
  */
-const EXHIBIT_NOUN = String.raw`(?:figure|image|diagram|photo(?:graph)?|photomicrograph|micrograph|radiograph|x[- ]ray|(?:ct|mri)(?:\s+scan)?|slide|specimen)`;
+const EXHIBIT_NOUN = String.raw`(?:fig(?:ure)?\.?|image|diagram|photo(?:graph)?|photomicrograph|micrograph|radiograph|x[- ]ray|(?:ct|mri)(?:\s+scan)?|slide|specimen)`;
 const EXPLICIT_EXHIBIT_REFERENCE = new RegExp([
+  // Imported text may reference "Figure 2A", "Fig. 3", "Micrograph #4", or
+  // "slide 6" without a retained attachment. A key alone cannot establish
+  // what the unseen image shows; hold AI drafting for manual source review.
+  String.raw`\b${EXHIBIT_NOUN}\s*(?:no\.?\s*|#\s*)?\d{1,4}[a-z]?\b`,
   String.raw`\b${EXHIBIT_NOUN}\s+(?:above|below|attached|provided|shown|pictured)\b`,
   String.raw`\b(?:shown|depicted|pictured|displayed|illustrated)\s+(?:in|on)\s+(?:(?:the|this|an?|following|attached|provided)\s+){1,3}${EXHIBIT_NOUN}\b`,
   String.raw`\b(?:see|refer\s+to|examine)\s+(?:(?:the|this|an?|following|attached|provided)\s+){1,3}${EXHIBIT_NOUN}\b`,
