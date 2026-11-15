@@ -53,6 +53,49 @@ describe("review-gated explanation drafting", () => {
     expect(eligibleForExplanationDraft(question({ needsReview: true }))).toBe(false);
   });
 
+  it.each([
+    ["an image-origin record with a missing exhibit", { source: "image" }],
+    ["a screenshot-origin record with no retained exhibit", { source: "screenshot" }],
+    ["a referenced figure", { stem: "Which structure is shown in the following image?" }],
+    ["an explicit CT exhibit", { stem: "See the CT scan to identify the vascular abnormality." }],
+    ["a missing exhibit mentioned by a choice", { options: [
+      { key: "A", text: "Tunica media" },
+      { key: "B", text: "Refer to the diagram below" },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "holds %s instead of prompting a model to infer unseen clinical images", async (_label, patch) => {
+      const source = question(patch);
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source)).rejects.toThrow(/unavailable visual exhibit/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(source.correctKey).toBe("A");
+      expect(source.explanation).toBeUndefined();
+    },
+  );
+
+  it("still allows source-reviewed text-only descriptions of histology without an exhibit dependency", async () => {
+    const source = question({
+      stem: "A written description identifies smooth muscle in the arterial tunica media. Which layer is described?",
+      topic: "Histology of vessel walls",
+    });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    const model = provider({
+      explanation: "The tunica media consists of concentric smooth muscle layers that regulate vascular tone.",
+      choiceRationales: {
+        A: "The tunica media is the muscle-rich middle layer.",
+        B: "The tunica intima primarily contains endothelial lining.",
+        C: "The adventitia is the supportive outer connective tissue.",
+      },
+      keywords: ["vascular histology"],
+    });
+    const result = await draftQuestionExplanation(model, source);
+    expect(result.choiceRationales.B).toMatch(/endothelial/);
+    expect(model.completeJson).toHaveBeenCalledOnce();
+    expect(source.explanation).toBeUndefined();
+  });
+
   it("rejects fabricated keys, insufficient explanations and missing distractor rationales", async () => {
     const valid = question();
     await expect(draftQuestionExplanation(provider({
