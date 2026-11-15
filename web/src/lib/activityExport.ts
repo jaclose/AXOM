@@ -21,10 +21,16 @@ export async function exportActivityWorkbook(
   const wb = XLSX.utils.book_new();
   wb.Props = { Title: "AXOM Activity History", Author: "AXOM", CreatedDate: new Date() };
 
-  appendSheet(XLSX, wb, "Overview", overviewRows(logs), [14, 12, 12, 12]);
+  // Group once rather than rescanning every source log for each custom activity type.
+  const groupedByType = new Map<string, StudyLog[]>();
+  for (const log of logs) {
+    const group = groupedByType.get(log.type);
+    if (group) group.push(log);
+    else groupedByType.set(log.type, [log]);
+  }
+  const byType = [...groupedByType.keys()].sort();
+  appendSheet(XLSX, wb, "Overview", overviewRows(logs, byType, groupedByType), [14, 12, 12, 12]);
   appendSheet(XLSX, wb, "All Activity", detailRows(logs), [14, 20, 14, 12, 12, 42]);
-
-  const byType = [...new Set(logs.map((log) => log.type))].sort();
   // Summary tabs and normalized/truncated study types can share an Excel title.
   // Allocate unique case-insensitive names without merging or dropping any type.
   // Excel reserves "History" even when it is not already used by this workbook.
@@ -38,7 +44,7 @@ export async function exportActivityWorkbook(
       sheetName = `${sheetTitlePrefix(baseName, 31 - suffix.length)}${suffix}`;
     }
     usedSheetNames.add(sheetName.toLowerCase());
-    appendSheet(XLSX, wb, sheetName, detailRows(logs.filter((log) => log.type === type)), [14, 20, 14, 12, 12, 42]);
+    appendSheet(XLSX, wb, sheetName, detailRows(groupedByType.get(type) ?? []), [14, 20, 14, 12, 12, 42]);
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
@@ -49,10 +55,10 @@ export async function exportActivityWorkbook(
   else XLSX.writeFile(wb, filename);
 }
 
-function overviewRows(logs: StudyLog[]) {
+function overviewRows(logs: StudyLog[], byType: string[], groupedByType: Map<string, StudyLog[]>) {
   const rows: Array<Array<string | number>> = [["Type", "Events", "Minutes", "Cards"]];
-  for (const type of [...new Set(logs.map((log) => log.type))].sort()) {
-    const subset = logs.filter((log) => log.type === type);
+  for (const type of byType) {
+    const subset = groupedByType.get(type) ?? [];
     rows.push([type, subset.length, sum(subset, "minutes"), sum(subset, "cards")]);
   }
   rows.push(["Total", logs.length, sum(logs, "minutes"), sum(logs, "cards")]);
