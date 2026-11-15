@@ -35,7 +35,7 @@ export async function exportActivityWorkbook(
     let duplicate = 2;
     while (usedSheetNames.has(sheetName.toLowerCase())) {
       const suffix = ` (${duplicate++})`;
-      sheetName = `${baseName.slice(0, 31 - suffix.length)}${suffix}`;
+      sheetName = `${sheetTitlePrefix(baseName, 31 - suffix.length)}${suffix}`;
     }
     usedSheetNames.add(sheetName.toLowerCase());
     appendSheet(XLSX, wb, sheetName, detailRows(logs.filter((log) => log.type === type)), [14, 20, 14, 12, 12, 42]);
@@ -90,10 +90,22 @@ function sum(logs: StudyLog[], key: "minutes" | "cards") {
   return logs.reduce((total, log) => total + Number(log[key] || 0), 0);
 }
 
+/** Prefix by UTF-16 units without splitting Unicode code points at Excel's 31-unit limit. */
+function sheetTitlePrefix(input: string, maxUnits: number): string {
+  let prefix = "";
+  for (const symbol of input) {
+    // Imported labels can contain an isolated surrogate; keep it out of XLSX XML titles.
+    const safeSymbol = symbol.length === 1 && /[\uD800-\uDFFF]/.test(symbol) ? " " : symbol;
+    if (prefix.length + safeSymbol.length > maxUnits) break;
+    prefix += safeSymbol;
+  }
+  return prefix;
+}
+
 function safeSheetName(input: string) {
   // Excel also rejects blank/whitespace-only tabs and names that begin/end with a quote.
   // Remove edge quotes after truncation, so the final 31-char title stays valid.
-  const title = input.replace(/[\\/?*[\]:]/g, " ").slice(0, 31)
+  const title = sheetTitlePrefix(input.replace(/[\\/?*[\]:]/g, " "), 31)
     .trim().replace(/^'+|'+$/g, "").trim();
   return title || "Activity";
 }
