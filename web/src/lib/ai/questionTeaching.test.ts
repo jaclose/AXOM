@@ -472,6 +472,29 @@ describe("review-gated explanation drafting", () => {
     ["DOI invented in explanation", {
       explanation: "The arterial tunica media contains smooth muscle and controls vascular caliber. DOI: 10.1234/vascular-example.2026.",
     }],
+    ["unlabeled DOI invented in explanation", {
+      explanation: "The arterial tunica media controls vascular tone through smooth muscle. See 10.1016/j.vasc.2026.01.005.",
+    }],
+    ["bare DOI resolver host invented in explanation", {
+      explanation: "The media controls vessel caliber through its smooth muscle. See doi.org/10.1234/arterial-anatomy.",
+    }],
+    ["unlabeled PMCID invented in distractor rationale", {
+      choiceRationales: {
+        A: "The tunica media contains smooth muscle that regulates caliber.",
+        B: "The intima provides the endothelial lining, not the muscle layer (PMC1234567).",
+        C: "The adventitia is outer connective tissue support.",
+      },
+    }],
+    ["scheme-less PubMed link invented in distractor rationale", {
+      choiceRationales: {
+        A: "The media includes contractile vascular smooth muscle.",
+        B: "The intima is the endothelial lining (pubmed.ncbi.nlm.nih.gov/12345678).",
+        C: "The adventitia provides supportive connective tissue.",
+      },
+    }],
+    ["scheme-less source domain in proposed keyword", {
+      keywords: ["vascular smooth muscle", "example.edu/artery/source"],
+    }],
     ["PMID invented in distractor rationale", {
       choiceRationales: {
         A: "The tunica media contains contractile vascular smooth muscle.",
