@@ -5,8 +5,8 @@ import type { QuestionRecord } from "../questions";
 import type { DownloadReference, DownloadWorkspace } from "./downloadReference";
 import type { Course, Term } from "../types";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), assertCurrent: vi.fn(), dispose: vi.fn() }));
-vi.mock("./client", () => ({ listAcademicCourses: mocks.list }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), lookup: vi.fn(), assertCurrent: vi.fn(), dispose: vi.fn() }));
+vi.mock("./client", () => ({ listAcademicCourses: mocks.list, getAcademicCourse: mocks.lookup }));
 vi.mock("./accountScope", () => ({ academicAccountScope: (key: string) => ({ key, assertCurrent: mocks.assertCurrent, dispose: mocks.dispose }) }));
 vi.mock("../store", () => ({ useStore: { getState: vi.fn() } }));
 vi.mock("../sync/contentDownloads", () => ({ downloadAccountContent: vi.fn() }));
@@ -26,19 +26,64 @@ const receipt = (index: number, questionIds: string[], patch: Partial<DownloadRe
 });
 const workspace = (documents: SourceDocument[], questions: QuestionRecord[]): DownloadWorkspace & { courses: Course[]; terms: Term[] } => ({ documents, questions, questionSets: [], terms: [], courses: [] });
 
-beforeEach(() => { vi.clearAllMocks(); mocks.list.mockReset(); mocks.assertCurrent.mockReset(); });
+beforeEach(() => {
+  vi.clearAllMocks(); mocks.list.mockReset(); mocks.lookup.mockReset(); mocks.assertCurrent.mockReset();
+  mocks.lookup.mockImplementation(async (id: string) => course(Number(id.replace("course-", ""))));
+});
 
 describe("complete term catalog", () => {
+  it("holds duplicate revision IDs on one page and across catalog pages", async () => {
+    mocks.list.mockResolvedValueOnce([course(1), { ...course(2), current_revision_id: "revision-1" }]);
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
+    const first = Array.from({ length: 24 }, (_, index) => course(index));
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([{ ...course(25), current_revision_id: "revision-3" }]);
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
+    expect(mocks.dispose).toHaveBeenCalledTimes(2);
+  });
+  it("rejects malformed and oversized catalog pages, preserving no partial result", async () => {
+    mocks.list.mockResolvedValueOnce([{ ...course(1), current_revision_id: " " }]);
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
+    mocks.list.mockResolvedValueOnce(Array.from({ length: 25 }, (_, index) => course(index)));
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
+  });
+  it("bounds a never-ending stream of unique full pages", async () => {
+    let page = 0;
+    mocks.list.mockImplementation(async () => {
+      const offset = page++ * 24;
+      return Array.from({ length: 24 }, (_, index) => course(offset + index));
+    });
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("safe page limit");
+    expect(mocks.list).toHaveBeenCalledTimes(200);
+  });
   it("reads beyond 24 courses using the cursor with no search filter", async () => {
     const first = Array.from({ length: 24 }, (_, index) => course(index));
     mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([course(24), course(25)]);
     expect(await listTermCourses("Term 1", "account")).toHaveLength(26);
     expect(mocks.list.mock.calls).toEqual([["", "Term 1", undefined], ["", "Term 1", "course-23"]]);
+    expect(mocks.lookup).toHaveBeenCalledExactlyOnceWith("course-23", "account");
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
   it("requests the terminal empty page for an exact multiple of 24", async () => {
     mocks.list.mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => course(index))).mockResolvedValueOnce([]);
     expect(await listTermCourses("Term 1", "account")).toHaveLength(24);
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+  it("refuses a silently truncated catalog if the previous page's cursor was withdrawn", async () => {
+    // The SQL cursor_row CTE is empty after withdrawal; academic_catalog then
+    // returns [] even though later term courses still exist.
+    const first = Array.from({ length: 24 }, (_, index) => course(index));
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([]);
+    mocks.lookup.mockRejectedValueOnce(new Error("This course is unavailable to this account."));
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow(/catalog could not be verified/);
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(mocks.lookup).toHaveBeenCalledExactlyOnceWith("course-23", "account");
+  });
+  it("rejects changed revision or sort placement at the page boundary instead of accepting an incomplete term", async () => {
+    const first = Array.from({ length: 24 }, (_, index) => course(index));
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([course(24)]);
+    mocks.lookup.mockResolvedValueOnce({ ...course(23), title: "Renamed during pagination",
+      current_revision_id: "new-revision" });
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow(/catalog changed while loading/);
     expect(mocks.list).toHaveBeenCalledTimes(2);
   });
   it("rejects repeated pages rather than looping or silently truncating", async () => {
@@ -50,41 +95,6 @@ describe("complete term catalog", () => {
   it("rejects wrong-term catalog results", async () => {
     mocks.list.mockResolvedValueOnce([course(1, "Term 2")]);
     await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
-  });
-  it("rejects two collections claiming the same academic revision on one page", async () => {
-    mocks.list.mockResolvedValueOnce([course(1), { ...course(2), current_revision_id: "revision-1" }]);
-    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
-    expect(mocks.list).toHaveBeenCalledOnce();
-    expect(mocks.dispose).toHaveBeenCalledOnce();
-  });
-  it("rejects a revision collision across cursor pages without returning a partial term", async () => {
-    const first = Array.from({ length: 24 }, (_, index) => course(index));
-    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([{ ...course(25), current_revision_id: "revision-3" }]);
-    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
-    expect(mocks.list.mock.calls).toEqual([["", "Term 1", undefined], ["", "Term 1", "course-23"]]);
-    expect(mocks.dispose).toHaveBeenCalledOnce();
-  });
-  it("holds malformed empty collection or revision identities", async () => {
-    mocks.list.mockResolvedValueOnce([{ ...course(1), id: "  " }]);
-    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
-    mocks.list.mockResolvedValueOnce([{ ...course(2), current_revision_id: "" }]);
-    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
-    expect(mocks.dispose).toHaveBeenCalledTimes(2);
-  });
-  it("holds pages larger than the supported catalog cursor window", async () => {
-    mocks.list.mockResolvedValueOnce(Array.from({ length: 25 }, (_, index) => course(index)));
-    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
-    expect(mocks.list).toHaveBeenCalledOnce();
-  });
-  it("limits a nonterminating stream of unique full pages without returning partial downloads", async () => {
-    let page = 0;
-    mocks.list.mockImplementation(async () => {
-      const first = page++ * 24;
-      return Array.from({ length: 24 }, (_, index) => course(first + index));
-    });
-    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("safe page limit");
-    expect(mocks.list).toHaveBeenCalledTimes(200);
-    expect(mocks.dispose).toHaveBeenCalledOnce();
   });
   it("stops after an in-flight page without fetching another page", async () => {
     let stopped = false;
@@ -101,11 +111,9 @@ describe("complete term catalog", () => {
 describe("downloaded term practice", () => {
   it("marks downloaded term practice as a cross-module quiz union", () => {
     const state = workspace([receipt(5, ["cross-module"], { term: "Term 5" })],
-      [question("cross-module", { module: "CPR", week: "Week 2" })]);
+      [question("cross-module", { module: "CPR", week: 2 })]);
     const selection = termQuizSelection("Term 5", "account", state);
     expect(selection.questionIds).toEqual(["cross-module"]);
-    // A Term 5 union includes CPR, RHPS and other source modules; the
-    // QBank launch validator must not interpret "Term 5" as one module.
     expect(selection.scopeKind).toBe("term");
     expect(hasDeclaredCourseScopeConflict(state.questions[0], selection)).toBe(false);
     state.deferredContent = { accountId: "another-account", questions: [], documents: [], sources: [], media: [] };
@@ -113,6 +121,26 @@ describe("downloaded term practice", () => {
       scopeKind: "term", questionIds: [], setIds: [],
     });
   });
+
+  it("suppresses legacy term metadata prefetch while another account hydrates", () => {
+    const state = workspace([receipt(1, ["ready"], { term: undefined })], [question("ready")]);
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+    state.deferredContent = { accountId: "foreign", questions: [], documents: [], sources: [], media: [] };
+    expect(termQuizNeedsCatalog("account", state)).toBe(false);
+    state.deferredContent.accountId = "account";
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+  });
+
+  it("excludes a shared original set ID filed into different source terms", () => {
+    const state = workspace([
+      receipt(1, ["q-1"], { term: "Term 1", setIds: ["duplicate-set"] }),
+      receipt(2, ["q-2"], { term: "Term 2", setIds: ["duplicate-set"] }),
+    ], [question("q-1", { setId: "duplicate-set" }), question("q-2", { setId: "duplicate-set" })]);
+    state.questionSets = [{ id: "duplicate-set" }] as unknown as typeof state.questionSets;
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({ questionIds: [], setIds: [] });
+    expect(termQuizSelection("Term 2", "account", state)).toMatchObject({ questionIds: [], setIds: [] });
+  });
+
   it("requires the full catalog for a legacy receipt even when it is beyond the visible page", () => {
     const documents = Array.from({ length: 26 }, (_, index) => receipt(index, [`q-${index}`]));
     const state = workspace(documents, []);
@@ -120,18 +148,6 @@ describe("downloaded term practice", () => {
     state.documents[25] = receipt(25, ["q-25"], { term: undefined });
     expect(termQuizNeedsCatalog("account", state)).toBe(true);
     expect(termQuizNeedsCatalog("other", state)).toBe(false);
-  });
-  it("does not prefetch legacy catalog while deferred hydration belongs to another account", () => {
-    const state = workspace([receipt(1, ["ready"], { term: undefined })], [question("ready")]);
-    // Legacy receipts without a saved term normally require the exact cloud catalog.
-    expect(termQuizNeedsCatalog("account", state)).toBe(true);
-    state.deferredContent = { accountId: "other-account", questions: [], documents: [], sources: [], media: [] };
-    // A held term quiz must not schedule a companion network request.
-    expect(termQuizNeedsCatalog("account", state)).toBe(false);
-    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({ questionIds: [], setIds: [] });
-    // Once hydration belongs to the active account, the normal legacy lookup resumes.
-    state.deferredContent.accountId = "account";
-    expect(termQuizNeedsCatalog("account", state)).toBe(true);
   });
   it("resolves a legacy receipt offline only with one exact hosted owner and a known term", () => {
     const state = workspace([receipt(1, ["q-1"], { term: undefined })], []);
@@ -160,6 +176,22 @@ describe("downloaded term practice", () => {
     expect(selection.questionIds).toEqual(Array.from({ length: 26 }, (_, index) => `q-${index}`));
     expect(selection).toMatchObject({ module: "Term 1", term: "Term 1" });
   });
+  it("labels reviewed receipt unions as term-wide without inventing a fixed source module", () => {
+    const state = workspace([
+      receipt(1, ["goer"], { term: "Term 5" }),
+      receipt(2, ["ncrs"], { term: "Term 5" }),
+      receipt(3, ["other"], { term: "Term 4" }),
+    ], [
+      question("goer", { module: "GOER", week: 1 }),
+      question("ncrs", { module: "NCRS", week: 2 }),
+      question("other", { module: "GOER", week: 1 }),
+    ]);
+    expect(termQuizSelection("Term 5", "account", state)).toMatchObject({
+      scopeKind: "term", term: "Term 5", module: "Term 5",
+      questionIds: ["goer", "ncrs"],
+    });
+  });
+
   it("supports legacy receipts using exact revision metadata or an installed hosted owner, never a title match", () => {
     const state = workspace([receipt(1, ["catalog"], { term: undefined }), receipt(2, ["owner"], { term: undefined }), receipt(3, ["ambiguous"], { term: undefined })],
       [question("catalog"), question("owner"), question("ambiguous")]);
@@ -183,22 +215,6 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 2", "account", state, [course(1, "Term 2")]).questionIds).toEqual([]);
     expect(termQuizSelection("Term 1", "account", state, [course(1, "T1")]).questionIds).toEqual(["q-1"]);
   });
-  it("holds term quiz membership while deferred hydration belongs to another account", () => {
-    const state = workspace([receipt(1, ["ready"], { setIds: ["valid-set"] })], [question("ready")]);
-    state.questionSets = [{ id: "valid-set" }] as typeof state.questionSets;
-    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
-      questionIds: ["ready"], setIds: ["valid-set"],
-    });
-    state.deferredContent = { accountId: "another-account", questions: [], documents: [], sources: [], media: [] };
-    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
-      questionIds: [], setIds: [],
-    });
-    state.deferredContent.accountId = "account";
-    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
-      questionIds: ["ready"], setIds: ["valid-set"],
-    });
-  });
-
   it("excludes duplicate or deferred question identities and deduplicates shared membership", () => {
     const state = workspace([receipt(1, ["unique", "duplicate", "deferred"]), receipt(2, ["unique"])],
       [question("unique"), question("duplicate"), question("duplicate"), question("deferred")]);
@@ -207,35 +223,185 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 5", "account", state).questionIds).toEqual([]);
   });
 
-  it("does not expose ambiguous duplicate local set records as a term quiz membership", () => {
-    const state = workspace([receipt(1, ["ready"], { setIds: ["ambiguous-set", "unique-set", "missing-set"] })], [question("ready")]);
-    state.questionSets = [{ id: "ambiguous-set" }, { id: "ambiguous-set" }, { id: "unique-set" }] as typeof state.questionSets;
-    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
-      questionIds: ["ready"], setIds: ["unique-set"],
-    });
+  it("holds ambiguous cross-term question identities in both term unions", () => {
+    const state = workspace([
+      receipt(1, ["cross-listed", "term-one-only"]),
+      receipt(2, ["cross-listed", "term-two-only"], { term: "Term 2" }),
+    ], [question("cross-listed"), question("term-one-only"), question("term-two-only")]);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["term-one-only"]);
+    expect(termQuizSelection("Term 2", "account", state).questionIds).toEqual(["term-two-only"]);
   });
 
-  it("holds a question or set identity filed under two different downloaded source terms", () => {
+  it("continues deduplicating compatible shared membership across equivalent term labels", () => {
     const state = workspace([
-      receipt(1, ["shared", "only-t1"], { setIds: ["shared-set", "only-t1-set"] }),
-      receipt(2, ["shared", "only-t2"], { term: "Term 2", setIds: ["shared-set", "only-t2-set"] }),
-      receipt(3, ["only-t1"], { term: "T01", setIds: ["only-t1-set"] }),
-    ], [question("shared"), question("only-t1"), question("only-t2")]);
-    state.questionSets = ["shared-set", "only-t1-set", "only-t2-set"].map(id => ({ id })) as typeof state.questionSets;
-    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
-      questionIds: ["only-t1"], setIds: ["only-t1-set"],
-    });
-    expect(termQuizSelection("T2", "account", state)).toMatchObject({
-      questionIds: ["only-t2"], setIds: ["only-t2-set"],
-    });
+      receipt(1, ["shared", "first"]),
+      receipt(2, ["shared", "second"], { term: "T01" }),
+    ], [question("shared"), question("first"), question("second")]);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["shared", "first", "second"]);
   });
 
-  it("does not treat another account's receipt as a cross-term conflict", () => {
+  it("holds duplicate or missing on-device set identities and their linked questions but preserves clean or loose neighbors", () => {
+    const state = workspace([receipt(1, ["ambiguous", "missing", "clean", "loose"], {
+      setIds: ["duplicated-set", "missing-set", "clean-set"],
+    })], [
+      question("ambiguous", { setId: "duplicated-set" }),
+      question("missing", { setId: "missing-set" }),
+      question("clean", { setId: "clean-set" }),
+      question("loose"),
+    ]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("duplicated-set"), set("duplicated-set"), set("clean-set")];
+    const selected = termQuizSelection("Term 1", "account", state);
+    expect(selected.questionIds).toEqual(["clean", "loose"]);
+    expect(selected.setIds).toEqual(["clean-set"]);
+  });
+  it("does not borrow an original set from a different term download receipt", () => {
     const state = workspace([
-      receipt(1, ["shared"], { term: "Term 1" }),
-      receipt(2, ["shared"], { accountId: "someone-else", term: "Term 2" }),
-    ], [question("shared")]);
+      receipt(1, ["misbound", "matched", "loose"], { setIds: ["set-1"] }),
+      receipt(2, ["separate"], { setIds: ["set-2"] }),
+    ], [
+      question("misbound", { setId: "set-2" }),
+      question("matched", { setId: "set-1" }),
+      question("loose"),
+      question("separate", { setId: "set-2" }),
+    ]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("set-1"), set("set-2")];
+    const selection = termQuizSelection("Term 1", "account", state);
+    expect(selection.questionIds).toEqual(["matched", "loose", "separate"]);
+    expect(selection.setIds).toEqual(["set-1", "set-2"]);
+  });
+
+  it("does not borrow a set grant from an unrelated term's receipt", () => {
+    const state = workspace([
+      receipt(1, ["cross-listed"], { term: "Term 1", setIds: ["set-1"] }),
+      receipt(2, ["cross-listed"], { term: "Term 2", setIds: ["set-2"] }),
+    ], [question("cross-listed", { setId: "set-2" })]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("set-1"), set("set-2")];
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual([]);
+    expect(termQuizSelection("Term 2", "account", state).questionIds).toEqual([]);
+  });
+
+  it("holds questions contradicted by explicit original-set membership without hiding valid or loose neighbors", () => {
+    const state = workspace([receipt(1, ["valid", "stale", "loose"], { setIds: ["valid-set", "stale-set"] })], [
+      question("valid", { setId: "valid-set" }),
+      question("stale", { setId: "stale-set" }),
+      question("loose"),
+    ]);
+    const explicitSet = (id: string, questionIds: string[]) =>
+      ({ id, questionIds }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [explicitSet("valid-set", ["valid"]), explicitSet("stale-set", ["different-question"])];
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["valid", "loose"]);
+  });
+
+  it("rejects duplicate explicit original-set members without hiding valid or legacy neighbors", () => {
+    const state = workspace([receipt(1, ["adjacent", "separated", "valid", "legacy", "loose"], {
+      setIds: ["adjacent-set", "separated-set", "valid-set", "legacy-set"],
+    })], [
+      question("adjacent", { setId: "adjacent-set" }),
+      question("separated", { setId: "separated-set" }),
+      question("valid", { setId: "valid-set" }),
+      question("legacy", { setId: "legacy-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "adjacent-set", questionIds: ["adjacent", "adjacent"] },
+      { id: "separated-set", questionIds: ["separated", "unrelated", "separated"] },
+      { id: "valid-set", questionIds: ["valid"] },
+      { id: "legacy-set" },
+    ] as unknown as typeof state.questionSets;
+    const selected = termQuizSelection("Term 1", "account", state);
+    expect(selected.questionIds).toEqual(["valid", "legacy", "loose"]);
+    expect(selected.setIds).toEqual(["valid-set", "legacy-set"]);
+  });
+
+  it("holds malformed declared membership without rejecting legacy sets that omit the list", () => {
+    const state = workspace([receipt(1, ["malformed", "legacy", "loose"], { setIds: ["bad-set", "legacy-set"] })], [
+      question("malformed", { setId: "bad-set" }),
+      question("legacy", { setId: "legacy-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "bad-set", questionIds: "not-an-array" } as unknown as (typeof state.questionSets)[number],
+      { id: "legacy-set" } as unknown as (typeof state.questionSets)[number],
+    ];
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["legacy", "loose"]);
+  });
+
+  it("preserves same-term cross-listing when one receipt owns the original set", () => {
+    const state = workspace([
+      receipt(1, ["shared"], { setIds: ["set-1"] }),
+      receipt(2, ["shared"], { setIds: ["set-2"] }),
+    ], [question("shared", { setId: "set-2" })]);
+    const set = (id: string) => ({ id }) as unknown as (typeof state.questionSets)[number];
+    state.questionSets = [set("set-1"), set("set-2")];
     expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["shared"]);
+  });
+
+  it("holds all term practice while deferred hydration belongs to a different account", () => {
+    const state = workspace([receipt(1, ["set-bound", "loose", "neighbor"], { setIds: ["owned-set"] })], [
+      question("set-bound", { setId: "owned-set" }), question("loose"), question("neighbor"),
+    ]);
+    state.questionSets = [{ id: "owned-set" } as unknown as (typeof state.questionSets)[number]];
+    state.deferredContent = { accountId: "other", questions: [{ id: "set-bound" }, { id: "loose" }],
+      documents: [], sources: [], media: [] };
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual([]);
+    expect(termQuizSelection("Term 1", "other", state).questionIds).toEqual([]);
+  });
+
+  it("continues withholding this account's deferred questions while keeping ready neighbors", () => {
+    const state = workspace([receipt(1, ["deferred", "ready"])], [question("deferred"), question("ready")]);
+    state.deferredContent = { accountId: "account", questions: [{ id: "deferred" }],
+      documents: [], sources: [], media: [] };
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["ready"]);
+  });
+
+  it("does not advertise receipt sets with no runnable members after review, absence and source holds", () => {
+    const state = workspace([receipt(1, ["held", "ready", "loose", "missing"], {
+      setIds: ["held-set", "ready-set", "empty-set"],
+    })], [
+      question("held", { setId: "held-set", needsReview: true }),
+      question("ready", { setId: "ready-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "held-set", questionIds: ["held"] },
+      { id: "ready-set", questionIds: ["ready"] },
+      { id: "empty-set", questionIds: ["missing"] },
+    ] as unknown as typeof state.questionSets;
+    const selection = termQuizSelection("Term 1", "account", state);
+    expect(selection.questionIds).toEqual(["ready", "loose"]);
+    expect(selection.setIds).toEqual(["ready-set"]);
+  });
+
+  it("keeps eligible explicitly cross-listed and legacy primary set provenance, not unrelated receipt sets", () => {
+    const state = workspace([receipt(1, ["cross-listed", "legacy", "loose"], {
+      setIds: ["cross-set", "legacy-set", "unrelated-set"],
+    })], [
+      question("cross-listed"),
+      question("legacy", { setId: "legacy-set" }),
+      question("loose"),
+    ]);
+    state.questionSets = [
+      { id: "cross-set", questionIds: ["cross-listed"] },
+      { id: "legacy-set" },
+      { id: "unrelated-set", questionIds: ["not-a-receipt-member"] },
+    ] as unknown as typeof state.questionSets;
+    const selection = termQuizSelection("Term 1", "account", state);
+    expect(selection.questionIds).toEqual(["cross-listed", "legacy", "loose"]);
+    expect(selection.setIds).toEqual(["cross-set", "legacy-set"]);
+  });
+
+  it("leaves the collection filter empty for loose-only runnable term selections", () => {
+    const state = workspace([receipt(1, ["ready-loose", "held-set-member"], { setIds: ["held-set"] })], [
+      question("ready-loose"),
+      question("held-set-member", { setId: "held-set", needsReview: true }),
+    ]);
+    state.questionSets = [{ id: "held-set", questionIds: ["held-set-member"] }] as unknown as typeof state.questionSets;
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["ready-loose"], setIds: [],
+    });
   });
 
 });
