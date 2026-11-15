@@ -834,6 +834,68 @@ class SourceLedgerTests(unittest.TestCase):
                              {"duplicate_member_name"})
             self.assertEqual(len({x["virtual_source_id"] for x in duplicates}), 2)
 
+    def test_archive_canonical_member_name_collisions_are_held(self):
+        # Two different names in the central directory may resolve to the same
+        # path after a case-insensitive or Unicode-normalizing extraction.
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "colliding-paths.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("DERS/IMCQ 1.txt", "case alias A")
+                z.writestr("ders/imcq 1.TXT", "case alias B")
+                z.writestr("PQ caf\u00e9.txt", "unicode alias A")
+                z.writestr("PQ cafe\u0301.txt", "unicode alias B")
+                z.writestr("PQ unique.txt", "unambiguous synthetic source")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="canonical-path-collisions", root_label="archive_root")
+            prior = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives(
+                    [row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = prior
+            self.assertEqual(result["question_candidate_count"], 1)
+            held = [m for m in result["entries"] if m["member_name"] != "PQ unique.txt"]
+            self.assertEqual(len(held), 4)
+            self.assertTrue(all(not m["question_candidate_eligible"] for m in held))
+            self.assertEqual({m["question_candidate_hold"] for m in held},
+                             {"colliding_member_path"})
+            self.assertEqual(len({m["virtual_source_id"] for m in held}), 4)
+            metrics = enriched.archive_metadata_metrics([result])
+            self.assertEqual(metrics["question_filename_hint_members"], 1)
+            self.assertEqual(metrics["held_question_hint_members"], 4)
+
+    def test_archive_dot_and_empty_member_path_segments_are_held(self):
+        # Zip extraction often collapses embedded '.' and empty components.
+        # Do not advertise an apparently unique but path-ambiguous member.
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "dot-segments.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("DERS/./PQ 2.txt", "dot segment")
+                z.writestr("DERS//IMCQ 3.txt", "empty segment")
+                z.writestr("PQ normal.txt", "valid synthetic candidate")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="dot-segments", root_label="archive_root")
+            prior = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives(
+                    [row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = prior
+            self.assertEqual(result["question_candidate_count"], 1)
+            ambiguous = [m for m in result["entries"] if m["member_name"] != "PQ normal.txt"]
+            self.assertEqual(len(ambiguous), 2)
+            self.assertTrue(all(m["unsafe_path"] for m in ambiguous))
+            self.assertEqual({m["question_candidate_hold"] for m in ambiguous},
+                             {"unsafe_member_path"})
+
     def test_archive_symlink_member_is_review_held(self):
         # A ZIP entry may be a Unix symlink even with a harmless filename.
         # A later importer must not be told this is an extractable question.
