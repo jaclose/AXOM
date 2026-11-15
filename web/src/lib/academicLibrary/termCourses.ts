@@ -84,6 +84,9 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   courses: readonly AcademicCourse[] = []): CourseQuizLaunch {
   const ids = new Set<string>();
   const setIds = new Set<string>();
+  // A receipt may identify a set, but ambiguous duplicate local rows cannot establish one canonical set.
+  const localSetCounts = new Map<string, number>();
+  for (const set of workspace.questionSets) localSetCounts.set(set.id, (localSetCounts.get(set.id) ?? 0) + 1);
   const questionTerms = new Map<string, string>();
   const setTerms = new Map<string, string>();
   const conflictingQuestions = new Set<string>();
@@ -108,7 +111,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
     }
     for (const id of saved.setIds) {
       recordTerm(id, ownerTerm, setTerms, conflictingSets);
-      if (ownerTerm === requestedTerm && workspace.questionSets.some(set => set.id === id)) setIds.add(id);
+      if (ownerTerm === requestedTerm && localSetCounts.get(id) === 1) setIds.add(id);
     }
   }
   for (const id of conflictingQuestions) ids.delete(id);

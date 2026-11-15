@@ -164,6 +164,14 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 5", "account", state).questionIds).toEqual([]);
   });
 
+  it("does not expose ambiguous duplicate local set records as a term quiz membership", () => {
+    const state = workspace([receipt(1, ["ready"], { setIds: ["ambiguous-set", "unique-set", "missing-set"] })], [question("ready")]);
+    state.questionSets = [{ id: "ambiguous-set" }, { id: "ambiguous-set" }, { id: "unique-set" }] as typeof state.questionSets;
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["ready"], setIds: ["unique-set"],
+    });
+  });
+
   it("holds a question or set identity filed under two different downloaded source terms", () => {
     const state = workspace([
       receipt(1, ["shared", "only-t1"], { setIds: ["shared-set", "only-t1-set"] }),
