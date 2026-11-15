@@ -248,6 +248,7 @@ describe("review-gated explanation drafting", () => {
     ["excess keywords", Array.from({ length: 9 }, (_, index) => `vascular topic ${index}`)],
     ["oversized keyword", ["histology " + "x".repeat(60)]],
     ["too-short keyword", ["ab"]],
+    ["whitespace-only keyword", ["   "]],
   ] as Array<[string, unknown]>)(
     "rejects %s from a model instead of silently dropping unreviewed metadata",
     async (_label, keywords) => {
@@ -973,7 +974,7 @@ describe("review-gated explanation drafting", () => {
         B: "The tunica intima primarily forms the endothelium.",
         C: "The tunica adventitia provides outer support.",
       },
-      keywords: [" Tunica Media ", "tunica media", "", "Vascular Tone", "CD4/CD8", "Histology: arteries"],
+      keywords: [" Tunica Media ", "tunica media", "Vascular Tone", "CD4/CD8", "Histology: arteries"],
     });
     const result = await draftQuestionExplanation(model, question());
     expect(result.keywords).toEqual(["tunica media", "vascular tone", "cd4/cd8", "histology: arteries"]);
