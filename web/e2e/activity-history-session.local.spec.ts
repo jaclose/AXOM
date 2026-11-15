@@ -83,3 +83,69 @@ for (const width of [1440, 390]) {
     expect(errors).toEqual([]);
   });
 }
+
+test("Activity History separately confirms and downloads retained-device XLSX with synthetic records", async ({ page }) => {
+  const note = "SYNTHETIC_EXPORT_CONSENT_R135";
+  const dialogs: string[] = [];
+  const downloads: string[] = [];
+  let approveExport = false;
+  page.on("dialog", async (dialog) => {
+    dialogs.push(dialog.message());
+    if (approveExport) await dialog.accept();
+    else await dialog.dismiss();
+  });
+  page.on("download", (download) => downloads.push(download.suggestedFilename()));
+
+  await page.goto("/#productivity", { waitUntil: "networkidle" });
+  await seedOnboarded(page);
+  await dev(page);
+  await page.evaluate(async (privateNote) => {
+    const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+    app.useStore.setState({ logs: [{
+      id: "browser-export-consent-A", dayKey: "2026-11-14",
+      ts: "2026-11-14T18:45:00.000Z", type: "Review",
+      minutes: 23, cards: 32, note: privateNote,
+    }] });
+    await app.flushVault();
+  }, note);
+  await reloadAfterSave(page);
+  await dev(page);
+  await setSession(page, "B", "unlinked");
+  await page.goto("/#activity", { waitUntil: "networkidle" });
+
+  await expect(page.getByText("Device history needs confirmation")).toBeVisible();
+  await expect(page.getByText(note)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export .xlsx" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Show device history" }).click();
+  await expect(page.getByText(note)).toBeVisible();
+  const exportButton = page.getByRole("button", { name: "Export .xlsx" });
+
+  // Revealing device history is not permission to save its contents as a workbook.
+  await exportButton.click();
+  expect(dialogs).toHaveLength(1);
+  expect(dialogs[0]).toMatch(/different account/i);
+  expect(downloads).toEqual([]);
+  await expect(exportButton).toBeEnabled();
+  await expect(page.getByText(note)).toBeVisible();
+
+  approveExport = true;
+  const downloadPromise = page.waitForEvent("download");
+  await exportButton.click();
+  const download = await downloadPromise;
+  expect(dialogs).toHaveLength(2);
+  expect(dialogs[1]).toMatch(/different account/i);
+  expect(download.suggestedFilename()).toMatch(/^axom-activity-history-\d{4}-\d{2}-\d{2}\.xlsx$/);
+  const { readFile } = await import("node:fs/promises");
+  const XLSX = await import("xlsx-js-style");
+  const workbook = XLSX.read(await readFile(await download.path()), { type: "buffer" });
+  expect(workbook.SheetNames).toContain("All Activity");
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["All Activity"], { header: 1 });
+  expect(JSON.stringify(rows)).toContain(note);
+  expect(downloads).toHaveLength(1);
+
+  await setSession(page, "A", "linked");
+  await expect(page.getByText("Activity History session changed")).toBeVisible();
+  await expect(page.getByText(note)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export .xlsx" })).toHaveCount(0);
+});
