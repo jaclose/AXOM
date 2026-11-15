@@ -5,6 +5,12 @@ import { hasPrivateDeviceCitation } from "./questionSetShare";
  * Preserve existing author tags, but reject new keyword proposals that claim a
  * publication or moderation state, carry a citation, or embed private references. */
 const RESERVED_PUBLICATION_KEYWORD = /^(?:visual|source|rights?|licen[sc]e|provenance|review|moderation|approval|publication|answer(?:-?key)?|correct(?:-?key)?)\s*:/i;
+// Public citation identifiers belong in separately verified provenance, not in
+// subject keyword suggestions. A model response has a parallel rejection gate,
+// but publisher-entered reviewed keywords must not bypass that boundary.
+// Keep domains bounded to common reference host TLDs to avoid rejecting
+// clinical abbreviations (for example E. coli) as fabricated citations.
+const UNVERIFIED_PUBLIC_CITATION = /\b(?:www\.[a-z0-9-]+\.[a-z]{2,}|(?:[a-z0-9-]+\.)+(?:com|edu|gov|net|org|io)\b|(?:doi\s*[:=]?\s*)?10\.\d{4,9}\/[^\s)\]}>]+|pmid\s*[:#]?\s*\d{1,9}\b|(?:pmcid\s*[:#]?\s*)?PMC\d+\b)/i;
 
 // Validate a separate comparison copy: invisible Unicode marks can split
 // "rights:approved" or "file://", and compatibility-width characters can
@@ -21,6 +27,7 @@ export function isCommunitySubjectKeyword(value: string): boolean {
   return Boolean(candidate)
     && !RESERVED_PUBLICATION_KEYWORD.test(candidate)
     && !/https?:\/\//i.test(candidate)
+    && !UNVERIFIED_PUBLIC_CITATION.test(candidate)
     && !hasPrivateDeviceCitation(candidate);
 }
 
