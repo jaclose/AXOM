@@ -137,7 +137,8 @@ test("Activity History separately confirms and downloads retained-device XLSX wi
   expect(dialogs[1]).toMatch(/different account/i);
   expect(download.suggestedFilename()).toMatch(/^axom-activity-history-\d{4}-\d{2}-\d{2}\.xlsx$/);
   const { readFile } = await import("node:fs/promises");
-  const XLSX = await import("xlsx-js-style");
+  // Node ESM wraps CommonJS exports under default; the named namespace has no read().
+  const XLSX = (await import("xlsx-js-style")).default;
   const workbook = XLSX.read(await readFile(await download.path()), { type: "buffer" });
   expect(workbook.SheetNames).toContain("All Activity");
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets["All Activity"], { header: 1 });
