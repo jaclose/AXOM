@@ -98,6 +98,29 @@ describe("review-gated explanation drafting", () => {
     ["unrepresented lab table", (rich: NonNullable<QuestionRecord["content"]>) => {
       rich.stem.push({ type: "table", headers: ["Analyte", "Value"], rows: [["Troponin", "positive"]] });
     }],
+    ["existing source-authored explanation not shown to AI", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.explanation = [{ type: "text", text: "The source explains the vascular smooth muscle in the tunica media." }];
+    }],
+    ["existing reviewed rich teaching not shown to AI", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.teaching = {
+        version: 1, answerLabel: "A", whyCorrect: "The media contains smooth muscle.",
+        mechanism: "Smooth muscle contraction regulates arterial caliber.",
+        highYieldRule: "The media is the contractile layer.", distractors: [],
+        sourceReferences: [], factCheck: {
+          status: "SOURCE_CHECKED", humanReviewerApproved: true,
+          answerChanged: false, limitations: [],
+        },
+      };
+    }],
+    ["missing original source key despite a legacy answer", (rich: NonNullable<QuestionRecord["content"]>) => {
+      delete rich.correctAnswer;
+    }],
+    ["source key without provenance", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.correctAnswer = { labels: ["A"] };
+    }],
+    ["unresolved discrepancy between source and recorded choices", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.flags = [{ type: "source_nonkey_discrepancy", message: "A choice differs from the original." }];
+    }],
     ["changed imported vignette", (rich: NonNullable<QuestionRecord["content"]>) => {
       rich.stem[0] = { type: "text", text: "Which structure is affected in this different source question?" };
     }],
@@ -128,6 +151,32 @@ describe("review-gated explanation drafting", () => {
       expect(source.content).toBe(rich);
     },
   );
+
+  it("accepts a historical text-only package without a rich key only when separately reviewed answer evidence exists", async () => {
+    const rich = textOnlyPackage();
+    delete rich.correctAnswer;
+    const source = question({
+      content: rich,
+      extraction: {
+        confidence: "high", reviewed: true,
+        answerEvidence: "Synthetic source page 3: answer A is explicitly stated.",
+      },
+    });
+    const model = provider({
+      explanation: "The tunica media contains the vascular smooth muscle responsible for regulating arterial caliber.",
+      choiceRationales: {
+        A: "Tunica media contains the smooth muscle layer.",
+        B: "Tunica intima contains the endothelium, not most smooth muscle.",
+        C: "Tunica adventitia is primarily supporting connective tissue.",
+      },
+      keywords: ["vascular anatomy"],
+    });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    const result = await draftQuestionExplanation(model, source);
+    expect(result.sourceFingerprint).toBe(questionExplanationFingerprint(source));
+    expect(source.correctKey).toBe("A");
+    expect(rich.correctAnswer).toBeUndefined();
+  });
 
   it("allows identical text-only imported blocks with a consistent printed key", async () => {
     const source = question({ content: textOnlyPackage() });
