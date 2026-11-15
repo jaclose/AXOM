@@ -448,22 +448,19 @@ test("Question Set Library submit, review, import, like and withdrawal use real 
   }
 });
 
-test("four-question SQL-approved set discloses unseen citation and distractor gaps before private import", async ({ page, browser, baseURL }) => {
-  test.setTimeout(210_000);
+test("four-question pending set blocks approval for an unseen source citation gap", async ({ page, browser, baseURL }) => {
+  test.setTimeout(180_000);
   const database = await createPlatformDatabase();
-  // Publisher, Host reviewer and importing learner are distinct fixture identities.
+  // Publisher, reviewer and searching learner are distinct fixture identities.
   const [reviewer, owner] = PLATFORM_USERS;
   const member = PLATFORM_GUEST_LEARNER;
-  const learnerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
-  const learner = await learnerContext.newPage();
   const reviewerContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   const reviewerPage = await reviewerContext.newPage();
   try {
     await database.db.query("insert into public.academic_reviewers(user_id) values($1)", [reviewer.id]);
     await database.attach(page, 1);
-    await database.attach(learner, 2);
     await database.attach(reviewerPage, 0);
-    for (const target of [page, learner, reviewerPage]) {
+    for (const target of [page, reviewerPage]) {
       await target.goto(`${baseURL}/#questions`);
       await seedLocalWorkspace(target);
     }
@@ -478,20 +475,17 @@ test("four-question SQL-approved set discloses unseen citation and distractor ga
 
     const [pending] = await database.rpc(owner.id, "my_question_set_library") as Array<{ id: string; status: string }>;
     expect(pending.status).toBe("pending");
-    const pendingEvidence = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as {
+    const evidence = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as {
       snapshot_payload: { questions: Array<{
-        stem: string; correctKey: string; citation?: string; choiceRationales?: Record<string, string>;
+        correctKey: string; citation?: string; choiceRationales?: Record<string, string>;
       }> };
       review_revision: number;
     };
-    expect(pendingEvidence.review_revision).toBeGreaterThan(0);
-    const submittedQuestions = pendingEvidence.snapshot_payload.questions;
-    expect(submittedQuestions).toHaveLength(4);
-    expect(submittedQuestions.every(question => question.correctKey === "B")).toBe(true);
-    expect(submittedQuestions.slice(0, 3).every(question => Boolean(question.citation?.trim()))).toBe(true);
-    expect(submittedQuestions[3].citation?.trim()).toBeFalsy();
-    expect(Object.keys(submittedQuestions[3].choiceRationales ?? {})).toEqual(["A"]);
-    // No unsigned set is searchable by the other learner.
+    expect(evidence.snapshot_payload.questions).toHaveLength(4);
+    expect(evidence.snapshot_payload.questions.every(question => question.correctKey === "B")).toBe(true);
+    expect(evidence.snapshot_payload.questions.slice(0, 3).every(question => Boolean(question.citation?.trim()))).toBe(true);
+    expect(evidence.snapshot_payload.questions[3].citation?.trim()).toBeFalsy();
+    expect(Object.keys(evidence.snapshot_payload.questions[3].choiceRationales ?? {})).toEqual(["A"]);
     expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
 
     await reviewerPage.goto(`${baseURL}/#host`);
@@ -499,57 +493,25 @@ test("four-question SQL-approved set discloses unseen citation and distractor ga
     await expect(queue.getByRole("heading", { name: "Question Set Library review" })).toBeVisible();
     await queue.getByRole("button", { name: "Inspect" }).click();
     const review = reviewerPage.getByRole("dialog", { name: `Review ${TITLE}` });
+    await expect(review.getByTestId("qsl-review-evidence-inventory"))
+      .toContainText("1 without source citations");
+    await expect(review.getByTestId("qsl-review-evidence-inventory"))
+      .toContainText("1 lacking at least one choice rationale");
+    await expect(review.getByRole("checkbox", { name: /I checked the set's distribution rights/ })).toBeDisabled();
+    await expect(review.getByRole("button", { name: "Approve for library" })).toBeDisabled();
     await review.getByRole("textbox", { name: "Review note" })
-      .fill("Synthetic four-item fixture reviewed; fourth item intentionally has incomplete recorded teaching evidence.");
-    await review.getByRole("checkbox", { name: /I checked the set's distribution rights/ }).check();
-    await review.getByRole("button", { name: "Approve for library" }).click();
-    await expect(queue.getByText("Question Set approved for search.", { exact: true })).toBeVisible();
+      .fill("Question 4 requires a source citation and a complete distractor review.");
+    await review.getByRole("button", { name: "Return for revision" }).click();
+    await expect(queue.getByText("Question Set returned to its contributor with your note.", { exact: true })).toBeVisible();
 
-    const approvedEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as
-      typeof pendingEvidence & { status: string };
-    expect(approvedEvidence.status).toBe("approved");
-    expect(approvedEvidence.snapshot_payload).toEqual(pendingEvidence.snapshot_payload);
-    expect(approvedEvidence.review_revision).toBeGreaterThan(pendingEvidence.review_revision);
-
-    await openSharedLibrary(learner);
-    const library = learner.locator(".qsl-library");
-    await library.getByRole("button", { name: "Refresh", exact: true }).click();
-    const card = library.locator(".qsl-card").filter({ hasText: TITLE });
-    await expect(card).toBeVisible();
-    await card.getByRole("button", { name: "Preview set" }).click();
-    const preview = learner.getByRole("dialog", { name: TITLE });
-    await expect(preview.getByText("Source citations recorded for 3 of 4 questions.", { exact: false })).toBeVisible();
-    await expect(preview.getByText("Choice-by-choice rationales recorded for all options in 3 of 4 questions.", { exact: false })).toBeVisible();
-    await expect(preview.getByText("Which synthetic label is reviewed in item 1?", { exact: true })).toBeVisible();
-    await expect(preview.getByText("Which synthetic label is reviewed in item 4?", { exact: true })).toHaveCount(0);
-    await preview.getByRole("button", { name: "Add to my AXOM" }).click();
-    await expect(preview.getByRole("button", { name: "Already in my AXOM" })).toBeDisabled();
-
-    const imported = await learner.evaluate(async () => {
-      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
-        useStore: { getState: () => {
-          questionSets: Array<{ title: string; questionIds: string[]; importProvenance?: { shareId: string } }>;
-          questions: Array<{ stem: string; correctKey?: string; citation?: string; choiceRationales?: Record<string, string> }>;
-        } };
-      }> }).__AXOM_DEV__;
-      const state = dev.useStore.getState();
-      const fourth = state.questions.find(question => question.stem === "Which synthetic label is reviewed in item 4?");
-      return {
-        importedSet: state.questionSets.some(set => set.title === "Synthetic source-checked set"
-          && set.questionIds.length === 4 && Boolean(set.importProvenance)),
-        fourthKey: fourth?.correctKey,
-        fourthHasCitation: Boolean(fourth?.citation?.trim()),
-        fourthRationaleKeys: Object.keys(fourth?.choiceRationales ?? {}),
-      };
-    });
-    expect(imported).toEqual({ importedSet: true, fourthKey: "B", fourthHasCitation: false, fourthRationaleKeys: ["A"] });
-    // Import must neither fill missing teaching claims nor rewrite the reviewed
-    // SQL snapshot or review revision. Account-bound private data stays private.
-    const afterImportEvidence = await database.rpc(member.id, "get_question_set_library", { p_id: pending.id }) as typeof approvedEvidence;
-    expect(afterImportEvidence.snapshot_payload).toEqual(approvedEvidence.snapshot_payload);
-    expect(afterImportEvidence.review_revision).toBe(approvedEvidence.review_revision);
+    const [rejected] = await database.rpc(owner.id, "my_question_set_library") as Array<{ id: string; status: string }>;
+    expect(rejected.id).toBe(pending.id);
+    expect(rejected.status).toBe("rejected");
+    expect(await database.rpc(member.id, "list_question_set_library", { p_search: TITLE, p_offset: 0 })).toEqual([]);
+    // Moderation does not repair or replace answer evidence in the retained revision.
+    const after = await database.rpc(owner.id, "get_question_set_library", { p_id: pending.id }) as typeof evidence;
+    expect(after.snapshot_payload).toEqual(evidence.snapshot_payload);
   } finally {
-    await learnerContext.close();
     await reviewerContext.close();
     await database.close();
   }
