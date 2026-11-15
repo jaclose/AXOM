@@ -252,7 +252,11 @@ export async function draftQuestionExplanation(
   // The provider does not receive independently reviewed citation evidence.
   // Even a plausible public URL/DOI/PMID is an invented attribution here.
   // Fail closed rather than silently adding it to learner-facing teaching.
-  const unverifiedGeneratedReference = /\b(?:https?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}|doi\s*[:=]?\s*10\.\d{4,9}\/|pmid\s*[:#]?\s*\d{5,9}\b|pmcid\s*[:#]?\s*PMC\d+\b)/i;
+  // Source URLs and publication identifiers need not include a scheme or a
+  // DOI/PMCID prefix. Never let a model launder these as reviewed citations;
+  // keep genuine clinical slash notation (for example CD4/CD8) eligible.
+  const unverifiedGeneratedReference =
+    /\b(?:https?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}|(?:[a-z0-9-]+\.)+(?:com|edu|gov|net|org|io)\b|(?:doi\s*[:=]?\s*)?10\.\d{4,9}\/[^\s)\]}>]+|pmid\s*[:#]?\s*\d{1,9}\b|(?:pmcid\s*[:#]?\s*)?PMC\d+\b)/i;
   if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
     .some(text => unverifiedGeneratedReference.test(text))) {
     throw new Error("The AI draft contains an unverified source link or publication identifier. Verify the reference against the original source and enter it separately before publication.");
