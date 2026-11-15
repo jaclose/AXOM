@@ -20,7 +20,8 @@ import unicodedata
 from difflib import SequenceMatcher
 from source_ledger_enrich import (enrich_source_records, canonical_packages, canonicalize_queue,
     enrich_pairs, add_workbook_answer_candidates, evidence_counts, build_lead_dispositions,
-    ordered_import_batches, index_source_archives, merge_agent2_assessment,
+    ordered_import_batches, index_source_archives, archive_metadata_metrics,
+    merge_agent2_assessment,
     raw_text_stem_fingerprints, baseline_source_continuity)
 from datetime import datetime, timezone
 
@@ -939,10 +940,7 @@ def report(args):
         source_types=dict(counts), native_package_issues=package_errors,
         scanned_roots=roots, coverage_row_count=len(coverage), potential_answer_pairs=len(pairs),
         same_stem_sha_groups=len(collisions),
-        archive_metadata=dict(archives_indexed=len(archives),
-            candidate_document_members=sum(len(a["entries"]) for a in archives),
-            question_filename_hint_members=sum(a["question_candidate_count"] for a in archives),
-            note="ZIP CRC32 and filenames are metadata, NOT SHA-256 content identities or extracted questions."),
+        archive_metadata=archive_metadata_metrics(archives),
         canonical_metrics=enriched,
         cross_distinct_native_bank_stem_repeats=len(cross_bank_repeats),
         raw_txt_stem_hash_stats=dict(distinct_candidate_stem_hashes=raw_stems["distinct_stem_hint_count"],
