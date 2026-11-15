@@ -314,7 +314,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       const next = parseImport(rawText);
       const omittedCount = omissions.missingBlobKeys.length + omissions.missingOriginalIds.length;
       const omissionWarning = omittedCount
-        ? ` This ZIP is incomplete: ${omissions.missingBlobKeys.length} referenced image attachment(s) and ${omissions.missingOriginalIds.length} original file(s) are missing from the archive. Their metadata can be retained, but their bytes cannot be restored from this copy. Keep your other backups.`
+        ? ` This ${file.name.toLowerCase().endsWith(".zip") ? "ZIP" : "JSON"} is incomplete: ${omissions.missingBlobKeys.length} referenced image attachment(s) and ${omissions.missingOriginalIds.length} original file(s) are missing from this backup. Their metadata can be retained, but their bytes cannot be restored from this copy. Keep your other backups.`
         : "";
       const message = (mode === "replace"
         ? "Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both."
