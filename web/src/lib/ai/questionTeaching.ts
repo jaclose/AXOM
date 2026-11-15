@@ -122,9 +122,17 @@ function hasUnrepresentedRichSource(question: QuestionRecord): boolean {
  *
  * This is an outbound privacy check, not source/redistribution permission.
  */
+// Unicode format marks can hide unsafe source schemes or identifiers inside
+// otherwise readable teaching text. Normalize only the scanning copy; never
+// rewrite a learner's source question or an AI proposal during validation.
+const INVISIBLE_REFERENCE_CONTROLS = /[\u200B-\u200D\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
+function referenceSafetyText(value: string | undefined): string {
+  return (value ?? "").replace(INVISIBLE_REFERENCE_CONTROLS, "");
+}
+
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
   return [question.stem, question.topic, ...question.options.map(option => option.text)]
-    .some(text => hasPrivateDeviceCitation(text));
+    .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)));
 }
 
 export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
@@ -243,7 +251,8 @@ export async function draftQuestionExplanation(
   // AI text is untrusted, including model-suggested references. Do not surface
   // private local paths, inline document URIs or credential-bearing URLs through
   // draft reviews and into a later Community publication attempt.
-  if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords].some(hasPrivateDeviceCitation)) {
+  if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
+    .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)))) {
     throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
   }
   if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
@@ -258,7 +267,7 @@ export async function draftQuestionExplanation(
   const unverifiedGeneratedReference =
     /\b(?:https?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}|(?:[a-z0-9-]+\.)+(?:com|edu|gov|net|org|io)\b|(?:doi\s*[:=]?\s*)?10\.\d{4,9}\/[^\s)\]}>]+|pmid\s*[:#]?\s*\d{1,9}\b|(?:pmcid\s*[:#]?\s*)?PMC\d+\b)/i;
   if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
-    .some(text => unverifiedGeneratedReference.test(text))) {
+    .some(text => unverifiedGeneratedReference.test(referenceSafetyText(text)))) {
     throw new Error("The AI draft contains an unverified source link or publication identifier. Verify the reference against the original source and enter it separately before publication.");
   }
   // Keywords are subject phrases, never rights attestations or visual-intent

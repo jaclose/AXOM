@@ -532,6 +532,48 @@ describe("review-gated explanation drafting", () => {
     },
   );
 
+  it.each([
+    ["zero-width hidden inline document URI", "Case source data\u200B:application/pdf;base64,JVBERi0x"],
+    ["word-joiner hidden browser-local URI", "Question note blob\u2060:null/abcdef"],
+    ["bidi mark in a signed URL parameter", "Reference https://example.edu/notes?X-Amz-Sign\u202Aature=DEMO_NOT_SECRET"],
+  ] as Array<[string, string]>)(
+    "holds %s before sending question text to the AI provider", async (_label, stem) => {
+      const source = question({ stem });
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/private file|inline media|URL credentials/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(source.correctKey).toBe("A");
+      expect(source.stem).toBe(stem);
+    },
+  );
+
+  it.each([
+    ["zero-width source domain", "The tunica media controls vascular caliber. See example\u200B.edu/artery/source for evidence."],
+    ["bidi-inserted DOI", "Tunica media contains smooth muscle that modulates resistance. DOI 10.1016\u202A/j.vasc.2026.02.001."],
+    ["word-joiner PMCID", "The vascular smooth muscle in the tunica media changes arterial tone. PMC\u20601234567."],
+  ] as Array<[string, string]>)(
+    "rejects %s in an AI-generated explanation without altering the reviewed citation", async (_label, explanation) => {
+      const source = question({ citation: "Reviewed source, page 3" });
+      const model = provider({
+        explanation,
+        choiceRationales: {
+          A: "The tunica media contains vascular smooth muscle.",
+          B: "The intima contains the endothelial layer.",
+          C: "The adventitia consists primarily of connective tissue.",
+        },
+        keywords: ["arterial histology"],
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/unverified source link or publication identifier/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(source.citation).toBe("Reviewed source, page 3");
+      expect(source.correctKey).toBe("A");
+      expect(source.explanation).toBeUndefined();
+    },
+  );
+
   it("keeps clinical slash notation eligible while source citations remain separately reviewed", async () => {
     const source = question({
       stem: "For the CD4/CD8 ratio, which arterial layer contains smooth muscle?",
