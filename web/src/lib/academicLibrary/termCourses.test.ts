@@ -156,6 +156,22 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 2", "account", state, [course(1, "Term 2")]).questionIds).toEqual([]);
     expect(termQuizSelection("Term 1", "account", state, [course(1, "T1")]).questionIds).toEqual(["q-1"]);
   });
+  it("holds term quiz membership while deferred hydration belongs to another account", () => {
+    const state = workspace([receipt(1, ["ready"], { setIds: ["valid-set"] })], [question("ready")]);
+    state.questionSets = [{ id: "valid-set" }] as typeof state.questionSets;
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["ready"], setIds: ["valid-set"],
+    });
+    state.deferredContent = { accountId: "another-account", questions: [], documents: [], sources: [], media: [] };
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: [], setIds: [],
+    });
+    state.deferredContent.accountId = "account";
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["ready"], setIds: ["valid-set"],
+    });
+  });
+
   it("excludes duplicate or deferred question identities and deduplicates shared membership", () => {
     const state = workspace([receipt(1, ["unique", "duplicate", "deferred"]), receipt(2, ["unique"])],
       [question("unique"), question("duplicate"), question("duplicate"), question("deferred")]);

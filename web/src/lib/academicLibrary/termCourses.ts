@@ -82,6 +82,11 @@ export function termQuizNeedsCatalog(accountId: string, workspace: TermWorkspace
  * older receipts use an exact catalog or installed hosted-course identity. */
 export function termQuizSelection(term: string, accountId: string, workspace: TermWorkspace,
   courses: readonly AcademicCourse[] = []): CourseQuizLaunch {
+  // Deferred hydration is account-bound. Never derive saved quiz membership
+  // from a workspace mixing this account with another account's pending data.
+  if (workspace.deferredContent && workspace.deferredContent.accountId !== accountId) {
+    return { module: term, term, setIds: [], questionIds: [] };
+  }
   const ids = new Set<string>();
   const setIds = new Set<string>();
   // A receipt may identify a set, but ambiguous duplicate local rows cannot establish one canonical set.
