@@ -8,7 +8,7 @@ import { privateReviewMedia } from "./privateLibrary/media";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, base64ToBytes, blobToBase64,
-  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
+  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, normalizeQuestionAttachments, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
   type StagedQuestionAttachmentRestore,
 } from "./questionAttachments";
@@ -681,9 +681,39 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       }
       verified.set(payload.blobKey, { mimeType: payload.mimeType, byteSize: payload.byteSize, bytes });
     }
-    // JSON has no ZIP original-file manifest. Legacy JSON imports retain their
-    // existing media validation and recovery behavior.
-    return { rawText, omissions: { missingBlobKeys: [], missingOriginalIds: [] }, restoreMedia: async refs => {
+    // A complete JSON file can carry references without corresponding image
+    // payloads, including historical attachments with id but no blobKey.
+    // Inspect the actual validated binary records before offering recovery.
+    // JSON never embeds original-file manifests, so do not infer original
+    // omissions from source-document metadata.
+    const workspace = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as {
+        questions?: Array<{ id: string; attachments?: QuestionImageAttachment[] }>;
+        documents?: SourceDocument[];
+        deferredContent?: {
+          questions?: Array<{ id: string; attachments?: QuestionImageAttachment[] }>;
+          documents?: SourceDocument[];
+        };
+      } : {};
+    const sourceDocuments = [
+      ...(Array.isArray(workspace.documents) ? workspace.documents : []),
+      ...(Array.isArray(workspace.deferredContent?.documents) ? workspace.deferredContent.documents : []),
+    ].filter((doc): doc is SourceDocument =>
+      !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
+    const questions = [
+      ...(Array.isArray(workspace.questions) ? workspace.questions : []),
+      ...(Array.isArray(workspace.deferredContent?.questions) ? workspace.deferredContent.questions : []),
+    ].filter(question => !!question && typeof question.id === "string")
+      .map(question => ({
+        id: question.id,
+        attachments: normalizeQuestionAttachments(question.attachments) ?? [],
+      }));
+    const expected = mediaReferences([...questions, ...privateReviewMedia(sourceDocuments)]);
+    const omissions = {
+      missingBlobKeys: [...new Set(expected.map(({ metadata }) => metadata.blobKey).filter(key => !verified.has(key)))],
+      missingOriginalIds: [] as string[],
+    };
+    return { rawText, omissions, restoreMedia: async refs => {
       assertConsistentMediaReferences(refs);
       return stageQuestionAttachmentPayloads(payloads, refs);
     }, restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
@@ -769,8 +799,10 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   ].filter(question => question && typeof question.id === "string")
     .map(question => ({
       id: question.id,
-      attachments: Array.isArray(question.attachments)
-        ? question.attachments.filter(a => a && typeof a.blobKey === "string") : [],
+      // Historical v1/v2 metadata may have id without blobKey. Parse/import
+      // accepts those records and uses id as the storage key; completeness must
+      // inspect the same normalized references or it can hide missing bytes.
+      attachments: normalizeQuestionAttachments(question.attachments) ?? [],
     }));
   const expectedMedia = mediaReferences([...questions, ...privateReviewMedia(sourceDocuments)]);
   const missingBlobKeys = expectedMedia
