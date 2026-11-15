@@ -36,6 +36,28 @@ describe("explicitly reviewed Community AI keywords", () => {
       .toThrow(/subject phrases.*publication metadata/i);
   });
 
+  it.each([
+    ["zero-width rights attestation", "rig\u200Bhts:approved"],
+    ["word-joiner source review", "source\u2060:reviewed"],
+    ["zero-width visual-intent claim", "visual\u200D:intent:histology"],
+    ["bidi-hidden moderation claim", "moderation\u202E:approved"],
+    ["fullwidth rights attestation", "ＲＩＧＨＴＳ：approved"],
+    ["zero-width web citation", "https\u200B://example.edu/clinical"],
+    ["fullwidth web citation", "ｈｔｔｐｓ：／／example.edu/clinical"],
+    ["hidden private file URI", "file\u200B:///Users/student/private.pdf"],
+    ["invisible-only subject tag", "\u200B\uFEFF"],
+  ])("rejects unicode-disguised publication evidence or reference: %s", (_label, keyword) => {
+    const authored = ["original", "rights:reviewed"];
+    expect(() => mergeReviewedCommunityKeywords(authored, keyword))
+      .toThrow(/subject phrases.*publication metadata/i);
+    expect(authored).toEqual(["original", "rights:reviewed"]);
+  });
+
+  it("preserves legitimate clinical and non-Latin subject phrases with joining marks", () => {
+    expect(mergeReviewedCommunityKeywords(["author"], "CD4/CD8, بافت\u200Cشناسی"))
+      .toEqual(["author", "cd4/cd8", "بافت\u200Cشناسی"]);
+  });
+
   it("preserves existing legacy metadata without letting AI proposals create more", () => {
     const original = ["visual:intent:anatomy", "rights:reviewed", "CD4/CD8"];
     expect(mergeReviewedCommunityKeywords(original, "Histology: vessel layers, CD4/CD8"))

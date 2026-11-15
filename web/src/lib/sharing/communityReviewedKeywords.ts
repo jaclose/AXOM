@@ -6,8 +6,18 @@ import { hasPrivateDeviceCitation } from "./questionSetShare";
  * publication or moderation state, carry a citation, or embed private references. */
 const RESERVED_PUBLICATION_KEYWORD = /^(?:visual|source|rights?|licen[sc]e|provenance|review|moderation|approval|publication|answer(?:-?key)?|correct(?:-?key)?)\s*:/i;
 
+// Validate a separate comparison copy: invisible Unicode marks can split
+// "rights:approved" or "file://", and compatibility-width characters can
+// disguise a rights claim or source URL. Do not rewrite authored keywords or
+// the original source record. Legitimate joining marks in non-Latin subjects
+// remain intact in the stored subject tag.
+const HIDDEN_KEYWORD_REFERENCE_MARKS = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+function keywordSafetyText(value: string): string {
+  return value.normalize("NFKC").replace(HIDDEN_KEYWORD_REFERENCE_MARKS, "").trim();
+}
+
 export function isCommunitySubjectKeyword(value: string): boolean {
-  const candidate = value.trim();
+  const candidate = keywordSafetyText(value);
   return Boolean(candidate)
     && !RESERVED_PUBLICATION_KEYWORD.test(candidate)
     && !/https?:\/\//i.test(candidate)
