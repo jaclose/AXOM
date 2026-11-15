@@ -246,6 +246,9 @@ export async function draftQuestionExplanation(
   if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords].some(hasPrivateDeviceCitation)) {
     throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
   }
+  if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
+    throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
+  }
   // The provider does not receive independently reviewed citation evidence.
   // Even a plausible public URL/DOI/PMID is an invented attribution here.
   // Fail closed rather than silently adding it to learner-facing teaching.
@@ -253,9 +256,6 @@ export async function draftQuestionExplanation(
   if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
     .some(text => unverifiedGeneratedReference.test(text))) {
     throw new Error("The AI draft contains an unverified source link or publication identifier. Verify the reference against the original source and enter it separately before publication.");
-  }
-  if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
-    throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
   }
   // Keywords are subject phrases, never rights attestations or visual-intent
   // decisions. Retain deterministic distinct suggestions for explicit review.
