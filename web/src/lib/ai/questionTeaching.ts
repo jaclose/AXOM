@@ -287,12 +287,16 @@ export async function draftQuestionExplanation(
     }
     choiceRationales[key] = value.trim();
   }
-  // Inspect *all* raw model suggestions before truncation or the eight-tag
-  // limit. Otherwise an unsafe ninth keyword or an overlong signed URL can be
-  // silently dropped and evade the generated-output integrity gate.
-  const proposedKeywords = Array.isArray(raw.keywords)
-    ? raw.keywords.filter((value): value is string => typeof value === "string")
-    : [];
+  // Keyword proposals are untrusted structured output. Do not silently
+  // discard malformed entries, oversized source-like strings, or extra terms:
+  // accepting a partial list conceals a provider schema failure from review.
+  // Reviewers may later opt into these suggestions; the AI does not edit tags.
+  if (!Array.isArray(raw.keywords) || raw.keywords.length > 8
+    || raw.keywords.some((value: unknown) => typeof value !== "string"
+      || [...value.trim()].length < 3 || [...value.trim()].length > 64)) {
+    throw new Error("The model returned malformed or excessive keyword suggestions. Review the original source and retry the AI draft.");
+  }
+  const proposedKeywords: string[] = raw.keywords;
 
   // AI text is untrusted, including model-suggested references. Do not surface
   // private local paths, inline document URIs or credential-bearing URLs through
@@ -318,8 +322,7 @@ export async function draftQuestionExplanation(
   }
   // Keywords are subject phrases, never rights attestations or visual-intent
   // decisions. Retain deterministic distinct suggestions for explicit review.
-  const keywords = [...new Set(proposedKeywords.map(value => value.trim().toLowerCase())
-    .filter(value => value.length >= 3 && value.length <= 64))].slice(0, 8);
+  const keywords = [...new Set(proposedKeywords.map(value => value.trim().toLowerCase()))];
 
   return { questionId: question.id, explanation, choiceRationales, keywords, sourceFingerprint };
 }
