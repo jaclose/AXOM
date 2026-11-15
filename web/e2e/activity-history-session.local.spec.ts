@@ -8,7 +8,15 @@ type Dev = {
     setState: (patch: object) => void;
     getState: () => { logs: unknown[] };
   };
-  useAccount: { setState: (patch: object) => void };
+  useAccount: {
+    setState: (patch: object) => void;
+    getState: () => {
+      identityEpoch?: number;
+      phase: string;
+      link: string;
+      user: { id: string; email: string; displayName: string; emailConfirmed: boolean } | null;
+    };
+  };
   flushVault: () => Promise<void>;
 };
 
@@ -152,7 +160,7 @@ test("Activity History separately confirms and downloads retained-device XLSX wi
 });
 
 for (const width of [1440, 390]) {
-  test(`Activity History revokes synthetic epoch-only ABA without an identity or link delta at ${width}px`, async ({ page }) => {
+  test(`Activity History revokes producer-driven same-tick A→B→A after mounting at ${width}px}`, async ({ page }) => {
     const note = "SYNTHETIC_EPOCH_ONLY_PRIVATE_R137";
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -174,12 +182,13 @@ for (const width of [1440, 390]) {
     await reloadAfterSave(page);
     await dev(page);
     await setSession(page, "A", "linked");
-    // The Platform producer is held in a separate PR; test the consumer with
-    // an explicit synthetic epoch rather than claiming real auth coverage.
-    await page.evaluate(async () => {
+    // The DIRECT parent intentionally omits MOTHERSHIP's Platform epoch producer.
+    // Report SKIPPED, not green, until FORGE tests the literal combined source.
+    const initialEpoch = await page.evaluate(async () => {
       const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
-      app.useAccount.setState({ identityEpoch: 4 });
+      return app.useAccount.getState().identityEpoch;
     });
+    test.skip(typeof initialEpoch !== "number", "Requires Platform #736 identityEpoch producer; DIRECT-only parent cannot verify A→B→A.");
     await page.goto("/#activity", { waitUntil: "networkidle" });
 
     await expect(page.getByText(note)).toBeVisible();
@@ -187,12 +196,34 @@ for (const width of [1440, 390]) {
     await exportButton.focus();
     await expect(exportButton).toBeFocused();
 
-    // An unobserved A -> B -> A may have the original account and link again.
-    // Only an advanced epoch reveals that the mounted session is obsolete.
-    await page.evaluate(async () => {
+    // Both transitions occur before React can render an intermediate account.
+    // The Platform producer must increment twice even though the final identity
+    // and link match the mounted snapshot; never inject the epoch directly.
+    const transition = await page.evaluate(async () => {
       const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
-      app.useAccount.setState({ identityEpoch: 6 });
+      const before = app.useAccount.getState();
+      const ownerA = before.user;
+      if (!ownerA) throw new Error("Missing synthetic owner A");
+      app.useAccount.setState({
+        phase: "signed-in",
+        user: { ...ownerA, id: "browser-synthetic-B", email: "b@example.test", displayName: "Synthetic B" },
+        link: "linked-elsewhere",
+      });
+      const afterB = app.useAccount.getState();
+      app.useAccount.setState({ phase: "signed-in", user: ownerA, link: "linked" });
+      const afterA = app.useAccount.getState();
+      return {
+        initial: before.identityEpoch,
+        afterB: afterB.identityEpoch,
+        afterA: afterA.identityEpoch,
+        userId: afterA.user?.id,
+        link: afterA.link,
+      };
     });
+    expect(transition.afterB).toBe((transition.initial ?? 0) + 1);
+    expect(transition.afterA).toBe((transition.initial ?? 0) + 2);
+    expect(transition.userId).toBe("browser-synthetic-A");
+    expect(transition.link).toBe("linked");
     const notice = page.getByRole("status").filter({ hasText: "Activity History session changed" });
     await expect(notice).toBeVisible();
     await expect(notice).toBeFocused();
@@ -200,11 +231,15 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("button", { name: "Export .xlsx" })).toHaveCount(0);
     await expect(page.locator(".grid-stats")).toHaveCount(0);
 
-    // Once revoked, a synthetic counter rollback cannot resurrect this view.
-    await page.evaluate(async () => {
+    // An unchanged-account write must not increment the counter or restore
+    // an already revoked mounted view.
+    const epochAfterNoChange = await page.evaluate(async () => {
       const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
-      app.useAccount.setState({ identityEpoch: 4 });
+      const current = app.useAccount.getState();
+      app.useAccount.setState({ phase: current.phase, user: current.user, link: current.link });
+      return app.useAccount.getState().identityEpoch;
     });
+    expect(epochAfterNoChange).toBe(transition.afterA);
     await expect(notice).toBeVisible();
     await expect(page.getByText(note)).toHaveCount(0);
     const count = await page.evaluate(async () => {
