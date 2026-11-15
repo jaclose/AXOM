@@ -101,7 +101,18 @@ test("an incomplete legacy JSON warns before replacement, cancellation preserves
     });
     await dev.flushVault();
   }, { imageId: IMAGE_ID, questionId: QUESTION_ID, note: NOTE, base64: PNG_BASE64 });
-  await reloadAfterSave(page);
+  // Export the actual legacy in-memory record before any hydration routine
+  // can normalize its old optional blobKey field to the supported ID fallback.
+  const sourceMetadata = await page.evaluate(async questionId => {
+    const dev = await (window as unknown as {
+      __AXOM_DEV__: Promise<{ useStore: { getState: () => {
+        questions: { id: string; attachments?: { id: string; blobKey?: string }[] }[];
+      } } }>;
+    }).__AXOM_DEV__;
+    return dev.useStore.getState().questions.find(q => q.id === questionId)?.attachments?.[0] ?? null;
+  }, QUESTION_ID);
+  expect(sourceMetadata).toMatchObject({ id: IMAGE_ID });
+  expect(sourceMetadata?.blobKey).toBeUndefined();
   await openRecovery(page);
 
   const downloading = page.waitForEvent("download");
