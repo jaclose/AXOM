@@ -1401,8 +1401,10 @@ describe("portable binary media backup", () => {
       // A digestless v2 archive has never required SHA-256 for image media.
       const legacy = await readPortableBackup(new File([historicalZip], "digestless-v2-no-crypto.zip"));
       expect(legacy.omissions.missingBlobKeys).toEqual([]);
+      await expect(createMediaBackupArchive({ questions: refs }, refs))
+        .rejects.toThrow(/SHA-256.*unavailable/i);
     } finally {
-      vi.unstubAllGlobals();
+      vi.stubGlobal("crypto", cryptoWithSubtle);
     }
   });
 
@@ -1427,7 +1429,7 @@ describe("portable binary media backup", () => {
       await expect(readPortableBackup(new File([exported.blob], "intact-original-no-crypto.zip")))
         .rejects.toThrow(/SHA-256.*unavailable/i);
     } finally {
-      vi.unstubAllGlobals();
+      vi.stubGlobal("crypto", cryptoWithSubtle);
     }
   });
 
