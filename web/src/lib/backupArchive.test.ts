@@ -337,6 +337,52 @@ describe("portable binary media backup", () => {
     expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
   });
 
+  it.each([
+    { label: "MIME", change: { mimeType: "image/jpeg" as const } },
+    { label: "byte size", change: { byteSize: PNG_BYTES.length + 1 } },
+  ])("rejects ZIP media with a contradictory workspace $label before consent", async ({ change }) => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    // The archived media itself is valid; only the workspace reference lies.
+    const exported = await createMediaBackupArchive({
+      _app: "AXOM",
+      questions: [{ id: "held-question", attachments: [{ ...attachment, ...change }] }],
+    }, refs);
+    expect(exported).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+    await expect(readPortableBackup(new File([exported.blob], "zip-reference-conflict.zip")))
+      .rejects.toThrow(/ZIP backup image does not match its reference/i);
+  });
+
+  it("rejects contradictory shared-key ZIP references before consent even when image bytes are missing", async () => {
+    const conflicting = { ...attachment, id: "second-figure", byteSize: attachment.byteSize + 1 };
+    const questions = [
+      { id: "held-question", attachments: [attachment] },
+      { id: "other-question", attachments: [conflicting] },
+    ];
+    const exported = await createMediaBackupArchive({ _app: "AXOM", questions }, questions);
+    expect(exported).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+    await expect(readPortableBackup(new File([exported.blob], "zip-references-conflict.zip")))
+      .rejects.toThrow(/conflicting image metadata/i);
+  });
+
+  it("accepts matching shared-key ZIP references while disclosing only truly omitted media", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const missing = { ...attachment, id: "missing-figure", blobKey: "private-library:missing-figure" };
+    const questions = [
+      { id: "held-question", attachments: [attachment, missing] },
+      { id: "other-question", attachments: [{ ...attachment, id: "second-use" }] },
+    ];
+    const exported = await createMediaBackupArchive({ _app: "AXOM", questions }, questions);
+    expect(exported).toMatchObject({ attachmentCount: 1, missingBlobKeys: [missing.blobKey] });
+    const backup = await readPortableBackup(new File([exported.blob], "zip-compatible-references.zip"));
+    expect(backup.omissions).toEqual({ missingBlobKeys: [missing.blobKey], missingOriginalIds: [] });
+  });
+
   it.each(["duplicate storage key", "duplicate archive path"] as const)(
     "rejects a ZIP with %s media entries before exposing workspace state", async kind => {
       await putQuestionAttachmentBlob(attachment.blobKey, {
