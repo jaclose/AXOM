@@ -238,6 +238,31 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 5", "account", state).questionIds).toEqual([]);
   });
 
+  it("holds IDs shared with an unplaced legacy receipt until source term is reconciled", () => {
+    const state = workspace([
+      receipt(1, ["shared-question", "clean-question", "shared-set-question", "clean-set-question"], {
+        setIds: ["shared-set", "clean-set"],
+      }),
+      receipt(2, ["shared-question"], { term: undefined, setIds: ["shared-set"] }),
+    ], [
+      question("shared-question"), question("clean-question"),
+      question("shared-set-question", { setId: "shared-set" }),
+      question("clean-set-question", { setId: "clean-set" }),
+    ]);
+    state.questionSets = [{ id: "shared-set" }, { id: "clean-set" }] as typeof state.questionSets;
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+    // Do not infer whether the legacy collection belongs in Term 1. Its
+    // conflicting original IDs are held, without hiding independent work.
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["clean-question", "clean-set-question"], setIds: ["clean-set"],
+    });
+    state.documents[1] = receipt(2, ["shared-question"], { term: "Term 1", setIds: ["shared-set"] });
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["shared-question", "clean-question", "shared-set-question", "clean-set-question"],
+      setIds: ["shared-set", "clean-set"],
+    });
+  });
+
   it("holds ambiguous cross-term question identities in both term unions", () => {
     const state = workspace([
       receipt(1, ["cross-listed", "term-one-only"]),

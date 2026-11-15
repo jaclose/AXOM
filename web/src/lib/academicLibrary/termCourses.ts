@@ -143,6 +143,10 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const setTerms = new Map<string, string>();
   const conflictingQuestions = new Set<string>();
   const conflictingSets = new Set<string>();
+  // An unplaced legacy receipt is unresolved source ownership, not a
+  // separate proven term. Hold any original ID it shares with a known term.
+  const unplacedQuestions = new Set<string>();
+  const unplacedSets = new Set<string>();
   const recordTerm = (id: string, owner: string, owners: Map<string, string>, conflicts: Set<string>) => {
     const previous = owners.get(id);
     if (previous !== undefined && previous !== owner) conflicts.add(id);
@@ -152,7 +156,11 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
     const catalog = courses.find(course => course.id === saved.collectionId && course.current_revision_id === saved.revisionId);
     if (saved.term && catalog && termIdentity(saved.term) !== termIdentity(catalog.term)) continue;
     const savedTerm = saved.term ?? catalog?.term ?? installedReferenceTerm(saved, workspace);
-    if (!savedTerm) continue;
+    if (!savedTerm) {
+      for (const id of saved.questionIds) unplacedQuestions.add(id);
+      for (const id of saved.setIds) unplacedSets.add(id);
+      continue;
+    }
     const owner = termIdentity(savedTerm);
     for (const id of saved.questionIds) recordTerm(id, owner, questionTerms, conflictingQuestions);
     for (const id of saved.setIds) recordTerm(id, owner, setTerms, conflictingSets);
@@ -165,13 +173,14 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
     // An original set ID must resolve to exactly one local set. An ambiguous
     // or absent original is not evidence that its questions can be practiced.
     for (const id of saved.questionIds) {
-      if (conflictingQuestions.has(id)) continue;
+      if (conflictingQuestions.has(id) || unplacedQuestions.has(id)) continue;
       ids.add(id);
       const owningSets = receiptSetsByQuestion.get(id) ?? new Set<string>();
       for (const originalSetId of saved.setIds) owningSets.add(originalSetId);
       receiptSetsByQuestion.set(id, owningSets);
     }
-    for (const id of saved.setIds) if (!conflictingSets.has(id) && setCounts.get(id) === 1 && explicitSetMembers.get(id) !== null) setIds.add(id);
+    for (const id of saved.setIds) if (!conflictingSets.has(id) && !unplacedSets.has(id)
+      && setCounts.get(id) === 1 && explicitSetMembers.get(id) !== null) setIds.add(id);
   }
   const counts = new Map<string, number>();
   for (const question of workspace.questions) counts.set(question.id, (counts.get(question.id) ?? 0) + 1);
@@ -183,7 +192,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
     ? workspace.deferredContent.questions.map(question => question.id) : []);
   const readyQuestions = workspace.questions.filter(question => ids.has(question.id)
     && counts.get(question.id) === 1 && !deferred.has(question.id)
-    && (!question.setId || !conflictingSets.has(question.setId))
+    && (!question.setId || (!conflictingSets.has(question.setId) && !unplacedSets.has(question.setId)))
     && (!question.setId || (setCounts.get(question.setId) === 1
       && receiptSetsByQuestion.get(question.id)?.has(question.setId)
       && (!explicitSetMembers.has(question.setId) || explicitSetMembers.get(question.setId)?.has(question.id) === true)))
@@ -194,7 +203,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   const runnableIds = new Set(readyQuestions.map(question => question.id));
   const linkedSetIds = new Set(readyQuestions.map(question => question.setId).filter((id): id is string => typeof id === "string" && !!id.trim()));
   const runnableSetIds = [...setIds].filter(id => {
-    if (conflictingSets.has(id)) return false;
+    if (conflictingSets.has(id) || unplacedSets.has(id)) return false;
     if (linkedSetIds.has(id)) return true;
     const declaredMembers = explicitSetMembers.get(id);
     // A valid explicit membership can establish a cross-listed source even
