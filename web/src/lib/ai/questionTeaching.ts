@@ -287,6 +287,18 @@ export async function draftQuestionExplanation(
     }
     choiceRationales[key] = value.trim();
   }
+  // Privacy validation must precede keyword schema validation. In particular,
+  // oversized and ninth-position suggestions are still untrusted model output
+  // and must not conceal a private URL behind a generic format error.
+  // Inspect every string value without truncating, normalizing or publishing it.
+  const untrustedKeywordStrings: string[] = Array.isArray(raw.keywords)
+    ? raw.keywords.filter((value: unknown): value is string => typeof value === "string")
+    : [];
+  if ([explanation, ...Object.values(choiceRationales), ...untrustedKeywordStrings]
+    .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)))) {
+    throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
+  }
+
   // Keyword proposals are untrusted structured output. Do not silently
   // discard malformed entries, oversized source-like strings, or extra terms:
   // accepting a partial list conceals a provider schema failure from review.
@@ -298,13 +310,6 @@ export async function draftQuestionExplanation(
   }
   const proposedKeywords: string[] = raw.keywords;
 
-  // AI text is untrusted, including model-suggested references. Do not surface
-  // private local paths, inline document URIs or credential-bearing URLs through
-  // draft reviews and into a later Community publication attempt.
-  if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
-    .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)))) {
-    throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
-  }
   if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
     throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
   }
