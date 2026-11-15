@@ -105,7 +105,13 @@ function sheetTitlePrefix(input: string, maxUnits: number): string {
 function safeSheetName(input: string) {
   // Excel also rejects blank/whitespace-only tabs and names that begin/end with a quote.
   // Strip both spaces and apostrophes at each edge in one pass, including those exposed by sanitization.
-  const title = sheetTitlePrefix(input.replace(/[\\/?*[\]:]/g, " "), 31)
+  // Worksheet titles must exclude C0 controls and XML-forbidden noncharacters.
+  // Only tab labels change; the original activity types and notes remain in data cells.
+  const xmlSafe = Array.from(input, (symbol) => {
+    const point = symbol.codePointAt(0) ?? 0;
+    return point < 0x20 || point === 0xfffe || point === 0xffff ? " " : symbol;
+  }).join("");
+  const title = sheetTitlePrefix(xmlSafe.replace(/[\\/?*[\]:]/g, " "), 31)
     .replace(/^[\s']+|[\s']+$/g, "");
   return title || "Activity";
 }
