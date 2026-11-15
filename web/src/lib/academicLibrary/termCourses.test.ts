@@ -12,6 +12,7 @@ vi.mock("../store", () => ({ useStore: { getState: vi.fn() } }));
 vi.mock("../sync/contentDownloads", () => ({ downloadAccountContent: vi.fn() }));
 vi.mock("../localVault", () => ({ getVaultWriteCheckpoint: vi.fn(), flushLocalVaultWrites: vi.fn(), assertVaultWritesSince: vi.fn() }));
 import { listTermCourses, termQuizNeedsCatalog, termQuizSelection } from "./termCourses";
+import { hasDeclaredCourseScopeConflict } from "../course-engine/quizLaunch";
 
 const course = (index: number, term = "Term 1"): AcademicCourse => ({ id: `course-${index}`, current_revision_id: `revision-${index}`, title: `Module ${index}`,
   module: `Module ${index}`, term, visibility: "shared", review_status: "approved", owned: false, ready_questions: 1, review_questions: 0 });
@@ -98,6 +99,20 @@ describe("complete term catalog", () => {
 });
 
 describe("downloaded term practice", () => {
+  it("marks downloaded term practice as a cross-module quiz union", () => {
+    const state = workspace([receipt(5, ["cross-module"], { term: "Term 5" })],
+      [question("cross-module", { module: "CPR", week: "Week 2" })]);
+    const selection = termQuizSelection("Term 5", "account", state);
+    expect(selection.questionIds).toEqual(["cross-module"]);
+    // A Term 5 union includes CPR, RHPS and other source modules; the
+    // QBank launch validator must not interpret "Term 5" as one module.
+    expect(selection.scopeKind).toBe("term");
+    expect(hasDeclaredCourseScopeConflict(state.questions[0], selection)).toBe(false);
+    state.deferredContent = { accountId: "another-account", questions: [], documents: [], sources: [], media: [] };
+    expect(termQuizSelection("Term 5", "account", state)).toMatchObject({
+      scopeKind: "term", questionIds: [], setIds: [],
+    });
+  });
   it("requires the full catalog for a legacy receipt even when it is beyond the visible page", () => {
     const documents = Array.from({ length: 26 }, (_, index) => receipt(index, [`q-${index}`]));
     const state = workspace(documents, []);
