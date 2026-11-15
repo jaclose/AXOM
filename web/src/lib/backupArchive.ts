@@ -755,7 +755,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   if (manifest._backupFormat !== FORMAT || ![1, 2].includes(manifest._backupVersion ?? 0) || !Array.isArray(manifest.media)) throw new Error("Unsupported workspace backup format.");
   const media = manifest.media;
   const mediaFiles = new Set<string>();
-  const mediaKeys = new Set<string>();
+  const mediaMetadata = new Map<string, { mimeType: string; byteSize: number }>();
   for (const item of media) {
     if (!item || !/^media\/\d+$/.test(item.file) || !zip.file(item.file)) throw new Error("The backup contains an invalid or missing image record.");
     // Use the same normalized fallback as restore: historical ZIP media
@@ -773,11 +773,11 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     }
     // One stored image per immutable key and archive path: reject aliases
     // before exposing workspace metadata for adoption.
-    if (mediaFiles.has(item.file) || mediaKeys.has(normalized[0].blobKey)) {
+    if (mediaFiles.has(item.file) || mediaMetadata.has(normalized[0].blobKey)) {
       throw new Error("The backup contains duplicate image records. No workspace data has been changed.");
     }
     mediaFiles.add(item.file);
-    mediaKeys.add(normalized[0].blobKey);
+    mediaMetadata.set(normalized[0].blobKey, { mimeType, byteSize });
   }
   const originals = manifest._backupVersion === 2 ? manifest.originals : [];
   if (!Array.isArray(originals)) throw new Error("The backup has no original-file manifest.");
@@ -819,6 +819,19 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       attachments: normalizeQuestionAttachments(question.attachments) ?? [],
     }));
   const expectedMedia = mediaReferences([...questions, ...privateReviewMedia(sourceDocuments)]);
+  // Match JSON recovery: a verified ZIP member proves its own bytes, not that
+  // every imported workspace reference describes the same immutable media.
+  // Reject contradictions before Settings can offer Replace/Merge consent.
+  // A genuinely absent member is still eligible for disclosed partial rescue.
+  for (const { metadata, conflicting } of expectedMedia) {
+    if (conflicting) {
+      throw new Error("The ZIP backup references conflicting image metadata for one storage key. No workspace data has been changed.");
+    }
+    const embedded = mediaMetadata.get(metadata.blobKey);
+    if (embedded && (embedded.mimeType !== metadata.mimeType || embedded.byteSize !== metadata.byteSize)) {
+      throw new Error("A ZIP backup image does not match its reference MIME or size. No workspace data has been changed.");
+    }
+  }
   const missingBlobKeys = expectedMedia
     .map(({ metadata }) => metadata.blobKey).filter(key => !mediaKeys.has(key));
   const omissions = { missingBlobKeys, missingOriginalIds };
