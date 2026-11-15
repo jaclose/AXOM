@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn() }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner-1" } }),
 }));
@@ -13,6 +13,7 @@ vi.mock("../../lib/academicLibrary/accountScope", () => ({
 }));
 vi.mock("../../lib/academicLibrary/client", () => ({
   listAcademicCourses: (...args: unknown[]) => mocks.list(...args),
+  getAcademicCourse: (...args: unknown[]) => mocks.detail(...args),
   isAcademicReviewer: (...args: unknown[]) => mocks.reviewer(...args),
   shareAcademicCourses: (...args: unknown[]) => mocks.share(...args),
   reviewAcademicCourse: (...args: unknown[]) => mocks.review(...args),
@@ -56,10 +57,14 @@ describe("your published courses", () => {
       course(30, { term: "Term 4", visibility: "shared", review_status: "approved" }),
       course(31, { term: "Term 4", visibility: "shared" }),
     ]);
+    // The cursor must still be visible at its original exact revision before
+    // combining the second page; this is not a second catalog page.
+    mocks.detail.mockResolvedValueOnce(first.at(-1));
     render(<AcademicCollectionManager onChanged={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
     expect(await screen.findByText("14 courses")).toBeTruthy();
     expect(mocks.list).toHaveBeenNthCalledWith(2, "", "", id(24));
+    expect(mocks.detail).toHaveBeenCalledWith(id(24), "owner-1");
     expect(screen.getByText(/12 private, 1 awaiting review, 1 shared with everyone\./)).toBeTruthy();
     expect(screen.getAllByRole("heading", { level: 4 }).map(heading => heading.textContent)).toEqual(["Term 1", "Term 4"]);
     // Not a reviewer: no approval controls, only an explanation.
