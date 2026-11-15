@@ -502,7 +502,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       {settings && <SettingsModal onClose={() => setSettings(false)} initialTab={settingsTab} />}
       {showTour && <GuidedTour onExit={endTour} onNavigate={navigateTour} currentRoute={route} />}
       <GuideOffer
-        active={!showTour && !settings && !promisePromptOpen && !promiseCutsceneOpen}
+        active={!showTour && !settings && !promisePromptOpen && !promiseCutsceneOpen && !drawer}
         onStart={() => { clearTourProgress(); updateProfile({ tourDone: false }); }}
       />
       <SaveProgressBanner
