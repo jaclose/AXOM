@@ -385,10 +385,40 @@ describe("saved-work recovery without downloading content", () => {
     expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
     expect(lastBackupAt()).toBeNull();
     expect(filename).toMatch(/\.json$/);
+    // A partial export is still downloadable for inspection, but conflicting
+    // references cannot be safely presented as restorable. Reject at read time,
+    // BEFORE Settings can offer Replace or Merge, rather than during staging.
+    const downloaded = new File([exported!], filename);
+    expect(JSON.parse(await downloaded.text())[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
+    await expect(readPortableBackup(downloaded)).rejects.toThrow(/conflicting image metadata/);
+    expect(lastBackupAt()).toBeNull();
+    // No staged restore was attempted and the original local image survives.
+    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeDefined();
+  });
+
+  it("preserves a nonconflicting, missing-image JSON as disclosed metadata-only recovery", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    state.questions[0].attachments = [attachment];
+    // Deliberately do not store the referenced bytes. Unlike a conflicting key,
+    // an absent image must not prevent safe rescue of the nonimage question data.
+    const result = await exportStateWithAttachments(state);
+    expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+    expect(filename).toMatch(/\\.json$/);
+    expect(lastBackupAt()).toBeNull();
     const backup = await readPortableBackup(new File([exported!], filename));
-    expect(JSON.parse(backup.rawText)[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
-    await expect(backup.restoreMedia([{ id: "q", attachments: state.questions[0].attachments }]))
-      .rejects.toThrow("conflicting image metadata");
+    expect(backup.omissions).toEqual({
+      missingBlobKeys: [attachment.blobKey],
+      missingOriginalIds: [],
+    });
+    const parsed = parseImport(backup.rawText);
+    expect(parsed.questions[0].notes).toBe("My saved note");
+    expect(parsed.questions[0].attachments).toEqual([attachment]);
+    const stage = await backup.restoreMedia([{ id: "q", attachments: parsed.questions[0].attachments }]);
+    expect(stage).toMatchObject({ restored: 0, skipped: 0 });
+    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
+    await stage.rollback();
   });
 
   it.each([
