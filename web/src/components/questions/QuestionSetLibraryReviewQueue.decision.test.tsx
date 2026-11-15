@@ -129,6 +129,45 @@ describe("Question Set academic decisions", () => {
     ));
   });
 
+  it("blocks an otherwise keyed and explained set when only its final source citation is missing", async () => {
+    const candidate = reviewPreview(21);
+    candidate.snapshot.questions[20].citation = "";
+    mocks.preview.mockResolvedValue(candidate);
+    await inspect();
+
+    const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("0 without recorded answer keys");
+    expect(inventory).toContain("1 without source citations");
+    expect(inventory).toContain("0 without explanation prose");
+    fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), {
+      target: { value: "The original source for question 21 was not recorded." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
+    expect(await screen.findByText("Vignette 21")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Return for revision" }).hasAttribute("disabled")).toBe(false);
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
+
+  it("blocks an otherwise cited and explained set when only the final answer key is missing", async () => {
+    const candidate = reviewPreview(21);
+    candidate.snapshot.questions[20].correctKey = "";
+    mocks.preview.mockResolvedValue(candidate);
+    await inspect();
+
+    const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("1 without recorded answer keys");
+    expect(inventory).toContain("0 without source citations");
+    expect(inventory).toContain("0 without explanation prose");
+    fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
+    expect(await screen.findByText("Vignette 21")).toBeTruthy();
+    expect(screen.getByText("Unresolved")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
+
   it("permits reasoned rejection without falsely attesting to distribution rights or answer correctness", async () => {
     await inspect();
     const reason = "Source reproduction rights are not demonstrated.";
