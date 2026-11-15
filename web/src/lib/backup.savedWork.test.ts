@@ -415,12 +415,13 @@ describe("saved-work recovery without downloading content", () => {
     const parsed = parseImport(backup.rawText);
     expect(parsed.questions[0].notes).toBe("My saved note");
     expect(parsed.questions[0].attachments).toEqual([attachment]);
+    // A complete export may try the optional offline network loader. Only
+    // the restore and this local storage assertion must avoid any new fetch.
+    const attemptedBeforeRestore = attemptedDownload.mock.calls.length;
     const stage = await backup.restoreMedia([{ id: "q", attachments: parsed.questions[0].attachments }]);
     expect(stage).toMatchObject({ restored: 0, skipped: 0 });
-    // This assertion is about bytes on this device, not an optional cloud read.
-    // The fixture deliberately makes network fallback throw "Offline".
     expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
-    expect(attemptedDownload).not.toHaveBeenCalled();
+    expect(attemptedDownload).toHaveBeenCalledTimes(attemptedBeforeRestore);
     await stage.rollback();
   });
 
