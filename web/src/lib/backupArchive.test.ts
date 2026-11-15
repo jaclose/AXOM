@@ -173,6 +173,31 @@ describe("portable binary media backup", () => {
     expect(await readSourceOriginal(document.id, document.checksum)).toBeUndefined();
   });
 
+  it("discloses omitted private-review images even when their review document has no original checksum", async () => {
+    const review: SourceDocument = {
+      id: "review-document-no-checksum", title: "Private review metadata",
+      fileName: "review.json", fileType: "axom-private-bank-review",
+      uploadedAt: "2026-11-15", sizeBytes: 0, tags: [],
+      linkedQuestionSetIds: [], libraryOnly: true,
+      rawText: JSON.stringify({ pkg: { questions: [{
+        id: "review-question", assets: [{
+          id: "private-review-image", checksum: "unavailable-review-image",
+          mimeType: "image/png", filename: "review.png",
+          byteSize: PNG_BYTES.length, role: "question",
+        }],
+      }] } }),
+    };
+    const exported = await createMediaBackupArchive(
+      { _app: "AXOM", _backupScope: "complete", documents: [review], questions: [] },
+      [], [review],
+    );
+    const backup = await readPortableBackup(new File([exported.blob], "private-review-partial.zip"));
+    expect(backup.omissions).toEqual({
+      missingBlobKeys: ["private-library:unavailable-review-image"],
+      missingOriginalIds: [],
+    });
+  });
+
   it("does not claim omitted ZIP files for complete available assets or accept an archive label as integrity proof", async () => {
     const original = new Blob(["Available source bytes"], { type: "text/plain" });
     const document: SourceDocument = {

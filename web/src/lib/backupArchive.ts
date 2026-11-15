@@ -756,9 +756,11 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   // An archive can say _backupScope: "complete" while omitting source bytes.
   // Derive omissions from its actual referenced metadata and verified members,
   // not from a producer assertion. This also works for older v1/v2 ZIPs.
+  // Review-image references may live on synthetic review documents without
+  // checksum-bound originals. Keep them for media completeness; the original
+  // filter independently limits original-file expectations to valid checksums.
   const sourceDocuments = [...documents.values()].filter((doc): doc is SourceDocument =>
-    !!doc && typeof doc.id === "string" && typeof doc.checksum === "string"
-    && typeof doc.fileType === "string");
+    !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
   const missingOriginalIds = backupOriginalDocuments(sourceDocuments)
     .filter(doc => !ids.has(doc.id)).map(doc => doc.id);
   const questions = [
