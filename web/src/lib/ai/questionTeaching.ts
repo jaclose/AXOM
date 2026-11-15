@@ -2,6 +2,7 @@ import type { AIProvider } from "./types";
 import { questionPracticeReadiness } from "../questionFilters";
 import { hasPrivateDeviceCitation } from "../sharing/questionSetShare";
 import { isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
+import { blocksToPlainText } from "../question-content/blocks";
 import type { QuestionRecord } from "../questions";
 
 /**
@@ -64,6 +65,43 @@ function referencesUnavailableExhibit(question: QuestionRecord): boolean {
 }
 
 /**
+ * Legacy text is all that is sent to the AI provider. An imported rich question
+ * can carry another vignette, a table, an equation, a missing image placement or
+ * a different choice/key while the legacy text still looks answer-ready.
+ * Refuse inference unless the original question's readable source matches the
+ * exact text/key being sent. Humans can inspect the rich source instead.
+ *
+ * This does not rewrite a source key, discard rich blocks or assert that the
+ * original publication rights have been reviewed.
+ */
+function hasUnrepresentedRichSource(question: QuestionRecord): boolean {
+  const rich = question.content;
+  if (!rich) return false;
+
+  const unsafeFlagTypes = new Set([
+    "source_inconsistency", "missing_required_media", "media_association_uncertain",
+    "media_position_uncertain", "table_parse_uncertain", "answer_needs_review",
+  ]);
+  if (rich.flags?.some(flag => unsafeFlagTypes.has(flag.type))) return true;
+  if (rich.correctAnswer && (rich.correctAnswer.labels.length !== 1
+    || rich.correctAnswer.labels[0] !== question.correctKey)) return true;
+
+  // These can hold medically decisive information that the legacy prompt does
+  // not represent faithfully, even if there are zero retained asset records.
+  if (rich.choiceTable || rich.stem.some(block => block.type !== "text")
+    || rich.choices.some(choice => choice.blocks.some(block => block.type !== "text"))) return true;
+
+  const sameText = (a: string, b: string): boolean =>
+    a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
+  if (!sameText(blocksToPlainText(rich.stem), question.stem)
+    || rich.choices.length !== question.options.length) return true;
+  return question.options.some(option => {
+    const sourceChoice = rich.choices.find(choice => choice.label === option.key);
+    return !sourceChoice || !sameText(blocksToPlainText(sourceChoice.blocks), option.text);
+  });
+}
+
+/**
  * Only stem, choice text and topic leave the device in the AI prompt.
  * A question can be text-only yet contain a private file URI, inline media,
  * or credentials in an embedded URL. Do not transmit those references to any
@@ -84,6 +122,7 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && !question.attachments?.length
     && !question.content?.assets.length
     && !referencesUnavailableExhibit(question)
+    && !hasUnrepresentedRichSource(question)
     && !containsPrivateDraftPromptReference(question);
 }
 
@@ -112,6 +151,9 @@ export async function draftQuestionExplanation(
   }
   if (referencesUnavailableExhibit(question)) {
     throw new Error("This question references an unavailable visual exhibit. Inspect the original image or specimen and write a source-reviewed explanation instead.");
+  }
+  if (hasUnrepresentedRichSource(question)) {
+    throw new Error("This question has source blocks, choices, or key evidence not faithfully represented in the text-only AI prompt. Inspect the original source and write a reviewed explanation instead.");
   }
   if (containsPrivateDraftPromptReference(question)) {
     throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
