@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BookOpenCheck, RefreshCw } from "lucide-react";
 import { isAcademicReviewer } from "../../lib/academicLibrary/client";
+import { hasExplanationProse } from "../../lib/questionExplanationCoverage";
 import {
   listPendingQuestionSets, loadPendingQuestionSetReviewPreview, reviewQuestionSetSubmission,
   type LibraryQuestionSetPreview, type LibrarySubmission,
@@ -14,6 +15,25 @@ import "../../styles/question-set-library.css";
 // Permission checks remain server-side; this prevents client-side disclosure.
 export function QuestionSetLibraryReviewQueue({ accountId }: { accountId: string }) {
   return <AccountScopedReviewQueue key={accountId} accountId={accountId} />;
+}
+
+// Summary is computed from the complete immutable pending snapshot, not only
+// the first displayed batch. Gaps are review prompts, not medical or rights approval.
+function reviewEvidenceInventory(preview: LibraryQuestionSetPreview) {
+  return preview.snapshot.questions.reduce((total, question) => {
+    const rationales = Object.entries(question.choiceRationales ?? {});
+    const lacksChoiceRationale = question.options.some(option =>
+      !rationales.some(([key, value]) =>
+        key.trim().toUpperCase() === option.key.trim().toUpperCase() && !!value?.trim()));
+    const hasAiDraft = question.explanation?.startsWith("AXOM AI-assisted explanation")
+      || rationales.some(([, value]) => value?.startsWith("AXOM AI-assisted rationale"));
+    if (!question.citation?.trim()) total.missingCitations++;
+    if (!hasExplanationProse(question.explanation)) total.missingExplanations++;
+    if (lacksChoiceRationale) total.missingChoiceRationales++;
+    if (hasAiDraft) total.aiAssistedQuestions++;
+    return total;
+  }, { missingCitations: 0, missingExplanations: 0,
+    missingChoiceRationales: 0, aiAssistedQuestions: 0 });
 }
 
 function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
@@ -30,6 +50,7 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
   const [shown, setShown] = useState(20);
   // An inspection response must not outlive an explicit refresh or newer selection.
   // This client guard complements the revision check enforced by PostgreSQL.
+  const attention = preview ? reviewEvidenceInventory(preview) : undefined;
   const previewEpoch = useRef(0);
   useEffect(() => {
     ++previewEpoch.current;
@@ -74,7 +95,7 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
     }
   }
   async function decide(approved: boolean) {
-    if (!preview || busy || reason.trim().length < 8 || (approved && (!attested || shown < preview.snapshot.questions.length))) return;
+    if (!preview || busy || reason.trim().length < 8 || (approved && (!attested || shown < preview.snapshot.questions.length || !!attention?.missingExplanations))) return;
     setBusy(true); setError(""); setMessage("");
     try {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
@@ -108,6 +129,15 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
         <p><BookOpenCheck size={17} aria-hidden="true" /> {preview.snapshot.questions.length} questions. The contributor attested to rights and answer review. Check that evidence yourself before approval.</p>
         <p><b>Recorded publication rights notice:</b> {preview.snapshot.copyrightNotice || "No rights notice supplied"}</p>
         <p className="sub">The contributor's notice and attestation are not independently verified redistribution permission. Check original-source and third-party image rights before approving.</p>
+        {attention && <p className={attention.missingExplanations ? "qsl-preview-ai-warning" : "sub"} data-testid="qsl-review-evidence-inventory">
+          Evidence inventory across all {preview.snapshot.questions.length} questions:
+          {" "}{attention.missingCitations} without source citations;
+          {" "}{attention.missingExplanations} without explanation prose;
+          {" "}{attention.missingChoiceRationales} lacking at least one choice rationale;
+          {" "}{attention.aiAssistedQuestions} containing AI-assisted teaching.
+          These flags prompt independent source review, not verified answer keys or image rights.
+          {attention.missingExplanations > 0 && " Approval is blocked until missing explanations are revised. Return this set for revision."}
+        </p>}
         <ol>{preview.snapshot.questions.slice(0, shown).map(question => <li key={question.id}>
           <b>{question.stem}</b>
           <ul>{question.options.map(option => {
@@ -138,10 +168,10 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
           <textarea className="field" value={reason} minLength={8} maxLength={500} rows={3} disabled={busy}
             onChange={event => setReason(event.target.value)} placeholder="Record source, rights or answer checks performed." />
         </label>
-        <label className="qsl-check"><input type="checkbox" checked={attested} disabled={busy || shown < preview.snapshot.questions.length} onChange={event => setAttested(event.target.checked)} />
+        <label className="qsl-check"><input type="checkbox" checked={attested} disabled={busy || shown < preview.snapshot.questions.length || !!attention?.missingExplanations} onChange={event => setAttested(event.target.checked)} />
           <span>I checked the set's distribution rights and answer evidence for every question. My note records what I checked.</span></label>
         <div className="row wrap gap8">
-          <GButton size="sm" variant="primary" disabled={busy || !attested || shown < preview.snapshot.questions.length || reason.trim().length < 8} onClick={() => void decide(true)}>Approve for library</GButton>
+          <GButton size="sm" variant="primary" disabled={busy || !attested || shown < preview.snapshot.questions.length || !!attention?.missingExplanations || reason.trim().length < 8} onClick={() => void decide(true)}>Approve for library</GButton>
           <GButton size="sm" disabled={busy || reason.trim().length < 8} onClick={() => void decide(false)}>Return for revision</GButton>
         </div>
         {error && <p role="alert" className="qsl-error">{error}</p>}
