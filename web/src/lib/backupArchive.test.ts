@@ -1617,4 +1617,67 @@ describe("portable binary media backup", () => {
       .rejects.toThrow(/conflicting source.document checksums/i);
   });
 
+
+  it.each([
+    { format: "json", mismatch: "size" },
+    { format: "zip", mismatch: "size" },
+    { format: "json", mismatch: "file type" },
+    { format: "zip", mismatch: "file type" },
+  ] as const)(
+    "rejects same-digest root/deferred original aliases with conflicting $mismatch in $format before recovery",
+    async ({ format, mismatch }) => {
+      const source: SourceDocument = {
+        id: "alias-metadata-original", title: "Original title", fileName: "source.txt",
+        fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Immutable metadata",
+        sizeBytes: 17, checksum: "a".repeat(64),
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      };
+      const alias = mismatch === "size"
+        ? { ...source, sizeBytes: source.sizeBytes + 1 }
+        : { ...source, fileType: "application/pdf" };
+      const payload = {
+        _app: "AXOM", _backupScope: "complete",
+        documents: [source],
+        deferredContent: { documents: [alias] },
+      };
+      // No original bytes are needed for the identity contradiction. The
+      // reader must refuse the metadata before Replace/Merge or staging.
+      const backup = format === "zip"
+        ? new File([(await createMediaBackupArchive(payload, [], [])).blob], "source-alias-metadata.zip")
+        : new File([JSON.stringify(payload)], "source-alias-metadata.json");
+      await expect(readPortableBackup(backup))
+        .rejects.toThrow(/conflicting source.document (size|file type)/i);
+    },
+  );
+
+  it.each(["zip", "json"] as const)(
+    "preserves same-digest mirrored source edits and historically internal aliases in $format",
+    async format => {
+      const source: SourceDocument = {
+        id: "mirror-original-identity", title: "Root source", fileName: "source.txt",
+        fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Source metadata",
+        sizeBytes: 21, checksum: "b".repeat(64),
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      };
+      const payload = {
+        _app: "AXOM", _backupScope: "complete",
+        documents: [source],
+        deferredContent: { documents: [
+          { ...source, title: "Renamed deferred source", fileName: "renamed.txt", checksum: `sha256:${source.checksum}` },
+          // An internal record may share its ID but is not a claim about the
+          // external original's MIME or byte length.
+          { ...source, fileType: "axom-internal", sizeBytes: 99 },
+        ] },
+      };
+      const input = format === "zip"
+        ? new File([(await createMediaBackupArchive(payload, [], [])).blob], "matching-source-alias.zip")
+        : new File([JSON.stringify(payload)], "matching-source-alias.json");
+      const portable = await readPortableBackup(input);
+      expect(portable.omissions).toEqual({
+        missingBlobKeys: [],
+        missingOriginalIds: format === "zip" ? [source.id] : [],
+      });
+    },
+  );
+
 });
