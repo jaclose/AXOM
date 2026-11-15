@@ -1344,4 +1344,61 @@ describe("portable binary media backup", () => {
     expect(new Uint8Array(await fetched!.blob.arrayBuffer())).toEqual(jpegBytes);
   });
 
+
+  it("records SHA-256 for new ZIP images and rejects equal-size CRC-valid substitution before recovery consent", async () => {
+    const { default: JSZip } = await import("jszip");
+    // Two *different pixels* (red and green), each a CRC-correct 1x1 RGBA PNG
+    // with a valid 13-byte zlib IDAT. MIME, size and structural checks all pass.
+    const original = crcCorrectPngWithIdat(deflateSync(Uint8Array.from([0, 255, 0, 0, 255])));
+    const substitute = crcCorrectPngWithIdat(deflateSync(Uint8Array.from([0, 0, 255, 0, 255])));
+    expect(original.byteLength).toBe(substitute.byteLength);
+    expect(await sha256Hex(original)).not.toBe(await sha256Hex(substitute));
+    const tagged = { ...attachment, byteSize: original.byteLength };
+    await putQuestionAttachmentBlob(tagged.blobKey, {
+      blob: new Blob([original as BlobPart], { type: "image/png" }),
+      mimeType: "image/png", byteSize: original.byteLength,
+      questionId: "held-question", updatedAt: tagged.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({ questions: [{ id: "held-question", attachments: [tagged] }] },
+      [{ id: "held-question", attachments: [tagged] }]);
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+    expect(manifest._backupVersion).toBe(3);
+    expect(manifest.media[0].sha256).toBe(await sha256Hex(original));
+    const intact = await readPortableBackup(new File([exported.blob], "digest-intact.zip"));
+    expect(intact.omissions.missingBlobKeys).toEqual([]);
+    zip.file(manifest.media[0].file, substitute);
+    await expect(readPortableBackup(new File([await zip.generateAsync({ type: "blob" })], "digest-substituted.zip")))
+      .rejects.toThrow(/image.*(digest|integrity|checksum)/i);
+  });
+
+  it("rejects absent or malformed new-format image digests but permits legacy v1/v2 archives", async () => {
+    const { default: JSZip } = await import("jszip");
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({ questions: refs }, refs);
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+    expect(manifest._backupVersion).toBe(3);
+    delete manifest.media[0].sha256;
+    zip.file("workspace.json", JSON.stringify(manifest));
+    await expect(readPortableBackup(new File([await zip.generateAsync({ type: "blob" })], "no-digest-v3.zip")))
+      .rejects.toThrow(/image.*(digest|integrity|checksum)/i);
+    for (const version of [1, 2]) {
+      manifest._backupVersion = version;
+      zip.file("workspace.json", JSON.stringify(manifest));
+      const recovered = await readPortableBackup(
+        new File([await zip.generateAsync({ type: "blob" })], "legacy-digestless.zip"),
+      );
+      expect(recovered.omissions.missingBlobKeys).toEqual([]);
+    }
+    manifest._backupVersion = 2;
+    manifest.media[0].sha256 = "invalid-digest";
+    zip.file("workspace.json", JSON.stringify(manifest));
+    await expect(readPortableBackup(new File([await zip.generateAsync({ type: "blob" })], "malformed-legacy-digest.zip")))
+      .rejects.toThrow(/image.*(digest|integrity|checksum)/i);
+  });
+
 });

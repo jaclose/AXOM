@@ -43,8 +43,15 @@ See [metadata checkpoints](accounts-sync-v1.md#metadata-checkpoints-and-explicit
 Original source binaries remain outside the workspace schema. Decode's existing
 `axom-decode-originals-v1` database accepts legacy Blob values and immutable
 `["version", documentId, checksum]` entries with a current-edition pointer. Portable
-ZIP format 2 carries verified originals separately; JSON and format-1 ZIP remain
-readable. See [original recovery](../features/academic-library.md#original-files-and-portable-recovery).
+ZIP format 2 introduced separately verified original files. Format 3 additionally
+binds each included image member to its SHA-256 digest in the ZIP manifest; a
+missing or mismatched digest blocks recovery *before* Replace/Merge consent.
+Formats 1 and 2 remain readable without image digests under their older
+structural validation. This improves fixed-manifest byte-integrity checks, **not**
+authenticity of an original source: a party who can rewrite both image and
+manifest can substitute a different digest. Source provenance and medical/media
+rights therefore remain separate review requirements. JSON backups keep their
+existing independent rules. See [original recovery](../features/academic-library.md#original-files-and-portable-recovery).
 Saved-work exports keep deferred source metadata outside the scoring engine and read
 only local binary caches. Restoring such a copy reuses exact source-digest retention;
 the imported personal overlay wins without fetching or discarding matching local bytes.
