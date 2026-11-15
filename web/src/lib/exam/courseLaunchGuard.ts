@@ -2,7 +2,7 @@
 // The canonical reader now keeps the entire requested pool intact. This
 // diagnostic guard explains missing/review records without consuming the
 // pending request or introducing a second session store.
-import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS as MAX_SELECTION, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
+import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS as MAX_SELECTION, hasDeclaredCourseScopeConflict, isValidCourseQuizScope, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
 import { questionPracticeReadiness } from "../questionFilters";
 import type { QuestionRecord } from "../questions";
 
@@ -35,13 +35,21 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
     || candidate.questionIds.some((id) => typeof id !== "string" || !id.trim())) {
     return invalid("The saved course selection has missing or invalid academic/question identifiers.");
   }
+  if (!isValidCourseQuizScope(candidate)) {
+    return invalid("The saved course selection has an invalid academic scope.");
+  }
   const ids = candidate.questionIds as string[];
   if (new Set(ids).size !== ids.length) return invalid("The saved course selection contains duplicate question identifiers.");
   if (candidate.week !== undefined && (!Number.isSafeInteger(candidate.week) || (candidate.week as number) < 1)) {
     return invalid("The saved course selection has an invalid week.");
   }
+  if (candidate.courseId !== undefined
+    && (typeof candidate.courseId !== "string" || !candidate.courseId.trim())) {
+    return invalid("The saved course selection has an invalid course identifier.");
+  }
   if (candidate.setIds !== undefined && (!Array.isArray(candidate.setIds)
     || candidate.setIds.length > MAX_SELECTION
+    || new Set(candidate.setIds).size !== candidate.setIds.length
     || candidate.setIds.some((id: unknown) => typeof id !== "string" || !id.trim()))) {
     return invalid("The saved course selection has invalid collection identifiers.");
   }
@@ -54,6 +62,12 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
     if (byId.has(question.id)) duplicateOnDevice.add(question.id);
     else byId.set(question.id, question);
   }
+  const expectedScope = {
+    module: candidate.module as string,
+    ...(candidate.scopeKind === "term" ? { scopeKind: "term" as const } : {}),
+    ...(typeof candidate.week === "number" ? { week: candidate.week } : {}),
+    ...(typeof candidate.courseId === "string" ? { courseId: candidate.courseId } : {}),
+  };
   let ready = 0;
   let missing = 0;
   const reviewIds: string[] = [];
@@ -61,7 +75,7 @@ export function inspectCourseLaunch(questions: readonly QuestionRecord[]): Cours
     const record = byId.get(id);
     if (duplicateOnDevice.has(id)) reviewIds.push(id);
     else if (!record) missing += 1;
-    else if (questionPracticeReadiness(record) === "ready") ready += 1;
+    else if (questionPracticeReadiness(record) === "ready" && !hasDeclaredCourseScopeConflict(record, expectedScope)) ready += 1;
     else reviewIds.push(id);
   }
 
