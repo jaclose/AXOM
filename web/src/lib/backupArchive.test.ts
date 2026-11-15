@@ -1372,6 +1372,67 @@ describe("portable binary media backup", () => {
       .rejects.toThrow(/image.*(digest|integrity|checksum)/i);
   });
 
+
+  it("reports unavailable SHA-256 verification for intact v3 media while preserving digestless legacy recovery", async () => {
+    const { default: JSZip } = await import("jszip");
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({ questions: refs }, refs);
+    const oldZip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const oldManifest = JSON.parse(await oldZip.file("workspace.json")!.async("string"));
+    expect(oldManifest._backupVersion).toBe(3);
+    oldManifest._backupVersion = 2;
+    delete oldManifest.media[0].sha256;
+    oldZip.file("workspace.json", JSON.stringify(oldManifest));
+    const historicalZip = await oldZip.generateAsync({ type: "blob" });
+
+    const cryptoWithSubtle = globalThis.crypto;
+    vi.stubGlobal("crypto", {
+      getRandomValues: cryptoWithSubtle.getRandomValues.bind(cryptoWithSubtle),
+      subtle: undefined,
+    });
+    try {
+      // This archive was exported successfully with working WebCrypto. It has
+      // not become corrupt merely because the restoring runtime lacks SHA-256.
+      await expect(readPortableBackup(new File([exported.blob], "intact-v3-no-crypto.zip")))
+        .rejects.toThrow(/SHA-256.*unavailable/i);
+      // A digestless v2 archive has never required SHA-256 for image media.
+      const legacy = await readPortableBackup(new File([historicalZip], "digestless-v2-no-crypto.zip"));
+      expect(legacy.omissions.missingBlobKeys).toEqual([]);
+      await expect(createMediaBackupArchive({ questions: refs }, refs))
+        .rejects.toThrow(/SHA-256.*unavailable/i);
+    } finally {
+      vi.stubGlobal("crypto", cryptoWithSubtle);
+    }
+  });
+
+  it("reports missing WebCrypto capability instead of corrupt original-file bytes", async () => {
+    const original = new Blob(["Portable original for hash verification"], { type: "text/plain" });
+    const document: SourceDocument = {
+      id: "verified-source", title: "Verified Source", fileName: "source.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Source metadata",
+      sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await saveSourceOriginal(document, original);
+    const exported = await createMediaBackupArchive({ documents: [document] }, [], [document]);
+    expect(exported).toMatchObject({ originalCount: 1, missingOriginalIds: [] });
+
+    const cryptoWithSubtle = globalThis.crypto;
+    vi.stubGlobal("crypto", {
+      getRandomValues: cryptoWithSubtle.getRandomValues.bind(cryptoWithSubtle),
+      subtle: undefined,
+    });
+    try {
+      await expect(readPortableBackup(new File([exported.blob], "intact-original-no-crypto.zip")))
+        .rejects.toThrow(/SHA-256.*unavailable/i);
+    } finally {
+      vi.stubGlobal("crypto", cryptoWithSubtle);
+    }
+  });
+
   it("rejects absent or malformed new-format image digests but permits legacy v1/v2 archives", async () => {
     const { default: JSZip } = await import("jszip");
     await putQuestionAttachmentBlob(attachment.blobKey, {
