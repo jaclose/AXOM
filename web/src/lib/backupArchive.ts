@@ -198,6 +198,25 @@ export async function preflightRestorableZipCandidateBudget(
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
+/** Root and deferred copies may mirror one original ID, but they cannot
+ * claim different valid source digests. A last-wins Map could otherwise make
+ * a contradictory source appear complete before Replace/Merge consent. */
+function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): void {
+  const byId = new Map<string, string>();
+  for (const record of records) {
+    if (!record || typeof record !== "object") continue;
+    const { id, checksum } = record as Partial<SourceDocument>;
+    if (typeof id !== "string" || typeof checksum !== "string") continue;
+    const digest = checksum.replace(/^sha256:/, "");
+    // Historical unbound originals are still represented as metadata only.
+    if (!/^[a-f0-9]{64}$/.test(digest)) continue;
+    const prior = byId.get(id);
+    if (prior !== undefined && prior !== digest) {
+      throw new Error("The backup contains conflicting source-document checksums for one document ID. No workspace data has been changed.");
+    }
+    byId.set(id, digest);
+  }
+}
 const FORMAT = "axom-media-backup";
 // v3 binds each included image to its exported bytes. Historical v1/v2 ZIPs
 // remain recoverable but lack this digest guarantee; a mutable manifest digest
@@ -737,6 +756,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       ...(Array.isArray(workspace.deferredContent?.documents) ? workspace.deferredContent.documents : []),
     ].filter((doc): doc is SourceDocument =>
       !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
+    assertConsistentSourceDocumentChecksums(sourceDocuments);
     const questions = [
       ...(Array.isArray(workspace.questions) ? workspace.questions : []),
       ...(Array.isArray(workspace.deferredContent?.questions) ? workspace.deferredContent.questions : []),
@@ -829,10 +849,12 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const originals = (manifest._backupVersion ?? 0) >= 2 ? manifest.originals : [];
   if (!Array.isArray(originals)) throw new Error("The backup has no original-file manifest.");
   const ids = new Set<string>(), files = new Set<string>();
-  const documents = new Map([
+  const documentRecords = [
     ...(Array.isArray(manifest.documents) ? manifest.documents : []),
     ...(Array.isArray(manifest.deferredContent?.documents) ? manifest.deferredContent.documents : []),
-  ].map(doc => [doc?.id, doc]));
+  ];
+  assertConsistentSourceDocumentChecksums(documentRecords);
+  const documents = new Map(documentRecords.map(doc => [doc?.id, doc]));
   // Check integrity before the caller offers to adopt any workspace records.
   for (const item of originals) {
     if (!item || typeof item.documentId !== "string" || ids.has(item.documentId) || files.has(item.file)
