@@ -1,7 +1,7 @@
 import type { AIProvider } from "./types";
 import { questionPracticeReadiness } from "../questionFilters";
 import { hasPrivateDeviceCitation } from "../sharing/questionSetShare";
-import { isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
+import { containsUnverifiedCommunityCitation, isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
 import { blocksToPlainText } from "../question-content/blocks";
 import type { QuestionRecord } from "../questions";
 
@@ -322,20 +322,17 @@ export async function draftQuestionExplanation(
   }
   const proposedKeywords: string[] = raw.keywords;
 
+  // Scan citation identifiers before generic keyword validation. Both the
+  // rationale and proposed-keyword paths must report an unverified citation
+  // rather than disguising it as an ordinary malformed subject tag.
+  // The same Unicode-normalized scanner is shared with reviewed publisher tags
+  // so these two paths cannot drift on DOI/PMID/domain formats.
+  if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
+    .some(containsUnverifiedCommunityCitation)) {
+    throw new Error("The AI draft contains an unverified source link or publication identifier. Verify the reference against the original source and enter it separately before publication.");
+  }
   if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
     throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
-  }
-  // The provider does not receive independently reviewed citation evidence.
-  // Even a plausible public URL/DOI/PMID is an invented attribution here.
-  // Fail closed rather than silently adding it to learner-facing teaching.
-  // Source URLs and publication identifiers need not include a scheme or a
-  // DOI/PMCID prefix. Never let a model launder these as reviewed citations;
-  // keep genuine clinical slash notation (for example CD4/CD8) eligible.
-  const unverifiedGeneratedReference =
-    /\b(?:https?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}|(?:[a-z0-9-]+\.)+(?:com|edu|gov|net|org|io)\b|(?:doi\s*[:=]?\s*)?10\.\d{4,9}\/[^\s)\]}>]+|pmid\s*[:#]?\s*\d{1,9}\b|(?:pmcid\s*[:#]?\s*)?PMC\d+\b)/i;
-  if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
-    .some(text => unverifiedGeneratedReference.test(referenceSafetyText(text)))) {
-    throw new Error("The AI draft contains an unverified source link or publication identifier. Verify the reference against the original source and enter it separately before publication.");
   }
   // Keywords are subject phrases, never rights attestations or visual-intent
   // decisions. Retain deterministic distinct suggestions for explicit review.

@@ -1083,8 +1083,13 @@ describe("review-gated explanation drafting", () => {
     expect(source.correctKey).toBe("A");
   });
 
-  it.each(["visual:intent:histology", "rights:approved", "source:reviewed", "https://example.edu/source"])(
-    "rejects source, rights and visual metadata disguised as an AI keyword: %s", async keyword => {
+  it.each([
+    ["visual:intent:histology", /publication metadata or citations/i],
+    ["rights:approved", /publication metadata or citations/i],
+    ["source:reviewed", /publication metadata or citations/i],
+    ["https://example.edu/source", /unverified source link or publication identifier/i],
+  ] as Array<[string, RegExp]>)(
+    "classifies unsafe AI keyword evidence correctly: %s", async (keyword, expectedError) => {
       const model = provider({
         explanation: "The arterial tunica media contains smooth muscle responsible for changing vascular diameter and resistance.",
         choiceRationales: {
@@ -1095,7 +1100,7 @@ describe("review-gated explanation drafting", () => {
         keywords: [keyword],
       });
       await expect(draftQuestionExplanation(model, question()))
-        .rejects.toThrow(/publication metadata or citations/i);
+        .rejects.toThrow(expectedError);
     },
   );
 

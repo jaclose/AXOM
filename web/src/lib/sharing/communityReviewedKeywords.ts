@@ -22,6 +22,12 @@ function keywordSafetyText(value: string): string {
   return value.normalize("NFKC").replace(HIDDEN_KEYWORD_REFERENCE_MARKS, "").trim();
 }
 
+/** Shared citation boundary for publisher keywords and generated teaching.
+ * Scan a normalization-only copy; never modify author source or review evidence. */
+export function containsUnverifiedCommunityCitation(value: string): boolean {
+  return UNVERIFIED_PUBLIC_CITATION.test(keywordSafetyText(value));
+}
+
 export function isCommunitySubjectKeyword(value: string): boolean {
   const candidate = keywordSafetyText(value);
   return Boolean(candidate)
