@@ -122,12 +122,13 @@ function hasUnrepresentedRichSource(question: QuestionRecord): boolean {
  *
  * This is an outbound privacy check, not source/redistribution permission.
  */
-// Unicode format marks can hide unsafe source schemes or identifiers inside
-// otherwise readable teaching text. Normalize only the scanning copy; never
-// rewrite a learner's source question or an AI proposal during validation.
+// Unicode format marks and compatibility-width punctuation can hide unsafe
+// source schemes or publication IDs (for example a fullwidth DOI or "file:").
+// Normalize only the scanning copy; never rewrite the original question,
+// source evidence, or AI proposal returned for review.
 const INVISIBLE_REFERENCE_CONTROLS = /[\u200B-\u200D\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
 function referenceSafetyText(value: string | undefined): string {
-  return (value ?? "").replace(INVISIBLE_REFERENCE_CONTROLS, "");
+  return (value ?? "").normalize("NFKC").replace(INVISIBLE_REFERENCE_CONTROLS, "");
 }
 
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
