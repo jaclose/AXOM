@@ -833,7 +833,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     }
   }
   const missingBlobKeys = expectedMedia
-    .map(({ metadata }) => metadata.blobKey).filter(key => !mediaKeys.has(key));
+    .map(({ metadata }) => metadata.blobKey).filter(key => !mediaMetadata.has(key));
   const omissions = { missingBlobKeys, missingOriginalIds };
   return { rawText, omissions, restoreOriginals: async documents => {
     const scope = getQuestionAttachmentScope();
