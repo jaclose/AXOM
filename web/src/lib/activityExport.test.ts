@@ -182,4 +182,30 @@ describe("Activity History XLSX sheet title collisions", () => {
     expectAllTypeSheets(workbook, logs);
     expect(workbook.SheetNames[2]).not.toBe(workbook.SheetNames[3]);
   });
+  it("groups many distinct types without rescanning every original activity for each worksheet", async () => {
+    const types = Array.from({ length: 80 }, (_, index) => `custom-type-${String(index).padStart(3, "0")}`);
+    const logs = studyLogs(types);
+    const original = logs.map((log) => ({ ...log }));
+    let originalRecordReads = 0;
+    // Deterministic complexity guard: count reads of source records, not wall-clock time.
+    const instrumented = new Proxy(logs, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\\d+$/.test(property)) originalRecordReads++;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const workbook = await captureWorkbook(instrumented);
+    expect(originalRecordReads).toBeLessThan(logs.length * 10);
+    expect(workbook.SheetNames).toEqual(["Overview", "All Activity", ...types]);
+    expect(workbook.Sheets["Overview"]?.B82?.v).toBe(logs.length);
+    expect(workbook.Sheets["Overview"]?.C82?.v).toBe(
+      logs.reduce((sum, log) => sum + log.minutes, 0),
+    );
+    expect(workbook.Sheets["Overview"]?.D82?.v).toBe(
+      logs.reduce((sum, log) => sum + log.cards, 0),
+    );
+    expect(workbook.Sheets["All Activity"]?.F2?.v).toBe("unique-note-79");
+    expect(logs).toEqual(original);
+  });
+
 });
