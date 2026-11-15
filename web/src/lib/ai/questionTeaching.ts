@@ -79,12 +79,25 @@ function hasUnrepresentedRichSource(question: QuestionRecord): boolean {
   if (!rich) return false;
 
   const unsafeFlagTypes = new Set([
-    "source_inconsistency", "missing_required_media", "media_association_uncertain",
-    "media_position_uncertain", "table_parse_uncertain", "answer_needs_review",
+    "source_inconsistency", "source_nonkey_discrepancy", "missing_required_media",
+    "media_association_uncertain", "media_position_uncertain", "table_parse_uncertain",
+    "answer_needs_review",
   ]);
   if (rich.flags?.some(flag => unsafeFlagTypes.has(flag.type))) return true;
+  // Source-authored explanations and reviewed teaching are not sent to the
+  // model. Do not replace or compete with that evidence using a new proposal.
+  if (rich.explanation?.length || rich.teaching) return true;
+
+  // A legacy correctKey alone must never fill an absent/unattributed rich
+  // source key. A separately human-reviewed extraction with recorded answer
+  // evidence can support historical packages lacking a rich key receipt.
+  const reviewedLegacyKey = question.extraction?.reviewed === true
+    && Boolean(question.extraction.answerEvidence?.trim()
+      || question.extraction.answerEvidenceSnippet?.trim());
+  if (!rich.correctAnswer && !reviewedLegacyKey) return true;
   if (rich.correctAnswer && (rich.correctAnswer.labels.length !== 1
-    || rich.correctAnswer.labels[0] !== question.correctKey)) return true;
+    || rich.correctAnswer.labels[0] !== question.correctKey
+    || (!rich.correctAnswer.evidence && !reviewedLegacyKey))) return true;
 
   // These can hold medically decisive information that the legacy prompt does
   // not represent faithfully, even if there are zero retained asset records.
