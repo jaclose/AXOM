@@ -21,20 +21,32 @@ export async function listTermCourses(term: string, accountId: string,
   };
   const courses: AcademicCourse[] = [];
   const seen = new Set<string>();
+  const seenRevisions = new Set<string>();
   let cursor: string | undefined;
   try {
-    for (;;) {
+    // A malformed cursor must not keep a whole-term download looping forever.
+    for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
       check();
       const page = await listAcademicCourses("", term, cursor);
       check();
-      if (page.some(course => termIdentity(course.term) !== termIdentity(term) || seen.has(course.id))
-        || new Set(page.map(course => course.id)).size !== page.length) {
+      if (!Array.isArray(page) || page.length > 24
+        || page.some(course => !course || typeof course.id !== "string" || !course.id.trim()
+          || typeof course.current_revision_id !== "string" || !course.current_revision_id.trim()
+          || typeof course.term !== "string" || termIdentity(course.term) !== termIdentity(term)
+          || seen.has(course.id) || seenRevisions.has(course.current_revision_id))
+        || new Set(page.map(course => course.id)).size !== page.length
+        || new Set(page.map(course => course.current_revision_id)).size !== page.length) {
         throw new Error("The term catalog changed while loading. Retry to read the complete term.");
       }
-      for (const course of page) { seen.add(course.id); courses.push(course); }
+      for (const course of page) {
+        seen.add(course.id);
+        seenRevisions.add(course.current_revision_id);
+        courses.push(course);
+      }
       if (page.length < 24) return courses;
       cursor = page.at(-1)!.id;
     }
+    throw new Error("The term catalog exceeded the safe page limit. Retry later; no partial course list was returned.");
   } finally { scope.dispose(); }
 }
 
