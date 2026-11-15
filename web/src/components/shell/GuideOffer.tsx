@@ -40,15 +40,20 @@ export function GuideOffer({ active, onStart }: { active: boolean; onStart: () =
     return () => window.removeEventListener("scroll", onScroll, true);
   }, [active, state, visible]);
 
+  // A hidden offer must not consume Escape from the mobile drawer or another
+  // temporary shell layer. Only the visible, active offer owns that shortcut.
   useEffect(() => {
-    if (!visible) return;
+    if (!active || !visible) return;
     const onKey = (event: KeyboardEvent) => {
+      // The drawer handles Escape at document level and may synchronously
+      // re-enable this offer before the same event reaches window.
+      if (event.defaultPrevented) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       if (event.key === "Escape") later();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, [active, visible]);
 
   function later() {
     const next = afterLater(state);

@@ -59,6 +59,85 @@ async function inspect(page: Page) {
 }
 
 /**
+ * Opening the mobile drawer must never silently accept or dismiss a hidden
+ * onboarding offer on Escape. This is distinct from intentionally pressing
+ * Escape while the offer is visible. No external API or learner data is used.
+ */
+test.describe("tour offer and drawer", () => {
+  test.use({ quietNudges: false });
+
+  test("mobile drawer Escape retains the hidden guide choice and returns focus", async ({ page, context }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const origin = new URL(process.env.AXOM_E2E_BASE_URL ?? "http://127.0.0.1:5187").origin;
+    if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
+      throw new Error("Guide keyboard regression requires isolated loopback.");
+    }
+    await context.route("**/*", route =>
+      new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    await page.goto(origin + "/?app=1#dashboard", { waitUntil: "networkidle" });
+    await seedOnboarded(page, { name: "Synthetic guide keyboard target" });
+    const offer = page.getByRole("dialog", { name: "Want a 60-second tour?" });
+    await expect(offer).toBeVisible({ timeout: 8_000 });
+    const readChoice = () => page.evaluate(() => localStorage.getItem("axom.guideOffer.v1"));
+    const initialChoice = await readChoice();
+    const menu = page.getByRole("button", { name: "Open navigation menu" });
+    await menu.focus();
+    await expect(menu).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+    await expect(offer).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeFocused();
+    expect(await readChoice()).toBe(initialChoice);
+    await expect(offer).toBeVisible();
+    // An intentional Escape *while visible* still postpones the tour.
+    await page.keyboard.press("Escape");
+    await expect(offer).toBeHidden();
+    expect(await readChoice()).toBe("snoozed");
+
+    // The one-time re-offer is triggered after cumulative scrolling. Escape
+    // while its drawer hides it must not consume that final offer opportunity.
+    await page.locator(".surface-scroll").evaluate(scroller => {
+      for (const scrollTop of [80, 650, 1390]) {
+        scroller.scrollTop = scrollTop;
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+    });
+    await expect(offer).toBeVisible();
+    await menu.focus();
+    await page.keyboard.press("Enter");
+    await expect(offer).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeFocused();
+    expect(await readChoice()).toBe("snoozed");
+    await expect(offer).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(offer).toBeHidden();
+    expect(await readChoice()).toBe("declined");
+  });
+
+  test("visible desktop guide intentionally dismisses with Escape", async ({ page, context }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const origin = new URL(process.env.AXOM_E2E_BASE_URL ?? "http://127.0.0.1:5187").origin;
+    if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
+      throw new Error("Guide keyboard regression requires isolated loopback.");
+    }
+    await context.route("**/*", route =>
+      new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    await page.goto(origin + "/?app=1#dashboard", { waitUntil: "networkidle" });
+    await seedOnboarded(page, { name: "Synthetic desktop guide target" });
+    const offer = page.getByRole("dialog", { name: "Want a 60-second tour?" });
+    await expect(offer).toBeVisible({ timeout: 8_000 });
+    expect(await page.evaluate(() => localStorage.getItem("axom.guideOffer.v1"))).toBeNull();
+    await page.keyboard.press("Escape");
+    await expect(offer).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem("axom.guideOffer.v1"))).toBe("snoozed");
+  });
+});
+
+/**
  * Real offline Chromium JSON export + preflight + recovery, using fabricated
  * data in isolated browser profiles. No owner backup, cloud account or network.
  * R109 owns the underlying reader/UI; this separate file is a browser-only
