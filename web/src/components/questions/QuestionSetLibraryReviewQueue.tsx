@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { BookOpenCheck, RefreshCw } from "lucide-react";
 import { isAcademicReviewer } from "../../lib/academicLibrary/client";
-import { hasExplanationProse } from "../../lib/questionExplanationCoverage";
 import {
-  listPendingQuestionSets, loadPendingQuestionSetReviewPreview, reviewQuestionSetSubmission,
+  hasCommunityTeachingRationale, listPendingQuestionSets, loadPendingQuestionSetReviewPreview, reviewQuestionSetSubmission,
   type LibraryQuestionSetPreview, type LibrarySubmission,
 } from "../../lib/sharing/questionSetLibrary";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../ui/primitives";
@@ -29,7 +28,7 @@ function reviewEvidenceInventory(preview: LibraryQuestionSetPreview) {
       || rationales.some(([, value]) => value?.startsWith("AXOM AI-assisted rationale"));
     if (!question.correctKey?.trim()) total.missingKeys++;
     if (!question.citation?.trim()) total.missingCitations++;
-    if (!hasExplanationProse(question.explanation)) total.missingExplanations++;
+    if (!hasCommunityTeachingRationale(question.explanation)) total.missingExplanations++;
     if (lacksChoiceRationale) total.missingChoiceRationales++;
     if (hasAiDraft) total.aiAssistedQuestions++;
     return total;
