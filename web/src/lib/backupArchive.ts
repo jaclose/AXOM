@@ -36,6 +36,19 @@ export const MAX_ZIP_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
  * Count JSZip's real entries, including generated directories and workspace.json.
  * Validate the serialized size separately because ZIP metadata adds overhead. */
 class ZipExportBudgetExceeded extends Error {}
+class ZipExportCryptoUnavailable extends Error {}
+
+/** Only advertise a v3 ZIP with digest-bound members when this environment can
+ * actually compute the SHA-256 required to read it again. */
+async function requiredExportSha256(bytes: Uint8Array): Promise<string> {
+  try {
+    const digest = await sha256Hex(bytes);
+    if (digest) return digest;
+  } catch {
+    // A present but unusable SubtleCrypto digest is also an export failure.
+  }
+  throw new ZipExportCryptoUnavailable("SHA-256 is unavailable; no ZIP backup was downloaded or certified.");
+}
 export function assertRestorableZipBudget(entryCount: number, expandedBytes: number, archiveBytes?: number): void {
   if (!Number.isSafeInteger(entryCount) || entryCount < 0 || entryCount > MAX_ZIP_BACKUP_ENTRIES) {
     throw new ZipExportBudgetExceeded("The ZIP backup exceeds 30,000 file entries. No backup was downloaded or certified.");
@@ -587,10 +600,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     reserveExpandedBytes(bytes.byteLength);
     assertRestorableZipEntryCounts(media.length + 1, 0);
     const file = `media/${media.length}`;
-    const sha256 = await sha256Hex(bytes);
-    // In older/offline webviews SubtleCrypto may be unavailable. Never emit a
-    // v3 archive that would later be rejected for lacking its mandatory hash.
-    if (!sha256) throw new Error("SHA-256 is unavailable; no ZIP backup was downloaded or certified.");
+    const sha256 = await requiredExportSha256(bytes);
     zip.file(file, bytes);
     media.push({ file, metadata, sha256 });
   }
@@ -610,11 +620,17 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
       const bytes = new Uint8Array(await blob.arrayBuffer());
       reserveExpandedBytes(bytes.byteLength);
       assertRestorableZipEntryCounts(media.length, originals.length + 1);
+      // Source originals are validated by the local noble-hashes reader, but a
+      // v3 ZIP must also be digest-verifiable in its exporting environment.
+      const sha256 = await requiredExportSha256(bytes);
+      if (sha256 !== document.checksum!.replace(/^sha256:/, "")) {
+        throw new Error("Original checksum changed during export");
+      }
       const file = `originals/${originals.length}`;
       zip.file(file, bytes);
-      originals.push({ file, documentId: document.id, sha256: document.checksum!.replace(/^sha256:/, ""), byteSize: bytes.byteLength, mimeType: blob.type });
+      originals.push({ file, documentId: document.id, sha256, byteSize: bytes.byteLength, mimeType: blob.type });
     } catch (error) {
-      if (error instanceof ZipExportBudgetExceeded) throw error;
+      if (error instanceof ZipExportBudgetExceeded || error instanceof ZipExportCryptoUnavailable) throw error;
       missingOriginalIds.push(document.id);
     }
   }
