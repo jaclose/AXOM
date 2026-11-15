@@ -100,6 +100,30 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("normalizes cascading edge apostrophes exposed by forbidden title characters", async () => {
+    const logs = studyLogs(["'/'Hello", "A'/'", "'?'History", "History'/'", "O'Brien"]);
+    const workbook = await captureWorkbook(logs);
+    expectAllTypeSheets(workbook, logs);
+    for (const name of workbook.SheetNames) {
+      expect(name).not.toMatch(/^'|'$/);
+      expect(name.toLowerCase()).not.toBe("history");
+      expect(name).not.toMatch(/[\\/?*[\]:]/);
+    }
+    // These raw types initially sanitize into "''"-adjacent edge whitespace.
+    // The Excel name is disposable; learner-supplied type and note cells are not.
+    expect(workbook.SheetNames).toContain("Hello");
+    expect(workbook.SheetNames).toContain("A");
+    expect(workbook.SheetNames).toContain("O'Brien");
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const restored = XLSX.read(bytes, { type: "buffer" });
+    expect(restored.SheetNames).toEqual(workbook.SheetNames);
+    for (const name of workbook.SheetNames.slice(2)) {
+      expect(restored.Sheets[name]?.C2?.v).toBe(workbook.Sheets[name]?.C2?.v);
+      expect(restored.Sheets[name]?.F2?.v).toBe(workbook.Sheets[name]?.F2?.v);
+    }
+  });
+
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {
     const shared = "Long protocol study session " + "x".repeat(40);
     const logs = studyLogs([shared + "Alpha", shared + "Beta"]);
