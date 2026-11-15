@@ -46,7 +46,8 @@ describe("Activity History XLSX sheet title collisions", () => {
     expectAllTypeSheets(workbook, logs);
     // Common nonconflicting names keep their familiar workbook tab.
     expect(workbook.SheetNames).toContain("Anki");
-    expect(workbook.Sheets["All Activity"]?.C2?.v).toBe(logs[0].type);
+    // The all-activity tab is sorted newest first, independently of type-tab allocation.
+    expect(workbook.Sheets["All Activity"]?.C2?.v).toBe(logs[logs.length - 1].type);
   });
 
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {
