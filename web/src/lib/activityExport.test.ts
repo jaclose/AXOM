@@ -148,6 +148,33 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("orders offset-aware ISO events by instant without changing source timestamps", async () => {
+    const logs = studyLogs(["Manual", "Manual", "Manual"]);
+    logs[0].ts = "2026-11-14T10:00:00-05:00"; // 15:00 UTC, latest
+    logs[1].ts = "2026-11-14T14:00:00.000Z"; // 14:00 UTC
+    logs[2].ts = "2026-11-14T10:00:00+01:00"; // 09:00 UTC, earliest
+    const original = logs.map((log) => ({ ...log }));
+    const workbook = await captureWorkbook(logs);
+    expect(workbook.SheetNames).toEqual(["Overview", "All Activity", "Manual"]);
+    for (const sheetName of ["All Activity", "Manual"]) {
+      const sheet = workbook.Sheets[sheetName];
+      expect([sheet?.F2?.v, sheet?.F3?.v, sheet?.F4?.v])
+        .toEqual(["unique-note-0", "unique-note-1", "unique-note-2"]);
+      expect([sheet?.B2?.v, sheet?.B3?.v, sheet?.B4?.v])
+        .toEqual(original.map((log) => log.ts));
+    }
+    // The workbook must remain readable, and no input log may be rewritten.
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const restored = XLSX.read(bytes, { type: "buffer" });
+    expect(restored.SheetNames).toEqual(workbook.SheetNames);
+    expect([restored.Sheets["All Activity"]?.F2?.v, restored.Sheets["All Activity"]?.F3?.v,
+      restored.Sheets["All Activity"]?.F4?.v]).toEqual([
+      "unique-note-0", "unique-note-1", "unique-note-2",
+    ]);
+    expect(logs).toEqual(original);
+  });
+
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {
     const shared = "Long protocol study session " + "x".repeat(40);
     const logs = studyLogs([shared + "Alpha", shared + "Beta"]);
