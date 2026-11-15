@@ -25,8 +25,19 @@ export async function exportActivityWorkbook(
   appendSheet(XLSX, wb, "All Activity", detailRows(logs), [14, 20, 14, 12, 12, 42]);
 
   const byType = [...new Set(logs.map((log) => log.type))].sort();
+  // Summary tabs and normalized/truncated study types can share an Excel title.
+  // Allocate unique case-insensitive names without merging or dropping any type.
+  const usedSheetNames = new Set(wb.SheetNames.map((name) => name.toLowerCase()));
   for (const type of byType) {
-    appendSheet(XLSX, wb, safeSheetName(type), detailRows(logs.filter((log) => log.type === type)), [14, 20, 14, 12, 12, 42]);
+    const baseName = safeSheetName(type);
+    let sheetName = baseName;
+    let duplicate = 2;
+    while (usedSheetNames.has(sheetName.toLowerCase())) {
+      const suffix = ` (${duplicate++})`;
+      sheetName = `${baseName.slice(0, 31 - suffix.length)}${suffix}`;
+    }
+    usedSheetNames.add(sheetName.toLowerCase());
+    appendSheet(XLSX, wb, sheetName, detailRows(logs.filter((log) => log.type === type)), [14, 20, 14, 12, 12, 42]);
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
