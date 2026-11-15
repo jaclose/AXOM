@@ -14,7 +14,7 @@ import {
 } from "./questionAttachments";
 
 type References = ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>;
-type MediaEntry = { file: string; metadata: Omit<QuestionAttachmentExportPayload, "base64"> };
+type MediaEntry = { file: string; metadata: Omit<QuestionAttachmentExportPayload, "base64">; sha256?: string };
 type OriginalEntry = { file: string; documentId: string; sha256: string; byteSize: number; mimeType: string };
 const MAX_ORIGINAL_BYTES = 128 * 1024 * 1024;
 export const MAX_ZIP_WORKSPACE_BYTES = MAX_ORIGINAL_BYTES;
@@ -175,6 +175,9 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
 const FORMAT = "axom-media-backup";
+// v3 binds each included image to its exported bytes. Historical v1/v2 ZIPs
+// remain recoverable but lack this digest guarantee; a mutable manifest digest
+// is not a signature and cannot authenticate the original source of an image.
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
 // Small JSON backups include base64 inline; reject unbounded parsing/inflate.
 // ZIP remains the supported format for larger original exports.
@@ -498,7 +501,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   // ZIP entries; absent assets never consume the preflight budget.
   const mandatoryWorkspaceBytes = needsPreflight
     ? new Blob([JSON.stringify({
-      ...payload, _backupFormat: FORMAT, _backupVersion: 2, media: [], originals: [],
+      ...payload, _backupFormat: FORMAT, _backupVersion: 3, media: [], originals: [],
     })], { type: "application/json" }).size
     : 0;
   if (mandatoryWorkspaceBytes > MAX_ZIP_WORKSPACE_BYTES) {
@@ -526,6 +529,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     (candidateIndex, admittedIndex) => new Blob([JSON.stringify({
       file: `media/${admittedIndex}`,
       metadata: referencedMedia[candidateIndex].metadata,
+      sha256: "0".repeat(64),
     })], { type: "application/json" }).size + Number(admittedIndex > 0),
     (candidateIndex, admittedIndex) => {
       const document = eligibleOriginals[candidateIndex];
@@ -560,18 +564,21 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
       missingBlobKeys.push(metadata.blobKey);
       continue;
     }
+    let bytes: Uint8Array;
     try {
-      const { bytes } = await verifiedMediaBlob(metadata, options);
-      reserveExpandedBytes(bytes.byteLength);
-      assertRestorableZipEntryCounts(media.length + 1, 0);
-      const file = `media/${media.length}`;
-      zip.file(file, bytes); media.push({ file, metadata });
-    } catch (error) {
-      // A safety-budget failure is not a missing image that can be omitted from
-      // a partial backup; abort so no unusable archive can be certified.
-      if (error instanceof ZipExportBudgetExceeded) throw error;
+      ({ bytes } = await verifiedMediaBlob(metadata, options));
+    } catch {
       missingBlobKeys.push(metadata.blobKey);
+      continue;
     }
+    // A missing asset may be salvaged as metadata only; budget or digest
+    // failures must instead abort the export, never certify a weaker copy.
+    reserveExpandedBytes(bytes.byteLength);
+    assertRestorableZipEntryCounts(media.length + 1, 0);
+    const file = `media/${media.length}`;
+    const sha256 = await sha256Hex(bytes);
+    zip.file(file, bytes);
+    media.push({ file, metadata, sha256 });
   }
   const originals: OriginalEntry[] = [];
   const missingOriginalIds: string[] = [];
@@ -599,7 +606,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   }
   // The ZIP reader limits the uncompressed workspace.json entry to 128 MiB.
   // Do not produce a backup the same application would refuse to restore.
-  const workspaceJson = JSON.stringify({ ...payload, _backupFormat: FORMAT, _backupVersion: 2, media, originals });
+  const workspaceJson = JSON.stringify({ ...payload, _backupFormat: FORMAT, _backupVersion: 3, media, originals });
   const workspaceBytes = new Blob([workspaceJson], { type: "application/json" }).size;
   if (workspaceBytes > MAX_ZIP_WORKSPACE_BYTES) {
     throw new Error("The ZIP workspace exceeds the 128 MB recovery safety limit. No backup was downloaded or certified.");
@@ -752,7 +759,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     documents?: SourceDocument[];
     deferredContent?: { questions?: Array<{ id: string; attachments?: QuestionImageAttachment[] }>; documents?: SourceDocument[] };
   };
-  if (manifest._backupFormat !== FORMAT || ![1, 2].includes(manifest._backupVersion ?? 0) || !Array.isArray(manifest.media)) throw new Error("Unsupported workspace backup format.");
+  if (manifest._backupFormat !== FORMAT || ![1, 2, 3].includes(manifest._backupVersion ?? 0) || !Array.isArray(manifest.media)) throw new Error("Unsupported workspace backup format.");
   const media = manifest.media;
   const mediaFiles = new Set<string>();
   const mediaMetadata = new Map<string, { mimeType: string; byteSize: number }>();
@@ -765,11 +772,21 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     // Validate the actual archive bytes, not only metadata, before handing
     // workspace JSON to the caller. Use the export-side image predicates so
     // ZIP imports cannot silently accept media that a new export would hold.
+    // New archives must carry a well-formed digest for every included image.
+    // Older archives may omit it, but a present digest is never ignored.
+    if ((manifest._backupVersion === 3 && item.sha256 === undefined)
+      || (item.sha256 !== undefined && (typeof item.sha256 !== "string"
+        || !/^[a-f0-9]{64}$/.test(item.sha256)))) {
+      throw new Error("A backup image has an invalid or missing SHA-256 digest. No workspace data has been changed.");
+    }
     const imageBytes = await zip.file(item.file)!.async("uint8array");
     const { mimeType, byteSize } = normalized[0];
     if (imageBytes.byteLength !== byteSize || !hasExpectedImageStructure(imageBytes, mimeType)
       || (mimeType === "image/png" && !(await hasInflatablePngImageData(imageBytes)))) {
       throw new Error("A backup image failed its integrity check. No workspace data has been changed.");
+    }
+    if (item.sha256 !== undefined && await sha256Hex(imageBytes) !== item.sha256) {
+      throw new Error("A backup image failed its SHA-256 integrity check. No workspace data has been changed.");
     }
     // One stored image per immutable key and archive path: reject aliases
     // before exposing workspace metadata for adoption.
@@ -779,7 +796,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     mediaFiles.add(item.file);
     mediaMetadata.set(normalized[0].blobKey, { mimeType, byteSize });
   }
-  const originals = manifest._backupVersion === 2 ? manifest.originals : [];
+  const originals = (manifest._backupVersion ?? 0) >= 2 ? manifest.originals : [];
   if (!Array.isArray(originals)) throw new Error("The backup has no original-file manifest.");
   const ids = new Set<string>(), files = new Set<string>();
   const documents = new Map([
