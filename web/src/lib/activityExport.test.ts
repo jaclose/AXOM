@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkBook } from "xlsx-js-style";
-import { exportActivityWorkbook } from "./activityExport";
+import { allocateActivitySheetName, exportActivityWorkbook } from "./activityExport";
 import type { StudyLog } from "./types";
 
 function studyLogs(types: string[]): StudyLog[] {
@@ -208,6 +208,53 @@ describe("Activity History XLSX sheet title collisions", () => {
     );
     expect(workbook.Sheets["All Activity"]?.F2?.v).toBe("unique-note-79");
     expect(logs).toEqual(original);
+  });
+
+
+  it("bounds collision probing across identical and cross-prefix Excel worksheet title families", () => {
+    class CountingSet extends Set<string> {
+      probes = 0;
+      override has(value: string): boolean {
+        this.probes++;
+        return super.has(value);
+      }
+    }
+    const samePrefix = Array.from({ length: 420 }, (_, index) => `${"z".repeat(31)}#${index}`);
+    const used = new CountingSet(["overview", "all activity", "history"]);
+    const suffixCursors = new Map<string, number>();
+    const allocated = samePrefix.map((type) => allocateActivitySheetName(type, used, suffixCursors));
+    expect(new Set(allocated.map((name) => name.toLowerCase())).size).toBe(samePrefix.length);
+    expect(allocated[0]).toBe("z".repeat(31));
+    expect(allocated[1]).toBe(`${"z".repeat(27)} (2)`);
+    expect(allocated.every((name) => name.length <= 31)).toBe(true);
+    expect(used.probes).toBeLessThan(samePrefix.length * 6);
+
+    // All 31-unit bases differ, but fallback suffixes share the same shortened prefix.
+    const crossPrefix = Array.from({ length: 420 }, (_, index) =>
+      `${"S".repeat(27)}${String(index).padStart(4, "0")}`);
+    const reserved = new CountingSet(crossPrefix.map((name) => name.toLowerCase()));
+    const crossCursors = new Map<string, number>();
+    const crossTitles = crossPrefix.map((name) => allocateActivitySheetName(name, reserved, crossCursors));
+    expect(new Set(crossTitles.map((name) => name.toLowerCase())).size).toBe(crossPrefix.length);
+    expect(crossTitles.every((name) => name.length <= 31)).toBe(true);
+    expect(reserved.probes).toBeLessThan(crossPrefix.length * 6);
+  });
+
+  it("roundtrips many colliding type sheets with original source text and notes intact", async () => {
+    const types = Array.from({ length: 40 }, (_, index) => `${"x".repeat(31)}-source-${index}`);
+    const logs = studyLogs(types);
+    const before = logs.map((log) => ({ ...log }));
+    const workbook = await captureWorkbook(logs);
+    expectAllTypeSheets(workbook, logs);
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const reloaded = XLSX.read(bytes, { type: "buffer" });
+    expect(reloaded.SheetNames).toEqual(workbook.SheetNames);
+    for (const name of reloaded.SheetNames.slice(2)) {
+      expect(types).toContain(reloaded.Sheets[name]?.C2?.v);
+      expect(reloaded.Sheets[name]?.F2?.v).toMatch(/^unique-note-/);
+    }
+    expect(logs).toEqual(before);
   });
 
 });
