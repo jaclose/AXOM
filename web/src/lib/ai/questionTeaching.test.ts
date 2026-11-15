@@ -340,6 +340,15 @@ describe("review-gated explanation drafting", () => {
     ["an image-origin record with a missing exhibit", { source: "image" }],
     ["a screenshot-origin record with no retained exhibit", { source: "screenshot" }],
     ["a referenced figure", { stem: "Which structure is shown in the following image?" }],
+    ["a numbered figure", { stem: "Which lesion is depicted in Figure 2A?" }],
+    ["an abbreviated figure label", { stem: "Using Fig. 3, identify the abnormal vessel." }],
+    ["a numbered histology micrograph", { stem: "Micrograph #4 shows which histologic change?" }],
+    ["a numbered H&E slide", { stem: "On H&E slide 6, what is the cellular finding?" }],
+    ["a numbered specimen", { options: [
+      { key: "A", text: "Specimen 12 demonstrates fibrosis" },
+      { key: "B", text: "Unrelated control" },
+      { key: "C", text: "Other control" },
+    ] }],
     ["an explicit CT exhibit", { stem: "See the CT scan to identify the vascular abnormality." }],
     ["a missing exhibit mentioned by a choice", { options: [
       { key: "A", text: "Tunica media" },
