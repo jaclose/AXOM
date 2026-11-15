@@ -5,6 +5,7 @@ import os
 import pathlib
 import re
 import subprocess
+import unicodedata
 from difflib import SequenceMatcher
 
 QUESTION_TYPES = {"imcq", "esoft", "pq", "answer_key", "small_group", "case", "review_questions"}
@@ -573,6 +574,12 @@ def index_source_archives(rows, secure_open=None):
                     supported = [i for i in infos if not i.is_dir()
                                  and pathlib.Path(i.filename).suffix.casefold() in allowed]
                     names = collections.Counter(i.filename for i in supported)
+                    # ZIP's name table distinguishes raw spellings even when
+                    # common extraction filesystems do not. Do not advertise
+                    # multiple entries that normalize to one target path.
+                    canonical_names = collections.Counter(
+                        unicodedata.normalize("NFC", i.filename).casefold()
+                        for i in supported)
                     partial = len(supported) > 10000
                     if partial:
                         archived["errors"].append("member_output_capped_at_10000")
@@ -585,19 +592,24 @@ def index_source_archives(rows, secure_open=None):
                         unsafe = (name.startswith(("/", "\\"))
                                   or "\\" in name or win.drive or win.is_absolute()
                                   or ".." in pathlib.PurePosixPath(name).parts
-                                  or ".." in win.parts)
+                                  or ".." in win.parts
+                                  or any(part in {"", "."} for part in name.split("/")))
                         ext = pathlib.Path(name).suffix.casefold()
                         academic = bool(re.search(
                             r"(?i)(?:\bpq\b|practice.?q|imcq|e.?soft|examsoft|quiz|questions?|workbook|answer.?key)",
                             name))
                         duplicate = names[name] > 1
+                        normalized_collision = (
+                            canonical_names[unicodedata.normalize("NFC", name).casefold()] > 1
+                            and not duplicate)
                         encrypted = bool(i.flag_bits & 1)
                         symlink = i.create_system == 3 and stat.S_ISLNK(i.external_attr >> 16)
                         hold = ("archive_member_directory_truncated" if partial else
                                 "unsafe_member_path" if unsafe else
                                 "symlink_member" if symlink else
                                 "encrypted_member" if encrypted else
-                                "duplicate_member_name" if duplicate else None)
+                                "duplicate_member_name" if duplicate else
+                                 "colliding_member_path" if normalized_collision else None)
                         eligible = academic and hold is None
                         # Preserve the historic virtual ID for unique members.
                         # Ambiguous name+size+CRC identities need an offset bound
@@ -612,6 +624,7 @@ def index_source_archives(rows, secure_open=None):
                             zip_compressed_bytes=i.compress_size, crc32=f"{i.CRC:08x}",
                             encrypted=encrypted, unsafe_path=bool(unsafe),
                             symlink_member=symlink, duplicate_member_name=duplicate,
+                            normalized_member_path_collision=normalized_collision,
                             academic_question_hint=academic,
                             question_candidate_eligible=eligible,
                             question_candidate_hold=hold,
