@@ -102,6 +102,11 @@ test("complete ZIP downloads exact image and source bytes and restores both afte
   expect(sha256(await zip.file(image!.file)!.async("uint8array"))).toBe(sha256(PNG));
   expect(sha256(await zip.file(source!.file)!.async("uint8array"))).toBe(checksum);
   await expect(page.locator(".backup-status")).toContainText("Check that the file exists");
+  const lastCompleteExport = await page.evaluate(async () => {
+    const { lastBackupAt } = await import(/* @vite-ignore */ "/src/lib/backup.ts");
+    return lastBackupAt();
+  });
+  expect(lastCompleteExport).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
   const recovery = await browser.newContext({ acceptDownloads: true, reducedMotion: "reduce" });
   try {
@@ -151,8 +156,9 @@ test("complete ZIP downloads exact image and source bytes and restores both afte
 });
 
 
-test("a ZIP with a missing original reports partial recovery and never certifies a full backup", async ({ page, context }) => {
-  test.setTimeout(90_000);
+test("a ZIP with a missing original discloses the gap before and after separate-profile recovery", async ({ page, context, browser }) => {
+  test.setTimeout(75_000);
+  await page.setViewportSize({ width: 390, height: 844 });
   const origin = new URL(process.env.AXOM_E2E_BASE_URL ?? "http://127.0.0.1:5187").origin;
   if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
     throw new Error("Incomplete ZIP acceptance requires an isolated loopback app.");
@@ -178,8 +184,9 @@ test("a ZIP with a missing original reports partial recovery and never certifies
     await flushVault();
   }, { checksum: sourceHash, sourceText: missingSourceText });
   await reloadAfterSave(page);
-  await page.getByTitle("Settings", { exact: true }).click();
-  await page.getByRole("tab", { name: "Emergency recovery", exact: true }).click();
+  await page.getByRole("button", { name: "Open navigation menu" }).click();
+  await page.locator(".server-header").click();
+  await page.getByRole("combobox", { name: "Settings section" }).selectOption("backup");
   const pending = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export complete backup", exact: true }).click();
   const download = await pending;
@@ -205,4 +212,46 @@ test("a ZIP with a missing original reports partial recovery and never certifies
     return lastBackupAt();
   });
   expect(timestamp).toBeNull();
+
+  const restoreProfile = await browser.newContext({ acceptDownloads: true, reducedMotion: "reduce", viewport: { width: 390, height: 844 } });
+  try {
+    await restoreProfile.route("**/*", route =>
+      new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    const restored = await restoreProfile.newPage();
+    await restored.goto(`${origin}/?app=1#dashboard`, { waitUntil: "networkidle" });
+    await seedOnboarded(restored, { name: "Fresh partial ZIP recovery target" });
+    const inspect = () => restored.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
+        useStore: { getState: () => { documents: { id: string; checksum?: string }[] } };
+      }> }).__AXOM_DEV__;
+      const document = (await dev).useStore.getState().documents.find(d => d.id === "r105-uncached-original");
+      const { readSourceOriginal } = await import(/* @vite-ignore */ "/src/lib/decode/sources.ts");
+      return { checksum: document?.checksum ?? null,
+        originalPresent: !!(document && await readSourceOriginal(document.id, document.checksum)) };
+    });
+    expect(await inspect()).toEqual({ checksum: null, originalPresent: false });
+    await restored.getByRole("button", { name: "Open navigation menu" }).click();
+    await restored.locator(".server-header").click();
+    await restored.getByRole("combobox", { name: "Settings section" }).selectOption("backup");
+    const chooser = restored.waitForEvent("filechooser");
+    await restored.getByRole("button", { name: "Choose backup to restore", exact: true }).click();
+    const confirmations: string[] = [];
+    restored.on("dialog", dialog => {
+      confirmations.push(dialog.message());
+      void dialog.accept();
+    });
+    await (await chooser).setFiles({
+      name: download.suggestedFilename(), mimeType: "application/zip", buffer: await readFile(file),
+    });
+    await expect(restored.locator(".backup-status")).toContainText("Saved on this device.", { timeout: 60_000 });
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]).toContain("This ZIP is incomplete: 0 referenced image attachment(s) and 1 original file(s)");
+    await expect(restored.locator(".backup-status")).toContainText("This ZIP is incomplete");
+    await expect(restored.locator(".backup-status")).toContainText("their bytes cannot be restored from this copy");
+    expect(await inspect()).toEqual({ checksum: sourceHash, originalPresent: false });
+    await reloadAfterSave(restored);
+    expect(await inspect()).toEqual({ checksum: sourceHash, originalPresent: false });
+  } finally {
+    await restoreProfile.close();
+  }
 });
