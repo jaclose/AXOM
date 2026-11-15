@@ -479,12 +479,12 @@ describe("review-gated explanation drafting", () => {
         C: "The adventitia provides structural connective tissue support.",
       },
     }],
-    ["public URL hidden after the eight-keyword display limit", {
-      keywords: [
-        "vascular anatomy", "vascular tone", "tunica media", "histology",
-        "endothelium", "intima", "adventitia", "smooth muscle",
-        "https://example.edu/unsupported-reference",
-      ],
+    ["invented public website in distractor rationale", {
+      choiceRationales: {
+        A: "The tunica media contains contractile vascular smooth muscle.",
+        B: "The intima is the endothelial lining, not the principal muscle layer.",
+        C: "The adventitia is predominantly connective tissue. See www.example.edu/unsupported-reference.",
+      },
     }],
   ] as Array<[string, Record<string, unknown>]> )(
     "rejects %s before accepting AI-authored source attribution", async (_case, patch) => {
