@@ -4,7 +4,7 @@ import { useStore } from "../lib/store";
 import { useAccount } from "../lib/account/accountStore";
 import { GlassCard, GButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Field, SelectField } from "../components/ui/Modal";
-import { exportActivityWorkbook } from "../lib/activityExport";
+import { ActivityExportTextEncodingError, exportActivityWorkbook } from "../lib/activityExport";
 import { pushToast } from "../lib/toast";
 import { prettyDate } from "../lib/scoring";
 import type { StudyLog } from "../lib/types";
@@ -121,12 +121,14 @@ export function ActivityHistoryPage() {
     try {
       assertCurrentExport();
       await exportActivityWorkbook(filtered, undefined, assertCurrentExport);
-    } catch {
+    } catch (error) {
       if (!unmounted.current) pushToast(accountIsStale()
         ? { title: "Activity export canceled", body: "Your account or device link changed. Reopen Activity History before exporting again.", tone: "warn" }
         : historyIsStale()
           ? { title: "Activity export canceled", body: "Your study history changed. Reopen Activity History before exporting the current records.", tone: "warn" }
-          : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
+          : error instanceof ActivityExportTextEncodingError
+            ? { title: "Activity export stopped", body: "Some saved activity text contains invalid Unicode that Excel would alter. No workbook was downloaded and your study history is unchanged. Preserve a workspace backup and correct the affected entry before exporting.", tone: "warn" }
+            : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
     } finally {
       if (!unmounted.current) setExportPending(false);
     }

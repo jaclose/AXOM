@@ -9,6 +9,29 @@ const HEADER = {
   alignment: { horizontal: "center", vertical: "center", wrapText: true },
 };
 
+/** A workbook cannot encode isolated UTF-16 surrogates without changing learner text. */
+export class ActivityExportTextEncodingError extends Error {
+  constructor() {
+    super("Activity export stopped: saved text contains invalid Unicode that Excel cannot preserve.");
+    this.name = "ActivityExportTextEncodingError";
+  }
+}
+
+function assertLosslessWorkbookText(logs: StudyLog[]): void {
+  // Validate only exported text fields; source rows, including IDs, are never rewritten.
+  // for...of iterates paired supplementary characters as a single two-unit symbol.
+  for (const log of logs) {
+    for (const text of [log.dayKey, log.ts, log.type, log.note]) {
+      if (!text) continue;
+      for (const symbol of text) {
+        if (symbol.length === 1 && /[\uD800-\uDFFF]/.test(symbol)) {
+          throw new ActivityExportTextEncodingError();
+        }
+      }
+    }
+  }
+}
+
 /** Optional workbook writer retains the existing XLSX test seam; account guard is a distinct third argument. */
 export async function exportActivityWorkbook(
   logs: StudyLog[],
@@ -18,6 +41,8 @@ export async function exportActivityWorkbook(
   const XLSX = await import("xlsx-js-style");
   // Lazy module loading crosses an async boundary. Do not serialize a previous account after it.
   assertCurrent?.();
+  // Refuse silently lossy XLSX encoding before building or downloading the workbook.
+  assertLosslessWorkbookText(logs);
   const wb = XLSX.utils.book_new();
   wb.Props = { Title: "AXOM Activity History", Author: "AXOM", CreatedDate: new Date() };
 
