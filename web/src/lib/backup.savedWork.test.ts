@@ -417,7 +417,10 @@ describe("saved-work recovery without downloading content", () => {
     expect(parsed.questions[0].attachments).toEqual([attachment]);
     const stage = await backup.restoreMedia([{ id: "q", attachments: parsed.questions[0].attachments }]);
     expect(stage).toMatchObject({ restored: 0, skipped: 0 });
-    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
+    // This assertion is about bytes on this device, not an optional cloud read.
+    // The fixture deliberately makes network fallback throw "Offline".
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+    expect(attemptedDownload).not.toHaveBeenCalled();
     await stage.rollback();
   });
 
