@@ -161,7 +161,7 @@ function AccountScopedReviewQueue({ accountId }: { accountId: string }) {
                 : <p className="sub">No choice-specific rationale recorded. Verify this choice against the source.</p>}
             </li>;
           })}</ul>
-          <p>Answer: <b>{question.correctKey ?? "Unresolved"}</b></p>
+          <p>Answer: <b>{question.correctKey?.trim() || "Unresolved"}</b></p>
           {question.explanation?.startsWith("AXOM AI-assisted explanation")
             && <p className="qsl-preview-ai-warning">AI-assisted explanation: source and medical claims require independent review.</p>}
           {question.explanation ? <p>{question.explanation}</p>
