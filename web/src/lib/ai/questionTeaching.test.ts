@@ -857,6 +857,91 @@ describe("review-gated explanation drafting", () => {
     },
   );
 
+  it.each([
+    ["fullwidth local file scheme", "Read ｆｉｌｅ：／／／Users/student/private-exam.pdf"],
+    ["fullwidth content-provider URI", "Data ｃｏｎｔｅｎｔ：／／private.provider/document/42"],
+    ["fullwidth credential-bearing HTTPS URL", "Source ｈｔｔｐｓ：／／example.edu/artery？access_token＝DEMO_NOT_SECRET"],
+  ] as Array<[string, string]>)(
+    "blocks %s before provider inference without rewriting the original source",
+    async (_label, stem) => {
+      const source = question({ stem });
+      const model = provider({});
+      const original = JSON.stringify(source);
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/private file|inline media|URL credentials/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(JSON.stringify(source)).toBe(original);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it.each([
+    ["fullwidth public link in explanation", {
+      explanation: "The tunica media regulates vascular resistance. See ｈｔｔｐｓ：／／example.edu/unverified.",
+    }],
+    ["fullwidth DOI in explanation", {
+      explanation: "The tunica media contains contractile smooth muscle. DOI １０．１２３４／arterial-2026.",
+    }],
+    ["fullwidth PMCID in distractor rationale", {
+      choiceRationales: {
+        A: "The media contains arterial smooth muscle.",
+        B: "The intima is the endothelial lining, not the primary muscular layer. ＰＭＣ１２３４５６７.",
+        C: "The adventitia provides connective tissue support.",
+      },
+    }],
+    ["fullwidth PMID in explanation", {
+      explanation: "The tunica media supports vascular contraction. ＰＭＩＤ：１２３４５６７８.",
+    }],
+    ["fullwidth PubMed domain in distractor rationale", {
+      choiceRationales: {
+        A: "The media provides arterial smooth muscle.",
+        B: "The intima is the inner endothelial layer. ｐｕｂｍｅｄ．ｎｃｂｉ．ｎｌｍ．ｎｉｈ．ｇｏｖ／1234567.",
+        C: "The adventitia provides connective tissue support.",
+      },
+    }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    "rejects %s as unverified AI attribution without changing source evidence",
+    async (_label, patch) => {
+      const source = question({ citation: "Reviewed source, page 3" });
+      const before = JSON.stringify(source);
+      const model = provider({
+        explanation: "The tunica media contains vascular smooth muscle that regulates vascular tone and resistance.",
+        choiceRationales: {
+          A: "The media contains vascular smooth muscle.",
+          B: "The intima forms the endothelial lining.",
+          C: "The adventitia supports the vessel with connective tissue.",
+        },
+        keywords: ["arterial histology"],
+        ...patch,
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/unverified source link or publication identifier/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(JSON.stringify(source)).toBe(before);
+    },
+  );
+
+  it("preserves authored non-Latin clinical typography when scanning AI references", async () => {
+    const stem = "For HLA-ＤＲ and CD4/CD8 signaling, which arterial layer contains smooth muscle?";
+    const explanation = "The tunica media contains β-adrenergically responsive smooth muscle that changes vascular resistance.";
+    const source = question({ stem, citation: "Reviewed source, page 3" });
+    const model = provider({
+      explanation,
+      choiceRationales: {
+        A: "The tunica media contains vascular smooth muscle.",
+        B: "The intima predominantly consists of endothelial lining.",
+        C: "The adventitia is outer connective tissue support.",
+      },
+      keywords: ["vascular histology"],
+    });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    const result = await draftQuestionExplanation(model, source);
+    expect(result.explanation).toBe(explanation);
+    expect(source.stem).toBe(stem);
+    expect(source.correctKey).toBe("A");
+  });
+
   it("keeps clinical slash notation eligible while source citations remain separately reviewed", async () => {
     const source = question({
       stem: "For the CD4/CD8 ratio, which arterial layer contains smooth muscle?",
