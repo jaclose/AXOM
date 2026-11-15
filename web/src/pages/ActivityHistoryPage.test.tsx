@@ -39,14 +39,11 @@ vi.mock("../lib/store", () => ({
     { getState: () => ({ logs: fixture.logs }) },
   ),
 }));
-vi.mock("../lib/activityExport", () => ({
+vi.mock("../lib/activityExport", async (importOriginal) => ({
+  // Exercise the real shared chronology and typed export errors while intercepting
+  // the download side effect. A test-only comparator could conceal UI/XLSX drift.
+  ...(await importOriginal<typeof import("../lib/activityExport")>()),
   exportActivityWorkbook: fixture.exportWorkbook,
-  ActivityExportTextEncodingError: class ActivityExportTextEncodingError extends Error {
-    constructor() { super("Invalid Unicode text in activity export."); this.name = "ActivityExportTextEncodingError"; }
-  },
-  ActivityExportCellLimitError: class ActivityExportCellLimitError extends Error {
-    constructor() { super("Excel cell limit exceeded."); this.name = "ActivityExportCellLimitError"; }
-  },
 }));
 vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
 
@@ -317,12 +314,13 @@ describe("Activity History workbook download feedback", () => {
       { id: "broken", type: "broken", ts: "not-a-date", dayKey: "2026-11-13", minutes: 5, cards: 0 },
       { id: "earlier", type: "earlier", ts: "2026-11-13T15:00:00Z", dayKey: "2026-11-13", minutes: 5, cards: 0 },
       { id: "later", type: "later", ts: "2026-11-13T12:00:00-04:00", dayKey: "2026-11-13", minutes: 5, cards: 0 },
+      { id: "tie-offset", type: "tie-offset", ts: "2026-11-13T11:30:00-05:00", dayKey: "2026-11-13", minutes: 5, cards: 0 },
       { id: "tie-b", type: "tie-b", ts: "2026-11-13T16:30:00Z", dayKey: "2026-11-13", minutes: 5, cards: 0 },
       { id: "tie-a", type: "tie-a", ts: "2026-11-13T16:30:00Z", dayKey: "2026-11-13", minutes: 5, cards: 0 },
     ];
     try {
       render(<ActivityHistoryPage />);
-      const ids = ["tie-a", "tie-b", "later", "earlier", "broken"];
+      const ids = ["tie-a", "tie-b", "tie-offset", "later", "earlier", "broken"];
       const rendered = [...document.querySelectorAll(".activity-history-row")]
         .map((row) => ids.find((id) => row.textContent?.includes(id)));
       expect(rendered).toEqual(ids);

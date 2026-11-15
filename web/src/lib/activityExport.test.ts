@@ -175,6 +175,28 @@ describe("Activity History XLSX sheet title collisions", () => {
     expect(logs).toEqual(original);
   });
 
+  it("uses deterministic cross-offset UTC ties and malformed-timestamp order without mutating rows", async () => {
+    const logs = studyLogs(["Manual", "Manual", "Manual", "Manual", "Manual", "Manual"]);
+    logs[0].ts = "2026-11-14T10:00:00-05:00"; // 15:00 UTC
+    logs[1].ts = "2026-11-14T15:00:00Z";      // same instant, later lexical stamp
+    logs[2].ts = "2026-11-14T15:00:00Z";      // identical stamp, higher ID
+    logs[3].ts = "2026-11-14T14:00:00Z";      // older valid instant
+    logs[4].ts = "not-a-date";
+    logs[5].ts = "zzz-invalid";
+    const original = logs.map((log) => ({ ...log }));
+    const expected = [1, 2, 0, 3, 5, 4].map((index) => `unique-note-${index}`);
+    const workbook = await captureWorkbook(logs);
+    for (const tab of ["All Activity", "Manual"]) {
+      expect(Array.from({ length: 6 }, (_, index) => workbook.Sheets[tab]?.[`F${index + 2}`]?.v))
+        .toEqual(expected);
+    }
+    const XLSX = await import("xlsx-js-style");
+    const restored = XLSX.read(XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }), { type: "buffer" });
+    expect(Array.from({ length: 6 }, (_, index) => restored.Sheets["All Activity"]?.[`F${index + 2}`]?.v))
+      .toEqual(expected);
+    expect(logs).toEqual(original);
+  });
+
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {
     const shared = "Long protocol study session " + "x".repeat(40);
     const logs = studyLogs([shared + "Alpha", shared + "Beta"]);

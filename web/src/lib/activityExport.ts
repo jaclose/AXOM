@@ -128,19 +128,26 @@ function overviewRows(logs: StudyLog[], byType: string[], groupedByType: Map<str
   return rows;
 }
 
+/** Canonical, deterministic chronology for both the visible ledger and downloaded XLSX. */
+export function compareStudyLogsNewestFirst(a: StudyLog, b: StudyLog): number {
+  const aTime = Date.parse(a.ts);
+  const bTime = Date.parse(b.ts);
+  const aValid = Number.isFinite(aTime);
+  const bValid = Number.isFinite(bTime);
+
+  // Always place malformed legacy timestamps after valid records, without sort cycles.
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  if (aValid && bValid && aTime !== bTime) return bTime - aTime;
+
+  // Equal instants with different offsets and exact timestamp duplicates must agree
+  // across reorders/filters, even if original insertion order differs.
+  return b.ts.localeCompare(a.ts) || a.id.localeCompare(b.id);
+}
+
 function detailRows(logs: StudyLog[]) {
   return [
     ["Study day", "Timestamp", "Type", "Minutes", "Cards", "Note"],
-    ...logs.slice().sort((a, b) => {
-      // ISO datetimes with distinct UTC offsets are not chronologically ordered as strings.
-      const aTime = Date.parse(a.ts);
-      const bTime = Date.parse(b.ts);
-      if (Number.isFinite(aTime) && Number.isFinite(bTime)) return bTime - aTime;
-      // Keep malformed legacy timestamps stable and deterministic, but behind valid events.
-      if (Number.isFinite(aTime)) return -1;
-      if (Number.isFinite(bTime)) return 1;
-      return b.ts.localeCompare(a.ts);
-    }).map((log) => [
+    ...logs.slice().sort(compareStudyLogsNewestFirst).map((log) => [
       log.dayKey,
       log.ts,
       log.type,
