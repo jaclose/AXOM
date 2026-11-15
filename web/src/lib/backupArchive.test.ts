@@ -1406,6 +1406,31 @@ describe("portable binary media backup", () => {
     }
   });
 
+  it("reports missing WebCrypto capability instead of corrupt original-file bytes", async () => {
+    const original = new Blob(["Portable original for hash verification"], { type: "text/plain" });
+    const document: SourceDocument = {
+      id: "verified-source", title: "Verified Source", fileName: "source.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Source metadata",
+      sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await saveSourceOriginal(document, original);
+    const exported = await createMediaBackupArchive({ documents: [document] }, [], [document]);
+    expect(exported).toMatchObject({ originalCount: 1, missingOriginalIds: [] });
+
+    const cryptoWithSubtle = globalThis.crypto;
+    vi.stubGlobal("crypto", {
+      getRandomValues: cryptoWithSubtle.getRandomValues.bind(cryptoWithSubtle),
+      subtle: undefined,
+    });
+    try {
+      await expect(readPortableBackup(new File([exported.blob], "intact-original-no-crypto.zip")))
+        .rejects.toThrow(/SHA-256.*unavailable/i);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects absent or malformed new-format image digests but permits legacy v1/v2 archives", async () => {
     const { default: JSZip } = await import("jszip");
     await putQuestionAttachmentBlob(attachment.blobKey, {
