@@ -70,6 +70,21 @@ describe("complete term catalog", () => {
     await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
     expect(mocks.dispose).toHaveBeenCalledTimes(2);
   });
+  it("holds pages larger than the supported catalog cursor window", async () => {
+    mocks.list.mockResolvedValueOnce(Array.from({ length: 25 }, (_, index) => course(index)));
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("catalog changed");
+    expect(mocks.list).toHaveBeenCalledOnce();
+  });
+  it("limits a nonterminating stream of unique full pages without returning partial downloads", async () => {
+    let page = 0;
+    mocks.list.mockImplementation(async () => {
+      const first = page++ * 24;
+      return Array.from({ length: 24 }, (_, index) => course(first + index));
+    });
+    await expect(listTermCourses("Term 1", "account")).rejects.toThrow("safe page limit");
+    expect(mocks.list).toHaveBeenCalledTimes(200);
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
   it("stops after an in-flight page without fetching another page", async () => {
     let stopped = false;
     mocks.list.mockImplementationOnce(async () => { stopped = true; return Array.from({ length: 24 }, (_, index) => course(index)); });
