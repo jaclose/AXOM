@@ -262,6 +262,100 @@ describe("lossless account and device-link transition epoch", () => {
   });
 });
 
+
+describe("password recovery rebinds account ownership", () => {
+  it("does not let B inherit A's linked device, protected status, private receipts or upload caches", async () => {
+    let emit: (event: string, value: unknown) => void = () => undefined;
+    auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {
+      emit = callback;
+      callback("INITIAL_SESSION", session);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    }) as never);
+    useAccount.getState().init();
+    await vi.waitFor(() => expect(useAccount.getState().user?.id).toBe("user-1"));
+    const { read, write } = await import("../sync/syncMetadata");
+    write({ ...read(), accountUserId: "user-1", lastProtectedAt: "2026-11-14T12:00:00.000Z" });
+    useAccount.setState({
+      link: "linked", protection: "protected",
+      history: [{ id: "a-revision" } as never],
+      devices: [{ id: "a-device" } as never],
+      restoreOffer: { id: "a-restore" } as never,
+    });
+    const localTasks = useStore.getState().tasks;
+    const before = useAccount.getState().identityEpoch;
+    const clears = await watchUploadCacheClears();
+    try {
+      emit("PASSWORD_RECOVERY", {
+        ...session,
+        user: { ...session.user, id: "user-2", email: "other@example.com" },
+      });
+      expect(useAccount.getState()).toMatchObject({
+        phase: "recovering-password",
+        user: { id: "user-2" },
+        link: "linked-elsewhere",
+        protection: "local-only",
+        identityEpoch: before + 1,
+        history: [],
+        devices: [],
+      });
+      expect(useAccount.getState().lastProtectedAt).toBeUndefined();
+      expect(useAccount.getState().restoreOffer).toBeUndefined();
+      for (const clear of clears) expect(clear).toHaveBeenCalledOnce();
+      expect(read().accountUserId).toBe("user-1"); // Device remains A-owned, never silently adopted by B.
+      expect(useStore.getState().tasks).toEqual(localTasks); // No local learner data mutation.
+    } finally {
+      for (const clear of clears) clear.mockRestore();
+    }
+  });
+
+  it("retains the same account's device link on its own recovery event", async () => {
+    let emit: (event: string, value: unknown) => void = () => undefined;
+    auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {
+      emit = callback;
+      callback("INITIAL_SESSION", session);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    }) as never);
+    useAccount.getState().init();
+    await vi.waitFor(() => expect(useAccount.getState().user?.id).toBe("user-1"));
+    const { read, write } = await import("../sync/syncMetadata");
+    write({ ...read(), accountUserId: "user-1" });
+    useAccount.setState({ link: "linked", history: [{ id: "owned" } as never] });
+    const before = useAccount.getState().identityEpoch;
+    const clears = await watchUploadCacheClears();
+    try {
+      emit("PASSWORD_RECOVERY", session);
+      expect(useAccount.getState()).toMatchObject({
+        phase: "recovering-password",
+        user: { id: "user-1" },
+        link: "linked",
+        identityEpoch: before,
+        history: [{ id: "owned" }],
+      });
+      for (const clear of clears) expect(clear).not.toHaveBeenCalled();
+    } finally {
+      for (const clear of clears) clear.mockRestore();
+    }
+  });
+
+  it("does not expose the password recovery screen when the SDK supplies no session", async () => {
+    let emit: (event: string, value: unknown) => void = () => undefined;
+    auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {
+      emit = callback;
+      callback("INITIAL_SESSION", session);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    }) as never);
+    useAccount.getState().init();
+    await vi.waitFor(() => expect(useAccount.getState().user?.id).toBe("user-1"));
+    useAccount.setState({ link: "linked", protection: "protected", history: [{ id: "old" } as never] });
+    emit("PASSWORD_RECOVERY", null);
+    expect(useAccount.getState()).toMatchObject({
+      phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [],
+    });
+    expect(useAccount.getState().message).toBe("");
+    expect(useAccount.getState().error).toMatch(/recovery link|recovery session/i);
+  });
+});
+
 describe("account lifecycle", () => {
   it("signs in without uploading or replacing local work", async () => {
     const before = useStore.getState().courses.length;
