@@ -163,4 +163,28 @@ describe("downloaded term practice", () => {
     expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["unique"]);
     expect(termQuizSelection("Term 5", "account", state).questionIds).toEqual([]);
   });
+
+  it("holds a question or set identity filed under two different downloaded source terms", () => {
+    const state = workspace([
+      receipt(1, ["shared", "only-t1"], { setIds: ["shared-set", "only-t1-set"] }),
+      receipt(2, ["shared", "only-t2"], { term: "Term 2", setIds: ["shared-set", "only-t2-set"] }),
+      receipt(3, ["only-t1"], { term: "T01", setIds: ["only-t1-set"] }),
+    ], [question("shared"), question("only-t1"), question("only-t2")]);
+    state.questionSets = ["shared-set", "only-t1-set", "only-t2-set"].map(id => ({ id })) as typeof state.questionSets;
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({
+      questionIds: ["only-t1"], setIds: ["only-t1-set"],
+    });
+    expect(termQuizSelection("T2", "account", state)).toMatchObject({
+      questionIds: ["only-t2"], setIds: ["only-t2-set"],
+    });
+  });
+
+  it("does not treat another account's receipt as a cross-term conflict", () => {
+    const state = workspace([
+      receipt(1, ["shared"], { term: "Term 1" }),
+      receipt(2, ["shared"], { accountId: "someone-else", term: "Term 2" }),
+    ], [question("shared")]);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual(["shared"]);
+  });
+
 });
