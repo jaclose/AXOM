@@ -179,6 +179,37 @@ describe("saved-work recovery without downloading content", () => {
     },
   );
 
+  it("resolves a legacy ID only from the current A/B/A account image store", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    const id = "legacy-account-scoped-id";
+    const source = state.questions[0].attachments![0];
+    state.questions[0].attachments = [{ ...source, id, blobKey: undefined as unknown as string }];
+    setQuestionAttachmentAccount("account-a");
+    try {
+      await putQuestionAttachmentBlob(id, {
+        blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+        questionId: "q", updatedAt: source.updatedAt,
+      });
+      const a = await exportStateWithAttachments(state);
+      expect(a).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+      const aReceipt = lastBackupAt();
+      expect(aReceipt).not.toBeNull();
+
+      setQuestionAttachmentAccount("account-b");
+      const b = await exportStateWithAttachments(state);
+      expect(b).toMatchObject({ attachmentCount: 0, missingBlobKeys: [id] });
+      expect(lastBackupAt()).toBeNull();
+      setQuestionAttachmentAccount("account-a");
+      const restoredA = await exportStateWithAttachments(state);
+      expect(restoredA).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+      expect(lastBackupAt()).not.toBeNull();
+    } finally {
+      setQuestionAttachmentAccount(undefined);
+    }
+  });
+
   it("keeps complete-backup receipts isolated across device and A/B/A account ownership", async () => {
     localStorage.clear();
     setQuestionAttachmentAccount(undefined);
