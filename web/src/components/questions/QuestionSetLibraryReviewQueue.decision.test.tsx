@@ -82,12 +82,13 @@ describe("Question Set academic decisions", () => {
     mocks.preview.mockResolvedValue(candidate);
     await inspect();
     const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("0 without recorded answer keys");
     expect(inventory).toContain("1 without source citations");
     expect(inventory).toContain("2 without explanation prose");
     expect(inventory).toContain("20 lacking at least one choice rationale");
     expect(inventory).toContain("1 containing AI-assisted teaching");
     expect(inventory).toContain("not verified answer keys or image rights");
-    expect(inventory).toContain("Approval is blocked until missing explanations are revised");
+    expect(inventory).toContain("Approval is blocked until every question records an answer key, a source citation and explanation prose");
     const note = "The final question has no source citation or explanation.";
     fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), { target: { value: note } });
     fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
@@ -99,6 +100,72 @@ describe("Question Set academic decisions", () => {
     await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith(
       "independent-reviewer", expect.objectContaining({ id }), false, note,
     ));
+  });
+
+  it("requires key and citation evidence across undisplayed questions even when explanations have prose", async () => {
+    const candidate = reviewPreview(21);
+    candidate.snapshot.questions[19].correctKey = "";
+    candidate.snapshot.questions[20].citation = "";
+    mocks.preview.mockResolvedValue(candidate);
+    await inspect();
+
+    const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("1 without recorded answer keys");
+    expect(inventory).toContain("1 without source citations");
+    expect(inventory).toContain("0 without explanation prose");
+    expect(inventory).toContain("Approval is blocked");
+    fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), {
+      target: { value: "The final entries need a recorded source and answer key." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
+    expect(await screen.findByText("Vignette 21")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.decide).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Return for revision" }));
+    await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith(
+      "independent-reviewer", expect.objectContaining({ id }), false,
+      "The final entries need a recorded source and answer key.",
+    ));
+  });
+
+  it("blocks an otherwise keyed and explained set when only its final source citation is missing", async () => {
+    const candidate = reviewPreview(21);
+    candidate.snapshot.questions[20].citation = "";
+    mocks.preview.mockResolvedValue(candidate);
+    await inspect();
+
+    const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("0 without recorded answer keys");
+    expect(inventory).toContain("1 without source citations");
+    expect(inventory).toContain("0 without explanation prose");
+    fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), {
+      target: { value: "The original source for question 21 was not recorded." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
+    expect(await screen.findByText("Vignette 21")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Return for revision" }).hasAttribute("disabled")).toBe(false);
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
+
+  it("blocks an otherwise cited and explained set when only the final answer key is missing", async () => {
+    const candidate = reviewPreview(21);
+    candidate.snapshot.questions[20].correctKey = "";
+    mocks.preview.mockResolvedValue(candidate);
+    await inspect();
+
+    const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("1 without recorded answer keys");
+    expect(inventory).toContain("0 without source citations");
+    expect(inventory).toContain("0 without explanation prose");
+    fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
+    expect(await screen.findByText("Vignette 21")).toBeTruthy();
+    expect(screen.getByText("Unresolved")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.decide).not.toHaveBeenCalled();
   });
 
   it("permits reasoned rejection without falsely attesting to distribution rights or answer correctness", async () => {
