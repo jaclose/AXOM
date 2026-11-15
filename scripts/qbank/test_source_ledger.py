@@ -1710,6 +1710,109 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertEqual(original_disposition["status"], "review-required")
             self.assertEqual(original_disposition["readyCount"], 0)
 
+    def test_agent2_raw_audit_cannot_reclassify_nonquestion_sources(self):
+        # The parser is not allowed to turn a course template, asset, answer
+        # key or lecture reference into a ready question bank by naming its SHA.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            path = pathlib.Path(root) / "audit.json"
+            sha = digest("synthetic raw source original")
+            receipt = dict(sha256=sha, questionsDetected=2, ready=2,
+                           needsReview=0, sourceVerified=True, cloudVerified=False,
+                           file="synthetic.txt")
+            path.write_text(json.dumps({"native": [], "raw": [receipt]}))
+            for document_type in ("tracker_template", "image_asset", "answer_key",
+                                  "lecture_reference", "metadata_manifest"):
+                with self.subTest(source_type=document_type):
+                    rows = [dict(source_id="original", original_path="/synthetic/source.txt",
+                                 source_sha256=sha, priority=2, document_type=document_type,
+                                 academic_term="T4", module="DERS", week=16)]
+                    dispositions = enriched.build_lead_dispositions(rows, [])
+                    before = json.loads(json.dumps(dispositions))
+                    result = enriched.merge_agent2_assessment(dispositions, [], rows, path)
+                    self.assertEqual(result["assessed_source_count"], 0)
+                    self.assertEqual(result["assessed_ready_not_installed"], 0)
+                    self.assertEqual(dispositions, before)
+                    self.assertTrue(any("raw_record_source_kind_hold" in r
+                                        for r in result["rejected_audit_rows"]))
+            # If a PQ and an answer-key-only asset share the same bytes, the
+            # PQ-ranked disposition must not hide the contradictory source kind.
+            mixed_rows = [dict(source_id=kind, original_path="/synthetic/" + kind,
+                               source_sha256=sha, priority=2, document_type=kind,
+                               academic_term="T4", module="DERS", week=16)
+                          for kind in ("pq", "answer_key")]
+            mixed_dispositions = enriched.build_lead_dispositions(mixed_rows, [])
+            self.assertEqual(mixed_dispositions["sources"][0]["kind"], "question-source")
+            before = json.loads(json.dumps(mixed_dispositions))
+            mixed_result = enriched.merge_agent2_assessment(
+                mixed_dispositions, [], mixed_rows, path)
+            self.assertEqual(mixed_result["assessed_source_count"], 0)
+            self.assertEqual(mixed_dispositions, before)
+            self.assertTrue(any("raw_record_source_kind_hold" in r
+                                for r in mixed_result["rejected_audit_rows"]))
+            # A genuine PQ remains a parser candidate, not a cloud approval.
+            rows = [dict(source_id="pq", original_path="/synthetic/PQ.txt",
+                         source_sha256=sha, priority=2, document_type="pq",
+                         academic_term="T4", module="DERS", week=16)]
+            dispositions = enriched.build_lead_dispositions(rows, [])
+            result = enriched.merge_agent2_assessment(dispositions, [], rows, path)
+            self.assertEqual(result["assessed_source_count"], 1)
+            self.assertEqual(result["assessed_ready_not_installed"], 2)
+            self.assertFalse(result["validated_sources"][0]["cloudVerified"])
+
+    def test_agent2_raw_audit_cannot_assume_conflicting_mirror_week(self):
+        # The same original bytes under two different curriculum filings do
+        # not authorize choosing a single week from scan order.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            path = pathlib.Path(root) / "audit.json"
+            sha = digest("synthetic mirrored original")
+            path.write_text(json.dumps({"native": [], "raw": [{
+                "sha256": "sha256:" + sha, "questionsDetected": 2, "ready": 1,
+                "needsReview": 1, "sourceVerified": True, "cloudVerified": False,
+                "file": "PQ.txt",
+            }]}))
+            for second_week in (17, None):
+                for ordered_weeks in ((16, second_week), (second_week, 16)):
+                    with self.subTest(weeks=ordered_weeks):
+                        rows = [dict(source_id="mirror" + str(i),
+                                     original_path="/synthetic/" + str(i) + "/PQ.txt",
+                                     source_sha256=sha, priority=2, document_type="pq",
+                                     academic_term="T4", module="DERS", week=week)
+                                for i, week in enumerate(ordered_weeks)]
+                        dispositions = enriched.build_lead_dispositions(rows, [])
+                        before = json.loads(json.dumps(dispositions))
+                        result = enriched.merge_agent2_assessment(
+                            dispositions, [], rows, path)
+                        self.assertEqual(result["assessed_source_count"], 0)
+                        self.assertEqual(result["assessed_ready_not_installed"], 0)
+                        self.assertEqual(dispositions, before)
+                        self.assertTrue(any("raw_record_source_scope_hold" in r
+                                            for r in result["rejected_audit_rows"]))
+            # Nested metadata from a malformed inventory must not raise
+            # unhashable-type errors, even with only one source record.
+            for invalid_week in (["16"], {"week": 16}, True, -1):
+                with self.subTest(invalid_week=repr(invalid_week)):
+                    rows = [dict(source_id="invalid", original_path="/synthetic/PQ.txt",
+                                 source_sha256=sha, priority=2, document_type="pq",
+                                 academic_term="T4", module="DERS", week=invalid_week)]
+                    dispositions = enriched.build_lead_dispositions(rows, [])
+                    before = json.loads(json.dumps(dispositions))
+                    result = enriched.merge_agent2_assessment(dispositions, [], rows, path)
+                    self.assertEqual(result["assessed_source_count"], 0)
+                    self.assertEqual(dispositions, before)
+                    self.assertTrue(any("raw_record_source_scope_hold" in r
+                                        for r in result["rejected_audit_rows"]))
+            # Two identical source-week filings remain eligible for raw
+            # parser *assessment*, not answer approval or cloud publication.
+            rows = [dict(source_id=str(i), original_path=f"/synthetic/{i}/PQ.txt",
+                         source_sha256=sha, priority=2, document_type="pq",
+                         academic_term="T4", module="DERS", week=16)
+                    for i in range(2)]
+            dispositions = enriched.build_lead_dispositions(rows, [])
+            result = enriched.merge_agent2_assessment(dispositions, [], rows, path)
+            self.assertEqual(result["assessed_source_count"], 1)
+            self.assertEqual(result["assessed_ready_not_installed"], 1)
+            self.assertFalse(result["validated_sources"][0]["cloudVerified"])
+
     def test_agent2_malformed_audit_top_level_fails_closed(self):
         with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
             audit_path = pathlib.Path(root) / "audit.json"

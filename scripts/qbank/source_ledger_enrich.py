@@ -682,6 +682,15 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
             else:
                 expected[key]=p
     ambiguous_source_shas={sha for sha,n in source_package_counts.items() if n>1}
+    # Raw parser receipts are not proof that a source may be treated as a
+    # question bank. Preserve every scanned mirror's source kind and academic
+    # filing; a representative disposition alone cannot authorize promotion.
+    raw_source_rows=collections.defaultdict(list)
+    for row in rows:
+        sha=row.get("source_sha256")
+        if _valid_source_sha(sha):
+            raw_source_rows[sha].append(row)
+    raw_question_types=QUESTION_TYPES - {"answer_key"}
     def held_native_package(package):
         return (package.get("canonical_status") != "canonical_distinct_question_collection"
                 or package.get("status") != "local_ready_for_agent2_review"
@@ -741,7 +750,26 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
         review=item.get("needsReview",item.get("review-suggested",0))
         unresolved=item.get("unresolved",0)
         source=bysha.get(sha)
-        if (not source or not re.fullmatch(r"[a-f0-9]{64}",sha or "")
+        mirrors=raw_source_rows.get(sha, [])
+        if (not mirrors or not source or source.get("kind") != "question-source"
+                or source.get("status") != "review-required"
+                or any(not isinstance(row.get("document_type"), str)
+                       or row["document_type"] not in raw_question_types for row in mirrors)):
+            rejected.append("raw_record_source_kind_hold:" + str(item.get("file")))
+            continue
+        scopes=[(row.get("academic_term"), row.get("module"), row.get("week"))
+                for row in mirrors]
+        if (any((term is not None and not isinstance(term, str))
+                or (module is not None and not isinstance(module, str))
+                or (week is not None and (type(week) is not int or week < 1))
+                for term,module,week in scopes)
+                or any(scope != scopes[0] for scope in scopes[1:])):
+            # Reject unhashable/nested, invalid and contradictory scope values
+            # rather than silently attaching assessed questions to a first
+            # observed week. Missing versus known scope also needs review.
+            rejected.append("raw_record_source_scope_hold:" + str(item.get("file")))
+            continue
+        if (not re.fullmatch(r"[a-f0-9]{64}",sha or "")
                 or any(type(v) is not int or v<0 for v in [detected,ready,review,unresolved])
                 or detected!=ready+review+unresolved
                 or item.get("sourceVerified") is not True or item.get("cloudVerified") is True):
