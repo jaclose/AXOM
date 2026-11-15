@@ -8,7 +8,7 @@ import { privateReviewMedia } from "./privateLibrary/media";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, base64ToBytes, blobToBase64,
-  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
+  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, normalizeQuestionAttachments, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
   type StagedQuestionAttachmentRestore,
 } from "./questionAttachments";
@@ -769,8 +769,10 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   ].filter(question => question && typeof question.id === "string")
     .map(question => ({
       id: question.id,
-      attachments: Array.isArray(question.attachments)
-        ? question.attachments.filter(a => a && typeof a.blobKey === "string") : [],
+      // Historical v1/v2 metadata may have id without blobKey. Parse/import
+      // accepts those records and uses id as the storage key; completeness must
+      // inspect the same normalized references or it can hide missing bytes.
+      attachments: normalizeQuestionAttachments(question.attachments) ?? [],
     }));
   const expectedMedia = mediaReferences([...questions, ...privateReviewMedia(sourceDocuments)]);
   const missingBlobKeys = expectedMedia
