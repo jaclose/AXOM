@@ -149,6 +149,87 @@ describe("portable binary media backup", () => {
   });
 
 
+  it("discloses missing ZIP image and checksum-original bytes from source references even with a complete scope label", async () => {
+    const originalBytes = new Blob(["Synthetic absent source bytes"], { type: "text/plain" });
+    const document: SourceDocument = {
+      id: "missing-original", title: "Uncached source", fileName: "uncached.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Metadata retained",
+      sizeBytes: originalBytes.size, checksum: await sha256Hex(await originalBytes.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    // No original or image is saved: only their references survive in the ZIP.
+    const exported = await createMediaBackupArchive(
+      { _app: "AXOM", _backupScope: "complete", documents: [document], questions: refs },
+      refs, [document],
+    );
+    const backup = await readPortableBackup(new File([exported.blob], "partial.zip"));
+    expect(backup.omissions).toEqual({
+      missingBlobKeys: [attachment.blobKey],
+      missingOriginalIds: [document.id],
+    });
+    expect(JSON.parse(backup.rawText)._backupScope).toBe("complete");
+    expect(JSON.parse(backup.rawText).documents[0].checksum).toBe(document.checksum);
+    expect(await backup.restoreOriginals([document])).toEqual({ restored: 0, skipped: 0 });
+    expect(await readSourceOriginal(document.id, document.checksum)).toBeUndefined();
+  });
+
+  it("discloses omitted private-review images even when their review document has no original checksum", async () => {
+    const review: SourceDocument = {
+      id: "review-document-no-checksum", title: "Private review metadata",
+      fileName: "review.json", fileType: "axom-private-bank-review",
+      uploadedAt: "2026-11-15", sizeBytes: 0, tags: [],
+      linkedQuestionSetIds: [], libraryOnly: true,
+      rawText: JSON.stringify({ pkg: { questions: [{
+        id: "review-question", assets: [{
+          id: "private-review-image", checksum: "unavailable-review-image",
+          mimeType: "image/png", filename: "review.png",
+          byteSize: PNG_BYTES.length, role: "question",
+        }],
+      }] } }),
+    };
+    const exported = await createMediaBackupArchive(
+      { _app: "AXOM", _backupScope: "complete", documents: [review], questions: [] },
+      [], [review],
+    );
+    const backup = await readPortableBackup(new File([exported.blob], "private-review-partial.zip"));
+    expect(backup.omissions).toEqual({
+      missingBlobKeys: ["private-library:unavailable-review-image"],
+      missingOriginalIds: [],
+    });
+  });
+
+  it("does not claim omitted ZIP files for complete available assets or accept an archive label as integrity proof", async () => {
+    const original = new Blob(["Available source bytes"], { type: "text/plain" });
+    const document: SourceDocument = {
+      id: "available-original", title: "Available", fileName: "available.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Available source bytes",
+      sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await saveSourceOriginal(document, original);
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive(
+      { _app: "AXOM", _backupScope: "complete", documents: [document], questions: refs },
+      refs, [document],
+    );
+    const complete = await readPortableBackup(new File([exported.blob], "complete.zip"));
+    expect(complete.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+    // An older or manually modified archive may omit the media entry while retaining
+    // an unchanged complete label. The reader must re-derive rather than trust it.
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+    zip.remove(manifest.media[0].file);
+    manifest.media = [];
+    zip.file("workspace.json", JSON.stringify(manifest));
+    const truncated = await readPortableBackup(new File([await zip.generateAsync({ type: "blob" })], "older-partial.zip"));
+    expect(truncated.omissions.missingBlobKeys).toEqual([attachment.blobKey]);
+    expect(truncated.omissions.missingOriginalIds).toEqual([]);
+  });
+
   it("round-trips images with two verified originals and supports staged image rollback", async () => {
     const firstBlob = new Blob(["first source"], { type: "text/plain" });
     const secondBlob = new Blob(["second source"], { type: "text/plain" });

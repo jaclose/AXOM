@@ -309,17 +309,22 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     const expectedScope = getQuestionAttachmentScope();
     setBackupBusy(true); setMsg("Reading your backup…");
     try {
-      const { rawText, restoreMedia, restoreOriginals } = await readPortableBackup(file);
+      const { rawText, restoreMedia, restoreOriginals, omissions } = await readPortableBackup(file);
       if (!isQuestionAttachmentScopeCurrent(expectedScope)) throw new Error("The account changed while reading your backup. Choose the backup again in the intended account.");
       const next = parseImport(rawText);
+      const omittedCount = omissions.missingBlobKeys.length + omissions.missingOriginalIds.length;
+      const omissionWarning = omittedCount
+        ? ` This ZIP is incomplete: ${omissions.missingBlobKeys.length} referenced image attachment(s) and ${omissions.missingOriginalIds.length} original file(s) are missing from the archive. Their metadata can be retained, but their bytes cannot be restored from this copy. Keep your other backups.`
+        : "";
       const message = (mode === "replace"
         ? "Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both."
         : "Merge this backup into the current data? Records are combined by id (newer wins); your profile and current day stay as they are. Nothing is deleted.")
-        + (next.deferredContent ? " This copy contains download references. Uncached course files require the original account and access to that content. Matching files already on this device will be kept." : "");
+        + (next.deferredContent ? " This copy contains download references. Uncached course files require the original account and access to that content. Matching files already on this device will be kept." : "")
+        + omissionWarning;
       if (!confirm(message)) { setMsg("Restore cancelled. No data changed."); return; }
       const current = useStore.getState();
       const restoredState = mode === "merge" ? mergeStates(current, next) : await retainDownloadedContent(next, current);
-      setMsg(await persistPortableRestore({
+      const restoredMessage = await persistPortableRestore({
         current,
         fileName: file.name,
         mode,
@@ -328,7 +333,8 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
         restoreOriginals,
         expectedScope,
         onProgress: setMsg,
-      }));
+      });
+      setMsg(restoredMessage + omissionWarning);
     } catch (e) {
       setMsg(`Recovery did not finish. ${e instanceof Error ? e.message : "Keep your backup and try again."}`);
     } finally {

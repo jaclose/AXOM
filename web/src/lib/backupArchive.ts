@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
+import { privateReviewMedia } from "./privateLibrary/media";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, base64ToBytes, blobToBase64,
@@ -620,6 +621,9 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
 
 export interface PortableBackupRead {
   rawText: string;
+  /** Referenced file bytes absent from this portable archive, irrespective of
+   * its declared complete/saved-work label. Metadata may still be restored. */
+  omissions: { missingBlobKeys: string[]; missingOriginalIds: string[] };
   restoreOriginals: (documents: readonly SourceDocument[]) => Promise<{ restored: number; skipped: number }>;
   restoreMedia: (references: References) => Promise<StagedQuestionAttachmentRestore>;
 }
@@ -677,7 +681,9 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       }
       verified.set(payload.blobKey, { mimeType: payload.mimeType, byteSize: payload.byteSize, bytes });
     }
-    return { rawText, restoreMedia: async refs => {
+    // JSON has no ZIP original-file manifest. Legacy JSON imports retain their
+    // existing media validation and recovery behavior.
+    return { rawText, omissions: { missingBlobKeys: [], missingOriginalIds: [] }, restoreMedia: async refs => {
       assertConsistentMediaReferences(refs);
       return stageQuestionAttachmentPayloads(payloads, refs);
     }, restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
@@ -696,7 +702,12 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const workspace = zip.file("workspace.json");
   if (!workspace) throw new Error("This ZIP is not an AXOM workspace backup. Prepared libraries are installed from the Course Library or QBank.");
   const rawText = await workspace.async("string");
-  const manifest = JSON.parse(rawText) as { _backupFormat?: string; _backupVersion?: number; media?: MediaEntry[]; originals?: OriginalEntry[]; documents?: SourceDocument[]; deferredContent?: { documents?: SourceDocument[] } };
+  const manifest = JSON.parse(rawText) as {
+    _backupFormat?: string; _backupVersion?: number; media?: MediaEntry[]; originals?: OriginalEntry[];
+    questions?: Array<{ id: string; attachments?: QuestionImageAttachment[] }>;
+    documents?: SourceDocument[];
+    deferredContent?: { questions?: Array<{ id: string; attachments?: QuestionImageAttachment[] }>; documents?: SourceDocument[] };
+  };
   if (manifest._backupFormat !== FORMAT || ![1, 2].includes(manifest._backupVersion ?? 0) || !Array.isArray(manifest.media)) throw new Error("Unsupported workspace backup format.");
   const media = manifest.media;
   const mediaFiles = new Set<string>();
@@ -742,7 +753,30 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     if (bytes.byteLength !== item.byteSize || await sha256Hex(bytes) !== item.sha256) throw new Error("An original file failed its backup integrity check. No workspace data has been changed.");
     ids.add(item.documentId); files.add(item.file);
   }
-  return { rawText, restoreOriginals: async documents => {
+  // An archive can say _backupScope: "complete" while omitting source bytes.
+  // Derive omissions from its actual referenced metadata and verified members,
+  // not from a producer assertion. This also works for older v1/v2 ZIPs.
+  // Review-image references may live on synthetic review documents without
+  // checksum-bound originals. Keep them for media completeness; the original
+  // filter independently limits original-file expectations to valid checksums.
+  const sourceDocuments = [...documents.values()].filter((doc): doc is SourceDocument =>
+    !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
+  const missingOriginalIds = backupOriginalDocuments(sourceDocuments)
+    .filter(doc => !ids.has(doc.id)).map(doc => doc.id);
+  const questions = [
+    ...(Array.isArray(manifest.questions) ? manifest.questions : []),
+    ...(Array.isArray(manifest.deferredContent?.questions) ? manifest.deferredContent.questions : []),
+  ].filter(question => question && typeof question.id === "string")
+    .map(question => ({
+      id: question.id,
+      attachments: Array.isArray(question.attachments)
+        ? question.attachments.filter(a => a && typeof a.blobKey === "string") : [],
+    }));
+  const expectedMedia = mediaReferences([...questions, ...privateReviewMedia(sourceDocuments)]);
+  const missingBlobKeys = expectedMedia
+    .map(({ metadata }) => metadata.blobKey).filter(key => !mediaKeys.has(key));
+  const omissions = { missingBlobKeys, missingOriginalIds };
+  return { rawText, omissions, restoreOriginals: async documents => {
     const scope = getQuestionAttachmentScope();
     let restored = 0, skipped = 0;
     for (const item of originals) {
