@@ -93,8 +93,14 @@ function workspaceReferences(accountId: string, workspace: TermWorkspace): Downl
 
 function installedReferenceTerm(saved: DownloadReference, workspace: TermWorkspace): string | undefined {
   const owners = workspace.courses.filter(course => course.code === `academic:${saved.collectionId}`);
-  const term = owners.length === 1 ? workspace.terms.find(entry => entry.id === owners[0].termId)?.name : undefined;
-  return term?.trim() || undefined;
+  if (owners.length !== 1) return undefined;
+  // A legacy receipt without a saved source term requires a unique local
+  // owner AND a unique curriculum term row. A duplicated term ID must not
+  // assign its questions to whichever conflicting row happens to come first.
+  const matchingTerms = workspace.terms.filter(entry => entry.id === owners[0].termId);
+  if (matchingTerms.length !== 1) return undefined;
+  const name: unknown = matchingTerms[0].name;
+  return typeof name === "string" ? name.trim() || undefined : undefined;
 }
 
 /** Old question-only receipts may have no local term identity. Check every
