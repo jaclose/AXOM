@@ -289,7 +289,9 @@ describe("Activity History XLSX sheet title collisions", () => {
     expect(restored.Sheets["All Activity"]?.F2?.v).toBe(logs[0].note);
     logs[0].note = "a" + "\n".repeat(253) + "b";
     const withLineFeeds = await captureWorkbook(logs);
-    expect(withLineFeeds.Sheets["All Activity"]?.F2?.v).toBe(logs[0].note);
+    const lineFeedBytes = XLSX.write(withLineFeeds, { bookType: "xlsx", type: "buffer" });
+    const reloadedLineFeeds = XLSX.read(lineFeedBytes, { type: "buffer" });
+    expect(reloadedLineFeeds.Sheets["All Activity"]?.F2?.v).toBe(logs[0].note);
     expect(original[0].note).toHaveLength(32767);
   });
 
