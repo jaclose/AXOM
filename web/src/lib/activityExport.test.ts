@@ -124,6 +124,30 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("keeps XML-forbidden control characters out of worksheet titles without changing records", async () => {
+    const logs = studyLogs([
+      "Zero\u0000Byte", "Control\u0001Name", "Line\nBreak", "Tab\tType",
+      "Unit\u001fSeparator", "Noncharacter\uFFFEName", "Noncharacter\uFFFFName",
+    ]);
+    const workbook = await captureWorkbook(logs);
+    expectAllTypeSheets(workbook, logs);
+    for (const name of workbook.SheetNames) {
+      for (const character of name) {
+        const point = character.codePointAt(0) ?? 0;
+        expect(point >= 0x20 && point !== 0xfffe && point !== 0xffff).toBe(true);
+      }
+    }
+    // Only sheet titles are normalized; source type and note cells remain unchanged.
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const restored = XLSX.read(bytes, { type: "buffer" });
+    expect(restored.SheetNames).toEqual(workbook.SheetNames);
+    for (const name of workbook.SheetNames.slice(2)) {
+      expect(restored.Sheets[name]?.C2?.v).toBe(workbook.Sheets[name]?.C2?.v);
+      expect(restored.Sheets[name]?.F2?.v).toBe(workbook.Sheets[name]?.F2?.v);
+    }
+  });
+
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {
     const shared = "Long protocol study session " + "x".repeat(40);
     const logs = studyLogs([shared + "Alpha", shared + "Beta"]);
