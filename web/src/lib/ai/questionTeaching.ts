@@ -44,6 +44,26 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
 }
 
 /**
+ * Text-only storage is not proof that the source question was text-only:
+ * legacy image/screenshot imports can lose their exhibit reference while
+ * retaining a reviewed answer key. Explicit "see figure" references likewise
+ * cannot be responsibly explained without the missing exhibit. Keep these
+ * held for manual source review, without inferring an image or answer.
+ */
+const EXHIBIT_NOUN = String.raw`(?:figure|image|diagram|photo(?:graph)?|photomicrograph|micrograph|radiograph|x[- ]ray|(?:ct|mri)(?:\\s+scan)?|slide|specimen)`;
+const EXPLICIT_EXHIBIT_REFERENCE = new RegExp([
+  String.raw`\\b${EXHIBIT_NOUN}\\s+(?:above|below|attached|provided|shown|pictured)\\b`,
+  String.raw`\\b(?:shown|depicted|pictured|displayed|illustrated)\\s+(?:in|on)\\s+(?:(?:the|this|an?|following|attached|provided)\\s+){1,3}${EXHIBIT_NOUN}\\b`,
+  String.raw`\\b(?:see|refer\\s+to|examine)\\s+(?:(?:the|this|an?|following|attached|provided)\\s+){1,3}${EXHIBIT_NOUN}\\b`,
+].join("|"), "i");
+
+function referencesUnavailableExhibit(question: QuestionRecord): boolean {
+  return question.source === "image" || question.source === "screenshot"
+    || [question.stem, ...question.options.map(option => option.text)]
+      .some(value => EXPLICIT_EXHIBIT_REFERENCE.test(value));
+}
+
+/**
  * Only stem, choice text and topic leave the device in the AI prompt.
  * A question can be text-only yet contain a private file URI, inline media,
  * or credentials in an embedded URL. Do not transmit those references to any
@@ -63,6 +83,7 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && Object.keys(question.choiceRationales ?? {}).length === 0
     && !question.attachments?.length
     && !question.content?.assets.length
+    && !referencesUnavailableExhibit(question)
     && !containsPrivateDraftPromptReference(question);
 }
 
@@ -88,6 +109,9 @@ export async function draftQuestionExplanation(
   }
   if (question.attachments?.length || question.content?.assets.length) {
     throw new Error("An image or media question needs its actual exhibit before a model can explain it.");
+  }
+  if (referencesUnavailableExhibit(question)) {
+    throw new Error("This question references an unavailable visual exhibit. Inspect the original image or specimen and write a source-reviewed explanation instead.");
   }
   if (containsPrivateDraftPromptReference(question)) {
     throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
