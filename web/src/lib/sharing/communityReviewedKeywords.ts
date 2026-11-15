@@ -18,6 +18,11 @@ const UNVERIFIED_PUBLIC_CITATION = /\b(?:www\.[a-z0-9-]+\.[a-z]{2,}|(?:[a-z0-9-]
 // the original source record. Legitimate joining marks in non-Latin subjects
 // remain intact in the stored subject tag.
 const HIDDEN_KEYWORD_REFERENCE_MARKS = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+// A single proposed subject tag must not contain a second comma/semicolon-
+// separated tag or an embedded line. Publisher text inputs split these
+// delimiters before review, but AI JSON keyword arrays do not. Otherwise a
+// subject phrase could conceal a rights/source/moderation claim after a separator.
+const COMPOUND_KEYWORD_SEPARATORS = /[,;\r\n\u0085\u2028\u2029]/u;
 function keywordSafetyText(value: string): string {
   return value.normalize("NFKC").replace(HIDDEN_KEYWORD_REFERENCE_MARKS, "").trim();
 }
@@ -31,6 +36,7 @@ export function containsUnverifiedCommunityCitation(value: string): boolean {
 export function isCommunitySubjectKeyword(value: string): boolean {
   const candidate = keywordSafetyText(value);
   return Boolean(candidate)
+    && !COMPOUND_KEYWORD_SEPARATORS.test(candidate)
     && !RESERVED_PUBLICATION_KEYWORD.test(candidate)
     && !/https?:\/\//i.test(candidate)
     && !UNVERIFIED_PUBLIC_CITATION.test(candidate)
