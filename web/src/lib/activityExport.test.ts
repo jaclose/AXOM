@@ -50,6 +50,30 @@ describe("Activity History XLSX sheet title collisions", () => {
     expect(workbook.Sheets["All Activity"]?.C2?.v).toBe(logs[logs.length - 1].type);
   });
 
+  it("exports Excel-valid titles for reserved History, quote boundaries and punctuation-only types", async () => {
+    const logs = studyLogs([
+      "History", "history", "'History'", "'Anki", "Anki'", "O'Brien", "?", "/", "'", "  ",
+    ]);
+    const workbook = await captureWorkbook(logs);
+    expectAllTypeSheets(workbook, logs);
+    for (const name of workbook.SheetNames) {
+      expect(name.trim()).not.toBe("");
+      expect(name).not.toMatch(/^'|'$/);
+      expect(name.toLowerCase()).not.toBe("history");
+      expect(name).not.toMatch(/[\\/?*[\]:]/);
+    }
+
+    // A real .xlsx write/read verifies workbook interoperability, not only in-memory tab names.
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const reloaded = XLSX.read(bytes, { type: "buffer" });
+    expect(reloaded.SheetNames).toEqual(workbook.SheetNames);
+    for (const name of workbook.SheetNames.slice(2)) {
+      expect(reloaded.Sheets[name]?.C2?.v).toBe(workbook.Sheets[name]?.C2?.v);
+      expect(reloaded.Sheets[name]?.F2?.v).toBe(workbook.Sheets[name]?.F2?.v);
+    }
+  });
+
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {
     const shared = "Long protocol study session " + "x".repeat(40);
     const logs = studyLogs([shared + "Alpha", shared + "Beta"]);
