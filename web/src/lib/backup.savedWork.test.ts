@@ -127,6 +127,89 @@ describe("saved-work recovery without downloading content", () => {
     expect(filename).toMatch(/^axom-backup-.*\.json$/);
     expect(lastBackupAt()).toBeNull();
   });
+  it.each(["json", "zip"] as const)(
+    "exports an id-only legacy image through %s using its supported ID fallback",
+    async (format) => {
+      localStorage.clear();
+      const { state, original } = await fixture();
+      const legacyId = "legacy-id-only-" + format;
+      const source = state.questions[0].attachments![0];
+      // Historical portable records can have a valid ID without blobKey.
+      state.questions[0].attachments = [{ ...source, id: legacyId, blobKey: undefined as unknown as string }];
+      if (format === "json") state.documents = [];
+      else await saveSourceOriginal(state.documents[0], original);
+      await putQuestionAttachmentBlob(legacyId, {
+        blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+        questionId: "q", updatedAt: source.updatedAt,
+      });
+
+      const result = await exportStateWithAttachments(state);
+      expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+      expect(filename.endsWith("." + format)).toBe(true);
+      expect(lastBackupAt()).not.toBeNull();
+      expect(state.questions[0].attachments![0].blobKey).toBeUndefined();
+      const portable = format === "zip"
+        ? JSON.parse((await readPortableBackup(new File([exported!], filename))).rawText)
+        : JSON.parse(await exported!.text());
+      expect(portable.questions[0].attachments[0].id).toBe(legacyId);
+      expect(portable.questions[0].attachments[0].blobKey).toBeUndefined();
+      const binary = format === "zip" ? portable.media : portable[ATTACHMENT_EXPORT_KEY];
+      expect(binary).toEqual([expect.objectContaining(
+        format === "zip"
+          ? { metadata: expect.objectContaining({ blobKey: legacyId, questionId: "q" }) }
+          : { blobKey: legacyId, questionId: "q" },
+      )]);
+    },
+  );
+
+  it.each(["json", "zip"] as const)(
+    "reports the real missing ID and withholds the complete %s receipt for an id-only legacy image",
+    async (format) => {
+      localStorage.clear();
+      const { state, original } = await fixture();
+      const legacyId = "legacy-id-only-missing-" + format;
+      const source = state.questions[0].attachments![0];
+      state.questions[0].attachments = [{ ...source, id: legacyId, blobKey: undefined as unknown as string }];
+      if (format === "json") state.documents = [];
+      else await saveSourceOriginal(state.documents[0], original);
+      const result = await exportStateWithAttachments(state);
+      expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [legacyId] });
+      expect(filename.endsWith("." + format)).toBe(true);
+      expect(lastBackupAt()).toBeNull();
+    },
+  );
+
+  it("resolves a legacy ID only from the current A/B/A account image store", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    const id = "legacy-account-scoped-id";
+    const source = state.questions[0].attachments![0];
+    state.questions[0].attachments = [{ ...source, id, blobKey: undefined as unknown as string }];
+    setQuestionAttachmentAccount("account-a");
+    try {
+      await putQuestionAttachmentBlob(id, {
+        blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+        questionId: "q", updatedAt: source.updatedAt,
+      });
+      const a = await exportStateWithAttachments(state);
+      expect(a).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+      const aReceipt = lastBackupAt();
+      expect(aReceipt).not.toBeNull();
+
+      setQuestionAttachmentAccount("account-b");
+      const b = await exportStateWithAttachments(state);
+      expect(b).toMatchObject({ attachmentCount: 0, missingBlobKeys: [id] });
+      expect(lastBackupAt()).toBeNull();
+      setQuestionAttachmentAccount("account-a");
+      const restoredA = await exportStateWithAttachments(state);
+      expect(restoredA).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+      expect(lastBackupAt()).not.toBeNull();
+    } finally {
+      setQuestionAttachmentAccount(undefined);
+    }
+  });
+
   it("keeps complete-backup receipts isolated across device and A/B/A account ownership", async () => {
     localStorage.clear();
     setQuestionAttachmentAccount(undefined);

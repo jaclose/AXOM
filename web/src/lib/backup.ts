@@ -99,7 +99,19 @@ export async function exportStateWithAttachments(
   const metadata = contentMetadata(state);
   const deferredSourceCount = state.deferredContent?.sources.length ?? 0;
   const options = { localOnly: scope === "saved-work", scope: attachmentScope };
-  const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
+  // Older portable workspaces can have a valid image ID without blobKey.
+  // Use the same supported fallback as parseImport for reading binary bytes,
+  // but never rewrite the learner's original exported question metadata.
+  // Invalid references remain untouched so a failed media read cannot
+  // silently certify a complete backup.
+  const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)].map(reference => ({
+    ...reference,
+    attachments: (reference.attachments ?? []).map(attachment => {
+      if (typeof attachment?.blobKey === "string"
+        && attachment.blobKey.length > 0 && attachment.blobKey.trim() === attachment.blobKey) return attachment;
+      return normalizeQuestionAttachments([attachment])?.[0] ?? attachment;
+    }),
+  }));
   const exportZip = async () => {
     // Always send only metadata into workspace.json. Inline base64 belongs to
     // the JSON route and must not be duplicated inside a ZIP fallback.
