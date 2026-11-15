@@ -54,7 +54,7 @@ test("Community SQL admission rejects key-only placeholders across submit, resub
       );
       expect(rows[0].accepted, explanation).toBe(false);
     }
-    const controls = [substantive, `Source: synthetic case study\\n${substantive}`];
+    const controls = [substantive, `Source: synthetic case study\n${substantive}`];
     for (const explanation of controls) {
       const { rows } = await database.db.query<{ accepted: boolean }>(
         "select private.question_set_library_has_teaching_rationale($1::jsonb) as accepted",
@@ -62,7 +62,7 @@ test("Community SQL admission rejects key-only placeholders across submit, resub
       );
       expect(rows[0].accepted).toBe(true);
     }
-    const sourceOnly = "Source: synthetic page 1\\nExplanation: will be added";
+    const sourceOnly = "Source: synthetic page 1\nExplanation: will be added";
     const { rows: sourceRows } = await database.db.query<{ accepted: boolean }>(
       "select private.question_set_library_has_teaching_rationale($1::jsonb) as accepted",
       [JSON.stringify(sourceOnly)],
