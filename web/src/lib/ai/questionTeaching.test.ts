@@ -75,6 +75,79 @@ describe("review-gated explanation drafting", () => {
     },
   );
 
+  function textOnlyPackage(): NonNullable<QuestionRecord["content"]> {
+    return {
+      id: "source-q1",
+      source: { filename: "synthetic-vascular-source.pdf", page: 3 },
+      stem: [{ type: "text", text: "Which layer contains smooth muscle in an artery?" }],
+      choices: [
+        { id: "source-a", label: "A", blocks: [{ type: "text", text: "Tunica media" }] },
+        { id: "source-b", label: "B", blocks: [{ type: "text", text: "Tunica intima" }] },
+        { id: "source-c", label: "C", blocks: [{ type: "text", text: "Tunica adventitia" }] },
+      ],
+      correctAnswer: { labels: ["A"], evidence: "printed-key" },
+      assets: [],
+      provenance: { method: "manual-transcription" },
+    };
+  }
+
+  it.each([
+    ["missing source image placement", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.stem.push({ type: "image", assetId: "source-exhibit-not-retained" });
+    }],
+    ["unrepresented lab table", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.stem.push({ type: "table", headers: ["Analyte", "Value"], rows: [["Troponin", "positive"]] });
+    }],
+    ["changed imported vignette", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.stem[0] = { type: "text", text: "Which structure is affected in this different source question?" };
+    }],
+    ["changed imported distractor", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.choices[1].blocks = [{ type: "text", text: "Aortic valve" }];
+    }],
+    ["conflicting printed answer", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.correctAnswer = { labels: ["B"], evidence: "printed-key" };
+    }],
+    ["unreviewed source-media flag", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.flags = [{ type: "missing_required_media", message: "Image not attached" }];
+    }],
+    ["choice table omitted from legacy options", (rich: NonNullable<QuestionRecord["content"]>) => {
+      rich.choiceTable = { type: "table", headers: ["Choice", "Finding"], rows: [["A", "muscle"], ["B", "endothelium"]] };
+    }],
+  ] as Array<[string, (rich: NonNullable<QuestionRecord["content"]>) => void]>)(
+    "blocks AI inference for %s even when the legacy question looks keyed and text-only", async (_label, mutate) => {
+      const rich = textOnlyPackage();
+      mutate(rich);
+      const source = question({ content: rich });
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/source blocks|original source/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(source.correctKey).toBe("A");
+      expect(source.explanation).toBeUndefined();
+      expect(source.content).toBe(rich);
+    },
+  );
+
+  it("allows identical text-only imported blocks with a consistent printed key", async () => {
+    const source = question({ content: textOnlyPackage() });
+    const model = provider({
+      explanation: "The tunica media has smooth muscle that changes arterial diameter and systemic resistance.",
+      choiceRationales: {
+        A: "The tunica media is the principal contractile smooth muscle layer.",
+        B: "The intima contains the endothelial layer and not the main muscle layer.",
+        C: "The adventitia contains supportive connective tissue, not the contractile layer.",
+      },
+      keywords: ["vascular anatomy"],
+    });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    const result = await draftQuestionExplanation(model, source);
+    expect(result.questionId).toBe("q1");
+    expect(result.choiceRationales.C).toMatch(/connective tissue/);
+    expect(model.completeJson).toHaveBeenCalledOnce();
+    expect(source.correctKey).toBe("A");
+  });
+
   it("still allows source-reviewed text-only descriptions of histology without an exhibit dependency", async () => {
     const source = question({
       stem: "A written description identifies smooth muscle in the arterial tunica media. Which layer is described?",
