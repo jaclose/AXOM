@@ -189,7 +189,11 @@ for (const width of [1440, 390]) {
       const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
       return app.useAccount.getState().identityEpoch;
     });
-    test.skip(typeof initialEpoch !== "number", "Requires Platform #736 identityEpoch producer; DIRECT-only parent cannot verify A→B→A.");
+    // Standalone DIRECT must report a skip, while FORGE's explicit integration
+    // gate must fail closed if the real Platform producer is absent.
+    test.skip(typeof initialEpoch !== "number" && process.env.AXOM_REQUIRE_PLATFORM_EPOCH !== "1",
+      "Requires Platform #736 identityEpoch producer; DIRECT-only parent cannot verify A→B→A.");
+    expect(initialEpoch, "AXOM_REQUIRE_PLATFORM_EPOCH=1 needs the real numeric Platform producer").toEqual(expect.any(Number));
     await page.goto("/#activity", { waitUntil: "networkidle" });
 
     await expect(page.getByText(note)).toBeVisible();
@@ -280,7 +284,10 @@ for (const width of [1440, 390]) {
       const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
       return app.useAccount.getState().identityEpoch;
     });
-    test.skip(typeof epoch !== "number", "Platform #736 epoch producer is not present in the standalone DIRECT branch.");
+    // Do not turn an absent epoch producer into green CI in a FORGE combined gate.
+    test.skip(typeof epoch !== "number" && process.env.AXOM_REQUIRE_PLATFORM_EPOCH !== "1",
+      "Platform #736 epoch producer is not present in the standalone DIRECT branch.");
+    expect(epoch, "AXOM_REQUIRE_PLATFORM_EPOCH=1 needs the real numeric Platform producer").toEqual(expect.any(Number));
 
     // Control: retained local A history really is renderable before the race.
     await page.goto("/#activity", { waitUntil: "networkidle" });
