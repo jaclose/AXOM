@@ -241,6 +241,53 @@ describe("review-gated explanation drafting", () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 
+  it.each([
+    ["missing keywords", undefined],
+    ["non-array keywords", "vascular histology"],
+    ["non-string keyword", ["vascular histology", { topic: "private source" }]],
+    ["excess keywords", Array.from({ length: 9 }, (_, index) => `vascular topic ${index}`)],
+    ["oversized keyword", ["histology " + "x".repeat(60)]],
+    ["too-short keyword", ["ab"]],
+  ] as Array<[string, unknown]>)(
+    "rejects %s from a model instead of silently dropping unreviewed metadata",
+    async (_label, keywords) => {
+      const source = question();
+      const before = JSON.stringify(source);
+      const model = provider({
+        explanation: "The tunica media contains smooth muscle that adjusts vessel caliber and vascular resistance.",
+        choiceRationales: {
+          A: "The tunica media contains the principal arterial smooth muscle layer.",
+          B: "The intima lines the vessel with endothelium, not the main muscle layer.",
+          C: "The adventitia provides supporting connective tissue, not contraction.",
+        },
+        ...(keywords === undefined ? {} : { keywords }),
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/keyword suggestions/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(JSON.stringify(source)).toBe(before);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it("keeps bounded, deduplicated subject keywords as provisional proposals", async () => {
+    const source = question();
+    const model = provider({
+      explanation: "Arterial tunica media smooth muscle contracts to regulate vascular resistance and luminal caliber.",
+      choiceRationales: {
+        A: "Smooth muscle is most prominent in the tunica media.",
+        B: "The intima is mostly endothelial lining rather than contractile muscle.",
+        C: "The adventitia provides structural support rather than primary contraction.",
+      },
+      keywords: ["Arterial histology", "vascular tone", "ARTERIAL HISTOLOGY"],
+    });
+    const draft = await draftQuestionExplanation(model, source);
+    expect(draft.keywords).toEqual(["arterial histology", "vascular tone"]);
+    expect(source.tags).toEqual([]);
+    expect(source.correctKey).toBe("A");
+    expect(source.explanation).toBeUndefined();
+  });
+
   it("never sends unresolved answers or inaccessible image questions to a model", async () => {
     const model = provider({});
     await expect(draftQuestionExplanation(model, question({ correctKey: undefined }))).rejects.toThrow(/reviewed answer/i);
