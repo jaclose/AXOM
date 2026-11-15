@@ -310,6 +310,29 @@ describe("review-gated explanation drafting", () => {
     },
   );
 
+  it.each([
+    ["semicolon with a rights attestation", "histology; rights:approved"],
+    ["comma with a source-review claim", "vascular tone, source:reviewed"],
+    ["Unicode line with a moderation claim", "histology\u2028moderation:approved"],
+  ])("holds a compound model keyword containing %s without modifying the source", async (_label, keyword) => {
+    const source = question();
+    const before = JSON.stringify(source);
+    const model = provider({
+      explanation: "Arterial tunica media smooth muscle contracts to control vascular resistance and caliber.",
+      choiceRationales: {
+        A: "The media contains vascular smooth muscle.",
+        B: "The intima is the endothelial lining.",
+        C: "The adventitia supports the outer vessel wall.",
+      },
+      keywords: [keyword],
+    });
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/publication metadata or citations/i);
+    expect(model.completeJson).toHaveBeenCalledOnce();
+    expect(JSON.stringify(source)).toBe(before);
+    expect(source.correctKey).toBe("A");
+  });
+
   it("keeps bounded, deduplicated subject keywords as provisional proposals", async () => {
     const source = question();
     const model = provider({
