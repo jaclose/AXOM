@@ -150,3 +150,69 @@ test("Activity History separately confirms and downloads retained-device XLSX wi
   await expect(page.getByText(note)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export .xlsx" })).toHaveCount(0);
 });
+
+for (const width of [1440, 390]) {
+  test(`Activity History revokes synthetic epoch-only ABA without an identity or link delta at ${width}px`, async ({ page }) => {
+    const note = "SYNTHETIC_EPOCH_ONLY_PRIVATE_R137";
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+
+    await page.goto("/#productivity", { waitUntil: "networkidle" });
+    await seedOnboarded(page);
+    await dev(page);
+    await page.evaluate(async (privateNote) => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      app.useStore.setState({ logs: [{
+        id: "synthetic-epoch-only-A", dayKey: "2026-11-14",
+        ts: "2026-11-14T18:45:00.000Z", type: "Review",
+        minutes: 31, cards: 51, note: privateNote,
+      }] });
+      await app.flushVault();
+    }, note);
+    await reloadAfterSave(page);
+    await dev(page);
+    await setSession(page, "A", "linked");
+    // The Platform producer is held in a separate PR; test the consumer with
+    // an explicit synthetic epoch rather than claiming real auth coverage.
+    await page.evaluate(async () => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      app.useAccount.setState({ identityEpoch: 4 });
+    });
+    await page.goto("/#activity", { waitUntil: "networkidle" });
+
+    await expect(page.getByText(note)).toBeVisible();
+    const exportButton = page.getByRole("button", { name: "Export .xlsx" });
+    await exportButton.focus();
+    await expect(exportButton).toBeFocused();
+
+    // An unobserved A -> B -> A may have the original account and link again.
+    // Only an advanced epoch reveals that the mounted session is obsolete.
+    await page.evaluate(async () => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      app.useAccount.setState({ identityEpoch: 6 });
+    });
+    const notice = page.getByRole("status").filter({ hasText: "Activity History session changed" });
+    await expect(notice).toBeVisible();
+    await expect(notice).toBeFocused();
+    await expect(page.getByText(note)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Export .xlsx" })).toHaveCount(0);
+    await expect(page.locator(".grid-stats")).toHaveCount(0);
+
+    // Once revoked, a synthetic counter rollback cannot resurrect this view.
+    await page.evaluate(async () => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      app.useAccount.setState({ identityEpoch: 4 });
+    });
+    await expect(notice).toBeVisible();
+    await expect(page.getByText(note)).toHaveCount(0);
+    const count = await page.evaluate(async () => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      return app.useStore.getState().logs.length;
+    });
+    expect(count).toBe(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}
