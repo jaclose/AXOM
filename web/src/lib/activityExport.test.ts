@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkBook } from "xlsx-js-style";
-import { allocateActivitySheetName, exportActivityWorkbook } from "./activityExport";
+import { ActivityExportTextEncodingError, allocateActivitySheetName, exportActivityWorkbook } from "./activityExport";
 import type { StudyLog } from "./types";
 
 function studyLogs(types: string[]): StudyLog[] {
@@ -255,6 +255,40 @@ describe("Activity History XLSX sheet title collisions", () => {
       expect(reloaded.Sheets[name]?.F2?.v).toMatch(/^unique-note-/);
     }
     expect(logs).toEqual(before);
+  });
+
+
+  it("refuses malformed UTF-16 source text before invoking any XLSX writer, preserving original records", async () => {
+    const loneHigh = String.fromCharCode(0xd800);
+    const loneLow = String.fromCharCode(0xdc00);
+    for (const [field, value] of [
+      ["type", "B" + loneHigh + "C"],
+      ["note", "B" + loneLow + "C"],
+      ["ts", "2026-11-14T" + loneHigh],
+      ["dayKey", "2026-11-" + loneLow],
+    ] as const) {
+      const logs = studyLogs(["Anki"]);
+      logs[0][field] = value;
+      const original = logs.map((log) => ({ ...log }));
+      let writerInvocations = 0;
+      await expect(exportActivityWorkbook(logs, () => { writerInvocations++; }))
+        .rejects.toBeInstanceOf(ActivityExportTextEncodingError);
+      expect(writerInvocations).toBe(0);
+      expect(logs).toEqual(original);
+    }
+  });
+
+  it("roundtrips valid paired Unicode in types and notes without a destructive encoding workaround", async () => {
+    const logs = studyLogs(["Anki📚😀", "B🚀C"]);
+    logs[0].note = "valid supplementary characters 🧠🫀";
+    logs[1].note = "B😀C";
+    const original = logs.map((log) => ({ ...log }));
+    const workbook = await captureWorkbook(logs);
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const reloaded = XLSX.read(bytes, { type: "buffer" });
+    expectAllTypeSheets(reloaded, logs);
+    expect(logs).toEqual(original);
   });
 
 });
