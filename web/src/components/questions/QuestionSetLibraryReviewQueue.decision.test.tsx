@@ -168,6 +168,25 @@ describe("Question Set academic decisions", () => {
     expect(mocks.decide).not.toHaveBeenCalled();
   });
 
+  it("flags placeholder teaching notices that pass generic prose detection but fail the publication admission contract", async () => {
+    const candidate = reviewPreview(21);
+    candidate.snapshot.questions[20].explanation = "Explanation: will be added";
+    mocks.preview.mockResolvedValue(candidate);
+    await inspect();
+
+    const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("1 without explanation prose");
+    fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
+    expect(await screen.findByText("Vignette 21")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), {
+      target: { value: "Question 21 still contains a placeholder rationale." },
+    });
+    expect(screen.getByRole("button", { name: "Return for revision" }).hasAttribute("disabled")).toBe(false);
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
+
   it("permits reasoned rejection without falsely attesting to distribution rights or answer correctness", async () => {
     await inspect();
     const reason = "Source reproduction rights are not demonstrated.";
