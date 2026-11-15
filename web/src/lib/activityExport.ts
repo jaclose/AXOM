@@ -35,15 +35,9 @@ export async function exportActivityWorkbook(
   // Allocate unique case-insensitive names without merging or dropping any type.
   // Excel reserves "History" even when it is not already used by this workbook.
   const usedSheetNames = new Set([...wb.SheetNames.map((name) => name.toLowerCase()), "history"]);
+  const nextSuffixByPrefix = new Map<string, number>();
   for (const type of byType) {
-    const baseName = safeSheetName(type);
-    let sheetName = baseName;
-    let duplicate = 2;
-    while (usedSheetNames.has(sheetName.toLowerCase())) {
-      const suffix = ` (${duplicate++})`;
-      sheetName = `${sheetTitlePrefix(baseName, 31 - suffix.length)}${suffix}`;
-    }
-    usedSheetNames.add(sheetName.toLowerCase());
+    const sheetName = allocateActivitySheetName(type, usedSheetNames, nextSuffixByPrefix);
     appendSheet(XLSX, wb, sheetName, detailRows(groupedByType.get(type) ?? []), [14, 20, 14, 12, 12, 42]);
   }
 
@@ -53,6 +47,37 @@ export async function exportActivityWorkbook(
   const filename = `axom-activity-history-${stamp}.xlsx`;
   if (saveWorkbook) saveWorkbook(wb, filename);
   else XLSX.writeFile(wb, filename);
+}
+
+
+/** Assign an Excel-safe unique title without quadratic retries for shared truncated prefixes.
+ * The two maps belong to one workbook; original log types remain untouched.
+ */
+export function allocateActivitySheetName(
+  type: string,
+  usedSheetNames: Set<string>,
+  nextSuffixByPrefix: Map<string, number>,
+): string {
+  const baseName = safeSheetName(type);
+  let sheetName = baseName;
+  let duplicate = 2;
+  while (usedSheetNames.has(sheetName.toLowerCase())) {
+    const suffix = ` (${duplicate})`;
+    const prefix = sheetTitlePrefix(baseName, 31 - suffix.length);
+    const prefixKey = prefix.toLowerCase();
+    // A previous collision with this *candidate prefix* proves smaller suffixes
+    // already occupied, even if the raw 31-character names were distinct.
+    const next = nextSuffixByPrefix.get(prefixKey);
+    if (next !== undefined && next > duplicate) {
+      duplicate = next;
+      continue;
+    }
+    sheetName = `${prefix}${suffix}`;
+    nextSuffixByPrefix.set(prefixKey, duplicate + 1);
+    duplicate++;
+  }
+  usedSheetNames.add(sheetName.toLowerCase());
+  return sheetName;
 }
 
 function overviewRows(logs: StudyLog[], byType: string[], groupedByType: Map<string, StudyLog[]>) {
