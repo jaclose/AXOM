@@ -119,7 +119,7 @@ describe("R109: legacy id-only image completeness at the portable export/import 
     });
     const exported = await exportStateWithAttachments(state);
     expect(exported).toMatchObject({ attachmentCount: 1, missingBlobKeys: [], originalCount: 1, missingOriginalIds: [] });
-    expect(downloadedName).toMatch(/\\.zip$/);
+    expect(downloadedName).toMatch(/\.zip$/);
     expect(lastBackupAt()).not.toBeNull();
     expect(state.questions[0].attachments![0].blobKey).toBeUndefined();
     const backup = await readPortableBackup(new File([downloaded!], downloadedName));
@@ -142,7 +142,7 @@ describe("R109: legacy id-only image completeness at the portable export/import 
     const state = await legacyExportState(id);
     const exported = await exportStateWithAttachments(state);
     expect(exported).toMatchObject({ attachmentCount: 0, missingBlobKeys: [id], originalCount: 1, missingOriginalIds: [] });
-    expect(downloadedName).toMatch(/\\.zip$/);
+    expect(downloadedName).toMatch(/\.zip$/);
     expect(lastBackupAt()).toBeNull();
     const backup = await readPortableBackup(new File([downloaded!], downloadedName));
     expect(backup.omissions).toEqual({ missingBlobKeys: [id], missingOriginalIds: [] });
