@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActivityHistoryPage } from "./ActivityHistoryPage";
-import { ActivityExportTextEncodingError } from "../lib/activityExport";
+import { ActivityExportCellLimitError, ActivityExportTextEncodingError } from "../lib/activityExport";
 import type { StudyLog } from "../lib/types";
 
 const fixture = vi.hoisted(() => ({
@@ -44,6 +44,9 @@ vi.mock("../lib/activityExport", () => ({
   ActivityExportTextEncodingError: class ActivityExportTextEncodingError extends Error {
     constructor() { super("Invalid Unicode text in activity export."); this.name = "ActivityExportTextEncodingError"; }
   },
+  ActivityExportCellLimitError: class ActivityExportCellLimitError extends Error {
+    constructor() { super("Excel cell limit exceeded."); this.name = "ActivityExportCellLimitError"; }
+  },
 }));
 vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
 
@@ -66,6 +69,30 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("Activity History workbook download feedback", () => {
+  it("warns about Excel cell limits without revealing the overlong note or recommending identical retry", async () => {
+    const privateNote = "private-data:" + "x".repeat(32768);
+    const original = fixture.logs;
+    fixture.logs = [{ ...original[0], note: privateNote }];
+    fixture.exportWorkbook.mockRejectedValueOnce(new ActivityExportCellLimitError());
+    try {
+      render(<ActivityHistoryPage />);
+      fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+      await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Activity export stopped",
+          tone: "warn",
+          body: expect.stringContaining("Excel cell limits"),
+        }),
+      ));
+      const warning = fixture.pushToast.mock.calls[0][0];
+      expect(warning.body).not.toContain(privateNote);
+      expect(warning.body).not.toMatch(/try exporting again/i);
+      expect(fixture.logs[0].note).toBe(privateNote);
+    } finally {
+      fixture.logs = original;
+    }
+  });
+
   it("identifies invalid Unicode export refusal without leaking notes or suggesting an unchanged retry", async () => {
     const privateNote = "sensitive-" + String.fromCharCode(0xd800);
     const original = fixture.logs;
