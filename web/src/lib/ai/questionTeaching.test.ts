@@ -115,6 +115,62 @@ describe("review-gated explanation drafting", () => {
     expect(source.explanation).toBeUndefined();
   });
 
+  it.each([
+    ["oversized vignette", { stem: "Which arterial layer contains smooth muscle? " + "x".repeat(8_000) }],
+    ["oversized answer choice", { options: [
+      { key: "A", text: "Tunica media " + "x".repeat(4_000) },
+      { key: "B", text: "Tunica intima" },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["oversized author topic", { topic: "Vascular histology " + "x".repeat(200) }],
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "refuses AI drafting for %s rather than silently removing clinical evidence", async (_label, patch) => {
+      const source = question(patch);
+      const original = JSON.stringify(source);
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/prompt limits|truncated|complete source/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(JSON.stringify(source)).toBe(original);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it("includes every character at the exact AI prompt boundaries without editing source evidence", async () => {
+    const stemLead = "Which arterial layer contains smooth muscle? ";
+    const stem = stemLead + "x".repeat(8_000 - stemLead.length - 7) + "STEMEND";
+    const choiceLead = "Tunica media ";
+    const option = choiceLead + "y".repeat(4_000 - choiceLead.length - 7) + "OPTEND!";
+    const topic = "z".repeat(200 - 8) + "TOPICEND";
+    const source = question({
+      stem, topic,
+      options: [{ key: "A", text: option }, { key: "B", text: "Tunica intima" }, { key: "C", text: "Tunica adventitia" }],
+    });
+    const model = provider({
+      explanation: "Arterial tunica media has concentric vascular smooth muscle, allowing adjustment of arterial caliber and resistance.",
+      choiceRationales: {
+        A: "The media contains the primary arterial smooth muscle.",
+        B: "The intima is primarily the endothelial lining.",
+        C: "The adventitia is supportive outer connective tissue.",
+      },
+      keywords: ["arterial histology"],
+    });
+    expect(stem).toHaveLength(8_000);
+    expect(option).toHaveLength(4_000);
+    expect(topic).toHaveLength(200);
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    const draft = await draftQuestionExplanation(model, source);
+    for (const marker of ["STEMEND", "OPTEND!", "TOPICEND"]) {
+      expect(model.completeJson).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: expect.stringContaining(marker),
+      }));
+    }
+    expect(draft.sourceFingerprint).toBe(questionExplanationFingerprint(source));
+    expect(source.correctKey).toBe("A");
+    expect(source.explanation).toBeUndefined();
+  });
+
   it("never sends unresolved answers or inaccessible image questions to a model", async () => {
     const model = provider({});
     await expect(draftQuestionExplanation(model, question({ correctKey: undefined }))).rejects.toThrow(/reviewed answer/i);
