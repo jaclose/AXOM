@@ -1347,15 +1347,10 @@ describe("portable binary media backup", () => {
 
   it("records SHA-256 for new ZIP images and rejects equal-size CRC-valid substitution before recovery consent", async () => {
     const { default: JSZip } = await import("jszip");
-    // Ancillary PNG chunks are checksum-correct and equally sized. Structural
-    // validation must not mistake the substituted *bytes* for the exported asset.
-    const taggedPng = (tag: string) => Uint8Array.from([
-      ...PNG_BYTES.subarray(0, 33),
-      ...pngChunk("tEXt", new TextEncoder().encode("note\0" + tag)),
-      ...PNG_BYTES.subarray(33),
-    ]);
-    const original = taggedPng("a");
-    const substitute = taggedPng("b");
+    // Two *different pixels* (red and green), each a CRC-correct 1x1 RGBA PNG
+    // with a valid 13-byte zlib IDAT. MIME, size and structural checks all pass.
+    const original = crcCorrectPngWithIdat(deflateSync(Uint8Array.from([0, 255, 0, 0, 255])));
+    const substitute = crcCorrectPngWithIdat(deflateSync(Uint8Array.from([0, 0, 255, 0, 255])));
     expect(original.byteLength).toBe(substitute.byteLength);
     expect(await sha256Hex(original)).not.toBe(await sha256Hex(substitute));
     const tagged = { ...attachment, byteSize: original.byteLength };
