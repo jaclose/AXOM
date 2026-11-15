@@ -106,6 +106,18 @@ describe("downloaded term practice", () => {
     expect(termQuizNeedsCatalog("account", state)).toBe(true);
     expect(termQuizNeedsCatalog("other", state)).toBe(false);
   });
+  it("does not prefetch legacy catalog while deferred hydration belongs to another account", () => {
+    const state = workspace([receipt(1, ["ready"], { term: undefined })], [question("ready")]);
+    // Legacy receipts without a saved term normally require the exact cloud catalog.
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+    state.deferredContent = { accountId: "other-account", questions: [], documents: [], sources: [], media: [] };
+    // A held term quiz must not schedule a companion network request.
+    expect(termQuizNeedsCatalog("account", state)).toBe(false);
+    expect(termQuizSelection("Term 1", "account", state)).toMatchObject({ questionIds: [], setIds: [] });
+    // Once hydration belongs to the active account, the normal legacy lookup resumes.
+    state.deferredContent.accountId = "account";
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+  });
   it("resolves a legacy receipt offline only with one exact hosted owner and a known term", () => {
     const state = workspace([receipt(1, ["q-1"], { term: undefined })], []);
     state.terms = [{ id: "term", name: "Term 1" }];
