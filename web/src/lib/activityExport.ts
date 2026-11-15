@@ -62,7 +62,16 @@ function overviewRows(logs: StudyLog[]) {
 function detailRows(logs: StudyLog[]) {
   return [
     ["Study day", "Timestamp", "Type", "Minutes", "Cards", "Note"],
-    ...logs.slice().sort((a, b) => b.ts.localeCompare(a.ts)).map((log) => [
+    ...logs.slice().sort((a, b) => {
+      // ISO datetimes with distinct UTC offsets are not chronologically ordered as strings.
+      const aTime = Date.parse(a.ts);
+      const bTime = Date.parse(b.ts);
+      if (Number.isFinite(aTime) && Number.isFinite(bTime)) return bTime - aTime;
+      // Keep malformed legacy timestamps stable and deterministic, but behind valid events.
+      if (Number.isFinite(aTime)) return -1;
+      if (Number.isFinite(bTime)) return 1;
+      return b.ts.localeCompare(a.ts);
+    }).map((log) => [
       log.dayKey,
       log.ts,
       log.type,
