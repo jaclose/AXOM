@@ -211,6 +211,15 @@ function sessionState(session: Session | null): Pick<AccountState, "phase" | "us
     user,
     link,
     ...protectionView(user && link === "linked" ? restingStatus(read()) : "local-only"),
+    // A device linked to another account must never display that owner's
+    // upload/protection receipt as the current recovery account's receipt.
+    ...(link !== "linked" ? {
+      lastProtectedAt: undefined,
+      conflictServerRevision: undefined,
+      syncFailure: undefined,
+      nextAttemptAt: undefined,
+      snapshotBytes: undefined,
+    } : {}),
   };
 }
 
@@ -272,11 +281,17 @@ export const useAccount = create<AccountState>((originalSet, get, api) => {
     const next = sessionState(session);
     // Keep a display name the profile table already supplied for this user.
     const current = get().user;
-    if (current?.id !== next.user?.id) clearAccountUploadCaches();
+    const ownerChanged = (current?.id ?? null) !== (next.user?.id ?? null);
+    if (ownerChanged) clearAccountUploadCaches();
     if (next.user && current?.id === next.user.id && current.displayName && !session?.user?.user_metadata?.display_name) {
       next.user = { ...next.user, displayName: current.displayName };
     }
-    set(next);
+    // Account history, device list and pending server-restore offers are
+    // owner-specific. Clearing them is in-memory only; local work is retained.
+    set({
+      ...next,
+      ...(ownerChanged ? { history: [], devices: [], restoreOffer: undefined } : {}),
+    });
     if (next.user) void loadProfileName(next.user.id);
   }
 
@@ -362,7 +377,15 @@ export const useAccount = create<AccountState>((originalSet, get, api) => {
             && isQuestionAttachmentScopeCurrent(initialScope)
             && session?.user.id === bootLinkedAccountId;
           if (event === "PASSWORD_RECOVERY") {
-            set({ phase: "recovering-password", user: toUser(session), message: "Choose a new password to finish recovery." });
+            // Recovery events can replace SIGNED_IN. Rebind all account-scoped
+            // link, protection, cache and history state before showing B's
+            // password screen; a prior A-linked device must not authorize B.
+            applySession(session);
+            if (!session?.user) {
+              set({ error: "Couldn’t verify this password recovery link. Request a new one.", message: "" });
+              return;
+            }
+            set({ phase: "recovering-password", error: "", message: "Choose a new password to finish recovery." });
             return;
           }
           applySession(session);
