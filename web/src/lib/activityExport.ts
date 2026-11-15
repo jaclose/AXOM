@@ -27,7 +27,8 @@ export async function exportActivityWorkbook(
   const byType = [...new Set(logs.map((log) => log.type))].sort();
   // Summary tabs and normalized/truncated study types can share an Excel title.
   // Allocate unique case-insensitive names without merging or dropping any type.
-  const usedSheetNames = new Set(wb.SheetNames.map((name) => name.toLowerCase()));
+  // Excel reserves "History" even when it is not already used by this workbook.
+  const usedSheetNames = new Set([...wb.SheetNames.map((name) => name.toLowerCase()), "history"]);
   for (const type of byType) {
     const baseName = safeSheetName(type);
     let sheetName = baseName;
@@ -90,5 +91,9 @@ function sum(logs: StudyLog[], key: "minutes" | "cards") {
 }
 
 function safeSheetName(input: string) {
-  return input.replace(/[\\/?*[\]:]/g, " ").slice(0, 31) || "Activity";
+  // Excel also rejects blank/whitespace-only tabs and names that begin/end with a quote.
+  // Remove edge quotes after truncation, so the final 31-char title stays valid.
+  const title = input.replace(/[\\/?*[\]:]/g, " ").slice(0, 31)
+    .trim().replace(/^'+|'+$/g, "").trim();
+  return title || "Activity";
 }
