@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActivityHistoryPage } from "./ActivityHistoryPage";
+import { ActivityExportTextEncodingError } from "../lib/activityExport";
 import type { StudyLog } from "../lib/types";
 
 const fixture = vi.hoisted(() => ({
@@ -38,7 +39,12 @@ vi.mock("../lib/store", () => ({
     { getState: () => ({ logs: fixture.logs }) },
   ),
 }));
-vi.mock("../lib/activityExport", () => ({ exportActivityWorkbook: fixture.exportWorkbook }));
+vi.mock("../lib/activityExport", () => ({
+  exportActivityWorkbook: fixture.exportWorkbook,
+  ActivityExportTextEncodingError: class ActivityExportTextEncodingError extends Error {
+    constructor() { super("Invalid Unicode text in activity export."); this.name = "ActivityExportTextEncodingError"; }
+  },
+}));
 vi.mock("../lib/toast", () => ({ pushToast: fixture.pushToast }));
 
 function switchAccount(accountId: string | null, link: typeof fixture.link = accountId ? "linked" : "unlinked") {
@@ -60,6 +66,30 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("Activity History workbook download feedback", () => {
+  it("identifies invalid Unicode export refusal without leaking notes or suggesting an unchanged retry", async () => {
+    const privateNote = "sensitive-" + String.fromCharCode(0xd800);
+    const original = fixture.logs;
+    fixture.logs = [{ ...original[0], note: privateNote }];
+    fixture.exportWorkbook.mockRejectedValueOnce(new ActivityExportTextEncodingError());
+    try {
+      render(<ActivityHistoryPage />);
+      fireEvent.click(screen.getByRole("button", { name: /Export .xlsx/i }));
+      await waitFor(() => expect(fixture.pushToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Activity export stopped",
+          tone: "warn",
+          body: expect.stringContaining("invalid Unicode"),
+        }),
+      ));
+      const warning = fixture.pushToast.mock.calls[0][0];
+      expect(warning.body).not.toContain(privateNote);
+      expect(warning.body).not.toMatch(/try exporting again/i);
+      expect(fixture.logs[0].note).toBe(privateNote);
+    } finally {
+      fixture.logs = original;
+    }
+  });
+
   it("keeps the export disabled during a pending write, without a false success notice", async () => {
     let finish!: () => void;
     fixture.exportWorkbook.mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
