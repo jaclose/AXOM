@@ -156,10 +156,28 @@ function hasUnsafeDraftChoiceLabels(question: QuestionRecord): boolean {
 const MAX_DRAFT_STEM_CHARS = 8_000;
 const MAX_DRAFT_CHOICE_CHARS = 4_000;
 const MAX_DRAFT_TOPIC_CHARS = 200;
+// A group of individually valid choices can still exceed the model's useful
+// input budget, especially because the confirmed choice is repeated verbatim.
+// Hold the entire question rather than truncate a clinically decisive choice.
+const MAX_DRAFT_TOTAL_PROMPT_CHARS = 20_000;
+
+function buildDraftPrompt(question: QuestionRecord): string {
+  const correct = question.options.find(option => option.key === question.correctKey);
+  return [
+    `Question: ${question.stem}`,
+    "Choices:",
+    ...question.options.map(option => `${option.key}. ${option.text}`),
+    `Confirmed answer: ${question.correctKey ?? ""}. ${correct?.text ?? ""}`,
+    question.topic ? `Topic (author-supplied): ${question.topic}` : "",
+    "Drafts will be visibly reviewed before saving. Do not claim to have inspected the original source.",
+  ].filter(Boolean).join("\n");
+}
+
 function wouldTruncateDraftPrompt(question: QuestionRecord): boolean {
   return question.stem.length > MAX_DRAFT_STEM_CHARS
     || (question.topic?.length ?? 0) > MAX_DRAFT_TOPIC_CHARS
-    || question.options.some(option => option.text.length > MAX_DRAFT_CHOICE_CHARS);
+    || question.options.some(option => option.text.length > MAX_DRAFT_CHOICE_CHARS)
+    || buildDraftPrompt(question).length > MAX_DRAFT_TOTAL_PROMPT_CHARS;
 }
 
 export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
@@ -232,14 +250,7 @@ export async function draftQuestionExplanation(
       "Output ONLY JSON with explanation (string), choiceRationales (object keyed by supplied choice keys),",
       "and keywords (array of up to eight subject phrases). Do not return a correctKey or other keys.",
     ].join(" "),
-    prompt: [
-      `Question: ${question.stem}`,
-      "Choices:",
-      ...question.options.map(option => `${option.key}. ${option.text}`),
-      `Confirmed answer: ${question.correctKey}. ${correct.text}`,
-      question.topic ? `Topic (author-supplied): ${question.topic}` : "",
-      "Drafts will be visibly reviewed before saving. Do not claim to have inspected the original source.",
-    ].filter(Boolean).join("\n"),
+    prompt: buildDraftPrompt(question),
     maxTokens: 1800,
     signal,
   });
