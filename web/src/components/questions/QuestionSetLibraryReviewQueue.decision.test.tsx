@@ -10,11 +10,17 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../lib/academicLibrary/client", () => ({
   isAcademicReviewer: (...args: unknown[]) => mocks.reviewer(...args),
 }));
-vi.mock("../../lib/sharing/questionSetLibrary", () => ({
-  listPendingQuestionSets: (...args: unknown[]) => mocks.pending(...args),
-  loadPendingQuestionSetReviewPreview: (...args: unknown[]) => mocks.preview(...args),
-  reviewQuestionSetSubmission: (...args: unknown[]) => mocks.decide(...args),
-}));
+// Keep the real publication-admission predicate under test while isolating the
+// reviewer RPCs. Duplicating its heuristic here would conceal contract drift.
+vi.mock("../../lib/sharing/questionSetLibrary", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../lib/sharing/questionSetLibrary")>();
+  return {
+    hasCommunityTeachingRationale: actual.hasCommunityTeachingRationale,
+    listPendingQuestionSets: (...args: unknown[]) => mocks.pending(...args),
+    loadPendingQuestionSetReviewPreview: (...args: unknown[]) => mocks.preview(...args),
+    reviewQuestionSetSubmission: (...args: unknown[]) => mocks.decide(...args),
+  };
+});
 
 const id = "11111111-1111-4111-8111-111111111111";
 const pendingRow = {
