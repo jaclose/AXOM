@@ -16,6 +16,17 @@ import {
 type References = ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>;
 type MediaEntry = { file: string; metadata: Omit<QuestionAttachmentExportPayload, "base64">; sha256?: string };
 type OriginalEntry = { file: string; documentId: string; sha256: string; byteSize: number; mimeType: string };
+/** A missing WebCrypto implementation is a recovery capability failure, not
+ * evidence that the archived bytes were corrupted. Never silently accept a
+ * checksum-bound ZIP member when its digest cannot be verified. */
+async function requiredRestoreSha256(bytes: Uint8Array): Promise<string> {
+  const digest = await sha256Hex(bytes);
+  if (digest === undefined) {
+    throw new Error("SHA-256 verification is unavailable in this browser or app. Restore this backup in an environment with WebCrypto support. No workspace data has been changed.");
+  }
+  return digest;
+}
+
 const MAX_ORIGINAL_BYTES = 128 * 1024 * 1024;
 export const MAX_ZIP_WORKSPACE_BYTES = MAX_ORIGINAL_BYTES;
 export const MAX_ZIP_BACKUP_ENTRIES = 30_000;
@@ -788,7 +799,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       || (mimeType === "image/png" && !(await hasInflatablePngImageData(imageBytes)))) {
       throw new Error("A backup image failed its integrity check. No workspace data has been changed.");
     }
-    if (item.sha256 !== undefined && await sha256Hex(imageBytes) !== item.sha256) {
+    if (item.sha256 !== undefined && await requiredRestoreSha256(imageBytes) !== item.sha256) {
       throw new Error("A backup image failed its SHA-256 integrity check. No workspace data has been changed.");
     }
     // One stored image per immutable key and archive path: reject aliases
@@ -814,7 +825,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       || typeof item.mimeType !== "string" || item.mimeType.length > 255
       || documents.get(item.documentId)?.checksum?.replace(/^sha256:/, "") !== item.sha256) throw new Error("The backup contains an invalid or missing original-file record.");
     const bytes = await zip.file(item.file)!.async("uint8array");
-    if (bytes.byteLength !== item.byteSize || await sha256Hex(bytes) !== item.sha256) throw new Error("An original file failed its backup integrity check. No workspace data has been changed.");
+    if (bytes.byteLength !== item.byteSize || await requiredRestoreSha256(bytes) !== item.sha256) throw new Error("An original file failed its backup integrity check. No workspace data has been changed.");
     ids.add(item.documentId); files.add(item.file);
   }
   // An archive can say _backupScope: "complete" while omitting source bytes.
