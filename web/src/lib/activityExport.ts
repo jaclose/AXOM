@@ -104,8 +104,8 @@ function sheetTitlePrefix(input: string, maxUnits: number): string {
 
 function safeSheetName(input: string) {
   // Excel also rejects blank/whitespace-only tabs and names that begin/end with a quote.
-  // Remove edge quotes after truncation, so the final 31-char title stays valid.
+  // Strip both spaces and apostrophes at each edge in one pass, including those exposed by sanitization.
   const title = sheetTitlePrefix(input.replace(/[\\/?*[\]:]/g, " "), 31)
-    .trim().replace(/^'+|'+$/g, "").trim();
+    .replace(/^[\s']+|[\s']+$/g, "");
   return title || "Activity";
 }
