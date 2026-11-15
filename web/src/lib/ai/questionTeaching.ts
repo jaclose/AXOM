@@ -149,6 +149,19 @@ function hasUnsafeDraftChoiceLabels(question: QuestionRecord): boolean {
     || question.options.some(option => !AI_CHOICE_LABEL.test(option.key));
 }
 
+/** AI explanations cannot be medically reliable when the prompt silently drops
+ * the end of a vignette, option, or author topic. Retain the same per-field
+ * provider caps, but hold incomplete inputs for manual source review instead
+ * of presenting guesses based on missing clinical evidence. */
+const MAX_DRAFT_STEM_CHARS = 8_000;
+const MAX_DRAFT_CHOICE_CHARS = 4_000;
+const MAX_DRAFT_TOPIC_CHARS = 200;
+function wouldTruncateDraftPrompt(question: QuestionRecord): boolean {
+  return question.stem.length > MAX_DRAFT_STEM_CHARS
+    || (question.topic?.length ?? 0) > MAX_DRAFT_TOPIC_CHARS
+    || question.options.some(option => option.text.length > MAX_DRAFT_CHOICE_CHARS);
+}
+
 export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
   return questionPracticeReadiness(question) === "ready"
     && Boolean(question.correctKey)
@@ -159,7 +172,8 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && !referencesUnavailableExhibit(question)
     && !hasUnrepresentedRichSource(question)
     && !containsPrivateDraftPromptReference(question)
-    && !hasUnsafeDraftChoiceLabels(question);
+    && !hasUnsafeDraftChoiceLabels(question)
+    && !wouldTruncateDraftPrompt(question);
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -197,6 +211,9 @@ export async function draftQuestionExplanation(
   if (hasUnsafeDraftChoiceLabels(question)) {
     throw new Error("AI drafting requires at most 26 short, single-line alphanumeric choice labels. Review and normalize the source labels before requesting an explanation.");
   }
+  if (wouldTruncateDraftPrompt(question)) {
+    throw new Error("The question exceeds AI prompt limits and would be truncated. Review the complete source and draft its explanation manually.");
+  }
   if (question.explanation?.trim()) throw new Error("An existing explanation must never be replaced automatically.");
   if (Object.keys(question.choiceRationales ?? {}).length > 0) throw new Error("An existing choice rationale must never be replaced automatically.");
   const correct = question.options.find(option => option.key === question.correctKey);
@@ -216,11 +233,11 @@ export async function draftQuestionExplanation(
       "and keywords (array of up to eight subject phrases). Do not return a correctKey or other keys.",
     ].join(" "),
     prompt: [
-      `Question: ${question.stem.slice(0, 8000)}`,
+      `Question: ${question.stem}`,
       "Choices:",
-      ...question.options.map(option => `${option.key}. ${option.text.slice(0, 4000)}`),
-      `Confirmed answer: ${question.correctKey}. ${correct.text.slice(0, 4000)}`,
-      question.topic ? `Topic (author-supplied): ${question.topic.slice(0, 200)}` : "",
+      ...question.options.map(option => `${option.key}. ${option.text}`),
+      `Confirmed answer: ${question.correctKey}. ${correct.text}`,
+      question.topic ? `Topic (author-supplied): ${question.topic}` : "",
       "Drafts will be visibly reviewed before saving. Do not claim to have inspected the original source.",
     ].filter(Boolean).join("\n"),
     maxTokens: 1800,
