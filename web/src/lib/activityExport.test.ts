@@ -182,15 +182,17 @@ describe("Activity History XLSX sheet title collisions", () => {
     expectAllTypeSheets(workbook, logs);
     expect(workbook.SheetNames[2]).not.toBe(workbook.SheetNames[3]);
   });
+
   it("groups many distinct types without rescanning every original activity for each worksheet", async () => {
     const types = Array.from({ length: 80 }, (_, index) => `custom-type-${String(index).padStart(3, "0")}`);
     const logs = studyLogs(types);
+    logs.forEach((log, index) => { log.ts = new Date(Date.UTC(2026, 10, 14, 12, 0, index)).toISOString(); });
     const original = logs.map((log) => ({ ...log }));
     let originalRecordReads = 0;
     // Deterministic complexity guard: count reads of source records, not wall-clock time.
     const instrumented = new Proxy(logs, {
       get(target, property, receiver) {
-        if (typeof property === "string" && /^\\d+$/.test(property)) originalRecordReads++;
+        if (typeof property === "string" && /^\d+$/.test(property)) originalRecordReads++;
         return Reflect.get(target, property, receiver);
       },
     });
