@@ -58,3 +58,61 @@ it("keeps the open course mounted during same-account refresh, but clears it for
   rerender({ query: "different" });
   expect(result.current.courses).toEqual([]);
 });
+
+
+it("fails closed when a catalog page repeats a collection ID or assigns a revision to different collections", async () => {
+  vi.useFakeTimers();
+  const cases = [
+    [course("collection"), { ...course("collection"), current_revision_id: "other-revision" }],
+    [course("first"), { ...course("second"), current_revision_id: "first" }],
+  ];
+  for (const rows of cases) {
+    vi.mocked(listAcademicCourses).mockResolvedValueOnce(rows);
+    const { result, unmount } = renderHook(() => useAcademicCatalog("a", "", ""));
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(result.current.courses).toEqual([]);
+    expect(result.current.more).toBe(false);
+    expect(result.current.error).toMatch(/catalog changed/i);
+    unmount();
+  }
+});
+
+it("does not hide a repeated collection or revision identity on a later catalog page", async () => {
+  vi.useFakeTimers();
+  const first = Array.from({ length: 24 }, (_, index) => course("course-" + index));
+  for (const conflicting of [
+    { ...course("course-23"), current_revision_id: "new-revision" },
+    { ...course("different-collection"), current_revision_id: "course-5" },
+  ]) {
+    vi.mocked(listAcademicCourses).mockResolvedValueOnce(first).mockResolvedValueOnce([conflicting]);
+    const { result, unmount } = renderHook(() => useAcademicCatalog("a", "", ""));
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(result.current.courses).toHaveLength(24);
+    await act(async () => { await result.current.loadMore(); });
+    expect(result.current.courses).toEqual([]);
+    expect(result.current.more).toBe(false);
+    expect(result.current.error).toMatch(/catalog changed/i);
+    unmount();
+  }
+});
+
+it("allows unambiguous pagination and clean recovery after an inconsistent catalog page", async () => {
+  vi.useFakeTimers();
+  const first = Array.from({ length: 24 }, (_, index) => course("course-" + index));
+  vi.mocked(listAcademicCourses)
+    .mockResolvedValueOnce([course("first"), { ...course("first"), current_revision_id: "changed" }])
+    .mockResolvedValueOnce(first)
+    .mockResolvedValueOnce([course("course-24")]);
+  const { result } = renderHook(() => useAcademicCatalog("a", "", ""));
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.error).toMatch(/catalog changed/i);
+  act(() => result.current.retry());
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(result.current.courses).toHaveLength(24);
+  expect(result.current.error).toBe("");
+  await act(async () => { await result.current.loadMore(); });
+  expect(result.current.courses.map(entry => entry.id)).toEqual(
+    Array.from({ length: 25 }, (_, index) => "course-" + index));
+  expect(result.current.more).toBe(false);
+  expect(result.current.error).toBe("");
+});
