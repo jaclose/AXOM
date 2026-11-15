@@ -465,19 +465,69 @@ describe("review-gated explanation drafting", () => {
     expect(source.explanation).toBeUndefined();
   });
 
-  it("permits public source links and clinical slash notation in generated draft prose", async () => {
-    const model = provider({
-      explanation: "The tunica media controls arterial caliber via vascular smooth muscle. Reference: https://example.edu/arterial-histology.",
+  it.each([
+    ["public website invented in explanation", {
+      explanation: "The tunica media controls arterial diameter through vascular smooth muscle. Reference: https://example.edu/arterial-histology.",
+    }],
+    ["DOI invented in explanation", {
+      explanation: "The arterial tunica media contains smooth muscle and controls vascular caliber. DOI: 10.1234/vascular-example.2026.",
+    }],
+    ["PMID invented in distractor rationale", {
       choiceRationales: {
-        A: "The media has smooth muscle, unlike the other vessel wall layers.",
-        B: "The intima has the endothelial lining, not the main muscle layer.",
-        C: "The adventitia consists mainly of outer connective tissue support.",
+        A: "The tunica media contains contractile vascular smooth muscle.",
+        B: "The intima contains endothelium, not the principal muscle layer. PMID: 12345678.",
+        C: "The adventitia provides structural connective tissue support.",
+      },
+    }],
+    ["invented public website in distractor rationale", {
+      choiceRationales: {
+        A: "The tunica media contains contractile vascular smooth muscle.",
+        B: "The intima is the endothelial lining, not the principal muscle layer.",
+        C: "The adventitia is predominantly connective tissue. See www.example.edu/unsupported-reference.",
+      },
+    }],
+  ] as Array<[string, Record<string, unknown>]> )(
+    "rejects %s before accepting AI-authored source attribution", async (_case, patch) => {
+      const source = question({ citation: "https://example.edu/real-reviewed-source" });
+      const model = provider({
+        explanation: "The tunica media has concentric vascular smooth muscle that controls vessel caliber and peripheral resistance.",
+        choiceRationales: {
+          A: "The media contains layers of vascular smooth muscle.",
+          B: "The intima lines the lumen and contains endothelium.",
+          C: "The adventitia is largely supportive connective tissue.",
+        },
+        keywords: ["vascular smooth muscle"],
+        ...patch,
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/unverified source link or publication identifier/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      // A model cannot add publication citations or replace source-reviewed metadata.
+      expect(source.citation).toBe("https://example.edu/real-reviewed-source");
+      expect(source.correctKey).toBe("A");
+      expect(source.explanation).toBeUndefined();
+    },
+  );
+
+  it("keeps clinical slash notation eligible while source citations remain separately reviewed", async () => {
+    const source = question({
+      stem: "For the CD4/CD8 ratio, which arterial layer contains smooth muscle?",
+      citation: "https://example.edu/real-reviewed-source",
+    });
+    const model = provider({
+      explanation: "The tunica media contains concentric smooth muscle that controls arterial diameter and vascular tone.",
+      choiceRationales: {
+        A: "The tunica media contains vascular smooth muscle.",
+        B: "The intima provides the endothelial inner lining.",
+        C: "The adventitia is the outer connective tissue layer.",
       },
       keywords: ["cd4/cd8", "vascular smooth muscle"],
     });
-    const result = await draftQuestionExplanation(model, question());
-    expect(result.explanation).toContain("https://example.edu/arterial-histology");
+    const result = await draftQuestionExplanation(model, source);
     expect(result.keywords).toContain("cd4/cd8");
+    expect(result.explanation).toMatch(/vascular tone/);
+    expect(source.citation).toBe("https://example.edu/real-reviewed-source");
+    expect(source.correctKey).toBe("A");
   });
 
   it("invalidates drafts when source evidence or provenance changes without a timestamp bump", () => {

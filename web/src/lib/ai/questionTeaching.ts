@@ -185,6 +185,7 @@ export async function draftQuestionExplanation(
       "Explain the mechanism, why the chosen answer fits, and why EACH distractor is incorrect.",
       "If the supplied information cannot support a rationale, do not guess. Return an empty explanation instead.",
       "Do not invent references, patient facts, source provenance or claims of clinical review.",
+      "Do not generate URLs, DOIs, PMIDs, PMCIDs or source identifiers. Real citations remain in the separately reviewed source field.",
       "Output ONLY JSON with explanation (string), choiceRationales (object keyed by supplied choice keys),",
       "and keywords (array of up to eight subject phrases). Do not return a correctKey or other keys.",
     ].join(" "),
@@ -247,6 +248,14 @@ export async function draftQuestionExplanation(
   }
   if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
     throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
+  }
+  // The provider does not receive independently reviewed citation evidence.
+  // Even a plausible public URL/DOI/PMID is an invented attribution here.
+  // Fail closed rather than silently adding it to learner-facing teaching.
+  const unverifiedGeneratedReference = /\b(?:https?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}|doi\s*[:=]?\s*10\.\d{4,9}\/|pmid\s*[:#]?\s*\d{5,9}\b|pmcid\s*[:#]?\s*PMC\d+\b)/i;
+  if ([explanation, ...Object.values(choiceRationales), ...proposedKeywords]
+    .some(text => unverifiedGeneratedReference.test(text))) {
+    throw new Error("The AI draft contains an unverified source link or publication identifier. Verify the reference against the original source and enter it separately before publication.");
   }
   // Keywords are subject phrases, never rights attestations or visual-intent
   // decisions. Retain deterministic distinct suggestions for explicit review.
