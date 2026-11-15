@@ -67,6 +67,8 @@ describe("explicitly reviewed Community AI keywords", () => {
     ["PubMed Central identifier", "PMC1234567"],
     ["fullwidth DOI", "１０．１２３４／source"],
     ["zero-width obfuscated PMID", "PM\u200BID: 12345678"],
+    ["joiner-disguised PMID", "PM\u200DID: 12345678"],
+    ["word-joiner DOI", "10.1234\u2060/arterial-study"],
   ])("keeps a proposed %s out of reviewed subject keywords", (_label, keyword) => {
     const authored = ["histology", "source:reviewed"];
     expect(() => mergeReviewedCommunityKeywords(authored, keyword))
