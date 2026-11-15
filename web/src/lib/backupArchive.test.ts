@@ -427,6 +427,50 @@ describe("portable binary media backup", () => {
     },
   );
 
+  it.each(["declared MIME", "declared byte size"] as const)(
+    "rejects embedded JSON media with incompatible %s before asking to replace the workspace",
+    async defect => {
+      // A structurally valid embedded PNG cannot certify a reference claiming
+      // JPEG bytes or an incompatible size, even when its storage key exists.
+      const referenced = defect === "declared MIME"
+        ? { ...attachment, mimeType: "image/jpeg" as const }
+        : { ...attachment, byteSize: attachment.byteSize + 1 };
+      const raw = {
+        _app: "AXOM",
+        questions: [{ id: "held-question", attachments: [referenced] }],
+        [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: PNG_BASE64 }],
+      };
+      await expect(readPortableBackup(new File([JSON.stringify(raw)], "mismatched-reference.json")))
+        .rejects.toThrow(/image.*reference|conflicting image metadata/i);
+    },
+  );
+
+  it("rejects conflicting shared-key JSON references before asking for recovery consent", async () => {
+    const raw = {
+      _app: "AXOM",
+      questions: [
+        { id: "question-a", attachments: [{ ...attachment, id: "first-use" }] },
+        { id: "question-b", attachments: [{ ...attachment, id: "second-use", byteSize: attachment.byteSize + 1 }] },
+      ],
+      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, id: "first-use", questionId: "question-a", base64: PNG_BASE64 }],
+    };
+    await expect(readPortableBackup(new File([JSON.stringify(raw)], "conflicting-references.json")))
+      .rejects.toThrow(/conflicting image metadata/i);
+  });
+
+  it("accepts consistent shared-key JSON references without a false omission", async () => {
+    const raw = {
+      _app: "AXOM",
+      questions: [
+        { id: "question-a", attachments: [{ ...attachment, id: "first-use" }] },
+        { id: "question-b", attachments: [{ ...attachment, id: "second-use" }] },
+      ],
+      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, id: "first-use", questionId: "question-a", base64: PNG_BASE64 }],
+    };
+    const recovered = await readPortableBackup(new File([JSON.stringify(raw)], "consistent-references.json"));
+    expect(recovered.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+  });
+
   it("rejects a malformed embedded JSON image record instead of silently omitting it", async () => {
     const raw = {
       _app: "AXOM",
