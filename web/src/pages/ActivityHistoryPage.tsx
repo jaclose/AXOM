@@ -4,7 +4,7 @@ import { useStore } from "../lib/store";
 import { useAccount } from "../lib/account/accountStore";
 import { GlassCard, GButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Field, SelectField } from "../components/ui/Modal";
-import { ActivityExportTextEncodingError, exportActivityWorkbook } from "../lib/activityExport";
+import { ActivityExportCellLimitError, ActivityExportTextEncodingError, exportActivityWorkbook } from "../lib/activityExport";
 import { pushToast } from "../lib/toast";
 import { prettyDate } from "../lib/scoring";
 import type { StudyLog } from "../lib/types";
@@ -128,7 +128,9 @@ export function ActivityHistoryPage() {
           ? { title: "Activity export canceled", body: "Your study history changed. Reopen Activity History before exporting the current records.", tone: "warn" }
           : error instanceof ActivityExportTextEncodingError
             ? { title: "Activity export stopped", body: "Some saved activity text contains invalid Unicode that Excel would alter. No workbook was downloaded and your study history is unchanged. Preserve a workspace backup and correct the affected entry before exporting.", tone: "warn" }
-            : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
+            : error instanceof ActivityExportCellLimitError
+              ? { title: "Activity export stopped", body: "Some saved activity text exceeds Excel cell limits (32,767 characters or 253 line feeds). No workbook was downloaded and your study history is unchanged. Preserve a workspace backup and shorten the affected entry before exporting.", tone: "warn" }
+              : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
     } finally {
       if (!unmounted.current) setExportPending(false);
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkBook } from "xlsx-js-style";
-import { ActivityExportTextEncodingError, allocateActivitySheetName, exportActivityWorkbook } from "./activityExport";
+import { ActivityExportCellLimitError, ActivityExportTextEncodingError, allocateActivitySheetName, exportActivityWorkbook } from "./activityExport";
 import type { StudyLog } from "./types";
 
 function studyLogs(types: string[]): StudyLog[] {
@@ -257,6 +257,43 @@ describe("Activity History XLSX sheet title collisions", () => {
     expect(logs).toEqual(before);
   });
 
+
+  it("refuses text above Excel cell limits before building or saving XLSX, without changing records", async () => {
+    const scenarios = [
+      ["note", "n".repeat(32768)],
+      ["type", "t".repeat(32768)],
+      ["dayKey", "d".repeat(32768)],
+      ["ts", "s".repeat(32768)],
+      ["note", ("a\n").repeat(254)],
+    ] as const;
+    for (const [field, value] of scenarios) {
+      const logs = studyLogs(["Anki"]);
+      logs[0][field] = value;
+      const original = logs.map((log) => ({ ...log }));
+      let writerCalls = 0;
+      await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+        .rejects.toBeInstanceOf(ActivityExportCellLimitError);
+      expect(writerCalls).toBe(0);
+      expect(logs).toEqual(original);
+    }
+  });
+
+  it("allows Excel boundary values of 32,767 code units and 253 line feeds", async () => {
+    const logs = studyLogs(["Anki"]);
+    logs[0].note = "z".repeat(32767);
+    const original = logs.map((log) => ({ ...log }));
+    const workbook = await captureWorkbook(logs);
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const restored = XLSX.read(bytes, { type: "buffer" });
+    expect(restored.Sheets["All Activity"]?.F2?.v).toBe(logs[0].note);
+    logs[0].note = "a" + "\n".repeat(253) + "b";
+    const withLineFeeds = await captureWorkbook(logs);
+    const lineFeedBytes = XLSX.write(withLineFeeds, { bookType: "xlsx", type: "buffer" });
+    const reloadedLineFeeds = XLSX.read(lineFeedBytes, { type: "buffer" });
+    expect(reloadedLineFeeds.Sheets["All Activity"]?.F2?.v).toBe(logs[0].note);
+    expect(original[0].note).toHaveLength(32767);
+  });
 
   it("refuses malformed UTF-16 source text before invoking any XLSX writer, preserving original records", async () => {
     const loneHigh = String.fromCharCode(0xd800);

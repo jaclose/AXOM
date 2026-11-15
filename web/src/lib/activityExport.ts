@@ -17,16 +17,29 @@ export class ActivityExportTextEncodingError extends Error {
   }
 }
 
+/** Excel accepts at most 32,767 text units and 253 line feeds in one cell. */
+export class ActivityExportCellLimitError extends Error {
+  constructor() {
+    super("Activity export stopped: saved text exceeds Excel cell limits.");
+    this.name = "ActivityExportCellLimitError";
+  }
+}
+
 function assertLosslessWorkbookText(logs: StudyLog[]): void {
   // Validate only exported text fields; source rows, including IDs, are never rewritten.
   // for...of iterates paired supplementary characters as a single two-unit symbol.
   for (const log of logs) {
     for (const text of [log.dayKey, log.ts, log.type, log.note]) {
       if (!text) continue;
+      // Check the actual XLSX cell content before construction: the writer rejects
+      // oversized text, and Excel itself limits line feeds even when the writer does not.
+      if (text.length > 32767) throw new ActivityExportCellLimitError();
+      let lineFeeds = 0;
       for (const symbol of text) {
         if (symbol.length === 1 && /[\uD800-\uDFFF]/.test(symbol)) {
           throw new ActivityExportTextEncodingError();
         }
+        if (symbol === "\n" && ++lineFeeds > 253) throw new ActivityExportCellLimitError();
       }
     }
   }
