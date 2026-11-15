@@ -134,6 +134,36 @@ test("an incomplete legacy JSON warns before replacement, cancellation preserves
     const partialPage = await partialContext.newPage();
     await partialPage.goto(origin + "/?app=1#dashboard", { waitUntil: "networkidle" });
     await seedOnboarded(partialPage, { name: "Fresh incomplete JSON target" });
+    // Give the recovery target its own fabricated saved data. A cancellation
+    // must preserve the *existing* workspace, not merely omit the source item.
+    const originalTargetNote = "R110 existing work must survive cancel";
+    await partialPage.evaluate(async note => {
+      const dev = await (window as unknown as {
+        __AXOM_DEV__: Promise<{ useStore: {
+          getState: () => { questions: { id: string }[] };
+          setState: (patch: Record<string, unknown>) => void;
+        }; flushVault: () => Promise<void> }>;
+      }).__AXOM_DEV__;
+      const createdAt = "2026-11-15T00:00:00.000Z";
+      dev.useStore.setState({ questions: [
+        ...dev.useStore.getState().questions.filter(q => q.id !== "r110-target-sentinel"),
+        { id: "r110-target-sentinel", stem: "Existing synthetic target work",
+          options: [{ key: "A", text: "Fabricated" }], correctKey: "A",
+          source: "manual", status: "unseen", tags: [], attempts: [],
+          notes: note, attachments: [], createdAt, updatedAt: createdAt },
+      ] });
+      await dev.flushVault();
+    }, originalTargetNote);
+    await reloadAfterSave(partialPage);
+    const readTargetNote = () => partialPage.evaluate(async () => {
+      const dev = await (window as unknown as {
+        __AXOM_DEV__: Promise<{ useStore: { getState: () => {
+          questions: { id: string; notes?: string }[];
+        } } }>;
+      }).__AXOM_DEV__;
+      return dev.useStore.getState().questions.find(q => q.id === "r110-target-sentinel")?.notes ?? null;
+    });
+    expect(await readTargetNote()).toBe(originalTargetNote);
     expect(await inspect(partialPage)).toMatchObject({ note: null, imageBase64: null });
     await openRecovery(partialPage, true);
 
@@ -141,6 +171,7 @@ test("an incomplete legacy JSON warns before replacement, cancellation preserves
     expect(cancelled).toContain("This JSON is incomplete: 1 referenced image attachment(s)");
     expect(cancelled).toContain("their bytes cannot be restored from this copy");
     await expect(partialPage.locator(".backup-status")).toContainText("Restore cancelled. No data changed.");
+    expect(await readTargetNote()).toBe(originalTargetNote);
     expect(await inspect(partialPage)).toMatchObject({ note: null, imageBase64: null });
 
     const approved = await chooseBackup(partialPage, "missing-legacy-image.json", incompleteBytes, () => true);
