@@ -127,10 +127,10 @@ export async function downloadAcademicCourse(revision: string, progress: (messag
 }
 const reviewerChecks = new Map<string, Promise<boolean>>();
 /** Whether the signed-in account may approve shared courses. The server still
- * enforces review rights; this only decides which controls to offer. Asked
- * once per account per session: reviewer membership changes rarely, and a
- * reload asks again. Any failure, including a backend without the check yet,
- * offers no review controls. */
+ * enforces review rights; this only decides which controls to offer.
+ * Deduplicate concurrent checks, but never cache a settled entitlement:
+ * reviewer grants, revocations and transient failures must be rechecked when
+ * a screen opens again without requiring the user to reload the whole app. */
 export function isAcademicReviewer(accountId: string): Promise<boolean> {
   let check = reviewerChecks.get(accountId);
   if (!check) {
@@ -138,6 +138,10 @@ export function isAcademicReviewer(accountId: string): Promise<boolean> {
       .then(client => client.rpc("academic_is_reviewer"))
       .then(({ data, error }) => !error && data === true, () => false);
     reviewerChecks.set(accountId, check);
+    const current = check;
+    void current.then(() => {
+      if (reviewerChecks.get(accountId) === current) reviewerChecks.delete(accountId);
+    });
   }
   return check;
 }
