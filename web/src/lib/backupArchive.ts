@@ -577,6 +577,9 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     assertRestorableZipEntryCounts(media.length + 1, 0);
     const file = `media/${media.length}`;
     const sha256 = await sha256Hex(bytes);
+    // In older/offline webviews SubtleCrypto may be unavailable. Never emit a
+    // v3 archive that would later be rejected for lacking its mandatory hash.
+    if (!sha256) throw new Error("SHA-256 is unavailable; no ZIP backup was downloaded or certified.");
     zip.file(file, bytes);
     media.push({ file, metadata, sha256 });
   }
