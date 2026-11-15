@@ -171,6 +171,76 @@ describe("review-gated explanation drafting", () => {
     expect(source.explanation).toBeUndefined();
   });
 
+  it("holds a large combined clinical prompt despite every individual field passing its limit", async () => {
+    const source = question({
+      stem: "Clinical history: " + "x".repeat(6_000),
+      options: [
+        { key: "A", text: "Media: " + "a".repeat(3_800) },
+        { key: "B", text: "Intima: " + "b".repeat(3_800) },
+        { key: "C", text: "Adventitia: " + "c".repeat(3_800) },
+        { key: "D", text: "Endothelium: " + "d".repeat(3_800) },
+      ],
+      topic: "Arterial histology",
+    });
+    const before = JSON.stringify(source);
+    const model = provider({});
+    expect(source.stem.length).toBeLessThan(8_001);
+    expect(source.options.every(option => option.text.length <= 4_000)).toBe(true);
+    expect(eligibleForExplanationDraft(source)).toBe(false);
+    await expect(draftQuestionExplanation(model, source)).rejects.toThrow(/prompt limits|truncated/i);
+    expect(model.completeJson).not.toHaveBeenCalled();
+    expect(JSON.stringify(source)).toBe(before);
+    expect(source.correctKey).toBe("A");
+  });
+
+  it("counts the repeated confirmed choice in the full outbound prompt budget", async () => {
+    const source = question({
+      stem: "Which layer? " + "x".repeat(7_500),
+      options: [
+        { key: "A", text: "Media: " + "a".repeat(3_800) },
+        { key: "B", text: "Intima: " + "b".repeat(3_800) },
+        { key: "C", text: "Adventitia: " + "c".repeat(1_700) },
+      ],
+    });
+    // Unique fields total below 20,000; duplicating the correct choice
+    // in "Confirmed answer" exceeds it and must not trigger AI inference.
+    const uniqueFields = source.stem.length + source.options.reduce((sum, option) => sum + option.text.length, 0);
+    expect(uniqueFields).toBeLessThan(20_000);
+    const model = provider({});
+    expect(eligibleForExplanationDraft(source)).toBe(false);
+    await expect(draftQuestionExplanation(model, source)).rejects.toThrow(/prompt limits|truncated/i);
+    expect(model.completeJson).not.toHaveBeenCalled();
+  });
+
+  it("keeps a complete under-budget prompt and all source text intact", async () => {
+    const source = question({
+      stem: "Which arterial layer? " + "x".repeat(3_500) + "STEMEND",
+      options: [
+        { key: "A", text: "Media: " + "a".repeat(2_800) + "MEDIAEND" },
+        { key: "B", text: "Intima: " + "b".repeat(2_800) + "INTIMAEND" },
+        { key: "C", text: "Adventitia: " + "c".repeat(2_800) + "ADVENTITIAEND" },
+      ],
+    });
+    const before = JSON.stringify(source);
+    const model = provider({
+      explanation: "The tunica media contains layers of arterial smooth muscle that control vessel caliber and vascular resistance.",
+      choiceRationales: {
+        A: "The tunica media is the smooth muscle rich arterial layer.",
+        B: "The tunica intima provides the inner endothelial surface.",
+        C: "The tunica adventitia is mainly the supportive outer connective tissue.",
+      },
+      keywords: ["vascular histology"],
+    });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    await draftQuestionExplanation(model, source);
+    const sent = vi.mocked(model.completeJson).mock.calls[0][0].prompt;
+    expect(sent.length).toBeLessThanOrEqual(20_000);
+    for (const marker of ["STEMEND", "MEDIAEND", "INTIMAEND", "ADVENTITIAEND"]) {
+      expect(sent).toContain(marker);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   it("never sends unresolved answers or inaccessible image questions to a model", async () => {
     const model = provider({});
     await expect(draftQuestionExplanation(model, question({ correctKey: undefined }))).rejects.toThrow(/reviewed answer/i);
