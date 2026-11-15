@@ -1433,6 +1433,59 @@ describe("portable binary media backup", () => {
     }
   });
 
+  it("refuses an original-only v3 export when WebCrypto is absent before export", async () => {
+    const original = new Blob(["Exact locally cached original without an image"], { type: "text/plain" });
+    const document: SourceDocument = {
+      id: "no-crypto-original-only", title: "Original without image", fileName: "source.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Original-only source",
+      sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await saveSourceOriginal(document, original);
+    const cryptoWithSubtle = globalThis.crypto;
+    vi.stubGlobal("crypto", {
+      getRandomValues: cryptoWithSubtle.getRandomValues.bind(cryptoWithSubtle),
+      subtle: undefined,
+    });
+    try {
+      // A v3 archive with originals[] is unreadable in this runtime. Never
+      // certify it as a complete backup or misreport its present source as omitted.
+      await expect(createMediaBackupArchive({ documents: [document] }, [], [document]))
+        .rejects.toThrow(/SHA-256.*unavailable/i);
+      expect(await (await readSourceOriginal(document.id, document.checksum))?.text())
+        .toBe("Exact locally cached original without an image");
+    } finally {
+      vi.stubGlobal("crypto", cryptoWithSubtle);
+    }
+    const exported = await createMediaBackupArchive({ documents: [document] }, [], [document]);
+    expect(exported).toMatchObject({ attachmentCount: 0, originalCount: 1, missingOriginalIds: [] });
+    const readable = await readPortableBackup(new File([exported.blob], "original-only-valid.zip"));
+    expect(readable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+  });
+
+  it("still discloses genuinely unavailable original bytes in a partial ZIP without WebCrypto", async () => {
+    const absent = new Blob(["Missing original bytes"], { type: "text/plain" });
+    const document: SourceDocument = {
+      id: "no-crypto-missing-original", title: "Missing original", fileName: "missing.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Metadata retained",
+      sizeBytes: absent.size, checksum: await sha256Hex(await absent.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    const cryptoWithSubtle = globalThis.crypto;
+    vi.stubGlobal("crypto", {
+      getRandomValues: cryptoWithSubtle.getRandomValues.bind(cryptoWithSubtle),
+      subtle: undefined,
+    });
+    try {
+      const exported = await createMediaBackupArchive({ documents: [document] }, [], [document]);
+      expect(exported).toMatchObject({ attachmentCount: 0, originalCount: 0, missingOriginalIds: [document.id] });
+      const readable = await readPortableBackup(new File([exported.blob], "original-missing-partial.zip"));
+      expect(readable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [document.id] });
+    } finally {
+      vi.stubGlobal("crypto", cryptoWithSubtle);
+    }
+  });
+
   it("rejects absent or malformed new-format image digests but permits legacy v1/v2 archives", async () => {
     const { default: JSZip } = await import("jszip");
     await putQuestionAttachmentBlob(attachment.blobKey, {
