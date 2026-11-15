@@ -4,7 +4,7 @@ import { useStore } from "../lib/store";
 import { useAccount } from "../lib/account/accountStore";
 import { GlassCard, GButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Field, SelectField } from "../components/ui/Modal";
-import { ActivityExportCellLimitError, ActivityExportTextEncodingError, exportActivityWorkbook } from "../lib/activityExport";
+import { ActivityExportCellLimitError, ActivityExportTextEncodingError, compareStudyLogsNewestFirst, exportActivityWorkbook } from "../lib/activityExport";
 import { pushToast } from "../lib/toast";
 import { prettyDate } from "../lib/scoring";
 import type { StudyLog } from "../lib/types";
@@ -211,20 +211,6 @@ export function ActivityHistoryPage() {
   );
 }
 
-
-/** Keep the visible ledger chronologically consistent with the XLSX ordering. */
-function compareStudyLogsNewestFirst(a: StudyLog, b: StudyLog): number {
-  const aTime = Date.parse(a.ts);
-  const bTime = Date.parse(b.ts);
-  const aValid = Number.isFinite(aTime);
-  const bValid = Number.isFinite(bTime);
-
-  // Mixing epoch and lexical branches in one comparison creates sort cycles.
-  if (aValid !== bValid) return aValid ? -1 : 1;
-  if (aValid && bValid && aTime !== bTime) return bTime - aTime;
-
-  return b.ts.localeCompare(a.ts) || a.id.localeCompare(b.id);
-}
 
 function HistoryStat({ label, value }: { label: string; value: number }) {
   return (
