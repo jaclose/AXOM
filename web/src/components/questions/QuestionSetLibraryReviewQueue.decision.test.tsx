@@ -74,6 +74,33 @@ describe("Question Set academic decisions", () => {
     expect(mocks.decide).not.toHaveBeenCalled();
   });
 
+  it("summarizes evidence gaps across undisplayed questions and blocks approval of an explanation-free legacy pending set", async () => {
+    const candidate = reviewPreview(21);
+    candidate.snapshot.questions[19].explanation = "Answer: A";
+    candidate.snapshot.questions[20].explanation = "";
+    candidate.snapshot.questions[20].citation = "";
+    mocks.preview.mockResolvedValue(candidate);
+    await inspect();
+    const inventory = screen.getByTestId("qsl-review-evidence-inventory").textContent ?? "";
+    expect(inventory).toContain("1 without source citations");
+    expect(inventory).toContain("2 without explanation prose");
+    expect(inventory).toContain("20 lacking at least one choice rationale");
+    expect(inventory).toContain("1 containing AI-assisted teaching");
+    expect(inventory).toContain("not verified answer keys or image rights");
+    expect(inventory).toContain("Approval is blocked until missing explanations are revised");
+    const note = "The final question has no source citation or explanation.";
+    fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), { target: { value: note } });
+    fireEvent.click(screen.getByRole("button", { name: "Show next 20 questions" }));
+    expect(await screen.findByText("Vignette 21")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Approve for library" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.decide).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Return for revision" }));
+    await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith(
+      "independent-reviewer", expect.objectContaining({ id }), false, note,
+    ));
+  });
+
   it("permits reasoned rejection without falsely attesting to distribution rights or answer correctness", async () => {
     await inspect();
     const reason = "Source reproduction rights are not demonstrated.";
