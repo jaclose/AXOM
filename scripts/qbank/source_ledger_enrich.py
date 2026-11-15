@@ -664,9 +664,17 @@ def merge_agent2_assessment(dispositions, canonical, rows, audit_path):
     source_package_counts=collections.Counter()
     for p in canonical:
         record=rows_by_path.get(p.get("source_path"))
-        if record and record.get("source_sha256"):
-            source_package_counts[record["source_sha256"]] += 1
-            key=(p["bank_id"],record["source_sha256"])
+        if record:
+            sha = record.get("source_sha256")
+            if not _valid_source_sha(sha):
+                # A malformed manifest digest must not become a hash-table
+                # identity or contribute a supposedly eligible native package.
+                # Other independently bound parser receipts remain reviewable.
+                rejected.append("native_package_source_digest_unverified:"
+                                + str(p.get("bank_id", "")))
+                continue
+            source_package_counts[sha] += 1
+            key=(p["bank_id"],sha)
             if key in expected:
                 # Multiple native revisions cite one bank/source tuple. Do not
                 # let scan ordering select which parser receipt is trusted.
