@@ -52,6 +52,10 @@ export async function listTermCourses(term: string, accountId: string,
 
 type TermWorkspace = DownloadWorkspace & Pick<NoctyriumState, "terms" | "courses">;
 
+function hasForeignDeferredHydration(accountId: string, workspace: TermWorkspace): boolean {
+  return !!workspace.deferredContent && workspace.deferredContent.accountId !== accountId;
+}
+
 function workspaceReferences(accountId: string, workspace: TermWorkspace): DownloadReference[] {
   const references: DownloadReference[] = [];
   for (const document of workspace.documents) {
@@ -74,6 +78,9 @@ function installedReferenceTerm(saved: DownloadReference, workspace: TermWorkspa
 /** Old question-only receipts may have no local term identity. Check every
  * receipt, not only those represented in the visible catalog page. */
 export function termQuizNeedsCatalog(accountId: string, workspace: TermWorkspace): boolean {
+  // Do not prefetch legacy metadata while account-bound hydration bars practice.
+  // The caller will revisit this lookup after the active workspace reconciles.
+  if (hasForeignDeferredHydration(accountId, workspace)) return false;
   return workspaceReferences(accountId, workspace).some(saved => !saved.term && !installedReferenceTerm(saved, workspace));
 }
 
@@ -84,7 +91,7 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   courses: readonly AcademicCourse[] = []): CourseQuizLaunch {
   // Deferred hydration is account-bound. Never derive saved quiz membership
   // from a workspace mixing this account with another account's pending data.
-  if (workspace.deferredContent && workspace.deferredContent.accountId !== accountId) {
+  if (hasForeignDeferredHydration(accountId, workspace)) {
     return { module: term, term, setIds: [], questionIds: [] };
   }
   const ids = new Set<string>();
