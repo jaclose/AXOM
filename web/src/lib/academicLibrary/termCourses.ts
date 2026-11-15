@@ -84,14 +84,35 @@ export function termQuizSelection(term: string, accountId: string, workspace: Te
   courses: readonly AcademicCourse[] = []): CourseQuizLaunch {
   const ids = new Set<string>();
   const setIds = new Set<string>();
+  const questionTerms = new Map<string, string>();
+  const setTerms = new Map<string, string>();
+  const conflictingQuestions = new Set<string>();
+  const conflictingSets = new Set<string>();
+  const requestedTerm = termIdentity(term);
+  const recordTerm = (id: string, owner: string, owners: Map<string, string>, conflicts: Set<string>) => {
+    const previous = owners.get(id);
+    if (previous !== undefined && previous !== owner) conflicts.add(id);
+    else owners.set(id, owner);
+  };
+  // A local ID claimed by two *different* source terms is not safe to quiz
+  // under either term. Same-term receipt duplicates are still deduplicated.
   for (const saved of workspaceReferences(accountId, workspace)) {
     const catalog = courses.find(course => course.id === saved.collectionId && course.current_revision_id === saved.revisionId);
     if (saved.term && catalog && termIdentity(saved.term) !== termIdentity(catalog.term)) continue;
     const savedTerm = saved.term ?? catalog?.term ?? installedReferenceTerm(saved, workspace);
-    if (!savedTerm || termIdentity(savedTerm) !== termIdentity(term)) continue;
-    for (const id of saved.questionIds) ids.add(id);
-    for (const id of saved.setIds) if (workspace.questionSets.some(set => set.id === id)) setIds.add(id);
+    if (!savedTerm) continue;
+    const ownerTerm = termIdentity(savedTerm);
+    for (const id of saved.questionIds) {
+      recordTerm(id, ownerTerm, questionTerms, conflictingQuestions);
+      if (ownerTerm === requestedTerm) ids.add(id);
+    }
+    for (const id of saved.setIds) {
+      recordTerm(id, ownerTerm, setTerms, conflictingSets);
+      if (ownerTerm === requestedTerm && workspace.questionSets.some(set => set.id === id)) setIds.add(id);
+    }
   }
+  for (const id of conflictingQuestions) ids.delete(id);
+  for (const id of conflictingSets) setIds.delete(id);
   const counts = new Map<string, number>();
   for (const question of workspace.questions) counts.set(question.id, (counts.get(question.id) ?? 0) + 1);
   const deferred = new Set(workspace.deferredContent?.questions.map(question => question.id) ?? []);
