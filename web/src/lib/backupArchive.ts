@@ -198,23 +198,47 @@ export async function preflightRestorableZipCandidateBudget(
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
-/** Root and deferred copies may mirror one original ID, but they cannot
- * claim different valid source digests. A last-wins Map could otherwise make
- * a contradictory source appear complete before Replace/Merge consent. */
+/** Root and deferred copies may mirror one original ID, but must not
+ * contradict the immutable original's identity. Do not compare mutable title,
+ * filename or tags; legacy internal/untyped records are not original claims.
+ * Refuse ambiguity before offering Replace/Merge consent. */
 function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): void {
-  const byId = new Map<string, string>();
+  type OriginalClaim = { digest: string; fileType?: string; sizeBytes?: number };
+  const byId = new Map<string, OriginalClaim>();
   for (const record of records) {
     if (!record || typeof record !== "object") continue;
-    const { id, checksum } = record as Partial<SourceDocument>;
+    const { id, checksum, fileType, sizeBytes } = record as Partial<SourceDocument>;
     if (typeof id !== "string" || typeof checksum !== "string") continue;
     const digest = checksum.replace(/^sha256:/, "");
     // Historical unbound originals are still represented as metadata only.
     if (!/^[a-f0-9]{64}$/.test(digest)) continue;
     const prior = byId.get(id);
-    if (prior !== undefined && prior !== digest) {
+    if (prior !== undefined && prior.digest !== digest) {
       throw new Error("The backup contains conflicting source-document checksums for one document ID. No workspace data has been changed.");
     }
-    byId.set(id, digest);
+    // Only two eligible external-original records can conflict on their MIME
+    // or declared size. Invalid/absent sizes are historical metadata gaps,
+    // not proof that a single source's cached original is corrupt.
+    const externalType = typeof fileType === "string" && fileType.length > 0
+      && !fileType.startsWith("axom-") ? fileType.toLowerCase() : undefined;
+    // SourceDocument.fileType permits either a MIME type or an extension.
+    // Compare MIME against MIME only; "pdf" and "application/pdf" are not
+    // conflicting evidence about the same immutable source bytes.
+    const explicitMime = externalType?.includes("/") ? externalType : undefined;
+    const externalSize = externalType !== undefined && typeof sizeBytes === "number"
+      && Number.isSafeInteger(sizeBytes) && sizeBytes >= 0 ? sizeBytes : undefined;
+    if (prior?.fileType && explicitMime && prior.fileType !== explicitMime) {
+      throw new Error("The backup contains conflicting source-document file type for one document ID. No workspace data has been changed.");
+    }
+    if (prior?.sizeBytes !== undefined && externalSize !== undefined
+      && prior.sizeBytes !== externalSize) {
+      throw new Error("The backup contains conflicting source-document size for one document ID. No workspace data has been changed.");
+    }
+    byId.set(id, {
+      digest,
+      fileType: prior?.fileType ?? explicitMime,
+      sizeBytes: prior?.sizeBytes ?? externalSize,
+    });
   }
 }
 const FORMAT = "axom-media-backup";
