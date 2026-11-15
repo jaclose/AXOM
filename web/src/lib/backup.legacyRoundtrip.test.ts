@@ -96,7 +96,7 @@ describe("R109: legacy id-only image completeness at the portable export/import 
   it("does not misreport a JSON image whose embedded bytes match a legacy id-only reference", async () => {
     const id = "legacy-json-present";
     const raw = {
-      _app: "AXOM", _backupScope: "complete",
+      _app: "AXOM", _backupScope: "complete", terms: [],
       questions: [{ id: "json-question", attachments: [legacyImage(id)] }],
       [ATTACHMENT_EXPORT_KEY]: [{ ...exampleImage, id, blobKey: id, questionId: "json-question", base64: PNG_BASE64 }],
     };
