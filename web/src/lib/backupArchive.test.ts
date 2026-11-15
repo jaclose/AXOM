@@ -198,6 +198,56 @@ describe("portable binary media backup", () => {
     });
   });
 
+  it.each([1, 2] as const)(
+    "discloses missing root and deferred legacy id-only image references from v%d ZIPs", async version => {
+      const legacyAttachment = (id: string) => {
+        const old: Partial<QuestionImageAttachment> = { ...attachment, id };
+        delete old.blobKey;
+        return old;
+      };
+      // Old payloads may have no blobKey even when id, MIME, timestamps, and size
+      // are valid. Import normalizes their storage key to id.
+      const payload = {
+        _app: "AXOM", _backupScope: "complete",
+        questions: [{ id: "legacy-root-question", attachments: [legacyAttachment("legacy-root-image")] }],
+        deferredContent: {
+          questions: [{ id: "legacy-deferred-question", attachments: [legacyAttachment("legacy-deferred-image")] }],
+        },
+      };
+      const exported = await createMediaBackupArchive(payload, [], []);
+      const { default: JSZip } = await import("jszip");
+      const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+      const workspace = JSON.parse(await zip.file("workspace.json")!.async("string"));
+      workspace._backupVersion = version;
+      zip.file("workspace.json", JSON.stringify(workspace));
+      const backup = await readPortableBackup(
+        new File([await zip.generateAsync({ type: "blob" })], `legacy-v${version}.zip`),
+      );
+      expect(backup.omissions).toEqual({
+        missingBlobKeys: ["legacy-root-image", "legacy-deferred-image"],
+        missingOriginalIds: [],
+      });
+      expect(JSON.parse(backup.rawText)._backupScope).toBe("complete");
+    },
+  );
+
+  it("does not falsely report a legacy id-only image when matching ZIP bytes exist", async () => {
+    const legacyId = "legacy-present-image";
+    const historical: Partial<QuestionImageAttachment> = { ...attachment, id: legacyId };
+    delete historical.blobKey;
+    await putQuestionAttachmentBlob(legacyId, {
+      blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length,
+      questionId: "legacy-present-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive(
+      { _app: "AXOM", _backupScope: "complete",
+        questions: [{ id: "legacy-present-question", attachments: [historical] }] },
+      [{ id: "legacy-present-question", attachments: [{ ...attachment, id: legacyId, blobKey: legacyId }] }],
+    );
+    const backup = await readPortableBackup(new File([exported.blob], "legacy-present.zip"));
+    expect(backup.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+  });
+
   it("does not claim omitted ZIP files for complete available assets or accept an archive label as integrity proof", async () => {
     const original = new Blob(["Available source bytes"], { type: "text/plain" });
     const document: SourceDocument = {
