@@ -126,8 +126,8 @@ function hasUnrepresentedRichSource(question: QuestionRecord): boolean {
 // otherwise readable teaching text. Normalize only the scanning copy; never
 // rewrite a learner's source question or an AI proposal during validation.
 const INVISIBLE_REFERENCE_CONTROLS = /[\u200B-\u200D\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
-function referenceSafetyText(value: string): string {
-  return value.replace(INVISIBLE_REFERENCE_CONTROLS, "");
+function referenceSafetyText(value: string | undefined): string {
+  return (value ?? "").replace(INVISIBLE_REFERENCE_CONTROLS, "");
 }
 
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
