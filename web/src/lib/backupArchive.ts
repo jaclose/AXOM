@@ -709,6 +709,20 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
         attachments: normalizeQuestionAttachments(question.attachments) ?? [],
       }));
     const expected = mediaReferences([...questions, ...privateReviewMedia(sourceDocuments)]);
+    // An embedded image is usable only if its validated bytes and declared
+    // metadata match *every* question reference to the same immutable key.
+    // Refuse contradictions before the Settings confirmation, not after the
+    // workspace has been offered for replacement. Missing bytes alone remain
+    // eligible for explicitly disclosed metadata-only partial recovery.
+    for (const { metadata, conflicting } of expected) {
+      if (conflicting) {
+        throw new Error("The JSON backup references conflicting image metadata for one storage key. No workspace data has been changed.");
+      }
+      const embedded = verified.get(metadata.blobKey);
+      if (embedded && (embedded.mimeType !== metadata.mimeType || embedded.byteSize !== metadata.byteSize)) {
+        throw new Error("A JSON backup image does not match its reference MIME or size. No workspace data has been changed.");
+      }
+    }
     const omissions = {
       missingBlobKeys: [...new Set(expected.map(({ metadata }) => metadata.blobKey).filter(key => !verified.has(key)))],
       missingOriginalIds: [] as string[],
