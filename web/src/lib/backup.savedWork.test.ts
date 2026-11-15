@@ -132,7 +132,7 @@ describe("saved-work recovery without downloading content", () => {
     async (format) => {
       localStorage.clear();
       const { state, original } = await fixture();
-      const legacyId = `legacy-id-only-${format}`;
+      const legacyId = "legacy-id-only-" + format;
       const source = state.questions[0].attachments![0];
       // Historical portable records can have a valid ID without blobKey.
       state.questions[0].attachments = [{ ...source, id: legacyId, blobKey: undefined as unknown as string }];
@@ -145,136 +145,7 @@ describe("saved-work recovery without downloading content", () => {
 
       const result = await exportStateWithAttachments(state);
       expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
-      expect(filename).toMatch(new RegExp(`\\.${format}// @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
-import { exportStateWithAttachments, lastBackupAt, markBackupDone, parseImport } from "./backup";
-import { readPortableBackup } from "./backupArchive";
-import { setQuestionAttachmentAccount } from "./questionAttachmentScope";
-import { makeSeed } from "./seed";
-import { sha256Hex } from "./checksum";
-import { saveSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
-import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
-import { splitCloudContent } from "./sync/cloudContent";
-import { deferContent } from "./sync/deferredContent";
-import { retainDownloadedContent } from "./sync/contentDownloads";
-
-const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
-const PNG_BYTES = Uint8Array.from(atob(PNG_BASE64), char => char.charCodeAt(0));
-const pngBlob = () => new Blob([PNG_BYTES.buffer as ArrayBuffer], { type: "image/png" });
-const attachment: QuestionImageAttachment = { id: "figure", blobKey: "offline-figure", fileName: "figure.png", mimeType: "image/png", byteSize: PNG_BYTES.length, altText: "Test figure", createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z", role: "question" };
-const attemptedDownload = vi.fn(async () => { throw new Error("Offline"); });
-const accountRead = vi.hoisted(() => vi.fn(async () => { throw new Error("Account unavailable"); }));
-vi.mock("./account/supabase", () => ({ accountOperationClient: accountRead }));
-let exported: Blob | undefined;
-let filename = "";
-let dispose: () => void;
-
-beforeEach(async () => {
-  await openEmptyWorkspace();
-  vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile);
-  vi.stubGlobal("URL", class extends URL {
-    static createObjectURL(blob: Blob) { exported = blob; return "blob:test"; }
-    static revokeObjectURL() {}
-  });
-  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { filename = this.download; });
-  attemptedDownload.mockClear(); accountRead.mockClear(); exported = undefined; filename = "";
-  dispose = setMissingAttachmentLoader(attemptedDownload);
-});
-afterEach(async () => {
-  setQuestionAttachmentAccount(undefined); // Clean up even when a scoped fixture throws during setup.
-  dispose();
-  await new Promise<void>(resolve => { const request = indexedDB.deleteDatabase(SOURCE_ORIGINALS_DB); request.onsuccess = () => resolve(); });
-  await closeWorkspace(); vi.restoreAllMocks(); vi.unstubAllGlobals();
-});
-
-async function fixture() {
-  const state = makeSeed();
-  state.questions = [{ id: "q", stem: "Source question", options: [{ key: "A", text: "Answer" }], source: "manual", correctKey: "A", status: "unseen", tags: [], attempts: [], notes: "My saved note", attachments: [attachment, { ...attachment, id: "missing", blobKey: "unavailable-image" }], createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z" }];
-  const original = new Blob(["Source file text"], { type: "text/plain" });
-  state.documents = [{ id: "document", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-14", rawText: "Source file text", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true }];
-  const split = await splitCloudContent(state);
-  const deferred = deferContent(split.workspace, "account-a", split.references, []);
-  return { state, original, deferred };
-}
-
-describe("saved-work recovery without downloading content", () => {
-  it("exports local images and exact originals while preserving deferred notes and references", async () => {
-    const { state, original, deferred } = await fixture();
-    await saveSourceOriginal(state.documents[0], original);
-    await putQuestionAttachmentBlob(attachment.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "q", updatedAt: attachment.updatedAt });
-    const result = await exportStateWithAttachments(deferred, "saved-work");
-    expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: ["unavailable-image"], originalCount: 1, missingOriginalIds: [], deferredSourceCount: 2 });
-    expect(filename).toMatch(/^axom-saved-work-.*\.zip$/);
-    expect(lastBackupAt()).toBeNull();
-    expect(attemptedDownload).not.toHaveBeenCalled(); expect(accountRead).not.toHaveBeenCalled();
-    const backup = await readPortableBackup(new File([exported!], filename));
-    expect(JSON.parse(backup.rawText)._backupScope).toBe("saved-work");
-    expect(backup.rawText).not.toContain("Source file text");
-    const restored = parseImport(backup.rawText);
-    expect(restored.deferredContent).toEqual(deferred.deferredContent);
-    expect(restored.questions).toEqual([]);
-    expect(restored.deferredContent?.questions[0].notes).toBe("My saved note");
-    const local = { ...state, questions: [{ ...state.questions[0], notes: "Older device note" }] };
-    const retained = await retainDownloadedContent(restored, local);
-    expect(retained.deferredContent).toBeUndefined();
-    expect(retained.questions[0].stem).toBe("Source question");
-    expect(retained.questions[0].notes).toBe("My saved note");
-    expect(retained.documents[0].rawText).toBe("Source file text");
-    const different = { ...local, questions: [{ ...local.questions[0], stem: "Different edition" }] };
-    expect((await retainDownloadedContent(restored, different)).deferredContent?.questions).toHaveLength(1);
-    expect(attemptedDownload).not.toHaveBeenCalled(); expect(accountRead).not.toHaveBeenCalled();
-  });
-
-  it("keeps JSON recovery local too, and does not silently downgrade a failed full export", async () => {
-    const { deferred } = await fixture();
-    deferred.deferredContent!.documents = []; deferred.deferredContent!.sources = deferred.deferredContent!.sources.filter(ref => ref.collection === "questions");
-    await expect(exportStateWithAttachments(deferred)).rejects.toThrow("Account unavailable");
-    expect(exported).toBeUndefined();
-    accountRead.mockClear();
-    const result = await exportStateWithAttachments(deferred, "saved-work");
-    expect(result).toMatchObject({ attachmentCount: 0, deferredSourceCount: 1, missingBlobKeys: ["offline-figure", "unavailable-image"] });
-    expect(filename).toMatch(/^axom-saved-work-.*\.json$/);
-    expect(parseImport(await exported!.text()).deferredContent).toEqual(deferred.deferredContent);
-    expect(attemptedDownload).not.toHaveBeenCalled(); expect(accountRead).not.toHaveBeenCalled();
-  });
-
-  it("does not certify a complete export when referenced images or originals were omitted", async () => {
-    localStorage.clear();
-    const { state } = await fixture();
-    const result = await exportStateWithAttachments(state);
-    expect(result.missingBlobKeys).toEqual(["offline-figure", "unavailable-image"]);
-    expect(result.missingOriginalIds).toEqual(["document"]);
-    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
-    expect(lastBackupAt()).toBeNull();
-  });
-
-  it("certifies a complete export when every expected image and original is readable", async () => {
-    localStorage.clear();
-    const { state, original } = await fixture();
-    await saveSourceOriginal(state.documents[0], original);
-    for (const a of state.questions[0].attachments ?? []) {
-      await putQuestionAttachmentBlob(a.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "q", updatedAt: a.updatedAt });
-    }
-    const result = await exportStateWithAttachments(state);
-    expect(result.missingBlobKeys).toEqual([]);
-    expect(result.missingOriginalIds).toEqual([]);
-    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
-    expect(lastBackupAt()).not.toBeNull();
-  });
-
-  it("does not certify an image-incomplete JSON export as a successful full backup", async () => {
-    localStorage.clear();
-    const { state } = await fixture();
-    state.documents = [];
-    const result = await exportStateWithAttachments(state);
-    expect(result.missingBlobKeys).toEqual(["offline-figure", "unavailable-image"]);
-    expect(result.missingOriginalIds).toEqual([]);
-    expect(filename).toMatch(/^axom-backup-.*\.json$/);
-    expect(lastBackupAt()).toBeNull();
-  });
-));
+      expect(filename.endsWith("." + format)).toBe(true);
       expect(lastBackupAt()).not.toBeNull();
       expect(state.questions[0].attachments![0].blobKey).toBeUndefined();
       const portable = format === "zip"
@@ -296,143 +167,14 @@ describe("saved-work recovery without downloading content", () => {
     async (format) => {
       localStorage.clear();
       const { state, original } = await fixture();
-      const legacyId = `legacy-id-only-missing-${format}`;
+      const legacyId = "legacy-id-only-missing-" + format;
       const source = state.questions[0].attachments![0];
       state.questions[0].attachments = [{ ...source, id: legacyId, blobKey: undefined as unknown as string }];
       if (format === "json") state.documents = [];
       else await saveSourceOriginal(state.documents[0], original);
       const result = await exportStateWithAttachments(state);
       expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [legacyId] });
-      expect(filename).toMatch(new RegExp(`\\.${format}// @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
-import { exportStateWithAttachments, lastBackupAt, markBackupDone, parseImport } from "./backup";
-import { readPortableBackup } from "./backupArchive";
-import { setQuestionAttachmentAccount } from "./questionAttachmentScope";
-import { makeSeed } from "./seed";
-import { sha256Hex } from "./checksum";
-import { saveSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
-import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
-import { splitCloudContent } from "./sync/cloudContent";
-import { deferContent } from "./sync/deferredContent";
-import { retainDownloadedContent } from "./sync/contentDownloads";
-
-const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
-const PNG_BYTES = Uint8Array.from(atob(PNG_BASE64), char => char.charCodeAt(0));
-const pngBlob = () => new Blob([PNG_BYTES.buffer as ArrayBuffer], { type: "image/png" });
-const attachment: QuestionImageAttachment = { id: "figure", blobKey: "offline-figure", fileName: "figure.png", mimeType: "image/png", byteSize: PNG_BYTES.length, altText: "Test figure", createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z", role: "question" };
-const attemptedDownload = vi.fn(async () => { throw new Error("Offline"); });
-const accountRead = vi.hoisted(() => vi.fn(async () => { throw new Error("Account unavailable"); }));
-vi.mock("./account/supabase", () => ({ accountOperationClient: accountRead }));
-let exported: Blob | undefined;
-let filename = "";
-let dispose: () => void;
-
-beforeEach(async () => {
-  await openEmptyWorkspace();
-  vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile);
-  vi.stubGlobal("URL", class extends URL {
-    static createObjectURL(blob: Blob) { exported = blob; return "blob:test"; }
-    static revokeObjectURL() {}
-  });
-  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { filename = this.download; });
-  attemptedDownload.mockClear(); accountRead.mockClear(); exported = undefined; filename = "";
-  dispose = setMissingAttachmentLoader(attemptedDownload);
-});
-afterEach(async () => {
-  setQuestionAttachmentAccount(undefined); // Clean up even when a scoped fixture throws during setup.
-  dispose();
-  await new Promise<void>(resolve => { const request = indexedDB.deleteDatabase(SOURCE_ORIGINALS_DB); request.onsuccess = () => resolve(); });
-  await closeWorkspace(); vi.restoreAllMocks(); vi.unstubAllGlobals();
-});
-
-async function fixture() {
-  const state = makeSeed();
-  state.questions = [{ id: "q", stem: "Source question", options: [{ key: "A", text: "Answer" }], source: "manual", correctKey: "A", status: "unseen", tags: [], attempts: [], notes: "My saved note", attachments: [attachment, { ...attachment, id: "missing", blobKey: "unavailable-image" }], createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z" }];
-  const original = new Blob(["Source file text"], { type: "text/plain" });
-  state.documents = [{ id: "document", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-14", rawText: "Source file text", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true }];
-  const split = await splitCloudContent(state);
-  const deferred = deferContent(split.workspace, "account-a", split.references, []);
-  return { state, original, deferred };
-}
-
-describe("saved-work recovery without downloading content", () => {
-  it("exports local images and exact originals while preserving deferred notes and references", async () => {
-    const { state, original, deferred } = await fixture();
-    await saveSourceOriginal(state.documents[0], original);
-    await putQuestionAttachmentBlob(attachment.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "q", updatedAt: attachment.updatedAt });
-    const result = await exportStateWithAttachments(deferred, "saved-work");
-    expect(result).toMatchObject({ attachmentCount: 1, missingBlobKeys: ["unavailable-image"], originalCount: 1, missingOriginalIds: [], deferredSourceCount: 2 });
-    expect(filename).toMatch(/^axom-saved-work-.*\.zip$/);
-    expect(lastBackupAt()).toBeNull();
-    expect(attemptedDownload).not.toHaveBeenCalled(); expect(accountRead).not.toHaveBeenCalled();
-    const backup = await readPortableBackup(new File([exported!], filename));
-    expect(JSON.parse(backup.rawText)._backupScope).toBe("saved-work");
-    expect(backup.rawText).not.toContain("Source file text");
-    const restored = parseImport(backup.rawText);
-    expect(restored.deferredContent).toEqual(deferred.deferredContent);
-    expect(restored.questions).toEqual([]);
-    expect(restored.deferredContent?.questions[0].notes).toBe("My saved note");
-    const local = { ...state, questions: [{ ...state.questions[0], notes: "Older device note" }] };
-    const retained = await retainDownloadedContent(restored, local);
-    expect(retained.deferredContent).toBeUndefined();
-    expect(retained.questions[0].stem).toBe("Source question");
-    expect(retained.questions[0].notes).toBe("My saved note");
-    expect(retained.documents[0].rawText).toBe("Source file text");
-    const different = { ...local, questions: [{ ...local.questions[0], stem: "Different edition" }] };
-    expect((await retainDownloadedContent(restored, different)).deferredContent?.questions).toHaveLength(1);
-    expect(attemptedDownload).not.toHaveBeenCalled(); expect(accountRead).not.toHaveBeenCalled();
-  });
-
-  it("keeps JSON recovery local too, and does not silently downgrade a failed full export", async () => {
-    const { deferred } = await fixture();
-    deferred.deferredContent!.documents = []; deferred.deferredContent!.sources = deferred.deferredContent!.sources.filter(ref => ref.collection === "questions");
-    await expect(exportStateWithAttachments(deferred)).rejects.toThrow("Account unavailable");
-    expect(exported).toBeUndefined();
-    accountRead.mockClear();
-    const result = await exportStateWithAttachments(deferred, "saved-work");
-    expect(result).toMatchObject({ attachmentCount: 0, deferredSourceCount: 1, missingBlobKeys: ["offline-figure", "unavailable-image"] });
-    expect(filename).toMatch(/^axom-saved-work-.*\.json$/);
-    expect(parseImport(await exported!.text()).deferredContent).toEqual(deferred.deferredContent);
-    expect(attemptedDownload).not.toHaveBeenCalled(); expect(accountRead).not.toHaveBeenCalled();
-  });
-
-  it("does not certify a complete export when referenced images or originals were omitted", async () => {
-    localStorage.clear();
-    const { state } = await fixture();
-    const result = await exportStateWithAttachments(state);
-    expect(result.missingBlobKeys).toEqual(["offline-figure", "unavailable-image"]);
-    expect(result.missingOriginalIds).toEqual(["document"]);
-    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
-    expect(lastBackupAt()).toBeNull();
-  });
-
-  it("certifies a complete export when every expected image and original is readable", async () => {
-    localStorage.clear();
-    const { state, original } = await fixture();
-    await saveSourceOriginal(state.documents[0], original);
-    for (const a of state.questions[0].attachments ?? []) {
-      await putQuestionAttachmentBlob(a.blobKey, { blob: pngBlob(), mimeType: "image/png", byteSize: PNG_BYTES.length, questionId: "q", updatedAt: a.updatedAt });
-    }
-    const result = await exportStateWithAttachments(state);
-    expect(result.missingBlobKeys).toEqual([]);
-    expect(result.missingOriginalIds).toEqual([]);
-    expect(filename).toMatch(/^axom-backup-.*\.zip$/);
-    expect(lastBackupAt()).not.toBeNull();
-  });
-
-  it("does not certify an image-incomplete JSON export as a successful full backup", async () => {
-    localStorage.clear();
-    const { state } = await fixture();
-    state.documents = [];
-    const result = await exportStateWithAttachments(state);
-    expect(result.missingBlobKeys).toEqual(["offline-figure", "unavailable-image"]);
-    expect(result.missingOriginalIds).toEqual([]);
-    expect(filename).toMatch(/^axom-backup-.*\.json$/);
-    expect(lastBackupAt()).toBeNull();
-  });
-));
+      expect(filename.endsWith("." + format)).toBe(true);
       expect(lastBackupAt()).toBeNull();
     },
   );
