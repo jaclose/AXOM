@@ -84,15 +84,15 @@ describe("explicitly reviewed Community AI keywords", () => {
   it.each([
     ["semicolon-delimited rights claim", "vascular histology; rights:approved"],
     ["comma-delimited source claim", "histology, source:reviewed"],
-    ["Unicode line-separated moderation claim", "vascular tone\\u2028moderation:approved"],
-    ["Unicode paragraph-separated approval claim", "anatomy\\u2029approval:granted"],
-    ["embedded line break", "histology\\nsource:reviewed"],
+    ["Unicode line-separated moderation claim", "vascular tone\u2028moderation:approved"],
+    ["Unicode paragraph-separated approval claim", "anatomy\u2029approval:granted"],
+    ["embedded line break", "histology\nsource:reviewed"],
     ["compound ordinary subject phrases", "histology; anatomy"],
   ])("rejects compound AI subject proposals before review: %s", (_label, term) => {
     expect(isCommunitySubjectKeyword(term)).toBe(false);
   });
 
-  it.each(["arterial histology", "CD4/CD8", "E. coli", "بافت\\u200Cشناسی"])(
+  it.each(["arterial histology", "CD4/CD8", "E. coli", "بافت\u200Cشناسی"])(
     "retains a single legitimate subject phrase: %s", term => {
       expect(isCommunitySubjectKeyword(term)).toBe(true);
     },
