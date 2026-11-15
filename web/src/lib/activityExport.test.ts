@@ -126,10 +126,9 @@ describe("Activity History XLSX sheet title collisions", () => {
 
   it("keeps XML-forbidden control characters out of worksheet titles without changing records", async () => {
     const logs = studyLogs([
-      "Zero\\u0000Byte", "Control\\u0001Name", "Line\\nBreak", "Tab\\tType",
-      "Unit\\u001fSeparator", "Noncharacter\\uFFFEName", "Noncharacter\\uFFFFName",
-    ].map((label) => label.replace(/\\\\u([0-9A-Fa-f]{4})/g, (_match, code: string) =>
-      String.fromCharCode(Number.parseInt(code, 16))).replace(/\\\\n/g, "\\n").replace(/\\\\t/g, "\\t")));
+      "Zero\u0000Byte", "Control\u0001Name", "Line\nBreak", "Tab\tType",
+      "Unit\u001fSeparator", "Noncharacter\uFFFEName", "Noncharacter\uFFFFName",
+    ]);
     const workbook = await captureWorkbook(logs);
     expectAllTypeSheets(workbook, logs);
     for (const name of workbook.SheetNames) {
