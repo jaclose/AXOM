@@ -288,12 +288,9 @@ for (const width of [1440, 390]) {
     await page.goto("/#productivity", { waitUntil: "networkidle" });
     await expect(page.getByText(note)).toHaveCount(0);
 
-    // Observe account subscriptions as the History view mounts. On the first
-    // registration with its region already committed to the DOM, transition
-    // A→B→A *before* forwarding the listener to Zustand. No intermediate B
-    // notification can reach this just-registering listener. Its layout-effect
-    // reconciliation must detect the producer's +2 epoch despite identical
-    // final account ID and device link.
+    // Run A→B→A at History's own layout-effect boundary, before its account
+    // listener is registered. This cannot accidentally intercept a different
+    // component's subscription after the History DOM has been committed.
     await page.evaluate(async () => {
       type Capture = {
         fired: boolean; initial?: number; afterB?: number; afterA?: number;
@@ -301,33 +298,31 @@ for (const width of [1440, 390]) {
       };
       const w = window as unknown as {
         __AXOM_DEV__: Promise<Dev>;
+        __AXOM_ACTIVITY_BEFORE_SUBSCRIBE__?: () => void;
         __AXOM_PRESUBSCRIBE_ABA__?: Capture;
       };
       const app = await w.__AXOM_DEV__;
-      const originalSubscribe = app.useAccount.subscribe;
       const capture: Capture = { fired: false };
       w.__AXOM_PRESUBSCRIBE_ABA__ = capture;
-      app.useAccount.subscribe = (listener) => {
-        if (!capture.fired && document.querySelector('[role="region"][aria-label="Activity History"]')) {
-          capture.fired = true;
-          const before = app.useAccount.getState();
-          const ownerA = before.user;
-          if (!ownerA) throw new Error("Missing synthetic A before History subscription");
-          capture.initial = before.identityEpoch;
-          app.useAccount.setState({
-            phase: "signed-in",
-            user: { ...ownerA, id: "browser-synthetic-B", email: "b@example.test", displayName: "Synthetic B" },
-            link: "linked-elsewhere",
-          });
-          capture.afterB = app.useAccount.getState().identityEpoch;
-          app.useAccount.setState({ phase: "signed-in", user: ownerA, link: "linked" });
-          const afterA = app.useAccount.getState();
-          capture.afterA = afterA.identityEpoch;
-          capture.userId = afterA.user?.id;
-          capture.link = afterA.link;
-          app.useAccount.subscribe = originalSubscribe;
-        }
-        return originalSubscribe(listener);
+      w.__AXOM_ACTIVITY_BEFORE_SUBSCRIBE__ = () => {
+        if (capture.fired) return;
+        capture.fired = true;
+        delete w.__AXOM_ACTIVITY_BEFORE_SUBSCRIBE__;
+        const before = app.useAccount.getState();
+        const ownerA = before.user;
+        if (!ownerA) throw new Error("Missing synthetic A before History subscription");
+        capture.initial = before.identityEpoch;
+        app.useAccount.setState({
+          phase: "signed-in",
+          user: { ...ownerA, id: "browser-synthetic-B", email: "b@example.test", displayName: "Synthetic B" },
+          link: "linked-elsewhere",
+        });
+        capture.afterB = app.useAccount.getState().identityEpoch;
+        app.useAccount.setState({ phase: "signed-in", user: ownerA, link: "linked" });
+        const afterA = app.useAccount.getState();
+        capture.afterA = afterA.identityEpoch;
+        capture.userId = afterA.user?.id;
+        capture.link = afterA.link;
       };
     });
     await page.goto("/#activity", { waitUntil: "networkidle" });
@@ -383,31 +378,29 @@ for (const width of [1440, 390]) {
     await page.goto("/#productivity", { waitUntil: "networkidle" });
 
     // Standalone consumer-contract check: a test-local getState shim supplies
-    // the missing transition counter without altering production Platform.
-    // There is no account/link change or subscribed B event to revoke the view.
-    // Removing ActivityHistoryPage's epoch comparisons should make this fail.
+    // the epoch only to History while the DEV-only layout-effect hook fires.
+    // There is no account/link change or B subscription notification; removing
+    // both consumer epoch guards should make this case fail.
     await page.evaluate(async () => {
       type Capture = { fired: boolean; before: number; after: number };
       const w = window as unknown as {
         __AXOM_DEV__: Promise<Dev>;
+        __AXOM_ACTIVITY_BEFORE_SUBSCRIBE__?: () => void;
         __AXOM_CONSUMER_EPOCH__?: Capture;
       };
       const app = await w.__AXOM_DEV__;
       const originalGetState = app.useAccount.getState;
-      const originalSubscribe = app.useAccount.subscribe;
       let syntheticEpoch = 7;
       const capture: Capture = { fired: false, before: syntheticEpoch, after: syntheticEpoch };
       w.__AXOM_CONSUMER_EPOCH__ = capture;
       app.useAccount.getState = () => ({ ...originalGetState(), identityEpoch: syntheticEpoch });
-      app.useAccount.subscribe = (listener) => {
-        if (!capture.fired && document.querySelector('[role="region"][aria-label="Activity History"]')) {
-          capture.fired = true;
-          capture.before = app.useAccount.getState().identityEpoch ?? -1;
-          syntheticEpoch += 2;
-          capture.after = app.useAccount.getState().identityEpoch ?? -1;
-          app.useAccount.subscribe = originalSubscribe;
-        }
-        return originalSubscribe(listener);
+      w.__AXOM_ACTIVITY_BEFORE_SUBSCRIBE__ = () => {
+        if (capture.fired) return;
+        capture.fired = true;
+        delete w.__AXOM_ACTIVITY_BEFORE_SUBSCRIBE__;
+        capture.before = app.useAccount.getState().identityEpoch ?? -1;
+        syntheticEpoch += 2;
+        capture.after = app.useAccount.getState().identityEpoch ?? -1;
       };
     });
     await page.goto("/#activity", { waitUntil: "networkidle" });

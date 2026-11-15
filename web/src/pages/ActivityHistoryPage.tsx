@@ -54,6 +54,13 @@ export function ActivityHistoryPage() {
         setViewRevoked(true);
       }
     };
+    // The DEV-only browser seam runs at this specific component's layout-effect
+    // boundary, unlike intercepting an arbitrary account-store subscriber.
+    // Vite strips this branch from production builds.
+    if (import.meta.env.DEV) {
+      (window as Window & { __AXOM_ACTIVITY_BEFORE_SUBSCRIBE__?: () => void })
+        .__AXOM_ACTIVITY_BEFORE_SUBSCRIBE__?.();
+    }
     const unsubscribe = useAccount.subscribe(revokeIfChanged);
     // Reconcile a transition occurring after render but before subscription.
     // Layout effects flush this revocation before the first browser paint.
