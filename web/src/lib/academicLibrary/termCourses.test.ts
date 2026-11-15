@@ -263,6 +263,35 @@ describe("downloaded term practice", () => {
     });
   });
 
+  it("holds shared source identities when another receipt contradicts exact catalog provenance", () => {
+    const state = workspace([
+      receipt(1, ["shared-question", "clean-question", "linked-question", "clean-set-question"], {
+        term: "Term 1", setIds: ["shared-set", "clean-set"],
+      }),
+      receipt(2, ["shared-question"], { term: "Term 1", setIds: ["shared-set"] }),
+    ], [
+      question("shared-question"), question("clean-question"),
+      question("linked-question", { setId: "shared-set" }),
+      question("clean-set-question", { setId: "clean-set" }),
+    ]);
+    state.questionSets = [{ id: "shared-set" }, { id: "clean-set" }] as typeof state.questionSets;
+    // A conflicting exact-revision catalog is not clean source evidence.
+    // Its ID claims cannot be discarded while a different receipt's identical
+    // original IDs are used to authorize practice.
+    const contradictoryCatalog = [course(2, "Term 2")];
+    expect(termQuizSelection("Term 1", "account", state, contradictoryCatalog)).toMatchObject({
+      questionIds: ["clean-question", "clean-set-question"], setIds: ["clean-set"],
+    });
+    expect(termQuizSelection("Term 2", "account", state, contradictoryCatalog).questionIds).toEqual([]);
+
+    // Once the exact source receipt and catalog agree, original identities
+    // become eligible again without rewriting existing learner records.
+    expect(termQuizSelection("Term 1", "account", state, [course(2, "Term 1")])).toMatchObject({
+      questionIds: ["shared-question", "clean-question", "linked-question", "clean-set-question"],
+      setIds: ["shared-set", "clean-set"],
+    });
+  });
+
   it("holds ambiguous cross-term question identities in both term unions", () => {
     const state = workspace([
       receipt(1, ["cross-listed", "term-one-only"]),
