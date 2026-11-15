@@ -1515,4 +1515,54 @@ describe("portable binary media backup", () => {
       .rejects.toThrow(/image.*(digest|integrity|checksum)/i);
   });
 
+  it.each(["zip", "json"] as const)(
+    "rejects conflicting root/deferred source digests before %s recovery consent",
+    async format => {
+      const original = new Blob(["Verifiable study source"], { type: "text/plain" });
+      const source: SourceDocument = {
+        id: "shared-original-id", title: "Canonical source", fileName: "source.txt",
+        fileType: "text/plain", uploadedAt: "2026-11-15",
+        rawText: "Verifiable study source", sizeBytes: original.size,
+        checksum: await sha256Hex(await original.arrayBuffer()),
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      };
+      const contradictory = { ...source, checksum: "f".repeat(64) };
+      await saveSourceOriginal(source, original);
+      const payload = {
+        _app: "AXOM", _backupScope: "complete",
+        documents: [contradictory],
+        deferredContent: { documents: [source] },
+      };
+      const input = format === "zip"
+        ? new File([(await createMediaBackupArchive(payload, [], [source])).blob], "contradictory.zip")
+        : new File([JSON.stringify(payload)], "contradictory.json");
+      // Both referenced records have valid SHA-256 syntax. Last-wins Maps
+      // previously concealed the first claim when the second matched bytes.
+      await expect(readPortableBackup(input))
+        .rejects.toThrow(/conflicting source.document checksums/i);
+      expect(await (await readSourceOriginal(source.id, source.checksum))?.text())
+        .toBe("Verifiable study source");
+    },
+  );
+
+  it("accepts matching root/deferred source digests in a complete ZIP", async () => {
+    const original = new Blob(["Mirrored source"], { type: "text/plain" });
+    const source: SourceDocument = {
+      id: "mirrored-source", title: "Root title", fileName: "mirrored.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15",
+      rawText: "Mirrored source", sizeBytes: original.size,
+      checksum: await sha256Hex(await original.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await saveSourceOriginal(source, original);
+    const payload = {
+      documents: [source],
+      deferredContent: { documents: [{ ...source, title: "Deferred title", checksum: `sha256:${source.checksum}` }] },
+    };
+    const exported = await createMediaBackupArchive(payload, [], [source]);
+    const backup = await readPortableBackup(new File([exported.blob], "mirrored.zip"));
+    expect(backup.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+    expect(await backup.restoreOriginals([source])).toMatchObject({ restored: 0, skipped: 1 });
+  });
+
 });
