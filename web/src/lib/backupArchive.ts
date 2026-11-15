@@ -221,20 +221,22 @@ function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): v
     // not proof that a single source's cached original is corrupt.
     const externalType = typeof fileType === "string" && fileType.length > 0
       && !fileType.startsWith("axom-") ? fileType.toLowerCase() : undefined;
+    // SourceDocument.fileType permits either a MIME type or an extension.
+    // Compare MIME against MIME only; "pdf" and "application/pdf" are not
+    // conflicting evidence about the same immutable source bytes.
+    const explicitMime = externalType?.includes("/") ? externalType : undefined;
     const externalSize = externalType !== undefined && typeof sizeBytes === "number"
       && Number.isSafeInteger(sizeBytes) && sizeBytes >= 0 ? sizeBytes : undefined;
-    if (prior?.fileType && externalType) {
-      if (prior.fileType !== externalType) {
-        throw new Error("The backup contains conflicting source-document file type for one document ID. No workspace data has been changed.");
-      }
-      if (prior.sizeBytes !== undefined && externalSize !== undefined
-        && prior.sizeBytes !== externalSize) {
-        throw new Error("The backup contains conflicting source-document size for one document ID. No workspace data has been changed.");
-      }
+    if (prior?.fileType && explicitMime && prior.fileType !== explicitMime) {
+      throw new Error("The backup contains conflicting source-document file type for one document ID. No workspace data has been changed.");
+    }
+    if (prior?.sizeBytes !== undefined && externalSize !== undefined
+      && prior.sizeBytes !== externalSize) {
+      throw new Error("The backup contains conflicting source-document size for one document ID. No workspace data has been changed.");
     }
     byId.set(id, {
       digest,
-      fileType: prior?.fileType ?? externalType,
+      fileType: prior?.fileType ?? explicitMime,
       sizeBytes: prior?.sizeBytes ?? externalSize,
     });
   }
