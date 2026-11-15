@@ -1664,6 +1664,9 @@ describe("portable binary media backup", () => {
         documents: [source],
         deferredContent: { documents: [
           { ...source, title: "Renamed deferred source", fileName: "renamed.txt", checksum: `sha256:${source.checksum}` },
+          // Historical SourceDocument.fileType accepts MIME or extension labels.
+          // Do not reject these semantically compatible representations.
+          { ...source, fileType: "txt", title: "Legacy extension label" },
           // An internal record may share its ID but is not a claim about the
           // external original's MIME or byte length.
           { ...source, fileType: "axom-internal", sizeBytes: 99 },
