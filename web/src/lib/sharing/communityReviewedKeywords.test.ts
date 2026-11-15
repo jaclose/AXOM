@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
+import { isCommunitySubjectKeyword, mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
 
 describe("explicitly reviewed Community AI keywords", () => {
   it("preserves authored tags and adds only canonical, unique reviewed keywords", () => {
@@ -80,6 +80,23 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(mergeReviewedCommunityKeywords(["anatomy"], "CD4/CD8; E. coli; IL-10; 10.2 kPa"))
       .toEqual(["anatomy", "cd4/cd8", "e. coli", "il-10", "10.2 kpa"]);
   });
+
+  it.each([
+    ["semicolon-delimited rights claim", "vascular histology; rights:approved"],
+    ["comma-delimited source claim", "histology, source:reviewed"],
+    ["Unicode line-separated moderation claim", "vascular tone\\u2028moderation:approved"],
+    ["Unicode paragraph-separated approval claim", "anatomy\\u2029approval:granted"],
+    ["embedded line break", "histology\\nsource:reviewed"],
+    ["compound ordinary subject phrases", "histology; anatomy"],
+  ])("rejects compound AI subject proposals before review: %s", (_label, term) => {
+    expect(isCommunitySubjectKeyword(term)).toBe(false);
+  });
+
+  it.each(["arterial histology", "CD4/CD8", "E. coli", "بافت\\u200Cشناسی"])(
+    "retains a single legitimate subject phrase: %s", term => {
+      expect(isCommunitySubjectKeyword(term)).toBe(true);
+    },
+  );
 
   it("preserves existing legacy metadata without letting AI proposals create more", () => {
     const original = ["visual:intent:anatomy", "rights:reviewed", "CD4/CD8"];
