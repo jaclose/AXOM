@@ -149,6 +149,21 @@ describe("downloaded term practice", () => {
     expect(termQuizNeedsCatalog("account", state)).toBe(true);
     expect(termQuizNeedsCatalog("other", state)).toBe(false);
   });
+  it("holds a legacy termless receipt when curriculum term identity is duplicated", () => {
+    const state = workspace([receipt(1, ["unplaced"], { term: undefined })], [question("unplaced")]);
+    state.terms = [{ id: "term", name: "Term 1" }, { id: "term", name: "Term 2" }];
+    state.courses = [{ id: "hosted", code: "academic:course-1", name: "Module 1", termId: "term", files: 0, modules: [] }];
+    // A duplicate local term ID is not unambiguous catalog evidence, whichever
+    // term happens to appear first. Do not expose its questions in either term.
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual([]);
+    expect(termQuizSelection("Term 2", "account", state).questionIds).toEqual([]);
+    state.terms.reverse();
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+    expect(termQuizSelection("Term 2", "account", state).questionIds).toEqual([]);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual([]);
+  });
+
   it("resolves a legacy receipt offline only with one exact hosted owner and a known term", () => {
     const state = workspace([receipt(1, ["q-1"], { term: undefined })], []);
     state.terms = [{ id: "term", name: "Term 1" }];
