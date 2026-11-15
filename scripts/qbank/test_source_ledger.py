@@ -764,6 +764,167 @@ class SourceLedgerTests(unittest.TestCase):
             self.assertIsNone(archives[0]["entries"][0]["content_sha256"])
             self.assertEqual(row["archive_index_status"], "central_directory_indexed")
 
+    def test_archive_encrypted_question_member_is_not_actionable(self):
+        # Central-directory metadata is visible, but encrypted source bytes
+        # cannot be parsed or counted among actionable question hints.
+        import zipfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "encrypted-index.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("PQ available.txt", "synthetic accessible")
+                z.writestr("IMCQ encrypted.txt", "synthetic inaccessible")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="encrypted-source", root_label="archive_root")
+            original_infolist = zipfile.ZipFile.infolist
+            def mark_encrypted(reader):
+                infos = original_infolist(reader)
+                for info in infos:
+                    if info.filename == "IMCQ encrypted.txt":
+                        info.flag_bits |= 1
+                return infos
+            previous = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                with patch.object(zipfile.ZipFile, "infolist", mark_encrypted):
+                    result = enriched.index_source_archives(
+                        [row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = previous
+            self.assertEqual(result["question_candidate_count"], 1)
+            held = next(x for x in result["entries"]
+                        if x["member_name"] == "IMCQ encrypted.txt")
+            self.assertTrue(held["encrypted"])
+            self.assertFalse(held["question_candidate_eligible"])
+            self.assertEqual(held["question_candidate_hold"], "encrypted_member")
+            self.assertEqual(row["archive_index_status"], "central_directory_indexed")
+
+    def test_archive_duplicate_named_members_are_held_with_distinct_virtual_ids(self):
+        # ZipFile.open(name) selects an ambiguous member if filenames repeat.
+        import warnings
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "duplicates.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("PQ unique.txt", "unambiguous")
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    z.writestr("DERS/IMCQ 1.txt", "same contents")
+                    z.writestr("DERS/IMCQ 1.txt", "same contents")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="duplicates", root_label="archive_root")
+            previous = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives(
+                    [row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = previous
+            self.assertEqual(result["question_candidate_count"], 1)
+            duplicates = [x for x in result["entries"]
+                          if x["member_name"] == "DERS/IMCQ 1.txt"]
+            self.assertEqual(len(duplicates), 2)
+            self.assertTrue(all(x["duplicate_member_name"] for x in duplicates))
+            self.assertTrue(all(not x["question_candidate_eligible"] for x in duplicates))
+            self.assertEqual({x["question_candidate_hold"] for x in duplicates},
+                             {"duplicate_member_name"})
+            self.assertEqual(len({x["virtual_source_id"] for x in duplicates}), 2)
+
+    def test_archive_symlink_member_is_review_held(self):
+        # A ZIP entry may be a Unix symlink even with a harmless filename.
+        # A later importer must not be told this is an extractable question.
+        import stat
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "linked-member.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("PQ ordinary.txt", "accessible synthetic")
+                info = zipfile.ZipInfo("PQ linked.txt")
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                z.writestr(info, "../outside-private-source")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="symlink", root_label="archive_root")
+            previous = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives(
+                    [row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = previous
+            self.assertEqual(result["question_candidate_count"], 1)
+            linked = next(x for x in result["entries"]
+                          if x["member_name"] == "PQ linked.txt")
+            self.assertTrue(linked["symlink_member"])
+            self.assertFalse(linked["question_candidate_eligible"])
+            self.assertEqual(linked["question_candidate_hold"], "symlink_member")
+
+    def test_archive_output_cap_not_reported_as_complete_or_counted(self):
+        # The first 10,000 members do not justify an exhaustive candidate count.
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "oversized-directory.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                for index in range(10001):
+                    z.writestr(f"PQ {index:05d}.txt", "")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="capped", root_label="archive_root")
+            previous = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                result = enriched.index_source_archives(
+                    [row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = previous
+            self.assertEqual(len(result["entries"]), 10000)
+            self.assertEqual(result["total_zip_entries"], 10001)
+            self.assertEqual(result["question_candidate_count"], 0)
+            self.assertEqual(row["archive_index_status"],
+                             "central_directory_partial_review_required")
+            self.assertIn("member_output_capped_at_10000", result["errors"])
+            self.assertEqual(row["unresolved_reason"], "archive_member_output_cap")
+            counts = enriched.archive_metadata_metrics([result])
+            self.assertEqual(counts["archives_indexed"], 0)
+            self.assertEqual(counts["archives_held_or_partial"], 1)
+            self.assertEqual(counts["question_filename_hint_members"], 0)
+
+    def test_archive_exact_output_limit_is_complete_and_summary_excludes_failures(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            archive = root / "exact-limit.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                for index in range(10000):
+                    z.writestr(f"IMCQ {index:05d}.txt", "")
+            row = dict(document_type="archive_review", original_path=str(archive),
+                       source_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                       source_id="exact-limit", root_label="archive_root")
+            previous = ledger.ROOTS
+            try:
+                ledger.ROOTS = [("archive_root", root)]
+                complete = enriched.index_source_archives(
+                    [row], ledger.open_scanned_source_file)[0]
+            finally:
+                ledger.ROOTS = previous
+            self.assertEqual(complete["question_candidate_count"], 10000)
+            self.assertEqual(row["archive_index_status"], "central_directory_indexed")
+            self.assertNotIn("member_output_capped_at_10000", complete["errors"])
+            invalid = dict(index_status="invalid_or_unreadable_archive",
+                           entries=[], question_candidate_count=0)
+            counts = enriched.archive_metadata_metrics([complete, invalid])
+            self.assertEqual(counts["archives_attempted"], 2)
+            self.assertEqual(counts["archives_indexed"], 1)
+            self.assertEqual(counts["archives_held_or_partial"], 1)
+            self.assertEqual(counts["question_filename_hint_members"], 10000)
+
     def test_archive_index_rejects_postscan_symlink_outside_root(self):
         # An off-root archive must not contribute even metadata-only filenames.
         import zipfile
