@@ -405,7 +405,7 @@ describe("saved-work recovery without downloading content", () => {
     // an absent image must not prevent safe rescue of the nonimage question data.
     const result = await exportStateWithAttachments(state);
     expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
-    expect(filename).toMatch(/\\.json$/);
+    expect(filename).toMatch(/\.json$/);
     expect(lastBackupAt()).toBeNull();
     const backup = await readPortableBackup(new File([exported!], filename));
     expect(backup.omissions).toEqual({
