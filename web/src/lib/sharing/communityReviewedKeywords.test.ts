@@ -58,6 +58,27 @@ describe("explicitly reviewed Community AI keywords", () => {
       .toEqual(["author", "cd4/cd8", "بافت\u200Cشناسی"]);
   });
 
+  it.each([
+    ["scheme-less source domain", "Review example.edu/source"],
+    ["www hostname", "www.example.org/arterial-case"],
+    ["unlabeled DOI", "10.1234/artery.2026"],
+    ["labeled DOI", "DOI: 10.1000/vascular.2026"],
+    ["PubMed identifier", "PMID: 12345678"],
+    ["PubMed Central identifier", "PMC1234567"],
+    ["fullwidth DOI", "１０．１２３４／source"],
+    ["zero-width obfuscated PMID", "PM\u200BID: 12345678"],
+  ])("keeps a proposed %s out of reviewed subject keywords", (_label, keyword) => {
+    const authored = ["histology", "source:reviewed"];
+    expect(() => mergeReviewedCommunityKeywords(authored, keyword))
+      .toThrow(/subject phrases.*citations/i);
+    expect(authored).toEqual(["histology", "source:reviewed"]);
+  });
+
+  it("retains clinical shorthand and species names that are not source citations", () => {
+    expect(mergeReviewedCommunityKeywords(["anatomy"], "CD4/CD8; E. coli; IL-10; 10.2 kPa"))
+      .toEqual(["anatomy", "cd4/cd8", "e. coli", "il-10", "10.2 kpa"]);
+  });
+
   it("preserves existing legacy metadata without letting AI proposals create more", () => {
     const original = ["visual:intent:anatomy", "rights:reviewed", "CD4/CD8"];
     expect(mergeReviewedCommunityKeywords(original, "Histology: vessel layers, CD4/CD8"))
