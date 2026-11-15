@@ -1627,6 +1627,47 @@ class SourceLedgerTests(unittest.TestCase):
                       "ready": 2, "needsReview": 0, "sourceVerified": True, "cloudVerified": False}
             assess([native], [raw])
 
+    def test_agent2_invalid_canonical_source_digest_holds_package_without_aborting_valid_receipt(self):
+        # A corrupted manifest SHA is not a hashable, scanned original identity.
+        # Reject that package independently while still accepting an unrelated
+        # valid native parser assessment; no cloud/public readiness is implied.
+        with tempfile.TemporaryDirectory(dir=ledger.OUT) as root:
+            folder = pathlib.Path(root)
+            valid_path = folder / "valid-source.pdf"
+            invalid_path = folder / "held-source.pdf"
+            valid_path.write_bytes(b"verified original")
+            invalid_path.write_bytes(b"unverified original")
+            valid_sha = digest("verified original")
+            valid = dict(bank_id="valid", source_path=str(valid_path),
+                         questions=2, status="local_ready_for_agent2_review",
+                         canonical_status="canonical_distinct_question_collection",
+                         issues=[])
+            held = dict(valid, bank_id="held", source_path=str(invalid_path))
+            receipt = dict(bankId="valid", sourceSha256=valid_sha,
+                           questionRecords=2, ready=1, needsReview=1,
+                           sourceVerified=True, cloudVerified=False)
+            audit_path = folder / "audit.json"
+            audit_path.write_text(json.dumps({"native": [receipt], "raw": []}))
+            for bad_sha in (["nested", valid_sha], {"sha256": valid_sha},
+                            "syntactically-invalid"):
+                with self.subTest(bad_sha=bad_sha):
+                    dispositions = {"sources": [dict(sha256=valid_sha,
+                                                     kind="question-source",
+                                                     status="review-required",
+                                                     readyCount=0)]}
+                    rows = [dict(original_path=str(invalid_path),
+                                 source_sha256=bad_sha),
+                            dict(original_path=str(valid_path),
+                                 source_sha256=valid_sha)]
+                    result = enriched.merge_agent2_assessment(
+                        dispositions, [held, valid], rows, audit_path)
+                    self.assertEqual(result["assessed_source_count"], 1)
+                    self.assertEqual(result["assessed_ready_not_installed"], 1)
+                    self.assertEqual(result["canonical_native_packages"], 1)
+                    self.assertIn("native_package_source_digest_unverified:held",
+                                  result["rejected_audit_rows"])
+                    self.assertEqual(dispositions["sources"][0]["readyCount"], 1)
+
     def test_agent2_malformed_native_identity_is_held_without_losing_valid_evidence(self):
         # External parser receipts are JSON and can contain unhashable nested
         # identifiers; one malformed row must not abort the complete review.
