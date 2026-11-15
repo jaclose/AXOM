@@ -131,8 +131,22 @@ function referenceSafetyText(value: string | undefined): string {
 }
 
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
-  return [question.stem, question.topic, ...question.options.map(option => option.text)]
+  // Option labels and the selected correctKey are included verbatim in the AI
+  // prompt too. An imported set may have reviewed keys that are not safe to
+  // disclose to a third-party provider (for example a local document URI).
+  return [question.stem, question.topic, question.correctKey,
+    ...question.options.flatMap(option => [option.key, option.text])]
     .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)));
+}
+
+/** The community snapshot accepts at most 26 short choice labels. The AI
+ * prompt must not interpolate arbitrarily long, multiline or instruction-like
+ * imported keys; retain the original question for manual review instead. */
+const AI_CHOICE_LABEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,15}$/;
+function hasUnsafeDraftChoiceLabels(question: QuestionRecord): boolean {
+  return question.options.length > 26
+    || !AI_CHOICE_LABEL.test(question.correctKey ?? "")
+    || question.options.some(option => !AI_CHOICE_LABEL.test(option.key));
 }
 
 export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
@@ -144,7 +158,8 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && !question.content?.assets.length
     && !referencesUnavailableExhibit(question)
     && !hasUnrepresentedRichSource(question)
-    && !containsPrivateDraftPromptReference(question);
+    && !containsPrivateDraftPromptReference(question)
+    && !hasUnsafeDraftChoiceLabels(question);
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -178,6 +193,9 @@ export async function draftQuestionExplanation(
   }
   if (containsPrivateDraftPromptReference(question)) {
     throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
+  }
+  if (hasUnsafeDraftChoiceLabels(question)) {
+    throw new Error("AI drafting requires at most 26 short, single-line alphanumeric choice labels. Review and normalize the source labels before requesting an explanation.");
   }
   if (question.explanation?.trim()) throw new Error("An existing explanation must never be replaced automatically.");
   if (Object.keys(question.choiceRationales ?? {}).length > 0) throw new Error("An existing choice rationale must never be replaced automatically.");
