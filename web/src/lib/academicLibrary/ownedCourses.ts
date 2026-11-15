@@ -1,5 +1,5 @@
 import { academicAccountScope } from "./accountScope";
-import { listAcademicCourses, reviewAcademicCourse, type AcademicCourse } from "./client";
+import { getAcademicCourse, listAcademicCourses, reviewAcademicCourse, type AcademicCourse } from "./client";
 import type { ExplanationReviewReceipt } from "./explanationReview";
 
 /** academic_catalog returns at most 24 courses per page. */
@@ -19,16 +19,58 @@ export function ownedCourseStatus(course: Pick<AcademicCourse, "visibility" | "r
 /** Every course the signed-in account owns, read page by page from the catalog. */
 export async function listOwnedAcademicCourses(accountId: string, signal?: AbortSignal): Promise<AcademicCourse[]> {
   const scope = academicAccountScope(accountId);
+  const check = () => {
+    scope.assertCurrent();
+    if (signal?.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
+  };
   try {
     const owned: AcademicCourse[] = [];
+    const seenIds = new Set<string>();
+    const seenRevisions = new Set<string>();
     let after: string | undefined;
+    let previousCursor: AcademicCourse | undefined;
     for (let page = 0; page < MAX_PAGES; page++) {
-      if (signal?.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
+      check();
       const courses = await listAcademicCourses("", "", after);
-      scope.assertCurrent();
-      owned.push(...courses.filter(course => course.owned));
+      check();
+      // A withdrawn cursor makes academic_catalog return [], indistinguishable
+      // from the true end. Never treat that as a complete owned-course list.
+      if (previousCursor) {
+        let current: AcademicCourse;
+        try {
+          current = await getAcademicCourse(previousCursor.id, accountId);
+        } catch {
+          check();
+          throw new Error("The owned course catalog could not be verified. Refresh before sharing or approving courses.");
+        }
+        check();
+        if (current.id !== previousCursor.id
+          || current.current_revision_id !== previousCursor.current_revision_id
+          || current.term !== previousCursor.term || current.module !== previousCursor.module
+          || current.title !== previousCursor.title || current.owned !== previousCursor.owned
+          || current.visibility !== previousCursor.visibility
+          || current.review_status !== previousCursor.review_status
+          || current.ready_questions !== previousCursor.ready_questions
+          || current.review_questions !== previousCursor.review_questions) {
+          throw new Error("The owned course catalog changed while loading. Refresh to view a complete list.");
+        }
+      }
+      if (!Array.isArray(courses) || courses.length > PAGE_SIZE
+        || courses.some(course => !course || typeof course.id !== "string"
+          || typeof course.current_revision_id !== "string"
+          || seenIds.has(course.id) || seenRevisions.has(course.current_revision_id))
+        || new Set(courses.map(course => course.id)).size !== courses.length
+        || new Set(courses.map(course => course.current_revision_id)).size !== courses.length) {
+        throw new Error("The owned course catalog changed while loading. Refresh to view a complete list.");
+      }
+      for (const course of courses) {
+        seenIds.add(course.id);
+        seenRevisions.add(course.current_revision_id);
+        if (course.owned) owned.push(course);
+      }
       if (courses.length < PAGE_SIZE) return owned;
-      after = courses[courses.length - 1].id;
+      previousCursor = courses[courses.length - 1];
+      after = previousCursor.id;
     }
     throw new Error("Your library has more courses than this list can read. Search the catalog for a course instead.");
   } finally { scope.dispose(); }

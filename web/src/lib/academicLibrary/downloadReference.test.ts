@@ -64,6 +64,18 @@ describe("academic download references", () => {
     expect(isAcademicCourseDownloaded(course, "account", { ...mocks.state,
       deferredContent: { accountId: "account", questions: [{ id: "question" }], documents: [], sources: [], media: [] } })).toBe(false);
   });
+  it("does not let a foreign account's deferred original IDs invalidate this account's complete course", () => {
+    const deferredContent = { accountId: "another-account", questions: [{ id: "question" }],
+      documents: [{ id: "source" }, { id: "template" }], sources: [], media: [] };
+    expect(isAcademicCourseDownloaded(course, "account", { ...mocks.state, deferredContent })).toBe(true);
+  });
+  it("holds matching same-account or unknown-owner originals, not unrelated pending content", () => {
+    const deferredContent = { accountId: "account", questions: [], documents: [{ id: "template" }], sources: [], media: [] };
+    expect(isAcademicCourseDownloaded(course, "account", { ...mocks.state, deferredContent })).toBe(false);
+    expect(isAcademicCourseDownloaded(course, "account", { ...mocks.state, deferredContent: { ...deferredContent, accountId: "" } })).toBe(false);
+    expect(isAcademicCourseDownloaded(course, "account", { ...mocks.state,
+      deferredContent: { ...deferredContent, documents: [{ id: "unrelated-document" }] } })).toBe(true);
+  });
 });
 
 describe("shared questions-only download", () => {
@@ -85,6 +97,21 @@ describe("shared questions-only download", () => {
     mocks.hydrate.mockImplementation(async () => { mocks.state.deferredContent = undefined; });
     await downloadCourseQuestions(course, "account");
     expect(mocks.hydrate).toHaveBeenCalledWith({ questionIds: ["question"], documentIds: ["source", "template"] });
+    expect(mocks.download).not.toHaveBeenCalled();
+  });
+  it("does not attempt another account's cloud recovery when this course is already installed", async () => {
+    mocks.state.deferredContent = { accountId: "other-account", questions: [{ id: "question" }],
+      documents: [{ id: "source" }], sources: [], media: [] };
+    await downloadCourseQuestions(course, "account");
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(mocks.durable).toHaveBeenCalledWith(5);
+  });
+  it("does not hydrate unrelated same-account deferred content on a complete course", async () => {
+    mocks.state.deferredContent = { accountId: "account", questions: [{ id: "unrelated" }],
+      documents: [], sources: [], media: [] };
+    await downloadCourseQuestions(course, "account");
+    expect(mocks.hydrate).not.toHaveBeenCalled();
     expect(mocks.download).not.toHaveBeenCalled();
   });
   it("propagates failed durable writes instead of claiming success", async () => {

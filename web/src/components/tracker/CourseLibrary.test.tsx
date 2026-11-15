@@ -8,9 +8,15 @@ import { CourseLibrary } from "./CourseLibrary";
 
 const mocks = vi.hoisted(() => ({ useStore: vi.fn(), connected: [] as unknown[] }));
 vi.mock("../../lib/store", () => ({ useStore: () => mocks.useStore() }));
-vi.mock("../../lib/account/accountStore", () => ({
-  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner" } }),
-}));
+vi.mock("../../lib/account/accountStore", () => {
+  const account = { user: { id: "owner" } };
+  // The term actions retain a canonical account scope while mounted. A
+  // selector-only function is not a faithful mock of Zustand's bound store.
+  return { useAccount: Object.assign(
+    (select: (state: typeof account) => unknown) => select(account),
+    { getState: () => account, subscribe: () => () => {} },
+  ) };
+});
 vi.mock("../../lib/academicLibrary/useAcademicCatalog", () => ({
   useAcademicCatalog: () => ({ courses: mocks.connected, loading: false, error: "", more: false, loadMore: vi.fn(), retry: vi.fn() }),
 }));
