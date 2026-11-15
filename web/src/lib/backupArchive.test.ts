@@ -1565,4 +1565,56 @@ describe("portable binary media backup", () => {
     expect(await backup.restoreOriginals([source])).toMatchObject({ restored: 0, skipped: 1 });
   });
 
+  it.each([
+    { label: "internal duplicate", fileType: "axom-internal", checksum: "same" },
+    { label: "missing type duplicate", fileType: undefined, checksum: "same" },
+    { label: "invalid digest duplicate", fileType: "text/plain", checksum: "malformed" },
+  ])("discloses a missing source original despite a later $label", async ({ fileType, checksum }) => {
+    const bytes = new Blob(["A source that is not cached locally"], { type: "text/plain" });
+    const source: SourceDocument = {
+      id: "alias-missing-source", title: "Original metadata", fileName: "original.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Unmodified text",
+      sizeBytes: bytes.size, checksum: await sha256Hex(await bytes.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    const alias = { ...source, fileType, checksum: checksum === "same" ? source.checksum : checksum };
+    const payload = { documents: [source], deferredContent: { documents: [alias] } };
+    const exported = await createMediaBackupArchive(payload, [], [source]);
+    expect(exported.originalCount).toBe(0);
+    const portable = await readPortableBackup(new File([exported.blob], "source-alias-missing.zip"));
+    expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [source.id] });
+  });
+
+  it("matches an included original to any eligible root/deferred record rather than last-wins alias", async () => {
+    const bytes = new Blob(["A source still available in the archive"], { type: "text/plain" });
+    const source: SourceDocument = {
+      id: "alias-present-source", title: "Original metadata", fileName: "original.txt",
+      fileType: "text/plain", uploadedAt: "2026-11-15", rawText: "Source retained",
+      sizeBytes: bytes.size, checksum: await sha256Hex(await bytes.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await saveSourceOriginal(source, bytes);
+    const exported = await createMediaBackupArchive({
+      documents: [source],
+      deferredContent: { documents: [{ ...source, checksum: "historical-invalid-digest" }] },
+    }, [], [source]);
+    expect(exported.originalCount).toBe(1);
+    const portable = await readPortableBackup(new File([exported.blob], "source-alias-present.zip"));
+    expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+  });
+
+  it("rejects conflicting JSON source digests even when a duplicate has no fileType", async () => {
+    const source = {
+      id: "json-no-type-source", fileType: "text/plain",
+      checksum: "a".repeat(64), title: "Expected source",
+    };
+    const payload = {
+      _app: "AXOM", _backupScope: "complete",
+      documents: [source],
+      deferredContent: { documents: [{ ...source, fileType: undefined, checksum: "b".repeat(64) }] },
+    };
+    await expect(readPortableBackup(new File([JSON.stringify(payload)], "conflicting-no-type.json")))
+      .rejects.toThrow(/conflicting source.document checksums/i);
+  });
+
 });

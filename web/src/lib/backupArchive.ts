@@ -751,12 +751,15 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
           documents?: SourceDocument[];
         };
       } : {};
-    const sourceDocuments = [
+    // Verify all root/deferred claims before filtering out historical records
+    // without fileType. A filtered duplicate must not hide a contradictory ID.
+    const documentRecords = [
       ...(Array.isArray(workspace.documents) ? workspace.documents : []),
       ...(Array.isArray(workspace.deferredContent?.documents) ? workspace.deferredContent.documents : []),
-    ].filter((doc): doc is SourceDocument =>
+    ];
+    assertConsistentSourceDocumentChecksums(documentRecords);
+    const sourceDocuments = documentRecords.filter((doc): doc is SourceDocument =>
       !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
-    assertConsistentSourceDocumentChecksums(sourceDocuments);
     const questions = [
       ...(Array.isArray(workspace.questions) ? workspace.questions : []),
       ...(Array.isArray(workspace.deferredContent?.questions) ? workspace.deferredContent.questions : []),
@@ -854,14 +857,22 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     ...(Array.isArray(manifest.deferredContent?.documents) ? manifest.deferredContent.documents : []),
   ];
   assertConsistentSourceDocumentChecksums(documentRecords);
-  const documents = new Map(documentRecords.map(doc => [doc?.id, doc]));
+  const sourceDocuments = documentRecords.filter((doc): doc is SourceDocument =>
+    !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
+  // Never collapse root/deferred records before assessing original completeness:
+  // a later internal, untyped or malformed alias cannot erase an eligible root.
+  // Valid duplicate digests have already passed the cross-record consistency check.
+  const originalDigestById = new Map<string, string>(
+    backupOriginalDocuments(sourceDocuments).map(doc =>
+      [doc.id, doc.checksum?.replace(/^sha256:/, "") ?? ""] as const),
+  );
   // Check integrity before the caller offers to adopt any workspace records.
   for (const item of originals) {
     if (!item || typeof item.documentId !== "string" || ids.has(item.documentId) || files.has(item.file)
       || !/^originals\/\d+$/.test(item.file) || !zip.file(item.file) || !/^[a-f0-9]{64}$/.test(item.sha256)
       || !Number.isSafeInteger(item.byteSize) || item.byteSize < 0 || item.byteSize > MAX_ORIGINAL_BYTES
       || typeof item.mimeType !== "string" || item.mimeType.length > 255
-      || documents.get(item.documentId)?.checksum?.replace(/^sha256:/, "") !== item.sha256) throw new Error("The backup contains an invalid or missing original-file record.");
+      || originalDigestById.get(item.documentId) !== item.sha256) throw new Error("The backup contains an invalid or missing original-file record.");
     const bytes = await zip.file(item.file)!.async("uint8array");
     if (bytes.byteLength !== item.byteSize || await requiredRestoreSha256(bytes) !== item.sha256) throw new Error("An original file failed its backup integrity check. No workspace data has been changed.");
     ids.add(item.documentId); files.add(item.file);
@@ -872,10 +883,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   // Review-image references may live on synthetic review documents without
   // checksum-bound originals. Keep them for media completeness; the original
   // filter independently limits original-file expectations to valid checksums.
-  const sourceDocuments = [...documents.values()].filter((doc): doc is SourceDocument =>
-    !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
-  const missingOriginalIds = backupOriginalDocuments(sourceDocuments)
-    .filter(doc => !ids.has(doc.id)).map(doc => doc.id);
+  const missingOriginalIds = [...originalDigestById.keys()].filter(id => !ids.has(id));
   const questions = [
     ...(Array.isArray(manifest.questions) ? manifest.questions : []),
     ...(Array.isArray(manifest.deferredContent?.questions) ? manifest.deferredContent.questions : []),
