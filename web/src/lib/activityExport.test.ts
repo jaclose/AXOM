@@ -74,6 +74,32 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("preserves well-formed Unicode across truncated and suffixed Excel tab names", async () => {
+    const logs = studyLogs([
+      `${"x".repeat(30)}😀`,
+      `${"x".repeat(30)}🚀`,
+      `${"x".repeat(30)}🧠`,
+      "📚".repeat(16),
+      `${"y".repeat(28)}😀💡`,
+    ]);
+    const workbook = await captureWorkbook(logs);
+    expectAllTypeSheets(workbook, logs);
+    for (const name of workbook.SheetNames) {
+      // A UTF-16 slice cannot leave half a surrogate pair in an XML worksheet title.
+      expect([...name].some((symbol) => symbol.length === 1 && /[\uD800-\uDFFF]/.test(symbol))).toBe(false);
+      expect(name.length).toBeLessThanOrEqual(31);
+    }
+
+    const XLSX = await import("xlsx-js-style");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const reloaded = XLSX.read(bytes, { type: "buffer" });
+    expect(reloaded.SheetNames).toEqual(workbook.SheetNames);
+    for (const name of workbook.SheetNames.slice(2)) {
+      expect(reloaded.Sheets[name]?.C2?.v).toBe(workbook.Sheets[name]?.C2?.v);
+      expect(reloaded.Sheets[name]?.F2?.v).toBe(workbook.Sheets[name]?.F2?.v);
+    }
+  });
+
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {
     const shared = "Long protocol study session " + "x".repeat(40);
     const logs = studyLogs([shared + "Alpha", shared + "Beta"]);
