@@ -10,7 +10,14 @@ const ATTACHMENT_KEY = "questionAttachmentPayloads";
 
 async function openRecovery(page: Page, mobile = false) {
   if (mobile) {
-    await page.getByRole("button", { name: "Open navigation menu" }).click();
+    // A first-run tour offer is a nonmodal dialog, not a reason for the open
+    // mobile drawer to become untappable. Reproduce the delayed offer before
+    // opening the drawer with the keyboard so pointer interception is visible.
+    const offer = page.getByRole("dialog", { name: "Want a 60-second tour?" });
+    await expect(offer).toBeVisible({ timeout: 8_000 });
+    await page.getByRole("button", { name: "Open navigation menu" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(offer).toBeHidden();
     await page.locator(".server-header").click();
     await page.getByRole("combobox", { name: "Settings section" }).selectOption("backup");
   } else {
