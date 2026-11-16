@@ -135,6 +135,15 @@ describe("study plan for one surface", () => {
   });
 });
 
+describe("a partly restored workspace", () => {
+  it("reads absent collections as empty instead of failing", () => {
+    const partial = { questions: [question("m", {}, [wrong(1)])], activeDayKey: localDateKey(NOW) } as unknown as NoctyriumState;
+    const plan = buildStudyPlan(partial, NOW);
+    expect(plan.actions.map((action) => action.kind)).toEqual(["retry-missed"]);
+    expect(plan.observed.trackerPasses).toBe(0);
+  });
+});
+
 describe("what AXOM saw today", () => {
   it("counts recorded answers, passes and reviews for the day and keeps timed minutes apart from typed ones", () => {
     const log = (patch: Partial<StudyLog>): StudyLog => ({ id: "l", dayKey: localDateKey(NOW), ts: daysAgo(0), type: "Manual", minutes: 0, cards: 0, ...patch });

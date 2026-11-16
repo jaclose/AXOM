@@ -116,8 +116,11 @@ const practice = (questions: readonly QuestionRecord[]): StudyLaunch => ({ type:
  * suggestion only.
  */
 export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), activeRun: ActiveRun | null = null, options: StudyPlanOptions = {}): StudyPlan {
-  const setsById = new Map(state.questionSets.map((set) => [set.id, set]));
-  const events = attemptEvents(state.questions);
+  // A workspace restored from an older copy can lack whole collections; an absent one is an empty one.
+  const questions = state.questions ?? [];
+  const tracker = state.tracker ?? [];
+  const setsById = new Map((state.questionSets ?? []).map((set) => [set.id, set]));
+  const events = attemptEvents(questions);
   const lastScored = new Map<string, AttemptEvent>();
   for (const event of events) if (event.correct !== undefined) lastScored.set(event.questionId, event);
   const answeredIds = new Set(events.map((event) => event.questionId));
@@ -126,7 +129,7 @@ export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), ac
   const minutesFor = (count: number): number | undefined => pace ? Math.max(1, Math.round((count * pace) / 60)) : undefined;
 
   // Ready, and one record per identity: the same rule the Up Next recommendation uses.
-  const ready: Scoped[] = uniquePracticeQuestions(state.questions).map((question) => {
+  const ready: Scoped[] = uniquePracticeQuestions(questions).map((question) => {
     const module = questionScope(question, setsById).module?.trim() || UNFILED;
     return { question, module, moduleKey: module === UNFILED ? "" : canonicalModuleKey(module), last: lastScored.get(question.id) };
   });
@@ -178,7 +181,7 @@ export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), ac
   }
 
   // The course the learner is in is the one they last recorded work on. AXOM never guesses a schedule.
-  const open = state.tracker.filter((item) => !item.archivedAt);
+  const open = tracker.filter((item) => !item.archivedAt);
   const latest = [...open].sort((left, right) => lastTouched(right) - lastTouched(left))[0];
   const current = latest && Number.isFinite(lastTouched(latest)) ? trackerPathScope(latest.path) : {};
   const currentKey = current.module ? canonicalModuleKey(current.module) : "";
@@ -224,12 +227,12 @@ export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), ac
   return {
     actions: kept.slice(0, options.limit ?? MAX_ACTIONS),
     observed: observedDay(state, state.activeDayKey, events),
-    empty: state.questions.length === 0 && state.tracker.length === 0,
+    empty: questions.length === 0 && tracker.length === 0,
   };
 }
 
 /** What the app itself recorded on one study day, kept apart from what the learner typed in. */
-export function observedDay(state: NoctyriumState, dayKey: string, events: readonly AttemptEvent[] = attemptEvents(state.questions)): ObservedDay {
+export function observedDay(state: NoctyriumState, dayKey: string, events: readonly AttemptEvent[] = attemptEvents(state.questions ?? [])): ObservedDay {
   const onDay = (at: string): boolean => {
     const time = Date.parse(at);
     return Number.isFinite(time) && localDateKey(new Date(time)) === dayKey;
@@ -242,18 +245,18 @@ export function observedDay(state: NoctyriumState, dayKey: string, events: reado
     for (const record of records) if (!latest.has(record.id) || record.at > latest.get(record.id)!) latest.set(record.id, record.at);
     return [...latest.values()].filter(onDay).length;
   };
-  const runLogs = new Set(state.quizSessions.map((session) => quizPracticeLogId(session.id)));
+  const runLogs = new Set((state.quizSessions ?? []).map((session) => quizPracticeLogId(session.id)));
   let observedMinutes = 0;
   let reportedMinutes = 0;
-  for (const log of canonicalStudyLogs(state.logs)) {
+  for (const log of canonicalStudyLogs(state.logs ?? [])) {
     if (log.dayKey !== dayKey || !(log.minutes > 0)) continue;
     if (log.type === "Pomodoro" || runLogs.has(log.id)) observedMinutes += log.minutes;
     else reportedMinutes += log.minutes;
   }
   return {
     answered: today.length, correct, accuracy: scored.length ? Math.round((correct / scored.length) * 100) : null,
-    trackerPasses: latestOnDay(state.tracker.flatMap((item) => item.passEvents ?? [])),
-    cardReviews: latestOnDay(state.cardReviews),
+    trackerPasses: latestOnDay((state.tracker ?? []).flatMap((item) => item.passEvents ?? [])),
+    cardReviews: latestOnDay(state.cardReviews ?? []),
     observedMinutes: Math.round(observedMinutes), reportedMinutes: Math.round(reportedMinutes),
   };
 }
