@@ -64,6 +64,13 @@ function document(value: PreparedBank | string, patch: Partial<SourceDocument> =
 }
 
 describe("private review backlog", () => {
+  it("counts distinct bank reviews from the same source without hiding either held queue", () => {
+    const first = bank(["unresolved"]);
+    const second = bank(["needs-review", "unresolved"]);
+    second.pkg.manifest.bank.id = "sibling-bank";
+    expect(summarizePrivateReviewBacklog([document(first), document(second, { id: `private-review-${SOURCE_CHECKSUM}-bank-sibling-bank` })]))
+      .toMatchObject({ held: 3, needsReview: 1, unresolved: 2, sources: 2, duplicateDocuments: 0 });
+  });
   it("keeps source-number collisions in the visible held backlog", () => {
     const retained = bank(["ready", "ready", "ready", "ready"]);
     retained.pkg.questions.slice(0, 3).forEach(question => { question.source.questionNumber = 1; });

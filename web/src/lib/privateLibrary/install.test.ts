@@ -44,6 +44,46 @@ function stubSuccessfulImageDecode(width = 1, height = 1) {
 beforeEach(async () => { await openEmptyWorkspace(); resetLocalBackupRuntimeForTests(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
 afterEach(async () => { resetLocalBackupRuntimeForTests(); await closeWorkspace(); vi.unstubAllGlobals(); });
 describe("prepared private library installation", () => {
+  it("retains sibling banks from one source and preserves each bank's review on reimport", async () => {
+    const b = await bundle();
+    const first = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    delete first.pkg.questions[0].correctAnswer;
+    const second = structuredClone(first);
+    second.pkg.manifest.bank.id = "second-bank";
+    second.pkg.questions[0].id = "second-question";
+    second.pkg.questions[0].stem = [{ type: "text", text: "Which separate second-bank option is supported?" }];
+    b.catalog.sources[0] = { ...b.catalog.sources[0], ready: 0, review: 1 };
+    b.catalog.sources.push({ ...b.catalog.sources[0], id: "second-source-bank", bankFile: "banks/second/bank.json" });
+    b.files.set("catalog.json", encode(b.catalog));
+    b.files.set("banks/test/bank.json", encode(first));
+    b.files.set("banks/second/bank.json", encode(second));
+
+    expect((await installPrivateLibrary(b.read)).status).toBe("complete");
+    await reloadWorkspace();
+    const reviews = useStore.getState().documents.filter(document => document.fileType === PRIVATE_REVIEW_DOCUMENT);
+    expect(reviews).toHaveLength(2);
+    expect(new Set(reviews.map(document => document.id)).size).toBe(2);
+    const legacy = reviews.find(document => document.id === `private-review-${"a".repeat(64)}`)!;
+    const confirmed = readPreparedBank(JSON.parse(legacy.rawText));
+    confirmed.pkg.questions[0].correctAnswer = { labels: ["B"], evidence: "reviewer" };
+    useStore.setState(state => ({ documents: state.documents.map(document => document.id === legacy.id
+      ? { ...document, rawText: JSON.stringify(confirmed) } : document) }));
+
+    expect((await installPrivateLibrary(b.read)).status).toBe("complete");
+    await reloadWorkspace();
+    const state = useStore.getState();
+    expect(state.questions).toHaveLength(1);
+    expect(state.questions[0].correctKey).toBe("B");
+    const retained = state.documents.filter(document => document.fileType === PRIVATE_REVIEW_DOCUMENT);
+    expect(retained).toHaveLength(2);
+    expect(readPreparedBank(JSON.parse(retained.find(document => document.id !== legacy.id)!.rawText)).pkg.questions[0].correctAnswer).toBeUndefined();
+    const catalog = JSON.parse(state.documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)!.rawText) as PrivateLibraryCatalog;
+    expect(catalog.sources.map(source => [source.bankId, source.ready, source.review])).toEqual([["sample", 1, 0], ["second-bank", 0, 1]]);
+  });
+  it.each(["", " ", 2, "x".repeat(513)])("refuses invalid optional catalog bank identity %s", async (bankId) => {
+    const { catalog } = await bundle();
+    expect(() => readCatalog({ ...catalog, sources: [{ ...catalog.sources[0], bankId }] })).toThrow("Invalid bank identity");
+  });
   it.each([undefined, "a".repeat(64), `sha256:${"d".repeat(64)}`])("rejects invalid source bindings on the first install: %s", async (sourceChecksum) => {
     const b = await bundle();
     const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));

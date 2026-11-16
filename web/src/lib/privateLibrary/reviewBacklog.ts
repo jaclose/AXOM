@@ -2,6 +2,7 @@ import type { SourceDocument } from "../library";
 import { assessBank } from "../question-content/assessBank";
 import { readPreparedBank } from "./install";
 import { PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "./types";
+import { preparedReviewChecksum } from "./reviewIdentity";
 
 export interface PrivateReviewBacklog {
   /** Every retained row that is excluded from scored practice. */
@@ -22,18 +23,8 @@ interface ReviewCandidate {
 }
 
 function sourceIdentity(document: SourceDocument, bank: PreparedBank): string {
-  const provenanceChecksums = new Set(bank.pkg.questions.flatMap(question => {
-    const checksum = question.provenance.sourceChecksum?.replace(/^sha256:/, "");
-    return checksum && /^[a-f0-9]{64}$/.test(checksum) ? [checksum] : [];
-  }));
-  if (provenanceChecksums.size === 1) return `source:${[...provenanceChecksums][0]}`;
-
-  const documentChecksum = document.checksum?.replace(/^sha256:/, "");
-  if (documentChecksum && /^[a-f0-9]{64}$/.test(documentChecksum)) return `document:${documentChecksum}`;
-
-  const reviewId = document.id.match(/^private-review-([a-f0-9]{64})$/)?.[1];
-  if (reviewId) return `source:${reviewId}`;
-
+  const checksum = preparedReviewChecksum(bank, document);
+  if (checksum) return JSON.stringify([checksum, bank.pkg.manifest.bank.id]);
   // Older review records can lack a source checksum. Their bank id and source
   // filename are still stable within the private-library contract.
   return `bank:${bank.pkg.manifest.bank.id}|${bank.pkg.manifest.source.filename}`;

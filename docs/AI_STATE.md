@@ -5,30 +5,32 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## CONVERGENCE integration · 2026-11-09
+## Study loop recovery · 2026-11-16
 
-Isolated branch `release/2026-11-09-convergence`, based on verified
-`origin/main` `382308aba5ececd039285d4b8ccee9a181b40d7c`. JD explicitly authorized
-combining the existing work, repairs, commits and push through the unified FORGE
-gateway. Original dirty worktrees and project source mirrors are untouched.
-[Candidate manifest](release/2026-11-09-CONVERGENCE.md) records pinned provenance,
-held work, migration order and verification. It is the current release record;
-older checkout claims remain in this file's Git history at the base SHA.
+Isolated branch `codex/study-loop-recovery-20261116` starts at `origin/main`
+`9f6b381f`. JD authorized implementation, private SSD imports and a safe branch
+push. The dirty original checkout and owner account remain untouched.
 
-Included working areas: reviewed QBank publication/import/practice, course-template
-access and week ownership, private Community profiles/feed/rankings, Journal
-concurrent edits, account-scoped image storage, upload diagnostics/progress, and
-foreground notification panels. WIP navigation and direct routes are withheld;
-Tools precedes Academic Support. Native packaging groundwork only: no installer,
-release archive or download has been generated.
+QBank puts courses/shared sets before source administration. Productivity starts
+the exact observed due, missed or unseen questions directly; launch guards retain
+saved runs and reject stale account/record identities. Existing attempt commits
+and Course Tracker evidence remain the single progress path. Prepared imports now
+keep separate reviews for sibling banks from the same PDF, preserving legacy
+review decisions and withholding ambiguous mappings. Host exposes the existing
+academic review queue. See [academic library](features/academic-library.md).
 
-The combined package is committed and pushed in draft PR #345. Focused tests and
-real local browser journeys have passed in these areas. The
-complete combined gate, exact-head hosted checks and production acceptance are
-still pending. Do not infer release readiness or cloud publication from those
-focused results. Both approved account-save repairs are applied and the owner's
-new checkpoint is verified. The nine feature migrations and regenerated
-Communications function retain separate production controls.
+Anonymous course browsing reuses candidate `12639e1d`, with explicit approval of
+the exact shared revision. Its new migration is **not applied to production**.
+Live readback found zero approved shared QBank revisions; private source possession
+does not establish sharing rights or academic review. No content was published.
+
+Focused unit/UI/security tests and local Chrome desktop/mobile journeys passed:
+catalog to attempt to Course Tracker/reload, recommendation to repair, and isolated
+SQL submit/review/import/withdrawal. These do not establish hosted acceptance.
+Private corpus import receipts stay outside Git on JDabSSD. The SSD must remain
+mounted; this checkout's dependencies and development profile are stored there.
+Internal storage pressure limits heavy concurrent verification. Historical live
+account receipts below remain dated evidence, not current production assertions.
 
 ## Live account investigation · 2026-11-09
 

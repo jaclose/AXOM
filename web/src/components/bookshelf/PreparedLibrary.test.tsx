@@ -115,6 +115,43 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("PreparedLibrary truthfulness", () => {
+  it("keeps sibling bank controls and reviewed counts separate for a shared source", async () => {
+    const catalog = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
+    catalog.sources[0].bankId = "bank";
+    catalog.sources.push({ ...catalog.sources[0], id: "sibling", bankId: "sibling", bankFile: "banks/sibling.json", name: "Sibling bank.pdf", ready: 7, review: 9 });
+    mocks.documents[0].rawText = JSON.stringify(catalog);
+    const sibling = question("sibling");
+    sibling.content!.bankId = "sibling";
+    mocks.questions.push(sibling);
+    const prepared = (bankId: string, members: QuestionRecord[]): PreparedBank => ({
+      pkg: { manifest: { schemaVersion: 1, course: { name: "FTCM", term: 1, week: 1 },
+        bank: { id: bankId, title: bankId, discipline: "Medicine" },
+        source: { filename: "source.pdf", sourceWeekDeclared: false }, questionsFile: "questions.json", assetsDirectory: "assets" },
+        questions: members.map(member => member.content!) },
+      issues: [], sourceText: { rawText: "Synthetic source" }, sourceBytes: 16, notes: [],
+    });
+    const first = prepared("bank", mocks.questions.slice(0, 2));
+    const firstReview = mocks.documents.find(document => document.fileType === PRIVATE_REVIEW_DOCUMENT)!;
+    firstReview.rawText = JSON.stringify(first);
+    mocks.documents.push({ ...firstReview, id: `private-review-${checksum}-bank-sibling`, rawText: JSON.stringify(prepared("sibling", [sibling])) });
+    const result: BankSave = { status: "saved", sections: [], incompleteSections: [], held: [], withheldAssets: [], filing: { module: "FTCM", term: 1, agrees: true }, errors: [] };
+    await persistPreparedLibraryReview(firstReview.id, first, first.pkg, result, mocks.documents[0].id, "source");
+    const updated = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
+    expect(updated.sources[0]).toMatchObject({ ready: 1, review: 0, bankId: "bank" });
+    expect(updated.sources[1]).toEqual(catalog.sources[1]);
+    render(<PreparedLibrary />);
+    expect(screen.getAllByRole("button", { name: "Review source" })).toHaveLength(2);
+    expect(screen.getByText(/1 locally answer-ready · 1 stored for review · 0 held in source/)).toBeTruthy();
+    expect(screen.getByText(/1 locally answer-ready · 0 stored for review · 9 held in source/)).toBeTruthy();
+  });
+  it("does not pick a legacy checksum-only review for ambiguous sibling catalog rows", () => {
+    const catalog = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
+    catalog.sources.push({ ...catalog.sources[0], id: "sibling", bankFile: "banks/sibling.json", name: "Sibling bank.pdf" });
+    mocks.documents[0].rawText = JSON.stringify(catalog);
+    render(<PreparedLibrary />);
+    expect(screen.queryByRole("button", { name: "Review source" })).toBeNull();
+    expect(screen.getAllByText(/Bank counts need source review/)).toHaveLength(2);
+  });
   it("combines installed catalogs, de-duplicates sources, and totals local readiness and held review", () => {
     const secondChecksum = "b".repeat(64);
     const thirdChecksum = "e".repeat(64);
@@ -369,7 +406,7 @@ describe("PreparedLibrary truthfulness", () => {
         questionsFile: "questions.json",
         assetsDirectory: "assets",
       },
-      questions: [],
+      questions: [question("ready").content!],
     };
     const bank: PreparedBank = {
       pkg,
@@ -424,7 +461,7 @@ describe("PreparedLibrary truthfulness", () => {
         source: { filename: "Source.pdf", sourceWeekDeclared: false },
         questionsFile: "questions.json", assetsDirectory: "assets",
       },
-      questions: [],
+      questions: [question("ready").content!],
     };
     const bank: PreparedBank = { pkg, issues: [], sourceText: { rawText: "Reviewed" }, sourceBytes: 8, notes: [] };
     const result: BankSave = {
@@ -456,7 +493,7 @@ describe("PreparedLibrary truthfulness", () => {
         questionsFile: "questions.json",
         assetsDirectory: "assets",
       },
-      questions: [],
+      questions: [question("ready").content!],
     };
     const bank = {
       pkg, issues: [], sourceText: { rawText: "Reviewed" }, sourceBytes: 8, notes: [],

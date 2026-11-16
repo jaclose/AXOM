@@ -17,6 +17,7 @@ import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { questionPracticeReadiness } from "../questionFilters";
 import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog, type ReviewedFiling } from "./types";
 import type { SourceDocument } from "../library";
+import { bankReviewDocumentId, preparedBankContains } from "./reviewIdentity";
 
 export type LibraryReader = (path: string) => Promise<Uint8Array>;
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
@@ -79,6 +80,8 @@ export function readCatalog(value: unknown): PrivateLibraryCatalog {
   if (!c || c.format !== PRIVATE_LIBRARY_FORMAT || c.schemaVersion !== 1 || !/^[a-zA-Z0-9_-]+$/.test(c.id) || typeof c.version !== "string" || !Array.isArray(c.templates) || !Array.isArray(c.sources) || c.sources.length > 10000) throw new Error("This is not a supported AXOM private library.");
   for (const t of c.templates) { safeLibraryPath(t.file); if (typeof t.name !== "string" || !/^[a-f0-9]{64}$/.test(t.checksum)) throw new Error("Invalid template identity."); }
   for (const s of c.sources) { if (s.bankFile) safeLibraryPath(s.bankFile); if (s.originalFile) safeLibraryPath(s.originalFile); if (typeof s.id !== "string" || !s.id || typeof s.name !== "string" || typeof s.sourcePath !== "string" || typeof s.reason !== "string" || !/^[a-f0-9]{64}$/.test(s.checksum) || ![s.ready,s.review].every(n => Number.isSafeInteger(n) && n >= 0) || !["prepared", "review-required", "duplicate-linked", "reference/template-only", "unsupported", "missing", "failed"].includes(s.status)) throw new Error("Invalid source identity or counts."); }
+  for (const source of c.sources) if (source.bankId !== undefined
+    && (typeof source.bankId !== "string" || !source.bankId.trim() || source.bankId.length > 512)) throw new Error("Invalid bank identity.");
   return c;
 }
 export function readPreparedBank(value: unknown): PreparedBank {
@@ -384,6 +387,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
     if (!source.bankFile && !source.originalFile) continue;
     const report = (phase: string) => progress(`Preparing your library · ${index + 1} of ${installed.length} sources · ${phase}`);
     report("checking original");
+    let openedBank: PreparedBank | undefined;
     try {
       if (source.originalFile) {
         const s = currentStore();
@@ -402,10 +406,25 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       }
       if (source.bankFile) {
       report("opening question package");
-      const storedReview = currentStore().documents.find(d => d.id === `private-review-${source.checksum}`);
       const incomingBank = readPreparedBank(JSON.parse(text(await read(source.bankFile))));
+      openedBank = incomingBank;
+      const bankId = incomingBank.pkg.manifest.bank.id;
+      if (source.bankId !== undefined && source.bankId !== bankId) throw new Error("The question package does not match its recorded bank identity.");
+      source.bankId = bankId;
       if (incomingBank.pkg.questions.some(question => question.provenance.sourceChecksum !== `sha256:${source.checksum}`))
         throw new Error("The question package does not match its recorded source checksum. Rebuild its source bindings before installing; no questions from this bank were saved.");
+      // Held-only banks may still be in the pending batch. Reserve distinct
+      // identities before it flushes, while retaining exact legacy review IDs.
+      const reviews = new Map(currentStore().documents.map(document => [document.id, document]));
+      for (const [id, document] of pendingDocuments) reviews.set(id, document);
+      const legacyId = `private-review-${source.checksum}`;
+      const scopedId = bankReviewDocumentId(source.checksum, bankId);
+      const legacy = reviews.get(legacyId);
+      const scoped = reviews.get(scopedId);
+      const matchingLegacy = legacy && readPreparedBank(JSON.parse(legacy.rawText)).pkg.manifest.bank.id === bankId ? legacy : undefined;
+      if (matchingLegacy && scoped) throw new Error("Two saved reviews claim this bank. Keep both copies and reconcile them before reinstalling.");
+      const storedReview = scoped ?? matchingLegacy;
+      const reviewId = storedReview?.id ?? (legacy ? scopedId : legacyId);
       const bank = storedReview
         ? mergeStoredReview(incomingBank, JSON.parse(storedReview.rawText), `sha256:${source.checksum}`)
         : incomingBank;
@@ -439,7 +458,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
         ...result.incompleteSections.filter(section => section.savedIds.length > 0),
       ];
       const localQuestions = currentStore().questions.filter(question => (
-        question.content?.provenance.sourceChecksum?.replace(/^sha256:/, "") === source.checksum
+        preparedBankContains(question, bank, source.checksum)
         && questionPracticeReadiness(question) === "ready"
       ));
       if (result.status === "failed" && localQuestions.length === 0) throw new Error(result.errors.join(" "));
@@ -471,9 +490,9 @@ async function install(read: LibraryReader, progress: (message: string) => void,
         : bank);
       const state = currentStore();
       // Preserve an existing reviewer's decisions when refreshing the same source version.
-      const id = `private-review-${source.checksum}`;
-      const existingReview = state.documents.find(d => d.id === id);
-      if (source.review || bank.reviewedFiling || existingReview) {
+      const id = reviewId;
+      const existingReview = pendingDocuments.get(id) ?? state.documents.find(d => d.id === id);
+      {
         installedIds.documentIds.push(id);
         const linkedQuestionSetIds = [...new Set([
           ...(existingReview?.linkedQuestionSetIds ?? []),
@@ -493,6 +512,8 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       source.status = "failed";
       const retained = currentStore().questions.filter(question => (
         question.content?.provenance.sourceChecksum?.replace(/^sha256:/, "") === source.checksum
+        && (openedBank ? preparedBankContains(question, openedBank, source.checksum)
+          : Boolean(source.bankId && question.content.bankId === source.bankId))
         && questionPracticeReadiness(question) === "ready"
       ));
       source.ready = retained.length;

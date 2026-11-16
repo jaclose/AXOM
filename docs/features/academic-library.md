@@ -11,6 +11,22 @@ tracker reconciliation and preserves completed work, notes, personal labels and 
 Quiz navigation passes an exact set of canonical local question IDs to the existing
 question workspace. An empty scope cannot expand into all questions.
 
+### Learner entry and observed practice
+
+Question Bank opens the course/shared-set browser before import administration.
+Source review mounts on first expansion and retains in-progress work when collapsed.
+Productivity and QBank use one selector: due questions, then latest recorded errors,
+then unseen questions. Starting passes those exact IDs to the existing tutor. Saved
+runs take precedence; account transitions and replaced records invalidate the handoff.
+Attempts and automatic quiz logs use the existing commit path; Course Tracker derives
+question evidence from the same academic scope. Recommendations describe evidence,
+not mastery.
+
+Prepared imports bind reviews to source checksum plus bank identity. Exact legacy
+reviews remain intact; sibling banks receive distinct review records. Per-bank counts
+use original question membership, and ambiguous legacy mappings require reimport.
+Reimport preserves reviewer decisions, question IDs, attempts and source bytes.
+
 ### Download and practice a term
 
 Signed-in learners can download a term from its Course Library section. The action
@@ -40,6 +56,46 @@ Explicit week policy leaves unresolved activities unassigned. Reviewed complete 
 take precedence over inferred legacy lists; older source versions remain available.
 
 ## Backend boundary
+
+### Visitors without an account
+
+A signed-out visitor sees the courses a reviewer has offered to everyone, in Question
+Bank > Browse the course catalog and in Course Library > Available courses. The same
+cards and curriculum order serve both audiences: `useAcademicCatalog` reads the
+account's permissioned collection when signed in and `academic_public_catalog` when
+not, and one page never mixes the two. Opening an offered course shows a read-only
+weekly plan (`PublicCoursePlan`). An activity the plan does not place in a week stays
+under "No stated week", and an activity AXOM placed by ordering is marked tentative.
+The preview saves nothing. Loading the course and practising its questions remain
+account actions, one sign-in away.
+
+A visitor receives the course title, module, term, academic term, cohort, the count
+of reviewed questions, the source revision label and the plan text. A visitor never
+receives the owner, a reviewer, sharing or review state, pending-review counts,
+revision provenance, question bodies, images or source files. No Storage policy
+changes.
+
+Offering is a decision in Course Library > a course > Sharing settings, shown only to
+an academic reviewer who owns the course. It applies to the exact revision on
+screen and requires an approved course shared with every signed-in account. A
+contributor's course cannot be offered, because nothing records that contributor's
+consent to an audience without accounts. The owner or any reviewer can end an offer.
+An offer also ends by itself when the course is withdrawn, stops being shared, loses
+its approval or gets a new current revision, and it does not come back when that
+state is restored: a reviewer must offer the course again. Every decision is
+appended to `academic_public_offer_log`, which no client role can read.
+
+Forward migration `20261113220000_academic_public_catalog.sql` adds the nullable
+`academic_collections.public_revision_id`, the log table, a guard trigger and the
+functions `academic_is_public`, `academic_offer_publicly`, `academic_public_catalog`
+and `academic_public_course`. It rewrites no existing row, policy, grant or function.
+`publicCatalog.pglite.test.ts` replays the academic migrations and proves the rules
+above as the anonymous, learner, contributor and reviewer roles. Until the migration
+is applied to a database, the client reads the missing functions as an empty catalog
+and offers no control, so the code can be released first. The reasoning is in
+[decision 003](../decisions/003-visitor-catalog-on-the-academic-collection.md). This
+is local evidence only: the migration is not applied to the hosted project and no
+course has been offered.
 
 ### Submitted course review
 

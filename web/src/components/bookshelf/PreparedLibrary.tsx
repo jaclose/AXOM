@@ -19,10 +19,12 @@ import type { QuestionRecord } from "../../lib/questions";
 import type { SourceDocument } from "../../lib/library";
 import type { ImportPackage } from "../../lib/question-content/package";
 import type { BankSave } from "../../lib/question-content/bankImport";
+import { preparedBankContains, preparedReviewChecksum, preparedSourceReview } from "../../lib/privateLibrary/reviewIdentity";
 
-export function practiceReadyQuestionCount(questions: readonly QuestionRecord[], checksum: string): number {
+export function practiceReadyQuestionCount(questions: readonly QuestionRecord[], checksum: string, bank?: PreparedBank): number {
   return questions.filter(question => (
     question.content?.provenance.sourceChecksum?.replace(/^sha256:/, "") === checksum
+    && (!bank || preparedBankContains(question, bank, checksum))
     && questionPracticeReadiness(question) === "ready"
   )).length;
 }
@@ -33,6 +35,7 @@ export async function persistPreparedLibraryReview(
   pkg: ImportPackage,
   result: BankSave,
   catalogDocumentId?: string,
+  sourceId?: string,
 ): Promise<void> {
   const checkpoint = getVaultWriteCheckpoint();
   const beforeDocuments = useStore.getState().documents;
@@ -44,16 +47,18 @@ export async function persistPreparedLibraryReview(
     useStore.setState((state) => {
       const reviewDocument = state.documents.find(document => document.id === reviewDocumentId);
       if (!reviewDocument) throw new Error("The prepared review record is no longer available.");
-      const sourceChecksum = reviewDocumentId.startsWith("private-review-")
-        ? reviewDocumentId.slice("private-review-".length)
-        : undefined;
+      const sourceChecksum = preparedReviewChecksum(bank, reviewDocument);
+      const bankId = bank.pkg.manifest.bank.id;
+      if (!sourceChecksum || pkg.manifest.bank.id !== bankId) throw new Error("The reviewed source identity changed. Reopen this source before saving.");
+      const matchesSource = (source: PrivateLibraryCatalog["sources"][number]) => source.checksum === sourceChecksum
+        && (!sourceId || source.id === sourceId) && (!source.bankId || source.bankId === bankId);
       const catalogDocuments = state.documents.filter(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT);
       const catalogDocument = catalogDocumentId
         ? catalogDocuments.find(document => document.id === catalogDocumentId)
         : catalogDocuments.find(document => {
           try {
             const candidate = readCatalog(JSON.parse(document.rawText));
-            return candidate.sources.some(source => source.checksum === sourceChecksum);
+            return candidate.sources.some(matchesSource);
           } catch {
             return false;
           }
@@ -68,7 +73,9 @@ export async function persistPreparedLibraryReview(
       });
       if (catalogDocument) {
         const liveCatalog = readCatalog(JSON.parse(catalogDocument.rawText));
-        if (!liveCatalog.sources.some(source => source.checksum === sourceChecksum)) {
+        const matching = liveCatalog.sources.filter(matchesSource);
+        const siblingBanks = liveCatalog.sources.filter(source => source.checksum === sourceChecksum && source.bankFile);
+        if (matching.length !== 1 || (!matching[0].bankId && siblingBanks.length > 1)) {
           throw new Error("The prepared library catalog no longer contains this source.");
         }
         updates.set(catalogDocument.id, {
@@ -76,11 +83,12 @@ export async function persistPreparedLibraryReview(
           rawText: JSON.stringify({
             ...liveCatalog,
             sources: liveCatalog.sources.map(source => {
-              if (source.checksum !== sourceChecksum) return source;
-              const ready = practiceReadyQuestionCount(state.questions, source.checksum);
+              if (!matchesSource(source)) return source;
+              const ready = practiceReadyQuestionCount(state.questions, source.checksum, bank);
               const incomplete = result.status === "partial";
               return {
                 ...source,
+                bankId,
                 ready,
                 review: result.held.length + (bank.unreadableQuestions ?? 0),
                 status: ready && !incomplete ? "prepared" : "review-required",
@@ -185,6 +193,8 @@ interface InstalledPreparedSource {
   catalogDocumentId: string;
 }
 
+const sourceEntryKey = (source: PrivateLibraryCatalog["sources"][number]) => JSON.stringify([source.checksum, source.bankId ?? source.bankFile ?? ""]);
+
 type OriginalAvailability = "checking" | "stored" | "missing";
 
 export function PreparedLibrary() {
@@ -221,21 +231,32 @@ export function PreparedLibrary() {
       // action even when a newer reference-only catalog repeats the checksum.
       // Preserve an original-file hint from either entry for local source view.
       for (const source of entry.catalog.sources) {
-        const candidate = { source, catalogDocumentId: entry.documentId };
-        const current = sources.get(source.checksum);
+        const references = [...sources].filter(([, row]) => row.source.checksum === source.checksum && !row.source.bankFile);
+        const banks = [...sources].filter(([, row]) => row.source.checksum === source.checksum && row.source.bankFile);
+        if (!source.bankFile && banks.length) {
+          if (source.originalFile) for (const [bankKey, row] of banks) {
+            if (!row.source.originalFile) sources.set(bankKey, { ...row, source: { ...row.source, originalFile: source.originalFile } });
+          }
+          continue;
+        }
+        const originalFile = source.originalFile ?? references.find(([, row]) => row.source.originalFile)?.[1].source.originalFile;
+        const candidate = { source: originalFile ? { ...source, originalFile } : source, catalogDocumentId: entry.documentId };
+        if (source.bankFile) for (const [referenceKey] of references) sources.delete(referenceKey);
+        const key = sourceEntryKey(source);
+        const current = sources.get(key);
         if (!current) {
-          sources.set(source.checksum, candidate);
+          sources.set(key, candidate);
           continue;
         }
         const owner = current.source.bankFile || !candidate.source.bankFile ? current : candidate;
         const other = owner === current ? candidate : current;
         if (!owner.source.originalFile && other.source.originalFile) {
-          sources.set(source.checksum, {
+          sources.set(key, {
             ...owner,
             source: { ...owner.source, originalFile: other.source.originalFile },
           });
         } else {
-          sources.set(source.checksum, owner);
+          sources.set(key, owner);
         }
       }
     }
@@ -246,7 +267,6 @@ export function PreparedLibrary() {
     };
   }, [parsed.catalogs]);
   const hasCatalog = parsed.catalogs.length > 0;
-  const reviews = documents.filter(d => d.fileType === PRIVATE_REVIEW_DOCUMENT);
   const originalDocumentsByChecksum = useMemo(() => {
     const originals = new Map<string, SourceDocument>();
     for (const document of documents) {
@@ -264,7 +284,7 @@ export function PreparedLibrary() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
-  const [opened, setOpened] = useState<{ id: string; catalogDocumentId: string; bank: PreparedBank; files: File[]; originalFile?: Blob }>();
+  const [opened, setOpened] = useState<{ id: string; catalogDocumentId: string; sourceId: string; bank: PreparedBank; files: File[]; originalFile?: Blob }>();
   const reviewRequest = useRef(0);
   const originalProbeCache = useRef(new Map<string, OriginalAvailability | Promise<OriginalAvailability>>());
   const [originalAvailability, setOriginalAvailability] = useState<Record<string, OriginalAvailability>>({});
@@ -294,17 +314,22 @@ export function PreparedLibrary() {
     const request = ++reviewRequest.current;
     setError("");
     try {
-      const id = `private-review-${entry.source.checksum}`;
-      const doc = documents.find(d => d.id === id)!;
+      const doc = reviewForSource(entry.source);
+      if (!doc) throw new Error("This source has no unambiguous bank review. Reinstall its prepared library before reviewing.");
+      const id = doc.id;
       const bank = readPreparedBank(JSON.parse(doc.rawText));
       const source = entry.source;
       const originalDocument = source.originalFile ? originalDocumentsByChecksum.get(source.checksum) : undefined;
       const files = await bankFiles(bank);
       const originalFile = originalDocument ? await readSourceOriginal(originalDocument.id, originalDocument.checksum) : undefined;
-      if (request === reviewRequest.current) setOpened({ id, catalogDocumentId: entry.catalogDocumentId, bank, files, originalFile });
+      if (request === reviewRequest.current) setOpened({ id, catalogDocumentId: entry.catalogDocumentId, sourceId: source.id, bank, files, originalFile });
     } catch (cause) {
       if (request === reviewRequest.current) setError(cause instanceof Error ? cause.message : "Review could not open.");
     }
+  }
+  function reviewForSource(source: PrivateLibraryCatalog["sources"][number]) {
+    if (!source.bankId && collection.sources.filter(entry => entry.source.checksum === source.checksum && entry.source.bankFile).length > 1) return undefined;
+    return preparedSourceReview(documents, source);
   }
   async function original(checksum: string, name: string) {
     setError("");
@@ -407,16 +432,23 @@ export function PreparedLibrary() {
       <input aria-label="Find a source" placeholder="Find a source, module or status" value={query} onChange={event => setQuery(event.target.value)} />
       <ul className="prepared-source-list">{sources.slice(0, 40).map(entry => {
         const source = entry.source;
-        const local = sourceStats.get(source.checksum) ?? { stored: 0, ready: 0, review: 0 };
+        const reviewDocument = reviewForSource(source);
+        let reviewedBank: PreparedBank | undefined;
+        try { if (reviewDocument) reviewedBank = readPreparedBank(JSON.parse(reviewDocument.rawText)); } catch { /* Opening the review reports its validation error. */ }
+        const matchingQuestions = reviewedBank ? questions.filter(question => preparedBankContains(question, reviewedBank, source.checksum)) : undefined;
+        const ready = matchingQuestions ? matchingQuestions.filter(question => questionPracticeReadiness(question) === "ready").length : undefined;
+        const scoped = Boolean(source.bankId) || collection.sources.filter(entry => entry.source.checksum === source.checksum && entry.source.bankFile).length > 1;
+        const local = matchingQuestions ? { stored: matchingQuestions.length, ready: ready!, review: matchingQuestions.length - ready! }
+          : scoped ? undefined : sourceStats.get(source.checksum) ?? { stored: 0, ready: 0, review: 0 };
         const originalState = source.originalFile ? (originalAvailability[source.checksum] ?? "checking") : undefined;
         const originalLabel = originalState === "stored" ? "Original stored on this device; verified when opened"
           : originalState === "missing" ? "Original listed but missing on this device"
           : originalState === "checking" ? "Checking original storage"
           : /local-only|remains local/i.test(source.reason) ? "Original remains outside this AXOM collection"
           : "No original included in this package";
-        return <li key={source.checksum}>
-        <div><strong>{source.name}</strong><span>{source.module ?? "Unfiled"} · {local.ready} locally answer-ready · {local.review} stored for review · {source.review} held in source · {source.status === "prepared" ? "Prepared package" : source.status}</span><small>{source.reason} · {originalLabel}</small></div>
-        {reviews.some(d => d.id === `private-review-${source.checksum}`) && <GButton onClick={() => void review(entry)}>Review source</GButton>}
+        return <li key={sourceEntryKey(source)}>
+        <div><strong>{source.name}</strong><span>{source.module ?? "Unfiled"} · {local ? `${local.ready} locally answer-ready · ${local.review} stored for review` : "Bank counts need source review"} · {source.review} held in source · {source.status === "prepared" ? "Prepared package" : source.status}</span><small>{source.reason} · {originalLabel}</small></div>
+        {reviewDocument && <GButton onClick={() => void review(entry)}>Review source</GButton>}
         {source.originalFile && <GButton disabled={originalState !== "stored"} onClick={() => void original(source.checksum, source.name)}>Open original</GButton>}
       </li>; })}</ul>
       {sources.length === 0 && <p role="status">No prepared sources match this search.</p>}
@@ -424,7 +456,7 @@ export function PreparedLibrary() {
     </details>}
     {opened && <Modal title="Source review" className="course-template-modal" onClose={() => setOpened(undefined)}>
       <BankImportReview bank={{ ...opened.bank, originalFile: opened.originalFile, sourceText: { ...opened.bank.sourceText, pageTexts: opened.bank.sourceText.pageTexts ?? [] }, files: opened.files, conversionIssues: opened.bank.issues, warnings: [], unplaced: [] }} onBack={() => setOpened(undefined)}
-        onReviewed={(pkg, result) => persistPreparedLibraryReview(opened.id, opened.bank, pkg, result, opened.catalogDocumentId)} />
+        onReviewed={(pkg, result) => persistPreparedLibraryReview(opened.id, opened.bank, pkg, result, opened.catalogDocumentId, opened.sourceId)} />
     </Modal>}
   </section>;
 }

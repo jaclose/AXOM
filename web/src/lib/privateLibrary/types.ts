@@ -44,6 +44,8 @@ export interface PrivateLibraryCatalog {
     status: "prepared" | "review-required" | "duplicate-linked" | "reference/template-only" | "unsupported" | "missing" | "failed";
     reason: string;
     bankFile?: string;
+    /** Exact validated package identity; source documents may contain several banks. */
+    bankId?: string;
     originalFile?: string;
     ready: number;
     review: number;
