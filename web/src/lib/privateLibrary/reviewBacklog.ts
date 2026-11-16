@@ -17,10 +17,28 @@ export interface PrivateReviewBacklog {
 }
 
 interface ReviewCandidate {
-  bank: PreparedBank;
+  review: AssessedReview;
   document: SourceDocument;
   index: number;
 }
+
+interface AssessedReview {
+  readonly identity: string;
+  readonly needsReview: number;
+  readonly unresolved: number;
+  readonly unreadable: number;
+}
+
+interface CachedReview {
+  readonly rawText: string;
+  readonly id: string;
+  readonly checksum: SourceDocument["checksum"];
+  readonly review: AssessedReview | null;
+}
+
+// Document objects belong to the active workspace. Weak keys neither retain a
+// departed account's corpus nor reuse a result just because its IDs match.
+const assessedReviews = new WeakMap<SourceDocument, CachedReview>();
 
 function sourceIdentity(document: SourceDocument, bank: PreparedBank): string {
   const checksum = preparedReviewChecksum(bank, document);
@@ -28,6 +46,32 @@ function sourceIdentity(document: SourceDocument, bank: PreparedBank): string {
   // Older review records can lack a source checksum. Their bank id and source
   // filename are still stable within the private-library contract.
   return `bank:${bank.pkg.manifest.bank.id}|${bank.pkg.manifest.source.filename}`;
+}
+
+function assessDocument(document: SourceDocument): AssessedReview | null {
+  const cached = assessedReviews.get(document);
+  if (cached && cached.rawText === document.rawText && cached.id === document.id && cached.checksum === document.checksum) return cached.review;
+
+  let review: AssessedReview | null = null;
+  try {
+    const bank = readPreparedBank(JSON.parse(document.rawText));
+    const declaredAssets = bank.pkg.questions.flatMap(question => question.assets.map(asset => ({
+      name: asset.filename,
+      ...(typeof asset.byteSize === "number" ? { size: asset.byteSize } : {}),
+    })));
+    const counts = assessBank(bank.pkg, bank.issues, declaredAssets).counts;
+    const unreadable = bank.unreadableQuestions;
+    review = {
+      identity: sourceIdentity(document, bank),
+      needsReview: counts["needs-review"],
+      unresolved: counts.unresolved,
+      unreadable: typeof unreadable === "number" && Number.isSafeInteger(unreadable) && unreadable > 0 ? unreadable : 0,
+    };
+  } catch {
+    // Retain a failed validation until the actual document changes, too.
+  }
+  assessedReviews.set(document, { rawText: document.rawText, id: document.id, checksum: document.checksum, review });
+  return review;
 }
 
 function uploadedAt(candidate: ReviewCandidate): number {
@@ -53,40 +97,30 @@ export function summarizePrivateReviewBacklog(documents: readonly SourceDocument
 
   documents.forEach((document, index) => {
     if (document.fileType !== PRIVATE_REVIEW_DOCUMENT) return;
-    let bank: PreparedBank;
-    try {
-      bank = readPreparedBank(JSON.parse(document.rawText));
-    } catch {
+    const review = assessDocument(document);
+    if (!review) {
       invalidDocuments += 1;
       return;
     }
 
-    const identity = sourceIdentity(document, bank);
+    const { identity } = review;
     const current = selected.get(identity);
     if (!current) {
-      selected.set(identity, { bank, document, index });
+      selected.set(identity, { review, document, index });
       return;
     }
     duplicateDocuments += 1;
-    const incoming = { bank, document, index };
+    const incoming = { review, document, index };
     if (preferIncoming(current, incoming)) selected.set(identity, incoming);
   });
 
   let needsReview = 0;
   let unresolved = 0;
   let unreadable = 0;
-  for (const { bank } of selected.values()) {
-    const declaredAssets = bank.pkg.questions.flatMap(question => question.assets.map(asset => ({
-      name: asset.filename,
-      ...(typeof asset.byteSize === "number" ? { size: asset.byteSize } : {}),
-    })));
-    const counts = assessBank(bank.pkg, bank.issues, declaredAssets).counts;
-    needsReview += counts["needs-review"];
-    unresolved += counts.unresolved;
-    const unreadableRows = bank.unreadableQuestions;
-    if (typeof unreadableRows === "number" && Number.isSafeInteger(unreadableRows) && unreadableRows > 0) {
-      unreadable += unreadableRows;
-    }
+  for (const { review } of selected.values()) {
+    needsReview += review.needsReview;
+    unresolved += review.unresolved;
+    unreadable += review.unreadable;
   }
 
   return {

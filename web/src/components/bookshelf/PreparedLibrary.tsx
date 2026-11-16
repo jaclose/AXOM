@@ -284,6 +284,7 @@ export function PreparedLibrary() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [coverageOpen, setCoverageOpen] = useState(false);
   const [opened, setOpened] = useState<{ id: string; catalogDocumentId: string; sourceId: string; bank: PreparedBank; files: File[]; originalFile?: Blob }>();
   const reviewRequest = useRef(0);
   const originalProbeCache = useRef(new Map<string, OriginalAvailability | Promise<OriginalAvailability>>());
@@ -366,6 +367,9 @@ export function PreparedLibrary() {
   }, [documents]);
   useEffect(() => {
     let active = true;
+    // Imports update progress and documents frequently. Closed source tools
+    // must not reconstruct review banks or probe every visible original.
+    if (!coverageOpen) return () => { active = false; };
     const originals = sources.slice(0, 40).map(entry => entry.source).filter(source => source.originalFile);
     if (!originals.length) {
       setOriginalAvailability({});
@@ -382,6 +386,7 @@ export function PreparedLibrary() {
       !document ? "missing" : typeof cached === "string" ? cached : "checking",
     ])));
     void (async () => {
+      const resolved: Record<string, OriginalAvailability> = {};
       // Presence checks read only pointers, manifests and declared chunk sizes.
       // Full byte hashing remains behind explicit Open and Review actions.
       for (const { source, document, key } of probeTargets) {
@@ -396,11 +401,12 @@ export function PreparedLibrary() {
         const availability = typeof probe === "string" ? probe : await probe;
         if (!active) return;
         originalProbeCache.current.set(key, availability);
-        setOriginalAvailability(current => ({ ...current, [source.checksum]: availability }));
+        resolved[source.checksum] = availability;
       }
+      if (active) setOriginalAvailability(current => ({ ...current, ...resolved }));
     })();
     return () => { active = false; };
-  }, [originalDocumentsByChecksum, sources]);
+  }, [coverageOpen, originalDocumentsByChecksum, sources]);
   return <section className="prepared-library" aria-label="Prepared library">
     <div className="prepared-library-summary">
       <LibraryBig size={22} aria-hidden="true" />
@@ -423,7 +429,8 @@ export function PreparedLibrary() {
     {error && <p role="alert">{error}</p>}
     {parsed.error && <p role="alert">{parsed.error}</p>}
     {hasCatalog && exceedsCloudLimit && <p>Saved on this device. This collection exceeds the current cloud sync limit. Keep a portable workspace backup.</p>}
-    {hasCatalog && <details><summary><ShieldCheck size={15} /> Source coverage & review ({heldQuestions} held)</summary>
+    {hasCatalog && <details open={coverageOpen} onToggle={event => setCoverageOpen(event.currentTarget.open)}><summary><ShieldCheck size={15} /> Source coverage & review ({heldQuestions} held)</summary>
+      {coverageOpen && <>
       <p className="sub">Only locally answer-ready questions enter scored practice. Review items and source gaps remain visible here. Supplementary generation is still outstanding.</p>
       <p className="sub">Keep your private bundle for transfer and restore. Workspace backups include question and review images; original document bytes are restored from the bundle.</p>
       <p className="sub">{parsed.catalogs.length === 1
@@ -453,6 +460,7 @@ export function PreparedLibrary() {
       </li>; })}</ul>
       {sources.length === 0 && <p role="status">No prepared sources match this search.</p>}
       {sources.length > 40 && <p>{sources.length - 40} more sources. Narrow the search to find a specific collection.</p>}
+      </>}
     </details>}
     {opened && <Modal title="Source review" className="course-template-modal" onClose={() => setOpened(undefined)}>
       <BankImportReview bank={{ ...opened.bank, originalFile: opened.originalFile, sourceText: { ...opened.bank.sourceText, pageTexts: opened.bank.sourceText.pageTexts ?? [] }, files: opened.files, conversionIssues: opened.bank.issues, warnings: [], unplaced: [] }} onBack={() => setOpened(undefined)}

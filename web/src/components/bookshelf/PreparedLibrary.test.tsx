@@ -112,9 +112,33 @@ beforeEach(() => {
   mocks.questions = [question("ready"), question("review", { needsReview: true })];
 });
 
+function openCoverage() {
+  const summary = screen.queryByText(/^Source coverage & review/);
+  if (!summary) return;
+  const details = summary.closest("details")!;
+  details.open = true;
+  fireEvent(details, new Event("toggle"));
+}
+function renderOpenedLibrary() {
+  const view = render(<PreparedLibrary />);
+  openCoverage();
+  return view;
+}
+
 afterEach(cleanup);
 
 describe("PreparedLibrary truthfulness", () => {
+  it("defers source review rows and original probes until coverage is opened", async () => {
+    render(<PreparedLibrary />);
+    expect(screen.getByText("0 templates · 1 locally answer-ready questions")).toBeTruthy();
+    expect(screen.queryByLabelText("Find a source")).toBeNull();
+    expect(mocks.probeOriginal).not.toHaveBeenCalled();
+    openCoverage();
+    expect(screen.getByLabelText("Find a source")).toBeTruthy();
+    await waitFor(() => expect(mocks.probeOriginal).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Review source" })).toBeTruthy();
+  });
+
   it("keeps sibling bank controls and reviewed counts separate for a shared source", async () => {
     const catalog = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
     catalog.sources[0].bankId = "bank";
@@ -139,7 +163,7 @@ describe("PreparedLibrary truthfulness", () => {
     const updated = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
     expect(updated.sources[0]).toMatchObject({ ready: 1, review: 0, bankId: "bank" });
     expect(updated.sources[1]).toEqual(catalog.sources[1]);
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
     expect(screen.getAllByRole("button", { name: "Review source" })).toHaveLength(2);
     expect(screen.getByText(/1 locally answer-ready · 1 stored for review · 0 held in source/)).toBeTruthy();
     expect(screen.getByText(/1 locally answer-ready · 0 stored for review · 9 held in source/)).toBeTruthy();
@@ -148,7 +172,7 @@ describe("PreparedLibrary truthfulness", () => {
     const catalog = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
     catalog.sources.push({ ...catalog.sources[0], id: "sibling", bankFile: "banks/sibling.json", name: "Sibling bank.pdf" });
     mocks.documents[0].rawText = JSON.stringify(catalog);
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
     expect(screen.queryByRole("button", { name: "Review source" })).toBeNull();
     expect(screen.getAllByText(/Bank counts need source review/)).toHaveLength(2);
   });
@@ -192,7 +216,7 @@ describe("PreparedLibrary truthfulness", () => {
     );
     mocks.questions.push(...Array.from({ length: 18 }, (_, index) => question(`rhps-ready-${index}`)));
 
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     expect(screen.getByText("2 templates · 19 locally answer-ready questions")).toBeTruthy();
     expect(screen.getByText(/Source coverage & review \(3520 held\)/)).toBeTruthy();
@@ -228,7 +252,7 @@ describe("PreparedLibrary truthfulness", () => {
       tags: [], linkedQuestionSetIds: [], libraryOnly: true,
     });
 
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     expect(screen.getByText(/1 locally answer-ready · 1 stored for review · 496 held in source/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Review source" })).toBeTruthy();
@@ -241,7 +265,7 @@ describe("PreparedLibrary truthfulness", () => {
       tags: [], linkedQuestionSetIds: [], libraryOnly: true,
     });
 
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     expect(screen.getByText("0 templates · 1 locally answer-ready questions")).toBeTruthy();
     expect(screen.getByText("Source.pdf")).toBeTruthy();
@@ -265,7 +289,7 @@ describe("PreparedLibrary truthfulness", () => {
       }, issues: [], sourceText: { rawText: "Synthetic source" }, sourceBytes: original.size, notes: [],
     };
     mocks.documents.find(document => document.id === `private-review-${checksum}`)!.rawText = JSON.stringify(prepared);
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
     fireEvent.click(screen.getByRole("button", { name: "Review source" }));
     await screen.findByRole("region", { name: "Source question bank preview" });
     fireEvent.change(screen.getByLabelText("Preview mode"), { target: { value: "review" } });
@@ -276,7 +300,7 @@ describe("PreparedLibrary truthfulness", () => {
   });
 
   it("counts only practice-ready local records and checks original availability", async () => {
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     expect(screen.getByText("0 templates · 1 locally answer-ready questions")).toBeTruthy();
     screen.getByText(/1 locally answer-ready · 1 stored for review · 4 held in source · Prepared package/);
@@ -311,7 +335,7 @@ describe("PreparedLibrary truthfulness", () => {
     const first = new Promise<undefined>((resolve) => { releaseFirst = () => resolve(undefined); });
     mocks.probeOriginal.mockImplementationOnce(() => first).mockResolvedValue(false);
 
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     await waitFor(() => expect(mocks.probeOriginal).toHaveBeenCalledTimes(1));
     expect(mocks.readOriginal).not.toHaveBeenCalled();
@@ -322,7 +346,7 @@ describe("PreparedLibrary truthfulness", () => {
 
   it("reuses the storage presence probe across search changes without reading original bytes", async () => {
     mocks.probeOriginal.mockResolvedValue(true);
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     await waitFor(() => expect(screen.getByText(/Original stored on this device; verified when opened/)).toBeTruthy());
     expect(mocks.probeOriginal).toHaveBeenCalledTimes(1);
@@ -346,7 +370,7 @@ describe("PreparedLibrary truthfulness", () => {
       questionIds: ["question-1", "question-2"],
       setIds: ["set-1"],
     });
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     fireEvent.change(screen.getByLabelText("Prepared library folder"), {
       target: { files: [new File(["catalog"], "catalog.json")] },
@@ -364,7 +388,7 @@ describe("PreparedLibrary truthfulness", () => {
       progress("Preparing your library · 2 of 3 sources · saving reviewed questions");
       throw new DOMException("QuotaExceededError: write failed", "QuotaExceededError");
     });
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     fireEvent.change(screen.getByLabelText("Prepared library folder"), {
       target: { files: [new File(["catalog"], "catalog.json")] },
@@ -379,7 +403,7 @@ describe("PreparedLibrary truthfulness", () => {
   it("normalizes a synchronous folder-reader quota error but preserves other precise import errors", async () => {
     const quota = new DOMException("The quota has been exceeded.", "QuotaExceededError");
     mocks.folderReader.mockImplementationOnce(() => { throw new Error("Folder access failed", { cause: quota }); });
-    render(<PreparedLibrary />);
+    renderOpenedLibrary();
 
     fireEvent.change(screen.getByLabelText("Prepared library folder"), {
       target: { files: [new File(["catalog"], "catalog.json")] },

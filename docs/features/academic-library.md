@@ -26,6 +26,9 @@ Prepared imports bind reviews to source checksum plus bank identity. Exact legac
 reviews remain intact; sibling banks receive distinct review records. Per-bank counts
 use original question membership, and ambiguous legacy mappings require reimport.
 Reimport preserves reviewer decisions, question IDs, attempts and source bytes.
+Closed source coverage does not parse bank rows or probe original files. Backlog
+validation caches only counts and source identity per unchanged document object;
+content edits invalidate the cache and current duplicate selection is recalculated.
 
 ### Download and practice a term
 

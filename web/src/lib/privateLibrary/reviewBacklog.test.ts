@@ -1,9 +1,11 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SourceDocument } from "../library";
 import type { PackageQuestion } from "../question-content/package";
 import { PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "./types";
 import { summarizePrivateReviewBacklog } from "./reviewBacklog";
+import * as preparedImport from "./install";
+import * as bankAssessment from "../question-content/assessBank";
 
 const SOURCE_CHECKSUM = "a".repeat(64);
 
@@ -64,6 +66,81 @@ function document(value: PreparedBank | string, patch: Partial<SourceDocument> =
 }
 
 describe("private review backlog", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reuses unchanged document assessments when the workspace document list changes", () => {
+    const parse = vi.spyOn(preparedImport, "readPreparedBank");
+    const assess = vi.spyOn(bankAssessment, "assessBank");
+    const first = document(bank(["unresolved"]));
+    const sibling = bank(["needs-review"]);
+    sibling.pkg.manifest.bank.id = "sibling";
+    const second = document(sibling, { id: `${first.id}-bank-sibling` });
+    expect(summarizePrivateReviewBacklog([first])).toMatchObject({ held: 1, sources: 1 });
+    expect(summarizePrivateReviewBacklog([first, second])).toMatchObject({ held: 2, sources: 2 });
+    expect(summarizePrivateReviewBacklog([second, first])).toMatchObject({ held: 2, sources: 2 });
+    expect(parse).toHaveBeenCalledTimes(2);
+    expect(assess).toHaveBeenCalledTimes(2);
+  });
+
+  it("reassesses an in-place reviewer edit instead of keeping cached held counts", () => {
+    const assess = vi.spyOn(bankAssessment, "assessBank");
+    const retained = document(bank(["unresolved"], 2));
+    expect(summarizePrivateReviewBacklog([retained])).toMatchObject({ held: 3, unreadable: 2 });
+    retained.rawText = JSON.stringify(bank(["ready"]));
+    expect(summarizePrivateReviewBacklog([retained])).toMatchObject({ held: 0, unreadable: 0 });
+    expect(assess).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps source membership and newest-review selection live without reassessing unchanged content", () => {
+    const assess = vi.spyOn(bankAssessment, "assessBank");
+    const older = document(bank(["needs-review"]), { id: "older", uploadedAt: "2026-10-22T12:00:00.000Z" });
+    const newer = document(bank(["ready"]), { id: "newer", uploadedAt: "2026-10-24T12:00:00.000Z" });
+    expect(summarizePrivateReviewBacklog([older, newer])).toMatchObject({ held: 0, duplicateDocuments: 1 });
+    older.uploadedAt = "2026-10-25T12:00:00.000Z";
+    expect(summarizePrivateReviewBacklog([older, newer])).toMatchObject({ held: 1, duplicateDocuments: 1 });
+    expect(summarizePrivateReviewBacklog([newer])).toMatchObject({ held: 0, sources: 1, duplicateDocuments: 0 });
+    expect(summarizePrivateReviewBacklog([])).toMatchObject({ held: 0, sources: 0 });
+    expect(assess).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not share assessments between accounts with matching document IDs", () => {
+    const assess = vi.spyOn(bankAssessment, "assessBank");
+    const accountA = document(bank(["unresolved"]));
+    const accountB = document(bank(["ready"]));
+    expect(accountB.id).toBe(accountA.id);
+    expect(summarizePrivateReviewBacklog([accountA])).toMatchObject({ held: 1 });
+    expect(summarizePrivateReviewBacklog([accountB])).toMatchObject({ held: 0 });
+    expect(summarizePrivateReviewBacklog([accountA])).toMatchObject({ held: 1 });
+    expect(assess).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches failed validation but retries when the document is repaired", () => {
+    const parse = vi.spyOn(preparedImport, "readPreparedBank");
+    const retained = document("{}");
+    expect(summarizePrivateReviewBacklog([retained])).toMatchObject({ sources: 0, invalidDocuments: 1 });
+    expect(summarizePrivateReviewBacklog([retained])).toMatchObject({ sources: 0, invalidDocuments: 1 });
+    expect(parse).toHaveBeenCalledTimes(1);
+    retained.rawText = JSON.stringify(bank(["needs-review"]));
+    expect(summarizePrivateReviewBacklog([retained])).toMatchObject({ held: 1, sources: 1, invalidDocuments: 0 });
+    expect(parse).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates cached source identity when legacy document metadata changes", () => {
+    const empty = bank([]);
+    const first = document(empty);
+    const second = document(empty, { id: `private-review-${"b".repeat(64)}` });
+    expect(summarizePrivateReviewBacklog([first, second])).toMatchObject({ sources: 2, duplicateDocuments: 0 });
+    second.id = first.id;
+    expect(summarizePrivateReviewBacklog([first, second])).toMatchObject({ sources: 1, duplicateDocuments: 1 });
+    first.id = "legacy-first";
+    second.id = "legacy-second";
+    first.checksum = "c".repeat(64);
+    second.checksum = "c".repeat(64);
+    expect(summarizePrivateReviewBacklog([first, second])).toMatchObject({ sources: 1, duplicateDocuments: 1 });
+    second.checksum = "d".repeat(64);
+    expect(summarizePrivateReviewBacklog([first, second])).toMatchObject({ sources: 2, duplicateDocuments: 0 });
+  });
+
   it("counts distinct bank reviews from the same source without hiding either held queue", () => {
     const first = bank(["unresolved"]);
     const second = bank(["needs-review", "unresolved"]);
