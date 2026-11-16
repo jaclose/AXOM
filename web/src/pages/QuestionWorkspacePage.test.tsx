@@ -10,6 +10,7 @@ import { useStore } from "../lib/store";
 import { QuestionWorkspacePage } from "./QuestionWorkspacePage";
 import { STORAGE_KEYS } from "../lib/brand";
 import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
+import { capturePracticeLaunchContext, launchRecommendedPractice, takeRecommendedPractice } from "../lib/exam/practiceLaunch";
 import { PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "../lib/privateLibrary/types";
 
 const localValues = new Map<string, string>();
@@ -141,7 +142,10 @@ describe("QuestionWorkspacePage first use", () => {
     expect(screen.queryByRole("tab", { name: /Insights/ })).toBeNull();
     expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Library", "Community", "How it works", "Add material"]);
     expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Answer-ready0Main explanation text0Held for review0Saved sets0");
-    expect(screen.getByLabelText("How to start a practice set").textContent).toBe("1Course2Question set3Practice");
+    const discovery = screen.getByRole("tablist", { name: "Browse Question Bank" });
+    expect(within(discovery).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Courses", "Shared sets"]);
+    expect(container.querySelector<HTMLDetailsElement>(".qb-course-catalog")?.open).toBe(true);
+    expect(container.querySelector<HTMLDetailsElement>("#prepared-course-library")?.open).toBe(false);
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
     await user.click(screen.getByRole("tab", { name: "Add material" }));
@@ -413,7 +417,7 @@ describe("QuestionWorkspacePage returning state", () => {
     render(<QuestionWorkspacePage />);
 
     await user.click(screen.getByRole("tab", { name: "Study" }));
-    expect(screen.getByRole("heading", { name: "Import another clean set" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Add a question set" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: /Review .* due questions/ })).toBeNull();
     expect(screen.queryByRole("heading", { name: /Retry .* misses/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Review due/ })).toHaveProperty("disabled", true);
@@ -771,5 +775,56 @@ describe("QBank single-question medical-media integrity", () => {
     expect(screen.getByRole("dialog", { name: "Question" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Check answer" })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "Verify essential clinical figures" })).toBeNull();
+  });
+});
+
+describe("QuestionWorkspacePage recommended practice", () => {
+  beforeEach(() => { sessionStorage.clear(); location.hash = "questions"; });
+  afterEach(() => sessionStorage.clear());
+
+  it("rejects a stale Begin click when the same question ID was replaced before rendering", async () => {
+    const user = userEvent.setup();
+    useStore.setState({ questions: [question({ id: "same", stem: "Original question" })] });
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Study" }));
+    const begin = screen.getByRole("button", { name: "Begin" });
+    act(() => {
+      useStore.setState({ questions: [question({ id: "same", stem: "Replacement question" })] });
+      begin.click();
+    });
+    expect(screen.queryByRole("dialog", { name: /Tutor|tutor/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check answer" })).toBeNull();
+    expect(takeRecommendedPractice(useStore.getState().questions)).toBeNull();
+  });
+
+  it("launches the advertised miss instead of repeating a previous session and saves its activity", async () => {
+    const user = userEvent.setup();
+    useStore.setState({ questions: [
+      question({ id: "missed", stem: "The question to repair", status: "incorrect", attempts: [{ at: "2026-07-06T12:00:00Z", answerKey: "B", status: "incorrect" }] }),
+      question({ id: "previous", stem: "Previous session question" }),
+    ], quizSessions: [{ ...session, questionIds: ["previous"], filters: { count: 1, status: "all", questionIds: ["previous"] } }] });
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Study" }));
+    expect(screen.getByRole("heading", { name: "Retry 1 missed question" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Begin" }));
+    expect(await screen.findByText("The question to repair")).toBeTruthy();
+    expect(screen.queryByText("Previous session question")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Finish block" }));
+    expect(await screen.findByRole("heading", { name: "Block results" })).toBeTruthy();
+    const saved = useStore.getState().quizSessions.find(item => item.questionIds.includes("missed"));
+    expect(saved?.questionIds).toEqual(["missed"]);
+    expect(useStore.getState().logs.filter(log => log.id === `qbank-session:${saved?.id}`)).toHaveLength(1);
+    expect(useStore.getState().questions.find(item => item.id === "missed")?.attempts).toHaveLength(2);
+  });
+
+  it("consumes Up Next on mount without inventing academic scope or asking for setup", async () => {
+    useStore.setState({ questions: [question({ id: "next", stem: "A ready source question" })] });
+    launchRecommendedPractice(["next"], capturePracticeLaunchContext(useStore.getState().questions), useStore.getState().questions);
+    render(<QuestionWorkspacePage />);
+    expect(await screen.findByText("A ready source question")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check answer" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Return to Course Tracker/ })).toBeNull();
   });
 });

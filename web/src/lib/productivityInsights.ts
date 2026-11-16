@@ -9,17 +9,18 @@ export interface ProductivityInsight {
   detail: string;
   action: string;
   href: string;
+  priority?: "attention" | "active-session";
 }
 
 /** Read-only recommendation based only on recorded sources and current targets. */
 export function productivityInsight(state: NoctyriumState, saveFailed: boolean, running: boolean): ProductivityInsight {
-  if (saveFailed) return { title: "Check your save", detail: "Your latest workspace save did not complete. Review storage before continuing.", action: "Open settings", href: "#settings" };
+  if (saveFailed) return { title: "Check your save", detail: "Your latest workspace save did not complete. Review storage before continuing.", action: "Open settings", href: "#settings", priority: "attention" };
   const result = evaluateDailySuccess(state);
-  if (result.requirements.some((item) => item.status === "unavailable")) return { title: "Review a target source", detail: "A target's linked source is unavailable. Your activity remains in history.", action: "Review targets", href: "#productivity-targets" };
+  if (result.requirements.some((item) => item.status === "unavailable")) return { title: "Review a target source", detail: "A target's linked source is unavailable. Your activity remains in history.", action: "Review targets", href: "#productivity-targets", priority: "attention" };
   const logs = canonicalStudyLogs(state.logs);
   const missingQuiz = state.quizSessions.some((session) => session.endedAt && Number.isFinite(Date.parse(session.endedAt)) && localDateKey(new Date(session.endedAt)) === state.activeDayKey && session.answers.some((answer) => answer.answerKey) && !logs.some((log) => log.id === quizPracticeLogId(session.id)));
-  if (logs.length !== state.logs.length || missingQuiz) return { title: "Review activity records", detail: missingQuiz ? "A finished question session has no linked activity record." : "Some activity records share an identity. Review the activity history.", action: "Open activity", href: "#activity" };
-  if (running) return { title: "Your focus session is running", detail: "Return to the timer when you are ready.", action: "Go to timer", href: "#productivity-focus" };
+  if (logs.length !== state.logs.length || missingQuiz) return { title: "Review activity records", detail: missingQuiz ? "A finished question session has no linked activity record." : "Some activity records share an identity. Review the activity history.", action: "Open activity", href: "#activity", priority: "attention" };
+  if (running) return { title: "Your focus session is running", detail: "Return to the timer when you are ready.", action: "Go to timer", href: "#productivity-focus", priority: "active-session" };
   const target = result.requirements.find((item) => item.eligible && item.status !== "met" && item.status !== "unavailable");
   if (target) {
     const weekly = target.requirement.schedule.kind === "times-per-week";

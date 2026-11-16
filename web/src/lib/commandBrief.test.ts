@@ -863,3 +863,22 @@ function importedDocument(): BriefEvidenceState["documents"] {
     uploadedAt: `${TODAY}T08:00:00.000Z`, rawText: "", sizeBytes: 100, tags: [], linkedQuestionSetIds: [], libraryOnly: true,
   }];
 }
+
+describe("academic practice recommendations", () => {
+  it("ranks newly available questions and carries the exact selection into the action", () => {
+    const state = slice({ questions: [question({ id: "available" })] });
+    const move = deriveNextBestMove(state, "maintain", deriveSignals(state));
+    expect(move.practice).toMatchObject({ kind: "unseen", questionIds: ["available"] });
+    expect(move.title).toBe(move.practice?.title);
+    expect(move.reason).toBe(move.practice?.reason);
+    expect(move.contributions?.[0].sourceLabel).toBe("Question Bank");
+  });
+
+  it("uses an actual wrong answer before its scheduled review and identifies its evidence", () => {
+    const state = slice({ questions: [question({ id: "missed", status: "incorrect", reviewDueAt: "2099-01-01", attempts: [{ at: "2026-07-06T12:00:00Z", answerKey: "A", status: "incorrect" }] })] });
+    const move = deriveNextBestMove(state, "maintain", deriveSignals(state));
+    expect(move.practice).toMatchObject({ kind: "missed", questionIds: ["missed"] });
+    expect(move.reason).toMatch(/latest recorded answer was incorrect/);
+    expect(move.contributions?.[0].sourceLabel).toBe("Recorded answers");
+  });
+});

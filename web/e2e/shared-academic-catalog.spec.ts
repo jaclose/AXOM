@@ -48,6 +48,10 @@ for (const width of [1440,390]) test(`one catalog links QBank to course weeks, i
   await page.getByRole("button", { name: "Finish block", exact: true }).click();
   const answered = await state(page); expect(answered.attempts).toHaveLength(1);
   await reloadAfterSave(page); expect(await state(page)).toEqual(answered);
+  await page.goto("/#tracker");
+  await expect(page.getByText("Questions: 1 of 1 answered, 100% right first time", { exact: true })).toBeVisible();
+  await reloadAfterSave(page);
+  await expect(page.getByText("Questions: 1 of 1 answered, 100% right first time", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });

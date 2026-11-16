@@ -55,6 +55,17 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
     || selection.setIds.some(id => typeof id !== "string" || !id.trim())) {
     throw new Error("The course practice selection is invalid or exceeds its supported question limit.");
   }
+  assertQuizLaunchAvailable();
+  sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(selection));
+  const alreadyInQuestionBank = location.hash === "#questions";
+  location.hash = "questions";
+  // A same-route launch does not emit hashchange, so the mounted page needs a
+  // fresh read of the exact handoff stored above.
+  if (alreadyInQuestionBank) window.dispatchEvent(new Event(COURSE_QUIZ_LAUNCH_EVENT));
+}
+
+/** Shared preflight preserves every saved run before any new practice entry. */
+export function assertQuizLaunchAvailable(): void {
   // A legacy mirror may be absent when a modern run was saved only under its
   // per-tab run key (e.g. a quota failure during legacy-mirror persistence).
   let legacyPresence: ReturnType<typeof savedQuizPresence>;
@@ -75,12 +86,6 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
   if (legacyPresence === "active" || scopedPresence === "active") {
     throw new Error("Resume or finish your current quiz in Question Bank before starting another.");
   }
-  sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(selection));
-  const alreadyInQuestionBank = location.hash === "#questions";
-  location.hash = "questions";
-  // A same-route launch does not emit hashchange, so the mounted page needs a
-  // fresh read of the exact handoff stored above.
-  if (alreadyInQuestionBank) window.dispatchEvent(new Event(COURSE_QUIZ_LAUNCH_EVENT));
 }
 
 /** Reading is pure so React's repeated initializers cannot consume the request. */

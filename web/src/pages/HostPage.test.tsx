@@ -5,6 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
+const academicReview = vi.hoisted(() => ({
+  canReview: vi.fn(), list: vi.fn(), preview: vi.fn(), decide: vi.fn(),
+}));
+vi.mock("../lib/academicLibrary/reviewQueue", () => ({
+  canReviewAcademicCourses: academicReview.canReview,
+  listAcademicReviewQueue: academicReview.list,
+  previewAcademicReview: academicReview.preview,
+  decideAcademicReview: academicReview.decide,
+}));
+vi.mock("../lib/academicLibrary/client", () => ({ downloadAcademicCourse: vi.fn() }));
+vi.mock("../lib/academicLibrary/explanationReview", () => ({ inspectStoredRevisionExplanations: vi.fn() }));
+vi.mock("../lib/academicLibrary/accountScope", () => ({ academicAccountScope: vi.fn() }));
+
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "verified-account" } }),
 }));
@@ -48,11 +61,52 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  academicReview.canReview.mockReset().mockResolvedValue(false);
+  academicReview.list.mockReset().mockResolvedValue([]);
+  academicReview.preview.mockReset();
   vi.mocked(resolveReport).mockResolvedValue(undefined);
 });
 afterEach(cleanup);
 
 describe("Host page authorization and moderation", () => {
+  it("does not turn host ownership into academic reviewer permission", async () => {
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("owner"));
+    render(<HostPage />);
+    await waitFor(() => expect(academicReview.canReview).toHaveBeenCalledWith("verified-account"));
+    expect(academicReview.list).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Submitted QBank review" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve this revision" })).toBeNull();
+  });
+
+  it("opens exact submitted revisions in Host while keeping approval gated on review", async () => {
+    const user = userEvent.setup();
+    const submission = {
+      id: "course-1", current_revision_id: "revision-1", title: "Source-reviewed course",
+      module: "GOER", term: "Term 5", owner_display_name: "Course owner",
+      ready_questions: 12, review_questions: 3, submitted_at: "2026-11-16T12:00:00Z",
+    };
+    const owner = dashboard("owner");
+    vi.mocked(loadOperatorDashboard).mockResolvedValue({
+      ...owner, overview: { ...owner.overview!, academic_review_pending: 1 },
+    });
+    academicReview.canReview.mockResolvedValue(true);
+    academicReview.list.mockResolvedValue([submission]);
+    academicReview.preview.mockResolvedValue({
+      id: submission.current_revision_id, collection_id: submission.id,
+      template_text: "Week 1\nLecture 1: Synthetic review plan",
+      ready_questions: 12, review_questions: 3,
+    });
+    render(<HostPage />);
+    const queue = await screen.findByRole("region", { name: "Submitted QBank review" });
+    await user.click(await within(queue).findByRole("button", { name: "Open preview" }));
+    expect(academicReview.preview).toHaveBeenCalledWith(submission, "verified-account");
+    expect(await within(queue).findByRole("button", { name: "Download review copy" })).toBeTruthy();
+    expect((within(queue).getByRole("button", { name: "Check stored explanations" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(queue).getByRole("button", { name: "Approve this revision" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(academicReview.decide).not.toHaveBeenCalled();
+    expect(screen.getByText("2 items in review and moderation queues.")).toBeTruthy();
+  });
+
   it("finds an older account through server search and restores the recent view when cleared", async () => {
     const user = userEvent.setup();
     const older = deferred<OperatorAccount[]>();

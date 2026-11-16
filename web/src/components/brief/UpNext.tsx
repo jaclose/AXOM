@@ -5,7 +5,7 @@
 // there is nothing real to rank or a session is already running. Nothing
 // starts until you press Start.
 // ===========================================================================
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ArrowRight, LifeBuoy, Play, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { assessCommandBriefEvidence, buildCommandBrief } from "../../lib/commandBrief";
@@ -17,10 +17,13 @@ import { activePrimaryPaths } from "../../lib/trackerFocus";
 import { GButton } from "../ui/primitives";
 import { RecoveryPanel } from "./RecoveryPanel";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { capturePracticeLaunchContext, launchRecommendedPractice } from "../../lib/exam/practiceLaunch";
 
-export function UpNext({ readiness, onHide }: { readiness?: ReadinessResult; onHide?: () => void }) {
+export function UpNext({ readiness, onHide, fallback = null }: { readiness?: ReadinessResult; onHide?: () => void; fallback?: ReactNode }) {
   const s = useStore();
+  const practiceContext = capturePracticeLaunchContext(s.questions ?? []);
   const [showWhy, setShowWhy] = useState(false);
+  const [launchError, setLaunchError] = useState("");
   const [showRecovery, setShowRecovery] = useState(false);
   const [fullPlan, setFullPlan] = useState(false);
 
@@ -86,7 +89,7 @@ export function UpNext({ readiness, onHide }: { readiness?: ReadinessResult; onH
   const recovery = useMemo(() => brief ? detectRecoveryTriggers(brief.signals) : null, [brief]);
 
   // The focus dock already shows a running session.
-  if (!brief || findLiveSession(s.sessions ?? [])) return null;
+  if (!brief || findLiveSession(s.sessions ?? [])) return fallback;
 
   const recoveryDismissedToday = (s.recoveryPlans ?? []).some((plan) =>
     (plan.status === "deferred" || plan.status === "dismissed")
@@ -94,17 +97,27 @@ export function UpNext({ readiness, onHide }: { readiness?: ReadinessResult; onH
   const offerRecovery = Boolean(recovery?.triggered) && !recoveryDismissedToday;
   const lowEnergy = Boolean(readiness && explainLowEnergy(readiness).triggered);
   const { move, minimumViableWin: small } = brief;
+  const samePractice = Boolean(move.practice && small.practice
+    && move.practice.questionIds.length === small.practice.questionIds.length
+    && move.practice.questionIds.every((id, index) => id === small.practice?.questionIds[index]));
   // Low energy leads with the smaller step; the full plan is one click away.
   const leadSmall = lowEnergy && !fullPlan;
   const meta = leadSmall
     ? [`~${small.estimatedMinutes} min`, small.link.context]
-    : [`~${move.estimatedMinutes} min`, move.link.context];
+    : [`~${move.practice ? move.practice.questionIds.length * 2 : move.estimatedMinutes} min`, move.link.context];
   const resources = leadSmall ? [] : move.resources;
   // The button already says Start.
   const title = (leadSmall ? small.title : move.title).replace(/^Start:\s*/, "");
-  const ranked = [...(move.contributions ?? [])].sort((a, b) => b.weight - a.weight);
+  const ranked = (move.contributions ?? []).filter(item => item.label !== move.reason).sort((a, b) => b.weight - a.weight);
 
   function start(kind: "move" | "small") {
+    setLaunchError("");
+    const practice = kind === "move" ? move.practice : small.practice;
+    if (practice) {
+      try { launchRecommendedPractice(practice.questionIds, practiceContext, useStore.getState().questions ?? []); }
+      catch (error) { setLaunchError(error instanceof Error ? error.message : "Practice could not be opened."); }
+      return;
+    }
     if (kind === "move") {
       s.startSession({
         title: move.title,
@@ -159,16 +172,17 @@ export function UpNext({ readiness, onHide }: { readiness?: ReadinessResult; onH
           </div>
         </div>
 
+        {launchError && <p role="alert">{launchError}</p>}
         <div className="up-next-foot">
           {leadSmall ? (
             <>
               <span>Energy is low today, so this starts small.</span>
-              <button type="button" className="up-next-link" onClick={() => setFullPlan(true)}>
+              {!samePractice && <button type="button" className="up-next-link" onClick={() => setFullPlan(true)}>
                 Full plan: {move.title} <ArrowRight size={ICON_SIZE.microInline} aria-hidden="true" />
-              </button>
+              </button>}
             </>
           ) : (
-            <button type="button" className="up-next-link" onClick={() => start("small")}>
+            !samePractice && <button type="button" className="up-next-link" onClick={() => start("small")}>
               Short on time? {small.title} (~{small.estimatedMinutes} min) <ArrowRight size={ICON_SIZE.microInline} aria-hidden="true" />
             </button>
           )}

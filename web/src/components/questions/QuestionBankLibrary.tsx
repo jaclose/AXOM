@@ -1,5 +1,6 @@
 import { AccountContentDownloads } from "../bookshelf/AccountContentDownloads";
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { FilePlus2, ListPlus } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { CURRICULA } from "../../lib/curricula";
 import { bankSource } from "../../lib/course-engine/questionBank";
@@ -13,6 +14,8 @@ import { knownBankManifests } from "../../lib/question-content/knownBanks";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
 import { AcademicBankDiscovery } from "../bookshelf/AcademicBankDiscovery";
 import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
+import { GButton } from "../ui/primitives";
+import { ICON_SIZE } from "../../lib/iconSize";
 import type { QuestionSet } from "../../lib/library";
 
 const packages: KnownPackage[] = knownBankManifests.map((manifest) => ({ manifest, hasSource: false }));
@@ -32,10 +35,47 @@ export function QuestionBankLibrary({ onPractice, onPracticeSet, onOpenBank, onI
   [s.terms, s.courses, sets, questions]);
   const ready = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready").length, [questions]);
   const localBookCount = shelves.reduce((count, shelf) => count + shelf.books.filter((book) => book.count > 0).length, 0);
-  const [catalogOpen, setCatalogOpen] = useState(questions.length === 0 && sets.length === 0);
-  const [communityOpen, setCommunityOpen] = useState(false);
-  const [preparedOpen, setPreparedOpen] = useState(localBookCount === 0);
-  const preparedRef = useRef<HTMLDetailsElement>(null);
+  const [catalogOpen, setCatalogOpen] = useState(ready === 0);
+  const [catalogTab, setCatalogTab] = useState<"courses" | "shared">("courses");
+  const [preparedOpen, setPreparedOpen] = useState(false);
+  const [preparedLoaded, setPreparedLoaded] = useState(false);
+  const catalogTabs = useRef<Array<HTMLButtonElement | null>>([]);
+  const catalogId = useId();
+  const catalogChoices = [["courses", "Courses"], ["shared", "Shared sets"]] as const;
+
+  function navigateCatalog(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next: number;
+    if (event.key === "ArrowRight") next = (index + 1) % catalogChoices.length;
+    else if (event.key === "ArrowLeft") next = (index + catalogChoices.length - 1) % catalogChoices.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = catalogChoices.length - 1;
+    else return;
+    event.preventDefault();
+    setCatalogTab(catalogChoices[next][0]);
+    catalogTabs.current[next]?.focus();
+  }
+
+  const collection = <AcademicLibrary key="collection" title="Your collection" subtitle={localBookCount > 0
+    ? `${localBookCount} course ${localBookCount === 1 ? "collection" : "collections"} on this device · ${sets.length} saved ${sets.length === 1 ? "set" : "sets"}.`
+    : "Courses and sets you save appear here. Your answers stay in your own workspace."}
+    browse={localBookCount === 0 && sets.length === 0
+      ? <section aria-label="Question bank library"><p className="qb-local-empty">No saved questions yet. Browse the catalog above or add a PDF, document, image, or question file.</p></section>
+      : <AcademicBookshelf label="Question bank library" shelves={shelves}
+        renderBook={(book) => <QuestionBankBookContent book={book} onPractice={onPractice} onOpenBank={onOpenBank} />} />} />;
+
+  const catalog = <details key="catalog" className="qb-course-catalog" open={catalogOpen} onToggle={(event) => setCatalogOpen(event.currentTarget.open)}>
+    <summary><span><b>Browse Question Bank</b><small>Find course collections and reviewed sets shared with you.</small></span></summary>
+    <div className="qb-catalog-tabs" role="tablist" aria-label="Browse Question Bank">
+      {catalogChoices.map(([id, label], index) => <button key={id} type="button" role="tab"
+        ref={element => { catalogTabs.current[index] = element; }} id={`${catalogId}-${id}-tab`}
+        aria-selected={catalogTab === id} aria-controls={`${catalogId}-${id}-panel`} tabIndex={catalogTab === id ? 0 : -1}
+        onClick={() => setCatalogTab(id)} onKeyDown={event => navigateCatalog(event, index)}>{label}</button>)}
+    </div>
+    {catalogChoices.map(([id]) => <div key={id} id={`${catalogId}-${id}-panel`} role="tabpanel"
+      aria-labelledby={`${catalogId}-${id}-tab`} hidden={catalogTab !== id} className="qb-catalog-panel">
+      {id === "courses" ? <AcademicBankDiscovery /> : catalogTab === "shared" && <CommunityQuestionSetLibrary onPractice={onPracticeSet} />}
+    </div>)}
+  </details>;
 
   return <section className="qb-library-workspace" aria-labelledby="qb-library-title">
     <header className="qb-library-intro">
@@ -45,35 +85,21 @@ export function QuestionBankLibrary({ onPractice, onPracticeSet, onOpenBank, onI
         <p>{ready + heldForReview > 0
           ? `${ready} ready to practice · ${heldForReview} held for answer or source review.`
           : "Start with a course collection, or add material you already trust."}</p>
-        {localBookCount === 0 && <button type="button" className="qb-prepared-link" onClick={() => {
-          setPreparedOpen(true);
-          window.requestAnimationFrame(() => preparedRef.current?.scrollIntoView({ block: "nearest" }));
-        }}>Install a prepared course library</button>}
       </div>
-      <ol className="qb-study-route" aria-label="How to start a practice set">
-        <li><span>1</span><b>Course</b></li>
-        <li><span>2</span><b>Question set</b></li>
-        <li><span>3</span><b>Practice</b></li>
-      </ol>
+      <div className="qb-library-actions">
+        <GButton onClick={onImport}><FilePlus2 size={ICON_SIZE.body} aria-hidden="true" /> Add material</GButton>
+        <GButton onClick={onCreate} disabled={ready === 0}><ListPlus size={ICON_SIZE.body} aria-hidden="true" /> Create a quiz</GButton>
+      </div>
     </header>
     <AccountContentDownloads />
-    <AcademicLibrary title="Your collection" subtitle={`${localBookCount} course ${localBookCount === 1 ? "collection" : "collections"} on this device · ${sets.length} saved ${sets.length === 1 ? "set" : "sets"}.`}
-      onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
-      browse={<AcademicBookshelf label="Question bank library" shelves={shelves}
-        renderBook={(book) => <QuestionBankBookContent book={book} onPractice={onPractice} onOpenBank={onOpenBank} />} />} />
-    <details className="qb-course-catalog" open={catalogOpen} onToggle={(event) => setCatalogOpen(event.currentTarget.open)}>
-      <summary>
-        <span><b>Browse the course catalog</b><small>Find server-provided courses and load the weeks you need.</small></span>
-      </summary>
-      <AcademicBankDiscovery />
-    </details>
-    <details className="qb-course-catalog" open={communityOpen} onToggle={event => setCommunityOpen(event.currentTarget.open)}>
-      <summary><span><b>Browse learner Question Sets</b><small>Search reviewed sets shared by other AXOM learners.</small></span></summary>
-      {communityOpen && <CommunityQuestionSetLibrary onPractice={onPracticeSet} />}
-    </details>
-    <details ref={preparedRef} id="prepared-course-library" className="cloud-local-material qb-library-maintenance"
-      open={preparedOpen} onToggle={(event) => setPreparedOpen(event.currentTarget.open)}>
-      <summary>Import status and source review</summary><PreparedLibrary />
+    {ready > 0 ? [collection, catalog] : [catalog, collection]}
+    <details id="prepared-course-library" className="cloud-local-material qb-library-maintenance"
+      open={preparedOpen} onToggle={(event) => {
+        setPreparedOpen(event.currentTarget.open);
+        // Keep a started import mounted if the learner folds away its tools.
+        if (event.currentTarget.open) setPreparedLoaded(true);
+      }}>
+      <summary>Import status and source review</summary>{preparedLoaded && <PreparedLibrary />}
     </details>
   </section>;
 }

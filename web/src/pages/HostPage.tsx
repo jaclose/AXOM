@@ -7,6 +7,7 @@ import {
 } from "../lib/operator/hostClient";
 import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { QuestionSetLibraryReviewQueue } from "../components/questions/QuestionSetLibraryReviewQueue";
+import { AcademicReviewQueue } from "../components/tracker/AcademicReviewQueue";
 import { JournalFeedbackReview } from "../components/dashboard/JournalFeedbackReview";
 import "../styles/host-console.css";
 
@@ -208,15 +209,7 @@ function HostAccountPage() {
           {!normalizedSearch && accounts.length === 0 && <p className="sub">No accounts to show.</p>}
           <p className="sub">Recent view shows up to 100 accounts. Search by name or email across the full directory. Project CEO access is bound to a verified account ID, never an editable name.</p>
         </GlassCard>}
-        <GlassCard pad>
-          <PanelHeader headingLevel={2} title="Submitted QBank review" sub="Revision-bound collections intentionally submitted for sharing. Pending review never implies approval." />
-          {dashboard.queue.length === 0 ? <p className="sub">No submitted Question Banks await review.</p> :
-            <div className="host-queue">{dashboard.queue.map(item => <div className="host-queue-row" key={item.collection_id}>
-              <div><b>{item.title}</b><small>{item.module} · {item.term} · submitted for review · {date(item.updated_at)}</small></div>
-              <div><Tag tone="orange">Pending</Tag><small>{item.ready_questions} candidate-ready · {item.review_questions} review</small></div>
-            </div>)}</div>}
-          <p className="sub">Approval is intentionally not a one-click host operation. Source provenance, rights and answer-review evidence must be validated through the academic review process first.</p>
-        </GlassCard>
+        <AcademicReviewQueue />
         {userId && <QuestionSetLibraryReviewQueue accountId={userId} />}
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>

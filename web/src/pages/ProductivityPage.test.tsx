@@ -153,6 +153,7 @@ describe("ProductivityPage daily console", () => {
     expect(within(month).getByText("0h 30m")).toBeTruthy();
     expect(screen.queryByText("Obsolete study label")).toBeNull();
     expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Up next" })).toBeNull();
     expect(useStore.getState().logs).toEqual(original);
   });
 

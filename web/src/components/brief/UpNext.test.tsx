@@ -5,6 +5,10 @@ import { calculateReadiness } from "../../lib/energy";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { UpNext } from "./UpNext";
+import type { QuestionRecord } from "../../lib/questions";
+import { takeRecommendedPractice } from "../../lib/exam/practiceLaunch";
+import { STORAGE_KEYS } from "../../lib/brand";
+import { setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
 
 beforeEach(() => {
   const seed = makeSeed();
@@ -35,6 +39,74 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+describe("Up next question practice", () => {
+  const ready = (id: string): QuestionRecord => ({
+    id, source: "imported", stem: "Synthetic source question", options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }],
+    correctKey: "A", status: "unseen", tags: [], attempts: [], createdAt: "2026-07-01", updatedAt: "2026-07-01",
+  });
+  beforeEach(() => {
+    const storage = () => {
+      const values = new Map<string, string>();
+      return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) };
+    };
+    vi.stubGlobal("localStorage", storage());
+    vi.stubGlobal("sessionStorage", storage());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("launches the displayed exact questions without creating a second timer session", () => {
+    useStore.setState({ questions: [ready("one"), ready("two")] });
+    render(<UpNext />);
+    expect(screen.getByText("Start 2 unseen questions")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Why?" }));
+    expect(screen.getAllByText(/2 questions are ready with no recorded attempts/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(location.hash).toBe("#questions");
+    expect(takeRecommendedPractice(useStore.getState().questions)).toEqual(["one", "two"]);
+    expect(useStore.getState().sessions).toEqual([]);
+  });
+
+  it("explains a blocked launch without replacing a saved run or starting a timer", () => {
+    useStore.setState({ questions: [ready("one")] });
+    const saved = JSON.stringify({ poolIds: ["in-progress"] });
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, saved);
+    render(<UpNext />);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/Resume or finish/);
+    expect(useStore.getState().sessions).toEqual([]);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBe(saved);
+    expect(location.hash).toBe("#dashboard");
+  });
+  it("does not retarget an old Start click to a replacement workspace with the same IDs", () => {
+    useStore.setState({ questions: [ready("one")] });
+    render(<UpNext />);
+    const start = screen.getByRole("button", { name: "Start" });
+    act(() => {
+      useStore.setState({ questions: [{ ...ready("one"), stem: "Different workspace question" }] });
+      start.click();
+    });
+    expect(screen.getByRole("alert").textContent).toContain("workspace changed");
+    expect(location.hash).toBe("#dashboard");
+    expect(takeRecommendedPractice(useStore.getState().questions)).toBeNull();
+    expect(useStore.getState().sessions).toEqual([]);
+  });
+  it("rejects a rendered Start after an account round trip before the click", () => {
+    useStore.setState({ questions: [ready("one")] });
+    setQuestionAttachmentAccount("A");
+    render(<UpNext />);
+    const start = screen.getByRole("button", { name: "Start" });
+    act(() => {
+      setQuestionAttachmentAccount("B");
+      setQuestionAttachmentAccount("A");
+      start.click();
+    });
+    expect(screen.getByRole("alert").textContent).toContain("account changed");
+    expect(location.hash).toBe("#dashboard");
+    expect(takeRecommendedPractice(useStore.getState().questions)).toBeNull();
+    expect(useStore.getState().sessions).toEqual([]);
+  });
+});
 
 const RENAL_TRACKER = [
   { id: "tracker-real-1", path: "Renal/Lectures", label: "Glomerular physiology", kind: "Lecture" as const, passes: 0, ankiPasses: 0, yield: "high" as const, updated: "2026-07-12T08:00:00.000Z" },

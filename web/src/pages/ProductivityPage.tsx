@@ -23,6 +23,7 @@ import { productivityInsight, formatStudyMinutes, recordedActivityEvidence } fro
 import { usePomodoro } from "../lib/pomodoro";
 import { ActivityIntelligence } from "../components/productivity/ActivityIntelligence";
 import { ProductivitySaveStatus, useProductivitySaveStatus } from "../components/productivity/ProductivitySaveStatus";
+import { UpNext } from "../components/brief/UpNext";
 import "../styles/productivity.css";
 
 export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
@@ -46,6 +47,7 @@ export function ProductivityPage() {
   const s = useStore();
   const saveStatus = useProductivitySaveStatus();
   const running = usePomodoro((state) => state.running);
+  const insight = productivityInsight(s, saveStatus === "failed", running);
   const logs = useMemo(() => canonicalStudyLogs(s.logs).reverse(), [s.logs]);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [manualType, setManualType] = useState("");
@@ -115,7 +117,8 @@ export function ProductivityPage() {
 
   return (
     <>
-      {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
+      {isActive && (insight.priority ? <ActivityIntelligence insight={insight} />
+        : <UpNext fallback={<ActivityIntelligence insight={insight} />} />)}
       <ProductivitySaveStatus status={saveStatus} />
       <div className="productivity-primary-grid">
       <GlassCard pad id="productivity-log" data-tour="log" data-module-tour="productivity-log">

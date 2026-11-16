@@ -29,6 +29,7 @@ import { normalizeTrackerPath, trackerItemKey } from "./pathUtils";
 import { entryFor, isScheduledDay, trackingStartKey } from "./habits";
 import type { DailyRequirementResult, DailySuccessResult } from "./dailySuccess";
 import type { ReadinessResult } from "./energy";
+import { nextPractice, type NextPractice } from "./exam/nextPractice";
 
 export type BriefMode = "maintain" | "catch-up" | "recovery" | "sprint" | "exam-week";
 
@@ -42,6 +43,7 @@ export const MODE_LABEL: Record<BriefMode, string> = {
 
 export interface NextBestMove {
   title: string;
+  practice?: NextPractice;
   link: SessionLink;
   estimatedMinutes: number;
   resources: string[];
@@ -69,6 +71,7 @@ export interface RankedBriefCandidate extends NextBestMove {
 
 export interface MinimumViableWin {
   title: string;
+  practice?: NextPractice;
   estimatedMinutes: number;
   reason: string;
   link: SessionLink;
@@ -980,21 +983,25 @@ export function rankCommandBriefCandidates(
     });
   }
 
-  const due = trustedDueQuestions(s.questions, now);
-  if (due.length) {
-    const contributions = [evidence("due-review", `${due.length} trusted review${due.length === 1 ? "" : "s"} due`, 65 + Math.min(due.length, 20), "Question Bank")];
+  const practiceLimit = Math.min(20, availableMinutes === undefined ? 20 : Math.max(1, Math.floor(availableMinutes / 2)),
+    readinessScore !== undefined && readinessScore < 40 ? 12 : 20);
+  const practice = nextPractice(s.questions, now, practiceLimit);
+  if (practice) {
+    const weight = practice.kind === "due" ? 65 + Math.min(practice.available, 20) : practice.kind === "missed" ? 64 : 35;
+    const contributions = [evidence(`practice-${practice.kind}`, practice.reason, weight,
+      practice.kind === "missed" ? "Recorded answers" : practice.kind === "due" ? "Review schedule" : "Question Bank")];
     if (examNear) contributions.push(evidence("exam-proximity", `${EXAM_META[examId!].label} is within seven days`, 20, "Exam plan"));
     if (latestLinked?.kind === "question-set") contributions.push(evidence("continuity", "Recently practised", 12, "Recent session"));
-    const score = candidateScore(contributions);
     candidates.push({
-      candidateId: "questions:due-review",
-      title: `Rework ${Math.min(due.length, 20)} due practice question${due.length === 1 ? "" : "s"}`,
-      link: { kind: "question-set", label: "Question Workspace", context: "Due review queue" },
-      estimatedMinutes: mode === "recovery" ? 20 : minutes,
-      resources: ["Question Workspace → Review mode"],
-      reason: `${due.length} trusted question${due.length === 1 ? " is" : "s are"} due for review.`,
-      expectedOutcome: "Revisit supported answer mappings and repair repeat errors.",
-      score,
+      candidateId: `questions:${practice.kind}-review`,
+      title: practice.title,
+      practice,
+      link: { kind: "question-set", label: "Question Bank", context: "Tutor practice" },
+      estimatedMinutes: practice.questionIds.length * 2,
+      resources: [],
+      reason: practice.reason,
+      expectedOutcome: "Answer the selected questions and review their explanations. Attempts are saved automatically.",
+      score: candidateScore(contributions),
       contributions,
       source: "command-brief",
     });
@@ -1136,13 +1143,14 @@ export function deriveMinimumViableWin(s: BriefStateSlice, signals: BriefSignals
       link: { kind: "card-review", label: "Anki Lab review queue" },
     };
   }
-  if (signals.dueQuestionCount > 0) {
-    const n = Math.min(signals.dueQuestionCount, 5);
+  const practice = nextPractice(s.questions, now, 5);
+  if (practice) {
     return {
-      title: `Answer ${n} due question${n === 1 ? "" : "s"}`,
-      estimatedMinutes: 10,
-      reason: "A handful of questions preserves the review loop without demanding a full session.",
-      link: { kind: "question-set", label: "Question Workspace", context: "Review mode" },
+      title: practice.title,
+      practice,
+      estimatedMinutes: practice.questionIds.length * 2,
+      reason: practice.reason,
+      link: { kind: "question-set", label: "Question Bank", context: "Short tutor practice" },
     };
   }
   const fragile = rankMeaningfulTracker(s, now).find(({ item }) => item.passes === 1 && item.yield !== "low")?.item;

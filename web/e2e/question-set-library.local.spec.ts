@@ -62,9 +62,11 @@ async function openSharedLibrary(page: Page) {
   if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
   const courses = page.getByRole("button", { name: "Courses", exact: true });
   if (await courses.getAttribute("aria-pressed") !== "true") await courses.click();
-  const summary = page.getByText("Browse learner Question Sets", { exact: true });
+  const catalog = page.locator(".qb-course-catalog");
+  if (!await catalog.evaluate(element => (element as HTMLDetailsElement).open))
+    await catalog.locator("summary").click();
   const heading = page.getByRole("heading", { name: "Find a Question Set" });
-  if (!await heading.isVisible()) await summary.click();
+  if (!await heading.isVisible()) await catalog.getByRole("tab", { name: "Shared sets", exact: true }).click();
   await expect(heading).toBeVisible();
 }
 

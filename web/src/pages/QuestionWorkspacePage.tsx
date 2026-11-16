@@ -1,5 +1,7 @@
 import { clearCourseQuizLaunch, COURSE_QUIZ_LAUNCH_EVENT } from "../lib/course-engine/quizLaunch";
 import { inspectCourseLaunch } from "../lib/exam/courseLaunchGuard";
+import { nextPractice } from "../lib/exam/nextPractice";
+import { capturePracticeLaunchContext, launchRecommendedPractice, PRACTICE_LAUNCH_EVENT, takeRecommendedPractice } from "../lib/exam/practiceLaunch";
 // ===========================================================================
 // Question Bank — the flagship study engine. Import Center → Source Library →
 // Question Sets → Block Builder → Results, in one tabbed surface. Uploaded
@@ -125,8 +127,9 @@ export function QuestionWorkspacePage() {
   const s = useStore();
   const accountId = useAccount(state => state.user?.id);
   const questions = s.questions ?? NO_QUESTIONS;
+  const practiceContext = capturePracticeLaunchContext(questions);
   // sessionStorage has no React subscription; the setter requests a fresh read.
-  const [, setHandoffVersion] = useState(0);
+  const [handoffVersion, setHandoffVersion] = useState(0);
   const sameRouteCourseLaunch = useRef(false);
   // Some app shells retain mounted pages across route switches. Refresh the
   // handoff when Course Tracker navigates back without changing question data.
@@ -136,9 +139,11 @@ export function QuestionWorkspacePage() {
     const fromQuestionBank = () => { sameRouteCourseLaunch.current = true; refresh(); };
     window.addEventListener("hashchange", fromRoute);
     window.addEventListener(COURSE_QUIZ_LAUNCH_EVENT, fromQuestionBank);
+    window.addEventListener(PRACTICE_LAUNCH_EVENT, refresh);
     return () => {
       window.removeEventListener("hashchange", fromRoute);
       window.removeEventListener(COURSE_QUIZ_LAUNCH_EVENT, fromQuestionBank);
+      window.removeEventListener(PRACTICE_LAUNCH_EVENT, refresh);
     };
   }, []);
   const courseHandoff = inspectCourseLaunch(questions);
@@ -189,6 +194,15 @@ export function QuestionWorkspacePage() {
     setRunner({ mode: "tutor", retakeIds: verified.questionIds, presetFilters: { setIds: verified.setIds }, fromCourse: !sameRouteCourseLaunch.current });
   }, [courseLaunch, runner, courseHandoff]);
 
+  useEffect(() => {
+    try {
+      const ids = takeRecommendedPractice(questions);
+      if (ids) setRunner({ mode: "tutor", retakeIds: ids });
+    } catch (error) {
+      pushToast({ title: "Practice could not start", body: error instanceof Error ? error.message : "Choose a new recommendation.", tone: "warn" });
+    }
+  }, [questions, accountId, handoffVersion]);
+
   function cancelPendingCourseLaunch() {
     clearCourseQuizLaunch();
     setHandoffVersion((version) => version + 1);
@@ -204,6 +218,7 @@ export function QuestionWorkspacePage() {
   const isFirstUse = questionSets.length === 0 && questions.length === 0 && privateReview.held === 0;
   const runnableQuestions = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready"), [questions]);
   const due = useMemo(() => dueQuestions(runnableQuestions), [runnableQuestions]);
+  const recommended = useMemo(() => nextPractice(questions), [questions]);
   const incorrect = runnableQuestions.filter((question) => question.status === "incorrect");
   const weak = useMemo(() => weakTopics(questions, 5), [questions]);
   const patterns = useMemo(() => errorPatterns(questions).slice(0, 5), [questions]);
@@ -213,7 +228,6 @@ export function QuestionWorkspacePage() {
   const runnable = runnableQuestions.length;
   const withExplanation = runnableQuestions.filter(hasMainExplanation).length;
   const heldForReview = questions.length - runnable + privateReview.held;
-  const unseen = runnableQuestions.filter((question) => question.attempts.length === 0).length;
   const lastSession = useMemo(() => (s.quizSessions ?? [])
     .map((session, index) => ({ session, index, time: timestamp(session.startedAt) }))
     .sort((a, b) => {
@@ -340,12 +354,9 @@ export function QuestionWorkspacePage() {
   }
 
   function launchRecommended() {
-    if (lastSession) {
-      setRunner({ mode: lastSession.mode, presetFilters: lastSession.filters, presetTimed: lastSession.timed });
-    } else if (due.length > 0) {
-      setRunner({ mode: "tutor", retakeIds: due.slice(0, 20).map((question) => question.id) });
-    } else if (unseen > 0) {
-      setRunner({ mode: "tutor", presetFilters: { status: "unused", count: Math.min(unseen, 10) } });
+    if (recommended) {
+      try { launchRecommendedPractice(recommended.questionIds, practiceContext, useStore.getState().questions ?? []); }
+      catch (error) { pushToast({ title: "Practice could not start", body: error instanceof Error ? error.message : "Choose a new recommendation.", tone: "warn" }); }
     } else if (runnable > 0) {
       setRunner({ mode: "tutor" });
     } else {
@@ -552,16 +563,8 @@ export function QuestionWorkspacePage() {
           <section className="qb-next-card glass-liquid" aria-labelledby="recommended-next-title" data-module-tour="qb-practice">
             <div className="qb-next-copy">
               <span className="qb-eyebrow">Recommended next</span>
-              <h2 id="recommended-next-title">{due.length ? `Review ${Math.min(due.length, 20)} due questions` : incorrect.length ? `Retry ${Math.min(incorrect.length, 20)} misses` : unseen ? "Start an unseen tutor block" : runnable ? "Start a focused practice block" : "Import another clean set"}</h2>
-              <p>{due.length
-                ? "These questions are scheduled to resurface now. A short tutor block keeps the review loop moving."
-                : incorrect.length
-                  ? "Turn recent misses into a focused block, classify the error, and repair the pattern."
-                  : unseen
-                    ? "Mapped questions are ready to study. Start small and let the performance data build."
-                    : runnable
-                      ? "Choose a short block and keep your current mastery signal fresh."
-                      : "Every import enters the same review-gated workflow."}</p>
+              <h2 id="recommended-next-title">{recommended?.title ?? (runnable ? "Create a focused practice block" : "Add a question set")}</h2>
+              <p>{recommended?.reason ?? (runnable ? "Choose the questions and mode for your next block." : "Add a set and review its answer mappings before practice.")}</p>
             </div>
             <button className="filter-pill on qb-begin-button" onClick={launchRecommended}><Play size={ICON_SIZE.body} /> Begin</button>
           </section>
