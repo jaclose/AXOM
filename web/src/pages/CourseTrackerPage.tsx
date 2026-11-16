@@ -353,7 +353,7 @@ export function CourseTrackerPage() {
                 {scopeOptions.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             )}
-            <RecordReview title="Practice for the course you are in" sub="Question blocks from your own answers, beside the activities below." limit={3} />
+            <RecordReview title="Practice for the course you are in" sub="Question blocks from your own answers." limit={3} compact />
             <div className="tracker-compact-suggestions">
               {inBlueprintScope && activeBlueprintInstall
                 ? <BlueprintSuggestions install={activeBlueprintInstall} nodes={activeBlueprintNodes} />

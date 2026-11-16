@@ -14,3 +14,10 @@
 .record-review-card span { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: 4px; color: var(--text-55); font-size: var(--fs-xs); }
 .record-review-card i { display: inline-flex; align-items: center; gap: 4px; color: var(--gold); font-style: normal; font-weight: var(--fw-medium); }
 @media (prefers-reduced-motion: reduce) { .record-review-card { transition: none; } }
+/* A narrow column: one tight row per block, the reason left to the full view. */
+.record-review.compact { gap: 8px; padding: 14px; }
+.record-review.compact h3 { font-size: var(--fs-md); }
+.record-review.compact ul { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.record-review.compact .record-review-card { gap: 2px; padding: 10px 12px; }
+.record-review.compact .record-review-card b { font-size: var(--fs-base); }
+.record-review.compact .record-review-card span { margin-top: 0; }
