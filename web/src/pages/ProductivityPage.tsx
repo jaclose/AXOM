@@ -24,6 +24,8 @@ import { usePomodoro } from "../lib/pomodoro";
 import { ActivityIntelligence } from "../components/productivity/ActivityIntelligence";
 import { ProductivitySaveStatus, useProductivitySaveStatus } from "../components/productivity/ProductivitySaveStatus";
 import { UpNext } from "../components/brief/UpNext";
+import { StudyPlanPanel } from "../components/productivity/StudyPlanPanel";
+import { buildStudyPlan, readActiveRun } from "../lib/studyPlan";
 import "../styles/productivity.css";
 
 export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
@@ -48,6 +50,8 @@ export function ProductivityPage() {
   const saveStatus = useProductivitySaveStatus();
   const running = usePomodoro((state) => state.running);
   const insight = productivityInsight(s, saveStatus === "failed", running);
+  // Read from the same snapshot the page renders, so a finished block or a new pass re-plans at once.
+  const plan = useMemo(() => buildStudyPlan(s, new Date(), readActiveRun()), [s]);
   const logs = useMemo(() => canonicalStudyLogs(s.logs).reverse(), [s.logs]);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [manualType, setManualType] = useState("");
@@ -119,6 +123,7 @@ export function ProductivityPage() {
     <>
       {isActive && (insight.priority ? <ActivityIntelligence insight={insight} />
         : <UpNext fallback={<ActivityIntelligence insight={insight} />} />)}
+      {isActive && <StudyPlanPanel plan={plan} />}
       <ProductivitySaveStatus status={saveStatus} />
       <div className="productivity-primary-grid">
       <GlassCard pad id="productivity-log" data-tour="log" data-module-tour="productivity-log">

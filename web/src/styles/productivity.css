@@ -48,3 +48,22 @@
 .productivity-evidence small { display: block; color: var(--text-50); }
 :root[data-theme="light"] .productivity-intel,
 :root[data-theme="light"] .month-intel { background: var(--glass-card-fill); }
+
+/* Today's plan: the lead action keeps the next-step card; later actions and the day's record sit under it. */
+.study-plan { display: grid; gap: 10px; }
+.study-plan { margin-top: 10px; }
+.study-plan-heading { margin: 2px 4px 0; color: var(--gold); font-size: var(--fs-micro); font-weight: var(--fw-medium); text-transform: uppercase; letter-spacing: var(--tracking-wider); }
+.study-plan-then { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; counter-reset: plan; }
+.study-plan-then li { position: relative; display: flex; align-items: center; gap: 14px; padding: 12px 16px 12px 48px; border: 1px solid var(--glass-card-border); border-radius: var(--radius-md); background: var(--glass-card-fill); counter-increment: plan; }
+.study-plan-then li::before { content: counter(plan); position: absolute; left: 16px; top: 50%; translate: 0 -50%; display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--gold-line); border-radius: var(--radius-pill); color: var(--gold); font-size: var(--fs-tiny); font-weight: var(--fw-semibold); }
+.study-plan-then li > div { flex: 1; min-width: 0; }
+.study-plan-then h3 { margin: 0; font-family: var(--font-display); font-size: var(--fs-md); }
+.study-plan-then p, .study-plan-error, .study-plan-note { margin: 2px 0 0; color: var(--text-70); font-size: var(--fs-sm); }
+.study-plan-note a { color: var(--gold); }
+.study-plan-observed { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0 4px; color: var(--text-70); font-size: var(--fs-xs); }
+.study-plan-observed div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.study-plan-observed dt { display: inline-flex; align-items: center; gap: 5px; color: var(--text-55); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: var(--tracking-wider); }
+.study-plan-observed dd { margin: 0; }
+@media (max-width: 560px) {
+  .study-plan-then li { flex-direction: column; align-items: flex-start; gap: 8px; }
+}
