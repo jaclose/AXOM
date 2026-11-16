@@ -19,6 +19,8 @@ import { AcademicReviewQueue } from "./AcademicReviewQueue";
 import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 import { getAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
+import { getPublicCourse, publicCatalogCourse } from "../../lib/academicLibrary/publicCatalog";
+import { PublicCoursePlan } from "./PublicCoursePlan";
 import { compareCourses } from "../../lib/academicLibrary/catalogOrder";
 import { TermCourseActions } from "./TermCourseActions";
 import { sameCourseLabel } from "./courseLabelMatch";
@@ -42,15 +44,21 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   const { courses: connected, loading: catalogLoading, error: catalogError, more: moreAvailable,
     loadMore: more, retry: retryCatalog } = useAcademicCatalog(accountId, query, term);
   const [selected, setSelected] = useState<string | null>(() => new URL(window.location.href).searchParams.get("course"));
-  const [linkedCourse, setLinkedCourse] = useState<{ accountId: string; course: AcademicCourse }>();
+  const [linkedCourse, setLinkedCourse] = useState<{ accountId: string | undefined; course: AcademicCourse }>();
   const [linkedError, setLinkedError] = useState("");
   const remoteId = selected?.startsWith("remote:") ? selected.slice(7) : undefined;
   const listedCourse = connected.find(course => course.id === remoteId);
   useEffect(() => {
     let cancelled = false;
     setLinkedCourse(undefined); setLinkedError("");
-    if (accountId && remoteId && !listedCourse) {
-      void getAcademicCourse(remoteId, accountId).then(course => {
+    if (remoteId && !listedCourse) {
+      // A deep link must not depend on the first catalog page, signed in or not.
+      const lookup = accountId ? getAcademicCourse(remoteId, accountId)
+        : getPublicCourse(remoteId).then(preview => {
+          if (!preview) throw new Error("This course is not offered to visitors. Sign in to open the courses available to your account.");
+          return publicCatalogCourse(preview);
+        });
+      void lookup.then(course => {
         if (!cancelled) setLinkedCourse({ accountId, course });
       }).catch(cause => { if (!cancelled) setLinkedError(cause instanceof Error ? cause.message : "This course could not be opened."); });
     }
@@ -92,8 +100,11 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
     <div className="course-card-copy"><span className="course-card-context">{book.courseCode || book.term}</span><h3>{book.module}</h3><p>{book.courseName || "Academic module"}</p><span className="course-card-facts">{book.weeks.length ? `${book.weeks.length} weeks · ${book.count} activities` : "Weekly plan not available"}</span><span className="course-card-state">{mine(book) ? "In My Courses" : available(book) ? "Ready to preview" : "Not prepared yet"}{bankFor(book)?.ready ? ` · ${bankFor(book)?.ready} ready questions` : ""}</span></div><ArrowUpRight size={ICON_SIZE.control} aria-hidden="true" />
   </button>;
   return <div className="course-library-page" ref={heading}>
-    {remoteId && !connectedChosen && <div><GButton onClick={() => setSelected(null)}>All courses</GButton><p role={linkedError ? "alert" : "status"}>{linkedError || (accountId ? "Opening your course…" : "Sign in to open this course.")}</p></div>}
-    {connectedChosen ? <ConnectedCoursePlan key={`${accountId}:${connectedChosen.current_revision_id}`} course={connectedChosen} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} onSharingSaved={retryCatalog} /> : chosen ? <CoursePlan key={chosen.id} book={chosen} bank={bankFor(chosen)} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : <>
+    {remoteId && !connectedChosen && <div><GButton onClick={() => setSelected(null)}>All courses</GButton><p role={linkedError ? "alert" : "status"}>{linkedError || (accountId ? "Opening your course…" : "Opening the course…")}</p></div>}
+    {connectedChosen ? accountId
+      ? <ConnectedCoursePlan key={`${accountId}:${connectedChosen.current_revision_id}`} course={connectedChosen} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} onSharingSaved={retryCatalog} />
+      : <PublicCoursePlan key={connectedChosen.current_revision_id} course={connectedChosen} onBack={() => setSelected(null)} />
+      : chosen ? <CoursePlan key={chosen.id} book={chosen} bank={bankFor(chosen)} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : <>
       <header className="course-library-heading"><div><p className="course-eyebrow">Your academic collection</p><h1 tabIndex={-1}>Course Library</h1><p>Preview the weeks. Choose what to load. Keep your progress.</p></div><div className="course-library-entry-actions"><GButton variant="primary" onClick={() => onTemplate()}>Saved templates and imports</GButton><GButton onClick={onClose}><ArrowLeft size={ICON_SIZE.body} /> My Courses</GButton></div></header>
       <AcademicReviewQueue />
       <div className="course-library-tools">
@@ -105,7 +116,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
         <label className="course-search"><Search size={ICON_SIZE.emphasis} /><span className="sr-only">Search courses</span><input name="course-search" autoComplete="off" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Course or module" /></label>
         <label className="course-term-filter"><span className="sr-only">Filter by term</span><select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{[...new Set([...books.map(book => book.term), ...connected.map(course => course.term)])].map(value => <option key={value}>{value}</option>)}</select></label>
       </div>
-      <div className="course-collection-summary"><p className="course-collection-count" role="status">{catalogLoading ? "Loading the collection…" : `${courseCount(shown.length + connectedShown.length)}${view === "mine" ? " activated" : view === "all" ? " in the course map" : accountId ? " available" : " available on this device"}`}</p><span className="course-storage-context">{accountId ? "Account + this device" : "On this device"}</span></div>
+      <div className="course-collection-summary"><p className="course-collection-count" role="status">{catalogLoading ? "Loading the collection…" : `${courseCount(shown.length + connectedShown.length)}${view === "mine" ? " activated" : view === "all" ? " in the course map" : accountId || connectedShown.length ? " available" : " available on this device"}`}</p><span className="course-storage-context">{accountId ? "Account + this device" : connectedShown.length ? "Offered to everyone + this device" : "On this device"}</span></div>
       {view === "available" && books.some(book => mine(book) && connectedShown.some(course => sameCourseLabel(book, course))) && <p className="course-overlap-note">Your loaded version of a course is in My Courses. Its account collection is shown here.</p>}
       {catalogError && <div role="alert"><p>{catalogError}</p><GButton onClick={retryCatalog}>Retry collection</GButton></div>}
       {!shown.length && !connectedShown.length && !catalogLoading && <div className="course-empty"><BookOpen size={32} /><h2>{view === "mine" ? "Your courses start here" : "No courses to show"}</h2><p>{query || term ? "Try a different search or term." : "Import your course templates to preview their activities and choose what to load. The course map is an outline; it does not include your school's lecture schedule."}</p>{query || term ? <GButton onClick={() => { setQuery(""); setTerm(""); }}>Clear course filters</GButton> : <GButton onClick={() => onTemplate()}>Import course templates</GButton>}{view !== "available" && <GButton onClick={() => setView("available")}>Browse available courses</GButton>}</div>}

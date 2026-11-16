@@ -6,19 +6,23 @@ import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog
 import { openAcademicCourse } from "../../lib/academicLibrary/navigation";
 import { coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
 import { ConnectedCoursePlan } from "../tracker/ConnectedCoursePlan";
+import { PublicCoursePlan } from "../tracker/PublicCoursePlan";
 import { GButton, GlassCard, PanelHeader } from "../ui/primitives";
 import "../../styles/course-library.css";
 
-/** QBank and Course Library discover the same permissioned collection. */
+/** QBank and Course Library discover the same collection: the account's
+ * permissioned courses when signed in, the courses offered to everyone when not. */
 export function AcademicBankDiscovery() {
   const accountId = useAccount(state => state.user?.id);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<{ accountId: string; course: AcademicCourse }>();
+  const [selected, setSelected] = useState<{ accountId: string | undefined; course: AcademicCourse }>();
   const detail = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const hadSelection = useRef(false);
   const catalog = useAcademicCatalog(accountId, query, "");
-  const selectedCourse = selected && accountId && selected.accountId === accountId ? selected.course : undefined;
+  const selectedCourse = selected && selected.accountId === accountId ? selected.course : undefined;
+  // A visitor with nothing offered and no search sees the same sign-in line as before.
+  const nothingOffered = !accountId && !query && !catalog.loading && !catalog.error && !catalog.courses.length;
   const course = selectedCourse
     ? catalog.courses.find(entry => entry.id === selectedCourse.id) ?? selectedCourse
     : undefined;
@@ -33,11 +37,14 @@ export function AcademicBankDiscovery() {
       <PanelHeader headingLevel={2} title="Study by course" sub="Preview the weekly plan, load the weeks you need, and open their reviewed question sets."
         action={course
           ? <GButton onClick={() => openAcademicCourse(course.id)}><ArrowUpRight size={16} /> Open in Course Tracker</GButton>
-          : <GButton onClick={catalog.retry} disabled={!accountId || catalog.loading}><RefreshCw size={16} /> Refresh banks</GButton>} />
-      {!accountId ? <p>Sign in through Account to discover courses. Your saved questions remain available below.</p> : course ? <div ref={detail} tabIndex={-1} role="region" aria-label={`${course.module} question sets`}>
-        <ConnectedCoursePlan key={`${accountId}:${course.current_revision_id}`} course={course} onBack={() => setSelected(undefined)}
-          onOpen={() => openAcademicCourse(course.id)} onCustomize={() => openAcademicCourse(course.id)} onSharingSaved={catalog.retry} />
+          : <GButton onClick={catalog.retry} disabled={catalog.loading}><RefreshCw size={16} /> Refresh banks</GButton>} />
+      {nothingOffered ? <p>Sign in through Account to discover courses. Your saved questions remain available below.</p> : course ? <div ref={detail} tabIndex={-1} role="region" aria-label={`${course.module} question sets`}>
+        {accountId
+          ? <ConnectedCoursePlan key={`${accountId}:${course.current_revision_id}`} course={course} onBack={() => setSelected(undefined)}
+            onOpen={() => openAcademicCourse(course.id)} onCustomize={() => openAcademicCourse(course.id)} onSharingSaved={catalog.retry} />
+          : <PublicCoursePlan key={course.current_revision_id} course={course} onBack={() => setSelected(undefined)} />}
       </div> : <>
+        {!accountId && <p className="sub">Courses offered to everyone. Sign in to load a course and practice its reviewed questions.</p>}
         <label className="course-search"><span className="sr-only">Search available banks</span><input ref={search} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Course or module" /></label>
         {catalog.loading && <p role="status">Loading available question banks…</p>}
         {catalog.error && <p role="alert">{catalog.error}</p>}
@@ -47,7 +54,7 @@ export function AcademicBankDiscovery() {
           <div className="course-collection">
             {courses.map(course => <button type="button" key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected({ accountId, course })} aria-label={`Preview ${course.module} course and weekly question sets`}>
               <div className="course-card-cover"><span>{course.term}</span><strong>{course.module}</strong><BookOpen size={28} strokeWidth={1} /></div>
-              <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}</span><h4>{course.module}</h4><p>{course.title}</p><span className="course-card-facts">{course.ready_questions} ready {course.ready_questions === 1 ? "question" : "questions"}{course.review_questions > 0 && ` · ${course.review_questions} awaiting review`}</span><span className="course-card-state">Preview weeks and question sets</span></div>
+              <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}</span><h4>{course.module}</h4><p>{course.title}</p><span className="course-card-facts">{course.ready_questions} ready {course.ready_questions === 1 ? "question" : "questions"}{course.review_questions > 0 && ` · ${course.review_questions} awaiting review`}</span><span className="course-card-state">{accountId ? "Preview weeks and question sets" : "Preview the weekly plan"}</span></div>
               <ArrowUpRight size={20} aria-hidden="true" />
             </button>)}
           </div>

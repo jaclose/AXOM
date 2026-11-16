@@ -243,7 +243,7 @@ const SERVICE_ONLY_PRIVACY = [
 const PRIVATE_TABLES = [
   "account_profiles", "workspaces", "workspace_revisions", "sync_conflicts", "question_set_shares", "account_devices", "ai_usage",
   "academic_catalog_releases", "academic_catalog_entries", "academic_catalog_files", "academic_catalog_grants",
-  "academic_source_identities",
+  "academic_source_identities", "academic_public_offer_log",
 ];
 describe("Supabase migrations on real Postgres", () => {
   it("revokes group/shared access when the currently selected academic revision is pending or rejected", async () => {

@@ -6,11 +6,16 @@ import { buildCurriculum, SGU_CURRICULUM } from "../../lib/curricula";
 import type { CourseBook } from "../../lib/bookshelf/courseBooks";
 import { CourseLibrary } from "./CourseLibrary";
 
-const mocks = vi.hoisted(() => ({ useStore: vi.fn(), connected: [] as unknown[] }));
+const mocks = vi.hoisted(() => ({ useStore: vi.fn(), connected: [] as unknown[], signedIn: true, offered: vi.fn() }));
 vi.mock("../../lib/store", () => ({ useStore: () => mocks.useStore() }));
 vi.mock("../../lib/account/accountStore", () => ({
-  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner" } }),
+  useAccount: (select: (state: { user: { id: string } | null }) => unknown) => select({ user: mocks.signedIn ? { id: "owner" } : null }),
 }));
+vi.mock("../../lib/academicLibrary/publicCatalog", () => ({
+  getPublicCourse: (...args: unknown[]) => mocks.offered(...args),
+  publicCatalogCourse: (entry: Record<string, unknown>) => ({ ...entry, visibility: "shared", review_status: "approved", owned: false, review_questions: 0 }),
+}));
+vi.mock("./PublicCoursePlan", () => ({ PublicCoursePlan: ({ course }: { course: { module: string } }) => <h1 data-testid="visitor-course">{course.module}</h1> }));
 vi.mock("../../lib/academicLibrary/useAcademicCatalog", () => ({
   useAcademicCatalog: () => ({ courses: mocks.connected, loading: false, error: "", more: false, loadMore: vi.fn(), retry: vi.fn() }),
 }));
@@ -42,7 +47,44 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/#tracker");
   HTMLElement.prototype.scrollIntoView = vi.fn();
   mocks.connected = [];
+  mocks.signedIn = true;
   mocks.useStore.mockReturnValue(workspace());
+});
+
+const OFFERED = { id: "11111111-1111-4111-8111-111111111111", title: "GOER reviewed course", module: "GOER", term: "Term 5",
+  visibility: "shared", review_status: "approved", current_revision_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", owned: false, ready_questions: 40, review_questions: 0 };
+
+it("shows a visitor the courses offered to everyone and opens a read-only preview, never the account plan", () => {
+  mocks.signedIn = false;
+  mocks.connected = [OFFERED];
+  render(<CourseLibrary onClose={vi.fn()} onTemplate={vi.fn()} onOpen={vi.fn()} onCreate={vi.fn()} />);
+  expect(screen.getByRole("status").textContent).toBe("1 course available");
+  expect(screen.getByText("Offered to everyone + this device")).toBeTruthy();
+  const card = screen.getByRole("button", { name: "Preview GOER, Term 5" });
+  expect(card.textContent).toContain("40 ready questions");
+  expect(card.textContent).toContain("Academic collection · Reviewed");
+  // Term download and enrollment actions belong to accounts only.
+  expect(screen.queryByRole("button", { name: /Download/ })).toBeNull();
+  fireEvent.click(card);
+  expect(screen.getByTestId("visitor-course").textContent).toBe("GOER");
+  expect(new URL(window.location.href).searchParams.get("course")).toBe(`remote:${OFFERED.id}`);
+});
+
+it("opens a visitor's direct course link through the offered-course lookup and explains one that is not offered", async () => {
+  mocks.signedIn = false;
+  window.history.replaceState(null, "", `/?course=remote:${OFFERED.id}#tracker`);
+  mocks.offered.mockResolvedValueOnce({ ...OFFERED, template_text: "" });
+  const first = render(<CourseLibrary onClose={vi.fn()} onTemplate={vi.fn()} onOpen={vi.fn()} onCreate={vi.fn()} />);
+  expect(screen.getByText("Opening the course…").getAttribute("role")).toBe("status");
+  expect((await screen.findByTestId("visitor-course")).textContent).toBe("GOER");
+  expect(mocks.offered).toHaveBeenCalledWith(OFFERED.id);
+  first.unmount();
+
+  window.history.replaceState(null, "", `/?course=remote:${OFFERED.id}#tracker`);
+  mocks.offered.mockResolvedValueOnce(null);
+  render(<CourseLibrary onClose={vi.fn()} onTemplate={vi.fn()} onOpen={vi.fn()} onCreate={vi.fn()} />);
+  expect((await screen.findByRole("alert")).textContent).toContain("not offered to visitors");
+  expect(screen.queryByTestId("visitor-course")).toBeNull();
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 

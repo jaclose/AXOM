@@ -18,7 +18,9 @@ const mocks = vi.hoisted(() => ({
   download: vi.fn(),
   enroll: vi.fn(),
   retry: vi.fn(),
+  offered: vi.fn(),
 }));
+vi.mock("../../lib/academicLibrary/publicCatalog", () => ({ getPublicCourse: (...args: unknown[]) => mocks.offered(...args) }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } | null }) => unknown) => select({ user: mocks.accountId ? { id: mocks.accountId } : null }),
 }));
@@ -160,6 +162,35 @@ describe("Question Bank hosted course discovery", () => {
       courseId: "hosted-course", module: "FTM 1", term: "Term 1", week: 2, questionIds: ["week-2"], setIds: ["set-2"],
     });
     expect(location.hash).toBe("#questions");
+  });
+
+  it("shows a visitor the courses offered to everyone and opens a read-only weekly plan", async () => {
+    mocks.accountId = "";
+    mocks.courses = [course];
+    mocks.offered.mockResolvedValue({ id: collection, title: course.title, module: course.module, term: course.term,
+      current_revision_id: revision, ready_questions: 2, template_text: planText });
+    render(<AcademicBankDiscovery />);
+    const region = screen.getByRole("region", { name: "Available question banks" });
+    expect(within(region).getByText(/Courses offered to everyone\./)).toBeTruthy();
+    expect(within(region).queryByText(/Sign in through Account to discover courses/)).toBeNull();
+    expect((within(region).getByRole("button", { name: /Refresh banks/ }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(within(region).getByRole("button", { name: /Preview FTM 1 course and weekly question sets/ }));
+    expect(await screen.findByRole("heading", { name: "Weekly plan" })).toBeTruthy();
+    expect(mocks.offered).toHaveBeenCalledWith(collection);
+    // The visitor preview never reaches the account-only plan, download or enrollment paths.
+    expect(mocks.preview).not.toHaveBeenCalled();
+    expect(screen.queryByRole("checkbox", { name: "Week 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load Course" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Sign in or create an account" })).toBeTruthy();
+  });
+
+  it("keeps the sign-in line for a visitor when nothing is offered, and a plain empty result for a search", () => {
+    mocks.accountId = "";
+    mocks.courses = [];
+    render(<AcademicBankDiscovery />);
+    expect(screen.getByText("Sign in through Account to discover courses. Your saved questions remain available below.")).toBeTruthy();
+    expect(screen.queryByRole("searchbox")).toBeNull();
   });
 
   it("hides another account's selected course and reports catalog errors", () => {

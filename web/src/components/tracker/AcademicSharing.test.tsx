@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicSharing } from "./AcademicSharing";
 
-const mocks = vi.hoisted(() => ({ reviewer: vi.fn(), review: vi.fn(), rpc: vi.fn(), explanations: vi.fn() }));
+const mocks = vi.hoisted(() => ({ reviewer: vi.fn(), review: vi.fn(), rpc: vi.fn(), explanations: vi.fn(), offerState: vi.fn(), offer: vi.fn() }));
+vi.mock("../../lib/academicLibrary/publicCatalog", () => ({
+  publicOfferState: (...args: unknown[]) => mocks.offerState(...args),
+  offerCoursePublicly: (...args: unknown[]) => mocks.offer(...args),
+}));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "reviewer-1" } }),
 }));
@@ -35,6 +39,7 @@ const course = (patch: Partial<AcademicCourse> = {}): AcademicCourse => ({
 describe("academic review controls", () => {
   beforeEach(() => {
     mocks.review.mockResolvedValue(undefined); mocks.rpc.mockResolvedValue({ error: null });
+    mocks.offerState.mockResolvedValue("unavailable"); mocks.offer.mockResolvedValue(undefined);
     mocks.explanations.mockResolvedValue({ collectionId: course().id, revisionId: course().current_revision_id,
       contentHash: "a".repeat(64), readyQuestions: 3, explainedReadyQuestions: 3, missingExplanations: 0 });
   });
@@ -78,5 +83,76 @@ describe("academic review controls", () => {
     const { container } = render(<AcademicSharing course={course()} onSaved={vi.fn()} />);
     await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledTimes(2));
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("offering a course to visitors without an account", () => {
+  const open = (container: HTMLElement) => {
+    const details = container.querySelector("details")!;
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+  };
+  const offer = () => screen.queryByRole("group", { name: "Visitors without an account" });
+  beforeEach(() => { mocks.reviewer.mockResolvedValue(true); mocks.offer.mockResolvedValue(undefined); mocks.rpc.mockResolvedValue({ error: null }); });
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("lets the reviewer who owns an approved, shared course offer its exact revision, then end the offer", async () => {
+    mocks.offerState.mockResolvedValue("not-offered");
+    const onSaved = vi.fn();
+    const approved = course({ owned: true, review_status: "approved" });
+    const { container } = render(<AcademicSharing course={approved} onSaved={onSaved} />);
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalled());
+    // Nothing is asked of the server until the reviewer opens the settings.
+    expect(mocks.offerState).not.toHaveBeenCalled();
+    open(container);
+    expect(await screen.findByText("Not offered to visitors.")).toBeTruthy();
+    expect(offer()!.textContent).toContain("Questions, images and source files always need an account.");
+    fireEvent.click(screen.getByRole("button", { name: "Offer this version to visitors" }));
+    await waitFor(() => expect(mocks.offer).toHaveBeenCalledWith(approved, true, "reviewer-1"));
+    expect(await screen.findByText("Offered to visitors.")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("can now find this version");
+    expect(onSaved).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop offering to visitors" }));
+    await waitFor(() => expect(mocks.offer).toHaveBeenLastCalledWith(approved, false, "reviewer-1"));
+    expect(await screen.findByText("Not offered to visitors.")).toBeTruthy();
+    expect(onSaved).toHaveBeenCalledTimes(2);
+  });
+
+  it("explains why an unapproved or unshared course cannot be offered and reports a refusal without claiming success", async () => {
+    mocks.offerState.mockResolvedValue("not-offered");
+    const first = render(<AcademicSharing course={course({ owned: true, review_status: "pending" })} onSaved={vi.fn()} />);
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalled());
+    open(first.container);
+    expect(await screen.findByText("Only an approved course shared with every signed-in account can be offered.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Offer this version to visitors" }) as HTMLButtonElement).disabled).toBe(true);
+    first.unmount();
+
+    mocks.offer.mockRejectedValueOnce(new Error("This course changed. Refresh it, check its current revision, then decide again."));
+    const onSaved = vi.fn();
+    const second = render(<AcademicSharing course={course({ owned: true, review_status: "approved" })} onSaved={onSaved} />);
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledTimes(2));
+    open(second.container);
+    fireEvent.click(await screen.findByRole("button", { name: "Offer this version to visitors" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("This course changed");
+    expect(screen.getByText("Not offered to visitors.")).toBeTruthy();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("offers no control to a reviewer who does not own the course, or when the backend has no visitor catalog", async () => {
+    mocks.offerState.mockResolvedValue("not-offered");
+    const first = render(<AcademicSharing course={course({ owned: false, review_status: "approved" })} onSaved={vi.fn()} />);
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalled());
+    open(first.container);
+    expect(offer()).toBeNull();
+    expect(mocks.offerState).not.toHaveBeenCalled();
+    first.unmount();
+
+    mocks.offerState.mockResolvedValue("unavailable");
+    const second = render(<AcademicSharing course={course({ owned: true, review_status: "approved" })} onSaved={vi.fn()} />);
+    await waitFor(() => expect(mocks.reviewer).toHaveBeenCalledTimes(2));
+    open(second.container);
+    await waitFor(() => expect(mocks.offerState).toHaveBeenCalledOnce());
+    expect(offer()).toBeNull();
   });
 });

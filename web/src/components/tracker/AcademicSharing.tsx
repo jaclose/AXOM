@@ -3,6 +3,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import { academicClient, isAcademicReviewer, reviewAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
+import { offerCoursePublicly, publicOfferState, type PublicOfferState } from "../../lib/academicLibrary/publicCatalog";
 import { GButton } from "../ui/primitives";
 
 /** Sharing changes access to the canonical collection, never a learner backup. */
@@ -81,7 +82,51 @@ export function AcademicSharing({ course, onSaved }: { course: AcademicCourse; o
     {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry settings</GButton></div>}
     </>}
     {reviewer && <AcademicReview course={course} accountId={accountId} onSaved={onSaved} />}
+    {open && reviewer && course.owned && <PublicOffer course={course} accountId={accountId} onSaved={onSaved} />}
   </details>;
+}
+
+/** Offering applies to the course's current revision. A newer upload, a lost
+ * approval or a narrower audience ends the offer until a reviewer decides again. */
+function PublicOffer({ course, accountId, onSaved }: { course: AcademicCourse; accountId: string; onSaved: () => void }) {
+  const [state, setState] = useState<PublicOfferState | "loading">("loading");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setState("loading"); setMessage(""); setError("");
+    void publicOfferState(course.id, accountId).then(value => { if (active) setState(value); });
+    return () => { active = false; };
+  }, [course.id, course.current_revision_id, course.review_status, course.visibility, accountId]);
+  // A backend without the visitor catalog offers no control at all.
+  if (state === "loading" || state === "unavailable") return null;
+  const eligible = course.review_status === "approved" && course.visibility === "shared";
+  async function decide(offered: boolean) {
+    if (busy) return;
+    const scope = academicAccountScope(accountId);
+    setBusy(true); setError(""); setMessage("");
+    try {
+      await offerCoursePublicly(course, offered, accountId);
+      scope.assertCurrent();
+      setState(offered ? "offered" : "not-offered");
+      setMessage(offered ? "Offered. Visitors without an account can now find this version in the course catalog."
+        : "The offer has ended. Visitors without an account can no longer find this course.");
+      onSaved();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "The decision could not be saved."); }
+    finally { scope.dispose(); setBusy(false); }
+  }
+  return <div className="course-review" role="group" aria-label="Visitors without an account">
+    <p><b>{state === "offered" ? "Offered to visitors." : "Not offered to visitors."}</b> Visitors without an account see an offered course's title, weekly plan and question count. Questions, images and source files always need an account.</p>
+    {state !== "offered" && !eligible && <p>Only an approved course shared with every signed-in account can be offered.</p>}
+    <div className="course-sharing-fields">
+      {state === "offered"
+        ? <GButton disabled={busy} onClick={() => void decide(false)}>{busy ? "Saving decision…" : "Stop offering to visitors"}</GButton>
+        : <GButton disabled={busy || !eligible} onClick={() => void decide(true)}>{busy ? "Saving decision…" : "Offer this version to visitors"}</GButton>}
+    </div>
+    {message && <p role="status">{message}</p>}
+    {error && <p role="alert">{error}</p>}
+  </div>;
 }
 
 /** Approval applies to the course's current revision. A newer upload waits for review again. */
