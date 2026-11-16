@@ -14,6 +14,7 @@ import { knownBankManifests } from "../../lib/question-content/knownBanks";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
 import { AcademicBankDiscovery } from "../bookshelf/AcademicBankDiscovery";
 import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
+import { RecordReview } from "./RecordReview";
 import { GButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import type { QuestionSet } from "../../lib/library";
@@ -92,6 +93,7 @@ export function QuestionBankLibrary({ onPractice, onPracticeSet, onOpenBank, onI
       </div>
     </header>
     <AccountContentDownloads />
+    <RecordReview title="Review what your answers point to" sub="Each block holds exactly the questions it names. Held questions never enter a block." />
     {ready > 0 ? [collection, catalog] : [catalog, collection]}
     <details id="prepared-course-library" className="cloud-local-material qb-library-maintenance"
       open={preparedOpen} onToggle={(event) => {

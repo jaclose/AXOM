@@ -51,7 +51,7 @@ export function ProductivityPage() {
   const running = usePomodoro((state) => state.running);
   const insight = productivityInsight(s, saveStatus === "failed", running);
   // Read from the same snapshot the page renders, so a finished block or a new pass re-plans at once.
-  const plan = useMemo(() => buildStudyPlan(s, new Date(), readActiveRun()), [s]);
+  const plan = useMemo(() => buildStudyPlan(s, new Date(), readActiveRun(), { limit: 5 }), [s]);
   const logs = useMemo(() => canonicalStudyLogs(s.logs).reverse(), [s.logs]);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [manualType, setManualType] = useState("");

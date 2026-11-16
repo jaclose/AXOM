@@ -78,6 +78,15 @@ export function readActiveRun(): ActiveRun | null {
   return null;
 }
 
+export interface StudyPlanOptions {
+  /** Keep only these kinds, in the plan's own order. Other kinds still claim their questions first. */
+  kinds?: readonly StudyActionKind[];
+  /** How many actions to return; four by default. */
+  limit?: number;
+  /** Offer a retry for every module with misses, largest first, instead of only the largest. */
+  everyMissedModule?: boolean;
+}
+
 const QUIZ_CAP = 20;
 const RECENT_DAYS = 14;
 const DAY_MS = 86_400_000;
@@ -106,7 +115,7 @@ const practice = (questions: readonly QuestionRecord[]): StudyLaunch => ({ type:
  * meet new questions there, then clear your flags. A question appears in one
  * suggestion only.
  */
-export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), activeRun: ActiveRun | null = null): StudyPlan {
+export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), activeRun: ActiveRun | null = null, options: StudyPlanOptions = {}): StudyPlan {
   const setsById = new Map(state.questionSets.map((set) => [set.id, set]));
   const events = attemptEvents(state.questions);
   const lastScored = new Map<string, AttemptEvent>();
@@ -128,12 +137,12 @@ export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), ac
     return chosen;
   };
   const newestAnswerFirst = (left: Scoped, right: Scoped) => (right.last?.at ?? "").localeCompare(left.last?.at ?? "");
-  /** The module holding the most entries; ties go to the one missed most recently. */
-  const largestModule = (pool: readonly Scoped[]): Scoped[] => {
+  /** Modules by how many entries they hold; ties go to the one missed most recently. */
+  const byModule = (pool: readonly Scoped[]): Scoped[][] => {
     const groups = new Map<string, Scoped[]>();
     for (const entry of pool) groups.set(entry.moduleKey, [...(groups.get(entry.moduleKey) ?? []), entry]);
     return [...groups.values()].sort((left, right) => right.length - left.length
-      || (right[0].last?.at ?? "").localeCompare(left[0].last?.at ?? ""))[0] ?? [];
+      || (right[0].last?.at ?? "").localeCompare(left[0].last?.at ?? ""));
   };
   const actions: StudyAction[] = [];
 
@@ -156,8 +165,7 @@ export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), ac
   }
 
   const remainingMisses = missed.filter((entry) => !used.has(entry.question.id));
-  const missGroup = largestModule(remainingMisses);
-  if (missGroup.length) {
+  for (const missGroup of byModule(remainingMisses).slice(0, options.everyMissedModule ? 3 : 1)) {
     const total = missGroup.length;
     const chosen = take(missGroup);
     const oldest = Math.max(0, Math.floor((now.getTime() - Math.min(...missGroup.map((entry) => Date.parse(entry.last!.at)))) / DAY_MS));
@@ -212,8 +220,9 @@ export function buildStudyPlan(state: NoctyriumState, now: Date = new Date(), ac
       actionLabel: "Start flagged" });
   }
 
+  const kept = options.kinds ? actions.filter((action) => options.kinds!.includes(action.kind)) : actions;
   return {
-    actions: actions.slice(0, MAX_ACTIONS),
+    actions: kept.slice(0, options.limit ?? MAX_ACTIONS),
     observed: observedDay(state, state.activeDayKey, events),
     empty: state.questions.length === 0 && state.tracker.length === 0,
   };

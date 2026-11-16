@@ -5,6 +5,7 @@ import {
   Plus, Trash2, ChevronRight, ChevronDown, ListPlus, RefreshCw, BookOpen, HelpCircle, Eye, Upload, Pencil, Brain, ExternalLink, Copy, X, Star,
 } from "lucide-react";
 import { useStore } from "../lib/store";
+import { RecordReview } from "../components/questions/RecordReview";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../lib/localVault";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Modal, Field, SelectField, TextAreaField } from "../components/ui/Modal";
@@ -352,6 +353,7 @@ export function CourseTrackerPage() {
                 {scopeOptions.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             )}
+            <RecordReview title="Practice for the course you are in" sub="Question blocks from your own answers, beside the activities below." limit={3} />
             <div className="tracker-compact-suggestions">
               {inBlueprintScope && activeBlueprintInstall
                 ? <BlueprintSuggestions install={activeBlueprintInstall} nodes={activeBlueprintNodes} />

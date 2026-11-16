@@ -117,6 +117,24 @@ describe("study plan", () => {
   });
 });
 
+describe("study plan for one surface", () => {
+  it("lists a retry for each module with misses and only the kinds a surface asks for", () => {
+    const state = workspace({
+      tracker: [row("done", "T5/GOER/Week 1", { passes: 1, updated: daysAgo(1) }), row("next", "T5/GOER/Week 2")],
+      questions: [question("g1", {}, [wrong(1)]), question("g2", {}, [wrong(2)]), question("f1", { module: "FTM 1" }, [wrong(1)]),
+        question("unfiled", { module: undefined }, [wrong(4)]), question("new")],
+    });
+    const bank = buildStudyPlan(state, NOW, { total: 3 }, { kinds: ["sure-and-wrong", "retry-missed", "new-questions", "flagged"], limit: 6, everyMissedModule: true });
+    expect(bank.actions.map((action) => action.title)).toEqual([
+      "Retry 2 missed questions in GOER", "Retry 1 missed question in FTM 1", "Retry 1 missed question in Unfiled questions", "Meet 1 new question in GOER",
+    ]);
+    expect(bank.actions.every((action) => action.launch.type === "practice")).toBe(true);
+    expect(bank.actions[2].launch).toEqual({ type: "practice", questionIds: ["unfiled"] });
+    // The default plan keeps one retry so that the course itself stays in view.
+    expect(buildStudyPlan(state, NOW).actions.map((action) => action.kind)).toEqual(["retry-missed", "continue-course", "new-questions"]);
+  });
+});
+
 describe("what AXOM saw today", () => {
   it("counts recorded answers, passes and reviews for the day and keeps timed minutes apart from typed ones", () => {
     const log = (patch: Partial<StudyLog>): StudyLog => ({ id: "l", dayKey: localDateKey(NOW), ts: daysAgo(0), type: "Manual", minutes: 0, cards: 0, ...patch });

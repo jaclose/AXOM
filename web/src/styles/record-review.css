@@ -1,0 +1,16 @@
+/* Practice blocks read from the learner's record. Shared by Question Bank and Course Tracker. */
+.record-review { display: grid; gap: 12px; padding: 18px 20px; border: 1px solid var(--glass-card-border); border-radius: var(--radius-lg); background: var(--glass-card-fill); }
+.record-review header { display: grid; gap: 2px; }
+.record-review-eyebrow { color: var(--gold); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: var(--tracking-wider); }
+.record-review h3 { margin: 0; font-family: var(--font-display); font-size: var(--fs-lg); }
+.record-review header p, .record-review-error { margin: 0; color: var(--text-70); font-size: var(--fs-sm); }
+.record-review ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px; }
+.record-review li { display: grid; min-width: 0; }
+.record-review-card { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color .2s ease, background-color .2s ease; }
+.record-review-card:hover { border-color: var(--gold-line); background: color-mix(in srgb, var(--gold) 6%, transparent); }
+.record-review-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.record-review-card b { font-family: var(--font-display); font-size: var(--fs-md); font-weight: var(--fw-medium); }
+.record-review-card small { color: var(--text-70); font-size: var(--fs-sm); line-height: var(--leading-snug); }
+.record-review-card span { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: 4px; color: var(--text-55); font-size: var(--fs-xs); }
+.record-review-card i { display: inline-flex; align-items: center; gap: 4px; color: var(--gold); font-style: normal; font-weight: var(--fw-medium); }
+@media (prefers-reduced-motion: reduce) { .record-review-card { transition: none; } }
