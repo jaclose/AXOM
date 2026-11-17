@@ -539,7 +539,7 @@ describe("Activity History XLSX asynchronous account and history revocation", ()
     }, () => { guardCalls++; });
     expect(guardCalls).toBe(2);
     expect(writerCalls).toBe(1);
-    expect(writtenFilename).toMatch(/^axom-activity-history-\\d{4}-\\d{2}-\\d{2}\\.xlsx$/);
+    expect(writtenFilename).toMatch(/^axom-activity-history-\d{4}-\d{2}-\d{2}\.xlsx$/);
     expect(savedWorkbook?.Sheets["Overview"]?.C2?.v).toBe(logs[0].minutes);
     expect(savedWorkbook?.Sheets["All Activity"]?.F2?.v).toBe(logs[0].note);
     expect(logs).toEqual(original);
