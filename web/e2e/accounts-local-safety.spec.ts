@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { completeSetup, deferPromisePrompt, expect, test } from "./fixtures";
 
@@ -47,3 +48,73 @@ async function onboard(page: Page) {
   // Defer the Promise and wait until the deferral is saved, or the reload below brings it back.
   await deferPromisePrompt(page);
 }
+
+/** The dashboard must never silently export metadata-only JSON under the word
+ * "backup"; it delegates to the consentful, omission-reporting Settings path. */
+test("dashboard backup options open the verified recovery flow on desktop and mobile", async ({ page }) => {
+  test.setTimeout(120_000);
+  const origin = new URL(process.env.AXOM_E2E_BASE_URL ?? "http://127.0.0.1:5187").origin;
+  if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
+    throw new Error("This backup entry test must run against an isolated loopback AXOM.");
+  }
+  const failedDownloads: string[] = [];
+  page.on("download", (download) => failedDownloads.push(download.suggestedFilename()));
+  await page.goto("/?app=1#dashboard", { waitUntil: "networkidle" });
+  await onboard(page);
+  await page.evaluate(async () => {
+    type Dev = {
+      useStore: {
+        getState: () => {
+          profile: { dashboardWidgetOrder?: string[]; hiddenDashboardWidgets?: string[]; dashboardLayout?: { order: string[]; hiddenWidgetIds: string[] } };
+          updateProfile: (value: Record<string, unknown>) => void;
+        };
+      };
+      flushVault: () => Promise<void>;
+    };
+    const { useStore, flushVault } =
+      await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+    const state = useStore.getState();
+    state.updateProfile({
+      dashboardWidgetOrder: [...new Set([...(state.profile.dashboardWidgetOrder ?? []), "localData"])],
+      hiddenDashboardWidgets: (state.profile.hiddenDashboardWidgets ?? []).filter(id => id !== "localData"),
+      ...(state.profile.dashboardLayout ? {
+        dashboardLayout: {
+          ...state.profile.dashboardLayout,
+          preset: "custom",
+          order: [...new Set([...(state.profile.dashboardLayout.order ?? []), "localData"])],
+          hiddenWidgetIds: (state.profile.dashboardLayout.hiddenWidgetIds ?? []).filter(id => id !== "localData"),
+          updatedAt: new Date().toISOString(),
+        },
+      } : {}),
+    });
+    await flushVault();
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const trigger = page.getByRole("button", { name: "Backup options", exact: true });
+    await expect(trigger).toBeVisible();
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const modal = page.getByRole("dialog", { name: "Settings" });
+    await expect(modal).toBeVisible();
+    if (viewport.width <= 560) {
+      await expect(modal.getByRole("combobox", { name: "Settings section" })).toHaveValue("backup");
+    } else {
+      await expect(modal.getByRole("tab", { name: "Emergency recovery" })).toHaveAttribute("aria-selected", "true");
+    }
+    expect(failedDownloads).toHaveLength(0); // merely opening options never downloads lossy metadata
+    const downloaded = page.waitForEvent("download");
+    await modal.getByRole("button", { name: "Export complete backup" }).click();
+    const file = await downloaded;
+    expect(file.suggestedFilename()).toMatch(/^axom-backup-\d{4}-\d{2}-\d{2}\.(json|zip)$/);
+    const path = await file.path();
+    if (!path) throw new Error("Chromium did not save the synthetic backup.");
+    const bytes = await readFile(path);
+    expect(bytes.byteLength).toBeGreaterThan(0);
+    await modal.getByRole("button", { name: "Done" }).click();
+    failedDownloads.length = 0;
+  }
+});
