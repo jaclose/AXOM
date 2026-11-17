@@ -78,6 +78,11 @@ const EXPLICIT_EXHIBIT_REFERENCE = new RegExp([
 // external image addresses or inline vector diagrams to an AI model as if it
 // could inspect them. Keep ordinary text hyperlinks eligible.
 const EMBEDDED_EXHIBIT_MARKUP = /!\[[^\]\r\n]*\]\s*(?:\(|\[)|<\s*(?:img|picture|svg)\b/i;
+// A public URL path such as /case,figure2 or /image12 is not a question's
+// missing exhibit. Only visible clinical prose can establish that reference.
+// Strip web link tokens for the exhibit-text scan, but still inspect the
+// original value for embedded media markup and private/signed references.
+const WEB_URL_TOKEN = /https?:\/\/[^\s<>"']+/gi;
 
 function referencesUnavailableExhibit(question: QuestionRecord): boolean {
   return question.source === "image" || question.source === "screenshot"
@@ -85,7 +90,8 @@ function referencesUnavailableExhibit(question: QuestionRecord): boolean {
     // must hold the draft just as a stem/choice exhibit cue does.
     || [question.stem, question.topic, ...question.options.map(option => option.text)]
       .some(value => typeof value === "string"
-        && (EXPLICIT_EXHIBIT_REFERENCE.test(value) || EMBEDDED_EXHIBIT_MARKUP.test(value)));
+        && (EMBEDDED_EXHIBIT_MARKUP.test(value)
+          || EXPLICIT_EXHIBIT_REFERENCE.test(value.replace(WEB_URL_TOKEN, " "))));
 }
 
 /**
@@ -219,9 +225,9 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && Object.keys(question.choiceRationales ?? {}).length === 0
     && !question.attachments?.length
     && !question.content?.assets.length
+    && !containsPrivateDraftPromptReference(question)
     && !referencesUnavailableExhibit(question)
     && !hasUnrepresentedRichSource(question)
-    && !containsPrivateDraftPromptReference(question)
     && !hasUnsafeDraftChoiceLabels(question)
     && !wouldTruncateDraftPrompt(question);
 }
@@ -249,14 +255,16 @@ export async function draftQuestionExplanation(
   if (question.attachments?.length || question.content?.assets.length) {
     throw new Error("An image or media question needs its actual exhibit before a model can explain it.");
   }
+  // A signed URL can itself contain a path like /image12 or /case,figure2.
+  // Privacy must win over a missing-exhibit diagnostic before any AI call.
+  if (containsPrivateDraftPromptReference(question)) {
+    throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
+  }
   if (referencesUnavailableExhibit(question)) {
     throw new Error("This question references an unavailable visual exhibit. Inspect the original image or specimen and write a source-reviewed explanation instead.");
   }
   if (hasUnrepresentedRichSource(question)) {
     throw new Error("This question has source blocks, choices, or key evidence not faithfully represented in the text-only AI prompt. Inspect the original source and write a reviewed explanation instead.");
-  }
-  if (containsPrivateDraftPromptReference(question)) {
-    throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
   }
   if (hasUnsafeDraftChoiceLabels(question)) {
     throw new Error("AI drafting requires at most 26 short, single-line alphanumeric choice labels. Review and normalize the source labels before requesting an explanation.");
