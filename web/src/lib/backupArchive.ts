@@ -224,6 +224,33 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
  * Refuse ambiguity before offering Replace/Merge consent. */
 function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): void {
   type OriginalClaim = { digest: string; fileType?: string; sizeBytes?: number };
+  // Historical blank-type records can carry real cached originals, not just
+  // metadata. Two different valid versions of one ID cannot both fit in the
+  // one-member-per-document ZIP, so reject before export or restore consent.
+  // A valid explicitly typed external original is authoritative when mixed
+  // historical blank aliases disagree; keep the older compatibility rule.
+  const typedOriginalIds = new Set<string>();
+  const blankDigestsById = new Map<string, Set<string>>();
+  for (const record of records) {
+    if (!record || typeof record !== "object") continue;
+    const { id, checksum, fileType } = record as Partial<SourceDocument>;
+    if (typeof id !== "string" || typeof checksum !== "string"
+      || typeof fileType !== "string" || fileType.startsWith("axom-")) continue;
+    const digest = checksum.replace(/^sha256:/, "");
+    if (!/^[a-f0-9]{64}$/.test(digest)) continue;
+    if (fileType.length > 0) {
+      typedOriginalIds.add(id);
+    } else {
+      const versions = blankDigestsById.get(id) ?? new Set<string>();
+      versions.add(digest);
+      blankDigestsById.set(id, versions);
+    }
+  }
+  for (const [id, versions] of blankDigestsById) {
+    if (!typedOriginalIds.has(id) && versions.size > 1) {
+      throw new Error("The backup contains conflicting source-document checksums for one document ID. No workspace data has been changed.");
+    }
+  }
   const byId = new Map<string, OriginalClaim>();
   for (const record of records) {
     if (!record || typeof record !== "object") continue;
