@@ -79,6 +79,22 @@ async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSigna
   throw new Error("The community review list is too large to check. Refresh your courses later.");
 }
 
+/** Stop releases the UI without waiting for a stalled read-only Storage request.
+ * The underlying request may still finish, but its result cannot enter this run. */
+function readUntilStopped<T>(read: Promise<T>, signal: AbortSignal): Promise<T> {
+  const cancelled = () => new DOMException("Explanation check stopped.", "AbortError");
+  if (signal.aborted) return Promise.reject(cancelled());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(cancelled());
+    signal.addEventListener("abort", onAbort, { once: true });
+    // Handle late rejection too; abandoning a read must not leak an unhandled error.
+    read.then(
+      value => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      cause => { signal.removeEventListener("abort", onAbort); reject(cause); },
+    );
+  });
+}
+
 /**
  * Every course the account has published, with sharing and, for an academic
  * reviewer, approval of many courses at once. Sharing exposes a course for
@@ -179,7 +195,8 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
         if (abort.signal.aborted) break;
         setProgress(`Checking explanations in ${label(course.id)} · ${index + 1} of ${targets.length}`);
         try {
-          const receipt = await inspectStoredRevisionExplanations(course.id, course.current_revision_id, accountId);
+          const receipt = await readUntilStopped(
+            inspectStoredRevisionExplanations(course.id, course.current_revision_id, accountId), abort.signal);
           scope.assertCurrent();
           // Stop can happen while the readback is still pending. A settled
           // receipt is not approval evidence if verification was cancelled.
