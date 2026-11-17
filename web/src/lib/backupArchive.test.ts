@@ -1664,6 +1664,59 @@ describe("portable binary media backup", () => {
     expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
   });
 
+  it("backs up, reads, and restores checksum-bound originals whose historical fileType is blank", async () => {
+    const bytes = new Blob(["Historical blank-type source original, not metadata only"], { type: "text/plain" });
+    const source: SourceDocument = {
+      id: "blank-type-original-present", title: "Historical original", fileName: "source.txt",
+      fileType: "", uploadedAt: "2026-11-17", rawText: "Source text",
+      sizeBytes: bytes.size, checksum: await sha256Hex(await bytes.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    // The ordinary complete-export selector uses exactly this candidate helper.
+    // Previously it chose JSON and could certify a copy with no original bytes.
+    expect(backupOriginalDocuments([source])).toEqual([source]);
+    await saveSourceOriginal(source, bytes);
+    const exported = await createMediaBackupArchive({
+      _app: "AXOM", _backupScope: "complete", documents: [source],
+    }, [], backupOriginalDocuments([source]));
+    expect(exported).toMatchObject({
+      originalCount: 1, missingOriginalIds: [], missingBlobKeys: [],
+    });
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+    expect(manifest.originals).toHaveLength(1);
+    expect(manifest.originals[0]).toMatchObject({ documentId: source.id, sha256: source.checksum });
+    const portable = await readPortableBackup(new File([exported.blob], "blank-type-original.zip"));
+    expect(JSON.parse(portable.rawText).documents).toEqual([source]);
+    expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+    await deleteSourceOriginal(source.id);
+    expect(await readSourceOriginal(source.id, source.checksum)).toBeUndefined();
+    expect(await portable.restoreOriginals([source])).toEqual({ restored: 1, skipped: 0 });
+    expect(await (await readSourceOriginal(source.id, source.checksum))?.text())
+      .toBe("Historical blank-type source original, not metadata only");
+  });
+
+  it("discloses absent blank-type originals instead of certifying an incomplete export", async () => {
+    const source: SourceDocument = {
+      id: "blank-type-original-missing", title: "Lost historical original", fileName: "source.txt",
+      fileType: "", uploadedAt: "2026-11-17", rawText: "Preserved metadata",
+      sizeBytes: 17, checksum: "e".repeat(64),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    const internal = { ...source, fileType: "axom-internal", checksum: "f".repeat(64) };
+    expect(backupOriginalDocuments([internal, source])).toEqual([source]);
+    const exported = await createMediaBackupArchive({
+      _app: "AXOM", _backupScope: "complete", documents: [source],
+      deferredContent: { documents: [internal] },
+    }, [], [internal, source]);
+    expect(exported.originalCount).toBe(0);
+    expect(exported.missingOriginalIds).toEqual([source.id]);
+    const portable = await readPortableBackup(new File([exported.blob], "blank-type-omitted.zip"));
+    expect(portable.omissions.missingOriginalIds).toEqual([source.id]);
+    expect(JSON.parse(portable.rawText).documents).toEqual([source]);
+  });
+
   it.each(["json", "zip"] as const)(
     "preserves a verified original when same-ID internal or untyped metadata has another valid digest in $format",
     async format => {
