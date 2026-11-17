@@ -409,6 +409,11 @@ describe("review-gated explanation drafting", () => {
     ["a hexadecimal-escaped SVG exhibit in a topic", { topic: "Gross anatomy &#x3c;svg viewBox='0 0 8 8'&#x3e;" }],
     ["an absent LaTeX includegraphics exhibit", { stem: "Which layer? \\includegraphics{missing-micrograph.png}" }],
     ["a sized LaTeX image named only in the topic", { topic: "Plate \\includegraphics*[width=0.7\\textwidth]{gross-plate.pdf}" }],
+    ["a compatibility-width numbered figure", { stem: "Ｆｉｇｕｒｅ ２Ａ shows a vascular lesion." }],
+    ["a zero-width supplementary figure reference", { stem: "Figure\\u200B S2 shows tissue injury." }],
+    ["a format-obscured arrow annotation", { stem: "The arr\\u200Bow indicates the abnormality." }],
+    ["a compatibility-width escaped image tag", { stem: 'Which lesion? ＆ｌｔ；ｉｍｇ src="missing-plate.png"＆ｇｔ；' }],
+    ["a compatibility-width LaTeX image command", { topic: "Histology ＼ｉｎｃｌｕｄｅｇｒａｐｈｉｃｓ{missing-slide.png}" }],
     ["a figure named only in the AI topic", { topic: "Figure S2: vascular lesion" }],
     ["a Markdown image named only in the AI topic", { topic: "Microscopy ![unavailable image](plate.png)" }],
     ["a numbered exhibit named in a text-link label", { stem: "Study [Figure 2](https://example.edu/vascular-atlas) to diagnose the lesion." }],
@@ -447,6 +452,9 @@ describe("review-gated explanation drafting", () => {
     "The source links to a public text page https://example.edu/case,figure2?view=summary.",
     "The reading is https://example.edu/atlas/image12?view=text, without an exhibit attached.",
     "The reference is [vascular atlas](https://example.edu/plateIV).",
+    "Read ｈｔｔｐｓ：／／example.edu/figure2?view=text for an ordinary textual discussion.",
+    "Read https://example.edu/figure\\u200B2?view=text for an ordinary textual discussion.",
+    "The written CD4/CD8 comparison is sufficient without an image.",
   ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
   });
