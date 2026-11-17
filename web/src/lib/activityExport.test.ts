@@ -486,3 +486,62 @@ describe("Activity History XLSX sheet title collisions", () => {
   });
 
 });
+
+
+describe("Activity History XLSX asynchronous account and history revocation", () => {
+  it("checks the current session before inspecting even an invalid saved numeric row", async () => {
+    const logs = studyLogs(["Manual"]);
+    logs[0].minutes = Number.NaN;
+    const original = logs.map((log) => ({ ...log }));
+    const stale = new Error("Session changed before export validation");
+    let guardCalls = 0;
+    let writerCalls = 0;
+    await expect(exportActivityWorkbook(
+      logs,
+      () => { writerCalls++; },
+      () => { guardCalls++; throw stale; },
+    )).rejects.toBe(stale);
+    expect(guardCalls).toBe(1);
+    expect(writerCalls).toBe(0);
+    expect(logs).toEqual(original);
+  });
+
+  it("rechecks session revision after workbook construction and before any writer", async () => {
+    const logs = studyLogs(["Manual", "Manual"]);
+    const original = logs.map((log) => ({ ...log }));
+    const stale = new Error("Study logs replaced while preparing XLSX");
+    let guardCalls = 0;
+    let writerCalls = 0;
+    await expect(exportActivityWorkbook(
+      logs,
+      () => { writerCalls++; },
+      () => {
+        guardCalls++;
+        if (guardCalls === 2) throw stale;
+      },
+    )).rejects.toBe(stale);
+    expect(guardCalls).toBe(2);
+    expect(writerCalls).toBe(0);
+    expect(logs).toEqual(original);
+  });
+
+  it("writes a valid workbook when both session checkpoints still match", async () => {
+    const logs = studyLogs(["Manual"]);
+    const original = logs.map((log) => ({ ...log }));
+    let guardCalls = 0;
+    let writerCalls = 0;
+    let writtenFilename = "";
+    let savedWorkbook: WorkBook | undefined;
+    await exportActivityWorkbook(logs, (workbook, filename) => {
+      writerCalls++;
+      writtenFilename = filename;
+      savedWorkbook = workbook;
+    }, () => { guardCalls++; });
+    expect(guardCalls).toBe(2);
+    expect(writerCalls).toBe(1);
+    expect(writtenFilename).toMatch(/^axom-activity-history-\\d{4}-\\d{2}-\\d{2}\\.xlsx$/);
+    expect(savedWorkbook?.Sheets["Overview"]?.C2?.v).toBe(logs[0].minutes);
+    expect(savedWorkbook?.Sheets["All Activity"]?.F2?.v).toBe(logs[0].note);
+    expect(logs).toEqual(original);
+  });
+});
