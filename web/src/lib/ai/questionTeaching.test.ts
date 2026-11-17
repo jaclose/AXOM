@@ -409,6 +409,16 @@ describe("review-gated explanation drafting", () => {
     ["a hexadecimal-escaped SVG exhibit in a topic", { topic: "Gross anatomy &#x3c;svg viewBox='0 0 8 8'&#x3e;" }],
     ["an absent LaTeX includegraphics exhibit", { stem: "Which layer? \\includegraphics{missing-micrograph.png}" }],
     ["a sized LaTeX image named only in the topic", { topic: "Plate \\includegraphics*[width=0.7\\textwidth]{gross-plate.pdf}" }],
+    ["an HTML object with an unavailable clinical specimen", { stem: 'Which vessel? <object data="missing-vessel.svg" type="image/svg+xml"></object>' }],
+    ["an HTML embed with an unavailable slide", { stem: 'Which lesion? <embed src="missing-slide.jpg">' }],
+    ["a bare HTML source tag with lost exhibit metadata", { stem: 'Which layer? <source srcset="missing-micrograph.webp">' }],
+    ["an escaped canvas exhibit referenced only in the topic", { topic: 'Anatomy &lt;canvas width="80" height="80"&gt;' }],
+    ["a LaTeX TikZ-rendered anatomical diagram", { stem: "Identify the lesion: \\begin{tikzpicture}\\draw (0,0) circle (2);\\end{tikzpicture}" }],
+    ["a LaTeX figure environment in topic metadata", { topic: "Histology \\begin{figure}[t]\\centering lost-image\\end{figure}" }],
+    ["a hexadecimal-escaped HTML object in a choice", { options: [
+      { key: "A", text: "Tunica media &#x3c;object data='missing-gross.svg'&#x3e;" },
+      { key: "B", text: "Tunica intima" }, { key: "C", text: "Tunica adventitia" },
+    ] }],
     ["a compatibility-width numbered figure", { stem: "Ｆｉｇｕｒｅ ２Ａ shows a vascular lesion." }],
     ["a zero-width supplementary figure reference", { stem: "Figure\u200B S2 shows tissue injury." }],
     ["a format-obscured arrow annotation", { stem: "The arr\u200Bow indicates the abnormality." }],
@@ -454,6 +464,11 @@ describe("review-gated explanation drafting", () => {
     "The reference is [vascular atlas](https://example.edu/plateIV).",
     "Read ｈｔｔｐｓ：／／example.edu/figure2?view=text for an ordinary textual discussion.",
     "Read https://example.edu/figure\u200B2?view=text for an ordinary textual discussion.",
+    "An object denotes a specimen in this written vignette; no graphic is referenced.",
+    "The word canvas is a metaphor for overlapping anatomical pathways.",
+    "The HTML <em>tunica media</em> emphasis contains no embedded clinical exhibit.",
+    "The LaTeX \\begin{enumerate} list contains only textual differential diagnoses.",
+    'The public written text is linked using <a href="https://example.edu/arteries">arteries</a>.',
     "The written CD4/CD8 comparison is sufficient without an image.",
   ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
