@@ -1717,6 +1717,91 @@ describe("portable binary media backup", () => {
     expect(JSON.parse(portable.rawText).documents).toEqual([source]);
   });
 
+  it("rejects two cached blank-type versions of one original before exporting a misleading complete ZIP", async () => {
+    const firstBytes = new Blob(["Historical original revision one"], { type: "text/plain" });
+    const secondBytes = new Blob(["Historical original revision two"], { type: "text/plain" });
+    const first: SourceDocument = {
+      id: "blank-multiversion-id", title: "Root original", fileName: "source.txt",
+      fileType: "", uploadedAt: "2026-11-17", rawText: "Root metadata",
+      sizeBytes: firstBytes.size, checksum: await sha256Hex(await firstBytes.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    const second: SourceDocument = {
+      ...first, title: "Deferred revision", sizeBytes: secondBytes.size,
+      checksum: await sha256Hex(await secondBytes.arrayBuffer()),
+    };
+    // The IndexedDB store retains immutable versions by (id, checksum).
+    // Deduplicating only by id would archive one while certifying both.
+    await saveSourceOriginal(first, firstBytes);
+    await saveSourceOriginal(second, secondBytes);
+    expect(await (await readSourceOriginal(first.id, first.checksum))?.text()).toBe("Historical original revision one");
+    expect(await (await readSourceOriginal(second.id, second.checksum))?.text()).toBe("Historical original revision two");
+    expect(() => backupOriginalDocuments([first, second]))
+      .toThrow(/conflicting source.document checksums/i);
+    await expect(createMediaBackupArchive({
+      _app: "AXOM", _backupScope: "complete",
+      documents: [first], deferredContent: { documents: [second] },
+    }, [], [first, second])).rejects.toThrow(/conflicting source.document checksums/i);
+    // A refused export must not delete or rewrite either cached original.
+    expect(await (await readSourceOriginal(first.id, first.checksum))?.text()).toBe("Historical original revision one");
+    expect(await (await readSourceOriginal(second.id, second.checksum))?.text()).toBe("Historical original revision two");
+  });
+
+  it.each(["json", "zip"] as const)(
+    "rejects an existing $format archive with two incompatible blank-type source versions before recovery consent",
+    async format => {
+      const firstBytes = new Blob(["Old archive original A"], { type: "text/plain" });
+      const secondBytes = new Blob(["Old archive original B"], { type: "text/plain" });
+      const first: SourceDocument = {
+        id: "ambiguous-blank-restore", title: "Root", fileName: "source.txt",
+        fileType: "", uploadedAt: "2026-11-17", rawText: "Metadata",
+        sizeBytes: firstBytes.size, checksum: await sha256Hex(await firstBytes.arrayBuffer()),
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      };
+      const second: SourceDocument = {
+        ...first, title: "Deferred", sizeBytes: secondBytes.size,
+        checksum: await sha256Hex(await secondBytes.arrayBuffer()),
+      };
+      const conflict = {
+        _app: "AXOM", _backupScope: "complete",
+        documents: [first], deferredContent: { documents: [second] },
+      };
+      let file: File;
+      if (format === "json") {
+        file = new File([JSON.stringify(conflict)], "blank-original-conflict.json");
+      } else {
+        await saveSourceOriginal(first, firstBytes);
+        const exported = await createMediaBackupArchive({
+          _app: "AXOM", _backupScope: "complete", documents: [first],
+        }, [], [first]);
+        const { default: JSZip } = await import("jszip");
+        const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+        const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+        manifest.deferredContent = { documents: [second] };
+        zip.file("workspace.json", JSON.stringify(manifest));
+        file = new File([await zip.generateAsync({ type: "arraybuffer" })], "blank-original-conflict.zip");
+      }
+      await expect(readPortableBackup(file)).rejects.toThrow(/conflicting source.document checksums/i);
+      if (format === "zip") {
+        expect(await (await readSourceOriginal(first.id, first.checksum))?.text()).toBe("Old archive original A");
+      }
+    },
+  );
+
+  it("keeps compatible blank-type duplicates and explicitly typed originals authoritative", async () => {
+    const blank: SourceDocument = {
+      id: "blank-version-typed-precedence", title: "Blank metadata", fileName: "source.txt",
+      fileType: "", uploadedAt: "2026-11-17", rawText: "Metadata",
+      sizeBytes: 4, checksum: "a".repeat(64),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    expect(backupOriginalDocuments([blank, { ...blank, checksum: `sha256:${blank.checksum}` }]))
+      .toEqual([blank]);
+    const typed = { ...blank, fileType: "text/plain", checksum: "c".repeat(64) };
+    const otherBlank = { ...blank, checksum: "b".repeat(64) };
+    expect(backupOriginalDocuments([blank, otherBlank, typed])).toEqual([typed]);
+  });
+
   it.each(["json", "zip"] as const)(
     "preserves a verified original when same-ID internal or untyped metadata has another valid digest in $format",
     async format => {
