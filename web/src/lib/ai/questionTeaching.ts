@@ -81,7 +81,9 @@ const EXPLICIT_EXHIBIT_REFERENCE = new RegExp([
 // numeric &#60;picture&#62;; LaTeX imports may retain \includegraphics
 // after the referenced graphic has been lost. These markers are still media
 // dependencies, not evidence for a text-only model to explain their contents.
-const EMBEDDED_EXHIBIT_MARKUP = /!\[[^\]\r\n]*\]\s*(?:\(|\[)|(?:<|&lt;|&#(?:0*60|x0*3c);)\s*(?:img|picture|svg)\b|\\includegraphics\*?(?:\s*\[[^\]\r\n]{0,128}\])?\s*\{/i;
+// Embedded object/embed/source/canvas elements and LaTeX figure/TikZ blocks
+// are visual dependencies even when a legacy import lost its asset record.
+const EMBEDDED_EXHIBIT_MARKUP = /!\[[^\]\r\n]*\]\s*(?:\(|\[)|(?:<|&lt;|&#(?:0*60|x0*3c);)\s*(?:img|picture|svg|object|embed|canvas|source)\b|\\(?:includegraphics\*?(?:\s*\[[^\]\r\n]{0,128}\])?\s*\{|begin\s*\{\s*(?:tikzpicture|figure\*?)\s*\})/i;
 // A public URL path such as /case,figure2 or /image12 is not a question's
 // missing exhibit. Only visible clinical prose can establish that reference.
 // Strip web link tokens for the exhibit-text scan, but still inspect the
