@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkBook } from "xlsx-js-style";
-import { ActivityExportCellLimitError, ActivityExportNumericError, ActivityExportTextEncodingError, allocateActivitySheetName, compareStudyLogsNewestFirst, exportActivityWorkbook } from "./activityExport";
+import { ActivityExportCellLimitError, ActivityExportNumericError, ActivityExportTextEncodingError, allocateActivitySheetName, compareStudyLogsNewestFirst, exportActivityWorkbook, sumActivityMetric } from "./activityExport";
 import type { StudyLog } from "./types";
 
 function studyLogs(types: string[]): StudyLog[] {
@@ -359,6 +359,39 @@ describe("Activity History XLSX sheet title collisions", () => {
         expect(logs).toEqual(original);
       }
     }
+  });
+
+  it("rejects false exact integer totals when adding a huge value to a small running value", async () => {
+    // Reverse subtraction itself rounds here: (1 + 1e16) - 1 === 1e16.
+    // The previous delta check therefore permitted a false workbook total.
+    for (const field of ["minutes", "cards"] as const) {
+      for (const values of [[1, 1e16], [-1, -1e16]]) {
+        const logs = studyLogs(["Manual", "Manual"]);
+        logs.forEach((log, index) => { log[field] = values[index]; });
+        const original = logs.map((log) => ({ ...log }));
+        let writerCalls = 0;
+        expect(() => sumActivityMetric(logs, field)).toThrow(ActivityExportNumericError);
+        await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+          .rejects.toBeInstanceOf(ActivityExportNumericError);
+        expect(writerCalls).toBe(0);
+        expect(logs).toEqual(original);
+      }
+    }
+  });
+
+  it("accepts exactly representable reverse-order large integer totals", async () => {
+    const logs = studyLogs(["Manual", "Manual"]);
+    logs[0].minutes = 4;
+    logs[1].minutes = 1e16;
+    logs[0].cards = -4;
+    logs[1].cards = -1e16;
+    const original = logs.map((log) => ({ ...log }));
+    expect(sumActivityMetric(logs, "minutes")).toBe(1e16 + 4);
+    expect(sumActivityMetric(logs, "cards")).toBe(-1e16 - 4);
+    const workbook = await captureWorkbook(logs);
+    expect(workbook.Sheets["Overview"]?.C2?.v).toBe(1e16 + 4);
+    expect(workbook.Sheets["Overview"]?.D2?.v).toBe(-1e16 - 4);
+    expect(logs).toEqual(original);
   });
 
   it("still exports exactly represented large integer additions and ordinary fractions", async () => {
