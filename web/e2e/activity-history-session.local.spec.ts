@@ -441,7 +441,7 @@ for (const width of [1440, 390]) {
 // R165: run the actual lazy workbook exporter after device-vault persistence.
 // These are synthetic local browser tests, not authenticated Supabase acceptance.
 for (const width of [1440, 390]) {
-  test(\`Activity History refuses rounded XLSX totals after vault reload at \${width}px\`, async ({ page }) => {
+  test(`Activity History refuses rounded XLSX totals after vault reload at ${width}px`, async ({ page }) => {
     const notes = ["SYNTHETIC_R165_INTEGER_0", "SYNTHETIC_R165_INTEGER_1", "SYNTHETIC_R165_INTEGER_2"];
     const counts = [1e16, 5, -1e16];
     const downloads: string[] = [];
@@ -458,8 +458,8 @@ for (const width of [1440, 390]) {
     await page.evaluate(async ({ notes, counts }) => {
       const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
       app.useStore.setState({ logs: counts.map((count, index) => ({
-        id: \`r165-rounded-\${index}\`, dayKey: "2026-11-14",
-        ts: \`2026-11-14T12:0\${index}:00.000Z\`, type: "Manual",
+        id: `r165-rounded-${index}`, dayKey: "2026-11-14",
+        ts: `2026-11-14T12:0${index}:00.000Z`, type: "Manual",
         minutes: count, cards: count, note: notes[index],
       })) });
       await app.flushVault();
@@ -474,7 +474,7 @@ for (const width of [1440, 390]) {
       }>).map(({ id, minutes, cards, note }) => ({ id, minutes, cards, note }));
     });
     expect(storedBefore).toEqual(counts.map((count, index) => ({
-      id: \`r165-rounded-\${index}\`, minutes: count, cards: count, note: notes[index],
+      id: `r165-rounded-${index}`, minutes: count, cards: count, note: notes[index],
     })));
 
     await setSession(page, "B", "unlinked");
@@ -522,8 +522,8 @@ test("Activity History XLSX roundtrips exactly represented large and fractional 
   await page.evaluate(async ({ notes, minutes, cards }) => {
     const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
     app.useStore.setState({ logs: notes.map((note, index) => ({
-      id: \`r165-exact-\${index}\`, dayKey: "2026-11-14",
-      ts: \`2026-11-14T12:0\${index}:00.000Z\`, type: "Manual",
+      id: `r165-exact-${index}`, dayKey: "2026-11-14",
+      ts: `2026-11-14T12:0${index}:00.000Z`, type: "Manual",
       minutes: minutes[index], cards: cards[index], note,
     })) });
     await app.flushVault();
