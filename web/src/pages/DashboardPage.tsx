@@ -17,7 +17,6 @@ import type {
   TrackerItem, DashboardLayoutPreferences, DashboardWidgetId,
   DashboardWidgetPreferences, DashboardWidgetSize,
 } from "../lib/types";
-import { exportState } from "../lib/backup";
 import { gotoJournalDay, useUi } from "../lib/uiStore";
 import { useInView } from "../lib/useInView";
 import { DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS } from "../lib/seed";
@@ -607,7 +606,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "journal") return <JournalDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "streak") return <ConsistencyDashboardWidget state={state} enabledFields={enabledFields} />;
   if (widgetId === "dailyWord") return <DailyWordDashboardWidget enabledFields={enabledFields} />;
-  if (widgetId === "localData") return <LocalDataWidget state={state} />;
+  if (widgetId === "localData") return <LocalDataWidget />;
   if (widgetId === "premedHours") return <PremedHoursWidget />;
   return null;
 }
@@ -1044,11 +1043,11 @@ function DetailMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function LocalDataWidget({ state }: { state: ReturnType<typeof useStore.getState> }) {
+function LocalDataWidget() {
   return (
     <GlassCard pad className="local-data-card" data-tour="data-safety-settings">
       <PanelHeader title="Local data & backup" sub="Your workspace saves locally first; portable exports and owner-private account protection are separate copies"
-        action={<GButton size="sm" onClick={() => exportState(state)}><Download size={ICON_SIZE.body} /> Export backup</GButton>} />
+        action={<GButton size="sm" onClick={() => useUi.getState().requestSettings("backup")}><Download size={ICON_SIZE.body} /> Backup options</GButton>} />
       <div className="alpha-notice">
         <span className="alpha-pill">ALPHA</span>
         <span>Web redeployments keep this browser vault intact. Export backups before switching devices, browsers, or domains.</span>

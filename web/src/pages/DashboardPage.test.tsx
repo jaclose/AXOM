@@ -8,6 +8,7 @@ import {
   makeSeed,
 } from "../lib/seed";
 import { useStore } from "../lib/store";
+import { useUi } from "../lib/uiStore";
 import { DashboardPage } from "./DashboardPage";
 
 const localValues = new Map<string, string>();
@@ -22,6 +23,7 @@ const memoryLocalStorage = {
 
 beforeEach(() => {
   localValues.clear();
+  useUi.getState().clearSettingsRequest();
   vi.stubGlobal("localStorage", memoryLocalStorage);
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   vi.stubGlobal("IntersectionObserver", class {
@@ -43,6 +45,24 @@ afterEach(() => {
 });
 
 describe("DashboardPage declutter", () => {
+  it("routes the dashboard backup affordance to recovery controls without generating a metadata-only file", () => {
+    useStore.getState().updateProfile({
+      dashboardWidgetOrder: [...DEFAULT_DASHBOARD_WIDGETS, "localData"],
+      hiddenDashboardWidgets: [],
+    });
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      throw new Error("Dashboard must not create an incomplete metadata-only backup");
+    });
+    try {
+      render(<DashboardPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Backup options" }));
+      expect(useUi.getState().settingsRequest).toBe("backup");
+      expect(createObjectURL).not.toHaveBeenCalled();
+    } finally {
+      createObjectURL.mockRestore();
+    }
+  });
+
   function showWeeklyWidget() {
     useStore.getState().updateProfile({
       hiddenDashboardWidgets: DEFAULT_DASHBOARD_WIDGETS.filter((id) => id !== "weekly"),
