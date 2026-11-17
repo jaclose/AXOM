@@ -403,6 +403,7 @@ describe("review-gated explanation drafting", () => {
     ["an inline SVG image in a text import", { stem: '<svg viewBox="0 0 12 12"><path d="M0 0"/></svg> Which layer?' }],
     ["a figure named only in the AI topic", { topic: "Figure S2: vascular lesion" }],
     ["a Markdown image named only in the AI topic", { topic: "Microscopy ![unavailable image](plate.png)" }],
+    ["a numbered exhibit named in a text-link label", { stem: "Study [Figure 2](https://example.edu/vascular-atlas) to diagnose the lesion." }],
     ["an explicit CT exhibit", { stem: "See the CT scan to identify the vascular abnormality." }],
     ["a missing exhibit mentioned by a choice", { options: [
       { key: "A", text: "Tunica media" },
@@ -433,6 +434,9 @@ describe("review-gated explanation drafting", () => {
     "Boxed seasonal trends in a survey are not relevant to this patient.",
     "The clinical note includes a text hyperlink [vessel anatomy](https://example.edu/arteries).",
     "The words <em>tunica media</em> are merely formatted text.",
+    "The source links to a public text page https://example.edu/case,figure2?view=summary.",
+    "The reading is https://example.edu/atlas/image12?view=text, without an exhibit attached.",
+    "The reference is [vascular atlas](https://example.edu/plateIV).",
   ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
   });
@@ -618,6 +622,7 @@ describe("review-gated explanation drafting", () => {
     ] }],
     ["comma-separated query before bearer token", { stem: "Source https://example.edu/case?q=CD4,CD8&token=DEMO_NOT_SECRET" }],
     ["comma path before signed access", { topic: "https://example.edu/case,figure2?X-Amz-Signature=DEMO_NOT_SECRET" }],
+    ["numbered image path before signed access", { topic: "https://example.edu/image12?X-Amz-Signature=DEMO_NOT_SECRET" }],
     ["semicolon in URL userinfo", { options: [
       { key: "A", text: "https://student;team:demo-password@example.edu/lesson" },
       { key: "B", text: "Benign control" }, { key: "C", text: "Second control" },
