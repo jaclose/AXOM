@@ -1835,7 +1835,11 @@ describe("portable binary media backup", () => {
         ? new File([exported!.blob], "historical-mixed-source.zip")
         : new File([JSON.stringify(payload)], "historical-mixed-source.json");
       const portable = await readPortableBackup(file);
-      expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+      // The cached local source is not embedded in a JSON backup; only the ZIP
+      // contains portable original bytes that a second device could restore.
+      expect(portable.omissions).toEqual({
+        missingBlobKeys: [], missingOriginalIds: format === "json" ? [source.id] : [],
+      });
       expect(await (await readSourceOriginal(source.id, source.checksum))?.text())
         .toBe("Authoritative external original bytes");
     },
