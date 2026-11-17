@@ -138,6 +138,11 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     if (!accountId || busy) return;
     const abort = start("loading");
     const scope = academicAccountScope(accountId);
+    // Invalidate the old eligibility snapshot before refreshing. A failed or
+    // aborted community read must not restore actions against stale revisions.
+    setLoaded(undefined);
+    setRights(false);
+    setChecked(false);
     setFailures({});
     setAudits({});
     try {
