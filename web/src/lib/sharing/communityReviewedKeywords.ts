@@ -33,7 +33,11 @@ function keywordSafetyText(value: string): string {
 /** Shared citation boundary for publisher keywords and generated teaching.
  * Scan a normalization-only copy; never modify author source or review evidence. */
 export function containsUnverifiedCommunityCitation(value: string): boolean {
-  return UNVERIFIED_PUBLIC_CITATION.test(keywordSafetyText(value));
+  const candidate = keywordSafetyText(value);
+  // AI-generated HTTPS/HTTP links are unverified citations regardless of TLD.
+  // A narrow domain allowlist missed plausible-looking .health/.dev sources.
+  // This scans a copy only; the real source citation remains separately reviewed.
+  return /https?:\/\//i.test(candidate) || UNVERIFIED_PUBLIC_CITATION.test(candidate);
 }
 
 export function isCommunitySubjectKeyword(value: string): boolean {
