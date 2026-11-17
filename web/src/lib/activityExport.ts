@@ -17,6 +17,14 @@ export class ActivityExportTextEncodingError extends Error {
   }
 }
 
+/** Excel cannot reliably represent NaN, infinity or an overflowing numeric summary. */
+export class ActivityExportNumericError extends Error {
+  constructor() {
+    super("Activity export stopped: some saved study numbers or totals cannot be represented in Excel.");
+    this.name = "ActivityExportNumericError";
+  }
+}
+
 /** Excel accepts at most 32,767 text units and 253 line feeds in one cell. */
 export class ActivityExportCellLimitError extends Error {
   constructor() {
@@ -25,10 +33,14 @@ export class ActivityExportCellLimitError extends Error {
   }
 }
 
-function assertLosslessWorkbookText(logs: StudyLog[]): void {
-  // Validate only exported text fields; source rows, including IDs, are never rewritten.
+function assertLosslessWorkbookData(logs: StudyLog[]): void {
+  // Validate exported numeric cells as well as text; source rows and IDs never change.
   // for...of iterates paired supplementary characters as a single two-unit symbol.
   for (const log of logs) {
+    // NaN is otherwise silently converted to a plausible 0 by the overview sum.
+    if (!Number.isFinite(log.minutes) || !Number.isFinite(log.cards)) {
+      throw new ActivityExportNumericError();
+    }
     for (const text of [log.dayKey, log.ts, log.type, log.note]) {
       if (!text) continue;
       // Check the actual XLSX cell content before construction: the writer rejects
@@ -55,7 +67,7 @@ export async function exportActivityWorkbook(
   // Lazy module loading crosses an async boundary. Do not serialize a previous account after it.
   assertCurrent?.();
   // Refuse silently lossy XLSX encoding before building or downloading the workbook.
-  assertLosslessWorkbookText(logs);
+  assertLosslessWorkbookData(logs);
   const wb = XLSX.utils.book_new();
   wb.Props = { Title: "AXOM Activity History", Author: "AXOM", CreatedDate: new Date() };
 
@@ -189,7 +201,10 @@ function appendSheet(XLSX: XlsxModule, wb: WorkBook, name: string, rows: unknown
 }
 
 function sum(logs: StudyLog[], key: "minutes" | "cards") {
-  return logs.reduce((total, log) => total + Number(log[key] || 0), 0);
+  // Even individually finite counts can overflow when aggregated.
+  const total = logs.reduce((running, log) => running + log[key], 0);
+  if (!Number.isFinite(total)) throw new ActivityExportNumericError();
+  return total;
 }
 
 /** Prefix by UTF-16 units without splitting Unicode code points at Excel's 31-unit limit. */
