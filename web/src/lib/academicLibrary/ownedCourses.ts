@@ -113,15 +113,30 @@ export async function approveAcademicCourses(collectionIds: readonly string[], a
   options: { receipts?: ReadonlyMap<string, ExplanationReviewReceipt>; rationaleReviewed?: boolean;
     assertCurrent?: () => void; signal?: AbortSignal; onProgress?: (done: number) => void } = {}): Promise<AcademicApprovalOutcome[]> {
   const outcomes: AcademicApprovalOutcome[] = [];
+  const assertStillCurrent = () => {
+    options.assertCurrent?.();
+    if (options.signal?.aborted) {
+      // The RPC may already have committed. Neither a success nor a failure
+      // outcome is safe to attribute after cancellation; require fresh readback.
+      throw new DOMException(
+        "Approval may have saved while loading stopped. Refresh your courses to confirm the current review status.",
+        "AbortError",
+      );
+    }
+  };
   for (const collectionId of collectionIds) {
     if (options.signal?.aborted) break;
-    options.assertCurrent?.();
+    assertStillCurrent();
+    let error: string | undefined;
     try {
       await reviewAcademicCourse(collectionId, true, accountId, options.receipts?.get(collectionId), options.rationaleReviewed);
-      outcomes.push({ collectionId, approved: true });
     } catch (cause) {
-      outcomes.push({ collectionId, approved: false, error: cause instanceof Error ? cause.message : "The approval was not saved." });
+      error = cause instanceof Error ? cause.message : "The approval was not saved.";
     }
+    // Account switches and Stop can occur while the reviewer RPC is pending.
+    // Do not update another account's UI with a stale success/failure receipt.
+    assertStillCurrent();
+    outcomes.push(error === undefined ? { collectionId, approved: true } : { collectionId, approved: false, error });
     options.onProgress?.(outcomes.length);
   }
   return outcomes;
