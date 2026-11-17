@@ -824,8 +824,9 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     // A complete JSON file can carry references without corresponding image
     // payloads, including historical attachments with id but no blobKey.
     // Inspect the actual validated binary records before offering recovery.
-    // JSON never embeds original-file manifests, so do not infer original
-    // omissions from source-document metadata.
+    // JSON can preserve checksum-bound source metadata, but it never embeds
+    // original-file bytes. Disclose the absent originals before consent, even
+    // when a historical producer labeled the backup "complete".
     const workspace = parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as {
         questions?: Array<{ id: string; attachments?: QuestionImageAttachment[] }>;
@@ -843,7 +844,8 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     ];
     assertConsistentSourceDocumentChecksums(documentRecords);
     const sourceDocuments = documentRecords.filter((doc): doc is SourceDocument =>
-      !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
+      !!doc && typeof doc.id === "string"
+        && (doc.fileType == null || typeof doc.fileType === "string"));
     const questions = [
       ...(Array.isArray(workspace.questions) ? workspace.questions : []),
       ...(Array.isArray(workspace.deferredContent?.questions) ? workspace.deferredContent.questions : []),
@@ -869,7 +871,10 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     }
     const omissions = {
       missingBlobKeys: [...new Set(expected.map(({ metadata }) => metadata.blobKey).filter(key => !verified.has(key)))],
-      missingOriginalIds: [] as string[],
+      // An original checksum is a reference, not proof that JSON has its bytes.
+      // Reuse ZIP's candidate/deduplication rule so root/deferred aliases and
+      // historically absent MIME fields cannot conceal an unrecoverable file.
+      missingOriginalIds: backupOriginalDocuments(sourceDocuments).map(doc => doc.id),
     };
     return { rawText, omissions, restoreMedia: async refs => {
       assertConsistentMediaReferences(refs);
