@@ -300,4 +300,45 @@ describe("your published courses", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("does not retain a stopped in-flight explanation receipt as approval evidence", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    let resolveRead: (receipt: unknown) => void = () => {};
+    mocks.explanations.mockImplementationOnce(() => new Promise(resolve => { resolveRead = resolve; }));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const approve = await screen.findByRole("button", { name: /Approve 1 course/ }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await waitFor(() => expect(mocks.explanations).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    resolveRead({ collectionId: id(1), revisionId: id(1001), contentHash: "a".repeat(64),
+      readyQuestions: 2, explainedReadyQuestions: 2, missingExplanations: 0 });
+    expect(await screen.findByText(/Explanation check stopped/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
+    expect(approve.disabled).toBe(true);
+    expect(screen.queryByText(/0 ready questions without an explanation/)).toBeNull();
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
+  it("discards an explanation readback when its account scope was invalidated", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    let resolveRead: (receipt: unknown) => void = () => {};
+    mocks.explanations.mockImplementationOnce(() => new Promise(resolve => { resolveRead = resolve; }));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const approve = await screen.findByRole("button", { name: /Approve 1 course/ }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await waitFor(() => expect(mocks.explanations).toHaveBeenCalledOnce());
+    mocks.scopeCheck.mockImplementation(() => { throw new Error("The account changed."); });
+    resolveRead({ collectionId: id(1), revisionId: id(1001), contentHash: "a".repeat(64),
+      readyQuestions: 2, explainedReadyQuestions: 2, missingExplanations: 0 });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
+    expect(approve.disabled).toBe(true);
+    expect(screen.queryByText(/Explanation readback complete/)).toBeNull();
+    expect(screen.queryByText(/0 ready questions without an explanation/)).toBeNull();
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
 });

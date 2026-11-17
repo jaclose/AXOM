@@ -180,14 +180,22 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
         setProgress(`Checking explanations in ${label(course.id)} · ${index + 1} of ${targets.length}`);
         try {
           const receipt = await inspectStoredRevisionExplanations(course.id, course.current_revision_id, accountId);
-          await scope.assertCurrent();
+          scope.assertCurrent();
+          // Stop can happen while the readback is still pending. A settled
+          // receipt is not approval evidence if verification was cancelled.
+          if (abort.signal.aborted) break;
           missing += receipt.missingExplanations;
           setAudits(current => ({ ...current, [course.id]: { receipt } }));
         } catch (cause) {
+          // Ignore errors from cancelled or superseded accounts, including
+          // account-scope rejection thrown after the awaited read.
+          if (abort.signal.aborted) break;
+          try { scope.assertCurrent(); } catch { return; }
           unreadable += 1;
           setAudits(current => ({ ...current, [course.id]: { error: cause instanceof Error ? cause.message : "Readback failed." } }));
         }
       }
+      try { scope.assertCurrent(); } catch { return; }
       setProgress(abort.signal.aborted ? "Explanation check stopped. No approvals were made."
         : `Explanation readback complete: ${plural(missing, "ready question")} without an explanation${unreadable ? `; ${plural(unreadable, "course")} could not be read` : ""}. Review each rationale against its source before attesting.`);
     } finally { scope.dispose(); finish(abort); }
