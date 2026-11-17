@@ -1545,6 +1545,67 @@ describe("portable binary media backup", () => {
     },
   );
 
+  it("exports a mirrored original only once and produces a readable ZIP", async () => {
+    const { default: JSZip } = await import("jszip");
+    const original = new Blob(["Duplicate eligible source bytes"], { type: "text/plain" });
+    const source: SourceDocument = {
+      id: "mirrored-export-id", title: "Root", fileName: "source.txt", fileType: "text/plain",
+      uploadedAt: "2026-11-17", rawText: "Test source", sizeBytes: original.size,
+      checksum: await sha256Hex(await original.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    const alias: SourceDocument = {
+      ...source, title: "Deferred alias", fileName: "renamed.txt",
+      checksum: `sha256:${source.checksum}`, fileType: "txt",
+    };
+    await saveSourceOriginal(source, original);
+    const payload = {
+      documents: [source],
+      deferredContent: { documents: [alias] },
+    };
+    const exported = await createMediaBackupArchive(payload, [], [source, alias]);
+    expect(exported.originalCount).toBe(1);
+    expect(exported.missingOriginalIds).toEqual([]);
+    const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+    expect(manifest.originals).toHaveLength(1);
+    expect(manifest.originals[0].documentId).toBe(source.id);
+    const readback = await readPortableBackup(new File([exported.blob], "mirrored-original.zip"));
+    expect(readback.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+    expect(await (await readSourceOriginal(source.id, source.checksum))?.text())
+      .toBe("Duplicate eligible source bytes");
+  });
+
+  it("reports missing mirrored originals once, without claiming a complete backup", async () => {
+    const source: SourceDocument = {
+      id: "uncached-mirror", title: "Missing", fileName: "uncached.txt", fileType: "text/plain",
+      uploadedAt: "2026-11-17", rawText: "", sizeBytes: 20,
+      checksum: "c".repeat(64), tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    const payload = { documents: [source], deferredContent: { documents: [{ ...source }] } };
+    const exported = await createMediaBackupArchive(payload, [], [source, { ...source }]);
+    expect(exported.originalCount).toBe(0);
+    expect(exported.missingOriginalIds).toEqual([source.id]);
+    const readback = await readPortableBackup(new File([exported.blob], "missing-mirror.zip"));
+    expect(readback.omissions.missingOriginalIds).toEqual([source.id]);
+  });
+
+  it("refuses conflicting eligible original digests before exporting a ZIP", async () => {
+    const original = new Blob(["Stable original"], { type: "text/plain" });
+    const source: SourceDocument = {
+      id: "conflicting-mirror", title: "Root", fileName: "source.txt", fileType: "text/plain",
+      uploadedAt: "2026-11-17", rawText: "Stable original", sizeBytes: original.size,
+      checksum: await sha256Hex(await original.arrayBuffer()),
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    await saveSourceOriginal(source, original);
+    const contradictory = { ...source, checksum: "f".repeat(64) };
+    await expect(createMediaBackupArchive({ documents: [source, contradictory] }, [], [source, contradictory]))
+      .rejects.toThrow(/conflicting source.document checksums/i);
+    expect(await (await readSourceOriginal(source.id, source.checksum))?.text())
+      .toBe("Stable original");
+  });
+
   it("accepts matching root/deferred source digests in a complete ZIP", async () => {
     const original = new Blob(["Mirrored source"], { type: "text/plain" });
     const source: SourceDocument = {
