@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCommunitySubjectKeyword, mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
+import { containsUnverifiedCommunityCitation, isCommunitySubjectKeyword, mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
 
 describe("explicitly reviewed Community AI keywords", () => {
   it("preserves authored tags and adds only canonical, unique reviewed keywords", () => {
@@ -75,6 +75,23 @@ describe("explicitly reviewed Community AI keywords", () => {
       .toThrow(/subject phrases.*citations/i);
     expect(authored).toEqual(["histology", "source:reviewed"]);
   });
+
+  it.each([
+    ["medical .health TLD", "Reviewed rationale https://reference.example.health/artery"],
+    ["developer .dev TLD", "Citation https://research.example.dev/vessels"],
+    ["fullwidth medical HTTPS URL", "Source ｈｔｔｐｓ：／／reference.example.health/artery"],
+    ["zero-width split HTTPS scheme", "Source https\u200B://reference.example.health/artery"],
+    ["an IP-hosted HTTP URL", "Source http://192.0.2.42/teaching"],
+  ])("detects unverified AI citation links regardless of %s", (_label, value) => {
+    expect(containsUnverifiedCommunityCitation(value)).toBe(true);
+    expect(isCommunitySubjectKeyword(value)).toBe(false);
+  });
+
+  it.each(["CD4/CD8", "E. coli", "10.2 kPa", "type 1 diabetes (autoimmune)"])(
+    "does not mistake clinical notation for a generated URL citation: %s", value => {
+      expect(containsUnverifiedCommunityCitation(value)).toBe(false);
+    },
+  );
 
   it("retains clinical shorthand and species names that are not source citations", () => {
     expect(mergeReviewedCommunityKeywords(["anatomy"], "CD4/CD8; E. coli; IL-10; 10.2 kPa"))
