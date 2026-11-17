@@ -188,6 +188,45 @@ describe("your published courses", () => {
     expect(mocks.share.mock.calls[0][0]).toEqual([id(3)]);
   });
 
+  it("invalidates previous sharing and approval permissions after a failed community refresh", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValue([course(1), course(2, { visibility: "shared" })]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const share = await screen.findByRole("button", { name: /Share 1 private course/ }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    expect(share.disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await screen.findByText(/Explanation readback complete/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
+    expect((screen.getByRole("button", { name: /Approve 1 course/ }) as HTMLButtonElement).disabled).toBe(false);
+
+    // A previously valid catalog is now untrustworthy: a failed second read
+    // must not resurrect rights or approval controls when busy clears.
+    mocks.community.mockRejectedValueOnce(new Error("The community upload list changed while loading. Refresh before sharing or approving courses."));
+    fireEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/community upload list changed/i);
+    await waitFor(() => expect((screen.getByRole("button", { name: /Show my courses/ }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve 1 course/ })).toBeNull();
+    expect(mocks.share).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+
+    // A subsequent clean read restores only the catalog, not stale consent
+    // or the old exact-revision explanation-review attestation.
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const recoveredShare = await screen.findByRole("button", { name: /Share 1 private course/ }) as HTMLButtonElement;
+    const recoveredApprove = screen.getByRole("button", { name: /Approve 1 course/ }) as HTMLButtonElement;
+    expect(recoveredShare.disabled).toBe(true);
+    expect(recoveredApprove.disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /right to share this course material/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: /I checked every stored explanation/ }) as HTMLInputElement).checked).toBe(false);
+    expect(mocks.share).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
   it("does not offer bulk actions when community status cannot be checked", async () => {
     mocks.list.mockResolvedValueOnce([course(1)]);
     mocks.community.mockRejectedValueOnce(new Error("Community uploads could not be loaded."));
