@@ -403,6 +403,8 @@ describe("review-gated explanation drafting", () => {
     "A written histology description of the arterial tunica media",
     "The patient had a CT scan previously; no new image is supplied.",
     "The term figure of speech appears in the clinical explanation.",
+    "Which technique could image a patient with poor renal function?",
+    "We must figure a differential diagnosis using the text findings.",
   ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
   });
