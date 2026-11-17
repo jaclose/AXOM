@@ -410,8 +410,8 @@ describe("review-gated explanation drafting", () => {
     ["an absent LaTeX includegraphics exhibit", { stem: "Which layer? \\includegraphics{missing-micrograph.png}" }],
     ["a sized LaTeX image named only in the topic", { topic: "Plate \\includegraphics*[width=0.7\\textwidth]{gross-plate.pdf}" }],
     ["a compatibility-width numbered figure", { stem: "Ｆｉｇｕｒｅ ２Ａ shows a vascular lesion." }],
-    ["a zero-width supplementary figure reference", { stem: "Figure\\u200B S2 shows tissue injury." }],
-    ["a format-obscured arrow annotation", { stem: "The arr\\u200Bow indicates the abnormality." }],
+    ["a zero-width supplementary figure reference", { stem: "Figure\u200B S2 shows tissue injury." }],
+    ["a format-obscured arrow annotation", { stem: "The arr\u200Bow indicates the abnormality." }],
     ["a compatibility-width escaped image tag", { stem: 'Which lesion? ＆ｌｔ；ｉｍｇ src="missing-plate.png"＆ｇｔ；' }],
     ["a compatibility-width LaTeX image command", { topic: "Histology ＼ｉｎｃｌｕｄｅｇｒａｐｈｉｃｓ{missing-slide.png}" }],
     ["a figure named only in the AI topic", { topic: "Figure S2: vascular lesion" }],
@@ -453,7 +453,7 @@ describe("review-gated explanation drafting", () => {
     "The reading is https://example.edu/atlas/image12?view=text, without an exhibit attached.",
     "The reference is [vascular atlas](https://example.edu/plateIV).",
     "Read ｈｔｔｐｓ：／／example.edu/figure2?view=text for an ordinary textual discussion.",
-    "Read https://example.edu/figure\\u200B2?view=text for an ordinary textual discussion.",
+    "Read https://example.edu/figure\u200B2?view=text for an ordinary textual discussion.",
     "The written CD4/CD8 comparison is sufficient without an image.",
   ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
