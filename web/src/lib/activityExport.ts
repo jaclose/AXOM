@@ -134,9 +134,9 @@ function overviewRows(logs: StudyLog[], byType: string[], groupedByType: Map<str
   const rows: Array<Array<string | number>> = [["Type", "Events", "Minutes", "Cards"]];
   for (const type of byType) {
     const subset = groupedByType.get(type) ?? [];
-    rows.push([type, subset.length, sum(subset, "minutes"), sum(subset, "cards")]);
+    rows.push([type, subset.length, sumActivityMetric(subset, "minutes"), sumActivityMetric(subset, "cards")]);
   }
-  rows.push(["Total", logs.length, sum(logs, "minutes"), sum(logs, "cards")]);
+  rows.push(["Total", logs.length, sumActivityMetric(logs, "minutes"), sumActivityMetric(logs, "cards")]);
   return rows;
 }
 
@@ -200,7 +200,8 @@ function appendSheet(XLSX: XlsxModule, wb: WorkBook, name: string, rows: unknown
   XLSX.utils.book_append_sheet(wb, ws, name);
 }
 
-function sum(logs: StudyLog[], key: "minutes" | "cards") {
+/** Shared guarded total for XLSX overviews and the on-screen Activity History. */
+export function sumActivityMetric(logs: StudyLog[], key: "minutes" | "cards"): number {
   // Finite inputs can overflow or lose a nonzero event when a much larger
   // running total absorbs it. A plausible but false overview must not be saved.
   return logs.reduce((running, log) => {
