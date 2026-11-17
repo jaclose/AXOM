@@ -131,7 +131,7 @@ export function ActivityHistoryPage() {
             : error instanceof ActivityExportCellLimitError
               ? { title: "Activity export stopped", body: "Some saved activity text exceeds Excel cell limits (32,767 characters or 253 line feeds). No workbook was downloaded and your study history is unchanged. Preserve a workspace backup and shorten the affected entry before exporting.", tone: "warn" }
               : error instanceof ActivityExportNumericError
-                ? { title: "Activity export stopped", body: "Some saved study counts are invalid or an export total overflowed. No workbook was downloaded and your study history is unchanged. Preserve a workspace backup and inspect the affected entries before exporting.", tone: "warn" }
+                ? { title: "Activity export stopped", body: "Some saved study numbers or totals cannot be represented reliably in Excel. No workbook was downloaded and your study history is unchanged. Preserve a workspace backup and inspect the affected entries before exporting.", tone: "warn" }
               : { title: "Activity export failed", body: "The workbook could not be downloaded. Your study logs are unchanged; try exporting again.", tone: "warn" });
     } finally {
       if (!unmounted.current) setExportPending(false);

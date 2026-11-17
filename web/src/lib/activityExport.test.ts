@@ -327,6 +327,33 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("refuses finite totals that silently swallow a nonzero study event", async () => {
+    // Both sequences are mathematically nonzero, but ordinary floating-point
+    // accumulation yields zero when an intervening contribution disappears.
+    for (const field of ["minutes", "cards"] as const) {
+      for (const values of [[1e16, 1, -1e16], [-1e16, -1, 1e16]]) {
+        const logs = studyLogs(["Manual", "Manual", "Manual"]);
+        logs.forEach((log, index) => { log[field] = values[index]; });
+        const original = logs.map((log) => ({ ...log }));
+        let writerCalls = 0;
+        await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+          .rejects.toBeInstanceOf(ActivityExportNumericError);
+        expect(writerCalls).toBe(0);
+        expect(logs).toEqual(original);
+      }
+    }
+  });
+
+  it("accepts genuine zero increments even alongside large cancelling counts", async () => {
+    const logs = studyLogs(["Manual", "Manual", "Manual"]);
+    [1e16, 0, -1e16].forEach((value, index) => { logs[index].minutes = value; });
+    const original = logs.map((log) => ({ ...log }));
+    const workbook = await captureWorkbook(logs);
+    expect(workbook.Sheets["Overview"]?.C2?.v).toBe(0);
+    expect(workbook.Sheets["Overview"]?.D2?.v).toBe(3);
+    expect(logs).toEqual(original);
+  });
+
   it("refuses finite-input summary overflow rather than producing an infinite Excel total", async () => {
     for (const field of ["minutes", "cards"] as const) {
       const logs = studyLogs(["Manual", "Manual"]);
