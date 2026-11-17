@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 
@@ -338,6 +338,38 @@ describe("your published courses", () => {
     expect(approve.disabled).toBe(true);
     expect(screen.queryByText(/Explanation readback complete/)).toBeNull();
     expect(screen.queryByText(/0 ready questions without an explanation/)).toBeNull();
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
+  it("lets Stop release a hanging explanation read immediately, and ignores its late receipt after restart", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    let resolveStale: (receipt: unknown) => void = () => {};
+    mocks.explanations.mockImplementationOnce(() => new Promise(resolve => { resolveStale = resolve; }));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const approve = await screen.findByRole("button", { name: /Approve 1 course/ }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await waitFor(() => expect(mocks.explanations).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    // The original remote read intentionally NEVER settles before the retry.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    expect(screen.getByText(/Explanation check stopped/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await waitFor(() => expect(mocks.explanations).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/Explanation readback complete/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
+    expect(approve.disabled).toBe(false);
+
+    // Resolving the abandoned call must not overwrite the fresh audit.
+    await act(async () => { resolveStale({
+      collectionId: id(1), revisionId: id(1001), contentHash: "b".repeat(64),
+      readyQuestions: 2, explainedReadyQuestions: 0, missingExplanations: 2,
+    }); });
+    expect(screen.getByText(/Explanation readback complete/)).toBeTruthy();
+    expect(screen.queryByText(/2 ready questions without an explanation/)).toBeNull();
+    expect(approve.disabled).toBe(false);
     expect(mocks.review).not.toHaveBeenCalled();
   });
 
