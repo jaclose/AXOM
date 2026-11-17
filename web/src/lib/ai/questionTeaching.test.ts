@@ -314,6 +314,10 @@ describe("review-gated explanation drafting", () => {
     ["semicolon with a rights attestation", "histology; rights:approved"],
     ["comma with a source-review claim", "vascular tone, source:reviewed"],
     ["Unicode line with a moderation claim", "histology\u2028moderation:approved"],
+    ["space-embedded rights claim", "histology rights:approved"],
+    ["parenthesized source claim", "vascular tone (source:reviewed)"],
+    ["tab-separated approval claim", "vascular tone\tmoderation:approved"],
+    ["vertical-tab license claim", "arterial pathology\u000blicense:cc-by"],
   ])("holds a compound model keyword containing %s without modifying the source", async (_label, keyword) => {
     const source = question();
     const before = JSON.stringify(source);

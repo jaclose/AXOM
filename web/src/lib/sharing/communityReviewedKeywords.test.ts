@@ -92,6 +92,27 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(isCommunitySubjectKeyword(term)).toBe(false);
   });
 
+  it.each([
+    ["space-embedded rights claim", "vascular histology rights:approved"],
+    ["parenthesized source claim", "tunica media (source:reviewed)"],
+    ["dash-embedded licensing claim", "pathology-license:cc-by"],
+    ["tab-separated moderation claim", "histology\tmoderation:approved"],
+    ["vertical-tab source claim", "histology\u000bsource:reviewed"],
+    ["record-separator rights claim", "histology\u001crights:approved"],
+    ["DEL-separated approval claim", "histology\u007fapproval:granted"],
+  ])("rejects embedded evidence or control-separated keyword claims: %s", (_label, term) => {
+    expect(isCommunitySubjectKeyword(term)).toBe(false);
+    expect(() => mergeReviewedCommunityKeywords(["original"], term))
+      .toThrow(/subject phrases.*publication metadata/i);
+  });
+
+  it("keeps normal clinical phrases with punctuation and joining marks", () => {
+    expect(isCommunitySubjectKeyword("type 1 diabetes (autoimmune)")).toBe(true);
+    expect(isCommunitySubjectKeyword("histology: vessel layers")).toBe(true);
+    expect(isCommunitySubjectKeyword("CD4/CD8: T cell subsets")).toBe(true);
+    expect(isCommunitySubjectKeyword("بافت\u200Cشناسی")).toBe(true);
+  });
+
   it.each(["arterial histology", "CD4/CD8", "E. coli", "بافت\u200Cشناسی"])(
     "retains a single legitimate subject phrase: %s", term => {
       expect(isCommunitySubjectKeyword(term)).toBe(true);
