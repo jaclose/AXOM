@@ -203,16 +203,19 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
   assertConsistentSourceDocumentChecksums(documents);
   const isCandidate = (doc: SourceDocument) => !!doc && typeof doc.id === "string"
     && /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "")
-    && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-");
+    // DeferredContent.documents permits a historical original with no MIME
+    // field. Its cached bytes still require export or an explicit omission.
+    && (doc.fileType == null || (typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-")));
   // Blank fileType is ambiguous metadata for digest-conflict checks, but a
   // checksum-bound original may still be cached under a historical blank type.
   // Prefer a typed claim for the same ID, even if a blank alias comes first.
   // Without either candidate, the complete-export JSON path could incorrectly
   // mark a copy current while omitting the local original's bytes.
-  const typedIds = new Set(documents.filter(doc => isCandidate(doc) && doc.fileType.length > 0).map(doc => doc.id));
+  const typedIds = new Set(documents.filter(doc =>
+    isCandidate(doc) && typeof doc.fileType === "string" && doc.fileType.length > 0).map(doc => doc.id));
   const seen = new Set<string>();
   return documents.filter(doc => {
-    if (!isCandidate(doc) || (doc.fileType.length === 0 && typedIds.has(doc.id))
+    if (!isCandidate(doc) || ((doc.fileType == null || doc.fileType === "") && typedIds.has(doc.id))
       || seen.has(doc.id)) return false;
     seen.add(doc.id);
     return true;
@@ -220,7 +223,8 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
 }
 /** Root and deferred copies may mirror one original ID, but must not
  * contradict the immutable original's identity. Do not compare mutable title,
- * filename or tags; legacy internal/untyped records are not original claims.
+ * filename or tags; internal records are not original claims. Missing/blank
+ * historical types may still have cached originals and must be accounted for.
  * Refuse ambiguity before offering Replace/Merge consent. */
 function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): void {
   type OriginalClaim = { digest: string; fileType?: string; sizeBytes?: number };
@@ -235,10 +239,16 @@ function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): v
     if (!record || typeof record !== "object") continue;
     const { id, checksum, fileType } = record as Partial<SourceDocument>;
     if (typeof id !== "string" || typeof checksum !== "string"
-      || typeof fileType !== "string" || fileType.startsWith("axom-")) continue;
+      || (typeof fileType === "string" && fileType.startsWith("axom-"))) continue;
     const digest = checksum.replace(/^sha256:/, "");
     if (!/^[a-f0-9]{64}$/.test(digest)) continue;
-    if (fileType.length > 0) {
+    // Unknown historical MIME is ambiguous, not evidence that a cached
+    // original never existed. Reject contradictory versions or explicitly
+    // account for the byte-addressed original during export.
+    if (fileType != null && typeof fileType !== "string") {
+      throw new Error("The backup contains an invalid source-document file type. No workspace data has been changed.");
+    }
+    if (typeof fileType === "string" && fileType.length > 0) {
       typedOriginalIds.add(id);
     } else {
       const versions = blankDigestsById.get(id) ?? new Set<string>();
@@ -932,7 +942,10 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   ];
   assertConsistentSourceDocumentChecksums(documentRecords);
   const sourceDocuments = documentRecords.filter((doc): doc is SourceDocument =>
-    !!doc && typeof doc.id === "string" && typeof doc.fileType === "string");
+    !!doc && typeof doc.id === "string"
+      && (doc.fileType == null || typeof doc.fileType === "string"));
+  // A missing type is accepted by the deferred metadata contract; the
+  // original's actual Blob MIME comes from ZIP bytes, not invented metadata.
   // Never collapse root/deferred records before assessing original completeness:
   // a later internal, untyped or malformed alias cannot erase an eligible root.
   // Valid duplicate digests have already passed the cross-record consistency check.
