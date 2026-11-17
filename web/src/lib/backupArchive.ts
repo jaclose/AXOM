@@ -196,7 +196,19 @@ export async function preflightRestorableZipCandidateBudget(
 }
 
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
-  return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
+  // Root and deferred aliases may describe the same immutable original. A
+  // duplicate entry makes a new ZIP unreadable: recovery forbids two archive
+  // members claiming the same document ID. Reject contradictory identities
+  // before writing, but retain one byte source for compatible aliases.
+  assertConsistentSourceDocumentChecksums(documents);
+  const seen = new Set<string>();
+  return documents.filter(doc => {
+    if (!doc || typeof doc.id !== "string" || !/^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "")
+      || typeof doc.fileType !== "string" || doc.fileType.startsWith("axom-")) return false;
+    if (seen.has(doc.id)) return false;
+    seen.add(doc.id);
+    return true;
+  });
 }
 /** Root and deferred copies may mirror one original ID, but must not
  * contradict the immutable original's identity. Do not compare mutable title,
