@@ -77,7 +77,11 @@ const EXPLICIT_EXHIBIT_REFERENCE = new RegExp([
 // even when the source asset record and attachment are missing. Do not hand
 // external image addresses or inline vector diagrams to an AI model as if it
 // could inspect them. Keep ordinary text hyperlinks eligible.
-const EMBEDDED_EXHIBIT_MARKUP = /!\[[^\]\r\n]*\]\s*(?:\(|\[)|<\s*(?:img|picture|svg)\b/i;
+// Imported PDF/HTML may escape a real exhibit tag as &lt;img&gt; or
+// numeric &#60;picture&#62;; LaTeX imports may retain \includegraphics
+// after the referenced graphic has been lost. These markers are still media
+// dependencies, not evidence for a text-only model to explain their contents.
+const EMBEDDED_EXHIBIT_MARKUP = /!\[[^\]\r\n]*\]\s*(?:\(|\[)|(?:<|&lt;|&#(?:0*60|x0*3c);)\s*(?:img|picture|svg)\b|\\includegraphics\*?(?:\s*\[[^\]\r\n]{0,128}\])?\s*\{/i;
 // A public URL path such as /case,figure2 or /image12 is not a question's
 // missing exhibit. Only visible clinical prose can establish that reference.
 // Strip web link tokens for the exhibit-text scan, but still inspect the
