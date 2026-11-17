@@ -4,9 +4,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn(), scopeCheck: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn(), scopeCheck: vi.fn(), userId: "owner-1" }));
 vi.mock("../../lib/account/accountStore", () => ({
-  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner-1" } }),
+  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: mocks.userId } }),
 }));
 vi.mock("../../lib/academicLibrary/accountScope", () => ({
   academicAccountScope: () => ({ key: "owner-1", assertCurrent: () => mocks.scopeCheck(), dispose: () => {} }),
@@ -39,6 +39,7 @@ const course = (n: number, patch: Partial<AcademicCourse> = {}): AcademicCourse 
 
 describe("your published courses", () => {
   beforeEach(() => {
+    mocks.userId = "owner-1";
     mocks.scopeCheck.mockReset();
     mocks.community.mockResolvedValue([]);
     mocks.reviewer.mockResolvedValue(false);
@@ -423,6 +424,97 @@ describe("your published courses", () => {
     expect(screen.queryByText("M1")).toBeNull();
     expect(approve.disabled).toBe(true);
     expect(mocks.review).not.toHaveBeenCalled();
+  });
+
+  it("rejects an original account's late sharing error even after switching A → B → A", async () => {
+    mocks.list.mockResolvedValueOnce([course(1)]).mockResolvedValueOnce([course(2)]).mockResolvedValueOnce([course(3)]);
+    let rejectOld: (reason: Error) => void = () => {};
+    mocks.share.mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }));
+    const onChanged = vi.fn();
+    const { rerender } = render(<AcademicCollectionManager onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const share = await screen.findByRole("button", { name: /Share 1 private course/ });
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    fireEvent.click(share);
+    await waitFor(() => expect(mocks.share).toHaveBeenCalledTimes(1));
+
+    mocks.userId = "owner-2";
+    rerender(<AcademicCollectionManager onChanged={onChanged} />);
+    const reload = screen.getByRole("button", { name: /Show my courses/ }) as HTMLButtonElement;
+    await waitFor(() => expect(reload.disabled).toBe(false));
+    fireEvent.click(reload);
+    expect(await screen.findByText("M2")).toBeTruthy();
+
+    mocks.userId = "owner-1";
+    rerender(<AcademicCollectionManager onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect(await screen.findByText("M3")).toBeTruthy();
+
+    await act(async () => { rejectOld(new Error("Old account sharing error.")); });
+    expect(screen.getByText("M3")).toBeTruthy();
+    expect(screen.queryByText(/Old account sharing error/)).toBeNull();
+    expect(screen.queryByText(/1 course shared before stopping/)).toBeNull();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("keeps a new account's catalog intact after the old account's pending approval settles", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })])
+      .mockResolvedValueOnce([course(2, { visibility: "shared" })]);
+    let resolveOld: () => void = () => {};
+    mocks.review.mockImplementationOnce(() => new Promise<void>(resolve => { resolveOld = resolve; }));
+    const onChanged = vi.fn();
+    const { rerender } = render(<AcademicCollectionManager onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const approve = await screen.findByRole("button", { name: /Approve 1 course/ });
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await screen.findByText(/Explanation readback complete/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
+    fireEvent.click(approve);
+    await waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(1));
+
+    mocks.userId = "owner-2";
+    rerender(<AcademicCollectionManager onChanged={onChanged} />);
+    const reload = screen.getByRole("button", { name: /Show my courses/ }) as HTMLButtonElement;
+    await waitFor(() => expect(reload.disabled).toBe(false));
+    fireEvent.click(reload);
+    expect(await screen.findByText("M2")).toBeTruthy();
+
+    await act(async () => { resolveOld(); });
+    expect(screen.getByText("M2")).toBeTruthy();
+    expect(screen.queryByText("M1")).toBeNull();
+    expect(screen.queryByText(/Approval may have saved/)).toBeNull();
+    expect(screen.queryByText(/1 course approved/)).toBeNull();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("cannot let an old account write completion unlock an in-flight new-account catalog read", async () => {
+    let resolveNew: (rows: AcademicCourse[]) => void = () => {};
+    mocks.list.mockResolvedValueOnce([course(1)])
+      .mockImplementationOnce(() => new Promise<AcademicCourse[]>(resolve => { resolveNew = resolve; }));
+    let rejectOld: (reason: Error) => void = () => {};
+    mocks.share.mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }));
+    const { rerender } = render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const share = await screen.findByRole("button", { name: /Share 1 private course/ });
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    fireEvent.click(share);
+    await waitFor(() => expect(mocks.share).toHaveBeenCalledTimes(1));
+
+    mocks.userId = "owner-2";
+    rerender(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+
+    await act(async () => { rejectOld(new Error("Old account write failed.")); });
+    // The new account's catalog is still unresolved; old finally must not
+    // clear the new operation's busy state or expose stale bulk actions.
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Loading your courses/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(/Old account write failed/)).toBeNull();
+    await act(async () => { resolveNew([course(2)]); });
+    expect(await screen.findByText("M2")).toBeTruthy();
   });
 
 });
