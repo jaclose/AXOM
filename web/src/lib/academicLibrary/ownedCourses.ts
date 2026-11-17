@@ -16,6 +16,19 @@ export function ownedCourseStatus(course: Pick<AcademicCourse, "visibility" | "r
   return course.review_status === "approved" ? "shared" : course.review_status === "rejected" ? "not-approved" : "awaiting-review";
 }
 
+/** Compare every field rendered/used by bulk sharing. An unchanged keyset cursor
+ * alone cannot detect another course moving to an already-read page. */
+function sameCatalogCourse(a: AcademicCourse, b: AcademicCourse): boolean {
+  return a.id === b.id
+    && a.current_revision_id === b.current_revision_id
+    && a.term === b.term && a.module === b.module && a.title === b.title
+    && a.academic_term === b.academic_term && a.cohort === b.cohort
+    && a.owned === b.owned && a.visibility === b.visibility
+    && a.review_status === b.review_status
+    && a.ready_questions === b.ready_questions
+    && a.review_questions === b.review_questions;
+}
+
 /** Every course the signed-in account owns, read page by page from the catalog. */
 export async function listOwnedAcademicCourses(accountId: string, signal?: AbortSignal): Promise<AcademicCourse[]> {
   const scope = academicAccountScope(accountId);
@@ -29,32 +42,26 @@ export async function listOwnedAcademicCourses(accountId: string, signal?: Abort
     const seenRevisions = new Set<string>();
     let after: string | undefined;
     let previousCursor: AcademicCourse | undefined;
+    const pages: AcademicCourse[][] = [];
+    const verifyCursor = async (expected: AcademicCourse) => {
+      let current: AcademicCourse;
+      try {
+        current = await getAcademicCourse(expected.id, accountId);
+      } catch {
+        check();
+        throw new Error("The owned course catalog could not be verified. Refresh before sharing or approving courses.");
+      }
+      check();
+      if (!sameCatalogCourse(current, expected)) {
+        throw new Error("The owned course catalog changed while loading. Refresh to view a complete list.");
+      }
+    };
     for (let page = 0; page < MAX_PAGES; page++) {
       check();
       const courses = await listAcademicCourses("", "", after);
       check();
-      // A withdrawn cursor makes academic_catalog return [], indistinguishable
-      // from the true end. Never treat that as a complete owned-course list.
-      if (previousCursor) {
-        let current: AcademicCourse;
-        try {
-          current = await getAcademicCourse(previousCursor.id, accountId);
-        } catch {
-          check();
-          throw new Error("The owned course catalog could not be verified. Refresh before sharing or approving courses.");
-        }
-        check();
-        if (current.id !== previousCursor.id
-          || current.current_revision_id !== previousCursor.current_revision_id
-          || current.term !== previousCursor.term || current.module !== previousCursor.module
-          || current.title !== previousCursor.title || current.owned !== previousCursor.owned
-          || current.visibility !== previousCursor.visibility
-          || current.review_status !== previousCursor.review_status
-          || current.ready_questions !== previousCursor.ready_questions
-          || current.review_questions !== previousCursor.review_questions) {
-          throw new Error("The owned course catalog changed while loading. Refresh to view a complete list.");
-        }
-      }
+      // A withdrawn or changed cursor must not appear to end pagination.
+      if (previousCursor) await verifyCursor(previousCursor);
       if (!Array.isArray(courses) || courses.length > PAGE_SIZE
         || courses.some(course => !course || typeof course.id !== "string"
           || typeof course.current_revision_id !== "string"
@@ -63,12 +70,35 @@ export async function listOwnedAcademicCourses(accountId: string, signal?: Abort
         || new Set(courses.map(course => course.current_revision_id)).size !== courses.length) {
         throw new Error("The owned course catalog changed while loading. Refresh to view a complete list.");
       }
+      pages.push(courses);
       for (const course of courses) {
         seenIds.add(course.id);
         seenRevisions.add(course.current_revision_id);
         if (course.owned) owned.push(course);
       }
-      if (courses.length < PAGE_SIZE) return owned;
+      if (courses.length < PAGE_SIZE) {
+        if (pages.length > 1) {
+          // Quiescent two-pass consistency check. A noncursor row can move from
+          // a future page to an earlier SQL keyset page, leaving the cursor
+          // unchanged and silently disappearing. Re-read every original page,
+          // not merely the cursor, before displaying complete bulk inventory.
+          // This is NOT an atomic snapshot; simultaneous repeated edits still
+          // require a future server-side snapshot/epoch contract.
+          for (let index = 0; index < pages.length; index++) {
+            check();
+            const cursor = index > 0 ? pages[index - 1].at(-1)! : undefined;
+            if (cursor) await verifyCursor(cursor);
+            const replay = await listAcademicCourses("", "", cursor?.id);
+            check();
+            const original = pages[index];
+            if (!Array.isArray(replay) || replay.length !== original.length
+              || replay.some((row, offset) => !sameCatalogCourse(row, original[offset]))) {
+              throw new Error("The owned course catalog changed while loading. Refresh to view a complete list.");
+            }
+          }
+        }
+        return owned;
+      }
       previousCursor = courses[courses.length - 1];
       after = previousCursor.id;
     }

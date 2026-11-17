@@ -43,8 +43,9 @@ describe("owned academic collection pagination integrity", () => {
   it("returns all legitimate owned courses from a 24-row page plus a final partial page", async () => {
     const first = firstPage();
     const last = [course(25), course(26, false)];
-    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce(last);
-    mocks.detail.mockResolvedValueOnce(first.at(-1));
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce(last)
+      .mockResolvedValueOnce(first).mockResolvedValueOnce(last);
+    mocks.detail.mockResolvedValue(first.at(-1));
     const result = await listOwnedAcademicCourses("owner");
     expect(result.map(row => row.id)).toEqual([...first.filter(row => row.owned), last[0]].map(row => row.id));
     expect(mocks.list).toHaveBeenNthCalledWith(2, "", "", first.at(-1)?.id);
@@ -96,4 +97,39 @@ describe("owned academic collection pagination integrity", () => {
       .rejects.toMatchObject({ name: "AbortError" });
     expect(mocks.dispose).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects a noncursor course refiled across an already-read page boundary", async () => {
+    // SQL keyset sorting uses term, module, title, id. An item can move
+    // *before* a stable cursor and disappear from later pages without repeats.
+    const rows = Array.from({ length: 25 }, (_, index) => ({
+      ...course(index + 1), module: "DERS", title: `Course ${String(index + 1).padStart(2, "0")}`,
+    }));
+    let moved = false;
+    mocks.list.mockImplementation(async (_search: string, _term: string, after?: string) => {
+      if (after === uuid(24) && !moved) {
+        rows[24] = { ...rows[24], title: "Course 00" };
+        moved = true;
+      }
+      const sorted = [...rows].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+      const cursor = rows.find(row => row.id === after);
+      return sorted.filter(row => !cursor || row.title > cursor.title
+        || (row.title === cursor.title && row.id > cursor.id)).slice(0, 24);
+    });
+    mocks.detail.mockImplementation(async (id: string) => rows.find(row => row.id === id));
+    await expect(listOwnedAcademicCourses("owner")).rejects.toThrow(/catalog changed/i);
+    expect(moved).toBe(true);
+    expect(mocks.list.mock.calls.length).toBeGreaterThan(2);
+    expect(mocks.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a stable-cursor page whose noncursor row changes during later reads", async () => {
+    const first = firstPage();
+    const last = [course(25)];
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce(last)
+      .mockResolvedValueOnce([{ ...first[0], ready_questions: 3 }, ...first.slice(1)]);
+    mocks.detail.mockResolvedValue(first.at(-1));
+    await expect(listOwnedAcademicCourses("owner")).rejects.toThrow(/catalog changed/i);
+    expect(mocks.dispose).toHaveBeenCalledTimes(1);
+  });
+
 });

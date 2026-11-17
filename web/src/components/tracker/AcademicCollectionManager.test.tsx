@@ -53,13 +53,15 @@ describe("your published courses", () => {
 
   it("reads every catalog page and lists only this account's courses by term and status", async () => {
     const first = Array.from({ length: 24 }, (_, index) => course(index + 1, index % 2 ? { owned: false, visibility: "shared", review_status: "approved" } : {}));
-    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce([
+    const finalPage = [
       course(30, { term: "Term 4", visibility: "shared", review_status: "approved" }),
       course(31, { term: "Term 4", visibility: "shared" }),
-    ]);
-    // The cursor must still be visible at its original exact revision before
-    // combining the second page; this is not a second catalog page.
-    mocks.detail.mockResolvedValueOnce(first.at(-1));
+    ];
+    // The readback repeats both observed pages and rechecks the cursor;
+    // bulk sharing cannot rely on the original cross-transaction scan alone.
+    mocks.list.mockResolvedValueOnce(first).mockResolvedValueOnce(finalPage)
+      .mockResolvedValueOnce(first).mockResolvedValueOnce(finalPage);
+    mocks.detail.mockResolvedValue(first.at(-1));
     render(<AcademicCollectionManager onChanged={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
     expect(await screen.findByText("14 courses")).toBeTruthy();
