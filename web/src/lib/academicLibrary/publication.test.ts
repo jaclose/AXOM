@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { PrivateLibraryCatalog } from "../privateLibrary/types";
 import { splitAcademicPlanSections } from "./coursePlan";
 import {
-  courseLibraryReader, planPublication, publicationCatalogId, publicationJobs, readPublicationInventory,
+  courseLibraryReader, planPublication, publicationCatalogId, publicationJobs, readPublicationInventory, UnreadableOriginalError,
 } from "./publication";
-import { library } from "./publicationFixture.testing";
+import { sha256 } from "../question-content/assets";
+import { inspectPreparedUploadExplanations } from "./explanationReview";
+import { bank, library } from "./publicationFixture.testing";
 import { prepareAcademicUpload } from "./upload";
 
 describe("publishing a prepared library as one course per term and module", () => {
@@ -245,5 +247,98 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(upload.metadata.ready_questions).toBe(1);
     expect(upload.provenance.sourceChecksums).toContain(bank.checksum);
     expect(notes.keptLocal.get(goer.catalogId)).toBe(1);
+  });
+
+  it("publishes a question set whose original is missing from the folder, and leaves out a lost original-only file", async () => {
+    const fixture = await library();
+    const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    const slides = fixture.catalog.sources.find(source => source.name === "goer-slides.pdf")!;
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    expect(goer.optionalSourceIds).toContain(slides.id);
+    fixture.files.delete(bank.originalFile!);
+    fixture.files.delete(slides.originalFile!);
+
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer]);
+    const upload = await jobs[0].prepare();
+    const catalog = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === "catalog.json")!.bytes)) as PrivateLibraryCatalog;
+    // The questions still publish, without the original pages.
+    expect(catalog.sources.find(source => source.id === bank.id)).toMatchObject({ bankFile: bank.bankFile });
+    expect(catalog.sources.find(source => source.id === bank.id)?.originalFile).toBeUndefined();
+    expect(upload.metadata.ready_questions).toBe(1);
+    // A file with nothing else to publish is left out, not listed without its file.
+    expect(catalog.sources.some(source => source.id === slides.id)).toBe(false);
+    expect(upload.files.some(file => file.path.endsWith(".pdf"))).toBe(false);
+    expect(notes.unreadableOriginals.get(goer.catalogId)).toBe(2);
+    // A file that could not be read is not also counted as kept on this device.
+    expect(notes.keptLocal.has(goer.catalogId)).toBe(false);
+  });
+
+  it("leaves out a question set without explanations when the course is submitted for review", async () => {
+    const fixture = await library();
+    // A second GOER set whose two ready questions carry no rationale.
+    const original = new TextEncoder().encode("%PDF-1.4 synthetic goer-unexplained");
+    const checksum = (await sha256(original)).slice(7);
+    fixture.files.set(`sources/${checksum}.pdf`, original);
+    fixture.files.set(`banks/${checksum}/bank.json`, new TextEncoder().encode(JSON.stringify(bank("goer-unexplained", "GOER", 5, checksum, 2, false))));
+    fixture.catalog.sources.push({ id: `source-${checksum}`, name: "goer-unexplained.pdf", sourcePath: "GOER/goer-unexplained.pdf", checksum,
+      module: "GOER", status: "prepared", reason: "Validated package", bankFile: `banks/${checksum}/bank.json`, originalFile: `sources/${checksum}.pdf`,
+      ready: 2, review: 0 });
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    expect(goer.ready).toBe(3);
+
+    // Published privately, every set travels.
+    const privately = publicationJobs(fixture.read, inventory, [goer]);
+    expect((await privately.jobs[0].prepare()).metadata.ready_questions).toBe(3);
+    expect(privately.notes.heldForExplanations.size).toBe(0);
+
+    // Submitted for review, only sets a reviewer could approve travel.
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer], { explainedOnly: true });
+    const upload = await jobs[0].prepare();
+    const catalog = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === "catalog.json")!.bytes)) as PrivateLibraryCatalog;
+    expect(upload.metadata.ready_questions).toBe(1);
+    expect(catalog.sources.some(source => source.id === `source-${checksum}`)).toBe(false);
+    expect(upload.files.some(file => file.path.startsWith(`banks/${checksum}/`))).toBe(false);
+    expect(notes.heldForExplanations.get(goer.catalogId)).toEqual({ sets: 1, readyQuestions: 2 });
+    expect(await inspectPreparedUploadExplanations(upload)).toMatchObject({ readyQuestions: 1, missingExplanations: 0 });
+  });
+
+  it("refuses to submit a course for review when no question set is fully explained", async () => {
+    const fixture = await library();
+    const goerBank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    fixture.files.set(goerBank.bankFile!, new TextEncoder().encode(JSON.stringify(bank("goer-pq", "GOER", 5, goerBank.checksum, 1, false))));
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer], { explainedOnly: true });
+    await expect(jobs[0].prepare()).rejects.toThrow(/No question set in this course has an explanation for every ready question/);
+    expect(notes.failures.get(goer.catalogId)).toMatch(/Publish it without submitting for review/);
+  });
+
+  it("still refuses a course whose question package is missing", async () => {
+    const fixture = await library();
+    const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    fixture.files.delete(bank.bankFile!);
+
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer]);
+    await expect(jobs[0].prepare()).rejects.toThrow(/Missing synthetic file banks\//);
+    expect(notes.unreadableOriginals.has(goer.catalogId)).toBe(false);
+  });
+
+  it("reports an original the reader cannot provide by its source", async () => {
+    const fixture = await library();
+    const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    fixture.files.delete(bank.originalFile!);
+    const reader = courseLibraryReader(fixture.read, inventory, goer);
+    // Before the course catalog is read, no path is known to be an original.
+    await expect(reader(bank.originalFile!)).rejects.not.toBeInstanceOf(UnreadableOriginalError);
+    await reader("catalog.json");
+    await expect(reader(bank.originalFile!)).rejects.toMatchObject({ name: "UnreadableOriginalError", sourceId: bank.id });
+    await expect(reader(bank.bankFile!)).resolves.toBeInstanceOf(Uint8Array);
   });
 });

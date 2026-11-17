@@ -31,6 +31,7 @@ import { openPublicationBrowserDecoder } from "./publicationBrowserDecoder.local
 import { applyFilingDecisions, readFilingDecisions, readFilingProposals } from "./filingDecisions";
 import { applyMiNmiDecision, readMiNmiDecision } from "./miNmiCorrection";
 import { accountQuestions } from "./questionLedger";
+import { inspectPreparedUploadExplanations } from "./explanationReview";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
 } from "./publication";
@@ -95,7 +96,9 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
     // Every question row the library holds, in exactly one course or one stated reason.
     const ledger = accountQuestions(inventory, plan);
     const ready = plan.courses.filter(course => course.termBasis !== "proposed");
-    const { jobs, notes } = publicationJobs(read, inventory, ready);
+    // AXOM_PUBLISH_FOR_REVIEW=1 prepares exactly what "Submit for academic review" uploads.
+    const forReview = process.env.AXOM_PUBLISH_FOR_REVIEW === "1";
+    const { jobs, notes } = publicationJobs(read, inventory, ready, { explainedOnly: forReview });
     const sources = new Map<string, string>();
     const label = (course: Pick<PlannedCourse, "term" | "module">) => `${course.term} ${course.module}`;
     const checked = [];
@@ -110,10 +113,15 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
         const repeated = upload.provenance.sourceChecksums.find(sha => sources.has(sha));
         if (repeated) throw new Error(`It shares a source file with ${sources.get(repeated)}.`);
         for (const sha of upload.provenance.sourceChecksums) sources.set(sha, label(course));
+        // Approval needs every ready question explained; this is the same local observation the publisher shows.
+        const coverage = await inspectPreparedUploadExplanations(upload);
         checked.push({ ...summary, ok: true as const, readyQuestions: Number(upload.metadata.ready_questions),
+          explainedReadyQuestions: coverage.explainedReadyQuestions, missingExplanations: coverage.missingExplanations,
           reviewQuestions: Number(upload.metadata.review_questions), files: upload.files.length,
           bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
-          keptLocal: notes.keptLocal.get(job.key) ?? 0, overLimit: upload.localOnlyOriginals.length });
+          keptLocal: notes.keptLocal.get(job.key) ?? 0, overLimit: upload.localOnlyOriginals.length,
+          unreadableOriginals: notes.unreadableOriginals.get(job.key) ?? 0,
+          heldForExplanations: notes.heldForExplanations.get(job.key) ?? { sets: 0, readyQuestions: 0 } });
       } catch (cause) {
         checked.push({ ...summary, ok: false as const,
           reason: notes.failures.get(job.key) ?? (cause instanceof Error ? cause.message : "This course could not be prepared.") });
@@ -125,7 +133,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
       sections: course.sections.map(section => section.name),
     }));
     const result = {
-      library: inventory.library, checkedAt: new Date().toISOString(), ...(filed ? { filingDecisions: filed.summary } : {}),
+      library: inventory.library, checkedAt: new Date().toISOString(), forReview, ...(filed ? { filingDecisions: filed.summary } : {}),
       ...(corrected ? { miNmiCorrection: corrected.summary } : {}),
       totals: {
         courses: plan.courses.length, checked: checked.length, readyToPublish: checked.filter(course => course.ok).length,
@@ -148,7 +156,11 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
     for (const group of ledger.leftOut) console.log(`left out  ${count(group.questions, "question")} in ${count(group.sources, "set")}: ${group.reason}`);
     for (const source of ledger.mismatched) console.log(`counts disagree  ${source.name}: ${source.rows} rows, catalog says ${source.ready} ready and ${source.held} held`);
     for (const course of checked) console.log(course.ok
-      ? `ready  ${label(course)}: ${course.readyQuestions} ready, ${course.reviewQuestions} awaiting review, ${course.files} files`
+      ? `ready  ${label(course)}: ${course.readyQuestions} ready (${course.explainedReadyQuestions} explained), `
+        + `${course.reviewQuestions} awaiting review, ${course.files} files`
+        + (course.unreadableOriginals ? `, ${count(course.unreadableOriginals, "listed original")} not in the folder` : "")
+        + (course.heldForExplanations.sets ? `, ${count(course.heldForExplanations.sets, "set")} with `
+          + `${count(course.heldForExplanations.readyQuestions, "unexplained ready question")} held back from review` : "")
       : `attention  ${label(course)}: ${course.reason}`);
     for (const course of needsTerm) console.log(`needs term  ${course.module} (${course.moduleKey}): proposed ${course.proposedTerm}`);
     expect(plan.courses.length + plan.blocked.length + plan.excluded.length).toBeGreaterThan(0);

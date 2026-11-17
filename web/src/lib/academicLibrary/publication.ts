@@ -16,6 +16,7 @@ import type { PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/ty
 import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicPlanTerm } from "./coursePlan";
 import { compareCourses } from "./catalogOrder";
 import { prepareAcademicUpload, preflightAcademicUpload } from "./upload";
+import { inspectPreparedUploadExplanationsBySource } from "./explanationReview";
 import type { AcademicBatchJob } from "./batch";
 
 type Term = ReviewedFiling["term"];
@@ -336,6 +337,19 @@ export interface CourseReaderOptions {
   include?: (sourceId: string) => boolean;
   /** False publishes the question sets without their original files. */
   originals?: boolean;
+  /** Sources whose original file could not be read; they publish without it. */
+  withoutOriginals?: ReadonlySet<string>;
+}
+
+/** The library lists an original file that the chosen folder cannot provide.
+ * Only originals raise this: a missing question package or figure still fails. */
+export class UnreadableOriginalError extends Error {
+  readonly sourceId: string;
+  constructor(sourceId: string, cause?: unknown) {
+    super("A source file the library lists is missing or unreadable in the chosen folder.", { cause });
+    this.name = "UnreadableOriginalError";
+    this.sourceId = sourceId;
+  }
 }
 
 /** One course's catalog over the same library files; nothing is copied. */
@@ -353,8 +367,19 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
     || new Set(sources.map(source => source.checksum)).size !== sources.length)
     throw new Error("The planned course has missing or duplicate source identities. Review its source filing.");
   let catalog: Uint8Array | undefined;
+  // Original path to its source, for the originals this course's catalog lists.
+  const originals = new Map<string, string>();
   return async path => {
-    if (safeLibraryPath(path) !== "catalog.json") return read(path);
+    if (safeLibraryPath(path) !== "catalog.json") {
+      const owner = originals.get(path);
+      if (!owner) return read(path);
+      try {
+        return await read(path);
+      } catch (cause) {
+        if ((cause as Error | undefined)?.name === "AbortError") throw cause;
+        throw new UnreadableOriginalError(owner, cause);
+      }
+    }
     if (!catalog) {
       const original = readCatalog(JSON.parse(decode(await read("catalog.json"))));
       const rows = new Map<string, CatalogSource>();
@@ -372,9 +397,11 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
           || Boolean(row.bankFile) !== source.hasBank)
           throw new Error("The library changed while publishing. Choose it again and review the plan.");
         const extension = row.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
-        return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
+        return options.originals === false || options.withoutOriginals?.has(row.id)
+          || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
           ? { ...row, originalFile: undefined } : row;
       });
+      for (const row of selected) if (row.originalFile) originals.set(row.originalFile, row.id);
       catalog = encode({ ...inventory.library, id: course.catalogId,
         templates: course.sections.map(section => ({ file: section.file, name: section.name, checksum: section.checksum })),
         sources: selected });
@@ -389,18 +416,31 @@ const TOO_LARGE = /exceeds the supported upload size|1–1500 verified files/;
 export interface PublicationJobNotes {
   /** Original files kept on this device so the course fits its size limit. */
   keptLocal: Map<string, number>;
+  /** Listed original files the chosen folder could not provide; their questions still publish. */
+  unreadableOriginals: Map<string, number>;
+  /** Question sets left out of a course submitted for review, because approval
+   * needs an explanation for every ready question. */
+  heldForExplanations: Map<string, { sets: number; readyQuestions: number }>;
   /** Why a course could not be prepared, in the validator's own words. */
   failures: Map<string, string>;
+}
+
+export interface PublicationJobOptions {
+  /** For a course submitted for review: leave out each question set with a
+   * ready question that has no explanation, which no reviewer could approve. */
+  explainedOnly?: boolean;
 }
 
 /**
  * One batch job per course. A course over 512 MiB or 1,500 files retries
  * first without its original-only files, then without any original files;
  * its questions and figures still publish and the kept files are counted.
+ * An original the folder cannot provide is left out the same way and counted
+ * apart, so one lost PDF does not hold back the questions prepared from it.
  */
-export function publicationJobs(read: LibraryReader, inventory: PublicationInventory, courses: readonly PlannedCourse[]):
-  { jobs: AcademicBatchJob[]; notes: PublicationJobNotes } {
-  const notes: PublicationJobNotes = { keptLocal: new Map(), failures: new Map() };
+export function publicationJobs(read: LibraryReader, inventory: PublicationInventory, courses: readonly PlannedCourse[],
+  jobOptions: PublicationJobOptions = {}): { jobs: AcademicBatchJob[]; notes: PublicationJobNotes } {
+  const notes: PublicationJobNotes = { keptLocal: new Map(), unreadableOriginals: new Map(), heldForExplanations: new Map(), failures: new Map() };
   const jobs = courses.map((course): AcademicBatchJob => ({
     key: course.catalogId,
     async prepare(signal) {
@@ -420,23 +460,60 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
         const unsupported = course.sourceIds.filter(id => {
           const original = byId.get(id)?.original;
           return original && !UPLOADABLE_ORIGINALS.has(original.extension);
-        }).length;
+        });
         const withOriginals = course.sourceIds.filter(id => {
           const original = byId.get(id)?.original;
           return !optional.has(id) && original && UPLOADABLE_ORIGINALS.has(original.extension);
-        }).length;
-        const stages: Array<{ options: CourseReaderOptions; kept: number }> = [{ options: {}, kept: unsupported }];
-        if (optional.size) stages.push({ options: { include: id => !optional.has(id) }, kept: unsupported + optional.size });
-        if (withOriginals) stages.push({ options: { include: id => !optional.has(id), originals: false }, kept: unsupported + optional.size + withOriginals });
+        });
+        const stages: Array<{ options: CourseReaderOptions; kept: string[] }> = [{ options: {}, kept: unsupported }];
+        if (optional.size) stages.push({ options: { include: id => !optional.has(id) }, kept: [...unsupported, ...optional] });
+        if (withOriginals.length) stages.push({ options: { include: id => !optional.has(id), originals: false }, kept: [...unsupported, ...optional, ...withOriginals] });
+        // A question set publishes without an original the folder cannot provide;
+        // an original-only source has nothing else, so it is left out. Every
+        // retry removes one more source, so the attempts end.
+        const unreadable = new Set<string>();
+        // Question sets left out for review: each has a ready question without an explanation.
+        const held = new Set<string>();
+        const attempt = async (options: CourseReaderOptions) => {
+          for (;;) {
+            if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
+            try {
+              return await prepareAcademicUpload(courseLibraryReader(read, inventory, course, {
+                ...options, withoutOriginals: unreadable,
+                include: id => (options.include?.(id) ?? true) && !held.has(id) && !(optional.has(id) && unreadable.has(id)),
+              }), unscheduled, planTerm ? { planTerm } : {});
+            } catch (cause) {
+              if (!(cause instanceof UnreadableOriginalError) || unreadable.has(cause.sourceId)) throw cause;
+              unreadable.add(cause.sourceId);
+            }
+          }
+        };
+        const heldCount = (field: "ready" | "review") => [...held].reduce((sum, id) => sum + (byId.get(id)?.[field] ?? 0), 0);
         for (const [index, stage] of stages.entries()) {
           if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
           try {
-            const upload = await prepareAcademicUpload(courseLibraryReader(read, inventory, course, stage.options),
-              unscheduled, planTerm ? { planTerm } : {});
-            if (upload.metadata.ready_questions !== course.ready || upload.metadata.review_questions !== course.review)
+            let upload = await attempt(stage.options);
+            if (jobOptions.explainedOnly) {
+              // Explanations come from the bank itself, so one more preparation settles it.
+              const unexplained = [...await inspectPreparedUploadExplanationsBySource(upload)]
+                .filter(([, coverage]) => coverage.missingExplanations > 0).map(([id]) => id);
+              if (unexplained.length) {
+                for (const id of unexplained) held.add(id);
+                if (course.ready - heldCount("ready") <= 0)
+                  throw new Error("No question set in this course has an explanation for every ready question, so a reviewer cannot approve it yet. Publish it without submitting for review, or add reviewed explanations first.");
+                upload = await attempt(stage.options);
+              }
+            }
+            if (upload.metadata.ready_questions !== course.ready - heldCount("ready")
+              || upload.metadata.review_questions !== course.review - heldCount("review"))
               throw new Error("The prepared course question counts differ from its unique planned sources. Review duplicate or changed source files.");
             await preflightAcademicUpload(upload);
-            if (stage.kept) notes.keptLocal.set(course.catalogId, stage.kept);
+            // Each source is reported once: held back for review, unreadable, or kept on this device.
+            const kept = stage.kept.filter(id => !unreadable.has(id) && !held.has(id)).length;
+            const unread = [...unreadable].filter(id => !held.has(id)).length;
+            if (kept) notes.keptLocal.set(course.catalogId, kept);
+            if (unread) notes.unreadableOriginals.set(course.catalogId, unread);
+            if (held.size) notes.heldForExplanations.set(course.catalogId, { sets: held.size, readyQuestions: heldCount("ready") });
             return upload;
           } catch (cause) {
             if (!(cause instanceof Error) || !TOO_LARGE.test(cause.message)) throw cause;

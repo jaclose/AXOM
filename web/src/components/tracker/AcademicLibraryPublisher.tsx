@@ -21,7 +21,7 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 type Term = ReviewedFiling["term"];
 const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 /** Source files a course leaves on this device because of type or size limits. */
-interface KeptFiles { keptLocal?: number; overLimit?: number }
+interface KeptFiles { keptLocal?: number; overLimit?: number; unreadable?: number; held?: { sets: number; readyQuestions: number } }
 type CourseState =
   | { state: "checked"; ready: number; review: number; missingExplanations: number; files: number; bytes: number } & KeptFiles
   | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; sharingError?: string } & KeptFiles
@@ -175,7 +175,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     const courses = chosen;
     setBusy("checking"); setError(""); setResults({});
     try {
-      const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
+      const { jobs, notes } = publicationJobs(current.read, current.inventory, courses, { explainedOnly: share });
       const sources = new Map<string, string>();
       const failed = new Set<string>();
       for (const [index, job] of jobs.entries()) {
@@ -193,7 +193,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           next = { state: "checked", ready: Number(upload.metadata.ready_questions), review: Number(upload.metadata.review_questions),
             missingExplanations: coverage.missingExplanations,
             files: upload.files.length, bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
-            ...kept(notes.keptLocal.get(job.key), upload.localOnlyOriginals.length) };
+            ...kept(notes.keptLocal.get(job.key), upload.localOnlyOriginals.length, notes.unreadableOriginals.get(job.key), notes.heldForExplanations.get(job.key)) };
         } catch (cause) {
           if (abort.signal.aborted) break;
           failed.add(job.key);
@@ -226,7 +226,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     const byKey = new Map(courses.map(course => [course.catalogId, course]));
     setBusy("publishing"); setError(""); setResults({});
     try {
-      const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
+      const { jobs, notes } = publicationJobs(current.read, current.inventory, courses, { explainedOnly: share });
       const published = new Map<string, string>();
       let blocked = false;
       for (let start = 0; start < jobs.length && !blocked && !abort.signal.aborted; start += BATCH_SIZE) {
@@ -245,7 +245,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
               published.set(outcome.receipt.collectionId, outcome.key);
               next = { state: "published", ready: outcome.receipt.readyQuestions, files: outcome.receipt.verifiedFiles,
                 missingExplanations: outcome.receipt.missingExplanations,
-                ...kept(notes.keptLocal.get(outcome.key), outcome.receipt.localOnlyOriginals.length) };
+                ...kept(notes.keptLocal.get(outcome.key), outcome.receipt.localOnlyOriginals.length, notes.unreadableOriginals.get(outcome.key), notes.heldForExplanations.get(outcome.key)) };
             } else if (outcome.state === "superseded") {
               next = { state: "failed", during: "publish", message: "A newer version of this course is already active in your account. Nothing was replaced." };
             } else if (outcome.state === "cancelled") next = { state: "stopped" };
@@ -455,14 +455,23 @@ function ConfirmTerm({ course, label: name, onConfirm }: { course?: PlannedCours
   </div>;
 }
 
-function kept(keptLocal: number | undefined, overLimit: number): KeptFiles {
-  return { ...(keptLocal ? { keptLocal } : {}), ...(overLimit ? { overLimit } : {}) };
+function explanationNote(ready: number, missing: number, consequence: string) {
+  if (missing > 0) return ` ${plural(missing, "ready question")} without an explanation${consequence}`;
+  return ready > 0 ? " Every ready question has an explanation." : "";
 }
 
-function keptNote({ keptLocal, overLimit }: KeptFiles, future: boolean) {
+function kept(keptLocal: number | undefined, overLimit: number, unreadable?: number, held?: KeptFiles["held"]): KeptFiles {
+  return { ...(keptLocal ? { keptLocal } : {}), ...(overLimit ? { overLimit } : {}), ...(unreadable ? { unreadable } : {}),
+    ...(held?.sets ? { held } : {}) };
+}
+
+function keptNote({ keptLocal, overLimit, unreadable, held }: KeptFiles, future: boolean) {
   const stay = (count: number) => future ? "will stay" : count === 1 ? "stays" : "stay";
+  const left = (count: number) => future ? "will be" : count === 1 ? "was" : "were";
   return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device because the file type or course size limit prevents upload.` : ""}${
-    overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${stay(overLimit)} on this device.` : ""}`;
+    overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${stay(overLimit)} on this device.` : ""}${
+    unreadable ? ` ${plural(unreadable, "source file")} the library lists could not be read from this folder and ${left(unreadable)} left out; questions prepared from ${unreadable === 1 ? "it" : "them"} still publish.` : ""}${
+    held ? ` ${plural(held.sets, "question set")} with ${plural(held.readyQuestions, "ready question")} that ${held.readyQuestions === 1 ? "has" : "have"} no explanation ${stay(held.sets)} on this device, because approval needs an explanation for every ready question.` : ""}`;
 }
 
 function CourseResult({ result }: { result: CourseState }) {
@@ -471,14 +480,14 @@ function CourseResult({ result }: { result: CourseState }) {
   if (result.state === "checked") return <p className="academic-publisher-result">
     <Tag>Ready to publish</Tag>
     {" "}{plural(result.ready, "ready question")}{result.review ? `, ${result.review} awaiting review,` : ""} and {plural(result.files, "file")} checked ({fileSize(result.bytes)}).
-    {` ${plural(result.missingExplanations, "ready question")} without an explanation; these cannot be approved for the official catalog.`}
+    {explanationNote(result.ready, result.missingExplanations, "; these cannot be approved for the official catalog.")}
     {keptNote(result, true)}
   </p>;
   return <p className="academic-publisher-result">
     <Tag tone="green">Published</Tag>
     {result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
     {" "}{plural(result.ready, "ready question")} and {plural(result.files, "file")} verified.
-    {` ${plural(result.missingExplanations, "ready question")} without an explanation in the stored revision.`}
+    {explanationNote(result.ready, result.missingExplanations, " in the stored revision.")}
     {keptNote(result, false)}
     {result.sharingError ? ` ${result.sharingError}` : ""}
   </p>;

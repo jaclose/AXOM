@@ -204,6 +204,40 @@ describe("publishing a prepared library", () => {
     expect(mocks.batch).not.toHaveBeenCalled();
   });
 
+  it("holds back a set without explanations from review, says so, and publishes it privately when sharing is off", async () => {
+    const goerBank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    const original = new TextEncoder().encode("%PDF-1.4 synthetic goer-unexplained");
+    const checksum = (await sha256(original)).slice(7);
+    fixture.files.set(`sources/${checksum}.pdf`, original);
+    fixture.files.set(`banks/${checksum}/bank.json`, new TextEncoder().encode(JSON.stringify(bank("goer-unexplained", "GOER", 5, checksum, 2, false))));
+    fixture.catalog.sources.push({ id: `source-${checksum}`, name: "goer-unexplained.pdf", sourcePath: "GOER/goer-unexplained.pdf", checksum,
+      module: "GOER", status: "prepared", reason: "Validated package", bankFile: `banks/${checksum}/bank.json`,
+      originalFile: `sources/${checksum}.pdf`, ready: 2, review: 0 });
+    // The first set's original was not copied into the chosen folder.
+    fixture.files.delete(goerBank.originalFile!);
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    fireEvent.click(screen.getByRole("button", { name: /Check 2 courses/ }));
+    let goer = screen.getByText("GOER").closest("article")!;
+    expect(await within(goer).findByText("Ready to publish")).toBeTruthy();
+    expect(within(goer).getByText(/^1 ready question and/)).toBeTruthy();
+    expect(within(goer).getByText(/1 question set with 2 ready questions that have no explanation will stay on this device, because approval needs an explanation for every ready question/)).toBeTruthy();
+    expect(within(goer).getByText(/1 source file the library lists could not be read from this folder and will be left out/)).toBeTruthy();
+
+    // Kept private, nothing waits on review, so every set is published.
+    const prepared: AcademicUpload[] = [];
+    mocks.batch.mockImplementation(simulatedBatch(prepared));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Submit for academic review to share/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
+    expect(await screen.findByText("2 courses published and verified.")).toBeTruthy();
+    expect(prepared.find(upload => upload.catalogId === "academic-library-t5-goer")?.metadata.ready_questions).toBe(3);
+    goer = screen.getByText("GOER").closest("article")!;
+    expect(within(goer).queryByText(/stays? on this device, because approval/)).toBeNull();
+    expect(mocks.share).not.toHaveBeenCalled();
+  });
+
   it("publishes a library of more than 100 courses in runs of 100", async () => {
     const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
     const files = new Map<string, Uint8Array>();

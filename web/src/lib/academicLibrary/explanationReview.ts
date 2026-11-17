@@ -49,7 +49,7 @@ const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().deco
 
 async function inspectBanks(
   read: LibraryReader, files: readonly { path: string; byte_size: number; sha256: string }[], expectedReady: number,
-  assertCurrent?: () => Promise<void>,
+  assertCurrent?: () => Promise<void>, onSource?: (sourceId: string, coverage: ExplanationCoverage) => void,
 ): Promise<ExplanationCoverage> {
   const byPath = new Map(files.map(file => [file.path, file]));
   const catalog = readCatalog(decode(await read("catalog.json")));
@@ -87,6 +87,7 @@ async function inspectBanks(
     if (assessment.counts.ready !== source.ready || held !== source.review)
       throw new Error("The stored question statuses differ from the reviewed source counts.");
     const coverage = countReadyExplanations(bank.pkg.questions, assessment);
+    onSource?.(source.id, coverage);
     readyQuestions += coverage.readyQuestions;
     explainedReadyQuestions += coverage.explainedReadyQuestions;
   }
@@ -94,14 +95,27 @@ async function inspectBanks(
   return { readyQuestions, explainedReadyQuestions, missingExplanations: readyQuestions - explainedReadyQuestions };
 }
 
-/** Upload-free local preview; never put this receipt inside strict upload metadata. */
-export function inspectPreparedUploadExplanations(upload: AcademicUpload): Promise<ExplanationCoverage> {
+function preparedUploadReader(upload: AcademicUpload): LibraryReader {
   const files = new Map(upload.files.map(file => [file.path, file]));
-  return inspectBanks(async path => {
+  return async path => {
     const file = files.get(path);
     if (!file) throw new Error("The prepared course is missing a required bank.");
     return file.bytes;
-  }, upload.files, Number(upload.metadata.ready_questions));
+  };
+}
+
+/** Upload-free local preview; never put this receipt inside strict upload metadata. */
+export function inspectPreparedUploadExplanations(upload: AcademicUpload): Promise<ExplanationCoverage> {
+  return inspectBanks(preparedUploadReader(upload), upload.files, Number(upload.metadata.ready_questions));
+}
+
+/** The same local observation for each question set, by source id, so a course
+ * can leave out the sets that cannot be approved yet. Upload-free. */
+export async function inspectPreparedUploadExplanationsBySource(upload: AcademicUpload): Promise<Map<string, ExplanationCoverage>> {
+  const bySource = new Map<string, ExplanationCoverage>();
+  await inspectBanks(preparedUploadReader(upload), upload.files, Number(upload.metadata.ready_questions), undefined,
+    (sourceId, coverage) => bySource.set(sourceId, coverage));
+  return bySource;
 }
 
 /** Reviewer-only authenticated Storage readback of the exact current revision.

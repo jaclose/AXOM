@@ -7,7 +7,8 @@ const text = (value: string) => new TextEncoder().encode(value);
 const json = (value: unknown) => text(JSON.stringify(value));
 const hex = async (bytes: Uint8Array) => (await sha256(bytes)).slice(7);
 
-export function bank(id: string, module: string, term: number, sourceSha: string, questions = 1): PreparedBank {
+/** `explained` gives every question an invented rationale, as a shareable set has. */
+export function bank(id: string, module: string, term: number, sourceSha: string, questions = 1, explained = true): PreparedBank {
   const unfiled = module === "Unfiled" && term === 0;
   return {
     pkg: {
@@ -22,6 +23,7 @@ export function bank(id: string, module: string, term: number, sourceSha: string
           { id: "b", label: "B", blocks: [{ type: "text" as const, text: "Second" }] },
         ],
         correctAnswer: { labels: ["A"], evidence: "printed-key" as const },
+        ...(explained ? { explanation: [{ type: "text" as const, text: `Synthetic rationale: First is the invented key for item ${index + 1}.` }] } : {}),
         assets: [], provenance: { method: "authored" as const, sourceChecksum: `sha256:${sourceSha}` },
       })),
     },
