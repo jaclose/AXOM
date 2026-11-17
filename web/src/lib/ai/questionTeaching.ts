@@ -60,7 +60,7 @@ const EXPLICIT_EXHIBIT_REFERENCE = new RegExp([
   // "slide 6" without a retained attachment. A key alone cannot establish
   // what the unseen image shows; hold AI drafting for manual source review.
   String.raw`\b${EXHIBIT_NOUN}\s*(?:no\.?\s*|#\s*)?(?:\d{1,4}[a-z]?|[a-z]\d{1,4}[a-z]?)\b`,
-  String.raw`\b${LABELED_EXHIBIT_NOUN}\s*(?:no\.?\s*|#\s*)?(?:[a-z]|[ivxlcdm]{2,6})\b`,
+  String.raw`\b${LABELED_EXHIBIT_NOUN}\s*(?:no\.?\s*|#\s*)?(?:[a-z]|[ivxlcdm]{2,6})\b(?=\s*(?:[,:;.!?)]|$)|\s+(?:shows?|depicts?|demonstrates?|illustrates?|reveals?|contains?|displays?|indicates?|is|has|above|below)\b)`,
   String.raw`\b(?:marked|indicated|labelled|labeled|pointed\s+to)\s+by\s+(?:(?:an?|the)\s+)?(?:arrow(?:head)?|asterisk)\b`,
   String.raw`\b${EXHIBIT_NOUN}\s+(?:above|below|attached|provided|shown|pictured)\b`,
   String.raw`\b(?:shown|depicted|pictured|displayed|illustrated)\s+(?:in|on)\s+(?:(?:the|this|an?|following|attached|provided)\s+){1,3}${EXHIBIT_NOUN}\b`,
