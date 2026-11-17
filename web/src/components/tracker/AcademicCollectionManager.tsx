@@ -25,19 +25,54 @@ const plural = (count: number, one: string, many = `${one}s`) => `${count} ${cou
 const COMMUNITY_PAGE_SIZE = 24;
 const MAX_COMMUNITY_PAGES = 200;
 
-async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSignal): Promise<Set<string>> {
+async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSignal,
+  assertCurrent: () => void): Promise<Set<string>> {
   const candidates = new Map(courses.filter(course => course.review_status === "pending")
     .map(course => [course.id, course.current_revision_id]));
   const pending = new Set<string>();
   if (!candidates.size) return pending;
+  const changed = () => new Error("The community upload list changed while loading. Refresh before sharing or approving courses.");
+  const assertActive = () => {
+    assertCurrent();
+    if (signal.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
+  };
+  type Row = { id: string; current_revision_id: string; submitted_at: string };
+  const pages: Array<{ cursor?: CommunityCursor; rows: Row[] }> = [];
+  const seen = new Set<string>();
   let after: CommunityCursor | undefined;
   for (let page = 0; page < MAX_COMMUNITY_PAGES; page++) {
-    if (signal.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
+    assertActive();
     const uploads = await listCommunityUploads("", "", after);
+    assertActive();
+    if (!Array.isArray(uploads) || uploads.length > COMMUNITY_PAGE_SIZE
+      || uploads.some(upload => !upload || typeof upload.id !== "string"
+        || typeof upload.current_revision_id !== "string" || typeof upload.submitted_at !== "string"
+        || seen.has(upload.id))
+      || new Set(uploads.map(upload => upload.id)).size !== uploads.length) throw changed();
+    // Snapshot scalar identity, not mutable RPC row references, before replay.
+    pages.push({ cursor: after, rows: uploads.map(({ id, current_revision_id, submitted_at }) =>
+      ({ id, current_revision_id, submitted_at })) });
     for (const upload of uploads) {
+      seen.add(upload.id);
       if (candidates.get(upload.id) === upload.current_revision_id) pending.add(upload.id);
     }
-    if (uploads.length < COMMUNITY_PAGE_SIZE || pending.size === candidates.size) return pending;
+    if (uploads.length < COMMUNITY_PAGE_SIZE || pending.size === candidates.size) {
+      // A moving noncursor submission can be skipped by otherwise-valid
+      // keyset pages. Fail closed rather than offering it to legacy approval.
+      // A quiescent replay is not a transactional snapshot/epoch contract.
+      if (pages.length > 1) {
+        for (const snapshot of pages) {
+          assertActive();
+          const replay = await listCommunityUploads("", "", snapshot.cursor);
+          assertActive();
+          if (!Array.isArray(replay) || replay.length !== snapshot.rows.length
+            || replay.some((upload, index) => upload.id !== snapshot.rows[index].id
+              || upload.current_revision_id !== snapshot.rows[index].current_revision_id
+              || upload.submitted_at !== snapshot.rows[index].submitted_at)) throw changed();
+        }
+      }
+      return pending;
+    }
     const last = uploads[uploads.length - 1];
     after = { submittedAt: last.submitted_at, id: last.id };
   }
@@ -102,16 +137,26 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
   async function load() {
     if (!accountId || busy) return;
     const abort = start("loading");
+    const scope = academicAccountScope(accountId);
     setFailures({});
     setAudits({});
     try {
       const owned = await listOwnedAcademicCourses(accountId, abort.signal);
-      const pending = await pendingCommunityIds(owned, abort.signal);
+      scope.assertCurrent();
+      const pending = await pendingCommunityIds(owned, abort.signal, scope.assertCurrent);
+      scope.assertCurrent();
       if (abort.signal.aborted) return;
       setLoaded({ accountId, courses: owned, communityIds: pending });
     } catch (cause) {
-      if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : "Your courses could not be loaded.");
-    } finally { finish(abort); }
+      if (!abort.signal.aborted) {
+        // A→B→A invalidates the old read even if the original ID returns.
+        // Do not show the previous account's error in the new account.
+        try {
+          scope.assertCurrent();
+          setError(cause instanceof Error ? cause.message : "Your courses could not be loaded.");
+        } catch { /* Superseded account; discard this old result. */ }
+      }
+    } finally { scope.dispose(); finish(abort); }
   }
 
   async function checkExplanations() {
