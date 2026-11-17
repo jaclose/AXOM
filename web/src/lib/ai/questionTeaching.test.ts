@@ -392,6 +392,17 @@ describe("review-gated explanation drafting", () => {
       { key: "B", text: "A non-specific normal tissue description" },
       { key: "C", text: "Unrelated textual differential" },
     ] }],
+    ["a Markdown image in a stem without its source asset", { stem: "Which layer? ![arterial micrograph](https://example.edu/histology.png)" }],
+    ["a Markdown reference image in a choice", { options: [
+      { key: "A", text: "Media ![unavailable specimen][gross-plate]" },
+      { key: "B", text: "Tunica intima" },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["an HTML img source not represented as an attachment", { stem: 'Identify the layer: <img src="https://example.edu/micrograph.jpg">' }],
+    ["an HTML picture without its clinical source", { stem: "<picture><source srcset='https://example.edu/slide.png'></picture>" }],
+    ["an inline SVG image in a text import", { stem: '<svg viewBox="0 0 12 12"><path d="M0 0"/></svg> Which layer?' }],
+    ["a figure named only in the AI topic", { topic: "Figure S2: vascular lesion" }],
+    ["a Markdown image named only in the AI topic", { topic: "Microscopy ![unavailable image](plate.png)" }],
     ["an explicit CT exhibit", { stem: "See the CT scan to identify the vascular abnormality." }],
     ["a missing exhibit mentioned by a choice", { options: [
       { key: "A", text: "Tunica media" },
@@ -420,6 +431,8 @@ describe("review-gated explanation drafting", () => {
     "An asterisk denotes statistical significance in a textual report.",
     "Highlight the cellular mechanism of vascular remodeling.",
     "Boxed seasonal trends in a survey are not relevant to this patient.",
+    "The clinical note includes a text hyperlink [vessel anatomy](https://example.edu/arteries).",
+    "The words <em>tunica media</em> are merely formatted text.",
   ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
   });
