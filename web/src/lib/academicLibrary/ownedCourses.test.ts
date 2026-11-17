@@ -4,18 +4,20 @@ import type { AcademicCourse } from "./client";
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   detail: vi.fn(),
+  review: vi.fn(),
   check: vi.fn(),
   dispose: vi.fn(),
 }));
 vi.mock("./client", () => ({
   listAcademicCourses: mocks.list,
   getAcademicCourse: mocks.detail,
+  reviewAcademicCourse: mocks.review,
 }));
 vi.mock("./accountScope", () => ({
   academicAccountScope: () => ({ assertCurrent: mocks.check, dispose: mocks.dispose }),
 }));
 
-import { listOwnedAcademicCourses } from "./ownedCourses";
+import { approveAcademicCourses, listOwnedAcademicCourses } from "./ownedCourses";
 
 const uuid = (number: number) => `${number.toString(16).padStart(8, "0")}-0000-4000-8000-000000000001`;
 const course = (number: number, owned = true): AcademicCourse => ({
@@ -35,6 +37,7 @@ const firstPage = () => Array.from({ length: 24 }, (_, index) => course(index + 
 beforeEach(() => {
   mocks.list.mockReset();
   mocks.detail.mockReset();
+  mocks.review.mockReset();
   mocks.check.mockReset();
   mocks.dispose.mockReset();
 });
@@ -130,6 +133,57 @@ describe("owned academic collection pagination integrity", () => {
     mocks.detail.mockResolvedValue(first.at(-1));
     await expect(listOwnedAcademicCourses("owner")).rejects.toThrow(/catalog changed/i);
     expect(mocks.dispose).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("does not report a reviewer approval when Stop occurs during the in-flight RPC", async () => {
+    const controller = new AbortController();
+    const onProgress = vi.fn();
+    mocks.review.mockImplementationOnce(async () => { controller.abort(); });
+    await expect(approveAcademicCourses([uuid(1), uuid(2)], "owner",
+      { signal: controller.signal, onProgress })).rejects.toMatchObject({ name: "AbortError" });
+    expect(mocks.review).toHaveBeenCalledTimes(1);
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("does not emit a stale approval if the account changes while the RPC settles", async () => {
+    const onProgress = vi.fn();
+    const assertCurrent = vi.fn().mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => { throw new Error("Account changed"); });
+    mocks.review.mockResolvedValueOnce(undefined);
+    await expect(approveAcademicCourses([uuid(1), uuid(2)], "owner",
+      { assertCurrent, onProgress })).rejects.toThrow(/Account changed/i);
+    expect(mocks.review).toHaveBeenCalledTimes(1);
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("does not record a settled reviewer rejection for a now-different account", async () => {
+    const onProgress = vi.fn();
+    const assertCurrent = vi.fn().mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => { throw new Error("Account changed"); });
+    mocks.review.mockRejectedValueOnce(new Error("Permission denied"));
+    await expect(approveAcademicCourses([uuid(1)], "owner",
+      { assertCurrent, onProgress })).rejects.toThrow(/Account changed/i);
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("retains normal per-course failures and exact progress when the account remains active", async () => {
+    const onProgress = vi.fn();
+    mocks.review.mockRejectedValueOnce(new Error("Needs source review"))
+      .mockResolvedValueOnce(undefined);
+    const result = await approveAcademicCourses([uuid(1), uuid(2)], "owner", { onProgress });
+    expect(result).toEqual([
+      { collectionId: uuid(1), approved: false, error: "Needs source review" },
+      { collectionId: uuid(2), approved: true },
+    ]);
+    expect(onProgress.mock.calls).toEqual([[1], [2]]);
+  });
+
+  it("skips reviewer RPCs when cancelled before the first course", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    expect(await approveAcademicCourses([uuid(1)], "owner", { signal: controller.signal })).toEqual([]);
+    expect(mocks.review).not.toHaveBeenCalled();
   });
 
 });
