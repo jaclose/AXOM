@@ -65,6 +65,63 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+describe("Activity History visible aggregate integrity", () => {
+  it("does not show false finite totals when exact saved integer contributions are rounded", () => {
+    const original = fixture.logs;
+    const values = [1e16, 5, -1e16];
+    fixture.logs = values.map((value, index) => ({
+      ...original[0], id: `preserved-rounded-${index}`,
+      ts: `2026-11-13T13:0${index}:00Z`,
+      minutes: value, cards: value, note: `preserved-${index}`,
+    }));
+    const saved = fixture.logs.map((log) => ({ ...log }));
+    try {
+      render(<ActivityHistoryPage />);
+      expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+      expect(screen.getByText("Events").parentElement?.textContent).toContain("3");
+      expect(screen.getByText(/preserved-1/)).toBeTruthy();
+      expect(screen.queryByText("4", { exact: true })).toBeNull();
+      expect(fixture.logs).toEqual(saved);
+    } finally {
+      fixture.logs = original;
+    }
+  });
+
+  it("preserves truthful exact integer totals and readable filtered values", () => {
+    const original = fixture.logs;
+    fixture.logs = [
+      { ...original[0], id: "exact-a", minutes: 1e16, cards: 1 },
+      { ...original[1], id: "exact-b", minutes: 4, cards: 2 },
+      { ...original[0], id: "exact-c", minutes: -1e16, cards: 3 },
+    ];
+    try {
+      render(<ActivityHistoryPage />);
+      expect(screen.queryByText("Unavailable")).toBeNull();
+      expect(screen.getByText("Minutes").parentElement?.textContent).toContain("4");
+      expect(screen.getByText("Cards").parentElement?.textContent).toContain("6");
+      fireEvent.change(screen.getByLabelText("Activity type"), { target: { value: "type:Reading" } });
+      expect(screen.getByText("Minutes").parentElement?.textContent).toContain("4");
+      expect(screen.getByText("Cards").parentElement?.textContent).toContain("2");
+    } finally {
+      fixture.logs = original;
+    }
+  });
+
+  it("labels nonfinite source totals unavailable without changing source logs", () => {
+    const original = fixture.logs;
+    fixture.logs = [{ ...original[0], minutes: Number.NaN, cards: Number.POSITIVE_INFINITY }];
+    try {
+      render(<ActivityHistoryPage />);
+      expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+      expect(Number.isNaN(fixture.logs[0].minutes)).toBe(true);
+      expect(fixture.logs[0].cards).toBe(Number.POSITIVE_INFINITY);
+      expect(screen.getByText("Events").parentElement?.textContent).toContain("1");
+    } finally {
+      fixture.logs = original;
+    }
+  });
+});
+
 describe("Activity History workbook download feedback", () => {
   it("warns about Excel cell limits without revealing the overlong note or recommending identical retry", async () => {
     const privateNote = "private-data:" + "x".repeat(32768);
