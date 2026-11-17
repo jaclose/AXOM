@@ -162,9 +162,12 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     setFailures({});
     setAudits({});
     try {
-      const owned = await listOwnedAcademicCourses(accountId, abort.signal);
+      // Catalog RPCs may ignore AbortSignal; release the loading UI on Stop
+      // without allowing a late read to restore an obsolete eligibility snapshot.
+      const owned = await readUntilStopped(listOwnedAcademicCourses(accountId, abort.signal), abort.signal);
       scope.assertCurrent();
-      const pending = await pendingCommunityIds(owned, abort.signal, scope.assertCurrent);
+      const pending = await readUntilStopped(
+        pendingCommunityIds(owned, abort.signal, scope.assertCurrent), abort.signal);
       scope.assertCurrent();
       if (abort.signal.aborted) return;
       setLoaded({ accountId, courses: owned, communityIds: pending });
@@ -291,7 +294,7 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
       {reviewer && courses && awaiting.length > 0 && <GButton disabled={Boolean(busy)} onClick={() => void checkExplanations()}>
         {busy === "checking" ? "Checking explanations…" : "Check stored explanations"}
       </GButton>}
-      {(busy === "checking" || busy === "sharing" || busy === "approving") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
+      {(busy === "loading" || busy === "checking" || busy === "sharing" || busy === "approving") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
     </div>
 
     {courses && !courses.length && <p>You have not published any courses yet. Publish a prepared library above, then come back here.</p>}
