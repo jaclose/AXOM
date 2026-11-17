@@ -120,6 +120,21 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     return () => { active = false; };
   }, [accountId]);
   useEffect(() => () => controller.current?.abort(), []);
+  // An A → B → A transition invalidates every previous catalog, consent and
+  // write-status observation. A pending server write might still commit under
+  // its original account, but must not lock or repaint the new account's UI.
+  useEffect(() => {
+    controller.current?.abort();
+    controller.current = undefined;
+    setLoaded(undefined);
+    setBusy(undefined);
+    setRights(false);
+    setChecked(false);
+    setProgress("");
+    setError("");
+    setFailures({});
+    setAudits({});
+  }, [accountId]);
 
   const courses = loaded && loaded.accountId === accountId ? loaded.courses : undefined;
   const communityIds = loaded && loaded.accountId === accountId ? loaded.communityIds : new Set<string>();
@@ -146,8 +161,10 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     return abort;
   }
   function finish(abort: AbortController) {
+    // A prior account's late completion may not unlock a newer operation.
+    if (controller.current !== abort) return;
+    controller.current = undefined;
     setBusy(undefined);
-    if (controller.current === abort) controller.current = undefined;
   }
 
   async function load() {
@@ -238,6 +255,8 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
         if (outcome.shared) changes.set(id, { visibility: "shared", review_status: "pending" as const });
         if (outcome.error) failed[id] = outcome.error;
       }
+      if (controller.current !== abort) return;
+      try { scope.assertCurrent(); } catch { return; }
       update(changes);
       if (changes.size) setChecked(false);
       setFailures(failed);
@@ -246,6 +265,8 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
         : `${plural(shared, "course")} shared for review. Other accounts can find ${shared === 1 ? "it" : "them"} only after academic approval.`);
       if (shared) onChanged();
     } catch (cause) {
+      if (controller.current !== abort) return;
+      try { scope.assertCurrent(); } catch { return; }
       update(changes);
       setError(cause instanceof Error ? cause.message : "Sharing could not finish. Courses already shared stay shared.");
     } finally { scope.dispose(); finish(abort); }
@@ -261,8 +282,13 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
       const outcomes = await approveAcademicCourses(ids, accountId, {
         receipts: receipts(), rationaleReviewed: checked,
         assertCurrent: scope.assertCurrent, signal: abort.signal,
-        onProgress: done => { if (done < ids.length) setProgress(`Approving ${label(ids[done])} · ${done + 1} of ${ids.length}`); },
+        onProgress: done => {
+          if (controller.current === abort && !abort.signal.aborted && done < ids.length)
+            setProgress(`Approving ${label(ids[done])} · ${done + 1} of ${ids.length}`);
+        },
       });
+      if (controller.current !== abort) return;
+      try { scope.assertCurrent(); } catch { return; }
       const approved = outcomes.filter(outcome => outcome.approved);
       update(new Map(approved.map(outcome => [outcome.collectionId, { review_status: "approved" as const }])));
       setFailures(Object.fromEntries(outcomes.flatMap(outcome => outcome.error ? [[outcome.collectionId, outcome.error]] : [])));
@@ -270,6 +296,8 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
         : `${plural(approved.length, "course")} approved. Every signed-in AXOM account can now find ${approved.length === 1 ? "it" : "them"}.`);
       if (approved.length) onChanged();
     } catch (cause) {
+      if (controller.current !== abort) return;
+      try { scope.assertCurrent(); } catch { return; }
       setError(cause instanceof Error ? cause.message : "Approval could not finish. Courses already approved stay approved.");
     } finally { scope.dispose(); finish(abort); }
   }
