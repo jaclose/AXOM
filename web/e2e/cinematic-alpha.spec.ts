@@ -31,6 +31,9 @@ test("approved film occupies the full homepage without a marketing overlay", asy
     await page.setViewportSize({ width, height });
     await expect(page.getByRole("link", { name: "Open AXOM", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Sign In", exact: true })).toBeVisible();
+    // A phone keeps two links beside the mark; Sign In opens the same form with its Create tab.
+    if (width > 600) await expect(page.getByRole("link", { name: "Create Account", exact: true })).toBeVisible();
+    else await expect(page.getByRole("link", { name: "Create Account", exact: true })).toBeHidden();
     await expect(page.getByRole("button", { name: "Download for Desktop" })).toBeVisible();
     const bounds = await page.locator(".landing-film").boundingBox();
     expect(bounds?.width).toBe(width);

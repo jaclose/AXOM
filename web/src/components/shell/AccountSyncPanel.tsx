@@ -42,7 +42,9 @@ const PROTECTION_HEADING: Record<ProtectionStatus, string> = {
  * and conflict. Local work is always legitimate; nothing uploads or replaces
  * without a deliberate choice.
  */
-export function AccountSyncPanel({ onOpenBackup, onOpenCommunity }: { onOpenBackup?: () => void; onOpenCommunity?: () => void }) {
+export function AccountSyncPanel({ onOpenBackup, onOpenCommunity, initialAuthMode }: {
+  onOpenBackup?: () => void; onOpenCommunity?: () => void; initialAuthMode?: "sign-in" | "create";
+}) {
   const account = useAccount();
   const progress = useSyncProgress(state => state.current?.accountId === account.user?.id ? state.current : null);
   const protectionActions = useRef<HTMLDivElement>(null);
@@ -58,7 +60,7 @@ export function AccountSyncPanel({ onOpenBackup, onOpenCommunity }: { onOpenBack
         <div className="account-stage-work" ref={protectionActions}>
           {account.phase === "unconfigured" && <UnconfiguredCard onOpenBackup={onOpenBackup} />}
           {account.phase === "loading" && <div className="account-loading" role="status">Checking your account…</div>}
-          {account.phase === "signed-out" && <AuthCard />}
+          {account.phase === "signed-out" && <AuthCard initialMode={initialAuthMode} />}
           {account.phase === "recovering-password" && <PasswordRecoveryCard />}
           {account.phase === "signed-in" && account.user && <ProtectionCard onOpenBackup={onOpenBackup} />}
         </div>
@@ -159,10 +161,10 @@ function UnconfiguredCard({ onOpenBackup }: { onOpenBackup?: () => void }) {
   );
 }
 
-function AuthCard() {
+function AuthCard({ initialMode = "sign-in" }: { initialMode?: "sign-in" | "create" }) {
   const { busy, signIn, signUp, sendCode, verifyCode, requestPasswordReset, pendingCodeEmail, pendingCodeKind, clearNotice } = useAccount();
   const profileName = useStore((state) => state.profile.name);
-  const [mode, setMode] = useState<AuthMode>("sign-in");
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState(profileName ?? "");

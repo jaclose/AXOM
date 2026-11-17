@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldOpenAccount, shouldOpenWorkspace } from "./entry";
+import { ACCOUNT_CREATE_ENTRY, ACCOUNT_ENTRY, accountEntryMode, shouldOpenAccount, shouldOpenWorkspace } from "./entry";
 
 describe("public entry boundary", () => {
   it("keeps public visitors out of workspace hydration", () => {
@@ -18,5 +18,14 @@ describe("public entry boundary", () => {
       expect(shouldOpenAccount(new URL(path, "https://axom.info"))).toBe(true);
     }
     expect(shouldOpenAccount(new URL("https://axom.info/?app=1#questions"))).toBe(false);
+  });
+  it("opens the account page on the create form only when asked", () => {
+    const create = new URL(ACCOUNT_CREATE_ENTRY, "https://axom.info");
+    expect(shouldOpenWorkspace(create)).toBe(true);
+    expect(shouldOpenAccount(create)).toBe(true);
+    expect(accountEntryMode(create)).toBe("create");
+    expect(accountEntryMode(new URL(ACCOUNT_ENTRY, "https://axom.info"))).toBe("sign-in");
+    expect(accountEntryMode(new URL("/?code=auth-code", "https://axom.info"))).toBe("sign-in");
+    expect(shouldOpenAccount(new URL("/?app=1&account=other", "https://axom.info"))).toBe(false);
   });
 });

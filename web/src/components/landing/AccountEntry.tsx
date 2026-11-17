@@ -1,19 +1,22 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { AccountSyncPanel } from "../shell/AccountSyncPanel";
 import { markAppReady } from "../../lib/presentation";
 import { AxomBrandLockup } from "../ui/BrandMark";
-import { BROWSER_ENTRY } from "../../lib/landing/entry";
+import { BROWSER_ENTRY, accountEntryMode } from "../../lib/landing/entry";
 import "../../styles/landing-account.css";
 
 /** Hydrated by the canonical bootstrap before mounting the existing account controls. */
 export default function AccountEntry() {
   useEffect(() => markAppReady(), []);
+  const [mode] = useState(() => accountEntryMode(new URL(window.location.href)));
   return <main className="landing-account">
     <header><a href="/" aria-label="AXOM home"><AxomBrandLockup size="md" /></a><a href={BROWSER_ENTRY}>Continue to AXOM <ArrowUpRight size={16} /></a></header>
     <section aria-labelledby="account-entry-title"><a className="landing-account-back" href="/"><ArrowLeft size={16} /> Back to home</a>
-      <h1 id="account-entry-title">Your AXOM account</h1><p>Sign in to your account, or continue with your local workspace.</p>
-      <AccountSyncPanel />
+      {mode === "create"
+        ? <><h1 id="account-entry-title">Create your AXOM account</h1><p>An account keeps a protected copy of your work and opens the shared course library. Your local workspace stays on this device.</p></>
+        : <><h1 id="account-entry-title">Your AXOM account</h1><p>Sign in, create an account, or continue with your local workspace.</p></>}
+      <AccountSyncPanel initialAuthMode={mode} />
     </section>
   </main>;
 }

@@ -26,7 +26,8 @@ html[data-landing="true"] { background: #0d0d0e; }
 .landing-page--cinematic .landing-brand .axom-wordmark { width: 96px; }
 .landing-page--cinematic .landing-header nav { gap: 12px; }
 .landing-page--cinematic .landing-header nav a { display: inline-flex; justify-content: center; gap: 8px; min-height: 44px; color: var(--landing-paper); padding: 10px 16px; border-radius: 10px; }
-.landing-page--cinematic .landing-header nav .landing-signin { border-color: transparent; background: #0d0d0e99; }
+.landing-page--cinematic .landing-header nav .landing-signin,
+.landing-page--cinematic .landing-header nav .landing-create { border-color: transparent; background: #0d0d0e99; }
 .landing-page--cinematic .landing-header nav .landing-open { border: 1px solid var(--landing-line); background: #0d0d0ed9; }
 .landing-page--cinematic .landing-header nav a:hover { background: #26231e; border-color: var(--landing-focus); }
 .landing-page--cinematic .landing-footer { position: absolute; z-index: 2; left: max(24px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); margin: 0; min-height: 44px; }
@@ -43,6 +44,8 @@ html[data-landing="true"] { background: #0d0d0e; }
   .landing-page--cinematic .landing-brand .axom-wordmark { width: 76px; }
   .landing-page--cinematic .landing-header nav { gap: 4px; }
   .landing-page--cinematic .landing-header nav a { padding: 9px 11px; font-size: 11px; }
+  /* Three links do not fit beside the mark on a phone; Sign In opens the same form with a Create tab. */
+  .landing-page--cinematic .landing-header nav .landing-create { display: none; }
   .landing-page--cinematic .landing-footer { left: 16px; right: 16px; bottom: max(10px, env(safe-area-inset-bottom)); justify-content: center; }
   .landing-film-controls { left: 16px; right: 16px; bottom: calc(62px + env(safe-area-inset-bottom)); justify-content: center; }
   .landing-film-notice { bottom: calc(118px + env(safe-area-inset-bottom)); font-size: 11px; }

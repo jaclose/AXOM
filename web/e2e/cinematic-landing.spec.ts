@@ -65,6 +65,11 @@ test("browser launch retains first-run setup and sign-in reuses the existing acc
   await expect(page.getByRole("heading", { name: "Your AXOM account" })).toBeVisible();
   await expect(page.locator(".account-center")).toBeVisible();
   await expect(page.getByText("Accounts aren’t available in this version")).toBeVisible();
+  await page.goto("/");
+  await page.getByRole("link", { name: "Create Account", exact: true }).click();
+  await expect(page).toHaveURL(/app=1&account=create/);
+  await expect(page.getByRole("heading", { name: "Create your AXOM account" })).toBeVisible();
+  await expect(page.locator(".account-center")).toBeVisible();
   await page.getByRole("link", { name: "Continue to AXOM" }).click();
   await expect(page.locator(".setup-root")).toBeVisible();
 });

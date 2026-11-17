@@ -74,6 +74,17 @@ describe("Account protection experience", () => {
     expect(screen.getByText(/local workspace stays here until you choose/)).toBeTruthy();
   });
 
+  it("opens on account creation when the learner came to create one", () => {
+    useAccount.setState({ phase: "signed-out", user: null, protection: "local-only" });
+    render(<AccountSyncPanel initialAuthMode="create" />);
+    expect(screen.getByRole("button", { name: "Create", pressed: true })).toBeTruthy();
+    expect(screen.getByText("Create an account")).toBeTruthy();
+    expect(screen.getByText("Name on your account")).toBeTruthy();
+    // The other methods stay one click away.
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.getByRole("button", { name: "Sign in", pressed: true })).toBeTruthy();
+  });
+
   it("offers private-by-default Community choices during account creation", async () => {
     const signUp = vi.fn(async () => true);
     useAccount.setState({ phase: "signed-out", user: null, busy: false, signUp });

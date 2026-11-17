@@ -6,9 +6,16 @@ export function shouldOpenWorkspace(url: URL, native = false, installed = false)
 
 export const BROWSER_ENTRY = "/?app=1";
 export const ACCOUNT_ENTRY = "/?app=1&account=1";
+/** The same account controls, opened on the form that creates an account. */
+export const ACCOUNT_CREATE_ENTRY = "/?app=1&account=create";
 
 export function shouldOpenAccount(url: URL): boolean {
   const fragment = new URLSearchParams(url.hash.slice(1));
-  return url.searchParams.get("account") === "1" || ["code", "token_hash", "error", "error_description"].some((key) => url.searchParams.has(key))
+  return ["1", "create"].includes(url.searchParams.get("account") ?? "") || ["code", "token_hash", "error", "error_description"].some((key) => url.searchParams.has(key))
     || fragment.has("access_token") || fragment.get("type") === "recovery";
+}
+
+/** Which form the account page opens on. Auth callbacks keep the default. */
+export function accountEntryMode(url: URL): "sign-in" | "create" {
+  return url.searchParams.get("account") === "create" ? "create" : "sign-in";
 }

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { ArrowUpRight, Download } from "lucide-react";
 import { AxomWordmark } from "../ui/BrandMark";
 import { ICON_SIZE } from "../../lib/iconSize";
-import { ACCOUNT_ENTRY, BROWSER_ENTRY } from "../../lib/landing/entry";
+import { ACCOUNT_CREATE_ENTRY, ACCOUNT_ENTRY, BROWSER_ENTRY } from "../../lib/landing/entry";
 import { LandingFilm } from "./LandingFilm";
 import { DownloadDialog } from "./DownloadDialog";
 import "../../styles/landing.css";
@@ -20,6 +20,7 @@ export default function LandingPage() {
       </a>
       <nav aria-label="Main navigation">
         <a className="landing-signin" href={ACCOUNT_ENTRY}>Sign In</a>
+        <a className="landing-create" href={ACCOUNT_CREATE_ENTRY}>Create Account</a>
         <a className="landing-open" href={BROWSER_ENTRY}>Open AXOM <ArrowUpRight size={ICON_SIZE.emphasis} aria-hidden="true" /></a>
       </nav>
     </header>
