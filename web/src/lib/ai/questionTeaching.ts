@@ -73,10 +73,19 @@ const EXPLICIT_EXHIBIT_REFERENCE = new RegExp([
   String.raw`\b(?:see|refer\s+to|examine)\s+(?:(?:the|this|an?|following|attached|provided)\s+){1,3}${EXHIBIT_NOUN}\b`,
 ].join("|"), "i");
 
+// Legacy Markdown/HTML can retain an exhibit reference as literal source text
+// even when the source asset record and attachment are missing. Do not hand
+// external image addresses or inline vector diagrams to an AI model as if it
+// could inspect them. Keep ordinary text hyperlinks eligible.
+const EMBEDDED_EXHIBIT_MARKUP = /!\[[^\]\r\n]*\]\s*(?:\(|\[)|<\s*(?:img|picture|svg)\b/i;
+
 function referencesUnavailableExhibit(question: QuestionRecord): boolean {
   return question.source === "image" || question.source === "screenshot"
-    || [question.stem, ...question.options.map(option => option.text)]
-      .some(value => EXPLICIT_EXHIBIT_REFERENCE.test(value));
+    // Topic also leaves the device in the AI prompt. An image-only topic cue
+    // must hold the draft just as a stem/choice exhibit cue does.
+    || [question.stem, question.topic, ...question.options.map(option => option.text)]
+      .some(value => typeof value === "string"
+        && (EXPLICIT_EXHIBIT_REFERENCE.test(value) || EMBEDDED_EXHIBIT_MARKUP.test(value)));
 }
 
 /**
