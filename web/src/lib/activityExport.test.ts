@@ -344,6 +344,34 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("refuses partial loss of integer study contributions before writing workbook", async () => {
+    // IEEE-754 can round 1e16 + 5 to 1e16 + 4: unlike fully absorbed
+    // increments, the accumulator changes while still losing one saved unit.
+    for (const field of ["minutes", "cards"] as const) {
+      for (const values of [[1e16, 5, -1e16], [-1e16, -5, 1e16]]) {
+        const logs = studyLogs(["Manual", "Manual", "Manual"]);
+        logs.forEach((log, index) => { log[field] = values[index]; });
+        const original = logs.map((log) => ({ ...log }));
+        let writerCalls = 0;
+        await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+          .rejects.toBeInstanceOf(ActivityExportNumericError);
+        expect(writerCalls).toBe(0);
+        expect(logs).toEqual(original);
+      }
+    }
+  });
+
+  it("still exports exactly represented large integer additions and ordinary fractions", async () => {
+    const logs = studyLogs(["Manual", "Manual", "Manual"]);
+    [1e16, 4, -1e16].forEach((value, index) => { logs[index].minutes = value; });
+    [0.1, 0.2, 0.3].forEach((value, index) => { logs[index].cards = value; });
+    const original = logs.map((log) => ({ ...log }));
+    const workbook = await captureWorkbook(logs);
+    expect(workbook.Sheets["Overview"]?.C2?.v).toBe(4);
+    expect(workbook.Sheets["Overview"]?.D2?.v).toBeCloseTo(0.6);
+    expect(logs).toEqual(original);
+  });
+
   it("accepts genuine zero increments even alongside large cancelling counts", async () => {
     const logs = studyLogs(["Manual", "Manual", "Manual"]);
     [1e16, 0, -1e16].forEach((value, index) => { logs[index].minutes = value; });
