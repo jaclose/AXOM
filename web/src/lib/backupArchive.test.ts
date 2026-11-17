@@ -6,7 +6,7 @@ import { sha256Hex } from "./checksum";
 import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { MAX_ZIP_BACKUP_BYTES, MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, assertRestorableZipEntryCounts, projectedZipSerializedOverhead, preflightRestorableZipCandidateBudget, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { MAX_ZIP_BACKUP_BYTES, MAX_ZIP_BACKUP_ENTRIES, assertRestorableZipBudget, assertRestorableZipEntryCounts, projectedZipSerializedOverhead, preflightRestorableZipCandidateBudget, backupOriginalDocuments, collectVerifiedMediaBackupPayloads, createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
@@ -1664,7 +1664,46 @@ describe("portable binary media backup", () => {
     expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
   });
 
-  it("rejects conflicting JSON source digests even when a duplicate has no fileType", async () => {
+  it.each(["json", "zip"] as const)(
+    "preserves a verified original when same-ID internal or untyped metadata has another valid digest in $format",
+    async format => {
+      const bytes = new Blob(["Authoritative external original bytes"], { type: "text/plain" });
+      const source: SourceDocument = {
+        id: "historical-mixed-source", title: "External original", fileName: "original.txt",
+        fileType: "text/plain", uploadedAt: "2026-11-17", rawText: "External source",
+        sizeBytes: bytes.size, checksum: await sha256Hex(await bytes.arrayBuffer()),
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      };
+      const internal = { ...source, fileType: "axom-private-bank-review", checksum: "b".repeat(64), sizeBytes: 999 };
+      const untyped = { ...source, fileType: undefined, checksum: "c".repeat(64) };
+      const emptyType = { ...source, fileType: "", checksum: "d".repeat(64) };
+      const documentRecords = [internal, untyped, emptyType, source] as SourceDocument[];
+      // Only a checksum-bound external original may claim the immutable bytes.
+      // Metadata records keep their own content and are not aliases to the bytes.
+      expect(backupOriginalDocuments(documentRecords)).toEqual([source]);
+      await saveSourceOriginal(source, bytes);
+      const payload = {
+        _app: "AXOM", _backupScope: "complete",
+        documents: [source], deferredContent: { documents: [internal, untyped, emptyType] },
+      };
+      const exported = format === "zip"
+        ? await createMediaBackupArchive(payload, [], documentRecords)
+        : null;
+      if (exported) {
+        expect(exported.originalCount).toBe(1);
+        expect(exported.missingOriginalIds).toEqual([]);
+      }
+      const file = format === "zip"
+        ? new File([exported!.blob], "historical-mixed-source.zip")
+        : new File([JSON.stringify(payload)], "historical-mixed-source.json");
+      const portable = await readPortableBackup(file);
+      expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+      expect(await (await readSourceOriginal(source.id, source.checksum))?.text())
+        .toBe("Authoritative external original bytes");
+    },
+  );
+
+  it("rejects conflicting JSON source digests between two eligible external originals", async () => {
     const source = {
       id: "json-no-type-source", fileType: "text/plain",
       checksum: "a".repeat(64), title: "Expected source",
@@ -1672,7 +1711,7 @@ describe("portable binary media backup", () => {
     const payload = {
       _app: "AXOM", _backupScope: "complete",
       documents: [source],
-      deferredContent: { documents: [{ ...source, fileType: undefined, checksum: "b".repeat(64) }] },
+      deferredContent: { documents: [{ ...source, fileType: "text/plain", checksum: "b".repeat(64) }] },
     };
     await expect(readPortableBackup(new File([JSON.stringify(payload)], "conflicting-no-type.json")))
       .rejects.toThrow(/conflicting source.document checksums/i);

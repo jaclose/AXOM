@@ -204,7 +204,7 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
   const seen = new Set<string>();
   return documents.filter(doc => {
     if (!doc || typeof doc.id !== "string" || !/^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "")
-      || typeof doc.fileType !== "string" || doc.fileType.startsWith("axom-")) return false;
+      || typeof doc.fileType !== "string" || doc.fileType.length === 0 || doc.fileType.startsWith("axom-")) return false;
     if (seen.has(doc.id)) return false;
     seen.add(doc.id);
     return true;
@@ -221,8 +221,13 @@ function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): v
     if (!record || typeof record !== "object") continue;
     const { id, checksum, fileType, sizeBytes } = record as Partial<SourceDocument>;
     if (typeof id !== "string" || typeof checksum !== "string") continue;
+    // An internal or untyped document is metadata, not an assertion about
+    // source-original bytes, even when it happens to carry a valid digest.
+    // Apply the same eligibility boundary as backupOriginalDocuments.
+    const externalType = typeof fileType === "string" && fileType.length > 0
+      && !fileType.startsWith("axom-") ? fileType.toLowerCase() : undefined;
+    if (!externalType) continue;
     const digest = checksum.replace(/^sha256:/, "");
-    // Historical unbound originals are still represented as metadata only.
     if (!/^[a-f0-9]{64}$/.test(digest)) continue;
     const prior = byId.get(id);
     if (prior !== undefined && prior.digest !== digest) {
@@ -231,8 +236,6 @@ function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): v
     // Only two eligible external-original records can conflict on their MIME
     // or declared size. Invalid/absent sizes are historical metadata gaps,
     // not proof that a single source's cached original is corrupt.
-    const externalType = typeof fileType === "string" && fileType.length > 0
-      && !fileType.startsWith("axom-") ? fileType.toLowerCase() : undefined;
     // SourceDocument.fileType permits either a MIME type or an extension.
     // Compare MIME against MIME only; "pdf" and "application/pdf" are not
     // conflicting evidence about the same immutable source bytes.
