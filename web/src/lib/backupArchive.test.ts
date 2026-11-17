@@ -2008,9 +2008,62 @@ describe("portable binary media backup", () => {
       const portable = await readPortableBackup(input);
       expect(portable.omissions).toEqual({
         missingBlobKeys: [],
-        missingOriginalIds: format === "zip" ? [source.id] : [],
+        // Neither JSON nor a ZIP with no original members has source bytes.
+        missingOriginalIds: [source.id],
       });
     },
   );
+
+  it.each(["complete", "saved-work"] as const)(
+    "discloses missing source-original bytes in historical $scope JSON even with duplicate aliases",
+    async scope => {
+      const root: SourceDocument = {
+        id: "r128-json-root-original", title: "Root original", fileName: "source.txt",
+        fileType: "text/plain", uploadedAt: "2026-11-17", rawText: "Root metadata",
+        sizeBytes: 19, checksum: "a".repeat(64),
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      };
+      // Historical deferred metadata omits fileType entirely. Missing bytes
+      // must still be disclosed, including if the JSON claims to be complete.
+      const deferred = {
+        ...root, id: "r128-json-deferred-original", title: "Deferred original",
+        checksum: "b".repeat(64), fileType: undefined,
+      } as unknown as SourceDocument;
+      const internal = {
+        ...root, id: "r128-json-internal", fileType: "axom-private-analysis",
+        checksum: "c".repeat(64),
+      };
+      const invalid = {
+        ...root, id: "r128-json-unbound", checksum: "not-a-sha256",
+      };
+      const payload = {
+        _app: "AXOM", _backupScope: scope,
+        documents: [root, internal, invalid],
+        deferredContent: { documents: [{ ...root, title: "Mirrored root" }, deferred] },
+      };
+      const rawText = JSON.stringify(payload);
+      const portable = await readPortableBackup(new File([rawText], "historical-originals.json"));
+      expect(portable.rawText).toBe(rawText);
+      expect(portable.omissions).toEqual({
+        missingBlobKeys: [], missingOriginalIds: [root.id, deferred.id],
+      });
+      // JSON includes source metadata but no original-file member or manifest.
+      // Recovery must not fabricate or write missing original bytes.
+      expect(await portable.restoreOriginals([root, deferred])).toEqual({ restored: 0, skipped: 0 });
+      expect(await readSourceOriginal(root.id, root.checksum)).toBeUndefined();
+    },
+  );
+
+  it("does not invent missing originals for JSON without checksum-bound external sources", async () => {
+    const onlyMetadata = {
+      _app: "AXOM", documents: [
+        { id: "r128-internal", fileType: "axom-internal", checksum: "a".repeat(64) },
+        { id: "r128-invalid", fileType: "text/plain", checksum: "invalid" },
+        { id: "r128-unhashed", fileType: "text/plain" },
+      ],
+    };
+    const portable = await readPortableBackup(new File([JSON.stringify(onlyMetadata)], "metadata.json"));
+    expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+  });
 
 });
