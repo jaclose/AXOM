@@ -205,7 +205,12 @@ function sum(logs: StudyLog[], key: "minutes" | "cards") {
   // running total absorbs it. A plausible but false overview must not be saved.
   return logs.reduce((running, log) => {
     const next = running + log[key];
-    if (!Number.isFinite(next) || (log[key] !== 0 && next === running)) {
+    // Integer additions can lose only *part* of a contribution: 1e16 + 5
+    // becomes 1e16 + 4. Reject the workbook instead of exporting a false total.
+    // Do not apply exact-delta checks to ordinary fractional IEEE-754 inputs.
+    if (!Number.isFinite(next)
+      || (log[key] !== 0 && next === running)
+      || (Number.isInteger(running) && Number.isInteger(log[key]) && next - running !== log[key])) {
       throw new ActivityExportNumericError();
     }
     return next;
