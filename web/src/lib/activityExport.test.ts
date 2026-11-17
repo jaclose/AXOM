@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkBook } from "xlsx-js-style";
-import { ActivityExportCellLimitError, ActivityExportTextEncodingError, allocateActivitySheetName, exportActivityWorkbook } from "./activityExport";
+import { ActivityExportCellLimitError, ActivityExportTextEncodingError, allocateActivitySheetName, compareStudyLogsNewestFirst, exportActivityWorkbook } from "./activityExport";
 import type { StudyLog } from "./types";
 
 function studyLogs(types: string[]): StudyLog[] {
@@ -195,6 +195,35 @@ describe("Activity History XLSX sheet title collisions", () => {
     expect(Array.from({ length: 6 }, (_, index) => restored.Sheets["All Activity"]?.[`F${index + 2}`]?.v))
       .toEqual(expected);
     expect(logs).toEqual(original);
+  });
+
+  it("keeps impossible Gregorian days behind genuine instants in screen and workbook order", async () => {
+    const logs = studyLogs(Array(7).fill("Manual"));
+    logs[0].ts = "2026-02-29T23:30:00-05:00"; // impossible non-leap February
+    logs[1].ts = "2026-11-31T12:00:00Z"; // impossible November 31
+    logs[2].ts = "2026-11-30T12:00:00Z"; // valid, newest
+    logs[3].ts = "2024-02-29T23:15:00+02:00"; // valid leap day with offset
+    logs[4].ts = "1900-02-29T09:00:00Z"; // century is not leap
+    logs[5].ts = "2000-02-29T09:00:00Z"; // century divisible by 400 is leap
+    logs[6].ts = "not-a-date";
+    const source = logs.map((log) => ({ ...log }));
+    for (const valid of [logs[2], logs[3], logs[5]]) {
+      for (const invalid of [logs[0], logs[1], logs[4], logs[6]]) {
+        expect(compareStudyLogsNewestFirst(invalid, valid)).toBeGreaterThan(0);
+      }
+    }
+    const expected = logs.slice().sort(compareStudyLogsNewestFirst).map((log) => log.note);
+    expect(expected.slice(0, 3)).toEqual(["unique-note-2", "unique-note-3", "unique-note-5"]);
+    const workbook = await captureWorkbook(logs);
+    for (const tab of ["All Activity", "Manual"]) {
+      expect(Array.from({ length: logs.length }, (_, i) => workbook.Sheets[tab]?.[`F${i + 2}`]?.v))
+        .toEqual(expected);
+    }
+    const XLSX = await import("xlsx-js-style");
+    const restored = XLSX.read(XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }), { type: "buffer" });
+    expect(Array.from({ length: logs.length }, (_, i) => restored.Sheets["All Activity"]?.[`F${i + 2}`]?.v))
+      .toEqual(expected);
+    expect(logs).toEqual(source);
   });
 
   it("keeps distinct activities when 31-character Excel titles would collide", async () => {

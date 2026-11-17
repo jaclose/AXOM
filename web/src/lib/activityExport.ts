@@ -128,10 +128,27 @@ function overviewRows(logs: StudyLog[], byType: string[], groupedByType: Map<str
   return rows;
 }
 
+/** Native Date.parse normalizes impossible ISO dates; do not silently promote them
+ * to real activity instants. Preserve non-ISO legacy parsing and original strings. */
+function parseActivityInstant(ts: string): number {
+  const instant = Date.parse(ts);
+  if (!Number.isFinite(instant)) return Number.NaN;
+  const date = /^(\d{4})-(\d{2})-(\d{2})/.exec(ts);
+  if (date) {
+    const year = Number(date[1]);
+    const month = Number(date[2]);
+    const day = Number(date[3]);
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (day < 1 || day > (daysInMonth[month - 1] ?? 0)) return Number.NaN;
+  }
+  return instant;
+}
+
 /** Canonical, deterministic chronology for both the visible ledger and downloaded XLSX. */
 export function compareStudyLogsNewestFirst(a: StudyLog, b: StudyLog): number {
-  const aTime = Date.parse(a.ts);
-  const bTime = Date.parse(b.ts);
+  const aTime = parseActivityInstant(a.ts);
+  const bTime = parseActivityInstant(b.ts);
   const aValid = Number.isFinite(aTime);
   const bValid = Number.isFinite(bTime);
 
