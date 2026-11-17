@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkBook } from "xlsx-js-style";
-import { ActivityExportCellLimitError, ActivityExportTextEncodingError, allocateActivitySheetName, compareStudyLogsNewestFirst, exportActivityWorkbook } from "./activityExport";
+import { ActivityExportCellLimitError, ActivityExportNumericError, ActivityExportTextEncodingError, allocateActivitySheetName, compareStudyLogsNewestFirst, exportActivityWorkbook } from "./activityExport";
 import type { StudyLog } from "./types";
 
 function studyLogs(types: string[]): StudyLog[] {
@@ -308,6 +308,57 @@ describe("Activity History XLSX sheet title collisions", () => {
     expect(logs).toEqual(before);
   });
 
+
+  it("refuses nonfinite minutes and cards before workbook serialization without mutating records", async () => {
+    const cases: Array<{ field: "minutes" | "cards"; value: number }> = [
+      { field: "minutes", value: Number.NaN },
+      { field: "cards", value: Number.POSITIVE_INFINITY },
+      { field: "minutes", value: Number.NEGATIVE_INFINITY },
+    ];
+    for (const { field, value } of cases) {
+      const logs = studyLogs(["Manual"]);
+      logs[0][field] = value;
+      const original = logs.map((log) => ({ ...log }));
+      let writerCalls = 0;
+      await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+        .rejects.toBeInstanceOf(ActivityExportNumericError);
+      expect(writerCalls).toBe(0);
+      expect(logs).toEqual(original);
+    }
+  });
+
+  it("refuses finite-input summary overflow rather than producing an infinite Excel total", async () => {
+    for (const field of ["minutes", "cards"] as const) {
+      const logs = studyLogs(["Manual", "Manual"]);
+      for (const log of logs) log[field] = Number.MAX_VALUE;
+      const original = logs.map((log) => ({ ...log }));
+      let writerCalls = 0;
+      await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+        .rejects.toBeInstanceOf(ActivityExportNumericError);
+      expect(writerCalls).toBe(0);
+      expect(logs).toEqual(original);
+    }
+  });
+
+  it("preserves finite zeros and normal numeric totals in actual XLSX cells", async () => {
+    const logs = studyLogs(["Manual", "Manual"]);
+    logs[0].minutes = 0;
+    logs[0].cards = 0;
+    logs[1].minutes = 42;
+    logs[1].cards = 7;
+    const original = logs.map((log) => ({ ...log }));
+    const workbook = await captureWorkbook(logs);
+    expect(workbook.Sheets["Overview"]?.C2?.v).toBe(42);
+    expect(workbook.Sheets["Overview"]?.D2?.v).toBe(7);
+    expect(workbook.Sheets["All Activity"]?.D3?.v).toBe(0);
+    expect(workbook.Sheets["All Activity"]?.E3?.v).toBe(0);
+    const XLSX = await import("xlsx-js-style");
+    const restored = XLSX.read(XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }), { type: "buffer" });
+    expect(restored.Sheets["Overview"]?.C2?.v).toBe(42);
+    expect(restored.Sheets["Overview"]?.D2?.v).toBe(7);
+    expect(restored.Sheets["All Activity"]?.D3?.v).toBe(0);
+    expect(logs).toEqual(original);
+  });
 
   it("refuses text above Excel cell limits before building or saving XLSX, without changing records", async () => {
     const scenarios = [
