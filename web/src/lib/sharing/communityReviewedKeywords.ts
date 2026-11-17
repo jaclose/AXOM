@@ -4,7 +4,9 @@ import { hasPrivateDeviceCitation } from "./questionSetShare";
 /** Rights, source review and visual intent are evidence, not AI-generated subject tags.
  * Preserve existing author tags, but reject new keyword proposals that claim a
  * publication or moderation state, carry a citation, or embed private references. */
-const RESERVED_PUBLICATION_KEYWORD = /^(?:visual|source|rights?|licen[sc]e|provenance|review|moderation|approval|publication|answer(?:-?key)?|correct(?:-?key)?)\s*:/i;
+// Detect embedded evidence claims after ordinary text or punctuation, not
+// only at the beginning of a tag. Subject keywords cannot certify rights.
+const RESERVED_PUBLICATION_KEYWORD = /(?:^|[^\p{L}\p{N}_])(?:visual|source|rights?|licen[sc]e|provenance|review|moderation|approval|publication|answer(?:-?key)?|correct(?:-?key)?)\s*:/iu;
 // Public citation identifiers belong in separately verified provenance, not in
 // subject keyword suggestions. A model response has a parallel rejection gate,
 // but publisher-entered reviewed keywords must not bypass that boundary.
@@ -22,7 +24,8 @@ const HIDDEN_KEYWORD_REFERENCE_MARKS = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069
 // separated tag or an embedded line. Publisher text inputs split these
 // delimiters before review, but AI JSON keyword arrays do not. Otherwise a
 // subject phrase could conceal a rights/source/moderation claim after a separator.
-const COMPOUND_KEYWORD_SEPARATORS = /[,;\r\n\u0085\u2028\u2029]/u;
+// Control characters are never meaningful clinical subject-tag separators.
+const COMPOUND_KEYWORD_SEPARATORS = /[,;\u0000-\u001F\u007F-\u009F\u2028\u2029]/u;
 function keywordSafetyText(value: string): string {
   return value.normalize("NFKC").replace(HIDDEN_KEYWORD_REFERENCE_MARKS, "").trim();
 }
