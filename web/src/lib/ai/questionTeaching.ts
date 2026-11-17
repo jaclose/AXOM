@@ -33,7 +33,10 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
     // (including an optimistic failed-save retry) must not survive that edit.
     // This receipt stays private: it never becomes part of a public snapshot.
     question.attachments ?? null, question.analyses ?? null,
-    question.correctKey, question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
+    question.correctKey,
+    // A malformed legacy null must not share the receipt of an absent derived answer.
+    question.correctAnswerText === undefined ? ["absent"] : ["stored", question.correctAnswerText],
+    question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
     question.source, question.createdAt, question.sourceFile ?? null,
     question.sourceDocumentId ?? null, question.sourcePage ?? null, question.questionNumber ?? null,
     question.courseId ?? null, question.module ?? null, question.week ?? null,
@@ -230,9 +233,21 @@ function wouldTruncateDraftPrompt(question: QuestionRecord): boolean {
     || buildDraftPrompt(question).length > MAX_DRAFT_TOTAL_PROMPT_CHARS;
 }
 
+/** A migrated display answer may disagree with the verified keyed option without
+ * changing the key, options or timestamp. Do not generate teaching from a
+ * contradictory answer receipt, even when the practice mapping appears ready.
+ * The public Question Set serializer already rejects this conflict. */
+function hasConflictingStoredAnswerText(question: QuestionRecord): boolean {
+  if (question.correctAnswerText === undefined) return false;
+  const keyed = question.options.find(option => option.key === question.correctKey);
+  return typeof question.correctAnswerText !== "string"
+    || !keyed || question.correctAnswerText.trim() !== keyed.text.trim();
+}
+
 export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
   return questionPracticeReadiness(question) === "ready"
     && Boolean(question.correctKey)
+    && !hasConflictingStoredAnswerText(question)
     && !question.explanation?.trim()
     && Object.keys(question.choiceRationales ?? {}).length === 0
     && !question.attachments?.length
@@ -271,6 +286,9 @@ export async function draftQuestionExplanation(
   // Privacy must win over a missing-exhibit diagnostic before any AI call.
   if (containsPrivateDraftPromptReference(question)) {
     throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
+  }
+  if (hasConflictingStoredAnswerText(question)) {
+    throw new Error("Stored answer text conflicts with the confirmed keyed choice. Verify the source answer before AI drafting.");
   }
   if (referencesUnavailableExhibit(question)) {
     throw new Error("This question references an unavailable visual exhibit. Inspect the original image or specimen and write a source-reviewed explanation instead.");
