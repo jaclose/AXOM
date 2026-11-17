@@ -1841,6 +1841,98 @@ describe("portable binary media backup", () => {
     },
   );
 
+  it.each(["absent", "null"] as const)(
+    "archives a checksum-verified $type historical source without inventing its MIME",
+    async type => {
+      const bytes = new Blob(["Historical source without a MIME declaration"], { type: "text/plain" });
+      const document = {
+        id: `legacy-no-type-${type}`, title: "Historical original", fileName: "source.txt",
+        ...(type === "null" ? { fileType: null } : {}),
+        uploadedAt: "2026-11-17", rawText: "Historical bytes", sizeBytes: bytes.size,
+        checksum: await sha256Hex(await bytes.arrayBuffer()),
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      } as unknown as SourceDocument;
+      // Complete export selects ZIP using this predicate. The prior
+      // typeof-fileType check silently routed it to JSON and certified it.
+      expect(backupOriginalDocuments([document])).toEqual([document]);
+      await saveSourceOriginal(document, bytes);
+      const exported = await createMediaBackupArchive({
+        _app: "AXOM", _backupScope: "complete", documents: [document],
+      }, [], backupOriginalDocuments([document]));
+      expect(exported).toMatchObject({
+        originalCount: 1, missingOriginalIds: [], missingBlobKeys: [],
+      });
+      const { default: JSZip } = await import("jszip");
+      const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+      const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+      expect(manifest.originals).toEqual([expect.objectContaining({
+        documentId: document.id, sha256: document.checksum, mimeType: "text/plain",
+      })]);
+      const portable = await readPortableBackup(new File([exported.blob], "legacy-no-type.zip"));
+      expect(portable.omissions).toEqual({ missingBlobKeys: [], missingOriginalIds: [] });
+      await deleteSourceOriginal(document.id);
+      expect(await readSourceOriginal(document.id, document.checksum)).toBeUndefined();
+      expect(await portable.restoreOriginals([document])).toEqual({ restored: 1, skipped: 0 });
+      expect(await (await readSourceOriginal(document.id, document.checksum))?.text())
+        .toBe("Historical source without a MIME declaration");
+    },
+  );
+
+  it("reports an uncached absent-type source as omitted rather than a complete backup", async () => {
+    const document = {
+      id: "absent-type-uncached", title: "Missing original", fileName: "missing.txt",
+      checksum: "a".repeat(64), uploadedAt: "2026-11-17", sizeBytes: 12,
+    } as unknown as SourceDocument;
+    expect(backupOriginalDocuments([document])).toEqual([document]);
+    const exported = await createMediaBackupArchive({
+      _app: "AXOM", _backupScope: "complete", documents: [document],
+    }, [], backupOriginalDocuments([document]));
+    expect(exported).toMatchObject({ originalCount: 0, missingOriginalIds: [document.id] });
+    const portable = await readPortableBackup(new File([exported.blob], "absent-type-missing.zip"));
+    expect(portable.omissions.missingOriginalIds).toEqual([document.id]);
+  });
+
+  it.each(["json", "zip"] as const)(
+    "rejects conflicting absent/null-type original versions before $format recovery consent",
+    async format => {
+      const root = {
+        id: "absent-type-conflict", title: "First original", checksum: "a".repeat(64),
+      } as unknown as SourceDocument;
+      const deferred = {
+        ...root, title: "Second original", fileType: null, checksum: "b".repeat(64),
+      } as unknown as SourceDocument;
+      expect(() => backupOriginalDocuments([root, deferred]))
+        .toThrow(/conflicting source.document checksums/i);
+      const metadata = { _app: "AXOM", _backupScope: "complete",
+        documents: [root], deferredContent: { documents: [deferred] } };
+      if (format === "json") {
+        await expect(readPortableBackup(new File([JSON.stringify(metadata)], "ambiguous.json")))
+          .rejects.toThrow(/conflicting source.document checksums/i);
+      } else {
+        const exported = await createMediaBackupArchive({
+          _app: "AXOM", _backupScope: "complete", documents: [root],
+        }, [], [root]);
+        const { default: JSZip } = await import("jszip");
+        const zip = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+        const manifest = JSON.parse(await zip.file("workspace.json")!.async("string"));
+        manifest.deferredContent = { documents: [deferred] };
+        zip.file("workspace.json", JSON.stringify(manifest));
+        const file = new File([await zip.generateAsync({ type: "arraybuffer" })], "ambiguous.zip");
+        await expect(readPortableBackup(file)).rejects.toThrow(/conflicting source.document checksums/i);
+      }
+    },
+  );
+
+  it("keeps explicitly typed original authoritative over missing-type aliases and excludes internal claims", () => {
+    const unspecified = {
+      id: "missing-type-precedence", title: "Deferred metadata", checksum: "a".repeat(64),
+    } as unknown as SourceDocument;
+    const typed = { ...unspecified, fileType: "application/pdf", checksum: "b".repeat(64) };
+    const internal = { ...unspecified, fileType: "axom-private-analysis", checksum: "c".repeat(64) };
+    expect(backupOriginalDocuments([unspecified, internal, typed])).toEqual([typed]);
+    expect(backupOriginalDocuments([internal])).toEqual([]);
+  });
+
   it("rejects conflicting JSON source digests between two eligible external originals", async () => {
     const source = {
       id: "json-no-type-source", fileType: "text/plain",
