@@ -376,6 +376,11 @@ describe("review-gated explanation drafting", () => {
       { key: "B", text: "Unrelated control" },
       { key: "C", text: "Other control" },
     ] }],
+    ["a supplementary figure identifier", { stem: "Figure S2 shows tissue necrosis. Which pattern is present?" }],
+    ["a lettered diagnostic panel", { stem: "Which structure is shown in panel B?" }],
+    ["a roman-numbered pathology plate", { stem: "Plate IV depicts the liver. Which lesion is present?" }],
+    ["a lettered gross specimen", { stem: "Specimen A shows a nodule. What is the diagnosis?" }],
+    ["an arrow-marked missing visual", { stem: "Which structure is indicated by the arrowhead?" }],
     ["an explicit CT exhibit", { stem: "See the CT scan to identify the vascular abnormality." }],
     ["a missing exhibit mentioned by a choice", { options: [
       { key: "A", text: "Tunica media" },
@@ -393,6 +398,14 @@ describe("review-gated explanation drafting", () => {
       expect(source.explanation).toBeUndefined();
     },
   );
+
+  it.each([
+    "A written histology description of the arterial tunica media",
+    "The patient had a CT scan previously; no new image is supplied.",
+    "The term figure of speech appears in the clinical explanation.",
+  ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
+    expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
+  });
 
   function textOnlyPackage(): NonNullable<QuestionRecord["content"]> {
     return {
