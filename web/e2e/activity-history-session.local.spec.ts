@@ -436,3 +436,122 @@ for (const width of [1440, 390]) {
     expect(errors).toEqual([]);
   });
 }
+
+
+// R165: run the actual lazy workbook exporter after device-vault persistence.
+// These are synthetic local browser tests, not authenticated Supabase acceptance.
+for (const width of [1440, 390]) {
+  test(`Activity History refuses rounded XLSX totals after vault reload at ${width}px`, async ({ page }) => {
+    const notes = ["SYNTHETIC_R165_INTEGER_0", "SYNTHETIC_R165_INTEGER_1", "SYNTHETIC_R165_INTEGER_2"];
+    const counts = [1e16, 5, -1e16];
+    const downloads: string[] = [];
+    const errors: string[] = [];
+    page.on("download", (download) => downloads.push(download.suggestedFilename()));
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("dialog", async (dialog) => { await dialog.accept(); });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+
+    await page.goto("/#productivity", { waitUntil: "networkidle" });
+    await seedOnboarded(page);
+    await dev(page);
+    await page.evaluate(async ({ notes, counts }) => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      app.useStore.setState({ logs: counts.map((count, index) => ({
+        id: `r165-rounded-${index}`, dayKey: "2026-11-14",
+        ts: `2026-11-14T12:0${index}:00.000Z`, type: "Manual",
+        minutes: count, cards: count, note: notes[index],
+      })) });
+      await app.flushVault();
+    }, { notes, counts });
+
+    await reloadAfterSave(page);
+    await dev(page);
+    const storedBefore = await page.evaluate(async () => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      return (app.useStore.getState().logs as Array<{
+        id: string; minutes: number; cards: number; note: string;
+      }>).map(({ id, minutes, cards, note }) => ({ id, minutes, cards, note }));
+    });
+    expect(storedBefore).toEqual(counts.map((count, index) => ({
+      id: `r165-rounded-${index}`, minutes: count, cards: count, note: notes[index],
+    })));
+
+    await setSession(page, "B", "unlinked");
+    await page.goto("/#activity", { waitUntil: "networkidle" });
+    await expect(page.getByText("Device history needs confirmation")).toBeVisible();
+    await page.getByRole("button", { name: "Show device history" }).click();
+    await expect(page.getByText(notes[1], { exact: false })).toBeVisible();
+    const exportButton = page.getByRole("button", { name: "Export .xlsx" });
+    await exportButton.focus();
+    await expect(exportButton).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("Activity export stopped", { exact: true })).toBeVisible();
+    await expect(page.getByText(/study numbers or totals cannot be represented reliably/i)).toBeVisible();
+    await expect(exportButton).toBeEnabled();
+    expect(downloads).toEqual([]);
+
+    // A rejected export must not repair, delete, or reassign the original log bytes.
+    const storedAfter = await page.evaluate(async () => {
+      const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      return (app.useStore.getState().logs as Array<{
+        id: string; minutes: number; cards: number; note: string;
+      }>).map(({ id, minutes, cards, note }) => ({ id, minutes, cards, note }));
+    });
+    expect(storedAfter).toEqual(storedBefore);
+    await setSession(page, "A", "linked");
+    await expect(page.getByText("Activity History session changed")).toBeVisible();
+    for (const note of notes) await expect(page.getByText(note)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Export .xlsx" })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("Activity History XLSX roundtrips exactly represented large and fractional totals after reload", async ({ page }) => {
+  const notes = ["SYNTHETIC_R165_EXACT_0", "SYNTHETIC_R165_EXACT_1", "SYNTHETIC_R165_EXACT_2"];
+  const minutes = [1e16, 4, -1e16];
+  const cards = [0.1, 0.2, 0.3];
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("dialog", async (dialog) => { await dialog.accept(); });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/#productivity", { waitUntil: "networkidle" });
+  await seedOnboarded(page);
+  await dev(page);
+  await page.evaluate(async ({ notes, minutes, cards }) => {
+    const app = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+    app.useStore.setState({ logs: notes.map((note, index) => ({
+      id: `r165-exact-${index}`, dayKey: "2026-11-14",
+      ts: `2026-11-14T12:0${index}:00.000Z`, type: "Manual",
+      minutes: minutes[index], cards: cards[index], note,
+    })) });
+    await app.flushVault();
+  }, { notes, minutes, cards });
+  await reloadAfterSave(page);
+  await dev(page);
+  await setSession(page, "B", "unlinked");
+  await page.goto("/#activity", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Show device history" }).click();
+  await expect(page.getByText(notes[0], { exact: false })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export .xlsx" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^axom-activity-history-\d{4}-\d{2}-\d{2}\.xlsx$/);
+  const XLSX = (await import("xlsx-js-style")).default;
+  const { readFile } = await import("node:fs/promises");
+  const workbook = XLSX.read(await readFile(await download.path()), { type: "buffer" });
+  expect(workbook.Sheets.Overview?.C2?.v).toBe(4);
+  expect(workbook.Sheets.Overview?.D2?.v).toBeCloseTo(0.6, 12);
+  const detail = workbook.Sheets["All Activity"];
+  expect([detail?.D2?.v, detail?.D3?.v, detail?.D4?.v]).toEqual([...minutes].reverse());
+  expect([detail?.E2?.v, detail?.E3?.v, detail?.E4?.v]).toEqual([...cards].reverse());
+  expect([detail?.F2?.v, detail?.F3?.v, detail?.F4?.v]).toEqual([...notes].reverse());
+
+  await setSession(page, "A", "linked");
+  await expect(page.getByText("Activity History session changed")).toBeVisible();
+  for (const note of notes) await expect(page.getByText(note)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export .xlsx" })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
