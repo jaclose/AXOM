@@ -33,7 +33,10 @@ export function questionExplanationFingerprint(question: QuestionRecord): string
     // (including an optimistic failed-save retry) must not survive that edit.
     // This receipt stays private: it never becomes part of a public snapshot.
     question.attachments ?? null, question.analyses ?? null,
-    question.correctKey, question.correctAnswerText ?? null, question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
+    question.correctKey,
+    // A malformed legacy null must not share the receipt of an absent derived answer.
+    question.correctAnswerText === undefined ? ["absent"] : ["stored", question.correctAnswerText],
+    question.explanation ?? "", question.choiceRationales ?? {}, question.needsReview ?? false,
     question.source, question.createdAt, question.sourceFile ?? null,
     question.sourceDocumentId ?? null, question.sourcePage ?? null, question.questionNumber ?? null,
     question.courseId ?? null, question.module ?? null, question.week ?? null,
