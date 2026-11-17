@@ -4,7 +4,7 @@ import { useStore } from "../lib/store";
 import { useAccount } from "../lib/account/accountStore";
 import { GlassCard, GButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Field, SelectField } from "../components/ui/Modal";
-import { ActivityExportCellLimitError, ActivityExportNumericError, ActivityExportTextEncodingError, compareStudyLogsNewestFirst, exportActivityWorkbook } from "../lib/activityExport";
+import { ActivityExportCellLimitError, ActivityExportNumericError, ActivityExportTextEncodingError, compareStudyLogsNewestFirst, exportActivityWorkbook, sumActivityMetric } from "../lib/activityExport";
 import { pushToast } from "../lib/toast";
 import { prettyDate } from "../lib/scoring";
 import type { StudyLog } from "../lib/types";
@@ -104,8 +104,18 @@ export function ActivityHistoryPage() {
     && (!from || log.dayKey >= from)
     && (!to || log.dayKey <= to),
   );
-  const minutes = filtered.reduce((sum, log) => sum + log.minutes, 0);
-  const cards = filtered.reduce((sum, log) => sum + log.cards, 0);
+  // The workbook refuses misleading integer sums; the visible dashboard must
+  // not report the same rounded total as if it were exact.
+  const displayTotal = (key: "minutes" | "cards"): number | "Unavailable" => {
+    try {
+      return sumActivityMetric(filtered, key);
+    } catch (error) {
+      if (error instanceof ActivityExportNumericError) return "Unavailable";
+      throw error;
+    }
+  };
+  const minutes = displayTotal("minutes");
+  const cards = displayTotal("cards");
 
   async function handleExport() {
     if (exportPending || !filtered.length) return;
@@ -214,10 +224,10 @@ export function ActivityHistoryPage() {
 }
 
 
-function HistoryStat({ label, value }: { label: string; value: number }) {
+function HistoryStat({ label, value }: { label: string; value: number | "Unavailable" }) {
   return (
     <GlassCard pad>
-      <div className="stat-value">{value}</div>
+      <div className="stat-value" title={value === "Unavailable" ? "Study total cannot be represented reliably; original events are retained." : undefined}>{value}</div>
       <div className="stat-label">{label}</div>
     </GlassCard>
   );
