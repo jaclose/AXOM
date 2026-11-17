@@ -4,12 +4,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn(), scopeCheck: vi.fn() }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner-1" } }),
 }));
 vi.mock("../../lib/academicLibrary/accountScope", () => ({
-  academicAccountScope: () => ({ key: "owner-1", assertCurrent: () => {}, dispose: () => {} }),
+  academicAccountScope: () => ({ key: "owner-1", assertCurrent: () => mocks.scopeCheck(), dispose: () => {} }),
 }));
 vi.mock("../../lib/academicLibrary/client", () => ({
   listAcademicCourses: (...args: unknown[]) => mocks.list(...args),
@@ -39,6 +39,7 @@ const course = (n: number, patch: Partial<AcademicCourse> = {}): AcademicCourse 
 
 describe("your published courses", () => {
   beforeEach(() => {
+    mocks.scopeCheck.mockReset();
     mocks.community.mockResolvedValue([]);
     mocks.reviewer.mockResolvedValue(false);
     mocks.share.mockImplementation(async (ids: string[]) =>
@@ -195,4 +196,69 @@ describe("your published courses", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Community uploads could not be loaded.");
     expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
   });
+
+  it("fails closed when community pagination silently skips a pending upload after a keyset move", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    const first = Array.from({ length: 24 }, (_, index) => ({
+      id: id(index + 100), current_revision_id: id(index + 1100),
+      submitted_at: "2026-11-01T10:00:00Z",
+    }));
+    mocks.community.mockResolvedValueOnce(first).mockResolvedValueOnce([])
+      .mockResolvedValueOnce([first[0], ...first.slice(1, 23), {
+        id: id(1), current_revision_id: id(1001), submitted_at: "2026-11-01T10:01:00Z",
+      }]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/community.*changed/i);
+    expect(screen.queryByRole("button", { name: /Approve 1 course/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
+  });
+
+  it("refuses duplicate community IDs across pages instead of bypassing the review queue", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    const first = Array.from({ length: 24 }, (_, index) => ({
+      id: id(index + 100), current_revision_id: id(index + 1100),
+      submitted_at: "2026-11-01T10:00:00Z",
+    }));
+    mocks.community.mockResolvedValueOnce(first).mockResolvedValueOnce([first[5]]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/community.*changed/i);
+    expect(screen.queryByRole("button", { name: /Approve 1 course/ })).toBeNull();
+  });
+
+  it("routes a stable second-page exact revision to Community review without legacy approval", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    const first = Array.from({ length: 24 }, (_, index) => ({
+      id: id(index + 100), current_revision_id: id(index + 1100),
+      submitted_at: "2026-11-01T10:00:00Z",
+    }));
+    const finalPage = [{ id: id(1), current_revision_id: id(1001), submitted_at: "2026-10-31T10:00:00Z" }];
+    mocks.community.mockResolvedValueOnce(first).mockResolvedValueOnce(finalPage)
+      .mockResolvedValueOnce(first).mockResolvedValueOnce(finalPage);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect(await screen.findByText(/1 unreviewed community upload/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Approve 1 course/ })).toBeNull();
+    expect(mocks.community).toHaveBeenCalledTimes(4);
+  });
+
+  it("discards an old account's community readback after account identity becomes invalid", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    mocks.community.mockImplementationOnce(async () => {
+      mocks.scopeCheck.mockImplementation(() => { throw new Error("The account changed."); });
+      return [];
+    });
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: /Show my courses/ }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText(/1 course/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve 1 course/ })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
 });
