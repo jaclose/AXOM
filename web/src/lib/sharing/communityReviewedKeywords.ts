@@ -25,7 +25,7 @@ const HIDDEN_KEYWORD_REFERENCE_MARKS = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069
 // delimiters before review, but AI JSON keyword arrays do not. Otherwise a
 // subject phrase could conceal a rights/source/moderation claim after a separator.
 // Control characters are never meaningful clinical subject-tag separators.
-const COMPOUND_KEYWORD_SEPARATORS = /[,;\u0000-\u001F\u007F-\u009F\u2028\u2029]/u;
+const COMPOUND_KEYWORD_SEPARATORS = /[,;\p{Cc}\u2028\u2029]/u;
 function keywordSafetyText(value: string): string {
   return value.normalize("NFKC").replace(HIDDEN_KEYWORD_REFERENCE_MARKS, "").trim();
 }
