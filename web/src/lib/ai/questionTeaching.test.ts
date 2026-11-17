@@ -381,6 +381,17 @@ describe("review-gated explanation drafting", () => {
     ["a roman-numbered pathology plate", { stem: "Plate IV depicts the liver. Which lesion is present?" }],
     ["a lettered gross specimen", { stem: "Specimen A shows a nodule. What is the diagnosis?" }],
     ["an arrow-marked missing visual", { stem: "Which structure is indicated by the arrowhead?" }],
+    ["an arrow pointing at a tissue feature", { stem: "Which structure does the arrow point to?" }],
+    ["an arrowhead identifying a lesion", { stem: "Arrowhead denotes the pathologic margin. Which margin is it?" }],
+    ["an annotation asterisk marking a cell", { stem: "The asterisk marks an atypical cell cluster. What is the diagnosis?" }],
+    ["the tip of an image arrow", { stem: "Which finding is at the tip of the arrow?" }],
+    ["a circled histology area", { stem: "The circled area contains cells with prominent nucleoli." }],
+    ["arrowheads identifying tumor margins", { stem: "Arrowheads indicate tumor margins. Which margin is positive?" }],
+    ["a boxed gross-specimen region in a choice", { options: [
+      { key: "A", text: "The boxed region is necrotic tissue" },
+      { key: "B", text: "A non-specific normal tissue description" },
+      { key: "C", text: "Unrelated textual differential" },
+    ] }],
     ["an explicit CT exhibit", { stem: "See the CT scan to identify the vascular abnormality." }],
     ["a missing exhibit mentioned by a choice", { options: [
       { key: "A", text: "Tunica media" },
@@ -405,6 +416,10 @@ describe("review-gated explanation drafting", () => {
     "The term figure of speech appears in the clinical explanation.",
     "Which technique could image a patient with poor renal function?",
     "We must figure a differential diagnosis using the text findings.",
+    "The arrow of time explains progressive fibrosis in a causal model.",
+    "An asterisk denotes statistical significance in a textual report.",
+    "Highlight the cellular mechanism of vascular remodeling.",
+    "Boxed seasonal trends in a survey are not relevant to this patient.",
   ])("allows text-only clinical descriptions without a referenced exhibit: %s", stem => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
   });
