@@ -373,4 +373,56 @@ describe("your published courses", () => {
     expect(mocks.review).not.toHaveBeenCalled();
   });
 
+  it("releases a hanging owned-course read on Stop and ignores its late response after restart", async () => {
+    let resolveOld: (rows: AcademicCourse[]) => void = () => {};
+    mocks.list.mockImplementationOnce(() => new Promise<AcademicCourse[]>(resolve => { resolveOld = resolve; }))
+      .mockResolvedValueOnce([course(2)]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    // The first RPC is still pending: a cancelled read must not lock loading.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    const retry = screen.getByRole("button", { name: /Show my courses/ }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(false);
+    fireEvent.click(retry);
+    expect(await screen.findByText("M2")).toBeTruthy();
+    expect(screen.queryByText("M1")).toBeNull();
+
+    await act(async () => { resolveOld([course(1)]); });
+    expect(screen.getByText("M2")).toBeTruthy();
+    expect(screen.queryByText("M1")).toBeNull();
+    expect(mocks.share).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
+  it("releases a hanging Community Uploads read on Stop without reviving a stale approval", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })])
+      .mockResolvedValueOnce([course(2, { visibility: "shared" })]);
+    let resolveOld: (rows: { id: string; current_revision_id: string; submitted_at: string }[]) => void = () => {};
+    mocks.community.mockImplementationOnce(() =>
+      new Promise(resolve => { resolveOld = resolve; })).mockResolvedValueOnce([]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    await waitFor(() => expect(mocks.community).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    expect(screen.queryByRole("button", { name: /Approve 1 course/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect(await screen.findByText("M2")).toBeTruthy();
+    expect(screen.queryByText("M1")).toBeNull();
+    const approve = screen.getByRole("button", { name: /Approve 1 course/ }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+
+    await act(async () => { resolveOld([{ id: id(1), current_revision_id: id(1001),
+      submitted_at: "2026-11-01T10:00:00Z" }]); });
+    expect(screen.getByText("M2")).toBeTruthy();
+    expect(screen.queryByText("M1")).toBeNull();
+    expect(approve.disabled).toBe(true);
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+
 });
