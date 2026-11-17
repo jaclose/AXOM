@@ -201,10 +201,15 @@ function appendSheet(XLSX: XlsxModule, wb: WorkBook, name: string, rows: unknown
 }
 
 function sum(logs: StudyLog[], key: "minutes" | "cards") {
-  // Even individually finite counts can overflow when aggregated.
-  const total = logs.reduce((running, log) => running + log[key], 0);
-  if (!Number.isFinite(total)) throw new ActivityExportNumericError();
-  return total;
+  // Finite inputs can overflow or lose a nonzero event when a much larger
+  // running total absorbs it. A plausible but false overview must not be saved.
+  return logs.reduce((running, log) => {
+    const next = running + log[key];
+    if (!Number.isFinite(next) || (log[key] !== 0 && next === running)) {
+      throw new ActivityExportNumericError();
+    }
+    return next;
+  }, 0);
 }
 
 /** Prefix by UTF-16 units without splitting Unicode code points at Excel's 31-unit limit. */
