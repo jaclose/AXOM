@@ -93,9 +93,15 @@ function referencesUnavailableExhibit(question: QuestionRecord): boolean {
     // Topic also leaves the device in the AI prompt. An image-only topic cue
     // must hold the draft just as a stem/choice exhibit cue does.
     || [question.stem, question.topic, ...question.options.map(option => option.text)]
-      .some(value => typeof value === "string"
-        && (EMBEDDED_EXHIBIT_MARKUP.test(value)
-          || EXPLICIT_EXHIBIT_REFERENCE.test(value.replace(WEB_URL_TOKEN, " "))));
+      .some(value => {
+        if (typeof value !== "string") return false;
+        // Compatibility-width figures and hidden format marks can obscure a
+        // missing visual exhibit in PDF/OCR imports. Normalize only the
+        // temporary inspection copy; keep the source and review key intact.
+        const scan = referenceSafetyText(value);
+        return EMBEDDED_EXHIBIT_MARKUP.test(scan)
+          || EXPLICIT_EXHIBIT_REFERENCE.test(scan.replace(WEB_URL_TOKEN, " "));
+      });
 }
 
 /**
