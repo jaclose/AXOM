@@ -401,7 +401,7 @@ describe("review-gated explanation drafting", () => {
     ["an HTML img source not represented as an attachment", { stem: 'Identify the layer: <img src="https://example.edu/micrograph.jpg">' }],
     ["an HTML picture without its clinical source", { stem: "<picture><source srcset='https://example.edu/slide.png'></picture>" }],
     ["an inline SVG image in a text import", { stem: '<svg viewBox="0 0 12 12"><path d="M0 0"/></svg> Which layer?' }],
-["an HTML-entity escaped image in a text import", { stem: 'What lesion? &lt;img src="missing-artery.jpg"&gt;' }],
+    ["an HTML-entity escaped image in a text import", { stem: 'What lesion? &lt;img src="missing-artery.jpg"&gt;' }],
     ["a decimal-escaped HTML picture in a choice", { options: [
       { key: "A", text: "&#60;picture&#62;&#60;source srcset='histology.png'&#62;" },
       { key: "B", text: "Tunica intima" }, { key: "C", text: "Tunica adventitia" },
@@ -442,7 +442,7 @@ describe("review-gated explanation drafting", () => {
     "Boxed seasonal trends in a survey are not relevant to this patient.",
     "The clinical note includes a text hyperlink [vessel anatomy](https://example.edu/arteries).",
     "The words <em>tunica media</em> are merely formatted text.",
-"The escaped formatting &lt;em&gt;tunica media&lt;/em&gt; is only written prose.",
+    "The escaped formatting &lt;em&gt;tunica media&lt;/em&gt; is only written prose.",
     "The LaTeX command \\include{vascular-chapter} references a written chapter.",
     "The source links to a public text page https://example.edu/case,figure2?view=summary.",
     "The reading is https://example.edu/atlas/image12?view=text, without an exhibit attached.",
