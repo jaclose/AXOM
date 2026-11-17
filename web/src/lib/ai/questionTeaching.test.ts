@@ -788,6 +788,19 @@ describe("review-gated explanation drafting", () => {
     ["public website invented in explanation", {
       explanation: "The tunica media controls arterial diameter through vascular smooth muscle. Reference: https://example.edu/arterial-histology.",
     }],
+    ["unverified .health source in explanation", {
+      explanation: "Arterial smooth muscle is mainly in the tunica media and changes vessel resistance. See https://reference.example.health/artery.",
+    }],
+    ["unverified .dev source in distractor rationale", {
+      choiceRationales: {
+        A: "The media contains vascular smooth muscle.",
+        B: "The intima contains endothelium, unlike the media. See https://reference.example.dev/artery.",
+        C: "The adventitia provides external connective tissue.",
+      },
+    }],
+    ["fullwidth uncommon-domain HTTPS link in explanation", {
+      explanation: "The tunica media has vascular smooth muscle that controls artery caliber. See ｈｔｔｐｓ：／／reference.example.health/artery.",
+    }],
     ["DOI invented in explanation", {
       explanation: "The arterial tunica media contains smooth muscle and controls vascular caliber. DOI: 10.1234/vascular-example.2026.",
     }],
