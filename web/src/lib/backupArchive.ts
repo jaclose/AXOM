@@ -201,11 +201,19 @@ export function backupOriginalDocuments(documents: readonly SourceDocument[]): S
   // members claiming the same document ID. Reject contradictory identities
   // before writing, but retain one byte source for compatible aliases.
   assertConsistentSourceDocumentChecksums(documents);
+  const isCandidate = (doc: SourceDocument) => !!doc && typeof doc.id === "string"
+    && /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "")
+    && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-");
+  // Blank fileType is ambiguous metadata for digest-conflict checks, but a
+  // checksum-bound original may still be cached under a historical blank type.
+  // Prefer a typed claim for the same ID, even if a blank alias comes first.
+  // Without either candidate, the complete-export JSON path could incorrectly
+  // mark a copy current while omitting the local original's bytes.
+  const typedIds = new Set(documents.filter(doc => isCandidate(doc) && doc.fileType.length > 0).map(doc => doc.id));
   const seen = new Set<string>();
   return documents.filter(doc => {
-    if (!doc || typeof doc.id !== "string" || !/^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "")
-      || typeof doc.fileType !== "string" || doc.fileType.length === 0 || doc.fileType.startsWith("axom-")) return false;
-    if (seen.has(doc.id)) return false;
+    if (!isCandidate(doc) || (doc.fileType.length === 0 && typedIds.has(doc.id))
+      || seen.has(doc.id)) return false;
     seen.add(doc.id);
     return true;
   });
@@ -221,9 +229,9 @@ function assertConsistentSourceDocumentChecksums(records: readonly unknown[]): v
     if (!record || typeof record !== "object") continue;
     const { id, checksum, fileType, sizeBytes } = record as Partial<SourceDocument>;
     if (typeof id !== "string" || typeof checksum !== "string") continue;
-    // An internal or untyped document is metadata, not an assertion about
-    // source-original bytes, even when it happens to carry a valid digest.
-    // Apply the same eligibility boundary as backupOriginalDocuments.
+    // Only explicitly typed external originals assert identity conflicts.
+    // A blank-type record may still have cached, checksum-bound source bytes
+    // for export, but cannot override an explicitly typed original's identity.
     const externalType = typeof fileType === "string" && fileType.length > 0
       && !fileType.startsWith("axom-") ? fileType.toLowerCase() : undefined;
     if (!externalType) continue;
