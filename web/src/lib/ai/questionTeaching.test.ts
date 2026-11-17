@@ -737,6 +737,7 @@ describe("review-gated explanation drafting", () => {
     ["confirmed answer", (source: QuestionRecord) => { source.correctKey = "B"; }],
     ["source citation", (source: QuestionRecord) => { source.citation = "Different source evidence"; }],
     ["stored answer text", (source: QuestionRecord) => { source.correctAnswerText = "Tunica intima"; }],
+    ["malformed null answer receipt", (source: QuestionRecord) => { source.correctAnswerText = null as unknown as string; }],
     ["distractor wording", (source: QuestionRecord) => { source.options[1].text = "Revised distractor"; }],
   ] as Array<[string, (source: QuestionRecord) => void]>)(
     "rejects an AI explanation when %s changes during provider inference", async (_field, revise) => {
@@ -1204,6 +1205,7 @@ describe("review-gated explanation drafting", () => {
     const fingerprint = questionExplanationFingerprint(original);
     expect(questionExplanationFingerprint({ ...original, correctKey: "B" })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, correctAnswerText: "Tunica intima" })).not.toBe(fingerprint);
+    expect(questionExplanationFingerprint({ ...original, correctAnswerText: null as unknown as string })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, stem: "Changed stem" })).not.toBe(fingerprint);
     expect(questionExplanationFingerprint({ ...original, explanation: "User wrote a rationale" })).not.toBe(fingerprint);
   });
