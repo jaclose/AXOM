@@ -10,7 +10,7 @@ import { applyMiNmiDecision, readMiNmiDecision, type MiNmiSummary } from "../../
 import { accountQuestions, type QuestionLedger } from "../../lib/academicLibrary/questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationCatalogId, publicationJobs, readPublicationInventory,
-  type PlannedCourse, type PublicationInventory,
+  type PlannedCourse, type PublicationInventory, type PublicationJobNotes,
 } from "../../lib/academicLibrary/publication";
 import { folderLibraryReader, zipLibraryReader, type LibraryReader } from "../../lib/privateLibrary/install";
 import type { ReviewedFiling } from "../../lib/privateLibrary/types";
@@ -21,7 +21,8 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 type Term = ReviewedFiling["term"];
 const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 /** Source files a course leaves on this device because of type or size limits. */
-interface KeptFiles { keptLocal?: number; overLimit?: number; unreadable?: number; held?: { sets: number; readyQuestions: number } }
+interface KeptFiles { keptLocal?: number; overLimit?: number; unreadable?: number; held?: { sets: number; readyQuestions: number };
+  figureless?: { sets: number; reviewQuestions: number } }
 type CourseState =
   | { state: "checked"; ready: number; review: number; missingExplanations: number; files: number; bytes: number } & KeptFiles
   | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; sharingError?: string } & KeptFiles
@@ -193,7 +194,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           next = { state: "checked", ready: Number(upload.metadata.ready_questions), review: Number(upload.metadata.review_questions),
             missingExplanations: coverage.missingExplanations,
             files: upload.files.length, bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
-            ...kept(notes.keptLocal.get(job.key), upload.localOnlyOriginals.length, notes.unreadableOriginals.get(job.key), notes.heldForExplanations.get(job.key)) };
+            ...kept(notes, job.key, upload.localOnlyOriginals.length) };
         } catch (cause) {
           if (abort.signal.aborted) break;
           failed.add(job.key);
@@ -245,7 +246,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
               published.set(outcome.receipt.collectionId, outcome.key);
               next = { state: "published", ready: outcome.receipt.readyQuestions, files: outcome.receipt.verifiedFiles,
                 missingExplanations: outcome.receipt.missingExplanations,
-                ...kept(notes.keptLocal.get(outcome.key), outcome.receipt.localOnlyOriginals.length, notes.unreadableOriginals.get(outcome.key), notes.heldForExplanations.get(outcome.key)) };
+                ...kept(notes, outcome.key, outcome.receipt.localOnlyOriginals.length) };
             } else if (outcome.state === "superseded") {
               next = { state: "failed", during: "publish", message: "A newer version of this course is already active in your account. Nothing was replaced." };
             } else if (outcome.state === "cancelled") next = { state: "stopped" };
@@ -460,18 +461,23 @@ function explanationNote(ready: number, missing: number, consequence: string) {
   return ready > 0 ? " Every ready question has an explanation." : "";
 }
 
-function kept(keptLocal: number | undefined, overLimit: number, unreadable?: number, held?: KeptFiles["held"]): KeptFiles {
+function kept(notes: PublicationJobNotes, key: string, overLimit: number): KeptFiles {
+  const keptLocal = notes.keptLocal.get(key);
+  const unreadable = notes.unreadableOriginals.get(key);
+  const held = notes.heldForExplanations.get(key);
+  const figureless = notes.heldForFigures.get(key);
   return { ...(keptLocal ? { keptLocal } : {}), ...(overLimit ? { overLimit } : {}), ...(unreadable ? { unreadable } : {}),
-    ...(held?.sets ? { held } : {}) };
+    ...(held?.sets ? { held } : {}), ...(figureless?.sets ? { figureless } : {}) };
 }
 
-function keptNote({ keptLocal, overLimit, unreadable, held }: KeptFiles, future: boolean) {
+function keptNote({ keptLocal, overLimit, unreadable, held, figureless }: KeptFiles, future: boolean) {
   const stay = (count: number) => future ? "will stay" : count === 1 ? "stays" : "stay";
   const left = (count: number) => future ? "will be" : count === 1 ? "was" : "were";
   return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device because the file type or course size limit prevents upload.` : ""}${
     overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${stay(overLimit)} on this device.` : ""}${
     unreadable ? ` ${plural(unreadable, "source file")} the library lists could not be read from this folder and ${left(unreadable)} left out; questions prepared from ${unreadable === 1 ? "it" : "them"} still publish.` : ""}${
-    held ? ` ${plural(held.sets, "question set")} with ${plural(held.readyQuestions, "ready question")} that ${held.readyQuestions === 1 ? "has" : "have"} no explanation ${stay(held.sets)} on this device, because approval needs an explanation for every ready question.` : ""}`;
+    held ? ` ${plural(held.sets, "question set")} with ${plural(held.readyQuestions, "ready question")} that ${held.readyQuestions === 1 ? "has" : "have"} no explanation ${stay(held.sets)} on this device, because approval needs an explanation for every ready question.` : ""}${
+    figureless ? ` ${plural(figureless.sets, "question set")} missing figures in this folder ${stay(figureless.sets)} on this device; none of ${figureless.sets === 1 ? "its" : "their"} ${plural(figureless.reviewQuestions, "question")} ${figureless.reviewQuestions === 1 ? "was" : "were"} ready to practice.` : ""}`;
 }
 
 function CourseResult({ result }: { result: CourseState }) {

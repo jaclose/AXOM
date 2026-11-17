@@ -121,7 +121,8 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
           bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
           keptLocal: notes.keptLocal.get(job.key) ?? 0, overLimit: upload.localOnlyOriginals.length,
           unreadableOriginals: notes.unreadableOriginals.get(job.key) ?? 0,
-          heldForExplanations: notes.heldForExplanations.get(job.key) ?? { sets: 0, readyQuestions: 0 } });
+          heldForExplanations: notes.heldForExplanations.get(job.key) ?? { sets: 0, readyQuestions: 0 },
+          heldForFigures: notes.heldForFigures.get(job.key) ?? { sets: 0, reviewQuestions: 0 } });
       } catch (cause) {
         checked.push({ ...summary, ok: false as const,
           reason: notes.failures.get(job.key) ?? (cause instanceof Error ? cause.message : "This course could not be prepared.") });
@@ -161,6 +162,8 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
         + (course.unreadableOriginals ? `, ${count(course.unreadableOriginals, "listed original")} not in the folder` : "")
         + (course.heldForExplanations.sets ? `, ${count(course.heldForExplanations.sets, "set")} with `
           + `${count(course.heldForExplanations.readyQuestions, "unexplained ready question")} held back from review` : "")
+        + (course.heldForFigures.sets ? `, ${count(course.heldForFigures.sets, "set")} missing figures kept on this device `
+          + `(${count(course.heldForFigures.reviewQuestions, "question")}, none ready)` : "")
       : `attention  ${label(course)}: ${course.reason}`);
     for (const course of needsTerm) console.log(`needs term  ${course.module} (${course.moduleKey}): proposed ${course.proposedTerm}`);
     expect(plan.courses.length + plan.blocked.length + plan.excluded.length).toBeGreaterThan(0);

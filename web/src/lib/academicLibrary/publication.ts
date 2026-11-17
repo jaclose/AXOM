@@ -342,12 +342,22 @@ export interface CourseReaderOptions {
 }
 
 /** The library lists an original file that the chosen folder cannot provide.
- * Only originals raise this: a missing question package or figure still fails. */
+ * Only originals raise this: a missing question package still fails. */
 export class UnreadableOriginalError extends Error {
   readonly sourceId: string;
   constructor(sourceId: string, cause?: unknown) {
     super("A source file the library lists is missing or unreadable in the chosen folder.", { cause });
     this.name = "UnreadableOriginalError";
+    this.sourceId = sourceId;
+  }
+}
+
+/** A question set references a figure that the chosen folder cannot provide. */
+export class UnreadableFigureError extends Error {
+  readonly sourceId: string;
+  constructor(sourceId: string, cause?: unknown) {
+    super("A figure a question set references is missing or unreadable in the chosen folder.", { cause });
+    this.name = "UnreadableFigureError";
     this.sourceId = sourceId;
   }
 }
@@ -369,15 +379,22 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
   let catalog: Uint8Array | undefined;
   // Original path to its source, for the originals this course's catalog lists.
   const originals = new Map<string, string>();
+  // A question set's figure folder (beside its bank file) to its source.
+  const figureFolders = new Map<string, string>();
+  const figureOwner = (path: string) => {
+    for (const [folder, owner] of figureFolders) if (path.startsWith(folder)) return owner;
+    return undefined;
+  };
   return async path => {
     if (safeLibraryPath(path) !== "catalog.json") {
-      const owner = originals.get(path);
-      if (!owner) return read(path);
+      const original = originals.get(path);
+      const figure = original ? undefined : figureOwner(path);
+      if (!original && !figure) return read(path);
       try {
         return await read(path);
       } catch (cause) {
         if ((cause as Error | undefined)?.name === "AbortError") throw cause;
-        throw new UnreadableOriginalError(owner, cause);
+        throw original ? new UnreadableOriginalError(original, cause) : new UnreadableFigureError(figure!, cause);
       }
     }
     if (!catalog) {
@@ -401,7 +418,16 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
           || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
           ? { ...row, originalFile: undefined } : row;
       });
-      for (const row of selected) if (row.originalFile) originals.set(row.originalFile, row.id);
+      const shared = new Set<string>();
+      for (const row of selected) {
+        if (row.originalFile) originals.set(row.originalFile, row.id);
+        if (!row.bankFile) continue;
+        const folder = `${row.bankFile.slice(0, row.bankFile.lastIndexOf("/") + 1)}assets/`;
+        if (figureFolders.has(folder)) shared.add(folder);
+        figureFolders.set(folder, row.id);
+      }
+      // A figure folder two sets share cannot name its set, so its errors stay as they are.
+      for (const folder of shared) figureFolders.delete(folder);
       catalog = encode({ ...inventory.library, id: course.catalogId,
         templates: course.sections.map(section => ({ file: section.file, name: section.name, checksum: section.checksum })),
         sources: selected });
@@ -421,6 +447,9 @@ export interface PublicationJobNotes {
   /** Question sets left out of a course submitted for review, because approval
    * needs an explanation for every ready question. */
   heldForExplanations: Map<string, { sets: number; readyQuestions: number }>;
+  /** Question sets left on this device because the folder lacks a figure they
+   * reference; none of their questions was ready, so no practice is lost. */
+  heldForFigures: Map<string, { sets: number; reviewQuestions: number }>;
   /** Why a course could not be prepared, in the validator's own words. */
   failures: Map<string, string>;
 }
@@ -437,10 +466,13 @@ export interface PublicationJobOptions {
  * its questions and figures still publish and the kept files are counted.
  * An original the folder cannot provide is left out the same way and counted
  * apart, so one lost PDF does not hold back the questions prepared from it.
+ * A question set whose figures are missing stays on this device only when
+ * none of its questions is ready; with ready questions it still fails.
  */
 export function publicationJobs(read: LibraryReader, inventory: PublicationInventory, courses: readonly PlannedCourse[],
   jobOptions: PublicationJobOptions = {}): { jobs: AcademicBatchJob[]; notes: PublicationJobNotes } {
-  const notes: PublicationJobNotes = { keptLocal: new Map(), unreadableOriginals: new Map(), heldForExplanations: new Map(), failures: new Map() };
+  const notes: PublicationJobNotes = { keptLocal: new Map(), unreadableOriginals: new Map(), heldForExplanations: new Map(),
+    heldForFigures: new Map(), failures: new Map() };
   const jobs = courses.map((course): AcademicBatchJob => ({
     key: course.catalogId,
     async prepare(signal) {
@@ -474,21 +506,35 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
         const unreadable = new Set<string>();
         // Question sets left out for review: each has a ready question without an explanation.
         const held = new Set<string>();
+        // Question sets with no ready question whose figures this folder lacks.
+        const figureless = new Set<string>();
         const attempt = async (options: CourseReaderOptions) => {
           for (;;) {
             if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
             try {
               return await prepareAcademicUpload(courseLibraryReader(read, inventory, course, {
                 ...options, withoutOriginals: unreadable,
-                include: id => (options.include?.(id) ?? true) && !held.has(id) && !(optional.has(id) && unreadable.has(id)),
+                include: id => (options.include?.(id) ?? true) && !held.has(id) && !figureless.has(id)
+                  && !(optional.has(id) && unreadable.has(id)),
               }), unscheduled, planTerm ? { planTerm } : {});
             } catch (cause) {
-              if (!(cause instanceof UnreadableOriginalError) || unreadable.has(cause.sourceId)) throw cause;
-              unreadable.add(cause.sourceId);
+              if (cause instanceof UnreadableOriginalError && !unreadable.has(cause.sourceId)) {
+                unreadable.add(cause.sourceId);
+                continue;
+              }
+              if (cause instanceof UnreadableFigureError && !figureless.has(cause.sourceId)) {
+                const ready = byId.get(cause.sourceId)?.ready ?? 0;
+                if (ready > 0) throw new Error(`A question set with ${ready} ready question${ready === 1 ? "" : "s"} references a figure that is not in this folder. Recover its figures before publishing it.`, { cause });
+                figureless.add(cause.sourceId);
+                if (!course.sections.length && course.sourceIds.every(id => !byId.get(id)?.hasBank || figureless.has(id) || held.has(id)))
+                  throw new Error("Every question set in this course is missing figures and none of its questions is ready. Recover the figures before publishing it.", { cause });
+                continue;
+              }
+              throw cause;
             }
           }
         };
-        const heldCount = (field: "ready" | "review") => [...held].reduce((sum, id) => sum + (byId.get(id)?.[field] ?? 0), 0);
+        const heldCount = (field: "ready" | "review") => [...new Set([...held, ...figureless])].reduce((sum, id) => sum + (byId.get(id)?.[field] ?? 0), 0);
         for (const [index, stage] of stages.entries()) {
           if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
           try {
@@ -508,12 +554,15 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
               || upload.metadata.review_questions !== course.review - heldCount("review"))
               throw new Error("The prepared course question counts differ from its unique planned sources. Review duplicate or changed source files.");
             await preflightAcademicUpload(upload);
-            // Each source is reported once: held back for review, unreadable, or kept on this device.
-            const kept = stage.kept.filter(id => !unreadable.has(id) && !held.has(id)).length;
-            const unread = [...unreadable].filter(id => !held.has(id)).length;
+            // Each source is reported once: missing figures, held back for review, unreadable, or kept on this device.
+            const kept = stage.kept.filter(id => !unreadable.has(id) && !held.has(id) && !figureless.has(id)).length;
+            const unread = [...unreadable].filter(id => !held.has(id) && !figureless.has(id)).length;
             if (kept) notes.keptLocal.set(course.catalogId, kept);
             if (unread) notes.unreadableOriginals.set(course.catalogId, unread);
-            if (held.size) notes.heldForExplanations.set(course.catalogId, { sets: held.size, readyQuestions: heldCount("ready") });
+            if (held.size) notes.heldForExplanations.set(course.catalogId, { sets: held.size,
+              readyQuestions: [...held].reduce((sum, id) => sum + (byId.get(id)?.ready ?? 0), 0) });
+            if (figureless.size) notes.heldForFigures.set(course.catalogId, { sets: figureless.size,
+              reviewQuestions: [...figureless].reduce((sum, id) => sum + (byId.get(id)?.review ?? 0), 0) });
             return upload;
           } catch (cause) {
             if (!(cause instanceof Error) || !TOO_LARGE.test(cause.message)) throw cause;

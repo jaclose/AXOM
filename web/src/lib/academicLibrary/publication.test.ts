@@ -316,6 +316,48 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(notes.failures.get(goer.catalogId)).toMatch(/Publish it without submitting for review/);
   });
 
+  /** A GOER set whose question shows a figure the folder does not contain. */
+  async function addFigureSet(fixture: Awaited<ReturnType<typeof library>>, counts: { ready: number; review: number }) {
+    const original = new TextEncoder().encode("%PDF-1.4 synthetic goer-figures");
+    const checksum = (await sha256(original)).slice(7);
+    const figureBank = bank("goer-figures", "GOER", 5, checksum, 1);
+    figureBank.pkg.questions[0].assets = [{ id: "goer-figures-img-1", filename: "goer-figures-1.png", mimeType: "image/png",
+      role: "question", questionId: figureBank.pkg.questions[0].id, checksum: `sha256:${"a".repeat(64)}` }];
+    fixture.files.set(`sources/${checksum}.pdf`, original);
+    fixture.files.set(`banks/${checksum}/bank.json`, new TextEncoder().encode(JSON.stringify(figureBank)));
+    fixture.catalog.sources.push({ id: `source-${checksum}`, name: "goer-figures.pdf", sourcePath: "GOER/goer-figures.pdf", checksum,
+      module: "GOER", status: "prepared", reason: "Validated package", bankFile: `banks/${checksum}/bank.json`,
+      originalFile: `sources/${checksum}.pdf`, ...counts });
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+    return `source-${checksum}`;
+  }
+
+  it("keeps a question set with missing figures on this device when none of its questions is ready", async () => {
+    const fixture = await library();
+    const figureSet = await addFigureSet(fixture, { ready: 0, review: 1 });
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    expect(goer.sourceIds).toContain(figureSet);
+
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer]);
+    const upload = await jobs[0].prepare();
+    const catalog = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === "catalog.json")!.bytes)) as PrivateLibraryCatalog;
+    expect(catalog.sources.some(source => source.id === figureSet)).toBe(false);
+    expect(upload.metadata).toMatchObject({ ready_questions: 1, review_questions: 0 });
+    expect(notes.heldForFigures.get(goer.catalogId)).toEqual({ sets: 1, reviewQuestions: 1 });
+    expect(notes.unreadableOriginals.has(goer.catalogId)).toBe(false);
+  });
+
+  it("refuses a question set with ready questions whose figure is missing", async () => {
+    const fixture = await library();
+    await addFigureSet(fixture, { ready: 1, review: 0 });
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer]);
+    await expect(jobs[0].prepare()).rejects.toThrow(/A question set with 1 ready question references a figure that is not in this folder/);
+    expect(notes.heldForFigures.has(goer.catalogId)).toBe(false);
+  });
+
   it("still refuses a course whose question package is missing", async () => {
     const fixture = await library();
     const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
