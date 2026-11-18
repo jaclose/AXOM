@@ -853,6 +853,9 @@ describe("searchable Question Set client boundary", () => {
     ["stem", "stem", "See mentor@school.example"],
     ["choice rationale", "rationale", "Wrong because this observation differs. Call me at 865 555 0199"],
     ["citation", "citation", "Correspondence: lecturer@school.example"],
+    ["encoded citation", "citation", "https://example.edu/paper?owner=lecturer%40school.example"],
+    ["double-encoded citation", "citation", "https://example.edu/paper?owner=lecturer%2540school.example"],
+    ["encoded telephone citation", "citation", "https://example.edu/paper?contact=phone%3A%20%2B1%20%28865%29%20555-0199"],
     ["copyright notice", "copyright", "Rights: faculty@school.example"],
   ] as const)("refuses approval of legacy pending public %s contact data", async (_label, field, contact) => {
     const original = snapshot();
