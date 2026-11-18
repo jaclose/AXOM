@@ -77,8 +77,8 @@ function contactSafetyText(value: string): string {
 
 /** Comparison-only interpretation shared with outbound AI privacy checks.
  * Decodes bounded percent/HTML encodings without modifying source evidence. */
-export function communityEvidenceSafetyText(value: string): string {
-  return contactSafetyText(value);
+export function communityEvidenceSafetyText(value: string | undefined): string {
+  return contactSafetyText(value ?? "");
 }
 
 /** Shared citation boundary for publisher keywords and generated teaching.
