@@ -122,4 +122,37 @@ describe("saved-work recovery without downloading content", () => {
     expect(filename).toMatch(/^axom-backup-.*\.json$/);
     expect(lastBackupAt()).toBeNull();
   });
+
+  it("marks present but malformed image bytes incomplete in both ZIP and JSON exports", async () => {
+    const { state, original } = await fixture();
+    await saveSourceOriginal(state.documents[0], original);
+    await putQuestionAttachmentBlob("unavailable-image", {
+      blob: new Blob(["AXOM"], { type: "image/png" }),
+      mimeType: "image/png", byteSize: 4, questionId: "q", updatedAt: attachment.updatedAt,
+    });
+    const originalDocuments = state.documents;
+    const originalAttachments = state.questions[0].attachments;
+    const damaged = [
+      { label: "truncated bytes", blob: new Blob(["AX"], { type: "image/png" }), mimeType: "image/png" as const, byteSize: 2 },
+      { label: "wrong record format", blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/jpeg" as const, byteSize: 4 },
+      { label: "wrong blob format", blob: new Blob(["AXOM"], { type: "image/jpeg" }), mimeType: "image/png" as const, byteSize: 4 },
+    ];
+    for (const bad of damaged) {
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: bad.blob, mimeType: bad.mimeType, byteSize: bad.byteSize,
+        questionId: "q", updatedAt: attachment.updatedAt,
+      });
+      for (const format of ["zip", "json"] as const) {
+        localStorage.clear();
+        state.documents = format === "zip" ? originalDocuments : [];
+        const exportedCopy = await exportStateWithAttachments(state);
+        expect(exportedCopy.missingBlobKeys, `${bad.label} in ${format}`).toEqual([attachment.blobKey]);
+        expect(exportedCopy.attachmentCount).toBe(1);
+        expect(filename.endsWith(`.${format}`)).toBe(true);
+        expect(lastBackupAt()).toBeNull();
+        expect(state.questions[0].attachments).toBe(originalAttachments);
+      }
+    }
+  });
+
 });
