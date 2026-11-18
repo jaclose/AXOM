@@ -57,8 +57,17 @@ function decodeContactHtmlEntities(value: string): string {
 function contactSafetyText(value: string): string {
   let candidate = keywordSafetyText(value);
   for (let depth = 0; depth < 3; depth += 1) {
-    const percentDecoded = candidate.replace(/%([0-9a-f]{2})/gi, (_match, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16)));
+    // Percent escapes are UTF-8 bytes, not independent Latin-1 characters.
+    // Decode runs before NFKC so encoded fullwidth @, colon, dot and slash
+    // cannot bypass privacy, citation or publication-evidence gates.
+    // Malformed bytes are omitted only from this comparison copy, never source.
+    const percentDecoded = candidate.replace(/(?:%[0-9a-f]{2})+/gi, (encoded: string) => {
+      const bytes = Uint8Array.from(
+        (encoded.match(/%[0-9a-f]{2}/gi) ?? [])
+          .map(chunk => Number.parseInt(chunk.slice(1), 16)),
+      );
+      return new TextDecoder("utf-8").decode(bytes).replace(/\uFFFD/g, "");
+    });
     const decoded = decodeContactHtmlEntities(percentDecoded);
     if (decoded === candidate) break;
     candidate = keywordSafetyText(decoded);
