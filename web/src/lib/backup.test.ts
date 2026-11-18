@@ -203,6 +203,60 @@ describe("portable backup safety", () => {
     });
   });
 
+  it("preserves contradictory schema-31 answer evidence through JSON restore and reimport", () => {
+    const legacy = {
+      ...toPortableState(makeSeed()),
+      schemaVersion: 31,
+      questions: [{
+        id: "legacy-answer-conflict", source: "imported", stem: "Vessel wall layer?",
+        options: [{ key: "A", text: "Tunica media" }, { key: "B", text: "Tunica intima" }],
+        correctKey: "A", correctAnswerText: "Tunica intima",
+        status: "unseen", tags: [], attempts: [{
+          at: "2026-10-01T12:00:00.000Z", answerKey: "B", status: "incorrect",
+        }],
+        extraction: { confidence: "medium", reviewed: true },
+        createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z",
+      }],
+    };
+    const restored = parseImport(JSON.stringify({ _app: "AXOM", ...legacy }));
+    const question = restored.questions[0];
+    expect(question.correctKey).toBe("A");
+    expect(question.correctAnswerText).toBe("Tunica intima");
+    expect(question.options).toEqual(legacy.questions[0].options);
+    expect(question.needsReview).toBe(true);
+    expect(question.attempts).toEqual(legacy.questions[0].attempts);
+    expect(question.extraction?.reviewed).toBe(true);
+    const reimported = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(restored) }));
+    expect(reimported.questions[0].correctAnswerText).toBe("Tunica intima");
+    expect(reimported.questions[0].needsReview).toBe(true);
+  });
+
+  it("derives only absent legacy answer text, preserving matching and current-schema values", () => {
+    const base = {
+      ...toPortableState(makeSeed()),
+      questions: [{
+        id: "legacy-answer", source: "imported", stem: "Question",
+        options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }],
+        correctKey: "B", status: "unseen", tags: [], attempts: [],
+        createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z",
+      }],
+    };
+    const absent = parseImport(JSON.stringify({ _app: "AXOM", ...base, schemaVersion: 31 }));
+    expect(absent.questions[0].correctAnswerText).toBe("Beta");
+    expect(absent.questions[0].needsReview).not.toBe(true);
+
+    const supplied = { ...base.questions[0], correctAnswerText: "Beta" };
+    const matching = parseImport(JSON.stringify({ _app: "AXOM", ...base, schemaVersion: 31, questions: [supplied] }));
+    expect(matching.questions[0].correctAnswerText).toBe("Beta");
+    expect(matching.questions[0].needsReview).not.toBe(true);
+
+    const current = parseImport(JSON.stringify({
+      _app: "AXOM", ...base, schemaVersion: SCHEMA_VERSION,
+      questions: [{ ...supplied, correctAnswerText: "Historical distinct answer" }],
+    }));
+    expect(current.questions[0].correctAnswerText).toBe("Historical distinct answer");
+  });
+
   it("round-trips question notes and annotation metadata", () => {
     const state = makeSeed();
     state.questions = [{
