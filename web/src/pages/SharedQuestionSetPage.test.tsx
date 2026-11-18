@@ -581,4 +581,59 @@ describe("Shared Question Set page", () => {
     expect(mocks.commit.mock.calls[0][0].accountGuard.accountId).toBe("local-guest-session");
   });
 
+  it("does not expose a prior account's imported badge while B's vault is unlinked", async () => {
+    const aImported: QuestionSet = {
+      id: "A-old-import", title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["A-question"], tags: [],
+      aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    };
+    // Session B is known, but A's unswitched local workspace is still visible.
+    mocks.accountId = "account-2";
+    mocks.accountLink = "linked-elsewhere";
+    mocks.questionSets = [aImported];
+    render(<SharedQuestionSetPage />);
+
+    const pending = await screen.findByRole("button", { name: "Add to my AXOM" });
+    expect(pending).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Already in this AXOM" })).toBeNull();
+    expect(screen.getByText(/Finish connecting your account workspace/)).toBeTruthy();
+    expect(mocks.commit).not.toHaveBeenCalled();
+
+    // B's own empty vault arrives before it becomes writable.
+    await act(async () => { hydrateQuestionSets([]); });
+    await act(async () => { mocks.accountLink = "linked"; emitAccount(); });
+    expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it("hides imported membership during same-account restore and rechecks it when settled", async () => {
+    const imported: QuestionSet = {
+      id: "current-import", title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["q1"], tags: [],
+      aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    };
+    mocks.questionSets = [imported];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
+
+    await act(async () => {
+      mocks.accountBusy = true;
+      mocks.accountApplyingRemote = true;
+      emitAccount();
+    });
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Already in this AXOM" })).toBeNull();
+    await act(async () => { hydrateQuestionSets([]); });
+    await act(async () => {
+      mocks.accountBusy = false;
+      mocks.accountApplyingRemote = false;
+      emitAccount();
+    });
+    expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+
 });
