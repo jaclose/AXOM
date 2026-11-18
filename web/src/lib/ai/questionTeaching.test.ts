@@ -81,6 +81,55 @@ describe("review-gated explanation drafting", () => {
     },
   );
 
+  it.each([
+    ["percent-escaped duplicate answer", "Tuni%63a media"],
+    ["nested percent-escaped duplicate answer", "Tuni%2563a media"],
+    ["HTML numeric-entity duplicate answer", "Tunica&#32;media"],
+    ["HTML named-entity duplicate answer", "Tunica&nbsp;media"],
+    ["zero-width character duplicate answer", "Tuni\u200Bca media"],
+    ["bidi formatting mark duplicate answer", "Tunica\u200E media"],
+  ] as Array<[string, string]>)(
+    "holds %s before transmitting source text to an AI model", async (_label, disguised) => {
+      const source = question({ options: [
+        { key: "A", text: "Tunica media" },
+        { key: "B", text: disguised },
+        { key: "C", text: "Tunica adventitia" },
+      ] });
+      const unchanged = JSON.stringify(source);
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/duplicate answer text/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(JSON.stringify(source)).toBe(unchanged);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it("holds a choice containing only invisible formatting marks as blank", async () => {
+    const source = question({ options: [
+      { key: "A", text: "Tunica media" },
+      { key: "B", text: "\u200B\u200E" },
+      { key: "C", text: "Tunica adventitia" },
+    ] });
+    const model = provider({});
+    expect(eligibleForExplanationDraft(source)).toBe(false);
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/blank choices/i);
+    expect(model.completeJson).not.toHaveBeenCalled();
+  });
+
+  it("keeps clinical ion, receptor and cell-marker distinctions despite encoded inputs", () => {
+    const source = question({ options: [
+      { key: "A", text: "CD4%2B T lymphocytes" },
+      { key: "B", text: "CD4- T lymphocytes" },
+      { key: "C", text: "CD8+ T lymphocytes" },
+    ] });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    expect(source.options[0].text).toBe("CD4%2B T lymphocytes");
+    expect(source.correctKey).toBe("A");
+  });
+
   it("keeps distinct medically meaningful answer alternatives eligible for private draft review", () => {
     const source = question({ options: [
       { key: "A", text: "CD4-positive T cells" },

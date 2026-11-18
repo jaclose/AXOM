@@ -211,6 +211,8 @@ function hasUnsafeDraftChoiceLabels(question: QuestionRecord): boolean {
 /** A keyed question can be practice-ready while two choices have the same
  * displayed answer, or labels differ only by case. Asking an AI to explain one
  * as correct and the identical other as incorrect would invent a distinction.
+ * Compare bounded decoded copies as well: legacy HTML/percent escapes and
+ * invisible formatting marks can conceal the same answer after rendering.
  * This holds ONLY private AI drafting; the source and reviewed key remain intact
  * for human resolution before Community publication. Do not strip punctuation:
  * e.g. CD4 and CD8 or + and - can be clinically decisive. */
@@ -219,7 +221,7 @@ function hasAmbiguousDraftChoices(question: QuestionRecord): boolean {
   if (new Set(labels).size !== labels.length) return true;
   const texts = question.options.map(option =>
     typeof option.text === "string"
-      ? option.text.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()
+      ? communityEvidenceSafetyText(option.text).replace(/\s+/g, " ").trim().toLowerCase()
       : "");
   return texts.some(text => !text) || new Set(texts).size !== texts.length;
 }
