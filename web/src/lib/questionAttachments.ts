@@ -728,8 +728,9 @@ export async function stageQuestionAttachmentPayloads(
       const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
       if (existing) {
         const existingBytes = new Uint8Array(await existing.blob.arrayBuffer());
-        if (existing.mimeType !== payload.mimeType || !equalBytes(existingBytes, bytes)) {
-          throw new Error("A backup image uses an existing storage key with different bytes. No existing image was overwritten.");
+        if (existing.mimeType !== payload.mimeType || existing.byteSize !== bytes.byteLength
+          || !equalBytes(existingBytes, bytes)) {
+          throw new Error("A backup image uses an existing storage key with different bytes or metadata. No existing image was overwritten.");
         }
         skipped += 1;
         continue;
@@ -765,7 +766,7 @@ export async function stageQuestionAttachmentPayloads(
         const winnerBytes = new Uint8Array(await winner.blob.arrayBuffer());
         if (winner.mimeType !== payload.mimeType || winner.byteSize !== bytes.byteLength
           || !equalBytes(winnerBytes, bytes)) {
-          throw new Error("A backup image uses an existing storage key with different bytes. No existing image was overwritten.");
+          throw new Error("A backup image uses an existing storage key with different bytes or metadata. No existing image was overwritten.");
         }
         skipped += 1;
       }
