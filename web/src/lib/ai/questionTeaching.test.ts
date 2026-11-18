@@ -46,6 +46,56 @@ describe("review-gated explanation drafting", () => {
   });
 
   it.each([
+    ["source attestation in explanation", { explanation: "The arterial media contains smooth muscle that regulates vascular tone. Source evidence has been verified." }],
+    ["hyphenated source-review label", { explanation: "The arterial media contracts to modulate vascular resistance. This is a source-reviewed explanation." }],
+    ["hyphenated license approval", { explanation: "The tunica media controls vasomotor tone. License-approved for sharing." }],
+    ["rights approval in explanation", { explanation: "The tunica media contracts to regulate vessel caliber and peripheral resistance. Rights cleared for publication." }],
+    ["claimed source inspection", { explanation: "The tunica media contains layers of vascular smooth muscle. We have reviewed the original source." }],
+    ["academic review in distractor rationale", { choiceRationales: {
+      A: "The tunica media contains the vascular smooth muscle.",
+      B: "The tunica intima is endothelial lining. Academic review approved.",
+      C: "The tunica adventitia is outer connective tissue.",
+    } }],
+    ["fullwidth publication approval", { explanation: "The medial smooth muscle regulates vascular resistance. Ｐｕｂｌｉｃａｔｉｏｎ ｉｓ ａｐｐｒｏｖｅｄ." }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    "rejects model-generated %s as unsupported review evidence", async (_label, patch) => {
+      const source = question({ citation: "Original source evidence remains private" });
+      const before = JSON.stringify(source);
+      const model = provider({
+        explanation: "The tunica media contains vascular smooth muscle that modulates arterial tone and peripheral resistance.",
+        choiceRationales: {
+          A: "The tunica media contains the arterial smooth muscle.",
+          B: "The intima forms the endothelial lining, not the main muscle layer.",
+          C: "The adventitia consists mainly of outer supportive connective tissue.",
+        },
+        keywords: ["vascular histology"],
+        ...patch,
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/unverified source, rights, or publication approval/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(JSON.stringify(source)).toBe(before);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it("keeps ordinary mechanism descriptions distinct from approval claims", async () => {
+    const source = question();
+    const model = provider({
+      explanation: "The tunica media controls arterial caliber. The source of contractile calcium may include extracellular entry and intracellular stores.",
+      choiceRationales: {
+        A: "Arterial smooth muscle is located in the tunica media.",
+        B: "The tunica intima consists largely of endothelium.",
+        C: "The tunica adventitia supplies connective support.",
+      },
+      keywords: ["vascular tone"],
+    });
+    const draft = await draftQuestionExplanation(model, source);
+    expect(draft.explanation).toMatch(/source of contractile calcium/);
+    expect(source.explanation).toBeUndefined();
+  });
+
+  it.each([
     ["stem", { stem: "Which layer? Contact learner.study+1@example.edu" }],
     ["choice", { options: [
       { key: "A", text: "Tunica media (email mentor@example.health)" },
