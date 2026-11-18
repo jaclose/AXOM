@@ -102,6 +102,70 @@ describe("review-gated explanation drafting", () => {
     },
   );
 
+  it.each([
+    ["stem", { stem: "Identify the arterial layer. Call me at +1 (865) 555-0199." }],
+    ["choice", { options: [
+      { key: "A", text: "Tunica media. Phone: (473) 555-0123" },
+      { key: "B", text: "Tunica intima" }, { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["topic", { topic: "Vascular histology; contact number 868-555-0199" }],
+    ["fullwidth phone", { stem: "Arterial anatomy. Ｔｅｌ：＋１（８６５）５５５－０１９９" }],
+    ["zero-width phone", { topic: "Phone: 865\u200B-555-0199" }],
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "holds a labeled contact phone in %s before external AI inference", async (_label, patch) => {
+      const source = question(patch);
+      const before = JSON.stringify(source);
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/contact phone number/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(JSON.stringify(source)).toBe(before);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it.each([
+    ["explanation", { explanation: "The arterial tunica media contains smooth muscle. Call me at +1 (865) 555-0199 for details." }],
+    ["distractor rationale", { choiceRationales: {
+      A: "The media is the main contractile layer.",
+      B: "The intima is an endothelial layer; phone (473) 555-0123.",
+      C: "The adventitia is supporting connective tissue.",
+    } }],
+    ["ninth keyword", { keywords: [
+      "arterial anatomy", "tunica media", "tunica intima", "adventitia",
+      "vascular tone", "smooth muscle", "histology", "endothelium",
+      "contact number 868-555-0199",
+    ] }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    "rejects generated contact phone numbers in %s before accepting an AI proposal", async (_label, patch) => {
+      const source = question();
+      const before = JSON.stringify(source);
+      const model = provider({
+        explanation: "The tunica media contains smooth muscle that controls vessel diameter and peripheral resistance.",
+        choiceRationales: {
+          A: "The tunica media contains vascular smooth muscle.",
+          B: "The tunica intima is the endothelial lining.",
+          C: "The tunica adventitia is mainly supportive connective tissue.",
+        },
+        keywords: ["vascular histology"],
+        ...patch,
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/contact phone number/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(JSON.stringify(source)).toBe(before);
+    },
+  );
+
+  it.each([
+    "The patient's blood pressure is 120/80 mmHg with HR 72 and SpO2 98%. Which layer contains smooth muscle?",
+    "Call 911 in anaphylaxis. Which vascular layer contains smooth muscle?",
+    "A patient has 10,000 leukocytes/mm3, sodium 140 and 12 breaths/min. Which layer contains smooth muscle?",
+  ])("does not mistake ordinary clinical numbers for a contact phone: %s", stem => {
+    expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
+  });
+
   it("keeps clinical identifiers and non-contact at-sign notation eligible", () => {
     expect(eligibleForExplanationDraft(question({
       stem: "For the CD4/CD8 ratio, how does IL-6/STAT3 signaling influence vascular tone?",
