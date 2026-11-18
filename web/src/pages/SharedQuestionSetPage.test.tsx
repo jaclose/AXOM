@@ -10,13 +10,34 @@ const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
   questionSets: [] as QuestionSet[],
   accountId: "account-1" as string | null,
+  accountPhase: "signed-in" as "signed-in" | "signed-out" | "loading" | "unconfigured",
+  accountLink: "linked" as "linked" | "unlinked" | "linked-elsewhere",
+  accountBusy: false,
+  accountApplyingRemote: false,
+  accountRestoreOffer: false,
   accountObservers: new Set<(state: { user: { id: string } | null }) => void>(),
   storeObservers: new Set<(state: { questionSets: QuestionSet[] }, previous: { questionSets: QuestionSet[] }) => void>(),
 }));
 
+const accountState = () => ({
+  user: mocks.accountId ? { id: mocks.accountId } : null,
+  phase: mocks.accountPhase,
+  link: mocks.accountLink,
+  busy: mocks.accountBusy,
+  applyingRemote: mocks.accountApplyingRemote,
+  restoreOffer: mocks.accountRestoreOffer ? { id: "restore-offer" } : undefined,
+});
+
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: {
-    getState: () => ({ user: mocks.accountId ? { id: mocks.accountId } : null }),
+    getState: () => ({
+      user: mocks.accountId ? { id: mocks.accountId } : null,
+      phase: mocks.accountPhase,
+      link: mocks.accountLink,
+      busy: mocks.accountBusy,
+      applyingRemote: mocks.accountApplyingRemote,
+      restoreOffer: mocks.accountRestoreOffer ? { id: "restore-offer" } : undefined,
+    }),
     subscribe: (listener: (state: { user: { id: string } | null }) => void) => {
       mocks.accountObservers.add(listener);
       return () => { mocks.accountObservers.delete(listener); };
@@ -24,10 +45,16 @@ vi.mock("../lib/account/accountStore", () => ({
   },
 }));
 
+function emitAccount() {
+  const state = accountState();
+  mocks.accountObservers.forEach((listener) => listener(state));
+}
+
 function switchAccount(id: string | null) {
   mocks.accountId = id;
-  const state = { user: id ? { id } : null };
-  mocks.accountObservers.forEach((listener) => listener(state));
+  mocks.accountPhase = id ? "signed-in" : "signed-out";
+  mocks.accountLink = id ? "linked" : "unlinked";
+  emitAccount();
 }
 
 function hydrateQuestionSets(next: QuestionSet[]) {
@@ -88,6 +115,11 @@ const nextShare = {
 
 beforeEach(() => {
   mocks.accountId = "account-1";
+  mocks.accountPhase = "signed-in";
+  mocks.accountLink = "linked";
+  mocks.accountBusy = false;
+  mocks.accountApplyingRemote = false;
+  mocks.accountRestoreOffer = false;
   mocks.accountObservers.clear();
   mocks.storeObservers.clear();
   window.history.replaceState(null, "", `#/shared?token=${TOKEN}`);
@@ -460,4 +492,93 @@ describe("Shared Question Set page", () => {
     expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
     expect(mocks.commit).not.toHaveBeenCalled();
   });
+  it("holds imports when B signs in before its device workspace is linked", async () => {
+    mocks.commit.mockResolvedValue({
+      ok: true, questionSetId: "B-imported", questionIds: ["q1"],
+      added: 1, reused: 0, alreadyImported: false,
+    });
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+
+    await act(async () => {
+      switchAccount("account-2");
+      mocks.accountLink = "linked-elsewhere";
+      emitAccount();
+    });
+    const importButton = await screen.findByRole("button", { name: "Add to my AXOM" });
+    expect(importButton).toHaveProperty("disabled", true);
+    expect(screen.getByText(/Finish connecting your account workspace/)).toBeTruthy();
+    fireEvent.click(importButton);
+    expect(mocks.commit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mocks.accountLink = "linked";
+      emitAccount();
+    });
+    expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+    expect(mocks.commit.mock.calls[0][0].accountGuard.accountId).toBe("account-2");
+  });
+
+  it("blocks imports during active restore and revokes an in-flight import guard", async () => {
+    let finishSave!: () => void;
+    mocks.commit.mockImplementationOnce(() => new Promise((resolve) => {
+      finishSave = () => resolve({
+        ok: false, message: "The linked workspace is being restored",
+        rollbackFailures: [],
+      });
+    }));
+    render(<SharedQuestionSetPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+    const guard = mocks.commit.mock.calls[0][0].accountGuard;
+    expect(guard.isCurrentAccount("account-1")).toBe(true);
+
+    await act(async () => {
+      mocks.accountBusy = true;
+      mocks.accountApplyingRemote = true;
+      emitAccount();
+    });
+    expect(guard.isCurrentAccount("account-1")).toBe(false);
+    await act(async () => { finishSave(); });
+
+    await act(async () => {
+      mocks.accountBusy = false;
+      mocks.accountApplyingRemote = false;
+      mocks.accountRestoreOffer = true;
+      emitAccount();
+    });
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", true);
+    await act(async () => {
+      mocks.accountRestoreOffer = false;
+      emitAccount();
+    });
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+  });
+
+  it("does not treat an unresolved auth boot as a signed-out guest session", async () => {
+    mocks.accountId = null;
+    mocks.accountPhase = "loading";
+    mocks.accountLink = "unlinked";
+    mocks.commit.mockResolvedValue({
+      ok: true, questionSetId: "guest-set", questionIds: ["q1"],
+      added: 1, reused: 0, alreadyImported: false,
+    });
+    render(<SharedQuestionSetPage />);
+    const button = await screen.findByRole("button", { name: "Add to my AXOM" });
+    expect(button).toHaveProperty("disabled", true);
+    fireEvent.click(button);
+    expect(mocks.commit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mocks.accountPhase = "signed-out";
+      emitAccount();
+    });
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+    expect(mocks.commit.mock.calls[0][0].accountGuard.accountId).toBe("local-guest-session");
+  });
+
 });

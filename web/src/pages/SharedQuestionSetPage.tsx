@@ -6,6 +6,19 @@ import { readSharedQuestionImportProvenance } from "../lib/sharing/questionSetSh
 import { resolveShare, type ResolvedQuestionSetShare } from "../lib/sharing/supabaseSharing";
 import { useStore } from "../lib/store";
 
+// A signed-in account must first own the device workspace it is editing.
+// Auth identity is published before the asynchronous protected-vault restore,
+// so user ID alone is not a sufficient write-readiness condition. Guest
+// imports are available only after authentication has settled as signed-out.
+function canImportIntoWorkspace(state: ReturnType<typeof useAccount.getState>): boolean {
+  if (!state.user) return state.phase === "signed-out" || state.phase === "unconfigured";
+  return state.phase === "signed-in"
+    && state.link === "linked"
+    && !state.busy
+    && !state.applyingRemote
+    && !state.restoreOffer;
+}
+
 export function SharedQuestionSetPage() {
   const [share, setShare] = useState<ResolvedQuestionSetShare | null>(null);
   const [error, setError] = useState("");
@@ -13,6 +26,7 @@ export function SharedQuestionSetPage() {
   const [busy, setBusy] = useState(false);
   const [previewStopped, setPreviewStopped] = useState(false);
   const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [importReady, setImportReady] = useState(() => canImportIntoWorkspace(useAccount.getState()));
 
   // A shared-link route can change while this page stays mounted. Invalidate
   // both the pending preview and any old save UI before resolving its new token.
@@ -27,6 +41,7 @@ export function SharedQuestionSetPage() {
   useEffect(() => {
     let observedAccount = useAccount.getState().user?.id ?? null;
     const unsubscribe = useAccount.subscribe((state) => {
+      setImportReady(canImportIntoWorkspace(state));
       const currentAccount = state.user?.id ?? null;
       if (currentAccount === observedAccount) return;
       observedAccount = currentAccount;
@@ -126,6 +141,12 @@ export function SharedQuestionSetPage() {
 
   async function add() {
     if (!share || busy || added) return;
+    // Recheck synchronously in case a store transition preceded React's
+    // disabled-button render. An unlinked/restoring vault is not writable.
+    if (!canImportIntoWorkspace(useAccount.getState())) {
+      setError("Finish connecting your account workspace before importing this shared set.");
+      return;
+    }
     const currentToken = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
     const accountAtPreview = resolvedAccountId.current;
     const currentAccount = useAccount.getState().user?.id ?? null;
@@ -158,6 +179,7 @@ export function SharedQuestionSetPage() {
           isCurrentAccount: (id) => id === guardedAccountId
             && linkGeneration.current === generation
             && (useAccount.getState().user?.id ?? null) === accountAtPreview
+            && canImportIntoWorkspace(useAccount.getState())
             && new URLSearchParams(location.hash.split("?")[1] ?? "").get("token") === selectedToken,
         },
       });
@@ -189,7 +211,14 @@ export function SharedQuestionSetPage() {
           <div className="backup-note">
             Anyone with this link can open and import the snapshot. Do not share restricted or private source material.
           </div>
-          <GButton variant="primary" onClick={() => void add()} disabled={added || busy}>
+          {!importReady ? (
+            <p role="status">
+              {useAccount.getState().user
+                ? "Finish connecting your account workspace in Account before importing this set."
+                : "Checking your account session before importing this set."}
+            </p>
+          ) : null}
+          <GButton variant="primary" onClick={() => void add()} disabled={added || busy || !importReady}>
             <Download />{added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
           </GButton>
         </>
