@@ -2,8 +2,25 @@ name: APEX Academic Acceptance
 
 on:
   pull_request:
+    # Keep the full academic gate attached to changes that can alter quiz
+    # eligibility, cloud catalog access, learner progress or the study UI.
+    # Other product work is intentionally outside this costly workflow.
     paths:
       - 'web/src/lib/course-engine/**'
+      - 'web/src/lib/academicLibrary/**'
+      - 'web/src/lib/question*.ts'
+      - 'web/src/lib/quiz*.ts'
+      - 'web/src/lib/decode/**'
+      - 'web/src/lib/learning-intelligence/attempts*.ts'
+      - 'web/src/lib/sharing/questionSetLibrary*.ts'
+      - 'web/src/components/questions/**'
+      - 'web/src/components/tracker/**'
+      - 'web/src/pages/QuestionWorkspacePage.tsx'
+      - 'web/src/pages/CourseTrackerPage.tsx'
+      - 'web/e2e/academic-*.spec.ts'
+      - 'web/e2e/course-*.spec.ts'
+      - 'web/e2e/question-*.spec.ts'
+      - 'web/e2e/quiz-*.spec.ts'
       - '.github/workflows/apex-acceptance.yml'
   workflow_dispatch:
 
