@@ -134,6 +134,20 @@ export function mergeReviewedCommunityKeywords(
   reviewedInput: string,
 ): string[] {
   if (reviewedInput.length > 512) throw new Error("Reviewed keywords exceed the input limit.");
+  // The keyword editor separates tags on semicolons, which also terminate
+  // HTML entities. Validate a decoded comparison of the *whole* input first,
+  // or source&#58;approved becomes two harmless-looking subject fragments.
+  // Keep stored author text and the original delimiter behavior unchanged.
+  const raw = keywordSafetyText(reviewedInput);
+  const decoded = contactSafetyText(reviewedInput);
+  if (decoded !== raw && (
+    RESERVED_PUBLICATION_KEYWORD.test(decoded)
+    || containsUnverifiedCommunityAttestation(decoded)
+    || containsUnverifiedCommunityCitation(decoded)
+    || containsPrivateCommunityEmail(decoded)
+    || containsPrivateCommunityPhone(decoded)
+    || hasPrivateDeviceCitation(decoded)
+  )) throw new Error("Reviewed keywords must be subject phrases, not publication metadata, citations or private references.");
   const terms = reviewedInput.split(/[,;\n]/).map(value => value.trim()).filter(Boolean);
   if (terms.length > 8) throw new Error("Review at most eight keywords for each question.");
 
