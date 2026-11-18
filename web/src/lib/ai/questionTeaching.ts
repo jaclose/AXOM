@@ -208,6 +208,22 @@ function hasUnsafeDraftChoiceLabels(question: QuestionRecord): boolean {
     || question.options.some(option => !AI_CHOICE_LABEL.test(option.key));
 }
 
+/** A keyed question can be practice-ready while two choices have the same
+ * displayed answer, or labels differ only by case. Asking an AI to explain one
+ * as correct and the identical other as incorrect would invent a distinction.
+ * This holds ONLY private AI drafting; the source and reviewed key remain intact
+ * for human resolution before Community publication. Do not strip punctuation:
+ * e.g. CD4 and CD8 or + and - can be clinically decisive. */
+function hasAmbiguousDraftChoices(question: QuestionRecord): boolean {
+  const labels = question.options.map(option => option.key.toLowerCase());
+  if (new Set(labels).size !== labels.length) return true;
+  const texts = question.options.map(option =>
+    typeof option.text === "string"
+      ? option.text.normalize("NFKC").replace(/\\s+/g, " ").trim().toLowerCase()
+      : "");
+  return texts.some(text => !text) || new Set(texts).size !== texts.length;
+}
+
 /** AI explanations cannot be medically reliable when the prompt silently drops
  * the end of a vignette, option, or author topic. Retain the same per-field
  * provider caps, but hold incomplete inputs for manual source review instead
@@ -271,6 +287,7 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && !referencesUnavailableExhibit(question)
     && !hasUnrepresentedRichSource(question)
     && !hasUnsafeDraftChoiceLabels(question)
+    && !hasAmbiguousDraftChoices(question)
     && !wouldTruncateDraftPrompt(question);
 }
 
@@ -319,6 +336,9 @@ export async function draftQuestionExplanation(
   }
   if (hasUnsafeDraftChoiceLabels(question)) {
     throw new Error("AI drafting requires at most 26 short, single-line alphanumeric choice labels. Review and normalize the source labels before requesting an explanation.");
+  }
+  if (hasAmbiguousDraftChoices(question)) {
+    throw new Error("AI drafting cannot distinguish duplicate answer text, blank choices, or case-ambiguous choice labels. Compare the original source choices and resolve them manually.");
   }
   if (wouldTruncateDraftPrompt(question)) {
     throw new Error("The question exceeds AI prompt limits and would be truncated. Review the complete source and draft its explanation manually.");
