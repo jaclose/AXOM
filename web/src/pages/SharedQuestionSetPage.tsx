@@ -32,6 +32,9 @@ export function SharedQuestionSetPage() {
   // both the pending preview and any old save UI before resolving its new token.
   // Already-issued server writes cannot be cancelled by this UI guard.
   const linkGeneration = useRef(0);
+  // Once a write has observed a vault-readiness loss, its authorization is
+  // permanently revoked even if the same account finishes restoring later.
+  const writeRevocation = useRef(0);
   const resolvedToken = useRef<string | null>(null);
   const resolvedAccountId = useRef<string | null>(null);
 
@@ -40,8 +43,12 @@ export function SharedQuestionSetPage() {
   // any pending import authorization at each observed identity transition.
   useEffect(() => {
     let observedAccount = useAccount.getState().user?.id ?? null;
+    let previouslyReady = canImportIntoWorkspace(useAccount.getState());
     const unsubscribe = useAccount.subscribe((state) => {
-      setImportReady(canImportIntoWorkspace(state));
+      const ready = canImportIntoWorkspace(state);
+      if (previouslyReady && !ready) ++writeRevocation.current;
+      previouslyReady = ready;
+      setImportReady(ready);
       const currentAccount = state.user?.id ?? null;
       if (currentAccount === observedAccount) return;
       observedAccount = currentAccount;
@@ -171,6 +178,7 @@ export function SharedQuestionSetPage() {
       return;
     }
     const generation = linkGeneration.current;
+    const writeEpoch = writeRevocation.current;
     const selectedToken = currentToken;
     // Give the local guest workspace an explicit, revocable guard identity too.
     // The store checks this callback before and during its durable write.
@@ -185,15 +193,16 @@ export function SharedQuestionSetPage() {
           accountId: guardedAccountId,
           isCurrentAccount: (id) => id === guardedAccountId
             && linkGeneration.current === generation
+            && writeRevocation.current === writeEpoch
             && (useAccount.getState().user?.id ?? null) === accountAtPreview
             && canImportIntoWorkspace(useAccount.getState())
             && new URLSearchParams(location.hash.split("?")[1] ?? "").get("token") === selectedToken,
         },
       });
       if (!result.ok) throw new Error(result.message);
-      if (linkGeneration.current === generation) setAdded(true);
+      if (linkGeneration.current === generation && writeRevocation.current === writeEpoch) setAdded(true);
     } catch (cause) {
-      if (linkGeneration.current === generation) {
+      if (linkGeneration.current === generation && writeRevocation.current === writeEpoch) {
         setError(cause instanceof Error ? cause.message : "The shared set could not be imported safely.");
       }
     } finally {
