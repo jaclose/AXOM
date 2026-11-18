@@ -208,6 +208,15 @@ function hasUnsafeDraftChoiceLabels(question: QuestionRecord): boolean {
     || question.options.some(option => !AI_CHOICE_LABEL.test(option.key));
 }
 
+/** Legacy keyed imports can be practice-ready with no readable question at all.
+ * Do not ask an AI to rationalize a source key when the clinical stem is blank
+ * or consists only of encoded whitespace/formatting. Compare a decoded copy,
+ * leaving the original source, key and review receipt untouched. */
+function hasUnusableDraftStem(question: QuestionRecord): boolean {
+  return typeof question.stem !== "string"
+    || !communityEvidenceSafetyText(question.stem).trim();
+}
+
 /** A keyed question can be practice-ready while two choices have the same
  * displayed answer, or labels differ only by case. Asking an AI to explain one
  * as correct and the identical other as incorrect would invent a distinction.
@@ -278,6 +287,7 @@ function hasConflictingStoredAnswerText(question: QuestionRecord): boolean {
 export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
   return questionPracticeReadiness(question) === "ready"
     && Boolean(question.correctKey)
+    && !hasUnusableDraftStem(question)
     && !hasConflictingStoredAnswerText(question)
     && !question.explanation?.trim()
     && Object.keys(question.choiceRationales ?? {}).length === 0
@@ -312,6 +322,9 @@ export async function draftQuestionExplanation(
   assertDraftNotCancelled(signal);
   if (questionPracticeReadiness(question) !== "ready" || !question.correctKey) {
     throw new Error("A reviewed answer is required before an explanation can be drafted.");
+  }
+  if (hasUnusableDraftStem(question)) {
+    throw new Error("AI drafting requires a readable question stem. Verify the original source before requesting a teaching explanation.");
   }
   if (question.attachments?.length || question.content?.assets.length) {
     throw new Error("An image or media question needs its actual exhibit before a model can explain it.");
