@@ -148,6 +148,28 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("uses locale-independent Unicode tie breaks for same-instant and invalid timestamps", async () => {
+    const logs = studyLogs(["Manual", "Manual", "Manual", "Manual"]);
+    logs[0].ts = "2026-11-14T15:00:00Z";
+    logs[1].ts = logs[0].ts;
+    logs[0].id = "ä-1";
+    logs[1].id = "z-1";
+    logs[2].ts = "z-invalid";
+    logs[3].ts = "ä-invalid";
+    const original = logs.map((log) => ({ ...log }));
+
+    // JavaScript's default en-US locale collates ä before z, while Swedish
+    // collates it after z. Cross-device exports must use the same ordinal order.
+    expect(compareStudyLogsNewestFirst(logs[0], logs[1])).toBeGreaterThan(0);
+    expect(compareStudyLogsNewestFirst(logs[2], logs[3])).toBeGreaterThan(0);
+    const workbook = await captureWorkbook(logs);
+    for (const sheetName of ["All Activity", "Manual"]) {
+      expect(Array.from({ length: 4 }, (_, index) => workbook.Sheets[sheetName]?.[`F${index + 2}`]?.v))
+        .toEqual(["unique-note-1", "unique-note-0", "unique-note-3", "unique-note-2"]);
+    }
+    expect(logs).toEqual(original);
+  });
+
   it("orders offset-aware ISO events by instant without changing source timestamps", async () => {
     const logs = studyLogs(["Manual", "Manual", "Manual"]);
     logs[0].ts = "2026-11-14T10:00:00-05:00"; // 15:00 UTC, latest
