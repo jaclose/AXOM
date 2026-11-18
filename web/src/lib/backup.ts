@@ -370,6 +370,11 @@ export function parseImport(text: string): NoctyriumState {
   const educationTrack = resolveTrack(typeof profile.educationTrack === "string" ? profile.educationTrack : undefined).id;
 
   const importedSchemaVersion = typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
+  // A newer client may have records this parser does not know how to retain.
+  // Refuse loss-prone forward restores before constructing a reduced workspace.
+  if (importedSchemaVersion > SCHEMA_VERSION) {
+    throw new Error("This backup uses a newer AXOM data version. Update AXOM before restoring it.");
+  }
   return {
     schemaVersion: SCHEMA_VERSION,
     profile: {

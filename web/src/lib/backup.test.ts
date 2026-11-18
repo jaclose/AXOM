@@ -7,6 +7,25 @@ import { buildQuizPool } from "./quiz";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "./journalNotebook";
 
 describe("portable backup safety", () => {
+  it("refuses future-schema backups rather than silently discarding unknown learner records", () => {
+    const baseline = { _app: "AXOM", ...toPortableState(makeSeed()) };
+    const future = {
+      ...baseline,
+      schemaVersion: SCHEMA_VERSION + 1,
+      futureOnlyLearnerRecords: [{ id: "must-not-be-silently-dropped" }],
+    };
+    expect(() => parseImport(JSON.stringify(future)))
+      .toThrow(/newer AXOM data version.*Update AXOM/i);
+
+    // Older backups and versionless historical exports remain importable.
+    const old = { ...baseline, schemaVersion: SCHEMA_VERSION - 1 };
+    const versionless: Record<string, unknown> = { ...baseline };
+    delete versionless.schemaVersion;
+    expect(parseImport(JSON.stringify(baseline)).schemaVersion).toBe(SCHEMA_VERSION);
+    expect(parseImport(JSON.stringify(old)).schemaVersion).toBe(SCHEMA_VERSION);
+    expect(parseImport(JSON.stringify(versionless)).schemaVersion).toBe(SCHEMA_VERSION);
+  });
+
   it("round-trips exact learner method descriptions, timing and every preference layer", () => {
     const state = makeSeed();
     const original = "  Exact original words\n".repeat(50);
