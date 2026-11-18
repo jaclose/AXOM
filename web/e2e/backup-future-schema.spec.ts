@@ -19,6 +19,53 @@ test("future-schema JSON is refused before Replace or Merge and leaves local wor
   await completeSetup(page, "Synthetic recovery guard");
   await deferPromisePrompt(page);
 
+  // Seed genuinely nonempty synthetic QBank and source records to protect.
+  // No real medical content, original binary or account is involved.
+  await page.evaluate(async () => {
+    const app = window as unknown as {
+      __AXOM_DEV__: Promise<{
+        useStore: {
+          getState: () => NoctyriumState;
+          setState: (patch: Partial<NoctyriumState>) => void;
+        };
+        flushVault: () => Promise<void>;
+      }>;
+    };
+    const dev = await app.__AXOM_DEV__;
+    const state = dev.useStore.getState();
+    const at = "2026-11-18T09:00:00.000Z";
+    dev.useStore.setState({
+      terms: [...state.terms, { id: "synthetic-term", name: "Synthetic term to retain" }],
+      tracker: [...state.tracker, {
+        id: "synthetic-tracker", path: "Synthetic/Week 1", label: "Synthetic attendance",
+        kind: "Lecture", passes: 2, ankiPasses: 1, yield: "review",
+        attendance: "attended", weekSource: "learner", note: "Preserve this note", updated: at,
+      }],
+      questions: [...state.questions, {
+        id: "synthetic-question", source: "manual", stem: "Which letter is A?",
+        options: [{ key: "A", text: "A" }, { key: "B", text: "B" }],
+        correctKey: "A", sourceDocumentId: "synthetic-document",
+        status: "needs-review", needsReview: true, tags: ["synthetic"],
+        attempts: [{ at, answerKey: "B", status: "incorrect" }],
+        createdAt: at, updatedAt: at,
+      }],
+      documents: [...state.documents, {
+        id: "synthetic-document", title: "Synthetic source", fileName: "synthetic.txt",
+        fileType: "text/plain", uploadedAt: at, rawText: "Only synthetic test evidence.",
+        sizeBytes: 29, checksum: "a".repeat(64), tags: [],
+        linkedQuestionSetIds: ["synthetic-set"], libraryOnly: false,
+      }],
+      questionSets: [...state.questionSets, {
+        id: "synthetic-set", title: "Synthetic review set", createdAt: at,
+        sourceDocumentIds: ["synthetic-document"], questionIds: ["synthetic-question"],
+        tags: [], aiEnhanced: false, parserWarnings: [],
+      }],
+    });
+    await dev.flushVault();
+  });
+  // Normalize any first-hydration defaults before establishing the baseline.
+  await page.reload({ waitUntil: "networkidle" });
+
   const readEvidence = async () => {
     await page.waitForFunction(() => Boolean((window as unknown as { __AXOM_DEV__?: unknown }).__AXOM_DEV__));
     return page.evaluate(async () => {
@@ -31,21 +78,29 @@ test("future-schema JSON is refused before Replace or Merge and leaves local wor
       const dev = await app.__AXOM_DEV__;
       await dev.flushVault();
       const state = dev.useStore.getState();
-      // Exact synthetic identities and learner evidence, not volatile UI state.
-      return {
-        owner: state.profile.userId,
-        name: state.profile.name,
-        terms: state.terms.map(t => t.id),
-        tracker: state.tracker.map(t => [t.id, t.passes, t.ankiPasses]),
-        questions: state.questions.map(q => [q.id, q.attempts.length]),
-        documents: state.documents.map(d => d.id),
-        sessions: state.quizSessions.map(s => s.id),
-        sets: state.questionSets.map(s => s.id),
-      };
+      // Every JSON-persisted learner field matters here, not only record IDs.
+      // Exclude only device-clock-derived fields that can legitimately change on reload.
+      // Source text/checksums, question content/review flags, attendance and media
+      // references remain in the snapshot without touching original blob bytes.
+      return JSON.parse(JSON.stringify({
+        ...state,
+        activeDayKey: undefined,
+        lastActiveLocalDate: undefined,
+        lastTimezoneOffset: undefined,
+      })) as Omit<NoctyriumState, "activeDayKey" | "lastActiveLocalDate" | "lastTimezoneOffset">;
     });
   };
 
   const before = await readEvidence();
+  expect(before.terms.some(term => term.id === "synthetic-term" && term.name === "Synthetic term to retain")).toBe(true);
+  expect(before.tracker.some(item => item.id === "synthetic-tracker" &&
+    item.attendance === "attended" && item.weekSource === "learner")).toBe(true);
+  expect(before.questions.some(question => question.id === "synthetic-question" &&
+    question.stem === "Which letter is A?" && question.needsReview === true &&
+    question.attempts.length === 1)).toBe(true);
+  expect(before.documents.some(doc => doc.id === "synthetic-document" &&
+    doc.rawText === "Only synthetic test evidence." &&
+    doc.checksum === "a".repeat(64))).toBe(true);
   await page.getByTitle("Settings", { exact: true }).click();
   await page.getByRole("tab", { name: "Emergency recovery", exact: true }).click();
 
