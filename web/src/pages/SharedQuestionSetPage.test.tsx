@@ -518,8 +518,8 @@ describe("Shared Question Set page", () => {
     let finishSave!: () => void;
     mocks.commit.mockImplementationOnce(() => new Promise((resolve) => {
       finishSave = () => resolve({
-        ok: true, questionSetId: "saved", questionIds: ["q1"],
-        added: 1, reused: 0, alreadyImported: false,
+        ok: false, message: "The linked workspace is being restored",
+        rollbackFailures: [],
       });
     }));
     render(<SharedQuestionSetPage />);
