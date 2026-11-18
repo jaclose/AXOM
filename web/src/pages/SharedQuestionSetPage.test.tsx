@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../lib/library";
 import { createQuestionSetShare } from "../lib/sharing/questionSetShare";
@@ -164,8 +164,8 @@ describe("Shared Question Set page", () => {
     fireEvent(window, new Event("hashchange"));
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
 
-    finishOld();
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Second shared set" })).toBeTruthy());
+    await act(async () => { finishOld(); });
+    expect(screen.getByRole("heading", { name: "Second shared set" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Synthetic shared set" })).toBeNull();
   });
 
@@ -194,8 +194,8 @@ describe("Shared Question Set page", () => {
     fireEvent(window, new Event("hashchange"));
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
-    finishOldSave();
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Second shared set" })).toBeTruthy());
+    await act(async () => { finishOldSave(); });
+    expect(screen.getByRole("heading", { name: "Second shared set" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(2));
@@ -203,5 +203,15 @@ describe("Shared Question Set page", () => {
       snapshot: nextShare.snapshot,
       identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
     });
+  });
+
+  it("removes an earlier share preview when navigating to an incomplete link", async () => {
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+    window.location.hash = "#/shared";
+    fireEvent(window, new Event("hashchange"));
+    expect(screen.getByRole("alert").textContent).toContain("incomplete");
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(screen.queryByText("Synthetic question?")).toBeNull();
   });
 });
