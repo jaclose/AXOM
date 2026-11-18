@@ -798,6 +798,9 @@ export async function restoreQuestionAttachmentPayloads(
       existing = undefined;
     }
     if (existing && existing.updatedAt > payload.updatedAt) { skipped += 1; continue; }
+    if (payload.mimeType !== target.mimeType || payload.byteSize !== target.byteSize) {
+      throw new Error("A backup image failed validation against surviving question metadata. No existing image was overwritten.");
+    }
     if (existing && existing.updatedAt === payload.updatedAt) {
       // Equal timestamps do not establish content equality. In particular, a
       // colliding same-size image key must not be silently counted as restored
@@ -823,6 +826,9 @@ export async function restoreQuestionAttachmentPayloads(
     }
     const bytes = base64ToBytes(payload.base64);
     if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_QUESTION_ATTACHMENT_BYTES) { skipped += 1; continue; }
+    if (bytes.byteLength !== payload.byteSize) {
+      throw new Error("A backup image failed validation against its declared byte size. No existing image was overwritten.");
+    }
     await putQuestionAttachmentBlob(payload.blobKey, {
       // bytes is a fresh, exact-length Uint8Array — its buffer is a plain ArrayBuffer.
       blob: new Blob([bytes.buffer as ArrayBuffer], { type: payload.mimeType }),
