@@ -31,17 +31,16 @@ test("future-schema JSON is refused before Replace or Merge and leaves local wor
       const dev = await app.__AXOM_DEV__;
       await dev.flushVault();
       const state = dev.useStore.getState();
-      // Exact synthetic identities and learner evidence, not volatile UI state.
-      return {
-        owner: state.profile.userId,
-        name: state.profile.name,
-        terms: state.terms.map(t => t.id),
-        tracker: state.tracker.map(t => [t.id, t.passes, t.ankiPasses]),
-        questions: state.questions.map(q => [q.id, q.attempts.length]),
-        documents: state.documents.map(d => d.id),
-        sessions: state.quizSessions.map(s => s.id),
-        sets: state.questionSets.map(s => s.id),
-      };
+      // Every JSON-persisted learner field matters here, not only record IDs.
+      // Exclude only device-clock-derived fields that can legitimately change on reload.
+      // Source text/checksums, question content/review flags, attendance and media
+      // references remain in the snapshot without touching original blob bytes.
+      return JSON.parse(JSON.stringify({
+        ...state,
+        activeDayKey: undefined,
+        lastActiveLocalDate: undefined,
+        lastTimezoneOffset: undefined,
+      }));
     });
   };
 
