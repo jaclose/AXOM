@@ -214,8 +214,14 @@ export function sumActivityMetric(logs: StudyLog[], key: "minutes" | "cards"): n
     const integerOperands = Number.isInteger(running) && Number.isInteger(value);
     const safelyExact = Number.isSafeInteger(running)
       && Number.isSafeInteger(value) && Number.isSafeInteger(next);
+    // An integer plus a fractional operand cannot have an exact integer
+    // result. If IEEE-754 produces one, some saved fraction was rounded away.
+    // Two fractional operands can legitimately cancel to an integer.
+    const roundedFractionToInteger = Number.isInteger(next)
+      && Number.isInteger(running) !== Number.isInteger(value);
     if (!Number.isFinite(next)
       || (value !== 0 && next === running)
+      || roundedFractionToInteger
       || (integerOperands && !safelyExact && BigInt(next) !== BigInt(running) + BigInt(value))) {
       throw new ActivityExportNumericError();
     }
