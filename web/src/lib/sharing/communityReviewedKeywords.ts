@@ -30,6 +30,22 @@ function keywordSafetyText(value: string): string {
   return value.normalize("NFKC").replace(HIDDEN_KEYWORD_REFERENCE_MARKS, "").trim();
 }
 
+/** Public citations can carry contact details in percent-encoded query values.
+ * Decode a bounded comparison-only copy (including double/triple encoding)
+ * before both AI-provider egress and public metadata/submission checks.
+ * Decoding byte escapes individually still detects an email when a neighboring
+ * query parameter contains malformed escapes. Never rewrite the source text. */
+function contactSafetyText(value: string): string {
+  let candidate = keywordSafetyText(value);
+  for (let depth = 0; depth < 3; depth += 1) {
+    const decoded = candidate.replace(/%([0-9a-f]{2})/gi, (_match, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)));
+    if (decoded === candidate) break;
+    candidate = keywordSafetyText(decoded);
+  }
+  return candidate;
+}
+
 /** Shared citation boundary for publisher keywords and generated teaching.
  * Scan a normalization-only copy; never modify author source or review evidence. */
 export function containsUnverifiedCommunityCitation(value: string): boolean {
@@ -57,11 +73,11 @@ const PRIVATE_COMMUNITY_EMAIL = /(?:^|[^a-z0-9._%+-])[a-z0-9._%+-]+@[a-z0-9-]+(?
 const PRIVATE_COMMUNITY_PHONE = /(?:^|[^a-z0-9])(?:phone(?:\s*(?:number|no\.?))?|telephone|tel\.?|mobile(?:\s*(?:number|no\.?))?|cell(?:phone)?(?:\s*(?:number|no\.?))?|contact(?:\s*(?:number|no\.?))?|call(?:\s+me)?(?:\s+at)?)\s*(?::|#|=|is)?\s*(\+?[\d(][\d().\s-]{6,30}\d)/gi;
 
 export function containsPrivateCommunityEmail(value: string | undefined): boolean {
-  return PRIVATE_COMMUNITY_EMAIL.test(keywordSafetyText(value ?? ""));
+  return PRIVATE_COMMUNITY_EMAIL.test(contactSafetyText(value ?? ""));
 }
 
 export function containsPrivateCommunityPhone(value: string | undefined): boolean {
-  return [...keywordSafetyText(value ?? "").matchAll(PRIVATE_COMMUNITY_PHONE)]
+  return [...contactSafetyText(value ?? "").matchAll(PRIVATE_COMMUNITY_PHONE)]
     .some(match => {
       const digits = match[1].replace(/\D/g, "").length;
       return digits >= 7 && digits <= 15;

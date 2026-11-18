@@ -438,7 +438,6 @@ describe("searchable Question Set client boundary", () => {
     "https://example.edu/research?source=/home/public-notes",
     "https://example.edu/tmp/lecture.pdf",
     "DOI:10.1000/abc",
-    "https://example.edu/paper?q=learner@example.edu",
     "https://example.edu/@editor/chapter",
     "https://example.edu/paper#author@university",
     "Data: available upon request",
@@ -452,6 +451,24 @@ describe("searchable Question Set client boundary", () => {
     service(rpc);
     expect(await submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed)).toBe(entryId);
     expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["plain query email", "https://example.edu/paper?q=learner@example.edu"],
+    ["encoded query email", "https://example.edu/paper?q=learner%40example.edu"],
+    ["doubly encoded query email", "https://example.edu/paper?q=learner%2540example%252Eedu"],
+    ["triply encoded query email", "https://example.edu/paper?q=learner%252540example.edu"],
+    ["encoded phone in citation", "https://example.edu/paper?notes=phone%3A%20%2B1%20%28865%29%20555-0199"],
+  ])("refuses a source link that would publish %s", async (_label, citation) => {
+    const value = snapshot();
+    value.questions[0].citation = citation;
+    const initial = JSON.stringify(value);
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/public.*text.*contact information/i);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(JSON.stringify(value)).toBe(initial);
   });
 
   it("keeps approved historical previews with device-local citations readable", async () => {
@@ -836,6 +853,9 @@ describe("searchable Question Set client boundary", () => {
     ["stem", "stem", "See mentor@school.example"],
     ["choice rationale", "rationale", "Wrong because this observation differs. Call me at 865 555 0199"],
     ["citation", "citation", "Correspondence: lecturer@school.example"],
+    ["encoded citation", "citation", "https://example.edu/paper?owner=lecturer%40school.example"],
+    ["double-encoded citation", "citation", "https://example.edu/paper?owner=lecturer%2540school.example"],
+    ["encoded telephone citation", "citation", "https://example.edu/paper?contact=phone%3A%20%2B1%20%28865%29%20555-0199"],
     ["copyright notice", "copyright", "Rights: faculty@school.example"],
   ] as const)("refuses approval of legacy pending public %s contact data", async (_label, field, contact) => {
     const original = snapshot();
