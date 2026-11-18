@@ -581,8 +581,30 @@ export async function collectQuestionAttachmentPayloads(
   options = { ...options, scope };
   const payloads: QuestionAttachmentExportPayload[] = [];
   const missing: string[] = [];
+  // One key can be referenced by several questions, but a contradictory MIME
+  // or length cannot safely be represented by one exported binary. Match the
+  // ZIP path: hold the entire key rather than certifying a partial JSON export.
+  const metadataByKey = new Map<string, Pick<QuestionImageAttachment, "mimeType" | "byteSize">>();
+  const conflictingKeys = new Set<string>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) {
+      const prior = metadataByKey.get(attachment.blobKey);
+      if (prior && (prior.mimeType !== attachment.mimeType || prior.byteSize !== attachment.byteSize)) {
+        conflictingKeys.add(attachment.blobKey);
+      } else if (!prior) {
+        metadataByKey.set(attachment.blobKey, attachment);
+      }
+    }
+  }
+  const processedKeys = new Set<string>();
+  for (const question of questions) {
+    for (const attachment of question.attachments ?? []) {
+      if (processedKeys.has(attachment.blobKey)) continue;
+      processedKeys.add(attachment.blobKey);
+      if (conflictingKeys.has(attachment.blobKey)) {
+        missing.push(attachment.blobKey);
+        continue;
+      }
       // One unreadable blob (missing record OR a failing arrayBuffer/base64)
       // must isolate to that attachment — never reject the whole export and
       // strip every image down to metadata-only.

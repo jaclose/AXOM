@@ -7,7 +7,7 @@ import { makeSeed } from "./seed";
 import { sha256Hex } from "./checksum";
 import { saveSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
+import { ATTACHMENT_EXPORT_KEY, getQuestionAttachmentBlob, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
 import { splitCloudContent } from "./sync/cloudContent";
 import { deferContent } from "./sync/deferredContent";
 import { retainDownloadedContent } from "./sync/contentDownloads";
@@ -151,6 +151,44 @@ describe("saved-work recovery without downloading content", () => {
         expect(filename.endsWith(`.${format}`)).toBe(true);
         expect(lastBackupAt()).toBeNull();
         expect(state.questions[0].attachments).toBe(originalAttachments);
+      }
+    }
+  });
+
+  it("deduplicates valid shared JSON images and refuses contradictory blob-key metadata in either order", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = []; // Force the small JSON export path, not ZIP.
+    const first = { ...state.questions[0], attachments: [attachment] };
+    const second = { ...first, id: "q-other", attachments: [{ ...attachment, id: "figure-other" }] };
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/png",
+      byteSize: 4, questionId: "q", updatedAt: attachment.updatedAt,
+    });
+
+    state.questions = [first, second];
+    const valid = await exportStateWithAttachments(state);
+    expect(valid).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+    expect(filename).toMatch(/\.json$/);
+    expect(JSON.parse(await exported!.text())[ATTACHMENT_EXPORT_KEY]).toHaveLength(1);
+    expect(lastBackupAt()).not.toBeNull();
+
+    for (const conflicting of [
+      { ...second, attachments: [{ ...attachment, id: "different-size", byteSize: 3 }] },
+      { ...second, attachments: [{ ...attachment, id: "different-format", mimeType: "image/jpeg" as const }] },
+    ]) {
+      for (const reversed of [false, true]) {
+        localStorage.clear();
+        state.questions = reversed ? [conflicting, first] : [first, conflicting];
+        const refused = await exportStateWithAttachments(state);
+        expect(refused, `conflicting ${conflicting.attachments[0].id}, reversed=${reversed}`).toMatchObject({
+          attachmentCount: 0, missingBlobKeys: [attachment.blobKey],
+        });
+        expect(filename).toMatch(/\.json$/);
+        expect(JSON.parse(await exported!.text())[ATTACHMENT_EXPORT_KEY]).toBeUndefined();
+        expect(lastBackupAt()).toBeNull();
+        expect(await (await getQuestionAttachmentBlob(attachment.blobKey))?.blob.text()).toBe("AXOM");
+        expect(state.questions).toHaveLength(2);
       }
     }
   });
