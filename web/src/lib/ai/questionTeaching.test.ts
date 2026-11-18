@@ -331,6 +331,68 @@ describe("review-gated explanation drafting", () => {
   });
 
   it.each([
+    ["UTF-8 fullwidth file URI in stem", { stem: "Which arterial layer? Source file%EF%BC%9A%EF%BC%8F%EF%BC%8FUsers%EF%BC%8Fstudent%EF%BC%8Fcase.pdf" }],
+    ["HTML-entity file URI in topic", { topic: "Vascular histology. Source file&#58;&#47;&#47;Users/student/private.pdf" }],
+    ["encoded signed URL in choice", { options: [
+      { key: "A", text: "Tunica media. Source https%EF%BC%9A%EF%BC%8F%EF%BC%8Fexample.edu%EF%BC%8Fcase%EF%BC%9Ftoken%EF%BC%9DDEMO_NOT_SECRET" },
+      { key: "B", text: "Tunica intima" }, { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["HTML-entity data URI in stem", { stem: "Which vessel layer? Encoded media data&colon;image/png;base64,QUJD" }],
+    ["malformed neighboring percent byte", { stem: "Which arterial layer? Source file%FF%EF%BC%9A%EF%BC%8F%EF%BC%8FUsers%2Fstudent%2Fcase.pdf" }],
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "blocks %s before sending private source references to an AI provider", async (_label, patch) => {
+      const source = question(patch);
+      const original = JSON.stringify(source);
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/private file|inline media|URL credentials/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(JSON.stringify(source)).toBe(original);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it.each([
+    ["encoded file URI in explanation", { explanation: "The tunica media contains the vascular smooth muscle. See file%EF%BC%9A%EF%BC%8F%EF%BC%8FUsers%2Fstudent%2Fprivate.pdf." }],
+    ["HTML-entity data URI in distractor", { choiceRationales: {
+      A: "The tunica media contains vascular smooth muscle.",
+      B: "The intima is an endothelial layer. See data&colon;image/png;base64,QUJD.",
+      C: "The adventitia provides the outer connective support.",
+    } }],
+    ["encoded signed URL in ninth keyword", { keywords: [
+      "arterial anatomy", "tunica media", "tunica intima", "adventitia",
+      "vascular tone", "smooth muscle", "histology", "endothelium",
+      "https%EF%BC%9A%EF%BC%8F%EF%BC%8Fexample.edu%EF%BC%8Fcase%EF%BC%9Ftoken%EF%BC%9DDEMO_NOT_SECRET",
+    ] }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    "rejects an AI-generated %s before returning a private draft", async (_label, patch) => {
+      const source = question();
+      const before = JSON.stringify(source);
+      const model = provider({
+        explanation: "The tunica media has vascular smooth muscle regulating arterial resistance and vessel caliber.",
+        choiceRationales: {
+          A: "The arterial media contains vascular smooth muscle.",
+          B: "The intima is the luminal endothelial lining.",
+          C: "The adventitia is primarily outer connective tissue.",
+        },
+        keywords: ["arterial histology"],
+        ...patch,
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/private file|inline media|URL credentials/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(JSON.stringify(source)).toBe(before);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it("retains ordinary public source paths in prompts without treating them as private device URIs", () => {
+    const source = question({ stem: "Which vascular layer? Public source https://example.edu/education/home/vascular-case" });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+  });
+
+  it.each([
     ["local source path", "file:///Users/student/private-question.pdf"],
     ["zero-width local source path", "file\u200B:///Users/student/private-question.pdf"],
     ["credential-bearing URL", "https://example.edu/source?access_token=DEMO_NOT_SECRET"],
