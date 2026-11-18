@@ -700,8 +700,9 @@ export async function stageQuestionAttachmentPayloads(
   // "rollback" therefore compensates without deleting staged image bytes.
   // The caller still discards failed workspace metadata. A safe scoped GC
   // requires independent proof that no workspace references the key.
-  const rollback = async (): Promise<void> => {
+  const rollback = (): Promise<void> => {
     // Intentionally retain inserted scoped bytes, including on partial failure.
+    return Promise.resolve();
   };
 
   try {
