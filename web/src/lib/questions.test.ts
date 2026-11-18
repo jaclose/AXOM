@@ -228,6 +228,49 @@ describe("mapping readiness", () => {
     expect(questionMappingStatus(makeQuestion({ id: "valid" }))).toBe("ready");
   });
 
+  it("holds reviewed current-schema and legacy questions when saved answer text contradicts the keyed option", () => {
+    const currentSchema = makeQuestion({
+      id: "current-schema-conflict", source: "imported", correctKey: "A",
+      options: [{ key: "A", text: "Tunica media" }, { key: "B", text: "Tunica intima" }],
+      correctAnswerText: "Tunica intima", needsReview: false,
+      extraction: { confidence: "high", reviewed: true },
+    });
+    const legacy = makeQuestion({ id: "legacy-conflict", correctAnswerText: "different answer" });
+    const blank = makeQuestion({ id: "blank-saved-text", correctAnswerText: "  " });
+    const malformed = makeQuestion({
+      id: "nonstring-saved-text",
+      correctAnswerText: 42 as unknown as QuestionRecord["correctAnswerText"],
+    });
+    const questions = [currentSchema, legacy, blank, malformed];
+    const before = structuredClone(questions);
+
+    for (const question of questions) {
+      expect(questionMappingStatus(question), question.id).toBe("unresolved");
+    }
+    expect(summarizeQuestionMappings(questions)).toMatchObject({
+      ready: 0, reviewSuggested: 0, unresolved: 4, issueCount: 4,
+      unresolvedQuestionIds: questions.map((question) => question.id),
+    });
+    expect(filterForMode(questions, "mapping-review").map((question) => question.id))
+      .toEqual(questions.map((question) => question.id));
+    // Never silently rekey the question or erase the saved contradictory evidence.
+    expect(questions).toEqual(before);
+  });
+
+  it("keeps absent historical display text and matching whitespace-trimmed text eligible", () => {
+    const noDisplay = makeQuestion({
+      id: "historical-absent", correctAnswerText: undefined,
+      extraction: { confidence: "high", reviewed: true },
+    });
+    const matching = makeQuestion({
+      id: "matching-display", correctAnswerText: "  x \\n",
+      extraction: { confidence: "high", reviewed: true },
+    });
+    expect(questionMappingStatus(noDisplay)).toBe("ready");
+    expect(questionMappingStatus(matching)).toBe("ready");
+    expect(summarizeQuestionMappings([noDisplay, matching]).issueCount).toBe(0);
+  });
+
   it("treats a repaired mapping as ready even when its practice status is stale", () => {
     const repaired = makeQuestion({
       status: "needs-review",
