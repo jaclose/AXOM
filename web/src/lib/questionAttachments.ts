@@ -744,9 +744,31 @@ export async function stageQuestionAttachmentPayloads(
         // The payload may be the first of several equivalent metadata references.
         updatedAt: target.updatedAt,
       };
-      await putQuestionAttachmentBlob(payload.blobKey, record, { scope });
-      inserted.set(payload.blobKey, record);
-      restored += 1;
+      try {
+        // This must be an atomic add, not a get-then-put: another restore may
+        // reserve the same scoped identity after our read of the absent key.
+        await withAttachmentStore("readwrite", store => {
+          assertScope(scope);
+          return store.add(record, scopedBlobKey(scope, payload.blobKey));
+        });
+        inserted.set(payload.blobKey, record);
+        restored += 1;
+      } catch (error) {
+        if (attachmentErrorName(error) !== "ConstraintError") throw error;
+        // A competing stage (or malformed row) reserved the key. Re-read
+        // its actual bytes; matching content may be reused, but differing
+        // bytes and unreadable reservations must never be replaced.
+        const winner = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
+        if (!winner?.blob || typeof winner.blob.arrayBuffer !== "function") {
+          throw new Error("A backup image key is already reserved, but its bytes cannot be verified. No existing image was overwritten.");
+        }
+        const winnerBytes = new Uint8Array(await winner.blob.arrayBuffer());
+        if (winner.mimeType !== payload.mimeType || winner.byteSize !== bytes.byteLength
+          || !equalBytes(winnerBytes, bytes)) {
+          throw new Error("A backup image uses an existing storage key with different bytes. No existing image was overwritten.");
+        }
+        skipped += 1;
+      }
     }
     assertScope(scope);
     return { restored, skipped, rollback };
