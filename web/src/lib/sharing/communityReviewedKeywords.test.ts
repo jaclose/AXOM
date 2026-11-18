@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword, mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
+import { containsPrivateCommunityEmail, containsPrivateCommunityPhone, containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword, mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
 
 describe("explicitly reviewed Community AI keywords", () => {
   it("preserves authored tags and adds only canonical, unique reviewed keywords", () => {
@@ -169,6 +169,36 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(() => mergeReviewedCommunityKeywords(authored, term))
       .toThrow(/publication metadata, citations or private references/i);
     expect(authored).toEqual(["histology", "rights:reviewed"]);
+  });
+
+  it.each([
+    ["plain source-query email", "https://example.edu/paper?q=lecturer@school.health"],
+    ["percent-encoded at sign", "https://example.edu/paper?q=lecturer%40school.health"],
+    ["percent-encoded dot", "https://example.edu/paper?q=lecturer%40school%2Ehealth"],
+    ["doubly encoded contact", "https://example.edu/paper?q=lecturer%2540school%252Ehealth"],
+    ["triply encoded contact", "https://example.edu/paper?q=lecturer%252540school.health"],
+    ["malformed neighboring escape", "https://example.edu/paper?q=lecturer%40school.health%ZZ"],
+    ["fullwidth and escaped contact", "ｌｅｃｔｕｒｅｒ％４０school.health"],
+  ])("rejects a source/contact email concealed in %s", (_label, value) => {
+    expect(containsPrivateCommunityEmail(value)).toBe(true);
+  });
+
+  it.each([
+    "phone%3A%20%2B1%20%28865%29%20555-0199",
+    "Call%2520me%2520at%2520865-555-0199",
+  ])("rejects a percent-encoded labeled contact telephone: %s", value => {
+    expect(containsPrivateCommunityPhone(value)).toBe(true);
+  });
+
+  it.each([
+    "https://example.edu/paper?term=alpha%3Abeta&name=%C3%A9tude",
+    "https://example.edu/@editor/chapter",
+    "https://example.edu/paper#author@university",
+    "Call 911 for anaphylaxis",
+    "CD4/CD8 blood pressure 120/80 mmHg",
+  ])("preserves public citations and benign clinical notation without contact details: %s", value => {
+    expect(containsPrivateCommunityEmail(value)).toBe(false);
+    expect(containsPrivateCommunityPhone(value)).toBe(false);
   });
 
   it.each([
