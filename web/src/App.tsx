@@ -489,7 +489,9 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
                     ? <JournalPage registerAppTransitionGuard={registerRouteTransitionGuard} />
                     : routeKey === "communications"
                       ? <LazyCommunicationsPage registerAppTransitionGuard={registerRouteTransitionGuard} />
-                    : <Page />}
+                    : routeKey === "shared-set"
+                      ? <LazySharedQuestionSetPage key={route} />
+                      : <Page />}
                   {/* Commits with the page itself, so the film only hands over to real content. */}
                   <PresentationReady />
                 </Suspense>

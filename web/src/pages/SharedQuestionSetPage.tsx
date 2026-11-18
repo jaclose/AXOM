@@ -17,9 +17,11 @@ export function SharedQuestionSetPage() {
   // both the pending preview and any old save UI before resolving its new token.
   // Already-issued server writes cannot be cancelled by this UI guard.
   const linkGeneration = useRef(0);
+  const resolvedToken = useRef<string | null>(null);
   useEffect(() => {
     const openLink = () => {
       const generation = ++linkGeneration.current;
+      resolvedToken.current = null;
       setShare(null);
       setError("");
       setAdded(false);
@@ -32,6 +34,7 @@ export function SharedQuestionSetPage() {
       }
       void resolveShare(token).then((resolved) => {
         if (linkGeneration.current !== generation) return;
+        resolvedToken.current = token;
         setShare(resolved);
         const imported = useStore.getState().questionSets.some((questionSet) => {
           const provenance = readSharedQuestionImportProvenance(questionSet);
@@ -66,6 +69,19 @@ export function SharedQuestionSetPage() {
 
   async function add() {
     if (!share || busy || added) return;
+    const currentToken = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
+    if (!resolvedToken.current || currentToken !== resolvedToken.current) {
+      // pushState/replaceState do not emit hashchange. Never import the preview
+      // for a different link, even when the router has not remounted this page.
+      ++linkGeneration.current;
+      resolvedToken.current = null;
+      setShare(null);
+      setAdded(false);
+      setBusy(false);
+      setError("");
+      setPreviewAttempt((attempt) => attempt + 1);
+      return;
+    }
     const generation = linkGeneration.current;
     setBusy(true);
     setError("");
