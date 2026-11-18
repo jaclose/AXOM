@@ -9,7 +9,25 @@ import { SharedQuestionSetPage } from "./SharedQuestionSetPage";
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
   questionSets: [] as QuestionSet[],
+  accountId: "account-1" as string | null,
+  accountObservers: new Set<(state: { user: { id: string } | null }) => void>(),
 }));
+
+vi.mock("../lib/account/accountStore", () => ({
+  useAccount: {
+    getState: () => ({ user: mocks.accountId ? { id: mocks.accountId } : null }),
+    subscribe: (listener: (state: { user: { id: string } | null }) => void) => {
+      mocks.accountObservers.add(listener);
+      return () => { mocks.accountObservers.delete(listener); };
+    },
+  },
+}));
+
+function switchAccount(id: string | null) {
+  mocks.accountId = id;
+  const state = { user: id ? { id } : null };
+  mocks.accountObservers.forEach((listener) => listener(state));
+}
 
 vi.mock("../lib/store", () => ({
   useStore: {
@@ -57,6 +75,8 @@ const nextShare = {
 };
 
 beforeEach(() => {
+  mocks.accountId = "account-1";
+  mocks.accountObservers.clear();
   window.history.replaceState(null, "", `#/shared?token=${TOKEN}`);
   mocks.questionSets = [];
   mocks.commit.mockReset();
@@ -87,10 +107,10 @@ describe("Shared Question Set page", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
 
-    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({
       snapshot,
       identity: { shareId: SHARE_ID, contentDigest: DIGEST },
-    }));
+    })));
     expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
   });
 
@@ -141,10 +161,10 @@ describe("Shared Question Set page", () => {
 
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
-    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({
       snapshot: nextShare.snapshot,
       identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
-    }));
+    })));
     expect(mocks.commit).toHaveBeenCalledTimes(1);
   });
 
@@ -199,10 +219,10 @@ describe("Shared Question Set page", () => {
     expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
     await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(2));
-    expect(mocks.commit).toHaveBeenLastCalledWith({
+    expect(mocks.commit).toHaveBeenLastCalledWith(expect.objectContaining({
       snapshot: nextShare.snapshot,
       identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
-    });
+    }));
   });
 
   it("removes an earlier share preview when navigating to an incomplete link", async () => {
@@ -281,10 +301,10 @@ describe("Shared Question Set page", () => {
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
     expect(vi.mocked(resolveShare).mock.calls.at(-1)?.[0]).toBe(NEXT_TOKEN);
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
-    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({
       snapshot: nextShare.snapshot,
       identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
-    }));
+    })));
     expect(mocks.commit).toHaveBeenCalledTimes(1);
   });
 
@@ -306,10 +326,84 @@ describe("Shared Question Set page", () => {
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Synthetic shared set" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
-    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({
       snapshot: nextShare.snapshot,
       identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
-    }));
+    })));
     expect(mocks.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("revokes a loaded preview across a batched A to B to A account switch", async () => {
+    let finishReload!: () => void;
+    vi.mocked(resolveShare)
+      .mockResolvedValueOnce({ id: SHARE_ID, snapshot, contentDigest: DIGEST })
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        finishReload = () => resolve(nextShare);
+      }));
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+    await act(async () => {
+      switchAccount("account-2");
+      switchAccount("account-1");
+    });
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(resolveShare).toHaveBeenCalledTimes(2);
+    expect(mocks.commit).not.toHaveBeenCalled();
+    await act(async () => { finishReload(); });
+    expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
+  });
+
+  it("fences an in-flight import against A to B to A session reuse", async () => {
+    let finishSave!: () => void;
+    mocks.commit.mockImplementationOnce(() => new Promise((resolve) => {
+      finishSave = () => resolve({
+        ok: true, questionSetId: "old-account-set", questionIds: ["old-question"],
+        added: 1, reused: 0, alreadyImported: false,
+      });
+    }));
+    render(<SharedQuestionSetPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+    const payload = mocks.commit.mock.calls[0]?.[0];
+    expect(payload.accountGuard.accountId).toBe("account-1");
+    expect(payload.accountGuard.isCurrentAccount("account-1")).toBe(true);
+    await act(async () => {
+      switchAccount("account-2");
+      switchAccount("account-1");
+    });
+    expect(payload.accountGuard.isCurrentAccount("account-1")).toBe(false);
+    await act(async () => { finishSave(); });
+    expect(screen.queryByRole("button", { name: "Already in this AXOM" })).toBeNull();
+  });
+
+  it("refuses an old account's import click before React commits the account switch", async () => {
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+    act(() => {
+      switchAccount("account-2");
+      fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    });
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it("guards local guest imports without forbidding bearer-link access", async () => {
+    switchAccount(null);
+    let finishSave!: () => void;
+    mocks.commit.mockImplementationOnce(() => new Promise((resolve) => {
+      finishSave = () => resolve({
+        ok: true, questionSetId: "guest-set", questionIds: ["guest-question"],
+        added: 1, reused: 0, alreadyImported: false,
+      });
+    }));
+    render(<SharedQuestionSetPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+    const guard = mocks.commit.mock.calls[0]?.[0].accountGuard;
+    expect(typeof guard.accountId).toBe("string");
+    expect(guard.accountId.length).toBeGreaterThan(0);
+    expect(guard.isCurrentAccount(guard.accountId)).toBe(true);
+    act(() => { switchAccount("account-1"); });
+    expect(guard.isCurrentAccount(guard.accountId)).toBe(false);
+    await act(async () => { finishSave(); });
   });
 });
