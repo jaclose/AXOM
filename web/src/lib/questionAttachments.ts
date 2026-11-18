@@ -669,10 +669,20 @@ export async function stageQuestionAttachmentPayloads(
 ): Promise<StagedQuestionAttachmentRestore> {
   const scope = getQuestionAttachmentScope();
   const surviving = new Map<string, QuestionImageAttachment & { questionId: string }>();
+  const conflictingKeys = new Set<string>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) {
+      const previous = surviving.get(attachment.blobKey);
+      if (previous && (previous.mimeType !== attachment.mimeType || previous.byteSize !== attachment.byteSize)) {
+        conflictingKeys.add(attachment.blobKey);
+      }
       surviving.set(attachment.blobKey, { ...attachment, questionId: question.id });
     }
+  }
+  // Historical JSON may predate the export-side conflict guard. Never stage
+  // one shared binary against mutually incompatible surviving references.
+  if (payloads.some(payload => conflictingKeys.has(payload.blobKey))) {
+    throw new Error("A backup image has conflicting image references. No existing image was overwritten.");
   }
 
   const inserted = new Map<string, QuestionAttachmentBlobRecord>();
@@ -730,7 +740,9 @@ export async function stageQuestionAttachmentPayloads(
         mimeType: payload.mimeType,
         byteSize: bytes.byteLength,
         questionId: target.questionId,
-        updatedAt: payload.updatedAt,
+        // The last surviving reference supplies BOTH pieces of stored provenance.
+        // The payload may be the first of several equivalent metadata references.
+        updatedAt: target.updatedAt,
       };
       await putQuestionAttachmentBlob(payload.blobKey, record, { scope });
       inserted.set(payload.blobKey, record);
