@@ -5,6 +5,8 @@ import {
   validateQuestionRecord, weakTopics, type QuestionRecord,
 } from "./questions";
 import { parseQuestionText } from "./questionParse";
+import { parseImport, toPortableState } from "./backup";
+import { makeSeed, SCHEMA_VERSION } from "./seed";
 
 function makeQuestion(patch: Partial<QuestionRecord> = {}): QuestionRecord {
   return {
@@ -226,6 +228,111 @@ describe("mapping readiness", () => {
     });
     // A valid manually entered question remains runnable without import metadata.
     expect(questionMappingStatus(makeQuestion({ id: "valid" }))).toBe("ready");
+  });
+
+  it("holds reviewed current-schema and legacy questions when saved answer text contradicts the keyed option", () => {
+    const currentSchema = makeQuestion({
+      id: "current-schema-conflict", source: "imported", correctKey: "A",
+      options: [{ key: "A", text: "Tunica media" }, { key: "B", text: "Tunica intima" }],
+      correctAnswerText: "Tunica intima", needsReview: false,
+      extraction: { confidence: "high", reviewed: true },
+    });
+    const legacy = makeQuestion({ id: "legacy-conflict", source: "imported", correctAnswerText: "different answer" });
+    const malformed = makeQuestion({
+      id: "nonstring-saved-text",
+      correctAnswerText: 42 as unknown as QuestionRecord["correctAnswerText"],
+    });
+    const questions = [currentSchema, legacy, malformed];
+    const before = structuredClone(questions);
+
+    for (const question of questions) {
+      expect(questionMappingStatus(question), question.id).toBe("unresolved");
+    }
+    expect(summarizeQuestionMappings(questions)).toMatchObject({
+      ready: 0, reviewSuggested: 0, unresolved: 3, issueCount: 3,
+      unresolvedQuestionIds: questions.map((question) => question.id),
+    });
+    expect(filterForMode(questions, "mapping-review").map((question) => question.id))
+      .toEqual(questions.map((question) => question.id));
+    // Never silently rekey the question or erase the saved contradictory evidence.
+    expect(questions).toEqual(before);
+  });
+
+  it("treats blank display text as absent evidence, but still requires independent extraction review", () => {
+    const noDisplay = makeQuestion({
+      id: "historical-absent", correctAnswerText: undefined,
+      extraction: { confidence: "high", reviewed: true },
+    });
+    const matching = makeQuestion({
+      id: "matching-display", correctAnswerText: "  x  ",
+      extraction: { confidence: "high", reviewed: true },
+    });
+    const whitespace = makeQuestion({
+      id: "current-schema-blank", correctAnswerText: "   ",
+      extraction: { confidence: "high", reviewed: true },
+    });
+    const unreviewed = makeQuestion({
+      id: "unreviewed-blank", correctAnswerText: "\t",
+      extraction: { confidence: "medium", reviewed: false },
+    });
+    expect(questionMappingStatus(noDisplay)).toBe("ready");
+    expect(questionMappingStatus(matching)).toBe("ready");
+    expect(questionMappingStatus(whitespace)).toBe("ready");
+    expect(questionMappingStatus(unreviewed)).toBe("review-suggested");
+    expect(summarizeQuestionMappings([noDisplay, matching, whitespace, unreviewed]))
+      .toMatchObject({ ready: 3, reviewSuggested: 1, unresolved: 0, issueCount: 1 });
+    expect(whitespace.correctAnswerText).toBe("   ");
+  });
+
+  it("distinguishes independent extracted evidence from a manually authored stale display label", () => {
+    const manual = makeQuestion({
+      id: "manual-sixth-choice", source: "manual", correctKey: "F",
+      options: ["A", "B", "C", "D", "E", "F"].map((key) => ({
+        key, text: key === "F" ? "Foxtrot" : `Option ${key}`,
+      })),
+      correctAnswerText: "Beta", // Old display text does not identify another option.
+    });
+    const authoredSynonym = makeQuestion({
+      id: "manual-synonym", source: "manual", correctAnswerText: "Rhinovirus",
+      options: [{ key: "A", text: "Human rhinovirus" }, { key: "B", text: "Influenza" }],
+    });
+    const namedOtherChoice = makeQuestion({
+      id: "manual-conflict", source: "manual", correctAnswerText: "y",
+    });
+    const imported = { ...manual, source: "imported" as const };
+    const extracted = { ...manual, extraction: { confidence: "high" as const, reviewed: true } };
+    const before = structuredClone([manual, authoredSynonym, namedOtherChoice, imported, extracted]);
+
+    expect(questionMappingStatus(manual)).toBe("ready");
+    expect(questionMappingStatus(authoredSynonym)).toBe("ready");
+    expect(questionMappingStatus(namedOtherChoice)).toBe("unresolved");
+    expect(questionMappingStatus(imported)).toBe("unresolved");
+    expect(questionMappingStatus(extracted)).toBe("unresolved");
+    expect([manual, authoredSynonym, namedOtherChoice, imported, extracted]).toEqual(before);
+  });
+
+  it("keeps blank-display eligibility consistent across legacy and current portable schemas", () => {
+    const portable = toPortableState(makeSeed());
+    const sourceQuestion = makeQuestion({
+      id: "same-blank-source", correctAnswerText: "   ",
+      extraction: { confidence: "high", reviewed: true },
+      attempts: [{ at: "2026-11-01T10:00:00.000Z", answerKey: "B", status: "incorrect" }],
+    });
+    const original = structuredClone(sourceQuestion);
+    const restored = [31, SCHEMA_VERSION].map((schemaVersion) => parseImport(JSON.stringify({
+      _app: "AXOM", ...portable, schemaVersion, questions: [sourceQuestion],
+    })).questions[0]);
+    expect(restored.map(questionMappingStatus)).toEqual(["ready", "ready"]);
+    expect(restored[0].correctAnswerText).toBe("x"); // Legacy backfills a missing display answer.
+    expect(restored[1].correctAnswerText).toBe("   "); // Current schema preserves raw evidence.
+    for (const question of restored) {
+      expect(question).toMatchObject({
+        id: original.id, correctKey: original.correctKey,
+        options: original.options, attempts: original.attempts,
+        extraction: { reviewed: true },
+      });
+    }
+    expect(sourceQuestion).toEqual(original);
   });
 
   it("treats a repaired mapping as ready even when its practice status is stale", () => {

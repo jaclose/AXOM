@@ -275,6 +275,26 @@ export function questionMappingStatus(question: QuestionRecord): QuestionMapping
     || typeof question.correctKey !== "string"
     || optionKeys.filter((key) => key === question.correctKey).length !== 1
     || question.needsReview === true) return "unresolved";
+  // The display answer is independent evidence on imported/extracted records:
+  // substantive text that differs from the keyed option must remain review-held.
+  // On manually authored records without extraction, the selected key is canonical
+  // and older display text can be stale or differently phrased. Even there, a
+  // display answer naming a different listed choice is a definite conflict.
+  // Blank display text is missing evidence, not a contradictory answer; neither
+  // raw display text nor the keyed option is rewritten or clinically verified.
+  if (question.correctAnswerText !== undefined) {
+    const keyedOption = question.options.find((option) => option.key === question.correctKey);
+    if (typeof question.correctAnswerText !== "string" || typeof keyedOption?.text !== "string") {
+      return "unresolved";
+    }
+    const savedAnswer = question.correctAnswerText.trim();
+    if (savedAnswer && savedAnswer !== keyedOption.text.trim()) {
+      const namesAnotherChoice = question.options.some((option) => option.key !== question.correctKey
+        && typeof option.text === "string" && option.text.trim() === savedAnswer);
+      const independentEvidence = question.source !== "manual" || question.extraction !== undefined;
+      if (namesAnotherChoice || independentEvidence) return "unresolved";
+    }
+  }
   if (question.content?.assets.some((asset) => ["question", "stem", "choice"].includes(asset.role)
     && !question.attachments?.some((attachment) => attachment.assetId === asset.id))) return "unresolved";
   if (question.extraction && question.extraction.reviewed !== true) return "review-suggested";
