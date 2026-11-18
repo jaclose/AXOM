@@ -33,7 +33,8 @@ function savedShareStatus(
   const receipt = receipts[0];
   if (readSharedQuestionImportProvenance(receipt)?.contentDigest !== resolved.contentDigest) return "incomplete";
   const ids = receipt.questionIds;
-  if (ids.length !== resolved.snapshot.orderedQuestionIds.length || new Set(ids).size !== ids.length) {
+  if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || !id.trim())
+    || ids.length !== resolved.snapshot.orderedQuestionIds.length || new Set(ids).size !== ids.length) {
     return "incomplete";
   }
   const memberIds = new Set(ids);
