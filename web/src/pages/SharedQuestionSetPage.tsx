@@ -19,10 +19,34 @@ function canImportIntoWorkspace(state: ReturnType<typeof useAccount.getState>): 
     && !state.restoreOffer;
 }
 
+// A receipt alone does not prove its imported questions remain available.
+// Hold incomplete or conflicting local receipts without rewriting user data.
+function savedShareStatus(
+  state: Pick<ReturnType<typeof useStore.getState>, "questionSets" | "questions">,
+  resolved: ResolvedQuestionSetShare,
+): "absent" | "complete" | "incomplete" {
+  const receipts = (state.questionSets ?? []).filter((set) =>
+    readSharedQuestionImportProvenance(set)?.shareId === resolved.id,
+  );
+  if (receipts.length === 0) return "absent";
+  if (receipts.length !== 1) return "incomplete";
+  const receipt = receipts[0];
+  if (readSharedQuestionImportProvenance(receipt)?.contentDigest !== resolved.contentDigest) return "incomplete";
+  const ids = receipt.questionIds;
+  if (ids.length !== resolved.snapshot.orderedQuestionIds.length || new Set(ids).size !== ids.length) {
+    return "incomplete";
+  }
+  const memberIds = new Set(ids);
+  const storedMembers = (state.questions ?? []).filter((question) => memberIds.has(question.id));
+  if (storedMembers.length !== ids.length) return "incomplete";
+  return "complete";
+}
+
 export function SharedQuestionSetPage() {
   const [share, setShare] = useState<ResolvedQuestionSetShare | null>(null);
   const [error, setError] = useState("");
   const [added, setAdded] = useState(false);
+  const [importIssue, setImportIssue] = useState(false);
   const [busy, setBusy] = useState(false);
   const [previewStopped, setPreviewStopped] = useState(false);
   const [previewAttempt, setPreviewAttempt] = useState(0);
@@ -57,6 +81,7 @@ export function SharedQuestionSetPage() {
       resolvedAccountId.current = null;
       setShare(null);
       setAdded(false);
+      setImportIssue(false);
       setBusy(false);
       setError("");
       setPreviewStopped(false);
@@ -73,6 +98,7 @@ export function SharedQuestionSetPage() {
       setShare(null);
       setError("");
       setAdded(false);
+      setImportIssue(false);
       setBusy(false);
       setPreviewStopped(false);
       const token = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
@@ -88,12 +114,11 @@ export function SharedQuestionSetPage() {
         setShare(resolved);
         // Never derive the incoming account's membership from a different,
         // not-yet-restored device vault. Reconcile once this vault is ready.
-        const imported = canImportIntoWorkspace(useAccount.getState())
-          && useStore.getState().questionSets.some((questionSet) => {
-            const provenance = readSharedQuestionImportProvenance(questionSet);
-            return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
-          });
-        setAdded(imported);
+        const status = canImportIntoWorkspace(useAccount.getState())
+          ? savedShareStatus(useStore.getState(), resolved)
+          : "absent";
+        setAdded(status === "complete");
+        setImportIssue(status === "incomplete");
       }).catch((cause) => {
         if (linkGeneration.current === generation) {
           setError(cause instanceof Error ? cause.message : "This share is unavailable.");
@@ -117,7 +142,7 @@ export function SharedQuestionSetPage() {
     const generation = linkGeneration.current;
     const token = resolvedToken.current;
     const accountId = resolvedAccountId.current;
-    const reconcile = (questionSets: ReturnType<typeof useStore.getState>["questionSets"]) => {
+    const reconcile = (state: ReturnType<typeof useStore.getState>) => {
       if (
         linkGeneration.current !== generation
         || resolvedToken.current !== token
@@ -126,16 +151,18 @@ export function SharedQuestionSetPage() {
       ) return;
       if (!canImportIntoWorkspace(useAccount.getState())) {
         setAdded(false);
+        setImportIssue(false);
         return;
       }
-      setAdded(questionSets.some((questionSet) => {
-        const provenance = readSharedQuestionImportProvenance(questionSet);
-        return provenance?.shareId === share.id && provenance.contentDigest === share.contentDigest;
-      }));
+      const status = savedShareStatus(state, share);
+      setAdded(status === "complete");
+      setImportIssue(status === "incomplete");
     };
-    reconcile(useStore.getState().questionSets);
+    reconcile(useStore.getState());
     return useStore.subscribe((state, previous) => {
-      if (state.questionSets !== previous.questionSets) reconcile(state.questionSets);
+      if (state.questionSets !== previous.questionSets || state.questions !== previous.questions) {
+        reconcile(state);
+      }
     });
   }, [share, importReady]);
 
@@ -155,6 +182,13 @@ export function SharedQuestionSetPage() {
 
   async function add() {
     if (!share || busy || added) return;
+    // This synchronous check also closes a restore-to-click render race.
+    const receiptStatus = savedShareStatus(useStore.getState(), share);
+    if (receiptStatus !== "absent") {
+      setAdded(receiptStatus === "complete");
+      setImportIssue(receiptStatus === "incomplete");
+      return;
+    }
     // Recheck synchronously in case a store transition preceded React's
     // disabled-button render. An unlinked/restoring vault is not writable.
     if (!canImportIntoWorkspace(useAccount.getState())) {
@@ -172,6 +206,7 @@ export function SharedQuestionSetPage() {
       resolvedAccountId.current = null;
       setShare(null);
       setAdded(false);
+      setImportIssue(false);
       setBusy(false);
       setError("");
       setPreviewAttempt((attempt) => attempt + 1);
@@ -234,8 +269,14 @@ export function SharedQuestionSetPage() {
                 : "Checking your account session before importing this set."}
             </p>
           ) : null}
-          <GButton variant="primary" onClick={() => void add()} disabled={added || busy || !importReady}>
-            <Download />{!importReady ? "Add to my AXOM" : added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
+          {importReady && importIssue ? (
+            <p role="alert">
+              This saved shared set has missing or conflicting question membership. Restore your AXOM
+              workspace or backup before retrying. Existing learner data will not be overwritten here.
+            </p>
+          ) : null}
+          <GButton variant="primary" onClick={() => void add()} disabled={added || importIssue || busy || !importReady}>
+            <Download />{importIssue ? "Import unavailable" : !importReady ? "Add to my AXOM" : added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
           </GButton>
         </>
       ) : null}
