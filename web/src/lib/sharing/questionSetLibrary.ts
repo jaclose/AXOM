@@ -1,5 +1,6 @@
 import { accountOperationClient } from "../account/supabase";
 import { hasExplanationProse } from "../questionExplanationCoverage";
+import { containsPrivateCommunityEmail, containsPrivateCommunityPhone } from "./communityReviewedKeywords";
 import { hasPrivateDeviceCitation, sharedQuestionSetDigest, validateShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
 
 export interface LibraryQuestionSet {
@@ -70,6 +71,16 @@ function containsPrivateInlineReference(snapshot: SharedQuestionSetSnapshot): bo
 
 function containsPrivateInlineText(value: string): boolean {
   return INLINE_PRIVATE_REFERENCE.test(value) && hasPrivateDeviceCitation(value);
+}
+
+/** Metadata is visible in the public listing or imported question tags. Unlike
+ * reviewed keyword proposals, saved author tags bypass the keyword editor.
+ * Reject only contact data here: legacy source/visual subject tags must remain
+ * intact, and published snapshots are never rewritten. */
+function containsPrivatePublicMetadata(snapshot: SharedQuestionSetSnapshot, credit?: string): boolean {
+  const visible = [snapshot.title, ...snapshot.tags,
+    ...snapshot.questions.flatMap(question => question.tags), credit];
+  return visible.some(value => containsPrivateCommunityEmail(value) || containsPrivateCommunityPhone(value));
 }
 
 // Obvious answer labels and unresolved-draft notices do not teach the learner
@@ -254,6 +265,8 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   // Apply the same device/inline-media privacy boundary before the RPC.
   if (containsPrivateInlineText(credit))
     throw new Error("Public creator credit contains a private file, inline media reference or URL credentials. Remove it before publishing.");
+  if (containsPrivatePublicMetadata(submittedSnapshot, credit))
+    throw new Error("Public Question Set title, tags or creator credit contains contact information. Remove it before submitting.");
   if (!submittedSnapshot.questions.length || submittedSnapshot.questions.some(question => !question.correctKey))
     throw new Error("Every public library question needs a confirmed answer.");
   // The dialog filters missing/placeholder rationales, but other callers can
@@ -350,6 +363,8 @@ export async function reviewQuestionSetSubmission(
     || containsPrivateInlineReference(data.snapshot_payload)
   ))
     throw new Error("This Question Set contains a private file or inline media reference and cannot be approved. Return it for revision.");
+  if (approved && containsPrivatePublicMetadata(data.snapshot_payload))
+    throw new Error("This Question Set has contact information in a public title or tag and cannot be approved. Return it for revision.");
   await operation.assertCurrent();
   const decision = await operation.client.rpc("review_question_set_library", {
     p_id: reviewed.id, p_approved: approved, p_reason: reason.trim(),
