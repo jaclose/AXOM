@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   questionSets: [] as QuestionSet[],
   accountId: "account-1" as string | null,
   accountObservers: new Set<(state: { user: { id: string } | null }) => void>(),
+  storeObservers: new Set<(state: { questionSets: QuestionSet[] }, previous: { questionSets: QuestionSet[] }) => void>(),
 }));
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -29,12 +30,23 @@ function switchAccount(id: string | null) {
   mocks.accountObservers.forEach((listener) => listener(state));
 }
 
+function hydrateQuestionSets(next: QuestionSet[]) {
+  const previous = mocks.questionSets;
+  mocks.questionSets = next;
+  mocks.storeObservers.forEach((listener) =>
+    listener({ questionSets: next }, { questionSets: previous }));
+}
+
 vi.mock("../lib/store", () => ({
   useStore: {
     getState: () => ({
       questionSets: mocks.questionSets,
       commitSharedQuestionSetImport: mocks.commit,
     }),
+    subscribe: (listener: (state: { questionSets: QuestionSet[] }, previous: { questionSets: QuestionSet[] }) => void) => {
+      mocks.storeObservers.add(listener);
+      return () => { mocks.storeObservers.delete(listener); };
+    },
   },
 }));
 vi.mock("../lib/sharing/supabaseSharing", () => ({ resolveShare: vi.fn() }));
@@ -77,6 +89,7 @@ const nextShare = {
 beforeEach(() => {
   mocks.accountId = "account-1";
   mocks.accountObservers.clear();
+  mocks.storeObservers.clear();
   window.history.replaceState(null, "", `#/shared?token=${TOKEN}`);
   mocks.questionSets = [];
   mocks.commit.mockReset();
@@ -405,5 +418,46 @@ describe("Shared Question Set page", () => {
     act(() => { switchAccount("account-1"); });
     expect(guard.isCurrentAccount(guard.accountId)).toBe(false);
     await act(async () => { finishSave(); });
+  });
+
+  it("clears an obsolete imported badge after B's empty vault hydrates after share resolution", async () => {
+    const previouslyImported: QuestionSet = {
+      id: "A-imported-set",
+      title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["A-question"], tags: [],
+      aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    };
+    mocks.questionSets = [previouslyImported];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
+
+    // Auth can switch to B before the asynchronously restored B vault arrives.
+    await act(async () => { switchAccount("account-2"); });
+    expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
+    await act(async () => { hydrateQuestionSets([]); });
+
+    expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    expect(mocks.commit).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+  });
+
+  it("recognizes B's imported set when vault hydration arrives after a fresh share preview", async () => {
+    const bImported: QuestionSet = {
+      id: "B-imported-set",
+      title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["B-question"], tags: [],
+      aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    };
+    mocks.questionSets = [];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    await act(async () => { switchAccount("account-2"); });
+    expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+
+    await act(async () => { hydrateQuestionSets([bImported]); });
+    expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
+    expect(mocks.commit).not.toHaveBeenCalled();
   });
 });
