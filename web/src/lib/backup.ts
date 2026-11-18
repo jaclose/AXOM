@@ -517,7 +517,14 @@ function migrateImportedQuestion(value: unknown, fromVersion: number): unknown {
     const existingAnswerText = typeof question.correctAnswerText === "string" && question.correctAnswerText.trim()
       ? question.correctAnswerText
       : undefined;
-    question.correctAnswerText = matched && typeof matched.text === "string" ? matched.text : existingAnswerText;
+    const keyedAnswerText = matched && typeof matched.text === "string" ? matched.text : undefined;
+    // A legacy backup may contain contradictory answer evidence. Never repair it
+    // silently by replacing an explicitly saved answer with the keyed option.
+    question.correctAnswerText = existingAnswerText ?? keyedAnswerText;
+    if (existingAnswerText !== undefined && keyedAnswerText !== undefined
+      && existingAnswerText.trim() !== keyedAnswerText.trim()) {
+      question.needsReview = true;
+    }
     if (extraction) {
       question.extraction = {
         ...extraction,
