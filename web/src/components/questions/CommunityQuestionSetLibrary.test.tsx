@@ -10,6 +10,7 @@ import type { QuestionSet } from "../../lib/library";
 
 const mock = vi.hoisted(() => ({
   sets: [] as QuestionSet[],
+  questions: [] as { id: string }[],
   accountId: "account-1", observers: new Set<(state: { user: { id: string } }) => void>(), search: vi.fn(), preview: vi.fn(), authorize: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
 }));
 vi.mock("../../lib/account/accountStore", () => {
@@ -36,7 +37,7 @@ vi.mock("../../lib/sharing/questionSetLibrary", () => ({
   withdrawQuestionSetSubmission: mock.withdraw,
 }));
 vi.mock("../../lib/store", () => ({
-  useStore: Object.assign(() => ({}), { getState: () => ({ questionSets: mock.sets, commitSharedQuestionSetImport: mock.commit }) }),
+  useStore: Object.assign(() => ({}), { getState: () => ({ questionSets: mock.sets, questions: mock.questions, commitSharedQuestionSetImport: mock.commit }) }),
 }));
 
 const summary = {
@@ -54,6 +55,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mock.accountId = "account-1";
   mock.sets = [];
+  mock.questions = [];
   mock.observers.clear();
   mock.search.mockResolvedValue([summary]);
   mock.preview.mockResolvedValue({ id: summary.id, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2 });
@@ -75,6 +77,7 @@ describe("Community Question Set Library", () => {
     const onPractice = vi.fn();
     mock.commit.mockImplementationOnce(async () => {
       mock.sets = [savedSet];
+      mock.questions = [{ id: "local-q1" }];
       return { ok: true, questionSetId: savedSet.id };
     });
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
@@ -96,6 +99,25 @@ describe("Community Question Set Library", () => {
     expect(onPractice).not.toHaveBeenCalled();
     expect((await screen.findByRole("alert")).textContent).toContain("Add it again to practice");
     expect(screen.getByRole("button", { name: "Add to my AXOM" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it.each([
+    ["missing", []],
+    ["duplicate", [{ id: "local-q1" }, { id: "local-q1" }]],
+  ])("does not launch practice with %s imported question records after restoration", async (_failure, questions) => {
+    mock.sets = [savedSet];
+    mock.questions = questions;
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect((await screen.findByRole("alert")).textContent).toContain("Recover the original question IDs");
+    // Keep the original import receipt and ID-bound attempts; do not invite
+    // a replacement import that would manufacture unrelated question IDs.
+    expect(mock.sets).toEqual([savedSet]);
+    expect(screen.getByRole("button", { name: "Practice this set" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
   });
 
   it("searches approved listings, opens a safe preview, imports, and likes", async () => {
