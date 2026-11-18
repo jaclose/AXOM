@@ -497,6 +497,47 @@ describe("portable backup payloads", () => {
     expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
   });
 
+  it("preserves the newest legacy image when restores with stale initial reads overlap", async () => {
+    const key = "legacy-concurrent-timestamp";
+    const initial = "2026-07-17T12:00:00.000Z";
+    const older = "2026-07-17T14:00:00.000Z";
+    const newer = "2026-07-17T15:00:00.000Z";
+    await putQuestionAttachmentBlob(key, {
+      blob: new Blob(["BASE"]), mimeType: "image/png", byteSize: 4,
+      questionId: "q1", updatedAt: initial,
+    });
+    const restore = (updatedAt: string, content: string) => {
+      const meta = metadata({ id: key, byteSize: 4, updatedAt });
+      return restoreQuestionAttachmentPayloads(
+        [{ ...meta, questionId: "q1", base64: btoa(content) }],
+        [{ id: "q1", attachments: [meta] }],
+      );
+    };
+    // Both calls are made before either awaits a storage read. Even if a
+    // newer writer commits first, an older writer must never downgrade it.
+    const results = await Promise.all([restore(newer, "NEW2"), restore(older, "OLD1")]);
+    expect(results.every(result => result.restored + result.skipped === 1)).toBe(true);
+    const stored = await getQuestionAttachmentBlob(key, { localOnly: true });
+    expect(stored).toMatchObject({ updatedAt: newer, byteSize: 4 });
+    expect(await stored!.blob.text()).toBe("NEW2");
+  });
+
+  it("does not overwrite a concurrent same-revision legacy image with different bytes", async () => {
+    const meta = metadata({ id: "legacy-concurrent-same-revision", byteSize: 4 });
+    const restore = (text: string) => restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: btoa(text) }],
+      [{ id: "q1", attachments: [meta] }],
+    );
+    const outcomes = await Promise.allSettled([restore("AAAA"), restore("BBBB")]);
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find(result => result.status === "rejected");
+    expect(rejected?.status).toBe("rejected");
+    if (rejected?.status === "rejected") expect(String(rejected.reason)).toContain("same revision");
+    const stored = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(stored?.updatedAt).toBe(meta.updatedAt);
+    expect(["AAAA", "BBBB"]).toContain(await stored!.blob.text());
+  });
+
   it("payloads for questions the merge dropped are skipped (never attach to the wrong question)", async () => {
     const meta = metadata({ id: "attachment-x" });
     const result = await restoreQuestionAttachmentPayloads(
