@@ -458,6 +458,19 @@ describe("portable backup payloads", () => {
     expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("EXTRA");
   });
 
+  it("rejects same-revision legacy reuse when bytes match but surviving question metadata disagrees", async () => {
+    const meta = metadata({ id: "legacy-equal-revision-survivor-mismatch", byteSize: 4 });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["SAME"], { type: "image/jpeg" }),
+      mimeType: "image/jpeg", byteSize: 4, questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    const mismatchedPayload = [{ ...meta, mimeType: "image/jpeg" as const, questionId: "q1",
+      base64: await blobToBase64(new Blob(["SAME"])) }];
+    await expect(restoreQuestionAttachmentPayloads(mismatchedPayload, [{ id: "q1", attachments: [meta] }]))
+      .rejects.toThrow("surviving question metadata");
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("SAME");
+  });
+
   it("still reuses byte-identical legacy images at the same revision without rewriting their provenance", async () => {
     const meta = metadata({ id: "legacy-equal-revision-identical", byteSize: 4 });
     await putQuestionAttachmentBlob(meta.blobKey, {
@@ -495,6 +508,47 @@ describe("portable backup payloads", () => {
       [{ id: "q1", attachments: [meta] }],
     )).rejects.toThrow("declared byte size");
     expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it("preserves the newest legacy image when restores with stale initial reads overlap", async () => {
+    const key = "legacy-concurrent-timestamp";
+    const initial = "2026-07-17T12:00:00.000Z";
+    const older = "2026-07-17T14:00:00.000Z";
+    const newer = "2026-07-17T15:00:00.000Z";
+    await putQuestionAttachmentBlob(key, {
+      blob: new Blob(["BASE"]), mimeType: "image/png", byteSize: 4,
+      questionId: "q1", updatedAt: initial,
+    });
+    const restore = (updatedAt: string, content: string) => {
+      const meta = metadata({ id: key, byteSize: 4, updatedAt });
+      return restoreQuestionAttachmentPayloads(
+        [{ ...meta, questionId: "q1", base64: btoa(content) }],
+        [{ id: "q1", attachments: [meta] }],
+      );
+    };
+    // Both calls are made before either awaits a storage read. Even if a
+    // newer writer commits first, an older writer must never downgrade it.
+    const results = await Promise.all([restore(newer, "NEW2"), restore(older, "OLD1")]);
+    expect(results.every(result => result.restored + result.skipped === 1)).toBe(true);
+    const stored = await getQuestionAttachmentBlob(key, { localOnly: true });
+    expect(stored).toMatchObject({ updatedAt: newer, byteSize: 4 });
+    expect(await stored!.blob.text()).toBe("NEW2");
+  });
+
+  it("does not overwrite a concurrent same-revision legacy image with different bytes", async () => {
+    const meta = metadata({ id: "legacy-concurrent-same-revision", byteSize: 4 });
+    const restore = (text: string) => restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: btoa(text) }],
+      [{ id: "q1", attachments: [meta] }],
+    );
+    const outcomes = await Promise.allSettled([restore("AAAA"), restore("BBBB")]);
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find(result => result.status === "rejected");
+    expect(rejected?.status).toBe("rejected");
+    if (rejected?.status === "rejected") expect(String(rejected.reason)).toContain("same revision");
+    const stored = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(stored?.updatedAt).toBe(meta.updatedAt);
+    expect(["AAAA", "BBBB"]).toContain(await stored!.blob.text());
   });
 
   it("payloads for questions the merge dropped are skipped (never attach to the wrong question)", async () => {
