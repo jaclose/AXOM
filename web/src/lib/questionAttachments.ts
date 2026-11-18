@@ -798,7 +798,26 @@ export async function restoreQuestionAttachmentPayloads(
       existing = undefined;
     }
     if (existing && existing.updatedAt > payload.updatedAt) { skipped += 1; continue; }
-    if (existing && existing.updatedAt === payload.updatedAt && existing.byteSize === payload.byteSize) {
+    if (existing && existing.updatedAt === payload.updatedAt) {
+      // Equal timestamps do not establish content equality. In particular, a
+      // colliding same-size image key must not be silently counted as restored
+      // while the surviving question still points to different local bytes.
+      let identical = false;
+      try {
+        const incoming = base64ToBytes(payload.base64);
+        if (incoming && incoming.byteLength === payload.byteSize
+          && existing.mimeType === payload.mimeType
+          && existing.byteSize === payload.byteSize
+          && existing.blob?.size === payload.byteSize
+          && (!existing.blob.type || existing.blob.type === payload.mimeType)) {
+          identical = equalBytes(new Uint8Array(await existing.blob.arrayBuffer()), incoming);
+        }
+      } catch {
+        // An unreadable stored image is not a verified identical backup image.
+      }
+      if (!identical) {
+        throw new Error("A backup image uses an existing storage key at the same revision with different bytes or metadata. No existing image was overwritten.");
+      }
       skipped += 1;
       continue;
     }
