@@ -188,6 +188,24 @@ function hasPrivateDraftEmail(question: QuestionRecord): boolean {
     .some(containsPrivateDraftEmail);
 }
 
+// A labeled contact telephone number is personal data, not a clinical lab
+// value. Require an explicit phone/contact/call cue to avoid flagging dates,
+// vital signs or drug doses; hold rather than silently rewriting source text.
+// This is a bounded heuristic, not a comprehensive PII scrubber.
+const PRIVATE_DRAFT_CONTACT_PHONE = /(?:^|[^a-z0-9])(?:phone(?:\s*(?:number|no\.?))?|telephone|tel\.?|mobile(?:\s*(?:number|no\.?))?|cell(?:phone)?(?:\s*(?:number|no\.?))?|contact(?:\s*(?:number|no\.?))?|call(?:\s+me)?(?:\s+at)?)\s*(?::|#|=|is)?\s*(\+?[\d(][\d().\s-]{6,30}\d)/gi;
+function containsPrivateDraftPhone(value: string | undefined): boolean {
+  const scan = referenceSafetyText(value);
+  return [...scan.matchAll(PRIVATE_DRAFT_CONTACT_PHONE)]
+    .some(match => {
+      const digits = match[1].replace(/\D/g, "").length;
+      return digits >= 7 && digits <= 15;
+    });
+}
+function hasPrivateDraftPhone(question: QuestionRecord): boolean {
+  return [question.stem, question.topic, ...question.options.map(option => option.text)]
+    .some(containsPrivateDraftPhone);
+}
+
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
   // Option labels and the selected correctKey are included verbatim in the AI
   // prompt too. An imported set may have reviewed keys that are not safe to
@@ -266,6 +284,7 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && !question.content?.assets.length
     && !containsPrivateDraftPromptReference(question)
     && !hasPrivateDraftEmail(question)
+    && !hasPrivateDraftPhone(question)
     && !referencesUnavailableExhibit(question)
     && !hasUnrepresentedRichSource(question)
     && !hasUnsafeDraftChoiceLabels(question)
@@ -302,6 +321,9 @@ export async function draftQuestionExplanation(
   }
   if (hasPrivateDraftEmail(question)) {
     throw new Error("This question contains an email address in text sent to the AI provider. Remove private contact information before drafting.");
+  }
+  if (hasPrivateDraftPhone(question)) {
+    throw new Error("This question contains a contact phone number in text sent to the AI provider. Remove private contact information before drafting.");
   }
   if (hasConflictingStoredAnswerText(question)) {
     throw new Error("Stored answer text conflicts with the confirmed keyed choice. Verify the source answer before AI drafting.");
@@ -388,6 +410,11 @@ export async function draftQuestionExplanation(
   if ([explanation, ...Object.values(choiceRationales), ...untrustedKeywordStrings]
     .some(containsPrivateDraftEmail)) {
     throw new Error("The generated explanation contains an email address. Discard the draft and review any contact information before publication.");
+  }
+
+  if ([explanation, ...Object.values(choiceRationales), ...untrustedKeywordStrings]
+    .some(containsPrivateDraftPhone)) {
+    throw new Error("The generated explanation contains a contact phone number. Discard the draft and review any contact information before publication.");
   }
 
   // Keyword proposals are untrusted structured output. Do not silently
