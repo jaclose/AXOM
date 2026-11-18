@@ -254,7 +254,7 @@ describe("saved-work recovery without downloading content", () => {
       { ...second.attachments[0], mimeType: "image/jpeg" },
     ]) {
       for (const reversed of [false, true]) {
-        const raw = structuredClone(valid);
+        const raw = JSON.parse(JSON.stringify(valid));
         raw.questions = reversed ? [raw.questions[1], raw.questions[0]] : raw.questions;
         const conflictRef = raw.questions.find((q: { id: string }) => q.id === second.id);
         conflictRef.attachments = [conflicting];
