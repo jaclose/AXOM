@@ -71,4 +71,65 @@ describe("academic course review routing", () => {
       .rejects.toThrow(/Community submission changed/);
     expect(rpc).toHaveBeenCalledTimes(2);
   });
+
+  it("withdraws an approved Community revision without requiring a new explanation attestation", async () => {
+    const rpc = vi.fn(async (name: string) => name === "academic_review"
+      ? { error: { code: "42501", message: "Use exact community revision review" } }
+      : { error: null });
+    setupRpc(rpc);
+
+    await reviewAcademicCourse(collectionId, false, accountId, undefined, false, revisionId);
+
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(rpc).toHaveBeenNthCalledWith(1, "academic_review", { collection: collectionId, approved: false });
+    expect(rpc).toHaveBeenNthCalledWith(2, "academic_community_review", {
+      collection: collectionId, revision: revisionId, approved: false,
+    });
+    expect(attestAcademicExplanations).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed or absent selected revision for Community withdrawal", async () => {
+    const rpc = vi.fn(async () => ({ error: { code: "42501", message: "Use exact community revision review" } }));
+    setupRpc(rpc);
+
+    await expect(reviewAcademicCourse(collectionId, false, accountId, undefined, false, "not-a-uuid"))
+      .rejects.toThrow(/current revision/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(attestAcademicExplanations).not.toHaveBeenCalled();
+  });
+
+  it("rejects a conflicting explanation receipt instead of withdrawing another revision", async () => {
+    const rpc = vi.fn(async () => ({ error: { code: "42501", message: "Use exact community revision review" } }));
+    setupRpc(rpc);
+    const otherRevision = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+    await expect(reviewAcademicCourse(collectionId, false, accountId, receipt, false, otherRevision))
+      .rejects.toThrow(/current revision/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops before the Community RPC if the account changes after the initial refusal", async () => {
+    const rpc = vi.fn(async () => ({ error: { code: "42501", message: "Use exact community revision review" } }));
+    const first = { userId: accountId, client: { rpc } } as unknown as Awaited<ReturnType<typeof accountOperationClient>>;
+    const switched = { userId: "different-account", client: { rpc } } as unknown as Awaited<ReturnType<typeof accountOperationClient>>;
+    vi.mocked(accountOperationClient).mockReset();
+    vi.mocked(accountOperationClient).mockResolvedValueOnce(first).mockResolvedValueOnce(switched);
+
+    await expect(reviewAcademicCourse(collectionId, false, accountId, undefined, false, revisionId))
+      .rejects.toThrow(/account changed/i);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report success if the exact Community withdrawal is rejected by the server", async () => {
+    const rpc = vi.fn(async (name: string) => name === "academic_review"
+      ? { error: { code: "42501", message: "Use exact community revision review" } }
+      : { error: { code: "40001", message: "The revision changed" } });
+    setupRpc(rpc);
+
+    await expect(reviewAcademicCourse(collectionId, false, accountId, undefined, false, revisionId))
+      .rejects.toThrow(/Community submission changed/);
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(attestAcademicExplanations).not.toHaveBeenCalled();
+  });
+
 });
