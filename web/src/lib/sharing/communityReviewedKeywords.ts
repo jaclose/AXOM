@@ -35,7 +35,7 @@ function keywordSafetyText(value: string): string {
  * authored content, citations, review evidence or published history.
  * Named entities are intentionally restricted to contact-relevant syntax. */
 const CONTACT_HTML_ENTITIES: Record<string, string> = {
-  amp: "&", commat: "@", period: ".", colon: ":", plus: "+",
+  amp: "&", commat: "@", period: ".", colon: ":", plus: "+", sol: "/",
   lpar: "(", rpar: ")", hyphen: "-", nbsp: " ", tab: " ", newline: " ",
 };
 function decodeContactHtmlEntities(value: string): string {
@@ -69,7 +69,9 @@ function contactSafetyText(value: string): string {
 /** Shared citation boundary for publisher keywords and generated teaching.
  * Scan a normalization-only copy; never modify author source or review evidence. */
 export function containsUnverifiedCommunityCitation(value: string): boolean {
-  const candidate = keywordSafetyText(value);
+  // Encoded URLs can be displayed as live citations after rich-text rendering.
+  // Use the same bounded comparison-only decoding as the contact-data gate.
+  const candidate = contactSafetyText(value);
   // AI-generated HTTPS/HTTP links are unverified citations regardless of TLD.
   // A narrow domain allowlist missed plausible-looking .health/.dev sources.
   // This scans a copy only; the real source citation remains separately reviewed.
@@ -82,7 +84,7 @@ export function containsUnverifiedCommunityCitation(value: string): boolean {
 const UNVERIFIED_COMMUNITY_ATTESTATION = /(?:^|[^\p{L}\p{N}])(?:source(?:\s+(?:evidence|material|document|citation|reference))?|rights?|licen[sc]e|provenance|publication|moderation|academic\s+review|clinical\s+review|answer(?:[-\s]+key)?)[\s-]*(?::|=|\b(?:is|was|are|were|has\s+been|have\s+been)\b)?\s*(?:verified|validated|approved|cleared|confirmed|reviewed|licensed|granted|completed?)\b|\b(?:i|we)\s+(?:have\s+)?(?:reviewed|verified|checked|validated|confirmed)\s+(?:the\s+)?(?:original\s+)?(?:source|reference|citation|rights|licen[sc]e)\b|\b(?:approved|cleared|licensed|verified)\s+for\s+(?:community\s+)?publication\b|\b(?:reviewed|approved|verified|validated)\s+by\s+(?:faculty|(?:an?\s+)?(?:academic|clinical)\s+reviewer|(?:a\s+)?clinician|the\s+moderator)\b/iu;
 
 export function containsUnverifiedCommunityAttestation(value: string): boolean {
-  return UNVERIFIED_COMMUNITY_ATTESTATION.test(keywordSafetyText(value));
+  return UNVERIFIED_COMMUNITY_ATTESTATION.test(contactSafetyText(value));
 }
 
 // Public keyword proposals and outgoing AI text must use the same bounded
@@ -105,7 +107,9 @@ export function containsPrivateCommunityPhone(value: string | undefined): boolea
 }
 
 export function isCommunitySubjectKeyword(value: string): boolean {
-  const candidate = keywordSafetyText(value);
+  // Review what encoded references would mean when interpreted, without
+  // modifying the author-supplied tag or any immutable source evidence.
+  const candidate = contactSafetyText(value);
   return Boolean(candidate)
     && !COMPOUND_KEYWORD_SEPARATORS.test(candidate)
     && !RESERVED_PUBLICATION_KEYWORD.test(candidate)
