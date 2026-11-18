@@ -30,7 +30,14 @@ const accountState = () => ({
 
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: {
-    getState: accountState,
+    getState: () => ({
+      user: mocks.accountId ? { id: mocks.accountId } : null,
+      phase: mocks.accountPhase,
+      link: mocks.accountLink,
+      busy: mocks.accountBusy,
+      applyingRemote: mocks.accountApplyingRemote,
+      restoreOffer: mocks.accountRestoreOffer ? { id: "restore-offer" } : undefined,
+    }),
     subscribe: (listener: (state: { user: { id: string } | null }) => void) => {
       mocks.accountObservers.add(listener);
       return () => { mocks.accountObservers.delete(listener); };
