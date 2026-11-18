@@ -270,8 +270,15 @@ export function questionMappingStatus(question: QuestionRecord): QuestionMapping
   // are insufficient: quiz pools and saved-set metrics also call this function.
   if (!Array.isArray(question.options) || question.options.length < 2) return "unresolved";
   const optionKeys = question.options.map((option) => option?.key);
-  if (optionKeys.some((key) => typeof key !== "string" || !key.trim())
-    || new Set(optionKeys).size !== optionKeys.length
+  // Saved portable/legacy choices can bypass authoring validation. A blank or
+  // non-text choice is not a usable answer, and visually identical letter keys
+  // must not permit a quiz to score a potentially ambiguous selection.
+  const comparableKeys = optionKeys.map((key) => typeof key === "string"
+    ? key.trim().normalize("NFKC").toUpperCase()
+    : "");
+  if (question.options.some((option) => typeof option?.text !== "string" || !option.text.trim())
+    || optionKeys.some((key) => typeof key !== "string" || !key.trim())
+    || new Set(comparableKeys).size !== optionKeys.length
     || typeof question.correctKey !== "string"
     || optionKeys.filter((key) => key === question.correctKey).length !== 1
     || question.needsReview === true) return "unresolved";
