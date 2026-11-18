@@ -175,6 +175,62 @@ describe("community Question Set exact-revision publication gate", () => {
     expect(question.correctKey).toBe("A");
   });
 
+  it.each([
+    ["case and spacing equivalent choices", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: " TUNICA   MEDIA " },
+    ] }],
+    ["HTML-escaped duplicate choice", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "Tunica&nbsp;media" },
+    ] }],
+    ["percent-encoded duplicate choice", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "Tunica%20media" },
+    ] }],
+    ["nested percent-encoded duplicate choice", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "Tunica%2520media" },
+    ] }],
+    ["invisible-mark duplicate choice", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "Tuni\u200Bca media" },
+    ] }],
+    ["encoded blank alternative", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "&#32;&nbsp;" },
+    ] }],
+    ["nested encoded blank stem", { stem: "%2520&nbsp;\u200B" }],
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "holds %s at final submission even with a previously stored key and explanation",
+    (_label, patch) => {
+      const source = { ...question, ...patch };
+      const original = JSON.stringify(source);
+      expect(() => publish({ openedQuestion: source, liveQuestion: source }))
+        .toThrow(/unreadable question stem|indistinguishable answer choices/i);
+      expect(JSON.stringify(source)).toBe(original);
+      expect(source.correctKey).toBe("A");
+      expect(source.explanation).toBe(question.explanation);
+    },
+  );
+
+  it("preserves genuine clinical contrasts while checking text integrity", () => {
+    const source: QuestionRecord = {
+      ...question,
+      stem: "Which cell surface marker is characteristic of helper T lymphocytes?",
+      options: [
+        { key: "A", text: "CD4%2B T lymphocytes" },
+        { key: "B", text: "CD4- T lymphocytes" },
+        { key: "C", text: "CD8+ T lymphocytes" },
+      ],
+      explanation: "Helper T lymphocytes commonly express CD4 and coordinate adaptive immune responses through cytokine signaling.",
+      choiceRationales: {
+        A: "CD4 is a characteristic marker of helper T lymphocytes.",
+        B: "CD4-negative cells are not defined as helper T cells by that marker.",
+        C: "CD8 is characteristic of cytotoxic T lymphocytes.",
+      },
+    };
+    const original = JSON.stringify(source);
+    const snapshot = publish({ openedQuestion: source, liveQuestion: source });
+    expect(snapshot.questions[0].correctKey).toBe("A");
+    expect(snapshot.questions[0].options[0].text).toBe("CD4%2B T lymphocytes");
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
   it("never publishes newly held, unexplained or media-dependent questions", () => {
     expect(() => publish({ liveQuestion: { ...question, needsReview: true } })).toThrow(/changed while publishing/);
     expect(() => publish({ liveQuestion: { ...question, explanation: "" } })).toThrow(/changed while publishing/);
