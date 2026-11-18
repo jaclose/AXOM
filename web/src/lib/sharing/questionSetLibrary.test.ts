@@ -1018,6 +1018,9 @@ describe("searchable Question Set client boundary", () => {
     ["entity-encoded duplicate answer text", "choice", "F&#105;rst"],
     ["fullwidth duplicate choice label", "label", "Ａ"],
     ["nested encoded duplicate label", "label", "%2541"],
+    ["combining grapheme joiner only stem", "stem", "\u034F"],
+    ["variation selector only stem", "stem", "\uFE0F"],
+    ["combining grapheme joiner duplicate text", "choice", "Fir\u034Fst"],
   ] as const)("blocks %s in a schema-valid direct submission before account RPC", async (_label, field, replacement) => {
     const original = snapshot();
     if (field === "stem") original.questions[0].stem = replacement;
@@ -1036,6 +1039,9 @@ describe("searchable Question Set client boundary", () => {
     ["legacy encoded blank stem", "stem", "&#x200B;&nbsp;"],
     ["legacy duplicate answer text", "choice", "Ｆｉｒｓｔ"],
     ["legacy duplicate choice label", "label", "Ａ"],
+    ["legacy combining grapheme joiner only stem", "stem", "\u034F"],
+    ["legacy variation selector only stem", "stem", "\uFE0F"],
+    ["legacy combining grapheme joiner duplicate answer", "choice", "Fir\u034Fst"],
   ] as const)("holds %s at pending academic approval, while preserving rejection", async (_label, field, replacement) => {
     const original = snapshot();
     if (field === "stem") original.questions[0].stem = replacement;
