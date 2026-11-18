@@ -30,16 +30,36 @@ function keywordSafetyText(value: string): string {
   return value.normalize("NFKC").replace(HIDDEN_KEYWORD_REFERENCE_MARKS, "").trim();
 }
 
-/** Public citations can carry contact details in percent-encoded query values.
- * Decode a bounded comparison-only copy (including double/triple encoding)
- * before both AI-provider egress and public metadata/submission checks.
- * Decoding byte escapes individually still detects an email when a neighboring
- * query parameter contains malformed escapes. Never rewrite the source text. */
+/** Some imported clinical text and public source links contain HTML-escaped
+ * contact details. Decode only a bounded, comparison-only copy; never alter
+ * authored content, citations, review evidence or published history.
+ * Named entities are intentionally restricted to contact-relevant syntax. */
+const CONTACT_HTML_ENTITIES: Record<string, string> = {
+  amp: "&", commat: "@", period: ".", colon: ":", plus: "+",
+  lpar: "(", rpar: ")", hyphen: "-", nbsp: " ", tab: " ", newline: " ",
+};
+function decodeContactHtmlEntities(value: string): string {
+  return value.replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));|&([a-z][a-z0-9]+);/gi,
+    (raw, hex: string | undefined, decimal: string | undefined, name: string | undefined) => {
+      if (name) return CONTACT_HTML_ENTITIES[name.toLowerCase()] ?? raw;
+      const codepoint = Number.parseInt(hex ?? decimal ?? "", hex ? 16 : 10);
+      return codepoint >= 0x20 && codepoint <= 0x10ffff
+        && !(codepoint >= 0xd800 && codepoint <= 0xdfff)
+        ? String.fromCodePoint(codepoint) : raw;
+    });
+}
+
+/** Public citation and rich-text fields may conceal contact details through
+ * percent escapes, HTML entities, or both, including nested escapes.
+ * Normalize a bounded comparison-only copy before external AI inference,
+ * keyword review, submission or pending moderation approval. A malformed
+ * neighboring percent escape must not conceal a valid contact. */
 function contactSafetyText(value: string): string {
   let candidate = keywordSafetyText(value);
   for (let depth = 0; depth < 3; depth += 1) {
-    const decoded = candidate.replace(/%([0-9a-f]{2})/gi, (_match, hex: string) =>
+    const percentDecoded = candidate.replace(/%([0-9a-f]{2})/gi, (_match, hex: string) =>
       String.fromCharCode(Number.parseInt(hex, 16)));
+    const decoded = decodeContactHtmlEntities(percentDecoded);
     if (decoded === candidate) break;
     candidate = keywordSafetyText(decoded);
   }
