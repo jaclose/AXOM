@@ -2,10 +2,12 @@ import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { questionPracticeReadiness } from "../questionFilters";
 import { hasMainExplanation } from "../questionExplanationCoverage";
+import { communityEvidenceSafetyText } from "./communityReviewedKeywords";
 import { enrichPublicQuestionSetVisualTags } from "../diagrams/communityVisualSnapshot";
 import { createQuestionSetShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
 
 const CHANGED = "This Question Set or its source review changed while publishing. Reopen the set and reconfirm the current answers and sharing rights.";
+const UNREADABLE = "A Question Set has an unreadable question stem or indistinguishable answer choices. Review the original source and correct the question before publication.";
 
 /** Shared set-identity gate for AI drafting, private draft saves and public
  * submission. Membership alone is insufficient: the same saved IDs may be
@@ -60,6 +62,19 @@ function sourceReceipt(question: QuestionRecord): string {
   ]);
 }
 
+/** A verified key and an existing explanation do not make two equivalent
+ * displayed choices distinguishable. Independently hold a public submission if
+ * historical escaped text renders as a blank stem/choice or duplicate choices.
+ * This is a comparison-only integrity check, not new answer or rights evidence;
+ * neither source text nor existing reviewer/publication state is rewritten.
+ */
+function hasUnpublishableQuestionText(question: QuestionRecord): boolean {
+  if (!communityEvidenceSafetyText(question.stem).trim()) return true;
+  const texts = question.options.map(option =>
+    communityEvidenceSafetyText(option.text).replace(/\s+/g, " ").trim().toLowerCase());
+  return texts.some(text => !text) || new Set(texts).size !== texts.length;
+}
+
 /**
  * Publish only the immutable public projection of the set the owner actually
  * reviewed in this dialog. Supabase checks account/rights/review separately;
@@ -90,6 +105,13 @@ export function prepareCurrentCommunityQuestionSetSubmission(input: {
       || questionPracticeReadiness(live) !== "ready"
       || !hasMainExplanation(live)
       || Boolean(live.attachments?.length || live.content?.assets.length)) throw new Error(CHANGED);
+  }
+
+  // Reject source ambiguity even when an old rationale and key were previously
+  // accepted; this never selects or invents a replacement answer.
+  for (const id of openedSet.questionIds) {
+    const currentQuestion = liveById.get(id);
+    if (!currentQuestion || hasUnpublishableQuestionText(currentQuestion)) throw new Error(UNREADABLE);
   }
 
   // Share v1 includes every field that can leave the private account. Comparing
