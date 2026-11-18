@@ -40,6 +40,15 @@ export function containsUnverifiedCommunityCitation(value: string): boolean {
   return /https?:\/\//i.test(candidate) || UNVERIFIED_PUBLIC_CITATION.test(candidate);
 }
 
+// Source rights, key review and publication status belong to immutable review
+// evidence, not free-text keyword suggestions or AI teaching prose. One shared
+// comparison-only scanner keeps both admission paths aligned.
+const UNVERIFIED_COMMUNITY_ATTESTATION = /(?:^|[^\p{L}\p{N}])(?:source(?:\s+(?:evidence|material|document|citation|reference))?|rights?|licen[sc]e|provenance|publication|moderation|academic\s+review|clinical\s+review|answer(?:[-\s]+key)?)[\s-]*(?::|=|\b(?:is|was|are|were|has\s+been|have\s+been)\b)?\s*(?:verified|validated|approved|cleared|confirmed|reviewed|licensed|granted|completed?)\b|\b(?:i|we)\s+(?:have\s+)?(?:reviewed|verified|checked|validated|confirmed)\s+(?:the\s+)?(?:original\s+)?(?:source|reference|citation|rights|licen[sc]e)\b|\b(?:approved|cleared|licensed|verified)\s+for\s+(?:community\s+)?publication\b|\b(?:reviewed|approved|verified|validated)\s+by\s+(?:faculty|(?:an?\s+)?(?:academic|clinical)\s+reviewer|(?:a\s+)?clinician|the\s+moderator)\b/iu;
+
+export function containsUnverifiedCommunityAttestation(value: string): boolean {
+  return UNVERIFIED_COMMUNITY_ATTESTATION.test(keywordSafetyText(value));
+}
+
 export function isCommunitySubjectKeyword(value: string): boolean {
   const candidate = keywordSafetyText(value);
   return Boolean(candidate)
@@ -47,6 +56,7 @@ export function isCommunitySubjectKeyword(value: string): boolean {
     && !RESERVED_PUBLICATION_KEYWORD.test(candidate)
     && !/https?:\/\//i.test(candidate)
     && !UNVERIFIED_PUBLIC_CITATION.test(candidate)
+    && !containsUnverifiedCommunityAttestation(candidate)
     && !hasPrivateDeviceCitation(candidate);
 }
 

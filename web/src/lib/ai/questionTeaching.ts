@@ -1,7 +1,7 @@
 import type { AIProvider } from "./types";
 import { questionPracticeReadiness } from "../questionFilters";
 import { hasPrivateDeviceCitation } from "../sharing/questionSetShare";
-import { containsUnverifiedCommunityCitation, isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
+import { containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
 import { blocksToPlainText } from "../question-content/blocks";
 import type { QuestionRecord } from "../questions";
 
@@ -204,17 +204,6 @@ function containsPrivateDraftPhone(value: string | undefined): boolean {
 function hasPrivateDraftPhone(question: QuestionRecord): boolean {
   return [question.stem, question.topic, ...question.options.map(option => option.text)]
     .some(containsPrivateDraftPhone);
-}
-
-/**
- * Model output is a private, unreviewed teaching proposal. The model never
- * receives source documents or rights decisions, so it must not assert that
- * source evidence, licensing or academic publication has been approved.
- * Inspect only a normalized copy; retain original reviewer/source records.
- */
-const UNSUPPORTED_DRAFT_ATTESTATION = /(?:^|[^\p{L}\p{N}])(?:source(?:\s+(?:evidence|material|document|citation|reference))?|rights?|licen[sc]e|provenance|publication|moderation|academic\s+review|clinical\s+review)[\s-]*(?::|=|\b(?:is|was|are|were|has\s+been|have\s+been)\b)?\s*(?:verified|validated|approved|cleared|confirmed|reviewed|licensed|granted)\b|\b(?:i|we)\s+(?:have\s+)?(?:reviewed|verified|checked|validated|confirmed)\s+(?:the\s+)?(?:original\s+)?(?:source|reference|citation|rights|licen[sc]e)\b/iu;
-function containsUnsupportedDraftAttestation(value: string): boolean {
-  return UNSUPPORTED_DRAFT_ATTESTATION.test(referenceSafetyText(value));
 }
 
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
@@ -456,7 +445,7 @@ export async function draftQuestionExplanation(
   // academic moderation or clinical review. These assertions cannot be made
   // by an AI provider that received only text and a human-selected key.
   if ([explanation, ...Object.values(choiceRationales)]
-    .some(containsUnsupportedDraftAttestation)) {
+    .some(containsUnverifiedCommunityAttestation)) {
     throw new Error("The AI draft claims unverified source, rights, or publication approval. Discard the proposal and retain those decisions for independent human review.");
   }
   // Keywords are subject phrases, never rights attestations or visual-intent
