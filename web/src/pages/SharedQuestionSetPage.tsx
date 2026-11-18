@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Link2 } from "lucide-react";
 import { GlassCard, GButton, Tag } from "../components/ui/primitives";
+import { useAccount } from "../lib/account/accountStore";
 import { readSharedQuestionImportProvenance } from "../lib/sharing/questionSetShare";
 import { resolveShare, type ResolvedQuestionSetShare } from "../lib/sharing/supabaseSharing";
 import { useStore } from "../lib/store";
@@ -18,16 +19,42 @@ export function SharedQuestionSetPage() {
   // Already-issued server writes cannot be cancelled by this UI guard.
   const linkGeneration = useRef(0);
   const resolvedToken = useRef<string | null>(null);
+  const resolvedAccountId = useRef<string | null>(null);
+
+  // Auth changes can occur without a route change, and A → B → A can be
+  // batched before React renders B. Immediately revoke the old preview and
+  // any pending import authorization at each observed identity transition.
+  useEffect(() => {
+    let observedAccount = useAccount.getState().user?.id ?? null;
+    const unsubscribe = useAccount.subscribe((state) => {
+      const currentAccount = state.user?.id ?? null;
+      if (currentAccount === observedAccount) return;
+      observedAccount = currentAccount;
+      ++linkGeneration.current;
+      resolvedToken.current = null;
+      resolvedAccountId.current = null;
+      setShare(null);
+      setAdded(false);
+      setBusy(false);
+      setError("");
+      setPreviewStopped(false);
+      setPreviewAttempt((attempt) => attempt + 1);
+    });
+    return unsubscribe;
+  }, []);
+
   useEffect(() => {
     const openLink = () => {
       const generation = ++linkGeneration.current;
       resolvedToken.current = null;
+      resolvedAccountId.current = null;
       setShare(null);
       setError("");
       setAdded(false);
       setBusy(false);
       setPreviewStopped(false);
       const token = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
+      const openedBy = useAccount.getState().user?.id ?? null;
       if (!token) {
         setError("This share link is incomplete.");
         return;
@@ -35,6 +62,7 @@ export function SharedQuestionSetPage() {
       void resolveShare(token).then((resolved) => {
         if (linkGeneration.current !== generation) return;
         resolvedToken.current = token;
+        resolvedAccountId.current = openedBy;
         setShare(resolved);
         const imported = useStore.getState().questionSets.some((questionSet) => {
           const provenance = readSharedQuestionImportProvenance(questionSet);
@@ -58,6 +86,8 @@ export function SharedQuestionSetPage() {
   function stopPreview() {
     // The server request may still settle, but its UI result is now obsolete.
     ++linkGeneration.current;
+    resolvedToken.current = null;
+    resolvedAccountId.current = null;
     setPreviewStopped(true);
     setError("");
     setShare(null);
@@ -70,11 +100,14 @@ export function SharedQuestionSetPage() {
   async function add() {
     if (!share || busy || added) return;
     const currentToken = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
-    if (!resolvedToken.current || currentToken !== resolvedToken.current) {
+    const accountAtPreview = resolvedAccountId.current;
+    const currentAccount = useAccount.getState().user?.id ?? null;
+    if (!resolvedToken.current || currentToken !== resolvedToken.current || currentAccount !== accountAtPreview) {
       // pushState/replaceState do not emit hashchange. Never import the preview
       // for a different link, even when the router has not remounted this page.
       ++linkGeneration.current;
       resolvedToken.current = null;
+      resolvedAccountId.current = null;
       setShare(null);
       setAdded(false);
       setBusy(false);
@@ -83,12 +116,23 @@ export function SharedQuestionSetPage() {
       return;
     }
     const generation = linkGeneration.current;
+    const selectedToken = currentToken;
+    // Give the local guest workspace an explicit, revocable guard identity too.
+    // The store checks this callback before and during its durable write.
+    const guardedAccountId = accountAtPreview ?? "local-guest-session";
     setBusy(true);
     setError("");
     try {
       const result = await useStore.getState().commitSharedQuestionSetImport({
         snapshot: share.snapshot,
         identity: { shareId: share.id, contentDigest: share.contentDigest },
+        accountGuard: {
+          accountId: guardedAccountId,
+          isCurrentAccount: (id) => id === guardedAccountId
+            && linkGeneration.current === generation
+            && (useAccount.getState().user?.id ?? null) === accountAtPreview
+            && new URLSearchParams(location.hash.split("?")[1] ?? "").get("token") === selectedToken,
+        },
       });
       if (!result.ok) throw new Error(result.message);
       if (linkGeneration.current === generation) setAdded(true);
