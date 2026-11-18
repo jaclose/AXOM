@@ -163,6 +163,76 @@ describe("v26 → v27 migration", () => {
     });
   });
 
+  it("preserves and flags conflicting legacy keyed-answer evidence on hydration and repeat migration", () => {
+    const original = {
+      id: "legacy-answer-conflict", stem: "Vessel wall layer?",
+      options: [{ key: "A", text: "Tunica media" }, { key: "B", text: "Tunica intima" }],
+      correctKey: "A", correctAnswerText: "Tunica intima",
+      extraction: { confidence: "medium", reviewed: true },
+      attempts: [{ at: "2026-10-01T12:00:00.000Z", answerKey: "B", status: "incorrect" }],
+    };
+    const state = { ...v26State(), schemaVersion: 31, questions: [original] };
+    const migrated = migratePersistedState(structuredClone(state), 31);
+    expect(migrated.questions[0]).toMatchObject({
+      id: original.id,
+      correctKey: "A",
+      correctAnswerText: "Tunica intima",
+      needsReview: true,
+      options: original.options,
+      attempts: original.attempts,
+      extraction: { reviewed: true },
+    });
+    const rehydrated = migratePersistedState(structuredClone(migrated), SCHEMA_VERSION);
+    expect(rehydrated.questions[0].correctAnswerText).toBe("Tunica intima");
+    expect(rehydrated.questions[0].needsReview).toBe(true);
+    expect(rehydrated.questions[0].attempts).toEqual(original.attempts);
+  });
+
+
+  it("does not create a sticky hold for legacy manual aliases without independent evidence", () => {
+    const options = [{ key: "A", text: "Human rhinovirus" }, { key: "B", text: "Influenza" }];
+    const attempt = { at: "2026-10-01T12:00:00.000Z", answerKey: "B", status: "incorrect" };
+    const base = {
+      source: "manual", stem: "Choose the keyed diagnosis", options, correctKey: "A",
+      correctAnswerText: "Rhinovirus", attempts: [attempt],
+    };
+    const questions = [
+      { ...base, id: "manual-alias" },
+      { ...base, id: "manual-names-other-choice", correctAnswerText: "Influenza" },
+      { ...base, id: "imported-alias", source: "imported" },
+      { ...base, id: "extracted-manual-alias", extraction: { confidence: "medium", reviewed: true } },
+      { ...base, id: "already-held-manual", needsReview: true },
+    ];
+    const state = { ...v26State(), schemaVersion: 31, questions };
+    const migrated = migratePersistedState(structuredClone(state), 31);
+    expect(migrated.questions.map((question) => [question.id, question.needsReview === true])).toEqual([
+      ["manual-alias", false],
+      ["manual-names-other-choice", true],
+      ["imported-alias", true],
+      ["extracted-manual-alias", true],
+      ["already-held-manual", true],
+    ]);
+    for (let index = 0; index < questions.length; index++) {
+      expect(migrated.questions[index].correctKey).toBe("A");
+      expect(migrated.questions[index].correctAnswerText).toBe(questions[index].correctAnswerText);
+      expect(migrated.questions[index].options).toEqual(options);
+      expect(migrated.questions[index].attempts).toEqual([attempt]);
+    }
+    const repeated = migratePersistedState(structuredClone(migrated), SCHEMA_VERSION);
+    expect(repeated.questions.map((question) => question.needsReview === true))
+      .toEqual([false, true, true, true, true]);
+  });
+
+  it("preserves a matching legacy answer and does not invent a review hold", () => {
+    const state = { ...v26State(), schemaVersion: 31, questions: [{
+      id: "legacy-match", options: [{ key: "A", text: "Alpha" }],
+      correctKey: "A", correctAnswerText: "Alpha",
+    }] };
+    const migrated = migratePersistedState(structuredClone(state), 31);
+    expect(migrated.questions[0].correctAnswerText).toBe("Alpha");
+    expect(migrated.questions[0].needsReview).not.toBe(true);
+  });
+
   it("preserves existing answer text when a legacy key cannot be matched", () => {
     const state = {
       ...v26State(),

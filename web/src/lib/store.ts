@@ -2584,9 +2584,21 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
       const existingAnswerText = typeof question.correctAnswerText === "string" && question.correctAnswerText.trim()
         ? question.correctAnswerText
         : undefined;
+      const keyedAnswerText = correct && typeof correct.text === "string" ? correct.text : undefined;
+      // Preserve conflicting historical answer evidence for review instead of
+      // making a mismatched saved answer appear to agree with its keyed option.
+      const namesAnotherChoice = existingAnswerText !== undefined && options.some((option) =>
+        isRecord(option) && option.key !== correctKey && typeof option.text === "string"
+          && option.text.trim() === existingAnswerText.trim());
+      const answerTextConflict = existingAnswerText !== undefined && keyedAnswerText !== undefined
+        && existingAnswerText.trim() !== keyedAnswerText.trim()
+        // The keyed answer is canonical for a manual, extraction-free record.
+        // Imported/extracted conflicts and labels naming a different choice stay held.
+        && (question.source !== "manual" || extraction !== undefined || namesAnotherChoice);
       return {
         ...question,
-        correctAnswerText: correct && typeof correct.text === "string" ? correct.text : existingAnswerText,
+        correctAnswerText: existingAnswerText ?? keyedAnswerText,
+        ...(answerTextConflict ? { needsReview: true } : {}),
         extraction: extraction
           ? {
               ...extraction,

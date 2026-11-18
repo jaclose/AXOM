@@ -517,7 +517,21 @@ function migrateImportedQuestion(value: unknown, fromVersion: number): unknown {
     const existingAnswerText = typeof question.correctAnswerText === "string" && question.correctAnswerText.trim()
       ? question.correctAnswerText
       : undefined;
-    question.correctAnswerText = matched && typeof matched.text === "string" ? matched.text : existingAnswerText;
+    const keyedAnswerText = matched && typeof matched.text === "string" ? matched.text : undefined;
+    // A legacy backup may contain contradictory answer evidence. Never repair it
+    // silently by replacing an explicitly saved answer with the keyed option.
+    question.correctAnswerText = existingAnswerText ?? keyedAnswerText;
+    // Manually authored, extraction-free questions can retain older display labels
+    // without contradicting their selected key. An answer naming another option,
+    // or any independent imported/extracted answer evidence, still requires review.
+    const namesAnotherChoice = existingAnswerText !== undefined && options.some((option) =>
+      isRecord(option) && option.key !== correctKey && typeof option.text === "string"
+        && option.text.trim() === existingAnswerText.trim());
+    if (existingAnswerText !== undefined && keyedAnswerText !== undefined
+      && existingAnswerText.trim() !== keyedAnswerText.trim()
+      && (question.source !== "manual" || extraction !== undefined || namesAnotherChoice)) {
+      question.needsReview = true;
+    }
     if (extraction) {
       question.extraction = {
         ...extraction,
