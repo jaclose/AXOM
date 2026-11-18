@@ -275,15 +275,18 @@ export function questionMappingStatus(question: QuestionRecord): QuestionMapping
     || typeof question.correctKey !== "string"
     || optionKeys.filter((key) => key === question.correctKey).length !== 1
     || question.needsReview === true) return "unresolved";
-  // The saved display answer is separate provenance. Even a reviewed import
-  // with a valid keyed option cannot be practice-ready if that stored answer
-  // contradicts the keyed choice. Preserve both values for human review.
-  // Historical questions without a saved display answer remain eligible.
+  // The saved display answer is separate provenance: a substantive conflicting
+  // answer must be reviewed, even if the keyed option has a reviewed flag.
+  // Missing/whitespace-only display text contains no conflicting answer evidence
+  // and is treated consistently across legacy backfills and current schemas.
+  // Do not replace the original saved text or infer a medically correct key.
   if (question.correctAnswerText !== undefined) {
     const keyedOption = question.options.find((option) => option.key === question.correctKey);
-    if (typeof question.correctAnswerText !== "string"
-      || typeof keyedOption?.text !== "string"
-      || question.correctAnswerText.trim() !== keyedOption.text.trim()) return "unresolved";
+    if (typeof question.correctAnswerText !== "string" || typeof keyedOption?.text !== "string") {
+      return "unresolved";
+    }
+    const savedAnswer = question.correctAnswerText.trim();
+    if (savedAnswer && savedAnswer !== keyedOption.text.trim()) return "unresolved";
   }
   if (question.content?.assets.some((asset) => ["question", "stem", "choice"].includes(asset.role)
     && !question.attachments?.some((attachment) => attachment.assetId === asset.id))) return "unresolved";
