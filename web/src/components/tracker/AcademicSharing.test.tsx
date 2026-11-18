@@ -54,7 +54,7 @@ describe("academic review controls", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /I checked every explanation/ }));
     fireEvent.click(approve);
     await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(course().id, true, "reviewer-1",
-      expect.objectContaining({ missingExplanations: 0 }), true));
+      expect.objectContaining({ missingExplanations: 0 }), true, course().current_revision_id));
     expect(await screen.findByText(/Every signed-in AXOM account can now find this course\./)).toBeTruthy();
     expect(onSaved).toHaveBeenCalledOnce();
   });
@@ -65,7 +65,23 @@ describe("academic review controls", () => {
     render(<AcademicSharing course={course({ review_status: "approved" })} onSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw approval" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/Only an academic reviewer/);
-    expect(mocks.review).toHaveBeenCalledWith(course().id, false, "reviewer-1", undefined, false);
+    expect(mocks.review).toHaveBeenCalledWith(course().id, false, "reviewer-1", undefined, false, course().current_revision_id);
+  });
+
+
+  it("sends the exact selected revision on first-click withdrawal without an explanation receipt", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    const selected = course({ review_status: "approved" });
+    const onSaved = vi.fn();
+    render(<AcademicSharing course={selected} onSaved={onSaved} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw approval" }));
+
+    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(
+      selected.id, false, "reviewer-1", undefined, false, selected.current_revision_id,
+    ));
+    expect(mocks.explanations).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Approval withdrawn/)).toBeTruthy();
+    expect(onSaved).toHaveBeenCalledOnce();
   });
 
   it("shows owners their sharing settings and hides review from non-reviewers", async () => {

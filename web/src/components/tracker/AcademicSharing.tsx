@@ -104,7 +104,7 @@ function AcademicReview({ course, accountId, onSaved }: { course: AcademicCourse
     const scope = academicAccountScope(accountId);
     setBusy(true); setError(""); setMessage("");
     try {
-      await reviewAcademicCourse(course.id, approved, accountId, receipt, checked);
+      await reviewAcademicCourse(course.id, approved, accountId, receipt, checked, course.current_revision_id);
       scope.assertCurrent();
       setMessage(!approved ? "Approval withdrawn. Other accounts can no longer discover or download this version."
         : course.visibility === "private" ? "Approved. The course stays private until its owner chooses an audience."
