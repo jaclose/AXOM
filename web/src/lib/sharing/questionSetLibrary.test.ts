@@ -347,7 +347,7 @@ describe("searchable Question Set client boundary", () => {
   it.each([
     ["set title", "title", "Study group: contact@school.example"],
     ["set tags", "set-tags", "call me at 865 555 0124"],
-    ["question tags", "question-tags", "faculty\\u200B@school.example"],
+    ["question tags", "question-tags", "fac" + String.fromCharCode(0x200B) + "ulty@school.example"],
     ["creator credit", "credit", "ＰＨＯＮＥ：８６５５５５０１２４"],
   ])("refuses contact information in public %s without changing source evidence", async (_label, field, contact) => {
     const value = snapshot();
