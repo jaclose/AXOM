@@ -524,9 +524,12 @@ function migrateImportedQuestion(value: unknown, fromVersion: number): unknown {
     // Manually authored, extraction-free questions can retain older display labels
     // without contradicting their selected key. An answer naming another option,
     // or any independent imported/extracted answer evidence, still requires review.
-    const namesAnotherChoice = existingAnswerText !== undefined && options.some((option) =>
+    // Compare against alternate choices using the same case/compatibility folding
+    // as practice readiness; never change the learner's saved answer evidence.
+    const comparableAnswer = existingAnswerText?.trim().normalize("NFKC").toLowerCase();
+    const namesAnotherChoice = comparableAnswer !== undefined && options.some((option) =>
       isRecord(option) && option.key !== correctKey && typeof option.text === "string"
-        && option.text.trim() === existingAnswerText.trim());
+        && option.text.trim().normalize("NFKC").toLowerCase() === comparableAnswer);
     if (existingAnswerText !== undefined && keyedAnswerText !== undefined
       && existingAnswerText.trim() !== keyedAnswerText.trim()
       && (question.source !== "manual" || extraction !== undefined || namesAnotherChoice)) {
