@@ -176,6 +176,18 @@ function referenceSafetyText(value: string | undefined): string {
   return (value ?? "").normalize("NFKC").replace(INVISIBLE_REFERENCE_CONTROLS, "");
 }
 
+// Source text sent to an external model can expose learner contact data
+// even without a local URI or signed link. Inspect a normalized copy only;
+// human review must remove the contact, never silently edit source evidence.
+const PRIVATE_DRAFT_EMAIL = /(?:^|[^a-z0-9._%+-])[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/i;
+function containsPrivateDraftEmail(value: string | undefined): boolean {
+  return PRIVATE_DRAFT_EMAIL.test(referenceSafetyText(value));
+}
+function hasPrivateDraftEmail(question: QuestionRecord): boolean {
+  return [question.stem, question.topic, ...question.options.map(option => option.text)]
+    .some(containsPrivateDraftEmail);
+}
+
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
   // Option labels and the selected correctKey are included verbatim in the AI
   // prompt too. An imported set may have reviewed keys that are not safe to
@@ -253,6 +265,7 @@ export function eligibleForExplanationDraft(question: QuestionRecord): boolean {
     && !question.attachments?.length
     && !question.content?.assets.length
     && !containsPrivateDraftPromptReference(question)
+    && !hasPrivateDraftEmail(question)
     && !referencesUnavailableExhibit(question)
     && !hasUnrepresentedRichSource(question)
     && !hasUnsafeDraftChoiceLabels(question)
@@ -286,6 +299,9 @@ export async function draftQuestionExplanation(
   // Privacy must win over a missing-exhibit diagnostic before any AI call.
   if (containsPrivateDraftPromptReference(question)) {
     throw new Error("This question contains a private file or inline media reference, or URL credentials. Remove them before sending teaching text to an AI provider.");
+  }
+  if (hasPrivateDraftEmail(question)) {
+    throw new Error("This question contains an email address in text sent to the AI provider. Remove private contact information before drafting.");
   }
   if (hasConflictingStoredAnswerText(question)) {
     throw new Error("Stored answer text conflicts with the confirmed keyed choice. Verify the source answer before AI drafting.");
@@ -367,6 +383,11 @@ export async function draftQuestionExplanation(
   if ([explanation, ...Object.values(choiceRationales), ...untrustedKeywordStrings]
     .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)))) {
     throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
+  }
+
+  if ([explanation, ...Object.values(choiceRationales), ...untrustedKeywordStrings]
+    .some(containsPrivateDraftEmail)) {
+    throw new Error("The generated explanation contains an email address. Discard the draft and review any contact information before publication.");
   }
 
   // Keyword proposals are untrusted structured output. Do not silently

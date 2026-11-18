@@ -46,6 +46,70 @@ describe("review-gated explanation drafting", () => {
   });
 
   it.each([
+    ["stem", { stem: "Which layer? Contact learner.study+1@example.edu" }],
+    ["choice", { options: [
+      { key: "A", text: "Tunica media (email mentor@example.health)" },
+      { key: "B", text: "Tunica intima" }, { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["topic", { topic: "Arterial histology, contact student@example.dev" }],
+    ["fullwidth email", { stem: "Which vessel? Contact ｓｔｕｄｅｎｔ＠ｅｘａｍｐｌｅ．ｅｄｕ" }],
+    ["format-obscured email", { stem: "Which vessel? Contact student@exam\u200Bple.edu" }],
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "holds a private email in %s before external AI inference", async (_label, patch) => {
+      const source = question(patch);
+      const before = JSON.stringify(source);
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/email address/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(JSON.stringify(source)).toBe(before);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it.each([
+    ["explanation", { explanation: "The tunica media contains arterial smooth muscle. For personal details email learner@example.edu." }],
+    ["choice rationale", { choiceRationales: {
+      A: "The media contains vascular smooth muscle.",
+      B: "The intima is endothelium; email clinical.tutor@example.health.",
+      C: "The adventitia provides connective tissue support.",
+    } }],
+    ["ninth keyword", { keywords: [
+      "arterial anatomy", "tunica media", "tunica intima", "adventitia",
+      "vascular tone", "smooth muscle", "histology", "endothelium",
+      "reviewer@example.dev",
+    ] }],
+    ["fullwidth keyword", { keywords: ["vascular tone", "ｌｅａｒｎｅｒ＠ｅｘａｍｐｌｅ．ｅｄｕ"] }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    "rejects a model-generated email in %s before returning an AI proposal", async (_label, patch) => {
+      const source = question();
+      const before = JSON.stringify(source);
+      const model = provider({
+        explanation: "The tunica media contains contractile smooth muscle that regulates arterial caliber and peripheral resistance.",
+        choiceRationales: {
+          A: "The tunica media contains the contractile smooth muscle.",
+          B: "The tunica intima primarily supports an endothelial lining.",
+          C: "The adventitia is largely outer supportive connective tissue.",
+        },
+        keywords: ["vascular smooth muscle"],
+        ...patch,
+      });
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/email address/i);
+      expect(model.completeJson).toHaveBeenCalledOnce();
+      expect(JSON.stringify(source)).toBe(before);
+    },
+  );
+
+  it("keeps clinical identifiers and non-contact at-sign notation eligible", () => {
+    expect(eligibleForExplanationDraft(question({
+      stem: "For the CD4/CD8 ratio, how does IL-6/STAT3 signaling influence vascular tone?",
+      topic: "HLA-B27, anti-PD-1 and receptor A@B symbolic notation",
+    }))).toBe(true);
+  });
+
+  it.each([
     ["a stale answer copied from another choice", "Tunica intima"],
     ["a blank persisted display answer", "  "],
     ["a malformed imported display answer", null],
