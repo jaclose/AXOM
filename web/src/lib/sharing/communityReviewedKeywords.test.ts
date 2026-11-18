@@ -87,6 +87,19 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(isCommunitySubjectKeyword(value)).toBe(false);
   });
 
+  it.each([
+    ["percent-escaped URL", "Reference https%3A%2F%2Fexample.health%2Fvessel"],
+    ["double percent-escaped URL", "Reference https%253A%252F%252Fexample.health%2Fvessel"],
+    ["numeric HTML entity URL", "Reference https&#58;&#47;&#47;example.health/vessel"],
+    ["named HTML entity URL", "Reference https&colon;&sol;&sol;example.health/vessel"],
+    ["encoded PubMed identifier", "PM%49D%3A%2012345678"],
+  ])("detects %s before generated citation or keyword publication", (_label, value) => {
+    expect(containsUnverifiedCommunityCitation(value)).toBe(true);
+    expect(isCommunitySubjectKeyword(value)).toBe(false);
+    expect(() => mergeReviewedCommunityKeywords(["histology"], value))
+      .toThrow(/subject phrases.*publication metadata/i);
+  });
+
   it.each(["CD4/CD8", "E. coli", "10.2 kPa", "type 1 diabetes (autoimmune)"])(
     "does not mistake clinical notation for a generated URL citation: %s", value => {
       expect(containsUnverifiedCommunityCitation(value)).toBe(false);
@@ -140,6 +153,51 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(() => mergeReviewedCommunityKeywords(original, keyword))
       .toThrow(/subject phrases.*publication metadata/i);
     expect(original).toEqual(["histology", "rights:reviewed"]);
+  });
+
+  it.each([
+    ["percent-escaped source status", "source%3Areviewed"],
+    ["double-escaped rights status", "rights%253Aapproved"],
+    ["numeric HTML source attestation", "source&#58;verified"],
+    ["named HTML academic approval", "academic&nbsp;review&nbsp;completed"],
+    ["percent-escaped natural language attestation", "rights%20approved"],
+  ])("blocks %s in AI and publisher approval claims", (_label, value) => {
+    expect(containsUnverifiedCommunityAttestation(value)).toBe(true);
+    expect(isCommunitySubjectKeyword(value)).toBe(false);
+    expect(() => mergeReviewedCommunityKeywords(["histology"], value))
+      .toThrow(/subject phrases.*publication metadata/i);
+  });
+
+  it.each([
+    ["entity semicolon in source metadata", "histology; source&#58;verified"],
+    ["nested ampersand in rights approval", "anatomy, rights&amp;#58;approved"],
+    ["entity semicolons in an unverified URL", "vessel physiology; https&#58;&#47;&#47;example.health/study"],
+    ["named-entity academic status", "academic&nbsp;review&nbsp;completed; histology"],
+  ])("preflights %s before splitting reviewed tags", (_label, input) => {
+    const authored = ["vascular physiology"];
+    expect(() => mergeReviewedCommunityKeywords(authored, input))
+      .toThrow(/subject phrases.*publication metadata/i);
+    expect(authored).toEqual(["vascular physiology"]);
+  });
+
+  it.each([
+    ["escaped visual metadata", "visual%3Aintent%3Ahistology"],
+    ["escaped license status", "license&colon;cc-by"],
+    ["escaped nested moderation", "moderation%253Aapproved"],
+    ["escaped subject separator", "histology%2Csource%3Areviewed"],
+  ])("refuses encoded reserved keyword metadata: %s", (_label, value) => {
+    expect(isCommunitySubjectKeyword(value)).toBe(false);
+  });
+
+  it.each([
+    "vascular%20smooth%20muscle",
+    "10%20kPa",
+    "E. coli",
+    "right coronary artery",
+  ])("retains benign clinical subject phrases containing encoded text (%s)", value => {
+    expect(containsUnverifiedCommunityAttestation(value)).toBe(false);
+    expect(containsUnverifiedCommunityCitation(value)).toBe(false);
+    expect(isCommunitySubjectKeyword(value)).toBe(true);
   });
 
   it.each([
