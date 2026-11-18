@@ -16,6 +16,10 @@ describe("portable backup safety", () => {
     };
     expect(() => parseImport(JSON.stringify(future)))
       .toThrow(/newer AXOM data version.*Update AXOM/i);
+    for (const invalidVersion of [null, "36", -1, 1.5]) {
+      expect(() => parseImport(JSON.stringify({ ...baseline, schemaVersion: invalidVersion })))
+        .toThrow(/invalid AXOM data version/i);
+    }
 
     // Older backups and versionless historical exports remain importable.
     const old = { ...baseline, schemaVersion: SCHEMA_VERSION - 1 };
