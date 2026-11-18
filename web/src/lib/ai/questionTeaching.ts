@@ -1,7 +1,7 @@
 import type { AIProvider } from "./types";
 import { questionPracticeReadiness } from "../questionFilters";
 import { hasPrivateDeviceCitation } from "../sharing/questionSetShare";
-import { containsPrivateCommunityEmail as containsPrivateDraftEmail, containsPrivateCommunityPhone as containsPrivateDraftPhone, containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
+import { communityEvidenceSafetyText, containsPrivateCommunityEmail as containsPrivateDraftEmail, containsPrivateCommunityPhone as containsPrivateDraftPhone, containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
 import { blocksToPlainText } from "../question-content/blocks";
 import type { QuestionRecord } from "../questions";
 
@@ -193,7 +193,7 @@ function containsPrivateDraftPromptReference(question: QuestionRecord): boolean 
   // disclose to a third-party provider (for example a local document URI).
   return [question.stem, question.topic, question.correctKey,
     ...question.options.flatMap(option => [option.key, option.text])]
-    .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)));
+    .some(text => hasPrivateDeviceCitation(communityEvidenceSafetyText(text)));
 }
 
 /** The community snapshot accepts at most 26 short choice labels. The AI
@@ -384,7 +384,7 @@ export async function draftQuestionExplanation(
     ? raw.keywords.filter((value: unknown): value is string => typeof value === "string")
     : [];
   if ([explanation, ...Object.values(choiceRationales), ...untrustedKeywordStrings]
-    .some(text => hasPrivateDeviceCitation(referenceSafetyText(text)))) {
+    .some(text => hasPrivateDeviceCitation(communityEvidenceSafetyText(text)))) {
     throw new Error("The generated explanation contains a private file or inline media reference, or URL credentials. Discard the draft and verify the original source.");
   }
 
