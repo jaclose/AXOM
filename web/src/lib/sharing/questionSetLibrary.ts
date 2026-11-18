@@ -1,6 +1,6 @@
 import { accountOperationClient } from "../account/supabase";
 import { hasExplanationProse } from "../questionExplanationCoverage";
-import { containsPrivateCommunityEmail, containsPrivateCommunityPhone } from "./communityReviewedKeywords";
+import { communityEvidenceSafetyText, containsPrivateCommunityEmail, containsPrivateCommunityPhone } from "./communityReviewedKeywords";
 import { hasPrivateDeviceCitation, sharedQuestionSetDigest, validateShare, type SharedQuestionSetSnapshot } from "./questionSetShare";
 
 export interface LibraryQuestionSet {
@@ -70,7 +70,19 @@ function containsPrivateInlineReference(snapshot: SharedQuestionSetSnapshot): bo
 }
 
 function containsPrivateInlineText(value: string): boolean {
-  return INLINE_PRIVATE_REFERENCE.test(value) && hasPrivateDeviceCitation(value);
+  // HTML entities can conceal device URI delimiters in otherwise public
+  // question text (file&#58;//, data&colon;, source&#58;/Users). Check only a
+  // decoded comparison copy; never rewrite the author's source or snapshot.
+  const decoded = communityEvidenceSafetyText(value);
+  return [value, decoded].some(text => INLINE_PRIVATE_REFERENCE.test(text) && hasPrivateDeviceCitation(text));
+}
+
+function containsPrivateSourceCitation(value: string | undefined): boolean {
+  if (!value) return false;
+  // Citations have a stricter local-path boundary than ordinary clinical
+  // prose. Apply the same entity decoding to both publisher and moderator.
+  return hasPrivateDeviceCitation(value)
+    || hasPrivateDeviceCitation(communityEvidenceSafetyText(value));
 }
 
 /** All public question prose, citations and metadata reach learners after approval.
@@ -266,7 +278,7 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
   // Preconstructed snapshots can bypass createQuestionSetShare's outbound
   // privacy check. Enforce it at the final new-submission RPC boundary.
   // Historical approved sets remain readable/importable unchanged.
-  if (submittedSnapshot.questions.some(question => hasPrivateDeviceCitation(question.citation)))
+  if (submittedSnapshot.questions.some(question => containsPrivateSourceCitation(question.citation)))
     throw new Error("Question Set citation contains a private local file path, inline document URI or URL credentials and cannot be published.");
   if (containsPrivateInlineReference(submittedSnapshot))
     throw new Error("Question Set teaching text contains a private local file or inline media reference. Remove it before publishing.");
@@ -368,7 +380,7 @@ export async function reviewQuestionSetSubmission(
   // Refuse their approval, but allow the moderator to return them for revision.
   // Do not change historical approved snapshots or learner import behavior.
   if (approved && (
-    data.snapshot_payload.questions.some(question => hasPrivateDeviceCitation(question.citation))
+    data.snapshot_payload.questions.some(question => containsPrivateSourceCitation(question.citation))
     || containsPrivateInlineReference(data.snapshot_payload)
   ))
     throw new Error("This Question Set contains a private file or inline media reference and cannot be approved. Return it for revision.");
