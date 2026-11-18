@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../lib/library";
 import { createQuestionSetShare } from "../lib/sharing/questionSetShare";
@@ -49,8 +49,15 @@ const snapshot = createQuestionSetShare({
   updatedAt: NOW,
 }], NOW);
 
+const NEXT_TOKEN = "c".repeat(48);
+const nextShare = {
+  id: "00000000-0000-4000-8000-000000000002",
+  contentDigest: "d".repeat(64),
+  snapshot: { ...snapshot, title: "Second shared set" },
+};
+
 beforeEach(() => {
-  window.location.hash = `#/shared?token=${TOKEN}`;
+  window.history.replaceState(null, "", `#/shared?token=${TOKEN}`);
   mocks.questionSets = [];
   mocks.commit.mockReset();
   vi.mocked(resolveShare).mockReset();
@@ -116,5 +123,95 @@ describe("Shared Question Set page", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("Synthetic vault failure");
     expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+  });
+
+  it("resolves a new share token on an already-mounted page and imports only the new snapshot", async () => {
+    vi.mocked(resolveShare).mockImplementation(async (token) =>
+      token === TOKEN ? { id: SHARE_ID, snapshot, contentDigest: DIGEST } : nextShare,
+    );
+    mocks.commit.mockResolvedValue({
+      ok: true, questionSetId: "second-local-set", questionIds: ["second-local-question"],
+      added: 1, reused: 0, alreadyImported: false,
+    });
+
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+    window.history.replaceState(null, "", `#/shared?token=${NEXT_TOKEN}`);
+    fireEvent(window, new Event("hashchange"));
+
+    expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith({
+      snapshot: nextShare.snapshot,
+      identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
+    }));
+    expect(mocks.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a previous token's late share resolution", async () => {
+    let finishOld!: () => void;
+    vi.mocked(resolveShare).mockImplementation((token) =>
+      token === TOKEN
+        ? new Promise<Awaited<ReturnType<typeof resolveShare>>>((resolve) => {
+            finishOld = () => resolve({ id: SHARE_ID, snapshot, contentDigest: DIGEST });
+          })
+        : Promise.resolve(nextShare),
+    );
+
+    render(<SharedQuestionSetPage />);
+    expect(screen.getByText("Opening shared set…")).toBeTruthy();
+    window.history.replaceState(null, "", `#/shared?token=${NEXT_TOKEN}`);
+    fireEvent(window, new Event("hashchange"));
+    expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
+
+    await act(async () => { finishOld(); });
+    expect(screen.getByRole("heading", { name: "Second shared set" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Synthetic shared set" })).toBeNull();
+  });
+
+  it("does not mark the next token imported when the previous token's save finishes late", async () => {
+    let finishOldSave!: () => void;
+    vi.mocked(resolveShare).mockImplementation(async (token) =>
+      token === TOKEN ? { id: SHARE_ID, snapshot, contentDigest: DIGEST } : nextShare,
+    );
+    mocks.commit.mockImplementationOnce(() => new Promise((resolve) => {
+      finishOldSave = () => resolve({
+        ok: true, questionSetId: "first-local-set", questionIds: ["first-local-question"],
+        added: 1, reused: 0, alreadyImported: false,
+      });
+    }));
+    mocks.commit.mockResolvedValue({
+      ok: true, questionSetId: "second-local-set", questionIds: ["second-local-question"],
+      added: 1, reused: 0, alreadyImported: false,
+    });
+
+    render(<SharedQuestionSetPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Saving…" })).toHaveProperty("disabled", true);
+
+    window.history.replaceState(null, "", `#/shared?token=${NEXT_TOKEN}`);
+    fireEvent(window, new Event("hashchange"));
+    expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    await act(async () => { finishOldSave(); });
+    expect(screen.getByRole("heading", { name: "Second shared set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(2));
+    expect(mocks.commit).toHaveBeenLastCalledWith({
+      snapshot: nextShare.snapshot,
+      identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
+    });
+  });
+
+  it("removes an earlier share preview when navigating to an incomplete link", async () => {
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+    window.history.replaceState(null, "", "#/shared");
+    fireEvent(window, new Event("hashchange"));
+    expect(screen.getByRole("alert").textContent).toContain("incomplete");
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(screen.queryByText("Synthetic question?")).toBeNull();
   });
 });
