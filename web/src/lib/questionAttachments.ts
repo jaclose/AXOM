@@ -554,6 +554,25 @@ export interface StagedQuestionAttachmentRestore {
 
 export const ATTACHMENT_EXPORT_KEY = "questionAttachmentPayloads";
 
+/** A stored image descriptor is not evidence that the referenced bytes can
+ * survive a portable restore. Preserve an incomplete-export report instead
+ * of advertising corrupt or mismatched bytes as a complete backup.
+ * Empty Blob.type is tolerated for legacy records; a declared conflicting
+ * type, size or failed read is not. No image content is modified. */
+export async function readValidQuestionAttachmentExportBytes(
+  attachment: QuestionImageAttachment,
+  record: QuestionAttachmentBlobRecord | undefined,
+): Promise<Uint8Array | undefined> {
+  if (!record?.blob || typeof record.blob.arrayBuffer !== "function"
+    || !Number.isSafeInteger(attachment.byteSize) || attachment.byteSize <= 0
+    || record.mimeType !== attachment.mimeType
+    || record.byteSize !== attachment.byteSize
+    || record.blob.size !== attachment.byteSize
+    || (record.blob.type && record.blob.type !== attachment.mimeType)) return undefined;
+  const bytes = new Uint8Array(await record.blob.arrayBuffer());
+  return bytes.byteLength === attachment.byteSize ? bytes : undefined;
+}
+
 export async function collectQuestionAttachmentPayloads(
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
   options: AttachmentReadOptions = {},
@@ -570,7 +589,8 @@ export async function collectQuestionAttachmentPayloads(
       let base64: string | undefined;
       try {
         const record = await getQuestionAttachmentBlob(attachment.blobKey, options);
-        if (record) base64 = await blobToBase64(record.blob);
+        const bytes = await readValidQuestionAttachmentExportBytes(attachment, record);
+        if (bytes) base64 = await blobToBase64(new Blob([bytes as BlobPart], { type: attachment.mimeType }));
       } catch {
         base64 = undefined;
       }

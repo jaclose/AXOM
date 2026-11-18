@@ -95,4 +95,54 @@ describe("portable binary media backup", () => {
     zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: 1, media: [{ file: "media/0", metadata: { ...attachment, questionId: "held-question" } }] }));
     await expect(readPortableBackup(new File([new Uint8Array(await zip.generateAsync({ type: "uint8array" })).buffer], "damaged.zip"))).rejects.toThrow("invalid or missing image");
   });
+
+  it("omits present attachment records whose bytes or MIME disagree with their metadata", async () => {
+    const invalid = [
+      { blob: new Blob(["AX"], { type: "image/png" }), mimeType: "image/png" as const, byteSize: 2 },
+      { blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/jpeg" as const, byteSize: 4 },
+      { blob: new Blob(["AXOM"], { type: "image/jpeg" }), mimeType: "image/png" as const, byteSize: 4 },
+    ];
+    for (const stored of invalid) {
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        ...stored, questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      const result = await createMediaBackupArchive({}, refs);
+      expect(result).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+      const parsed = await readPortableBackup(new File([result.blob], "damaged-source.zip"));
+      expect(JSON.parse(parsed.rawText).media).toEqual([]);
+    }
+    // Legacy Blob descriptors without a type remain valid when the stored
+    // record and source metadata agree, matching older AXOM exports.
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const healthy = await createMediaBackupArchive({}, refs);
+    expect(healthy).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+  });
+
+
+  it("never certifies shared keys with conflicting attachment size or MIME metadata", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/png", byteSize: 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const incompatible = [
+      { ...attachment, id: "other-format", mimeType: "image/jpeg" as const },
+      { ...attachment, id: "other-length", byteSize: 2 },
+    ];
+    for (const metadata of incompatible) {
+      for (const references of [
+        [...refs, { id: "other-question", attachments: [metadata] }],
+        [{ id: "other-question", attachments: [metadata] }, ...refs],
+      ]) {
+        const exported = await createMediaBackupArchive({}, references);
+        expect(exported).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+        const backup = await readPortableBackup(new File([exported.blob], "conflicting-refs.zip"));
+        expect(JSON.parse(backup.rawText).media).toEqual([]);
+      }
+    }
+    expect(await (await getQuestionAttachmentBlob(attachment.blobKey))?.blob.text()).toBe("AXOM");
+  });
+
 });
