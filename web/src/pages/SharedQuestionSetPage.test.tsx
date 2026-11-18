@@ -222,7 +222,7 @@ describe("Shared Question Set page", () => {
     expect(mocks.commit).toHaveBeenLastCalledWith(expect.objectContaining({
       snapshot: nextShare.snapshot,
       identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
-    });
+    }));
   });
 
   it("removes an earlier share preview when navigating to an incomplete link", async () => {
@@ -301,7 +301,7 @@ describe("Shared Question Set page", () => {
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
     expect(vi.mocked(resolveShare).mock.calls.at(-1)?.[0]).toBe(NEXT_TOKEN);
     fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
-    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({
       snapshot: nextShare.snapshot,
       identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
     })));
