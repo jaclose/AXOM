@@ -2584,9 +2584,15 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
       const existingAnswerText = typeof question.correctAnswerText === "string" && question.correctAnswerText.trim()
         ? question.correctAnswerText
         : undefined;
+      const keyedAnswerText = correct && typeof correct.text === "string" ? correct.text : undefined;
+      // Preserve conflicting historical answer evidence for review instead of
+      // making a mismatched saved answer appear to agree with its keyed option.
+      const answerTextConflict = existingAnswerText !== undefined && keyedAnswerText !== undefined
+        && existingAnswerText.trim() !== keyedAnswerText.trim();
       return {
         ...question,
-        correctAnswerText: correct && typeof correct.text === "string" ? correct.text : existingAnswerText,
+        correctAnswerText: existingAnswerText ?? keyedAnswerText,
+        ...(answerTextConflict ? { needsReview: true } : {}),
         extraction: extraction
           ? {
               ...extraction,
