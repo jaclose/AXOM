@@ -208,6 +208,28 @@ describe("community Question Set exact-revision publication gate", () => {
     },
   );
 
+  it.each([
+    ["fullwidth duplicate label", "Ａ"],
+    ["HTML-encoded duplicate label", "&#65;"],
+    ["double percent-encoded duplicate label", "%2541"],
+    ["invisible-mark duplicate label", "A\u200B"],
+    ["case-only duplicate label", "a"],
+    ["encoded blank label", "&#32;&nbsp;"],
+  ])("holds %s before publication without reassigning the verified answer", (_name, alternativeKey) => {
+    const source: QuestionRecord = {
+      ...question,
+      options: [
+        { key: "A", text: "Tunica media" },
+        { key: alternativeKey, text: "Tunica intima" },
+      ],
+    };
+    const original = JSON.stringify(source);
+    expect(() => publish({ openedQuestion: source, liveQuestion: source }))
+      .toThrow(/ambiguous answer-choice labels/i);
+    expect(JSON.stringify(source)).toBe(original);
+    expect(source.correctKey).toBe("A");
+  });
+
   it("preserves genuine clinical contrasts while checking text integrity", () => {
     const source: QuestionRecord = {
       ...question,
