@@ -942,4 +942,71 @@ describe("searchable Question Set client boundary", () => {
     });
   });
 
+
+  it.each([
+    ["encoded file citation", "citation", "file&#58;&#47;&#47;&#47;Users/author/private.pdf"],
+    ["twice-escaped citation", "citation", "file&amp;#58;//Users/author/private.pdf"],
+    ["embedded file URI in citation URL", "citation", "https://example.edu/view?source=file&colon;//Users/author/private.pdf"],
+    ["encoded PDF in question stem", "stem", "View data&colon;application/pdf;base64,JVBERi0x"],
+    ["encoded private source in title", "title", "Notes source&#58;/Users/author/private.pdf"],
+    ["encoded browser object URI in tags", "tags", "blob&#58;https://example.edu/private-exhibit"],
+    ["twice-escaped source in rationale", "rationale", "Review file&amp;#58;//Users/author/private.pdf"],
+    ["encoded private source in credit", "credit", "source&#58;/Users/author/private-profile.pdf"],
+  ] as const)("holds %s at the final submission boundary before any RPC", async (_name, field, text) => {
+    const value = snapshot();
+    let credit = "";
+    if (field === "citation") value.questions[0].citation = text;
+    else if (field === "stem") value.questions[0].stem += " " + text;
+    else if (field === "title") value.title = text;
+    else if (field === "tags") value.questions[0].tags.push(text);
+    else if (field === "rationale") value.questions[0].choiceRationales = { B: text };
+    else credit = text;
+    const original = JSON.stringify(value);
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, credit, confirmed))
+      .rejects.toThrow(/private (local file path|file|local file|file, inline media)/i);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(JSON.stringify(value)).toBe(original);
+  });
+
+  it.each([
+    ["HTML-encoded private citation", "citation", "file&#58;&#47;&#47;&#47;Users/reviewer/private-source.pdf"],
+    ["HTML-encoded embedded source", "stem", "See data&colon;application/pdf;base64,JVBERi0x"],
+    ["HTML-encoded tag media", "tags", "blob&#58;https://example.edu/private-image"],
+  ] as const)("does not promote legacy pending %s at academic approval", async (_name, field, text) => {
+    const original = snapshot();
+    if (field === "citation") original.questions[0].citation = text;
+    else if (field === "stem") original.questions[0].stem += " " + text;
+    else original.questions[0].tags.push(text);
+    const before = JSON.stringify(original);
+    const reviewed = {
+      id: entryId, snapshot: original, contentDigest: await sharedQuestionSetDigest(original),
+      status: "pending" as const, reviewRevision: 1,
+    };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending",
+      snapshot_payload: original, review_revision: 1,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Rechecked source and rights"))
+      .rejects.toThrow(/private file or inline media reference.*Return it for revision/i);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(original)).toBe(before);
+  });
+
+  it("preserves public clinical prose and legitimate HTML-escaped public URLs", async () => {
+    const value = snapshot();
+    value.questions[0].stem = "Compare extracellular fluid &amp; intracellular fluid in this model.";
+    value.questions[0].citation = "https://example.edu/paper?term=CD4%2BCD8&amp;view=public";
+    value.questions[0].topic = "Inflammation &amp; repair";
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .resolves.toBe(entryId);
+    expect(rpc).toHaveBeenCalledWith("submit_question_set_library", expect.objectContaining({
+      p_snapshot: value,
+    }));
+  });
+
 });
