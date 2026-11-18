@@ -49,6 +49,25 @@ export function containsUnverifiedCommunityAttestation(value: string): boolean {
   return UNVERIFIED_COMMUNITY_ATTESTATION.test(keywordSafetyText(value));
 }
 
+// Public keyword proposals and outgoing AI text must use the same bounded
+// contact-data checks. Inspect NFKC-normalized copies only; keep original
+// questions, author tags, evidence and human moderation records unchanged.
+// These cues do not replace independent privacy and rights review.
+const PRIVATE_COMMUNITY_EMAIL = /(?:^|[^a-z0-9._%+-])[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/i;
+const PRIVATE_COMMUNITY_PHONE = /(?:^|[^a-z0-9])(?:phone(?:\s*(?:number|no\.?))?|telephone|tel\.?|mobile(?:\s*(?:number|no\.?))?|cell(?:phone)?(?:\s*(?:number|no\.?))?|contact(?:\s*(?:number|no\.?))?|call(?:\s+me)?(?:\s+at)?)\s*(?::|#|=|is)?\s*(\+?[\d(][\d().\s-]{6,30}\d)/gi;
+
+export function containsPrivateCommunityEmail(value: string | undefined): boolean {
+  return PRIVATE_COMMUNITY_EMAIL.test(keywordSafetyText(value ?? ""));
+}
+
+export function containsPrivateCommunityPhone(value: string | undefined): boolean {
+  return [...keywordSafetyText(value ?? "").matchAll(PRIVATE_COMMUNITY_PHONE)]
+    .some(match => {
+      const digits = match[1].replace(/\D/g, "").length;
+      return digits >= 7 && digits <= 15;
+    });
+}
+
 export function isCommunitySubjectKeyword(value: string): boolean {
   const candidate = keywordSafetyText(value);
   return Boolean(candidate)
@@ -57,6 +76,8 @@ export function isCommunitySubjectKeyword(value: string): boolean {
     && !/https?:\/\//i.test(candidate)
     && !UNVERIFIED_PUBLIC_CITATION.test(candidate)
     && !containsUnverifiedCommunityAttestation(candidate)
+    && !containsPrivateCommunityEmail(candidate)
+    && !containsPrivateCommunityPhone(candidate)
     && !hasPrivateDeviceCitation(candidate);
 }
 

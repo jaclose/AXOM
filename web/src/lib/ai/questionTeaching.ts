@@ -1,7 +1,7 @@
 import type { AIProvider } from "./types";
 import { questionPracticeReadiness } from "../questionFilters";
 import { hasPrivateDeviceCitation } from "../sharing/questionSetShare";
-import { containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
+import { containsPrivateCommunityEmail as containsPrivateDraftEmail, containsPrivateCommunityPhone as containsPrivateDraftPhone, containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword } from "../sharing/communityReviewedKeywords";
 import { blocksToPlainText } from "../question-content/blocks";
 import type { QuestionRecord } from "../questions";
 
@@ -176,30 +176,11 @@ function referenceSafetyText(value: string | undefined): string {
   return (value ?? "").normalize("NFKC").replace(INVISIBLE_REFERENCE_CONTROLS, "");
 }
 
-// Source text sent to an external model can expose learner contact data
-// even without a local URI or signed link. Inspect a normalized copy only;
-// human review must remove the contact, never silently edit source evidence.
-const PRIVATE_DRAFT_EMAIL = /(?:^|[^a-z0-9._%+-])[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/i;
-function containsPrivateDraftEmail(value: string | undefined): boolean {
-  return PRIVATE_DRAFT_EMAIL.test(referenceSafetyText(value));
-}
+// Use the same contact checks for private AI prompts and reviewed public
+// keyword proposals. Neither path silently sanitizes source evidence.
 function hasPrivateDraftEmail(question: QuestionRecord): boolean {
   return [question.stem, question.topic, ...question.options.map(option => option.text)]
     .some(containsPrivateDraftEmail);
-}
-
-// A labeled contact telephone number is personal data, not a clinical lab
-// value. Require an explicit phone/contact/call cue to avoid flagging dates,
-// vital signs or drug doses; hold rather than silently rewriting source text.
-// This is a bounded heuristic, not a comprehensive PII scrubber.
-const PRIVATE_DRAFT_CONTACT_PHONE = /(?:^|[^a-z0-9])(?:phone(?:\s*(?:number|no\.?))?|telephone|tel\.?|mobile(?:\s*(?:number|no\.?))?|cell(?:phone)?(?:\s*(?:number|no\.?))?|contact(?:\s*(?:number|no\.?))?|call(?:\s+me)?(?:\s+at)?)\s*(?::|#|=|is)?\s*(\+?[\d(][\d().\s-]{6,30}\d)/gi;
-function containsPrivateDraftPhone(value: string | undefined): boolean {
-  const scan = referenceSafetyText(value);
-  return [...scan.matchAll(PRIVATE_DRAFT_CONTACT_PHONE)]
-    .some(match => {
-      const digits = match[1].replace(/\D/g, "").length;
-      return digits >= 7 && digits <= 15;
-    });
 }
 function hasPrivateDraftPhone(question: QuestionRecord): boolean {
   return [question.stem, question.topic, ...question.options.map(option => option.text)]
