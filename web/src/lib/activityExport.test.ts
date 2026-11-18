@@ -660,4 +660,36 @@ describe("lossless unsafe-magnitude two-fraction totals", () => {
     expect(sumActivityMetric(normal, "minutes")).toBe(1);
     await expect(captureWorkbook(normal)).resolves.toBeDefined();
   });
+  it("rejects noninteger rounded totals at large fractional magnitudes without writing XLSX", async () => {
+    // A noninteger IEEE-754 result can still have lost an exact saved fraction.
+    // TwoSum's residual is nonzero even though the rounded next total is fractional.
+    const lossyPairs = [
+      [2 ** 50 + 0.25, 0.125],
+      [2 ** 50 + 0.25, 0.375],
+      [2 ** 50, 0.375],
+    ];
+    for (const field of ["minutes", "cards"] as const) {
+      for (const values of lossyPairs) {
+        const logs = studyLogs(["Manual", "Manual"]);
+        logs.forEach((log, index) => { log[field] = values[index]; });
+        const original = logs.map((log) => ({ ...log }));
+        let writerCalls = 0;
+        expect(() => sumActivityMetric(logs, field)).toThrow(ActivityExportNumericError);
+        await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+          .rejects.toBeInstanceOf(ActivityExportNumericError);
+        expect(writerCalls).toBe(0);
+        expect(logs).toEqual(original);
+      }
+    }
+
+    const exact = studyLogs(["Manual", "Manual"]);
+    exact[0].minutes = 2 ** 50 + 0.25;
+    exact[1].minutes = 0.5;
+    exact[0].cards = 0.1;
+    exact[1].cards = 0.9;
+    expect(sumActivityMetric(exact, "minutes")).toBe(2 ** 50 + 0.75);
+    expect(sumActivityMetric(exact, "cards")).toBe(1);
+    await expect(captureWorkbook(exact)).resolves.toBeDefined();
+  });
+
 });
