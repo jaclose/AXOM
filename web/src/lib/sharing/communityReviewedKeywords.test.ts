@@ -169,6 +169,18 @@ describe("explicitly reviewed Community AI keywords", () => {
   });
 
   it.each([
+    ["entity semicolon in source metadata", "histology; source&#58;verified"],
+    ["nested ampersand in rights approval", "anatomy, rights&amp;#58;approved"],
+    ["entity semicolons in an unverified URL", "vessel physiology; https&#58;&#47;&#47;example.health/study"],
+    ["named-entity academic status", "academic&nbsp;review&nbsp;completed; histology"],
+  ])("preflights %s before splitting reviewed tags", (_label, input) => {
+    const authored = ["vascular physiology"];
+    expect(() => mergeReviewedCommunityKeywords(authored, input))
+      .toThrow(/subject phrases.*publication metadata/i);
+    expect(authored).toEqual(["vascular physiology"]);
+  });
+
+  it.each([
     ["escaped visual metadata", "visual%3Aintent%3Ahistology"],
     ["escaped license status", "license&colon;cc-by"],
     ["escaped nested moderation", "moderation%253Aapproved"],
