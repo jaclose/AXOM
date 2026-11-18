@@ -104,6 +104,8 @@ describe("review-gated explanation drafting", () => {
     ["topic", { topic: "Arterial histology, contact student@example.dev" }],
     ["fullwidth email", { stem: "Which vessel? Contact ｓｔｕｄｅｎｔ＠ｅｘａｍｐｌｅ．ｅｄｕ" }],
     ["format-obscured email", { stem: "Which vessel? Contact student@exam\u200Bple.edu" }],
+    ["percent-encoded URL email", { stem: "Which vessel? Source https://example.edu/case?q=student%40example.edu" }],
+    ["double-encoded URL email", { topic: "Source https://example.edu/case?q=student%2540example.edu" }],
   ] as Array<[string, Partial<QuestionRecord>]>)(
     "holds a private email in %s before external AI inference", async (_label, patch) => {
       const source = question(patch);
@@ -131,6 +133,7 @@ describe("review-gated explanation drafting", () => {
       "reviewer@example.dev",
     ] }],
     ["fullwidth keyword", { keywords: ["vascular tone", "ｌｅａｒｎｅｒ＠ｅｘａｍｐｌｅ．ｅｄｕ"] }],
+    ["percent-encoded explanation", { explanation: "The tunica media contains smooth muscle. Contact learner%40example.edu." }],
   ] as Array<[string, Record<string, unknown>]>)(
     "rejects a model-generated email in %s before returning an AI proposal", async (_label, patch) => {
       const source = question();
@@ -161,6 +164,7 @@ describe("review-gated explanation drafting", () => {
     ["topic", { topic: "Vascular histology; contact number 868-555-0199" }],
     ["fullwidth phone", { stem: "Arterial anatomy. Ｔｅｌ：＋１（８６５）５５５－０１９９" }],
     ["zero-width phone", { topic: "Phone: 865\u200B-555-0199" }],
+    ["percent-encoded phone", { stem: "Which layer? Call%20me%20at%20865-555-0199" }],
   ] as Array<[string, Partial<QuestionRecord>]>)(
     "holds a labeled contact phone in %s before external AI inference", async (_label, patch) => {
       const source = question(patch);
@@ -187,6 +191,7 @@ describe("review-gated explanation drafting", () => {
       "vascular tone", "smooth muscle", "histology", "endothelium",
       "contact number 868-555-0199",
     ] }],
+    ["percent-encoded phone in explanation", { explanation: "The arterial tunica media contains smooth muscle. Call%20me%20at%20865-555-0199." }],
   ] as Array<[string, Record<string, unknown>]>)(
     "rejects generated contact phone numbers in %s before accepting an AI proposal", async (_label, patch) => {
       const source = question();
