@@ -10,6 +10,8 @@ export function SharedQuestionSetPage() {
   const [error, setError] = useState("");
   const [added, setAdded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [previewStopped, setPreviewStopped] = useState(false);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
 
   // A shared-link route can change while this page stays mounted. Invalidate
   // both the pending preview and any old save UI before resolving its new token.
@@ -22,6 +24,7 @@ export function SharedQuestionSetPage() {
       setError("");
       setAdded(false);
       setBusy(false);
+      setPreviewStopped(false);
       const token = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
       if (!token) {
         setError("This share link is incomplete.");
@@ -47,7 +50,19 @@ export function SharedQuestionSetPage() {
       ++linkGeneration.current;
       window.removeEventListener("hashchange", openLink);
     };
-  }, []);
+  }, [previewAttempt]);
+
+  function stopPreview() {
+    // The server request may still settle, but its UI result is now obsolete.
+    ++linkGeneration.current;
+    setPreviewStopped(true);
+    setError("");
+    setShare(null);
+  }
+
+  function retryPreview() {
+    setPreviewAttempt((attempt) => attempt + 1);
+  }
 
   async function add() {
     if (!share || busy || added) return;
@@ -76,7 +91,9 @@ export function SharedQuestionSetPage() {
       <Tag tone="neutral"><Link2 />Unlisted Question Set link</Tag>
       <h1>{snapshot?.title ?? "Shared Question Set"}</h1>
       {error ? <p role="alert">{error}</p> : null}
-      {!snapshot && !error ? <p role="status">Opening shared set…</p> : snapshot ? (
+      {!snapshot && !error ? (
+        <p role="status">{previewStopped ? "Shared set preview stopped. Retry when ready." : "Opening shared set…"}</p>
+      ) : snapshot ? (
         <>
           <p>{snapshot.questions.length} questions · fixed ordered membership</p>
           <p className="sub">
@@ -89,6 +106,12 @@ export function SharedQuestionSetPage() {
             <Download />{added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
           </GButton>
         </>
+      ) : null}
+      {!snapshot && !error && !previewStopped ? (
+        <GButton onClick={stopPreview}>Stop loading</GButton>
+      ) : null}
+      {!snapshot && (previewStopped || error) ? (
+        <GButton onClick={retryPreview}>Retry opening</GButton>
       ) : null}
     </GlassCard>
   );
