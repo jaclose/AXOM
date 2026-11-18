@@ -458,6 +458,19 @@ describe("portable backup payloads", () => {
     expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("EXTRA");
   });
 
+  it("rejects same-revision legacy reuse when bytes match but surviving question metadata disagrees", async () => {
+    const meta = metadata({ id: "legacy-equal-revision-survivor-mismatch", byteSize: 4 });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["SAME"], { type: "image/jpeg" }),
+      mimeType: "image/jpeg", byteSize: 4, questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    const mismatchedPayload = [{ ...meta, mimeType: "image/jpeg" as const, questionId: "q1",
+      base64: await blobToBase64(new Blob(["SAME"])) }];
+    await expect(restoreQuestionAttachmentPayloads(mismatchedPayload, [{ id: "q1", attachments: [meta] }]))
+      .rejects.toThrow("surviving question metadata");
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("SAME");
+  });
+
   it("still reuses byte-identical legacy images at the same revision without rewriting their provenance", async () => {
     const meta = metadata({ id: "legacy-equal-revision-identical", byteSize: 4 });
     await putQuestionAttachmentBlob(meta.blobKey, {
