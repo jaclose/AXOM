@@ -46,6 +46,52 @@ describe("review-gated explanation drafting", () => {
   });
 
   it.each([
+    ["identical correct and distractor text", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "Tunica media" },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["case and whitespace-equivalent answer text", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "  TUNICA   MEDIA  " },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["compatibility-width duplicated answer", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "Ｔｕｎｉｃａ　ｍｅｄｉａ" },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["case-ambiguous choice labels", { options: [
+      { key: "A", text: "Tunica media" }, { key: "a", text: "Tunica intima" },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+    ["an empty imported distractor", { options: [
+      { key: "A", text: "Tunica media" }, { key: "B", text: "    " },
+      { key: "C", text: "Tunica adventitia" },
+    ] }],
+  ] as Array<[string, Partial<QuestionRecord>]>)(
+    "holds %s rather than inventing a medical difference between choices",
+    async (_label, patch) => {
+      const source = question(patch);
+      const before = JSON.stringify(source);
+      const model = provider({});
+      expect(eligibleForExplanationDraft(source)).toBe(false);
+      await expect(draftQuestionExplanation(model, source))
+        .rejects.toThrow(/duplicate answer text, blank choices, or case-ambiguous choice labels/i);
+      expect(model.completeJson).not.toHaveBeenCalled();
+      expect(JSON.stringify(source)).toBe(before);
+      expect(source.correctKey).toBe("A");
+    },
+  );
+
+  it("keeps distinct medically meaningful answer alternatives eligible for private draft review", () => {
+    const source = question({ options: [
+      { key: "A", text: "CD4-positive T cells" },
+      { key: "B", text: "CD8-positive T cells" },
+      { key: "C", text: "CD4-negative T cells" },
+    ] });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    expect(source.correctKey).toBe("A");
+  });
+
+  it.each([
     ["source attestation in explanation", { explanation: "The arterial media contains smooth muscle that regulates vascular tone. Source evidence has been verified." }],
     ["hyphenated source-review label", { explanation: "The arterial media contracts to modulate vascular resistance. This is a source-reviewed explanation." }],
     ["hyphenated license approval", { explanation: "The tunica media controls vasomotor tone. License-approved for sharing." }],
