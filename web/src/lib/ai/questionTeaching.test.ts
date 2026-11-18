@@ -338,7 +338,7 @@ describe("review-gated explanation drafting", () => {
       { key: "B", text: "Tunica intima" }, { key: "C", text: "Tunica adventitia" },
     ] }],
     ["HTML-entity data URI in stem", { stem: "Which vessel layer? Encoded media data&colon;image/png;base64,QUJD" }],
-    ["legacy encoded NUL safety hold", { stem: "Which arterial layer? Source file%00:///Users/student/private.pdf" }],
+    ["legacy encoded NUL in otherwise public URL", { stem: "Which arterial layer? Source https://example.edu/artery?label%00=vascular" }],
     ["malformed neighboring percent byte", { stem: "Which arterial layer? Source file%FF%EF%BC%9A%EF%BC%8F%EF%BC%8FUsers%2Fstudent%2Fcase.pdf" }],
   ] as Array<[string, Partial<QuestionRecord>]>)(
     "blocks %s before sending private source references to an AI provider", async (_label, patch) => {
@@ -355,7 +355,7 @@ describe("review-gated explanation drafting", () => {
   );
 
   it.each([
-    ["legacy encoded NUL in explanation", { explanation: "The tunica media contains vascular smooth muscle and regulates arterial caliber. Source file%00:///Users/student/private.pdf." }],
+    ["legacy encoded NUL in otherwise public citation", { explanation: "The tunica media contains vascular smooth muscle and regulates arterial caliber. Source https://example.edu/artery?label%00=vascular." }],
     ["encoded file URI in explanation", { explanation: "The tunica media contains the vascular smooth muscle. See file%EF%BC%9A%EF%BC%8F%EF%BC%8FUsers%2Fstudent%2Fprivate.pdf." }],
     ["HTML-entity data URI in distractor", { choiceRationales: {
       A: "The tunica media contains vascular smooth muscle.",
