@@ -459,6 +459,8 @@ describe("searchable Question Set client boundary", () => {
     ["doubly encoded query email", "https://example.edu/paper?q=learner%2540example%252Eedu"],
     ["triply encoded query email", "https://example.edu/paper?q=learner%252540example.edu"],
     ["encoded phone in citation", "https://example.edu/paper?notes=phone%3A%20%2B1%20%28865%29%20555-0199"],
+    ["HTML numeric-entity email in citation", "https://example.edu/paper?owner=lecturer&#64;school.example"],
+    ["HTML named-entity phone in citation", "https://example.edu/paper?contact=Phone&colon;&nbsp;(865)&nbsp;555-0199"],
   ])("refuses a source link that would publish %s", async (_label, citation) => {
     const value = snapshot();
     value.questions[0].citation = citation;
@@ -856,6 +858,8 @@ describe("searchable Question Set client boundary", () => {
     ["encoded citation", "citation", "https://example.edu/paper?owner=lecturer%40school.example"],
     ["double-encoded citation", "citation", "https://example.edu/paper?owner=lecturer%2540school.example"],
     ["encoded telephone citation", "citation", "https://example.edu/paper?contact=phone%3A%20%2B1%20%28865%29%20555-0199"],
+    ["HTML escaped legacy citation", "citation", "https://example.edu/paper?owner=lecturer&amp;#64;school.example"],
+    ["HTML escaped legacy phone", "citation", "Phone&colon;&nbsp;(865)&nbsp;555-0199"],
     ["copyright notice", "copyright", "Rights: faculty@school.example"],
   ] as const)("refuses approval of legacy pending public %s contact data", async (_label, field, contact) => {
     const original = snapshot();

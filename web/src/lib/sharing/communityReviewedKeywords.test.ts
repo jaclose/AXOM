@@ -184,6 +184,34 @@ describe("explicitly reviewed Community AI keywords", () => {
   });
 
   it.each([
+    ["decimal numeric email", "lecturer&#64;school.edu"],
+    ["hex-encoded email and domain dot", "lecturer&#x40;school&#46;edu"],
+    ["named HTML email entities", "lecturer&commat;school&period;edu"],
+    ["nested HTML ampersand", "lecturer&amp;#64;school.edu"],
+    ["percent-escaped numeric entity", "lecturer%26%2364%3Bschool.edu"],
+  ])("rejects a public email hidden with %s", (_label, value) => {
+    expect(containsPrivateCommunityEmail(value)).toBe(true);
+    expect(isCommunitySubjectKeyword(value)).toBe(false);
+  });
+
+  it.each([
+    ["numeric-escaped contact prefix", "Call&#32;me&#32;at&#32;&#43;1&#32;(865)&#32;555-0199"],
+    ["named-entity phone label", "Phone&colon;&nbsp;(865)&nbsp;555-0199"],
+  ])("rejects a public phone hidden with %s", (_label, value) => {
+    expect(containsPrivateCommunityPhone(value)).toBe(true);
+    expect(isCommunitySubjectKeyword(value)).toBe(false);
+  });
+
+  it.each([
+    "https://example.edu/case?ref=alpha&amp;beta=gamma",
+    "A&amp;B receptor signaling",
+    "Blood pressure 120&#47;80 mmHg",
+  ])("preserves clinical notation and public citations containing safe HTML entities: %s", value => {
+    expect(containsPrivateCommunityEmail(value)).toBe(false);
+    expect(containsPrivateCommunityPhone(value)).toBe(false);
+  });
+
+  it.each([
     "phone%3A%20%2B1%20%28865%29%20555-0199",
     "Call%2520me%2520at%2520865-555-0199",
   ])("rejects a percent-encoded labeled contact telephone: %s", value => {
