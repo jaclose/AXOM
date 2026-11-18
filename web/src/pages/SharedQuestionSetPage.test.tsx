@@ -747,4 +747,22 @@ describe("Shared Question Set page", () => {
     expect(mocks.commit).not.toHaveBeenCalled();
   });
 
+
+  it.each([null, [null], [""]])(
+    "fails closed without crashing on malformed persisted membership %j",
+    async (invalidIds) => {
+      mocks.questionSets = [{
+        id: "malformed-receipt", title: "Synthetic shared set",
+        sourceDocumentIds: [], createdAt: NOW,
+        questionIds: invalidIds as unknown as string[],
+        tags: [], aiEnhanced: false, parserWarnings: [],
+        importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+      }];
+      render(<SharedQuestionSetPage />);
+      expect(await screen.findByRole("button", { name: "Import unavailable" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("alert").textContent).toMatch(/restore your AXOM/i);
+      expect(mocks.commit).not.toHaveBeenCalled();
+    },
+  );
+
 });
