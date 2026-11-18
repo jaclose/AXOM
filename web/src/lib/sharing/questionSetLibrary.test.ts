@@ -1049,6 +1049,10 @@ describe("searchable Question Set client boundary", () => {
         id: entryId, title: original.title, question_count: 1, status: "pending",
         snapshot_payload: original, review_revision: 1,
       }, error: null })
+      .mockResolvedValueOnce({ data: {
+        id: entryId, title: original.title, question_count: 1, status: "pending",
+        snapshot_payload: original, review_revision: 1,
+      }, error: null })
       .mockResolvedValueOnce({ data: null, error: null });
     service(rpc);
     await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked source and rights"))
