@@ -83,6 +83,33 @@ export function SharedQuestionSetPage() {
     };
   }, [previewAttempt]);
 
+  // The resolved share may arrive before a newly signed-in learner's vault
+  // finishes restoring. Reconcile the badge when that vault replaces its
+  // question-set membership, not just when the bearer link first resolves.
+  // This is UI state only; the durable Store import retains its own guard.
+  useEffect(() => {
+    if (!share) return;
+    const generation = linkGeneration.current;
+    const token = resolvedToken.current;
+    const accountId = resolvedAccountId.current;
+    const reconcile = (questionSets: ReturnType<typeof useStore.getState>["questionSets"]) => {
+      if (
+        linkGeneration.current !== generation
+        || resolvedToken.current !== token
+        || resolvedAccountId.current !== accountId
+        || (useAccount.getState().user?.id ?? null) !== accountId
+      ) return;
+      setAdded(questionSets.some((questionSet) => {
+        const provenance = readSharedQuestionImportProvenance(questionSet);
+        return provenance?.shareId === share.id && provenance.contentDigest === share.contentDigest;
+      }));
+    };
+    reconcile(useStore.getState().questionSets);
+    return useStore.subscribe((state, previous) => {
+      if (state.questionSets !== previous.questionSets) reconcile(state.questionSets);
+    });
+  }, [share]);
+
   function stopPreview() {
     // The server request may still settle, but its UI result is now obsolete.
     ++linkGeneration.current;
