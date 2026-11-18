@@ -144,7 +144,7 @@ export function isAcademicReviewer(accountId: string): Promise<boolean> {
 
 /** Approve or withdraw approval of a course's current revision. */
 export async function reviewAcademicCourse(collection: string, approved: boolean, accountId: string,
-  receipt?: ExplanationReviewReceipt, rationaleReviewed = false): Promise<void> {
+  receipt?: ExplanationReviewReceipt, rationaleReviewed = false, expectedRevisionId?: string): Promise<void> {
   if (approved) {
     if (!receipt || receipt.collectionId !== collection) throw new Error("Check this exact revision's explanations before approval.");
     await attestAcademicExplanations(receipt, accountId, rationaleReviewed);
@@ -155,11 +155,17 @@ export async function reviewAcademicCourse(collection: string, approved: boolean
   // Only the server can identify this exception; never guess from the course title
   // or bypass its independent reviewer and revision-bound explanation checks.
   if (/Use exact community revision review/.test(error.message ?? "")) {
-    if (!receipt || receipt.collectionId !== collection || !receipt.revisionId) {
-      throw new Error("This course has a Community submission. Open Question Bank > Community Uploads to review its current revision.");
+    // Approval requires an attested explanation receipt. Withdrawal is revocation,
+    // not a new clinical approval: use the *selected* course's exact revision ID.
+    // Do not look up and silently switch to a different, newly uploaded revision.
+    const revision = approved ? receipt?.revisionId : expectedRevisionId;
+    if (!uuid(revision) || (receipt && (receipt.collectionId !== collection || receipt.revisionId !== revision))
+      || (approved && expectedRevisionId && expectedRevisionId !== revision)) {
+      throw new Error("This course has a Community submission. Open Question Bank > Community Uploads to review its exact current revision.");
     }
+    // Recheck account after the first RPC before any Community review mutation.
     const community = await (await academicClient(accountId)).rpc("academic_community_review", {
-      collection, revision: receipt.revisionId, approved,
+      collection, revision, approved,
     });
     if (community.error) throw new Error("The Community submission changed or its review could not be saved. Reopen the exact revision and retry.");
     return;
