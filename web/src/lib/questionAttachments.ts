@@ -548,7 +548,8 @@ export interface QuestionAttachmentExportPayload extends QuestionImageAttachment
 export interface StagedQuestionAttachmentRestore {
   restored: number;
   skipped: number;
-  /** Remove only blob keys this restore inserted. Existing bytes are immutable. */
+  /** Non-destructive compensation: staged bytes may already be referenced by
+   * a concurrent successful restore. Does not remove potentially shared bytes. */
   rollback: () => Promise<void>;
 }
 
@@ -661,7 +662,12 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
  * Stage portable-backup images before adopting their workspace metadata.
  * Blob keys are immutable identities here: matching existing bytes are reused,
  * while a different payload for an occupied key aborts without overwriting it.
- * Rollback is consequently bounded to keys inserted by this exact operation.
+ * A failed stage must NOT delete even its own newly inserted bytes:
+ * a concurrent restore can reuse those immutable bytes and commit a question
+ * reference before the inserting stage calls rollback. Reference ownership
+ * lives in a separate workspace store and cannot be proven at this point.
+ * Keep any unreferenced bytes for later explicitly proven scoped cleanup
+ * rather than risk deleting media now referenced by another operation.
  */
 export async function stageQuestionAttachmentPayloads(
   payloads: readonly QuestionAttachmentExportPayload[],
@@ -685,33 +691,18 @@ export async function stageQuestionAttachmentPayloads(
     throw new Error("A backup image has conflicting image references. No existing image was overwritten.");
   }
 
-  const inserted = new Map<string, QuestionAttachmentBlobRecord>();
   let restored = 0;
   let skipped = 0;
 
-  const rollback = async () => {
-    const failures: string[] = [];
-    for (const [blobKey, staged] of inserted) {
-      try {
-        const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope });
-        if (!current) continue;
-        const [currentBytes, stagedBytes] = await Promise.all([
-          current.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
-          staged.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
-        ]);
-        if (current.mimeType !== staged.mimeType || current.questionId !== staged.questionId
-          || current.updatedAt !== staged.updatedAt || !equalBytes(currentBytes, stagedBytes)) {
-          failures.push(blobKey);
-          continue;
-        }
-        await deleteQuestionAttachmentBlobs([blobKey], { scope });
-      } catch {
-        failures.push(blobKey);
-      }
-    }
-    if (failures.length) {
-      throw new Error(`AXOM could not confirm cleanup for ${failures.length} staged image attachment${failures.length === 1 ? "" : "s"}.`);
-    }
+  // There is no transaction spanning the image store AND all possible
+  // workspaces/tabs that may have adopted an immutable key. Even a verified
+  // read-then-delete is unsafe: adoption or another write can race deletion.
+  // "rollback" therefore compensates without deleting staged image bytes.
+  // The caller still discards failed workspace metadata. A safe scoped GC
+  // requires independent proof that no workspace references the key.
+  const rollback = (): Promise<void> => {
+    // Intentionally retain inserted scoped bytes, including on partial failure.
+    return Promise.resolve();
   };
 
   try {
@@ -752,7 +743,6 @@ export async function stageQuestionAttachmentPayloads(
           assertScope(scope);
           return store.add(record, scopedBlobKey(scope, payload.blobKey));
         });
-        inserted.set(payload.blobKey, record);
         restored += 1;
       } catch (error) {
         if (attachmentErrorName(error) !== "ConstraintError") throw error;
@@ -774,11 +764,9 @@ export async function stageQuestionAttachmentPayloads(
     assertScope(scope);
     return { restored, skipped, rollback };
   } catch (error) {
-    try {
-      await rollback();
-    } catch (rollbackError) {
-      throw new Error(`Image staging failed, and cleanup could not be confirmed after ${error instanceof Error ? error.message : "an image write failed"}. ${rollbackError instanceof Error ? rollbackError.message : "Keep this tab open and retry."}`, { cause: rollbackError });
-    }
+    // Failed stage metadata is not committed by this helper. Retain previously
+    // inserted bytes: another concurrent operation may have adopted them.
+    await rollback();
     throw error;
   }
 }

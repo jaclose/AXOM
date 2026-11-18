@@ -438,7 +438,7 @@ describe("portable backup payloads", () => {
     expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
   });
 
-  it("stages only absent immutable blob keys and rolls back only its own bytes", async () => {
+  it("retains a staged key after rollback because another operation may now reference it", async () => {
     const existing = metadata({ id: "existing" });
     const added = metadata({ id: "added" });
     await putQuestionAttachmentBlob(existing.blobKey, {
@@ -452,7 +452,8 @@ describe("portable backup payloads", () => {
     expect(stage).toMatchObject({ restored: 1, skipped: 1 });
     await stage.rollback();
     expect(await getQuestionAttachmentBlob(existing.blobKey)).toBeTruthy();
-    expect(await getQuestionAttachmentBlob(added.blobKey)).toBeUndefined();
+    expect(await (await getQuestionAttachmentBlob(added.blobKey))?.blob.text())
+      .toBe(await new Blob([PNG_BYTES.buffer as ArrayBuffer]).text());
   });
 
   it("keeps the first immutable image when concurrent portable stages see the same absent key", async () => {
@@ -490,7 +491,9 @@ describe("portable backup payloads", () => {
     const bytes = await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text();
     expect(["AAAA", "BBBB"]).toContain(bytes);
     await winner.value.rollback();
-    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+    // Even an attempted rollback cannot prove that another tab has not
+    // adopted the originally staged bytes in its saved question metadata.
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe(bytes);
   });
 
   it("reuses identical bytes when two portable stages race to reserve one scoped key", async () => {
@@ -521,7 +524,59 @@ describe("portable backup payloads", () => {
     await reused.rollback();
     expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("SAME");
     await stages.find(stage => stage.restored === 1)!.rollback();
-    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("SAME");
+  });
+
+  it("preserves media adopted by a second successful stage when the inserting stage rolls back", async () => {
+    const meta = metadata({ id: "shared-post-adoption", byteSize: 4 });
+    const entry = [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["SAME"])) }];
+    const questionA = [{ id: "q1", attachments: [meta] }];
+    const questionB = [{ id: "q2", attachments: [{ ...meta, updatedAt: "2026-07-18T12:00:00.000Z" }] }];
+    const stageA = await stageQuestionAttachmentPayloads(entry, questionA);
+    // B has now accepted the same image into different surviving question state.
+    const stageB = await stageQuestionAttachmentPayloads(entry, questionB);
+    expect(stageA).toMatchObject({ restored: 1, skipped: 0 });
+    expect(stageB).toMatchObject({ restored: 0, skipped: 1 });
+
+    await stageA.rollback(); // A fails after B has committed its workspace.
+    const committedBImage = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(committedBImage?.blob.size).toBe(4);
+    expect(await committedBImage?.blob.text()).toBe("SAME");
+    await stageB.rollback();
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))?.blob.text()).toBe("SAME");
+  });
+
+  it("retains prior inserts when a later payload fails so concurrent references cannot be lost", async () => {
+    const first = metadata({ id: "partial-stage-safe", byteSize: 4 });
+    const second = metadata({ id: "invalid-second", byteSize: 4 });
+    const firstPayload = { ...first, questionId: "q1", base64: await blobToBase64(new Blob(["SAFE"])) };
+    const invalidSecond = { ...second, questionId: "q1", base64: await blobToBase64(new Blob(["TOO-LONG"])) };
+    const questions = [{ id: "q1", attachments: [first, second] }];
+    await expect(stageQuestionAttachmentPayloads([firstPayload, invalidSecond], questions))
+      .rejects.toThrow("failed validation");
+    const retained = await getQuestionAttachmentBlob(first.blobKey, { localOnly: true });
+    expect(await retained?.blob.text()).toBe("SAFE");
+
+    // A later retry must be able to verify and reuse the exact same bytes.
+    const retry = await stageQuestionAttachmentPayloads([firstPayload], questions);
+    expect(retry).toMatchObject({ restored: 0, skipped: 1 });
+    await retry.rollback();
+    expect(await (await getQuestionAttachmentBlob(first.blobKey, { localOnly: true }))?.blob.text()).toBe("SAFE");
+  });
+
+  it("cannot delete a newer store write interleaved before rollback", async () => {
+    const meta = metadata({ id: "staged-replaced", byteSize: 4 });
+    const stage = await stageQuestionAttachmentPayloads([
+      { ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["OLD!"])) },
+    ], [{ id: "q1", attachments: [meta] }]);
+    // Out-of-band local repair changes a key after staging. The rollback
+    // cannot assume its earlier get still reflects the current store version.
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["NEW!"]), mimeType: "image/png", byteSize: 4,
+      questionId: "q2", updatedAt: "2026-07-18T00:00:00.000Z",
+    });
+    await stage.rollback();
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("NEW!");
   });
 
   it("refuses a stored media descriptor whose declared size disagrees with its actual bytes", async () => {
