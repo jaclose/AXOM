@@ -121,4 +121,28 @@ describe("portable binary media backup", () => {
     expect(healthy).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
   });
 
+
+  it("never certifies shared keys with conflicting attachment size or MIME metadata", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"], { type: "image/png" }), mimeType: "image/png", byteSize: 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const incompatible = [
+      { ...attachment, id: "other-format", mimeType: "image/jpeg" as const },
+      { ...attachment, id: "other-length", byteSize: 2 },
+    ];
+    for (const metadata of incompatible) {
+      for (const references of [
+        [...refs, { id: "other-question", attachments: [metadata] }],
+        [{ id: "other-question", attachments: [metadata] }, ...refs],
+      ]) {
+        const exported = await createMediaBackupArchive({}, references);
+        expect(exported).toMatchObject({ attachmentCount: 0, missingBlobKeys: [attachment.blobKey] });
+        const backup = await readPortableBackup(new File([exported.blob], "conflicting-refs.zip"));
+        expect(JSON.parse(backup.rawText).media).toEqual([]);
+      }
+    }
+    expect(await (await getQuestionAttachmentBlob(attachment.blobKey))?.blob.text()).toBe("AXOM");
+  });
+
 });

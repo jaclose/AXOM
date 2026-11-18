@@ -25,6 +25,23 @@ export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
 function mediaReferences(references: References) {
   return [...new Map(references.flatMap(q => (q.attachments ?? []).map(a => [a.blobKey, { ...a, questionId: q.id }] as const))).values()];
 }
+
+/** Reused image keys can be legitimate across questions, but contradictory
+ * byte-count/format declarations must not be silently masked by Map last-win
+ * deduplication when certifying the ZIP as complete. */
+function conflictingMediaBlobKeys(references: References): Set<string> {
+  const seen = new Map<string, Pick<QuestionImageAttachment, "mimeType" | "byteSize">>();
+  const conflicts = new Set<string>();
+  for (const question of references) for (const attachment of question.attachments ?? []) {
+    const previous = seen.get(attachment.blobKey);
+    if (previous && (previous.byteSize !== attachment.byteSize || previous.mimeType !== attachment.mimeType)) {
+      conflicts.add(attachment.blobKey);
+    } else if (!previous) {
+      seen.set(attachment.blobKey, attachment);
+    }
+  }
+  return conflicts;
+}
 export function mediaBackupBytes(references: References): number {
   return mediaReferences(references).reduce((n, a) => n + a.byteSize, 0);
 }
@@ -36,7 +53,12 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
+  const conflictingKeys = conflictingMediaBlobKeys(references);
   for (const metadata of mediaReferences(references)) {
+    if (conflictingKeys.has(metadata.blobKey)) {
+      missingBlobKeys.push(metadata.blobKey);
+      continue;
+    }
     try {
       const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
       const bytes = await readValidQuestionAttachmentExportBytes(metadata, record);
