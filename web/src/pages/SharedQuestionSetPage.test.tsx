@@ -57,7 +57,7 @@ const nextShare = {
 };
 
 beforeEach(() => {
-  window.location.hash = `#/shared?token=${TOKEN}`;
+  window.history.replaceState(null, "", `#/shared?token=${TOKEN}`);
   mocks.questionSets = [];
   mocks.commit.mockReset();
   vi.mocked(resolveShare).mockReset();
@@ -136,7 +136,7 @@ describe("Shared Question Set page", () => {
 
     render(<SharedQuestionSetPage />);
     expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
-    window.location.hash = `#/shared?token=${NEXT_TOKEN}`;
+    window.history.replaceState(null, "", `#/shared?token=${NEXT_TOKEN}`);
     fireEvent(window, new Event("hashchange"));
 
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
@@ -160,7 +160,7 @@ describe("Shared Question Set page", () => {
 
     render(<SharedQuestionSetPage />);
     expect(screen.getByText("Opening shared set…")).toBeTruthy();
-    window.location.hash = `#/shared?token=${NEXT_TOKEN}`;
+    window.history.replaceState(null, "", `#/shared?token=${NEXT_TOKEN}`);
     fireEvent(window, new Event("hashchange"));
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
 
@@ -190,7 +190,7 @@ describe("Shared Question Set page", () => {
     await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "Saving…" })).toHaveProperty("disabled", true);
 
-    window.location.hash = `#/shared?token=${NEXT_TOKEN}`;
+    window.history.replaceState(null, "", `#/shared?token=${NEXT_TOKEN}`);
     fireEvent(window, new Event("hashchange"));
     expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
@@ -208,7 +208,7 @@ describe("Shared Question Set page", () => {
   it("removes an earlier share preview when navigating to an incomplete link", async () => {
     render(<SharedQuestionSetPage />);
     expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
-    window.location.hash = "#/shared";
+    window.history.replaceState(null, "", "#/shared");
     fireEvent(window, new Event("hashchange"));
     expect(screen.getByRole("alert").textContent).toContain("incomplete");
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
