@@ -79,7 +79,10 @@ export function SharedQuestionSetPage() {
         resolvedToken.current = token;
         resolvedAccountId.current = openedBy;
         setShare(resolved);
-        const imported = useStore.getState().questionSets.some((questionSet) => {
+        // Never derive the incoming account's membership from a different,
+        // not-yet-restored device vault. Reconcile once this vault is ready.
+        const imported = canImportIntoWorkspace(useAccount.getState())
+          && useStore.getState().questionSets.some((questionSet) => {
           const provenance = readSharedQuestionImportProvenance(questionSet);
           return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
         });
@@ -114,6 +117,10 @@ export function SharedQuestionSetPage() {
         || resolvedAccountId.current !== accountId
         || (useAccount.getState().user?.id ?? null) !== accountId
       ) return;
+      if (!canImportIntoWorkspace(useAccount.getState())) {
+        setAdded(false);
+        return;
+      }
       setAdded(questionSets.some((questionSet) => {
         const provenance = readSharedQuestionImportProvenance(questionSet);
         return provenance?.shareId === share.id && provenance.contentDigest === share.contentDigest;
@@ -123,7 +130,7 @@ export function SharedQuestionSetPage() {
     return useStore.subscribe((state, previous) => {
       if (state.questionSets !== previous.questionSets) reconcile(state.questionSets);
     });
-  }, [share]);
+  }, [share, importReady]);
 
   function stopPreview() {
     // The server request may still settle, but its UI result is now obsolete.
@@ -219,7 +226,7 @@ export function SharedQuestionSetPage() {
             </p>
           ) : null}
           <GButton variant="primary" onClick={() => void add()} disabled={added || busy || !importReady}>
-            <Download />{added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
+            <Download />{!importReady ? "Add to my AXOM" : added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
           </GButton>
         </>
       ) : null}
