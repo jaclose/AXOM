@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsUnverifiedCommunityCitation, isCommunitySubjectKeyword, mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
+import { containsUnverifiedCommunityAttestation, containsUnverifiedCommunityCitation, isCommunitySubjectKeyword, mergeReviewedCommunityKeywords } from "./communityReviewedKeywords";
 
 describe("explicitly reviewed Community AI keywords", () => {
   it("preserves authored tags and adds only canonical, unique reviewed keywords", () => {
@@ -121,6 +121,37 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(isCommunitySubjectKeyword(term)).toBe(false);
     expect(() => mergeReviewedCommunityKeywords(["original"], term))
       .toThrow(/subject phrases.*publication metadata/i);
+  });
+
+  it.each([
+    "source evidence verified",
+    "rights approved",
+    "license cleared",
+    "academic review completed",
+    "answer-key confirmed",
+    "approved for community publication",
+    "reviewed by faculty",
+    "rig\u200Bhts approved",
+    "ＲＩＧＨＴＳ　ＡＰＰＲＯＶＥＤ",
+  ])("holds unsupported approval claim in a proposed subject keyword (%s)", keyword => {
+    const original = ["histology", "rights:reviewed"];
+    expect(containsUnverifiedCommunityAttestation(keyword)).toBe(true);
+    expect(isCommunitySubjectKeyword(keyword)).toBe(false);
+    expect(() => mergeReviewedCommunityKeywords(original, keyword))
+      .toThrow(/subject phrases.*publication metadata/i);
+    expect(original).toEqual(["histology", "rights:reviewed"]);
+  });
+
+  it.each([
+    "right coronary artery",
+    "source of calcium",
+    "systematic review",
+    "histology: vessel layers",
+    "CD4/CD8",
+    "E. coli",
+  ])("preserves an ordinary clinical subject, not approval evidence (%s)", keyword => {
+    expect(containsUnverifiedCommunityAttestation(keyword)).toBe(false);
+    expect(isCommunitySubjectKeyword(keyword)).toBe(true);
   });
 
   it("keeps normal clinical phrases with punctuation and joining marks", () => {

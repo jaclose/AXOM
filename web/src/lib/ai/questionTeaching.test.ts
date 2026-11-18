@@ -216,6 +216,30 @@ describe("review-gated explanation drafting", () => {
     expect(eligibleForExplanationDraft(question({ stem }))).toBe(true);
   });
 
+  it.each([
+    "rights approved",
+    "source evidence verified",
+    "approved for community publication",
+    "ＲＩＧＨＴＳ　ＡＰＰＲＯＶＥＤ",
+  ])("rejects model-generated review-state keyword %s before returning a proposal", async keyword => {
+    const source = question();
+    const before = JSON.stringify(source);
+    const model = provider({
+      explanation: "The tunica media contains contractile vascular smooth muscle that regulates arterial diameter and peripheral resistance.",
+      choiceRationales: {
+        A: "The media contains the vascular smooth muscle.",
+        B: "The intima is the endothelial inner layer.",
+        C: "The adventitia provides outer connective support.",
+      },
+      keywords: ["arterial histology", keyword],
+    });
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/publication metadata or citations/i);
+    expect(model.completeJson).toHaveBeenCalledOnce();
+    expect(JSON.stringify(source)).toBe(before);
+    expect(source.correctKey).toBe("A");
+  });
+
   it("keeps clinical identifiers and non-contact at-sign notation eligible", () => {
     expect(eligibleForExplanationDraft(question({
       stem: "For the CD4/CD8 ratio, how does IL-6/STAT3 signaling influence vascular tone?",
