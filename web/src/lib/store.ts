@@ -2587,9 +2587,11 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
       const keyedAnswerText = correct && typeof correct.text === "string" ? correct.text : undefined;
       // Preserve conflicting historical answer evidence for review instead of
       // making a mismatched saved answer appear to agree with its keyed option.
-      const namesAnotherChoice = existingAnswerText !== undefined && options.some((option) =>
+      // Match the normalized alternate-choice gate without changing persisted text.
+      const comparableAnswer = existingAnswerText?.trim().normalize("NFKC").toLowerCase();
+      const namesAnotherChoice = comparableAnswer !== undefined && options.some((option) =>
         isRecord(option) && option.key !== correctKey && typeof option.text === "string"
-          && option.text.trim() === existingAnswerText.trim());
+          && option.text.trim().normalize("NFKC").toLowerCase() === comparableAnswer);
       const answerTextConflict = existingAnswerText !== undefined && keyedAnswerText !== undefined
         && existingAnswerText.trim() !== keyedAnswerText.trim()
         // The keyed answer is canonical for a manual, extraction-free record.

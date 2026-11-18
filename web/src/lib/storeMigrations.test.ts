@@ -199,6 +199,11 @@ describe("v26 → v27 migration", () => {
     const questions = [
       { ...base, id: "manual-alias" },
       { ...base, id: "manual-names-other-choice", correctAnswerText: "Influenza" },
+      { ...base, id: "manual-other-lower", correctAnswerText: "influenza" },
+      { ...base, id: "manual-other-upper", correctAnswerText: "INFLUENZA" },
+      { ...base, id: "manual-other-fullwidth", correctAnswerText: "ＩＮＦＬＵＥＮＺＡ" },
+      { ...base, id: "manual-other-padding", correctAnswerText: " influenza " },
+      { ...base, id: "manual-key-case", correctAnswerText: "HUMAN RHINOVIRUS" },
       { ...base, id: "imported-alias", source: "imported" },
       { ...base, id: "extracted-manual-alias", extraction: { confidence: "medium", reviewed: true } },
       { ...base, id: "already-held-manual", needsReview: true },
@@ -208,6 +213,11 @@ describe("v26 → v27 migration", () => {
     expect(migrated.questions.map((question) => [question.id, question.needsReview === true])).toEqual([
       ["manual-alias", false],
       ["manual-names-other-choice", true],
+      ["manual-other-lower", true],
+      ["manual-other-upper", true],
+      ["manual-other-fullwidth", true],
+      ["manual-other-padding", true],
+      ["manual-key-case", false],
       ["imported-alias", true],
       ["extracted-manual-alias", true],
       ["already-held-manual", true],
@@ -220,7 +230,7 @@ describe("v26 → v27 migration", () => {
     }
     const repeated = migratePersistedState(structuredClone(migrated), SCHEMA_VERSION);
     expect(repeated.questions.map((question) => question.needsReview === true))
-      .toEqual([false, true, true, true, true]);
+      .toEqual([false, true, true, true, true, true, false, true, true, true]);
   });
 
   it("preserves a matching legacy answer and does not invent a review hold", () => {

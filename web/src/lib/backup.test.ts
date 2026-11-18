@@ -243,6 +243,11 @@ describe("portable backup safety", () => {
     const questions = [
       { ...base, id: "manual-alias" },
       { ...base, id: "manual-names-other-choice", correctAnswerText: "Influenza" },
+      { ...base, id: "manual-other-lower", correctAnswerText: "influenza" },
+      { ...base, id: "manual-other-upper", correctAnswerText: "INFLUENZA" },
+      { ...base, id: "manual-other-fullwidth", correctAnswerText: "ＩＮＦＬＵＥＮＺＡ" },
+      { ...base, id: "manual-other-padding", correctAnswerText: " influenza " },
+      { ...base, id: "manual-key-case", correctAnswerText: "HUMAN RHINOVIRUS" },
       { ...base, id: "imported-alias", source: "imported" },
       { ...base, id: "extracted-manual-alias", extraction: { confidence: "high", reviewed: true } },
       { ...base, id: "already-held-manual", needsReview: true },
@@ -253,6 +258,11 @@ describe("portable backup safety", () => {
     expect(restored.questions.map((question) => [question.id, question.needsReview === true])).toEqual([
       ["manual-alias", false],
       ["manual-names-other-choice", true],
+      ["manual-other-lower", true],
+      ["manual-other-upper", true],
+      ["manual-other-fullwidth", true],
+      ["manual-other-padding", true],
+      ["manual-key-case", false],
       ["imported-alias", true],
       ["extracted-manual-alias", true],
       ["already-held-manual", true],
@@ -266,7 +276,7 @@ describe("portable backup safety", () => {
     }
     const repeat = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(restored) }));
     expect(repeat.questions.map((question) => question.needsReview === true))
-      .toEqual([false, true, true, true, true]);
+      .toEqual([false, true, true, true, true, true, false, true, true, true]);
   });
 
   it("derives only absent legacy answer text, preserving matching and current-schema values", () => {
