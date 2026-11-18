@@ -311,6 +311,44 @@ describe("mapping readiness", () => {
     expect([manual, authoredSynonym, namedOtherChoice, imported, extracted]).toEqual(before);
   });
 
+  it("holds manual answer displays naming another choice by case or Unicode compatibility form", () => {
+    const options = [{ key: "A", text: "Human rhinovirus" }, { key: "B", text: "Influenza" }];
+    const contradictoryDisplays = [
+      "Influenza", "influenza", "INFLUENZA", " influenza ",
+      "ＩＮＦＬＵＥＮＺＡ", "ｉｎｆｌｕｅｎｚａ",
+    ];
+    const conflicts = contradictoryDisplays.map((correctAnswerText, index) => makeQuestion({
+      id: `case-alternate-${index}`, source: "manual", options, correctKey: "A",
+      correctAnswerText,
+    }));
+    const manualAlias = makeQuestion({
+      id: "manual-benign-alias", source: "manual", options, correctKey: "A",
+      correctAnswerText: "Rhinovirus",
+    });
+    const manualKeyCase = makeQuestion({
+      id: "manual-key-case", source: "manual", options, correctKey: "A",
+      correctAnswerText: "HUMAN RHINOVIRUS",
+    });
+    const importedAlias = makeQuestion({
+      id: "imported-stale-label", source: "imported", options, correctKey: "A",
+      correctAnswerText: "Rhinovirus", extraction: { confidence: "high", reviewed: true },
+    });
+    const questions = [...conflicts, manualAlias, manualKeyCase, importedAlias];
+    const unchanged = structuredClone(questions);
+    expect(conflicts.map(questionMappingStatus)).toEqual(
+      Array(contradictoryDisplays.length).fill("unresolved"),
+    );
+    expect(questionMappingStatus(manualAlias)).toBe("ready");
+    expect(questionMappingStatus(manualKeyCase)).toBe("ready");
+    expect(questionMappingStatus(importedAlias)).toBe("unresolved");
+    expect(summarizeQuestionMappings(questions)).toMatchObject({
+      ready: 2, unresolved: contradictoryDisplays.length + 1,
+    });
+    expect(filterForMode(questions, "mapping-review").map((question) => question.id))
+      .toEqual([...conflicts, importedAlias].map((question) => question.id));
+    expect(questions).toEqual(unchanged); // No answer, key, option, or attempt rewritten.
+  });
+
   it("keeps blank-display eligibility consistent across legacy and current portable schemas", () => {
     const portable = toPortableState(makeSeed());
     const sourceQuestion = makeQuestion({
