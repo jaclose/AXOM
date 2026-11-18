@@ -636,4 +636,38 @@ describe("Shared Question Set page", () => {
   });
 
 
+  it("never reinstates an in-flight import guard after same-account vault restoration", async () => {
+    let finishSave!: () => void;
+    mocks.commit.mockImplementationOnce(() => new Promise((resolve) => {
+      finishSave = () => resolve({
+        ok: true, questionSetId: "obsolete-import",
+        questionIds: ["old-q"], added: 1, reused: 0, alreadyImported: false,
+      });
+    }));
+    render(<SharedQuestionSetPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+    const oldGuard = mocks.commit.mock.calls[0][0].accountGuard;
+    expect(oldGuard.isCurrentAccount("account-1")).toBe(true);
+
+    // Async digesting or durable-save preparation may straddle restoration.
+    await act(async () => {
+      mocks.accountBusy = true;
+      mocks.accountApplyingRemote = true;
+      emitAccount();
+    });
+    expect(oldGuard.isCurrentAccount("account-1")).toBe(false);
+    await act(async () => {
+      mocks.accountBusy = false;
+      mocks.accountApplyingRemote = false;
+      emitAccount();
+    });
+    // Old authorization must not regain validity just because readiness returns.
+    expect(oldGuard.isCurrentAccount("account-1")).toBe(false);
+    await act(async () => { finishSave(); });
+    expect(screen.queryByRole("button", { name: "Already in this AXOM" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
+  });
+
+
 });
