@@ -289,8 +289,13 @@ export function questionMappingStatus(question: QuestionRecord): QuestionMapping
     }
     const savedAnswer = question.correctAnswerText.trim();
     if (savedAnswer && savedAnswer !== keyedOption.text.trim()) {
+      // Normalize solely for fail-closed detection of an explicitly named other
+      // choice; never normalize or replace the persisted answer evidence/key.
+      // NFKC covers full-width compatibility forms, lowercase covers case drift.
+      const comparableAnswer = savedAnswer.normalize("NFKC").toLowerCase();
       const namesAnotherChoice = question.options.some((option) => option.key !== question.correctKey
-        && typeof option.text === "string" && option.text.trim() === savedAnswer);
+        && typeof option.text === "string"
+        && option.text.trim().normalize("NFKC").toLowerCase() === comparableAnswer);
       const independentEvidence = question.source !== "manual" || question.extraction !== undefined;
       if (namesAnotherChoice || independentEvidence) return "unresolved";
     }
