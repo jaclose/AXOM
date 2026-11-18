@@ -344,6 +344,37 @@ describe("searchable Question Set client boundary", () => {
     }));
   });
 
+  it.each([
+    ["set title", "title", "Study group: contact@school.example"],
+    ["set tags", "set-tags", "call me at 865 555 0124"],
+    ["question tags", "question-tags", "faculty\\u200B@school.example"],
+    ["creator credit", "credit", "ＰＨＯＮＥ：８６５５５５０１２４"],
+  ])("refuses contact information in public %s without changing source evidence", async (_label, field, contact) => {
+    const value = snapshot();
+    if (field === "title") value.title = contact;
+    else if (field === "set-tags") value.tags.push(contact);
+    else if (field === "question-tags") value.questions[0].tags.push(contact);
+    const credit = field === "credit" ? contact : "";
+    const original = JSON.stringify(value);
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, credit, confirmed))
+      .rejects.toThrow(/title, tags or creator credit contains contact information/i);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(JSON.stringify(value)).toBe(original);
+  });
+
+  it("preserves clinical tags and public attribution without contact data", async () => {
+    const value = snapshot();
+    value.tags = ["contact dermatitis", "blood pressure 120/80 mmHg"];
+    value.questions[0].tags = ["CD4/CD8", "HLA-B27", "Call 911 in anaphylaxis"];
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "Department of Pathology", confirmed))
+      .resolves.toBe(entryId);
+    expect(rpc).toHaveBeenCalledOnce();
+  });
+
   it("retains public medical prose, mechanism URLs and slash-delimited terminology", async () => {
     const value = snapshot();
     value.questions[0].stem = "Compare the CD4/CD8 ratio and MHC I/II mechanisms. https://example.edu/review";
@@ -748,6 +779,28 @@ describe("searchable Question Set client boundary", () => {
       expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
     },
   );
+
+  it.each([
+    ["set title", "title", "Faculty: professor@school.example"],
+    ["authored set tag", "set-tags", "telephone: +1 (865) 555-0199"],
+    ["authored question tag", "question-tags", "ｆａｃｕｌｔｙ＠school.example"],
+  ])("does not promote legacy pending contact metadata in %s to public discovery", async (_label, field, contact) => {
+    const original = snapshot();
+    if (field === "title") original.title = contact;
+    else if (field === "set-tags") original.tags.push(contact);
+    else original.questions[0].tags.push(contact);
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending",
+      snapshot_payload: original, review_revision: 1,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Reviewed source and rights"))
+      .rejects.toThrow(/contact information in a public title or tag.*Return it for revision/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+  });
 
   it("allows returning a privacy-blocked legacy submission for revision", async () => {
     const original = snapshot();
