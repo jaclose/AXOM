@@ -287,4 +287,29 @@ describe("Shared Question Set page", () => {
     }));
     expect(mocks.commit).toHaveBeenCalledTimes(1);
   });
+
+  it("remounts a new shared-set route identity before showing or importing the new snapshot", async () => {
+    window.history.replaceState(null, "", `#shared-set?token=${TOKEN}`);
+    vi.mocked(resolveShare).mockImplementation(async (token) =>
+      token === TOKEN ? { id: SHARE_ID, snapshot, contentDigest: DIGEST } : nextShare,
+    );
+    mocks.commit.mockResolvedValue({
+      ok: true, questionSetId: "second-local-set", questionIds: ["second-local-question"],
+      added: 1, reused: 0, alreadyImported: false,
+    });
+
+    const view = render(<SharedQuestionSetPage key={TOKEN} />);
+    expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+    window.history.replaceState(null, "", `#shared-set?token=${NEXT_TOKEN}`);
+    // This is the router's keyed child transition; history API sends no hashchange.
+    view.rerender(<SharedQuestionSetPage key={NEXT_TOKEN} />);
+    expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Synthetic shared set" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add to my AXOM" }));
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledWith({
+      snapshot: nextShare.snapshot,
+      identity: { shareId: nextShare.id, contentDigest: nextShare.contentDigest },
+    }));
+    expect(mocks.commit).toHaveBeenCalledTimes(1);
+  });
 });
