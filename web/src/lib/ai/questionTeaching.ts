@@ -212,7 +212,7 @@ function hasPrivateDraftPhone(question: QuestionRecord): boolean {
  * source evidence, licensing or academic publication has been approved.
  * Inspect only a normalized copy; retain original reviewer/source records.
  */
-const UNSUPPORTED_DRAFT_ATTESTATION = /(?:^|[^\p{L}\p{N}])(?:source(?:\s+(?:evidence|material|document|citation|reference))?|rights?|licen[sc]e|provenance|publication|moderation|academic\s+review|clinical\s+review)\s*(?::|=|\b(?:is|was|are|were|has\s+been|have\s+been)\b)?\s*(?:verified|validated|approved|cleared|confirmed|reviewed|licensed|granted)\b|\b(?:i|we)\s+(?:have\s+)?(?:reviewed|verified|checked|validated|confirmed)\s+(?:the\s+)?(?:original\s+)?(?:source|reference|citation|rights|licen[sc]e)\b/iu;
+const UNSUPPORTED_DRAFT_ATTESTATION = /(?:^|[^\p{L}\p{N}])(?:source(?:\s+(?:evidence|material|document|citation|reference))?|rights?|licen[sc]e|provenance|publication|moderation|academic\s+review|clinical\s+review)[\s-]*(?::|=|\b(?:is|was|are|were|has\s+been|have\s+been)\b)?\s*(?:verified|validated|approved|cleared|confirmed|reviewed|licensed|granted)\b|\b(?:i|we)\s+(?:have\s+)?(?:reviewed|verified|checked|validated|confirmed)\s+(?:the\s+)?(?:original\s+)?(?:source|reference|citation|rights|licen[sc]e)\b/iu;
 function containsUnsupportedDraftAttestation(value: string): boolean {
   return UNSUPPORTED_DRAFT_ATTESTATION.test(referenceSafetyText(value));
 }
