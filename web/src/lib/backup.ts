@@ -357,6 +357,16 @@ export function parseImport(text: string): NoctyriumState {
   if (!data || typeof data !== "object" || !Array.isArray(data.terms)) {
     throw new Error("This file doesn't look like an AXOM backup.");
   }
+  // Missing versions occur in older exports. Explicitly malformed versions
+  // cannot safely be interpreted as v0; later versions may contain unknown data.
+  const rawSchemaVersion = data.schemaVersion;
+  if (rawSchemaVersion !== undefined && (!Number.isSafeInteger(rawSchemaVersion) || rawSchemaVersion < 0)) {
+    throw new Error("This backup has an invalid AXOM data version. Verify the file before restoring it.");
+  }
+  const importedSchemaVersion = typeof rawSchemaVersion === "number" ? rawSchemaVersion : 0;
+  if (importedSchemaVersion > SCHEMA_VERSION) {
+    throw new Error("This backup uses a newer AXOM data version. Update AXOM before restoring it.");
+  }
   // accept the file even if schemaVersion is missing/older — fill the gaps
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
@@ -369,7 +379,6 @@ export function parseImport(text: string): NoctyriumState {
   const activeFocus = focusOption(activeFocusId);
   const educationTrack = resolveTrack(typeof profile.educationTrack === "string" ? profile.educationTrack : undefined).id;
 
-  const importedSchemaVersion = typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
   return {
     schemaVersion: SCHEMA_VERSION,
     profile: {
