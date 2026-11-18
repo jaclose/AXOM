@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, Link2 } from "lucide-react";
 import { GlassCard, GButton, Tag } from "../components/ui/primitives";
 import { readSharedQuestionImportProvenance } from "../lib/sharing/questionSetShare";
@@ -11,29 +11,47 @@ export function SharedQuestionSetPage() {
   const [added, setAdded] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // A shared-link route can change while this page stays mounted. Invalidate
+  // both the pending preview and any old save UI before resolving its new token.
+  // Already-issued server writes cannot be cancelled by this UI guard.
+  const linkGeneration = useRef(0);
   useEffect(() => {
-    const token = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
-    if (!token) {
-      setError("This share link is incomplete.");
-      return;
-    }
-    let active = true;
-    void resolveShare(token).then((resolved) => {
-      if (!active) return;
-      setShare(resolved);
-      const imported = useStore.getState().questionSets.some((questionSet) => {
-        const provenance = readSharedQuestionImportProvenance(questionSet);
-        return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
+    const openLink = () => {
+      const generation = ++linkGeneration.current;
+      setShare(null);
+      setError("");
+      setAdded(false);
+      setBusy(false);
+      const token = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
+      if (!token) {
+        setError("This share link is incomplete.");
+        return;
+      }
+      void resolveShare(token).then((resolved) => {
+        if (linkGeneration.current !== generation) return;
+        setShare(resolved);
+        const imported = useStore.getState().questionSets.some((questionSet) => {
+          const provenance = readSharedQuestionImportProvenance(questionSet);
+          return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
+        });
+        setAdded(imported);
+      }).catch((cause) => {
+        if (linkGeneration.current === generation) {
+          setError(cause instanceof Error ? cause.message : "This share is unavailable.");
+        }
       });
-      setAdded(imported);
-    }).catch((cause) => {
-      if (active) setError(cause instanceof Error ? cause.message : "This share is unavailable.");
-    });
-    return () => { active = false; };
+    };
+    window.addEventListener("hashchange", openLink);
+    openLink();
+    return () => {
+      ++linkGeneration.current;
+      window.removeEventListener("hashchange", openLink);
+    };
   }, []);
 
   async function add() {
     if (!share || busy || added) return;
+    const generation = linkGeneration.current;
     setBusy(true);
     setError("");
     try {
@@ -42,11 +60,13 @@ export function SharedQuestionSetPage() {
         identity: { shareId: share.id, contentDigest: share.contentDigest },
       });
       if (!result.ok) throw new Error(result.message);
-      setAdded(true);
+      if (linkGeneration.current === generation) setAdded(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The shared set could not be imported safely.");
+      if (linkGeneration.current === generation) {
+        setError(cause instanceof Error ? cause.message : "The shared set could not be imported safely.");
+      }
     } finally {
-      setBusy(false);
+      if (linkGeneration.current === generation) setBusy(false);
     }
   }
 
