@@ -7,7 +7,7 @@ import { makeSeed } from "./seed";
 import { sha256Hex } from "./checksum";
 import { saveSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
-import { ATTACHMENT_EXPORT_KEY, getQuestionAttachmentBlob, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
+import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, setMissingAttachmentLoader, type QuestionImageAttachment } from "./questionAttachments";
 import { splitCloudContent } from "./sync/cloudContent";
 import { deferContent } from "./sync/deferredContent";
 import { retainDownloadedContent } from "./sync/contentDownloads";
@@ -189,6 +189,81 @@ describe("saved-work recovery without downloading content", () => {
         expect(lastBackupAt()).toBeNull();
         expect(await (await getQuestionAttachmentBlob(attachment.blobKey))?.blob.text()).toBe("AXOM");
         expect(state.questions).toHaveLength(2);
+      }
+    }
+  });
+
+
+  it("round-trips shared-key JSON bytes with coherent surviving-reference provenance and reversible staging", async () => {
+    localStorage.clear();
+    const { state } = await fixture();
+    state.documents = [];
+    const first = { ...state.questions[0], id: "q-first", attachments: [attachment] };
+    const later = { ...state.questions[0], id: "q-later", attachments: [{
+      ...attachment, id: "figure-later", updatedAt: "2026-11-15T00:00:00Z",
+    }] };
+    state.questions = [first, later];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"], { type: "image/png" }),
+      mimeType: "image/png", byteSize: 4, questionId: first.id, updatedAt: attachment.updatedAt,
+    });
+
+    expect(await exportStateWithAttachments(state)).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+    expect(filename).toMatch(/\.json$/);
+    const backup = await readPortableBackup(new File([exported!], filename));
+    const imported = parseImport(backup.rawText);
+    expect(imported.questions.map(q => q.attachments?.[0]?.updatedAt))
+      .toEqual([attachment.updatedAt, later.attachments[0].updatedAt]);
+
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+
+    const staged = await backup.restoreMedia(imported.questions);
+    expect(staged).toMatchObject({ restored: 1, skipped: 0 });
+    const stored = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true });
+    expect(await stored?.blob.text()).toBe("AXOM");
+    expect(stored).toMatchObject({
+      mimeType: "image/png", byteSize: 4,
+      questionId: later.id, updatedAt: later.attachments[0].updatedAt,
+    });
+    const repeat = await backup.restoreMedia(imported.questions);
+    expect(repeat).toMatchObject({ restored: 0, skipped: 1 });
+    await repeat.rollback();
+    expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))?.blob.text()).toBe("AXOM");
+    await staged.rollback();
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it("refuses historical JSON with contradictory shared-key media references before writing any bytes", async () => {
+    const { state } = await fixture();
+    state.documents = [];
+    const first = { ...state.questions[0], attachments: [attachment] };
+    const second = { ...state.questions[0], id: "q-second", attachments: [{
+      ...attachment, id: "figure-second",
+    }] };
+    state.questions = [first, second];
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"], { type: "image/png" }),
+      mimeType: "image/png", byteSize: 4, questionId: first.id, updatedAt: attachment.updatedAt,
+    });
+    expect(await exportStateWithAttachments(state)).toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });
+    const valid = JSON.parse(await exported!.text());
+
+    for (const conflicting of [
+      { ...second.attachments[0], byteSize: 3 },
+      { ...second.attachments[0], mimeType: "image/jpeg" },
+    ]) {
+      for (const reversed of [false, true]) {
+        const raw = structuredClone(valid);
+        raw.questions = reversed ? [raw.questions[1], raw.questions[0]] : raw.questions;
+        const conflictRef = raw.questions.find((q: { id: string }) => q.id === second.id);
+        conflictRef.attachments = [conflicting];
+        const backup = await readPortableBackup(new File([JSON.stringify(raw)], "historical.json"));
+        const imported = parseImport(backup.rawText);
+        await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+        await expect(backup.restoreMedia(imported.questions)).rejects.toThrow(/conflicting image references/i);
+        expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+        expect(imported.questions).toHaveLength(2);
       }
     }
   });
