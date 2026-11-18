@@ -771,6 +771,54 @@ export async function stageQuestionAttachmentPayloads(
   }
 }
 
+/** Legacy imports may replace a strictly older image, unlike portable staged
+ * backups which use add-only immutable keys. The timestamp comparison and put
+ * MUST share one readwrite transaction; a separate get/put can downgrade a
+ * newer image committed by another restoring tab between those operations.
+ * Same-revision collisions are verified as immutable bytes by the caller. */
+async function conditionallyRestoreLegacyAttachment(
+  blobKey: string,
+  record: QuestionAttachmentBlobRecord,
+  scope: QuestionAttachmentScope,
+): Promise<"restored" | "newer" | "equal"> {
+  assertScope(scope);
+  const db = await openAttachmentDb();
+  return new Promise((resolve, reject) => {
+    let outcome: "restored" | "newer" | "equal" = "newer";
+    let abortReason: unknown;
+    let tx: IDBTransaction;
+    try {
+      tx = db.transaction(ATTACHMENT_STORE_NAME, "readwrite");
+      const store = tx.objectStore(ATTACHMENT_STORE_NAME);
+      const key = scopedBlobKey(scope, blobKey);
+      const request = store.get(key);
+      request.onsuccess = () => {
+        try {
+          assertScope(scope);
+          const current = request.result as QuestionAttachmentBlobRecord | undefined;
+          if (current && current.updatedAt >= record.updatedAt) {
+            outcome = current.updatedAt === record.updatedAt ? "equal" : "newer";
+            return;
+          }
+          store.put(record, key);
+          outcome = "restored";
+        } catch (error) {
+          abortReason = error;
+          tx.abort();
+        }
+      };
+      tx.oncomplete = () => { db.close(); resolve(outcome); };
+      tx.onabort = tx.onerror = () => {
+        db.close();
+        reject(abortReason ?? tx.error ?? new Error("Legacy image restoration was interrupted."));
+      };
+    } catch (error) {
+      db.close();
+      reject(error);
+    }
+  });
+}
+
 /** Write imported payload bytes for every attachment the merged/restored state
  * still references. Deterministic conflicts: the surviving metadata's updatedAt
  * decides — bytes are written when the store has nothing for that key or when
@@ -829,14 +877,41 @@ export async function restoreQuestionAttachmentPayloads(
     if (bytes.byteLength !== payload.byteSize) {
       throw new Error("A backup image failed validation against its declared byte size. No existing image was overwritten.");
     }
-    await putQuestionAttachmentBlob(payload.blobKey, {
+    const outcome = await conditionallyRestoreLegacyAttachment(payload.blobKey, {
       // bytes is a fresh, exact-length Uint8Array — its buffer is a plain ArrayBuffer.
       blob: new Blob([bytes.buffer as ArrayBuffer], { type: payload.mimeType }),
       mimeType: payload.mimeType,
       byteSize: bytes.byteLength,
       questionId: target.questionId,
       updatedAt: payload.updatedAt,
-    }, { scope });
+    }, scope);
+    assertScope(scope);
+    if (outcome === "newer") { skipped += 1; continue; }
+    if (outcome === "equal") {
+      // A parallel restore may have installed this revision after our first
+      // lookup. The transaction never overwrites it. Reuse only exact bytes.
+      const winner = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
+      assertScope(scope);
+      if (winner && winner.updatedAt > payload.updatedAt) { skipped += 1; continue; }
+      let identical = false;
+      try {
+        if (winner?.updatedAt === payload.updatedAt
+          && winner.mimeType === payload.mimeType
+          && winner.byteSize === bytes.byteLength
+          && winner.blob?.size === bytes.byteLength
+          && (!winner.blob.type || winner.blob.type === payload.mimeType)) {
+          identical = equalBytes(new Uint8Array(await winner.blob.arrayBuffer()), bytes);
+        }
+      } catch {
+        // Unreadable bytes can never certify an identical restoration.
+      }
+      assertScope(scope);
+      if (!identical) {
+        throw new Error("A backup image uses an existing storage key at the same revision with different bytes or metadata. No existing image was overwritten.");
+      }
+      skipped += 1;
+      continue;
+    }
     restored += 1;
   }
   assertScope(scope);
