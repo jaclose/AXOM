@@ -798,12 +798,37 @@ export async function restoreQuestionAttachmentPayloads(
       existing = undefined;
     }
     if (existing && existing.updatedAt > payload.updatedAt) { skipped += 1; continue; }
-    if (existing && existing.updatedAt === payload.updatedAt && existing.byteSize === payload.byteSize) {
+    if (payload.mimeType !== target.mimeType || payload.byteSize !== target.byteSize) {
+      throw new Error("A backup image failed validation against surviving question metadata. No existing image was overwritten.");
+    }
+    if (existing && existing.updatedAt === payload.updatedAt) {
+      // Equal timestamps do not establish content equality. In particular, a
+      // colliding same-size image key must not be silently counted as restored
+      // while the surviving question still points to different local bytes.
+      let identical = false;
+      try {
+        const incoming = base64ToBytes(payload.base64);
+        if (incoming && incoming.byteLength === payload.byteSize
+          && existing.mimeType === payload.mimeType
+          && existing.byteSize === payload.byteSize
+          && existing.blob?.size === payload.byteSize
+          && (!existing.blob.type || existing.blob.type === payload.mimeType)) {
+          identical = equalBytes(new Uint8Array(await existing.blob.arrayBuffer()), incoming);
+        }
+      } catch {
+        // An unreadable stored image is not a verified identical backup image.
+      }
+      if (!identical) {
+        throw new Error("A backup image uses an existing storage key at the same revision with different bytes or metadata. No existing image was overwritten.");
+      }
       skipped += 1;
       continue;
     }
     const bytes = base64ToBytes(payload.base64);
     if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_QUESTION_ATTACHMENT_BYTES) { skipped += 1; continue; }
+    if (bytes.byteLength !== payload.byteSize) {
+      throw new Error("A backup image failed validation against its declared byte size. No existing image was overwritten.");
+    }
     await putQuestionAttachmentBlob(payload.blobKey, {
       // bytes is a fresh, exact-length Uint8Array — its buffer is a plain ArrayBuffer.
       blob: new Blob([bytes.buffer as ArrayBuffer], { type: payload.mimeType }),
