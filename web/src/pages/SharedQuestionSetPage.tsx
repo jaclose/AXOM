@@ -83,9 +83,9 @@ export function SharedQuestionSetPage() {
         // not-yet-restored device vault. Reconcile once this vault is ready.
         const imported = canImportIntoWorkspace(useAccount.getState())
           && useStore.getState().questionSets.some((questionSet) => {
-          const provenance = readSharedQuestionImportProvenance(questionSet);
-          return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
-        });
+            const provenance = readSharedQuestionImportProvenance(questionSet);
+            return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
+          });
         setAdded(imported);
       }).catch((cause) => {
         if (linkGeneration.current === generation) {
