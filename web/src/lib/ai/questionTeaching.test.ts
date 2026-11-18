@@ -46,6 +46,32 @@ describe("review-gated explanation drafting", () => {
   });
 
   it.each([
+    ["empty source question", ""],
+    ["whitespace-only legacy question", " \t\n\r "],
+    ["zero-width formatting-only question", "\u200B\u200E\uFEFF"],
+    ["HTML-escaped blank question", "&#32;&nbsp;"],
+    ["percent-encoded blank question", "%20%09%0A"],
+    ["nested percent-encoded blank question", "%2520%2520"],
+    ["fullwidth spaces", "\u3000\u3000"],
+  ])("holds %s despite a reviewed answer key", async (_label, stem) => {
+    const source = question({ stem });
+    const original = JSON.stringify(source);
+    const model = provider({});
+    expect(eligibleForExplanationDraft(source)).toBe(false);
+    await expect(draftQuestionExplanation(model, source))
+      .rejects.toThrow(/readable question stem/i);
+    expect(model.completeJson).not.toHaveBeenCalled();
+    expect(JSON.stringify(source)).toBe(original);
+    expect(source.correctKey).toBe("A");
+  });
+
+  it("continues to allow a text-only, source-keyed clinical question", () => {
+    const source = question({ stem: "Which arterial layer contains contractile smooth muscle?" });
+    expect(eligibleForExplanationDraft(source)).toBe(true);
+    expect(source.correctKey).toBe("A");
+  });
+
+  it.each([
     ["identical correct and distractor text", { options: [
       { key: "A", text: "Tunica media" }, { key: "B", text: "Tunica media" },
       { key: "C", text: "Tunica adventitia" },
