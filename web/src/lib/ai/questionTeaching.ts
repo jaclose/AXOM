@@ -100,12 +100,13 @@ function referencesUnavailableExhibit(question: QuestionRecord): boolean {
     || [question.stem, question.topic, ...question.options.map(option => option.text)]
       .some(value => {
         if (typeof value !== "string") return false;
-        // Compatibility-width figures and hidden format marks can obscure a
-        // missing visual exhibit in PDF/OCR imports. Normalize only the
-        // temporary inspection copy; keep the source and review key intact.
-        const scan = referenceSafetyText(value);
-        return EMBEDDED_EXHIBIT_MARKUP.test(scan)
-          || EXPLICIT_EXHIBIT_REFERENCE.test(scan.replace(WEB_URL_TOKEN, " "));
+        // Legacy imports may percent-encode or HTML-escape missing figures,
+        // panels and markup. Inspect both raw-normalized and bounded-decoded
+        // comparison copies; never rewrite source text or its reviewed key.
+        // Continue masking public URL tokens before the prose-only scan.
+        return [referenceSafetyText(value), referenceSafetyText(communityEvidenceSafetyText(value))]
+          .some(scan => EMBEDDED_EXHIBIT_MARKUP.test(scan)
+            || EXPLICIT_EXHIBIT_REFERENCE.test(scan.replace(WEB_URL_TOKEN, " ")));
       });
 }
 
