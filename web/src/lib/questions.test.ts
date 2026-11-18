@@ -230,6 +230,42 @@ describe("mapping readiness", () => {
     expect(questionMappingStatus(makeQuestion({ id: "valid" }))).toBe("ready");
   });
 
+  it("holds malformed option displays and visually colliding answer keys without changing stored evidence", () => {
+    // Portable/legacy records may reach this classifier without running the current authoring validator.
+    const invalid = [
+      makeQuestion({ id: "blank-keyed-choice", options: [
+        { key: "A", text: "   " }, { key: "B", text: "Valid distractor" },
+      ] }),
+      makeQuestion({ id: "blank-distractor", options: [
+        { key: "A", text: "Valid answer" }, { key: "B", text: "" },
+      ] }),
+      makeQuestion({ id: "nonstring-distractor", options: [
+        { key: "A", text: "Valid answer" }, { key: "B", text: 42 as unknown as string },
+      ] }),
+      makeQuestion({ id: "case-colliding-keys", options: [
+        { key: "A", text: "Valid answer" }, { key: "a", text: "Other choice" },
+      ] }),
+      makeQuestion({ id: "unicode-colliding-keys", options: [
+        { key: "A", text: "Valid answer" }, { key: "Ａ", text: "Other choice" },
+      ] }),
+    ];
+    const before = structuredClone(invalid);
+    expect(invalid.map(questionMappingStatus)).toEqual(Array(invalid.length).fill("unresolved"));
+    expect(summarizeQuestionMappings(invalid)).toMatchObject({
+      ready: 0, unresolved: invalid.length, issueCount: invalid.length,
+      unresolvedQuestionIds: invalid.map((question) => question.id),
+    });
+    expect(filterForMode(invalid, "mapping-review").map((question) => question.id))
+      .toEqual(invalid.map((question) => question.id));
+    expect(invalid).toEqual(before);
+
+    // Preserve distinct answer keys, including a legacy all-lowercase mapping.
+    expect(questionMappingStatus(makeQuestion())).toBe("ready");
+    expect(questionMappingStatus(makeQuestion({
+      correctKey: "a", options: [{ key: "a", text: "Answer" }, { key: "b", text: "Distractor" }],
+    }))).toBe("ready");
+  });
+
   it("holds reviewed current-schema and legacy questions when saved answer text contradicts the keyed option", () => {
     const currentSchema = makeQuestion({
       id: "current-schema-conflict", source: "imported", correctKey: "A",
