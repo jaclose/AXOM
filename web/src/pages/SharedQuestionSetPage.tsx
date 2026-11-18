@@ -183,17 +183,18 @@ export function SharedQuestionSetPage() {
 
   async function add() {
     if (!share || busy || added) return;
-    // This synchronous check also closes a restore-to-click render race.
+    // Recheck authorization before inspecting any local receipt: a switched
+    // account must not see the prior vault's membership, even during a click
+    // that raced React's disabled-button render.
+    if (!canImportIntoWorkspace(useAccount.getState())) {
+      setError("Finish connecting your account workspace before importing this shared set.");
+      return;
+    }
+    // A restore may replace receipts between preview and the import click.
     const receiptStatus = savedShareStatus(useStore.getState(), share);
     if (receiptStatus !== "absent") {
       setAdded(receiptStatus === "complete");
       setImportIssue(receiptStatus === "incomplete");
-      return;
-    }
-    // Recheck synchronously in case a store transition preceded React's
-    // disabled-button render. An unlinked/restoring vault is not writable.
-    if (!canImportIntoWorkspace(useAccount.getState())) {
-      setError("Finish connecting your account workspace before importing this shared set.");
       return;
     }
     const currentToken = new URLSearchParams(location.hash.split("?")[1] ?? "").get("token");
