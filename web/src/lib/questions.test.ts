@@ -237,7 +237,7 @@ describe("mapping readiness", () => {
       correctAnswerText: "Tunica intima", needsReview: false,
       extraction: { confidence: "high", reviewed: true },
     });
-    const legacy = makeQuestion({ id: "legacy-conflict", correctAnswerText: "different answer" });
+    const legacy = makeQuestion({ id: "legacy-conflict", source: "imported", correctAnswerText: "different answer" });
     const malformed = makeQuestion({
       id: "nonstring-saved-text",
       correctAnswerText: 42 as unknown as QuestionRecord["correctAnswerText"],
@@ -282,6 +282,33 @@ describe("mapping readiness", () => {
     expect(summarizeQuestionMappings([noDisplay, matching, whitespace, unreviewed]))
       .toMatchObject({ ready: 3, reviewSuggested: 1, unresolved: 0, issueCount: 1 });
     expect(whitespace.correctAnswerText).toBe("   ");
+  });
+
+  it("distinguishes independent extracted evidence from a manually authored stale display label", () => {
+    const manual = makeQuestion({
+      id: "manual-sixth-choice", source: "manual", correctKey: "F",
+      options: ["A", "B", "C", "D", "E", "F"].map((key) => ({
+        key, text: key === "F" ? "Foxtrot" : `Option ${key}`,
+      })),
+      correctAnswerText: "Beta", // Old display text does not identify another option.
+    });
+    const authoredSynonym = makeQuestion({
+      id: "manual-synonym", source: "manual", correctAnswerText: "Rhinovirus",
+      options: [{ key: "A", text: "Human rhinovirus" }, { key: "B", text: "Influenza" }],
+    });
+    const namedOtherChoice = makeQuestion({
+      id: "manual-conflict", source: "manual", correctAnswerText: "y",
+    });
+    const imported = { ...manual, source: "imported" as const };
+    const extracted = { ...manual, extraction: { confidence: "high" as const, reviewed: true } };
+    const before = structuredClone([manual, authoredSynonym, namedOtherChoice, imported, extracted]);
+
+    expect(questionMappingStatus(manual)).toBe("ready");
+    expect(questionMappingStatus(authoredSynonym)).toBe("ready");
+    expect(questionMappingStatus(namedOtherChoice)).toBe("unresolved");
+    expect(questionMappingStatus(imported)).toBe("unresolved");
+    expect(questionMappingStatus(extracted)).toBe("unresolved");
+    expect([manual, authoredSynonym, namedOtherChoice, imported, extracted]).toEqual(before);
   });
 
   it("keeps blank-display eligibility consistent across legacy and current portable schemas", () => {
