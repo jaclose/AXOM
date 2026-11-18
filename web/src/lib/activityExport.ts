@@ -157,6 +157,11 @@ function parseActivityInstant(ts: string): number {
   return instant;
 }
 
+/** JavaScript UTF-16 ordinal order is independent of the device locale. */
+function compareTextCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** Canonical, deterministic chronology for both the visible ledger and downloaded XLSX. */
 export function compareStudyLogsNewestFirst(a: StudyLog, b: StudyLog): number {
   const aTime = parseActivityInstant(a.ts);
@@ -170,7 +175,9 @@ export function compareStudyLogsNewestFirst(a: StudyLog, b: StudyLog): number {
 
   // Equal instants with different offsets and exact timestamp duplicates must agree
   // across reorders/filters, even if original insertion order differs.
-  return b.ts.localeCompare(a.ts) || a.id.localeCompare(b.id);
+  // Locale-aware collation differs across browsers and OS locales. Tie order
+  // must be stable for exported rows and the visible activity ledger.
+  return compareTextCodeUnits(b.ts, a.ts) || compareTextCodeUnits(a.id, b.id);
 }
 
 function detailRows(logs: StudyLog[]) {
