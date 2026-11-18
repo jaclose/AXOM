@@ -765,4 +765,61 @@ describe("Shared Question Set page", () => {
     },
   );
 
+
+  it.each([
+    ["unsupported receipt version", { version: 2, shareId: SHARE_ID, contentDigest: DIGEST }],
+    ["invalid receipt digest", { version: 1, shareId: SHARE_ID, contentDigest: "not-a-digest" }],
+  ])("holds a raw same-share import with %s instead of starting another write", async (_name, rawProvenance) => {
+    mocks.questionSets = [{
+      id: "damaged-import", title: "Damaged shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["old-question"],
+      tags: [], aiEnhanced: false, parserWarnings: [],
+      importProvenance: rawProvenance,
+    } as unknown as QuestionSet];
+    render(<SharedQuestionSetPage />);
+    const blocked = await screen.findByRole("button", { name: "Import unavailable" });
+    expect(blocked).toHaveProperty("disabled", true);
+    expect(screen.getByRole("alert").textContent).toMatch(/restore your AXOM/i);
+    fireEvent.click(blocked);
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it("holds a valid same-share receipt when another same-share receipt is malformed", async () => {
+    const existing: QuestionSet = {
+      id: "valid-import", title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["local-q"],
+      tags: [], aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    };
+    mocks.questions = [{ id: "local-q" }];
+    mocks.questionSets = [
+      existing,
+      { ...existing, id: "damaged-import",
+        importProvenance: { version: 2, shareId: SHARE_ID, contentDigest: DIGEST } } as unknown as QuestionSet,
+    ];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Import unavailable" })).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Already in this AXOM" })).toBeNull();
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it("does not block the current share because an unrelated share has malformed provenance", async () => {
+    mocks.questionSets = [{
+      id: "other-import", title: "Different share",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: [],
+      tags: [], aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 2, shareId: nextShare.id, contentDigest: "malformed" },
+    } as unknown as QuestionSet];
+    mocks.commit.mockResolvedValue({
+      ok: true, questionSetId: "new-import", questionIds: ["new-question"],
+      added: 1, reused: 0, alreadyImported: false,
+    });
+    render(<SharedQuestionSetPage />);
+    const button = await screen.findByRole("button", { name: "Add to my AXOM" });
+    expect(button).toHaveProperty("disabled", false);
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(1));
+  });
+
 });

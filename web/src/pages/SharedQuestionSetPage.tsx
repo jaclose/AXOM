@@ -25,13 +25,18 @@ function savedShareStatus(
   state: Pick<ReturnType<typeof useStore.getState>, "questionSets" | "questions">,
   resolved: ResolvedQuestionSetShare,
 ): "absent" | "complete" | "incomplete" {
-  const receipts = (state.questionSets ?? []).filter((set) =>
-    readSharedQuestionImportProvenance(set)?.shareId === resolved.id,
-  );
+  // Inspect raw ownership before parsing: malformed metadata still reserves
+  // its share ID and must never silently look like a first-time import.
+  const receipts = (state.questionSets ?? []).filter((set) => {
+    const raw = (set as typeof set & { importProvenance?: unknown }).importProvenance;
+    return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+      && "shareId" in raw && raw.shareId === resolved.id;
+  });
   if (receipts.length === 0) return "absent";
   if (receipts.length !== 1) return "incomplete";
   const receipt = receipts[0];
-  if (readSharedQuestionImportProvenance(receipt)?.contentDigest !== resolved.contentDigest) return "incomplete";
+  const provenance = readSharedQuestionImportProvenance(receipt);
+  if (!provenance || provenance.contentDigest !== resolved.contentDigest) return "incomplete";
   const ids = receipt.questionIds;
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || !id.trim())
     || ids.length !== resolved.snapshot.orderedQuestionIds.length || new Set(ids).size !== ids.length) {
