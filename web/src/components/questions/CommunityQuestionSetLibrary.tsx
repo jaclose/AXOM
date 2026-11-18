@@ -447,6 +447,22 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       setPreviewError("This saved set is no longer in your library. Add it again to practice.");
       return;
     }
+    // A persisted import receipt does not prove that its question records
+    // survived a partial restore. Never launch practice with missing or
+    // ambiguous member IDs, or silently generate replacements that would
+    // detach learner attempts from their original questions.
+    const bank = useStore.getState().questions;
+    const memberIds = new Set(set.questionIds);
+    const found = new Map<string, number>();
+    for (const question of bank) {
+      if (memberIds.has(question.id)) found.set(question.id, (found.get(question.id) ?? 0) + 1);
+    }
+    if (set.questionIds.length !== activePreview.snapshot.questions.length
+      || memberIds.size !== set.questionIds.length
+      || set.questionIds.some(id => found.get(id) !== 1)) {
+      setPreviewError("This saved set has missing or duplicate question records. Recover the original question IDs in Question Bank before practicing. Reimport will not replace your attempts.");
+      return;
+    }
     cancelPendingPreview();
     pendingRevealFocus.current = null;
     setPreviewVisibleCount(3);
