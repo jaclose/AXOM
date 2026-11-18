@@ -263,7 +263,7 @@ describe("mapping readiness", () => {
       extraction: { confidence: "high", reviewed: true },
     });
     const matching = makeQuestion({
-      id: "matching-display", correctAnswerText: "  x \\n",
+      id: "matching-display", correctAnswerText: "  x  ",
       extraction: { confidence: "high", reviewed: true },
     });
     expect(questionMappingStatus(noDisplay)).toBe("ready");
