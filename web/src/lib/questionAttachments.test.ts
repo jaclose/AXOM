@@ -524,6 +524,20 @@ describe("portable backup payloads", () => {
     expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
   });
 
+  it("refuses a stored media descriptor whose declared size disagrees with its actual bytes", async () => {
+    const meta = metadata({ id: "declared-size-corrupt", byteSize: 4 });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["SAME"]), mimeType: "image/png", byteSize: 5,
+      questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    const entry = [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["SAME"])) }];
+    await expect(stageQuestionAttachmentPayloads(entry, [{ id: "q1", attachments: [meta] }]))
+      .rejects.toThrow("existing storage key with different bytes or metadata");
+    const stored = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(stored?.byteSize).toBe(5);
+    expect(await stored?.blob.text()).toBe("SAME");
+  });
+
   it("rejects a dangling reserved key without replacing the malformed original", async () => {
     const meta = metadata({ id: "reserved-null", byteSize: 4 });
     await putQuestionAttachmentBlob(meta.blobKey, null as unknown as Parameters<typeof putQuestionAttachmentBlob>[1]);
