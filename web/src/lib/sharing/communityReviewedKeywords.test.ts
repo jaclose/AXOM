@@ -88,6 +88,7 @@ describe("explicitly reviewed Community AI keywords", () => {
   });
 
   it.each([
+    ["UTF-8 escaped fullwidth URL punctuation", "Reference https%EF%BC%9A%EF%BC%8F%EF%BC%8Fexample.health%2Fvessel"],
     ["percent-escaped URL", "Reference https%3A%2F%2Fexample.health%2Fvessel"],
     ["double percent-escaped URL", "Reference https%253A%252F%252Fexample.health%2Fvessel"],
     ["numeric HTML entity URL", "Reference https&#58;&#47;&#47;example.health/vessel"],
@@ -156,6 +157,8 @@ describe("explicitly reviewed Community AI keywords", () => {
   });
 
   it.each([
+    ["UTF-8 escaped fullwidth colon", "rights%EF%BC%9Aapproved"],
+    ["nested UTF-8 escaped fullwidth colon", "source%25EF%25BC%259Averified"],
     ["percent-escaped source status", "source%3Areviewed"],
     ["double-escaped rights status", "rights%253Aapproved"],
     ["numeric HTML source attestation", "source&#58;verified"],
@@ -190,6 +193,7 @@ describe("explicitly reviewed Community AI keywords", () => {
   });
 
   it.each([
+    "caf%C3%A9%20au%20lait",
     "vascular%20smooth%20muscle",
     "10%20kPa",
     "E. coli",
@@ -230,6 +234,10 @@ describe("explicitly reviewed Community AI keywords", () => {
   });
 
   it.each([
+    ["UTF-8 escaped fullwidth at sign", "lecturer%EF%BC%A0school.health"],
+    ["nested UTF-8 escaped fullwidth at sign", "lecturer%25EF%25BC%25A0school.health"],
+    ["UTF-8 escaped fullwidth domain dot", "lecturer%40school%EF%BC%8Ehealth"],
+    ["malformed neighboring UTF-8 byte", "lecturer%FF%EF%BC%A0school.health"],
     ["plain source-query email", "https://example.edu/paper?q=lecturer@school.health"],
     ["percent-encoded at sign", "https://example.edu/paper?q=lecturer%40school.health"],
     ["percent-encoded dot", "https://example.edu/paper?q=lecturer%40school%2Ehealth"],
@@ -270,6 +278,7 @@ describe("explicitly reviewed Community AI keywords", () => {
   });
 
   it.each([
+    "Phone%EF%BC%9A%20%2B1%20865-555-0199",
     "phone%3A%20%2B1%20%28865%29%20555-0199",
     "Call%2520me%2520at%2520865-555-0199",
   ])("rejects a percent-encoded labeled contact telephone: %s", value => {
