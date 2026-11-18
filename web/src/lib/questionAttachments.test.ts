@@ -428,6 +428,51 @@ describe("portable backup payloads", () => {
     expect(await record!.blob.text()).toBe("imported");
   });
 
+  it("rejects same-revision legacy image collisions instead of treating different bytes as restored", async () => {
+    const meta = metadata({ id: "legacy-equal-revision-different-bytes", byteSize: 4 });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["KEEP"]), mimeType: "image/png", byteSize: 4,
+      questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["DROP"])) }],
+      [{ id: "q1", attachments: [meta] }],
+    )).rejects.toThrow("same revision");
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("KEEP");
+  });
+
+  it("rejects same-revision legacy image keys with incompatible MIME or corrupt stored byte length", async () => {
+    const meta = metadata({ id: "legacy-equal-revision-inconsistent-record", byteSize: 4 });
+    const payload = [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["KEEP"])) }];
+    const questions = [{ id: "q1", attachments: [meta] }];
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["KEEP"]), mimeType: "image/jpeg", byteSize: 4,
+      questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    await expect(restoreQuestionAttachmentPayloads(payload, questions)).rejects.toThrow("same revision");
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["EXTRA"]), mimeType: "image/png", byteSize: 4,
+      questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    await expect(restoreQuestionAttachmentPayloads(payload, questions)).rejects.toThrow("same revision");
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("EXTRA");
+  });
+
+  it("still reuses byte-identical legacy images at the same revision without rewriting their provenance", async () => {
+    const meta = metadata({ id: "legacy-equal-revision-identical", byteSize: 4 });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["SAME"]), mimeType: "image/png", byteSize: 4,
+      questionId: "original-owner", updatedAt: meta.updatedAt,
+    });
+    const result = await restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q2", base64: await blobToBase64(new Blob(["SAME"])) }],
+      [{ id: "q2", attachments: [meta] }],
+    );
+    expect(result).toEqual({ restored: 0, skipped: 1 });
+    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))
+      .toMatchObject({ questionId: "original-owner", updatedAt: meta.updatedAt });
+  });
+
   it("payloads for questions the merge dropped are skipped (never attach to the wrong question)", async () => {
     const meta = metadata({ id: "attachment-x" });
     const result = await restoreQuestionAttachmentPayloads(
