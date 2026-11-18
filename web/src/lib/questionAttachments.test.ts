@@ -455,6 +455,85 @@ describe("portable backup payloads", () => {
     expect(await getQuestionAttachmentBlob(added.blobKey)).toBeUndefined();
   });
 
+  it("keeps the first immutable image when concurrent portable stages see the same absent key", async () => {
+    const meta = metadata({ id: "concurrent-immutable", byteSize: 4 });
+    const payload = async (content: string) =>
+      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob([content])) }];
+    const questions = [{ id: "q1", attachments: [meta] }];
+    const originalGet = FakeIDBObjectStore.prototype.get;
+    let forcedMisses = 0;
+    // Simulate both writers' pre-insert reads seeing a missing *scoped* key.
+    // The race must be resolved by the actual IndexedDB add transaction.
+    const get = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, key) {
+      if (this.name === ATTACHMENT_STORE_NAME && Array.isArray(key) && forcedMisses < 2) {
+        forcedMisses += 1;
+        return originalGet.call(this, "forced-missing-key");
+      }
+      return originalGet.call(this, key);
+    });
+    let results: PromiseSettledResult<Awaited<ReturnType<typeof stageQuestionAttachmentPayloads>>>[];
+    try {
+      const [first, second] = await Promise.all([payload("AAAA"), payload("BBBB")]);
+      results = await Promise.allSettled([
+        stageQuestionAttachmentPayloads(first, questions),
+        stageQuestionAttachmentPayloads(second, questions),
+      ]);
+    } finally { get.mockRestore(); }
+    expect(forcedMisses).toBe(2);
+    expect(results.map(result => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const winner = results.find(result => result.status === "fulfilled");
+    const loser = results.find(result => result.status === "rejected");
+    if (!winner || winner.status !== "fulfilled" || !loser || loser.status !== "rejected") throw new Error("Expected one immutable winner");
+    expect(winner.value).toMatchObject({ restored: 1, skipped: 0 });
+    expect(loser.reason).toBeInstanceOf(Error);
+    expect(loser.reason.message).toContain("existing storage key with different bytes");
+    const bytes = await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text();
+    expect(["AAAA", "BBBB"]).toContain(bytes);
+    await winner.value.rollback();
+    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it("reuses identical bytes when two portable stages race to reserve one scoped key", async () => {
+    const meta = metadata({ id: "concurrent-identical", byteSize: 4 });
+    const entry = [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["SAME"])) }];
+    const questions = [{ id: "q1", attachments: [meta] }];
+    const originalGet = FakeIDBObjectStore.prototype.get;
+    let forcedMisses = 0;
+    const get = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, key) {
+      if (this.name === ATTACHMENT_STORE_NAME && Array.isArray(key) && forcedMisses < 2) {
+        forcedMisses += 1;
+        return originalGet.call(this, "forced-missing-key");
+      }
+      return originalGet.call(this, key);
+    });
+    let stages: Awaited<ReturnType<typeof stageQuestionAttachmentPayloads>>[];
+    try {
+      stages = await Promise.all([
+        stageQuestionAttachmentPayloads(entry, questions),
+        stageQuestionAttachmentPayloads(entry, questions),
+      ]);
+    } finally { get.mockRestore(); }
+    expect(forcedMisses).toBe(2);
+    expect(stages.map(stage => [stage.restored, stage.skipped]).sort()).toEqual([[0, 1], [1, 0]]);
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("SAME");
+    // The operation that did not add the key must not remove it on rollback.
+    const reused = stages.find(stage => stage.skipped === 1)!;
+    await reused.rollback();
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true }))!.blob.text()).toBe("SAME");
+    await stages.find(stage => stage.restored === 1)!.rollback();
+    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it("rejects a dangling reserved key without replacing the malformed original", async () => {
+    const meta = metadata({ id: "reserved-null", byteSize: 4 });
+    await putQuestionAttachmentBlob(meta.blobKey, null as unknown as Parameters<typeof putQuestionAttachmentBlob>[1]);
+    const entry = [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["SAFE"])) }];
+    await expect(stageQuestionAttachmentPayloads(entry, [{ id: "q1", attachments: [meta] }]))
+      .rejects.toThrow("already reserved");
+    expect(await listQuestionAttachmentBlobKeys()).toContain(meta.blobKey);
+    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
   it("rejects a colliding immutable blob key without changing its bytes", async () => {
     const meta = metadata({ id: "collision", byteSize: 8 });
     await putQuestionAttachmentBlob(meta.blobKey, {
