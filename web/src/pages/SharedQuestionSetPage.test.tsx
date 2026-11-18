@@ -214,4 +214,47 @@ describe("Shared Question Set page", () => {
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
     expect(screen.queryByText("Synthetic question?")).toBeNull();
   });
+
+  it("stops a never-settling share preview and retries without accepting late old results", async () => {
+    let finishOld!: () => void;
+    let requests = 0;
+    vi.mocked(resolveShare).mockImplementation(() => {
+      requests += 1;
+      if (requests === 1) {
+        return new Promise<Awaited<ReturnType<typeof resolveShare>>>((resolve) => {
+          finishOld = () => resolve({ id: SHARE_ID, snapshot, contentDigest: DIGEST });
+        });
+      }
+      return Promise.resolve(nextShare);
+    });
+
+    render(<SharedQuestionSetPage />);
+    expect(screen.getByText("Opening shared set…")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Stop loading" }));
+    expect(screen.getByText(/Shared set preview stopped/)).toBeTruthy();
+    expect(screen.queryByText("Opening shared set…")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry opening" }));
+    expect(await screen.findByRole("heading", { name: "Second shared set" })).toBeTruthy();
+    expect(resolveShare).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(resolveShare).mock.calls[1]?.[0]).toBe(TOKEN);
+
+    await act(async () => { finishOld(); });
+    expect(screen.getByRole("heading", { name: "Second shared set" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Synthetic shared set" })).toBeNull();
+  });
+
+  it("provides a retry for transient link-resolution errors", async () => {
+    vi.mocked(resolveShare)
+      .mockRejectedValueOnce(new Error("Temporary network failure"))
+      .mockResolvedValueOnce({ id: SHARE_ID, snapshot, contentDigest: DIGEST });
+
+    render(<SharedQuestionSetPage />);
+    expect((await screen.findByRole("alert")).textContent).toContain("Temporary network failure");
+    fireEvent.click(screen.getByRole("button", { name: "Retry opening" }));
+    expect(await screen.findByRole("heading", { name: "Synthetic shared set" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(resolveShare).toHaveBeenCalledTimes(2);
+  });
+
 });
