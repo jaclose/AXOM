@@ -212,7 +212,7 @@ describe("community Question Set exact-revision publication gate", () => {
     ["fullwidth duplicate label", "Ａ"],
     ["HTML-encoded duplicate label", "&#65;"],
     ["double percent-encoded duplicate label", "%2541"],
-    ["invisible-mark duplicate label", "A\\u200B"],
+    ["invisible-mark duplicate label", "A\u200B"],
     ["case-only duplicate label", "a"],
     ["encoded blank label", "&#32;&nbsp;"],
   ])("holds %s before publication without reassigning the verified answer", (_name, alternativeKey) => {
