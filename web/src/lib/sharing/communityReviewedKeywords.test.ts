@@ -154,6 +154,36 @@ describe("explicitly reviewed Community AI keywords", () => {
     expect(isCommunitySubjectKeyword(keyword)).toBe(true);
   });
 
+  it.each([
+    "professor@school.health",
+    "fac\u200Bulty@school.museum",
+    "ｆａｃｕｌｔｙ＠school.health",
+    "contact number: +1 (865) 555-0199",
+    "telephone: +44 20 7946 0958",
+    "Call me at 865 555 0199",
+    "ＰＨＯＮＥ：８６５５５５０１２４",
+    "p\u200Bhone: 865-555-0124",
+  ])("refuses a contact email or labeled telephone in a public reviewed keyword: %s", term => {
+    const authored = ["histology", "rights:reviewed"];
+    expect(isCommunitySubjectKeyword(term)).toBe(false);
+    expect(() => mergeReviewedCommunityKeywords(authored, term))
+      .toThrow(/publication metadata, citations or private references/i);
+    expect(authored).toEqual(["histology", "rights:reviewed"]);
+  });
+
+  it.each([
+    "CD4/CD8: T cell subsets",
+    "HLA-B27 and A@B notation",
+    "E. coli",
+    "Call 911 in anaphylaxis",
+    "contact dermatitis type IV",
+    "cell: 10.2 kPa",
+    "blood pressure 120/80 mmHg",
+    "histology arterial media",
+  ])("retains clinical subject tags without private contact cues: %s", term => {
+    expect(isCommunitySubjectKeyword(term)).toBe(true);
+  });
+
   it("keeps normal clinical phrases with punctuation and joining marks", () => {
     expect(isCommunitySubjectKeyword("type 1 diabetes (autoimmune)")).toBe(true);
     expect(isCommunitySubjectKeyword("histology: vessel layers")).toBe(true);
