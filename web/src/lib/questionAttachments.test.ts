@@ -473,6 +473,30 @@ describe("portable backup payloads", () => {
       .toMatchObject({ questionId: "original-owner", updatedAt: meta.updatedAt });
   });
 
+  it("rejects incompatible surviving metadata before a legacy restore writes image bytes", async () => {
+    const meta = metadata({ id: "legacy-mismatched-target", byteSize: 4 });
+    const questions = [{ id: "q1", attachments: [meta] }];
+    const base64 = await blobToBase64(new Blob(["SAME"]));
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", mimeType: "image/jpeg", base64 }],
+      questions,
+    )).rejects.toThrow("surviving question metadata");
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", byteSize: 5, base64 }],
+      questions,
+    )).rejects.toThrow("surviving question metadata");
+    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it("rejects a legacy image whose declared size disagrees with decoded bytes", async () => {
+    const meta = metadata({ id: "legacy-invalid-byte-size", byteSize: 4 });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["WRONG"])) }],
+      [{ id: "q1", attachments: [meta] }],
+    )).rejects.toThrow("declared byte size");
+    expect(await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
   it("payloads for questions the merge dropped are skipped (never attach to the wrong question)", async () => {
     const meta = metadata({ id: "attachment-x" });
     const result = await restoreQuestionAttachmentPayloads(
