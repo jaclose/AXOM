@@ -438,20 +438,32 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       || useAccount.getState().user?.id !== previewAccountId || !previewRequest.current) return;
     // Resolve the saved copy again at click time, so deletion or a replaced
     // local set cannot launch a stale imported membership.
-    const set = useStore.getState().questionSets.find(candidate => {
-      const receipt = readSharedQuestionImportProvenance(candidate);
-      return receipt?.shareId === activePreview.id && receipt.contentDigest === activePreview.contentDigest;
-    });
+    const store = useStore.getState();
+    // The canonical importer rejects multiple saved receipts for one public
+    // share ID, even when their digests match. A partial restore can violate
+    // that invariant after import: choosing the first receipt would silently
+    // launch practice against arbitrary membership and learner attempts.
+    const copies = store.questionSets.filter(candidate =>
+      readSharedQuestionImportProvenance(candidate)?.shareId === activePreview.id);
+    if (copies.length > 1) {
+      setPreviewError("Multiple saved copies reference this publication. Resolve the original import receipts in Question Bank before practicing. Your original question IDs and attempts are unchanged.");
+      return;
+    }
+    const set = copies[0];
     if (!set) {
       setImported(false);
       setPreviewError("This saved set is no longer in your library. Add it again to practice.");
+      return;
+    }
+    if (readSharedQuestionImportProvenance(set)?.contentDigest !== activePreview.contentDigest) {
+      setPreviewError("This saved publication revision no longer matches the preview. Close the preview and inspect your original saved set before practicing.");
       return;
     }
     // A persisted import receipt does not prove that its question records
     // survived a partial restore. Never launch practice with missing or
     // ambiguous member IDs, or silently generate replacements that would
     // detach learner attempts from their original questions.
-    const bank = useStore.getState().questions;
+    const bank = store.questions;
     const memberIds = new Set(set.questionIds);
     const found = new Map<string, number>();
     for (const question of bank) {
