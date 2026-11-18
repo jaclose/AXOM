@@ -275,6 +275,16 @@ export function questionMappingStatus(question: QuestionRecord): QuestionMapping
     || typeof question.correctKey !== "string"
     || optionKeys.filter((key) => key === question.correctKey).length !== 1
     || question.needsReview === true) return "unresolved";
+  // The saved display answer is separate provenance. Even a reviewed import
+  // with a valid keyed option cannot be practice-ready if that stored answer
+  // contradicts the keyed choice. Preserve both values for human review.
+  // Historical questions without a saved display answer remain eligible.
+  if (question.correctAnswerText !== undefined) {
+    const keyedOption = question.options.find((option) => option.key === question.correctKey);
+    if (typeof question.correctAnswerText !== "string"
+      || typeof keyedOption?.text !== "string"
+      || question.correctAnswerText.trim() !== keyedOption.text.trim()) return "unresolved";
+  }
   if (question.content?.assets.some((asset) => ["question", "stem", "choice"].includes(asset.role)
     && !question.attachments?.some((attachment) => attachment.assetId === asset.id))) return "unresolved";
   if (question.extraction && question.extraction.reviewed !== true) return "review-suggested";
