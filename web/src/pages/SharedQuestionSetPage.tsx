@@ -32,6 +32,9 @@ export function SharedQuestionSetPage() {
   // both the pending preview and any old save UI before resolving its new token.
   // Already-issued server writes cannot be cancelled by this UI guard.
   const linkGeneration = useRef(0);
+  // Once a write has observed a vault-readiness loss, its authorization is
+  // permanently revoked even if the same account finishes restoring later.
+  const writeRevocation = useRef(0);
   const resolvedToken = useRef<string | null>(null);
   const resolvedAccountId = useRef<string | null>(null);
 
@@ -40,8 +43,12 @@ export function SharedQuestionSetPage() {
   // any pending import authorization at each observed identity transition.
   useEffect(() => {
     let observedAccount = useAccount.getState().user?.id ?? null;
+    let previouslyReady = canImportIntoWorkspace(useAccount.getState());
     const unsubscribe = useAccount.subscribe((state) => {
-      setImportReady(canImportIntoWorkspace(state));
+      const ready = canImportIntoWorkspace(state);
+      if (previouslyReady && !ready) ++writeRevocation.current;
+      previouslyReady = ready;
+      setImportReady(ready);
       const currentAccount = state.user?.id ?? null;
       if (currentAccount === observedAccount) return;
       observedAccount = currentAccount;
@@ -79,10 +86,13 @@ export function SharedQuestionSetPage() {
         resolvedToken.current = token;
         resolvedAccountId.current = openedBy;
         setShare(resolved);
-        const imported = useStore.getState().questionSets.some((questionSet) => {
-          const provenance = readSharedQuestionImportProvenance(questionSet);
-          return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
-        });
+        // Never derive the incoming account's membership from a different,
+        // not-yet-restored device vault. Reconcile once this vault is ready.
+        const imported = canImportIntoWorkspace(useAccount.getState())
+          && useStore.getState().questionSets.some((questionSet) => {
+            const provenance = readSharedQuestionImportProvenance(questionSet);
+            return provenance?.shareId === resolved.id && provenance.contentDigest === resolved.contentDigest;
+          });
         setAdded(imported);
       }).catch((cause) => {
         if (linkGeneration.current === generation) {
@@ -114,6 +124,10 @@ export function SharedQuestionSetPage() {
         || resolvedAccountId.current !== accountId
         || (useAccount.getState().user?.id ?? null) !== accountId
       ) return;
+      if (!canImportIntoWorkspace(useAccount.getState())) {
+        setAdded(false);
+        return;
+      }
       setAdded(questionSets.some((questionSet) => {
         const provenance = readSharedQuestionImportProvenance(questionSet);
         return provenance?.shareId === share.id && provenance.contentDigest === share.contentDigest;
@@ -123,7 +137,7 @@ export function SharedQuestionSetPage() {
     return useStore.subscribe((state, previous) => {
       if (state.questionSets !== previous.questionSets) reconcile(state.questionSets);
     });
-  }, [share]);
+  }, [share, importReady]);
 
   function stopPreview() {
     // The server request may still settle, but its UI result is now obsolete.
@@ -164,6 +178,7 @@ export function SharedQuestionSetPage() {
       return;
     }
     const generation = linkGeneration.current;
+    const writeEpoch = writeRevocation.current;
     const selectedToken = currentToken;
     // Give the local guest workspace an explicit, revocable guard identity too.
     // The store checks this callback before and during its durable write.
@@ -178,15 +193,16 @@ export function SharedQuestionSetPage() {
           accountId: guardedAccountId,
           isCurrentAccount: (id) => id === guardedAccountId
             && linkGeneration.current === generation
+            && writeRevocation.current === writeEpoch
             && (useAccount.getState().user?.id ?? null) === accountAtPreview
             && canImportIntoWorkspace(useAccount.getState())
             && new URLSearchParams(location.hash.split("?")[1] ?? "").get("token") === selectedToken,
         },
       });
       if (!result.ok) throw new Error(result.message);
-      if (linkGeneration.current === generation) setAdded(true);
+      if (linkGeneration.current === generation && writeRevocation.current === writeEpoch) setAdded(true);
     } catch (cause) {
-      if (linkGeneration.current === generation) {
+      if (linkGeneration.current === generation && writeRevocation.current === writeEpoch) {
         setError(cause instanceof Error ? cause.message : "The shared set could not be imported safely.");
       }
     } finally {
@@ -219,7 +235,7 @@ export function SharedQuestionSetPage() {
             </p>
           ) : null}
           <GButton variant="primary" onClick={() => void add()} disabled={added || busy || !importReady}>
-            <Download />{added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
+            <Download />{!importReady ? "Add to my AXOM" : added ? "Already in this AXOM" : busy ? "Saving…" : "Add to my AXOM"}
           </GButton>
         </>
       ) : null}
