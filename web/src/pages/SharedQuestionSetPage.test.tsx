@@ -9,6 +9,7 @@ import { SharedQuestionSetPage } from "./SharedQuestionSetPage";
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
   questionSets: [] as QuestionSet[],
+  questions: [] as Array<{ id: string }>,
   accountId: "account-1" as string | null,
   accountPhase: "signed-in" as "signed-in" | "signed-out" | "loading" | "unconfigured",
   accountLink: "linked" as "linked" | "unlinked" | "linked-elsewhere",
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   accountApplyingRemote: false,
   accountRestoreOffer: false,
   accountObservers: new Set<(state: { user: { id: string } | null }) => void>(),
-  storeObservers: new Set<(state: { questionSets: QuestionSet[] }, previous: { questionSets: QuestionSet[] }) => void>(),
+  storeObservers: new Set<(state: { questionSets: QuestionSet[]; questions: Array<{ id: string }> }, previous: { questionSets: QuestionSet[]; questions: Array<{ id: string }> }) => void>(),
 }));
 
 const accountState = () => ({
@@ -61,16 +62,24 @@ function hydrateQuestionSets(next: QuestionSet[]) {
   const previous = mocks.questionSets;
   mocks.questionSets = next;
   mocks.storeObservers.forEach((listener) =>
-    listener({ questionSets: next }, { questionSets: previous }));
+    listener({ questionSets: next, questions: mocks.questions }, { questionSets: previous, questions: mocks.questions }));
+}
+
+function hydrateQuestions(next: Array<{ id: string }>) {
+  const previous = mocks.questions;
+  mocks.questions = next;
+  mocks.storeObservers.forEach((listener) =>
+    listener({ questionSets: mocks.questionSets, questions: next }, { questionSets: mocks.questionSets, questions: previous }));
 }
 
 vi.mock("../lib/store", () => ({
   useStore: {
     getState: () => ({
       questionSets: mocks.questionSets,
+      questions: mocks.questions,
       commitSharedQuestionSetImport: mocks.commit,
     }),
-    subscribe: (listener: (state: { questionSets: QuestionSet[] }, previous: { questionSets: QuestionSet[] }) => void) => {
+    subscribe: (listener: (state: { questionSets: QuestionSet[]; questions: Array<{ id: string }> }, previous: { questionSets: QuestionSet[]; questions: Array<{ id: string }> }) => void) => {
       mocks.storeObservers.add(listener);
       return () => { mocks.storeObservers.delete(listener); };
     },
@@ -124,6 +133,7 @@ beforeEach(() => {
   mocks.storeObservers.clear();
   window.history.replaceState(null, "", `#/shared?token=${TOKEN}`);
   mocks.questionSets = [];
+  mocks.questions = [];
   mocks.commit.mockReset();
   vi.mocked(resolveShare).mockReset();
   vi.mocked(resolveShare).mockResolvedValue({ id: SHARE_ID, snapshot, contentDigest: DIGEST });
@@ -160,6 +170,7 @@ describe("Shared Question Set page", () => {
   });
 
   it("recognizes a durable prior import after reload without another mutation", async () => {
+    mocks.questions = [{ id: "local-question" }];
     mocks.questionSets = [{
       id: "local-set",
       title: "Synthetic shared set",
@@ -460,6 +471,7 @@ describe("Shared Question Set page", () => {
       aiEnhanced: false, parserWarnings: [],
       importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
     };
+    mocks.questions = [{ id: "A-question" }];
     mocks.questionSets = [previouslyImported];
     render(<SharedQuestionSetPage />);
     expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
@@ -483,6 +495,7 @@ describe("Shared Question Set page", () => {
       importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
     };
     mocks.questionSets = [];
+    mocks.questions = [{ id: "B-question" }];
     render(<SharedQuestionSetPage />);
     expect(await screen.findByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
     await act(async () => { switchAccount("account-2"); });
@@ -614,6 +627,7 @@ describe("Shared Question Set page", () => {
       aiEnhanced: false, parserWarnings: [],
       importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
     };
+    mocks.questions = [{ id: "q1" }];
     mocks.questionSets = [imported];
     render(<SharedQuestionSetPage />);
     expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
@@ -669,5 +683,86 @@ describe("Shared Question Set page", () => {
     expect(screen.getByRole("button", { name: "Add to my AXOM" })).toHaveProperty("disabled", false);
   });
 
+
+
+  it("does not call an incomplete saved receipt an imported and usable question set", async () => {
+    mocks.questionSets = [{
+      id: "incomplete-receipt", title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["missing-q"],
+      tags: [], aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    }];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Import unavailable" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("alert").textContent).toMatch(/missing or conflicting.*restore/i);
+    expect(screen.queryByRole("button", { name: "Already in this AXOM" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Import unavailable" }));
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on multiple same-share receipts even when the first has intact membership", async () => {
+    const base: QuestionSet = {
+      id: "first-receipt", title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["local-q"],
+      tags: [], aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    };
+    mocks.questions = [{ id: "local-q" }];
+    mocks.questionSets = [
+      base,
+      { ...base, id: "second-receipt",
+        importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: "f".repeat(64) } },
+    ];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Import unavailable" })).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Already in this AXOM" })).toBeNull();
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a missing saved member when recovery restores the question objects", async () => {
+    mocks.questionSets = [{
+      id: "restored-receipt", title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["restored-q"],
+      tags: [], aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    }];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Import unavailable" })).toHaveProperty("disabled", true);
+    await act(async () => { hydrateQuestions([{ id: "restored-q" }]); });
+    expect(await screen.findByRole("button", { name: "Already in this AXOM" })).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it("holds a stored receipt whose membership length or identity is inconsistent with the share", async () => {
+    mocks.questions = [{ id: "local-q" }];
+    mocks.questionSets = [{
+      id: "wrong-membership", title: "Synthetic shared set",
+      sourceDocumentIds: [], createdAt: NOW, questionIds: ["local-q", "local-q"],
+      tags: [], aiEnhanced: false, parserWarnings: [],
+      importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+    }];
+    render(<SharedQuestionSetPage />);
+    expect(await screen.findByRole("button", { name: "Import unavailable" })).toHaveProperty("disabled", true);
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+
+  it.each([null, [null], [""]])(
+    "fails closed without crashing on malformed persisted membership %j",
+    async (invalidIds) => {
+      mocks.questionSets = [{
+        id: "malformed-receipt", title: "Synthetic shared set",
+        sourceDocumentIds: [], createdAt: NOW,
+        questionIds: invalidIds as unknown as string[],
+        tags: [], aiEnhanced: false, parserWarnings: [],
+        importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
+      }];
+      render(<SharedQuestionSetPage />);
+      expect(await screen.findByRole("button", { name: "Import unavailable" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("alert").textContent).toMatch(/restore your AXOM/i);
+      expect(mocks.commit).not.toHaveBeenCalled();
+    },
+  );
 
 });
