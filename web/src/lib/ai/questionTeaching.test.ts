@@ -47,6 +47,8 @@ describe("review-gated explanation drafting", () => {
 
   it.each([
     ["source attestation in explanation", { explanation: "The arterial media contains smooth muscle that regulates vascular tone. Source evidence has been verified." }],
+    ["hyphenated source-review label", { explanation: "The arterial media contracts to modulate vascular resistance. This is a source-reviewed explanation." }],
+    ["hyphenated license approval", { explanation: "The tunica media controls vasomotor tone. License-approved for sharing." }],
     ["rights approval in explanation", { explanation: "The tunica media contracts to regulate vessel caliber and peripheral resistance. Rights cleared for publication." }],
     ["claimed source inspection", { explanation: "The tunica media contains layers of vascular smooth muscle. We have reviewed the original source." }],
     ["academic review in distractor rationale", { choiceRationales: {
