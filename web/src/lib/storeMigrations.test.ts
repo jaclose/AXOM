@@ -163,6 +163,41 @@ describe("v26 → v27 migration", () => {
     });
   });
 
+  it("preserves and flags conflicting legacy keyed-answer evidence on hydration and repeat migration", () => {
+    const original = {
+      id: "legacy-answer-conflict", stem: "Vessel wall layer?",
+      options: [{ key: "A", text: "Tunica media" }, { key: "B", text: "Tunica intima" }],
+      correctKey: "A", correctAnswerText: "Tunica intima",
+      extraction: { confidence: "medium", reviewed: true },
+      attempts: [{ at: "2026-10-01T12:00:00.000Z", answerKey: "B", status: "incorrect" }],
+    };
+    const state = { ...v26State(), schemaVersion: 31, questions: [original] };
+    const migrated = migratePersistedState(structuredClone(state), 31);
+    expect(migrated.questions[0]).toMatchObject({
+      id: original.id,
+      correctKey: "A",
+      correctAnswerText: "Tunica intima",
+      needsReview: true,
+      options: original.options,
+      attempts: original.attempts,
+      extraction: { reviewed: true },
+    });
+    const rehydrated = migratePersistedState(structuredClone(migrated), SCHEMA_VERSION);
+    expect(rehydrated.questions[0].correctAnswerText).toBe("Tunica intima");
+    expect(rehydrated.questions[0].needsReview).toBe(true);
+    expect(rehydrated.questions[0].attempts).toEqual(original.attempts);
+  });
+
+  it("preserves a matching legacy answer and does not invent a review hold", () => {
+    const state = { ...v26State(), schemaVersion: 31, questions: [{
+      id: "legacy-match", options: [{ key: "A", text: "Alpha" }],
+      correctKey: "A", correctAnswerText: "Alpha",
+    }] };
+    const migrated = migratePersistedState(structuredClone(state), 31);
+    expect(migrated.questions[0].correctAnswerText).toBe("Alpha");
+    expect(migrated.questions[0].needsReview).not.toBe(true);
+  });
+
   it("preserves existing answer text when a legacy key cannot be matched", () => {
     const state = {
       ...v26State(),
