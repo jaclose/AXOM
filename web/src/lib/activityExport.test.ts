@@ -379,6 +379,29 @@ describe("Activity History XLSX sheet title collisions", () => {
     }
   });
 
+  it("rejects fractional contributions rounded by very large integers before workbook write", async () => {
+    // These are valid binary fractions; all three sequences have an exact
+    // nonzero mathematical result, but the previous integer-only guard let
+    // a false 0 or 4 appear in the overview and in the on-screen total.
+    for (const field of ["minutes", "cards"] as const) {
+      for (const values of [
+        [0.5, 1e16, -1e16],
+        [1e16, 4.5, -1e16],
+        [0.25, 2 ** 53, -(2 ** 53)],
+      ]) {
+        const logs = studyLogs(["Manual", "Manual", "Manual"]);
+        values.forEach((value, index) => { logs[index][field] = value; });
+        const original = logs.map((log) => ({ ...log }));
+        let writerCalls = 0;
+        expect(() => sumActivityMetric(logs, field)).toThrow(ActivityExportNumericError);
+        await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+          .rejects.toBeInstanceOf(ActivityExportNumericError);
+        expect(writerCalls).toBe(0);
+        expect(logs).toEqual(original);
+      }
+    }
+  });
+
   it("accepts exactly representable reverse-order large integer totals", async () => {
     const logs = studyLogs(["Manual", "Manual"]);
     logs[0].minutes = 4;
