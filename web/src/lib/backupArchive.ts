@@ -7,7 +7,7 @@ import type { SourceDocument } from "./library";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, blobToBase64,
-  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
+  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, readValidQuestionAttachmentExportBytes, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
   type StagedQuestionAttachmentRestore,
 } from "./questionAttachments";
@@ -39,8 +39,8 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   for (const metadata of mediaReferences(references)) {
     try {
       const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
-      if (!record) throw new Error("Missing image");
-      const bytes = new Uint8Array(await record.blob.arrayBuffer());
+      const bytes = await readValidQuestionAttachmentExportBytes(metadata, record);
+      if (!bytes) throw new Error("Missing or invalid image bytes");
       const file = `media/${media.length}`;
       zip.file(file, bytes); media.push({ file, metadata });
     } catch { missingBlobKeys.push(metadata.blobKey); }
