@@ -120,6 +120,30 @@ describe("Community Question Set Library", () => {
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
   });
 
+  it.each([
+    ["duplicate receipts for the same approved digest", "a".repeat(64)],
+    ["conflicting receipts for a different digest", "b".repeat(64)],
+  ])("holds imported practice with %s instead of selecting the first receipt", async (_case, otherDigest) => {
+    const conflictingSet: QuestionSet = {
+      ...savedSet, id: "second-saved-set",
+      importProvenance: { version: 1, shareId: summary.id, contentDigest: otherDigest },
+    };
+    mock.sets = [savedSet, conflictingSet];
+    mock.questions = [{ id: "local-q1" }];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect((await screen.findByRole("alert")).textContent).toContain("Multiple saved copies");
+    expect(mock.sets).toEqual([savedSet, conflictingSet]);
+    expect(mock.questions).toEqual([{ id: "local-q1" }]);
+    // Preserve original IDs, learner attempts and import receipts. A
+    // click-time ambiguity must not trigger a replacement cloud import.
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+  });
+
   it("searches approved listings, opens a safe preview, imports, and likes", async () => {
     const user = userEvent.setup();
     render(<CommunityQuestionSetLibrary />);
