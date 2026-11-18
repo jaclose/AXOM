@@ -223,14 +223,15 @@ export function sumActivityMetric(logs: StudyLog[], key: "minutes" | "cards"): n
       && Number.isSafeInteger(value) && Number.isSafeInteger(next);
     // An integer plus a fractional operand cannot have an exact integer
     // result. If IEEE-754 produces one, some saved fraction was rounded away.
-    // Two fractional operands may legitimately cancel to an integer, but
-    // their sum can also round to a false integer at unsafe magnitudes.
+    // A fractional operand can also round to a false *noninteger* total
+    // at unsafe magnitudes. Catch both integer and fractional rounded results.
     const roundedFractionToInteger = Number.isInteger(next)
       && Number.isInteger(running) !== Number.isInteger(value);
     // TwoSum's residual detects an unrepresented fractional remainder without
     // changing normal small decimal totals (for example, 0.1 + 0.9).
-    const unsafeTwoFractionRoundoff = Number.isInteger(next)
-      && !Number.isInteger(running) && !Number.isInteger(value)
+    // Any fractional operand matters here: a large integer plus a small
+    // fraction can round to a different fractional value, not just an integer.
+    const unsafeFractionRoundoff = !integerOperands
       && Math.abs(next) >= 2 ** 50
       && (() => {
         const recoveredValue = next - running;
@@ -239,7 +240,7 @@ export function sumActivityMetric(logs: StudyLog[], key: "minutes" | "cards"): n
     if (!Number.isFinite(next)
       || (value !== 0 && next === running)
       || roundedFractionToInteger
-      || unsafeTwoFractionRoundoff
+      || unsafeFractionRoundoff
       || (integerOperands && !safelyExact && BigInt(next) !== BigInt(running) + BigInt(value))) {
       throw new ActivityExportNumericError();
     }
