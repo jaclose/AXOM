@@ -206,6 +206,17 @@ function hasPrivateDraftPhone(question: QuestionRecord): boolean {
     .some(containsPrivateDraftPhone);
 }
 
+/**
+ * Model output is a private, unreviewed teaching proposal. The model never
+ * receives source documents or rights decisions, so it must not assert that
+ * source evidence, licensing or academic publication has been approved.
+ * Inspect only a normalized copy; retain original reviewer/source records.
+ */
+const UNSUPPORTED_DRAFT_ATTESTATION = /(?:^|[^\\p{L}\\p{N}])(?:source(?:\\s+(?:evidence|material|document|citation|reference))?|rights?|licen[sc]e|provenance|publication|moderation|academic\\s+review|clinical\\s+review)\\s*(?::|=|\\b(?:is|was|are|were|has\\s+been|have\\s+been)\\b)?\\s*(?:verified|validated|approved|cleared|confirmed|reviewed|licensed|granted)\\b|\\b(?:i|we)\\s+(?:have\\s+)?(?:reviewed|verified|checked|validated|confirmed)\\s+(?:the\\s+)?(?:original\\s+)?(?:source|reference|citation|rights|licen[sc]e)\\b/iu;
+function containsUnsupportedDraftAttestation(value: string): boolean {
+  return UNSUPPORTED_DRAFT_ATTESTATION.test(referenceSafetyText(value));
+}
+
 function containsPrivateDraftPromptReference(question: QuestionRecord): boolean {
   // Option labels and the selected correctKey are included verbatim in the AI
   // prompt too. An imported set may have reviewed keys that are not safe to
@@ -439,6 +450,14 @@ export async function draftQuestionExplanation(
   }
   if (proposedKeywords.some(keyword => keyword.trim() && !isCommunitySubjectKeyword(keyword))) {
     throw new Error("The model suggested publication metadata or citations as keywords. Discard the draft and verify source evidence separately.");
+  }
+
+  // A plausible medical mechanism is not proof of rights, source inspection,
+  // academic moderation or clinical review. These assertions cannot be made
+  // by an AI provider that received only text and a human-selected key.
+  if ([explanation, ...Object.values(choiceRationales)]
+    .some(containsUnsupportedDraftAttestation)) {
+    throw new Error("The AI draft claims unverified source, rights, or publication approval. Discard the proposal and retain those decisions for independent human review.");
   }
   // Keywords are subject phrases, never rights attestations or visual-intent
   // decisions. Retain deterministic distinct suggestions for explicit review.
