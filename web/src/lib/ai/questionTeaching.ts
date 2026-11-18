@@ -219,7 +219,7 @@ function hasAmbiguousDraftChoices(question: QuestionRecord): boolean {
   if (new Set(labels).size !== labels.length) return true;
   const texts = question.options.map(option =>
     typeof option.text === "string"
-      ? option.text.normalize("NFKC").replace(/\\s+/g, " ").trim().toLowerCase()
+      ? option.text.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()
       : "");
   return texts.some(text => !text) || new Set(texts).size !== texts.length;
 }
