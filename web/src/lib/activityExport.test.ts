@@ -623,3 +623,41 @@ describe("Activity History XLSX asynchronous account and history revocation", ()
     expect(logs).toEqual(original);
   });
 });
+
+
+describe("lossless unsafe-magnitude two-fraction totals", () => {
+  it("refuses a plausible integer when summing two large fractional operands loses a quarter", async () => {
+    // Both operands are fractional, so a simple integer-vs-fraction check
+    // misses the 0.25 lost when IEEE-754 rounds the result to a large integer.
+    for (const field of ["minutes", "cards"] as const) {
+      for (const values of [
+        [2251799813685247.5, 0.75],
+        [4503599627370495.5, 0.75],
+      ]) {
+        const logs = studyLogs(["Manual", "Manual"]);
+        logs.forEach((log, index) => { log[field] = values[index]; });
+        const original = logs.map((log) => ({ ...log }));
+        let writerCalls = 0;
+        expect(() => sumActivityMetric(logs, field)).toThrow(ActivityExportNumericError);
+        await expect(exportActivityWorkbook(logs, () => { writerCalls++; }))
+          .rejects.toBeInstanceOf(ActivityExportNumericError);
+        expect(writerCalls).toBe(0);
+        expect(logs).toEqual(original);
+      }
+    }
+  });
+
+  it("keeps exact large fractional cancellation and ordinary decimals exportable", async () => {
+    const large = studyLogs(["Manual", "Manual"]);
+    large[0].minutes = 2251799813685247.5;
+    large[1].minutes = 0.5;
+    expect(sumActivityMetric(large, "minutes")).toBe(2251799813685248);
+    await expect(captureWorkbook(large)).resolves.toBeDefined();
+
+    const normal = studyLogs(["Manual", "Manual"]);
+    normal[0].minutes = 0.1;
+    normal[1].minutes = 0.9;
+    expect(sumActivityMetric(normal, "minutes")).toBe(1);
+    await expect(captureWorkbook(normal)).resolves.toBeDefined();
+  });
+});
