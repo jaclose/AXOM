@@ -359,7 +359,37 @@ describe("searchable Question Set client boundary", () => {
     const rpc = vi.fn();
     service(rpc);
     await expect(submitQuestionSetToLibrary(accountId, "set-1", value, credit, confirmed))
-      .rejects.toThrow(/title, tags or creator credit contains contact information/i);
+      .rejects.toThrow(/public.*text.*contact information/i);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(JSON.stringify(value)).toBe(original);
+  });
+
+  it.each([
+    ["question stem", "stem", "Contact reviewer@school.example for details."],
+    ["answer choice", "choice", "Call me at +1 (865) 555-0199"],
+    ["teaching explanation", "explanation", "The first option fits the case. Email tutor@school.example"],
+    ["distractor rationale", "rationale", "This alternative is not supported. Phone: 865-555-0199"],
+    ["learning objective", "objective", "Explain the pathway. instructor@school.example"],
+    ["clinical topic", "topic", "telephone: (473) 555-0199"],
+    ["public citation", "citation", "Reviewed by teacher@school.example"],
+    ["copyright notice", "copyright", "Permissions: rights@school.example"],
+  ] as const)("blocks author-supplied contact data in public %s before submission", async (_label, field, contact) => {
+    const value = snapshot();
+    if (field === "stem") value.questions[0].stem += " " + contact;
+    else if (field === "choice") {
+      value.questions[0].options[0].text = contact;
+      value.questions[0].correctAnswerText = contact;
+    } else if (field === "explanation") value.questions[0].explanation = contact;
+    else if (field === "rationale") value.questions[0].choiceRationales = { B: contact };
+    else if (field === "objective") value.questions[0].objective = contact;
+    else if (field === "topic") value.questions[0].topic = contact;
+    else if (field === "citation") value.questions[0].citation = contact;
+    else value.copyrightNotice = contact;
+    const original = JSON.stringify(value);
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .rejects.toThrow(/public.*text.*contact information/i);
     expect(rpc).not.toHaveBeenCalled();
     expect(JSON.stringify(value)).toBe(original);
   });
@@ -797,8 +827,32 @@ describe("searchable Question Set client boundary", () => {
     }, error: null });
     service(rpc);
     await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Reviewed source and rights"))
-      .rejects.toThrow(/contact information in a public title or tag.*Return it for revision/);
+      .rejects.toThrow(/contact information in public text.*Return it for revision/);
     expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+  });
+
+  it.each([
+    ["stem", "stem", "See mentor@school.example"],
+    ["choice rationale", "rationale", "Wrong because this observation differs. Call me at 865 555 0199"],
+    ["citation", "citation", "Correspondence: lecturer@school.example"],
+    ["copyright notice", "copyright", "Rights: faculty@school.example"],
+  ] as const)("refuses approval of legacy pending public %s contact data", async (_label, field, contact) => {
+    const original = snapshot();
+    if (field === "stem") original.questions[0].stem += " " + contact;
+    else if (field === "rationale") original.questions[0].choiceRationales = { B: contact };
+    else if (field === "citation") original.questions[0].citation = contact;
+    else original.copyrightNotice = contact;
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      id: entryId, title: original.title, question_count: 1, status: "pending",
+      snapshot_payload: original, review_revision: 1,
+    }, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Reviewed source and rights"))
+      .rejects.toThrow(/contact information in public text.*Return it for revision/i);
+    expect(rpc).toHaveBeenCalledOnce();
     expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
   });
 
