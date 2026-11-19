@@ -59,6 +59,96 @@ describe("IndexedDB-first local vault", () => {
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("first tab edit"));
   });
 
+  it.each([
+    ["single-record", "jd"],
+    ["chunked", "jd"],
+    ["cross-account", "other"],
+  ] as const)(
+    "refuses a stale %s delete after another tab saved newer %s data",
+    async (layout, winnerId) => {
+      const key = STORAGE_KEYS.persistedState;
+      const rawText = layout === "chunked" ? "question attachment ".repeat(100_000) : "short";
+      const snapshot = (label: string, userId = "jd") => JSON.stringify({
+        state: { profile: { userId }, questions: [{ id: label }], rawText },
+        version: 34,
+      });
+      const original = snapshot("original");
+      const winner = snapshot("newer-owner-edit", winnerId);
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(original);
+
+      vi.resetModules();
+      const newerTab = await import("./localVault");
+      expect(await newerTab.localVaultStorage.getItem(key)).toBe(original);
+      await newerTab.localVaultStorage.setItem(key, winner);
+      await newerTab.flushLocalVaultWrites();
+      expect(await newerTab.localVaultStorage.getItem(key)).toBe(winner);
+
+      // The removing tab is still hydrated against X. Its delete must not
+      // remove the newer Y, the active account pointer, or Y's v5 chunks.
+      const deleteCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      const db = await openCurrentVault();
+      expect(await getDirect(db, `${key}:active-user`)).toBe(winnerId);
+      expect(await getDirect(db, key)).toBeDefined();
+      expect(await getDirect(db, `${key}:user:${winnerId}`)).toBeDefined();
+      db.close();
+      expect(await newerTab.localVaultStorage.getItem(key)).toBe(winner);
+      expect(localStorage.getItem(key)).toBeNull();
+    },
+  );
+
+  it("cannot remove an existing workspace from a tab that has not hydrated it", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const original = JSON.stringify({ state: { profile: { userId: "jd" }, notes: ["saved"] }, version: 34 });
+    await localVaultStorage.setItem(key, original);
+    await flushLocalVaultWrites();
+
+    vi.resetModules();
+    const unhydratedTab = await import("./localVault");
+    const deleteCheckpoint = unhydratedTab.getVaultWriteCheckpoint();
+    await unhydratedTab.localVaultStorage.removeItem(key);
+    await unhydratedTab.flushLocalVaultWrites();
+    expect(() => unhydratedTab.assertVaultWritesSince(deleteCheckpoint))
+      .toThrow(unhydratedTab.VAULT_CONFLICT_MESSAGE);
+    expect(await localVaultStorage.getItem(key)).toBe(original);
+  });
+
+  it("preserves a different tab's acknowledged fallback when stale deletion is refused", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const marker = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] }, version: 34,
+    });
+    await localVaultStorage.setItem(key, snapshot("base"));
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("base"));
+
+    vi.resetModules();
+    const fallbackTab = await import("./localVault");
+    expect(await fallbackTab.localVaultStorage.getItem(key)).toBe(snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await fallbackTab.localVaultStorage.setItem(key, snapshot("acknowledged-offline-edit"));
+    await fallbackTab.flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const savedMarker = localStorage.getItem(marker);
+    expect(savedMarker).not.toBeNull();
+    expect(localStorage.getItem(key)).toBe(snapshot("acknowledged-offline-edit"));
+
+    const deleteCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.removeItem(key);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(localStorage.getItem(key)).toBe(snapshot("acknowledged-offline-edit"));
+    expect(localStorage.getItem(marker)).toBe(savedMarker);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(snapshot("base"));
+    db.close();
+  });
+
   it.each(["single-record", "chunked"] as const)(
     "does not resurrect a deleted %s workspace from a stale second tab",
     async (layout) => {
