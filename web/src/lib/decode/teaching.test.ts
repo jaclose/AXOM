@@ -178,6 +178,12 @@ describe("questions that teach the same rule", () => {
           filename: `figure-${id}.png`, mimeType: "image/png", checksum,
         }],
       },
+      attachments: [{
+        id: `attachment-${id}`, assetId: `asset-${id}`, role: "exhibit",
+        blobKey: `blob-${id}`, fileName: `figure-${id}.png`, mimeType: "image/png",
+        byteSize: 128, altText: "",
+        createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+      }],
     });
     const verifiedA = make("q-verified-a", `sha256:${"a".repeat(64)}`);
     const verifiedB = make("q-verified-b", `sha256:${"b".repeat(64)}`);
@@ -187,6 +193,75 @@ describe("questions that teach the same rule", () => {
     expect(conceptGroups(oneVerified, documents)[0].uniqueQuestions).toBe(1);
     const twoVerified = [...oneVerified, { ...verifiedB, analyses: [reviewed(verifiedB)] }];
     expect(conceptGroups(twoVerified, documents)[0].uniqueQuestions).toBe(2);
+  });
+
+  it("does not count missing or mismatched image bindings or unreviewed mappings as source recurrence", () => {
+    const visual = (id: string, suffix: string, bind: "linked" | "missing" | "mismatched", reviewedExtraction = true) => {
+      const assetId = `asset-${id}`;
+      const base = question({
+        id,
+        extraction: { confidence: "high", reviewed: reviewedExtraction, warnings: [] },
+        content: {
+          id, source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+          provenance: { method: "pdf-import" },
+          assets: [{
+            id: assetId, questionId: id, role: "question", filename: "figure.png",
+            mimeType: "image/png", checksum: `sha256:${suffix.repeat(64)}`,
+          }],
+        },
+        ...(bind === "missing" ? {} : {
+          attachments: [{
+            id: `exhibit-${id}`, assetId: bind === "linked" ? assetId : "wrong-asset-id",
+            role: "exhibit" as const, blobKey: `blob-${id}`, fileName: "figure.png",
+            mimeType: "image/png", byteSize: 128, altText: "",
+            createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+          }],
+        }),
+      });
+      return { ...base, analyses: [reviewed(base)] };
+    };
+    const ready = visual("q-ready-image", "a", "linked");
+    const missing = visual("q-missing-image", "b", "missing");
+    const mismatched = visual("q-mismatched-image", "c", "mismatched");
+    const unreviewed = visual("q-unreviewed-image", "d", "linked", false);
+    const [group] = conceptGroups([ready, missing, mismatched, unreviewed], documents);
+    expect(group.questionIds).toEqual(["q-ready-image"]);
+    expect(group.uniqueQuestions).toBe(1);
+    expect(group.sources).toEqual([{ documentId: "doc-1", uniqueQuestions: 1 }]);
+    expect(group.evidence).toBe("single-question");
+    expect(conceptGroups([missing, mismatched, unreviewed], documents)).toEqual([]);
+  });
+
+  it("normalizes canonical crop coordinates instead of insertion-ordered object keys", () => {
+    const make = (id: string, crop: { left: number; top: number; right: number; bottom: number }) => {
+      const base = question({
+        id,
+        content: {
+          id, source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+          provenance: { method: "pdf-import" },
+          assets: [{
+            id: "figure", questionId: id, role: "question", filename: "figure.png",
+            mimeType: "image/png", checksum: `sha256:${"a".repeat(64)}`, crop,
+          }],
+        },
+        attachments: [{
+          id: `attachment-${id}`, assetId: "figure", role: "exhibit", blobKey: `blob-${id}`,
+          fileName: "figure.png", mimeType: "image/png", byteSize: 128, altText: "",
+          createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+        }],
+      });
+      return { ...base, analyses: [reviewed(base)] };
+    };
+    const a = make("q-crop-a", { left: 0.1, top: 0.2, right: 0.9, bottom: 0.8 });
+    const b = make("q-crop-b", { bottom: 0.8, right: 0.9, top: 0.2, left: 0.1 });
+    const changed = make("q-crop-changed", { left: 0.1, top: 0.2, right: 0.7, bottom: 0.8 });
+    const [equivalent] = conceptGroups([a, b], documents);
+    expect(equivalent.questionIds).toEqual(["q-crop-a", "q-crop-b"]);
+    expect(equivalent.uniqueQuestions).toBe(1);
+    expect(equivalent.sources).toEqual([{ documentId: "doc-1", uniqueQuestions: 1 }]);
+    const [distinct] = conceptGroups([a, b, changed], documents);
+    expect(distinct.uniqueQuestions).toBe(2);
+    expect(distinct.evidence).toBe("single-source");
   });
 
   it("uses only teaching that is reviewed and still fits", () => {
