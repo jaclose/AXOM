@@ -28,7 +28,10 @@ export function CoursesPage() {
                 <GhostButton title="Rename term"
                   onClick={() => {
                     const name = prompt("Rename term", term.name);
-                    if (name) s.renameTerm(term.id, name);
+                    if (name !== null) {
+                      const outcome = s.renameTerm(term.id, name);
+                      if (!outcome.ok) window.alert(outcome.reason ?? "Unable to safely rename this term.");
+                    }
                   }}><Pencil size={ICON_SIZE.body} /></GhostButton>
                 <GhostButton className="danger" title="Delete term + its courses"
                   onClick={() => confirm(`Delete "${term.name}" and its ${courses.length} courses?`) && s.removeTerm(term.id)}>
