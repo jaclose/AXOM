@@ -202,9 +202,10 @@ describe("source teaching stale-action fences", () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     const bare = siblings[1];
-    const view = render(<SourceTeaching question={bare} document={source} provider={provider(() => pending)} onChange={onChange} />);
+    const generate = provider(() => pending);
+    const view = render(<SourceTeaching question={bare} document={source} provider={generate} onChange={onChange} />);
     await user.click(screen.getByRole("button", { name: /Ask for an analysis/ }));
-    view.rerender(<SourceTeaching question={{ ...bare, needsReview: true }} document={source} provider={provider(() => pending)} onChange={onChange} />);
+    view.rerender(<SourceTeaching question={{ ...bare, needsReview: true }} document={source} provider={generate} onChange={onChange} />);
     await act(async () => { finish(reply); await pending; });
     expect(onChange).not.toHaveBeenCalled();
   });
