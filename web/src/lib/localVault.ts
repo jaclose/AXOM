@@ -770,6 +770,11 @@ const vaultStorage: StateStorage = {
         // localStorage still has the data; no need to interrupt app load.
       }
     }
+    // A previously confirmed workspace write is not proof of durability when
+    // hydration finds neither an IndexedDB primary/scoped record nor a fallback.
+    // This also fails closed when IndexedDB cannot be read. Only tiny status
+    // metadata is invalidated; the storage bytes and recovery copies remain.
+    if (fallback === null && observesWorkspace(name)) invalidateVaultWrite();
     rememberVaultSnapshot(name, fallback);
     return fallback;
   },

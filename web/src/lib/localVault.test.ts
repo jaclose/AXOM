@@ -297,6 +297,49 @@ describe("IndexedDB-first local vault", () => {
     expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
   });
 
+  it("retires a stale save receipt when IndexedDB is temporarily unreadable without losing vault bytes", async () => {
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "private recoverable text" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    expect(readLastVaultWrite()?.scope).toBe("workspace");
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+    expect(storage.getItem(key)).toBeNull();
+
+    vi.stubGlobal("indexedDB", undefined);
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+
+    // A failed read must never erase data from a temporarily inaccessible IDB.
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(saved);
+    // Reading existing bytes is not a new verified write receipt.
+    expect(readLastVaultWrite()).toBeNull();
+  });
+
+  it("keeps a valid receipt when hydration recovers the surviving per-account IndexedDB copy", async () => {
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "scoped copy" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    const receipt = readLastVaultWrite();
+    expect(receipt?.scope).toBe("workspace");
+    const db = await openCurrentVault();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("state", "readwrite");
+      tx.objectStore("state").delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+
+    expect(await localVaultStorage.getItem(key)).toBe(saved);
+    expect(readLastVaultWrite()).toEqual(receipt);
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+  });
+
   it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
     const oldConnection = await openVersionThreeVault();
     const key = STORAGE_KEYS.persistedState;
