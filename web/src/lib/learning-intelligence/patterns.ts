@@ -7,7 +7,7 @@
 // enough answers; otherwise the report says what it is waiting for.
 // ===========================================================================
 import type { ID } from "../types";
-import { ERROR_TYPE_LABEL, errorPatterns, type QuestionRecord } from "../questions";
+import { ERROR_TYPE_LABEL, errorPatterns, questionMappingStatus, type QuestionRecord } from "../questions";
 import { attemptEvents, median, tally, type AttemptEvent, type Tally } from "./attempts";
 import { QUESTION_TASK_LABEL, questionFeatures, type QuestionFeatures } from "./questionFeatures";
 
@@ -226,7 +226,9 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
       // These are different cohorts: the repeat group contains only items
       // revisited, while the first-time group includes items never revisited.
       // A raw accuracy gap therefore cannot identify a memory/learning effect.
-      const unseenIds = questions.filter((question) => question.attempts.length === 0).map((question) => question.id);
+      const answeredIds = new Set(events.map((event) => event.questionId));
+      const unseenIds = questions.filter((question) => !answeredIds.has(question.id)
+        && questionMappingStatus(question) === "ready").map((question) => question.id);
       findings.push({
         id: "first-vs-repeat",
         kind: "first-vs-repeat",
