@@ -8,7 +8,7 @@ import { normalizeQuestionAnalyses } from "./normalize";
 import type { QuestionAnalysis } from "./types";
 
 type SourceBearing = Pick<QuestionRecord,
-  "id" | "stem" | "options" | "correctKey" | "explanation" | "choiceRationales" | "objective" | "sourceDocumentId" | "sourcePage" | "extraction">;
+  "id" | "stem" | "options" | "correctKey" | "explanation" | "choiceRationales" | "objective" | "sourceDocumentId" | "sourcePage" | "extraction" | "content" | "attachments">;
 type PageSource = Pick<SourceDocument, "id" | "checksum" | "pageTexts">;
 
 function hash(value: unknown): string {
@@ -34,6 +34,65 @@ export function questionSourcePages(question: Pick<QuestionRecord, "sourcePage" 
   return [...new Set(pages)].sort((a, b) => a - b);
 }
 
+const QUESTION_VISUAL_ROLES = new Set(["question", "stem", "choice"]);
+
+/**
+ * Evidence identity, not a storage lookup key. A local asset ID / blobKey
+ * can change when the SAME image is imported twice. Only a canonical
+ * SHA-256 digest can distinguish source figures for recurrence estimates.
+ * An unverified image is deliberately not counted as a second instance.
+ * Metadata is retained separately by questionSourceFingerprint, which
+ * must still make prior reviewed teaching stale on replacement.
+ */
+export function questionVisualIdentity(question: Pick<QuestionRecord, "content" | "attachments">): string {
+  const sourceImages = (question.content?.assets ?? [])
+    .filter((asset) => QUESTION_VISUAL_ROLES.has(asset.role));
+  const boundIds = new Set((question.content?.assets ?? []).map((asset) => asset.id));
+  const unboundExhibits = (question.attachments ?? [])
+    .filter((attachment) => (attachment.role === "exhibit" || QUESTION_VISUAL_ROLES.has(attachment.role ?? ""))
+      && (!attachment.assetId || !boundIds.has(attachment.assetId)));
+  if (!sourceImages.length && !unboundExhibits.length) return "text-only";
+  // Unverified is one conservative identity, regardless of locally allocated
+  // blob/asset keys, file names, byte counts or image render roles.
+  if (!sourceImages.length || unboundExhibits.length
+    || sourceImages.some((asset) => !/^sha256:[0-9a-f]{64}$/i.test(asset.checksum?.trim() ?? ""))) {
+    return "unverified-figure";
+  }
+  const verified = sourceImages.map((asset) => JSON.stringify([
+    asset.checksum!.trim().toLowerCase(), asset.crop ?? null,
+  ]));
+  return JSON.stringify([...new Set(verified)].sort());
+}
+
+/**
+ * Only source-linked exhibits/figures are source-bearing; adding an image
+ * solely to the learner's personal notes must not revoke reviewed teaching.
+ * This becomes part of the fingerprint only when real source media exists,
+ * retaining existing fingerprints for text-only questions after upgrades.
+ */
+function sourceVisualRevision(question: SourceBearing): unknown[] | undefined {
+  const content = question.content;
+  const associated = (question.attachments ?? []).filter((attachment) => (
+    Boolean(attachment.assetId) || Boolean(attachment.role)
+  ));
+  if (!content?.assets.length && associated.length === 0) return undefined;
+  return [
+    content ? [
+      content.source,
+      content.stem,
+      content.choices,
+      content.choiceTable,
+      content.explanation,
+      content.correctAnswer,
+      content.assets,
+    ] : null,
+    associated.map((attachment) => [
+      attachment.id, attachment.assetId, attachment.role, attachment.blobKey,
+      attachment.mimeType, attachment.byteSize, attachment.width, attachment.height,
+    ]),
+  ];
+}
+
 /**
  * What an analysis was written about: the question's wording, its key, its
  * explanation, and the text of the pages it came from. Only source-bearing
@@ -55,6 +114,7 @@ export function questionSourceFingerprint(question: SourceBearing, document?: Pa
 const FINGERPRINTS = new WeakMap<object, { source: PageSource | undefined; value: string }>();
 
 function computeFingerprint(question: SourceBearing, source: PageSource | undefined): string {
+  const visualRevision = sourceVisualRevision(question);
   return hash([
     question.id,
     question.stem,
@@ -71,6 +131,7 @@ function computeFingerprint(question: SourceBearing, source: PageSource | undefi
     question.extraction?.explanationSourceSnippet,
     source?.checksum,
     questionSourcePages(question).map((page) => [page, source?.pageTexts?.[page - 1]]),
+    ...(visualRevision === undefined ? [] : [visualRevision]),
   ]);
 }
 

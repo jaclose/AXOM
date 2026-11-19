@@ -121,6 +121,57 @@ describe("whether an analysis still fits its question", () => {
     expect(questionSourceFingerprint(question, { ...document, pageTexts: ["Changed.", "Changed."] })).not.toBe(before);
   });
 
+  it("invalidates reviewed teaching when an attached source figure changes", () => {
+    const visual: QuestionRecord = {
+      ...question,
+      content: {
+        id: "q-1", source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+        assets: [{
+          id: "figure-1", questionId: "q-1", role: "question", filename: "figure.png",
+          mimeType: "image/png", checksum: `sha256:${"a".repeat(64)}`,
+        }],
+        provenance: { method: "pdf-import" },
+      },
+      attachments: [{
+        id: "attachment-1", assetId: "figure-1", role: "exhibit", blobKey: "blob-figure-a",
+        fileName: "figure.png", mimeType: "image/png", byteSize: 128,
+        altText: "ECG tracing", createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+      }],
+    };
+    const before = questionSourceFingerprint(visual, document);
+    const reviewed = analysis({ sourceFingerprint: before });
+    expect(currentTeaching({ ...visual, analyses: [reviewed] }, document)?.id).toBe("a-1");
+
+    const newFigure: QuestionRecord = {
+      ...visual,
+      content: { ...visual.content!, assets: visual.content!.assets.map((asset) => ({
+        ...asset, checksum: `sha256:${"b".repeat(64)}`,
+      })) },
+    };
+    expect(questionSourceFingerprint(newFigure, document)).not.toBe(before);
+    expect(currentTeaching({ ...newFigure, analyses: [reviewed] }, document)).toBeUndefined();
+
+    const newAttachment: QuestionRecord = {
+      ...visual,
+      attachments: visual.attachments!.map((attachment) => ({ ...attachment, blobKey: "blob-figure-b" })),
+    };
+    expect(questionSourceFingerprint(newAttachment, document)).not.toBe(before);
+    expect(currentTeaching({ ...newAttachment, analyses: [reviewed] }, document)).toBeUndefined();
+  });
+
+  it("does not invalidate source teaching for learner-only note images", () => {
+    const before = questionSourceFingerprint(question, document);
+    const annotated: QuestionRecord = {
+      ...question,
+      attachments: [{
+        id: "note-1", fileName: "my-note.png", mimeType: "image/png", byteSize: 40,
+        altText: "Personal note", blobKey: "note-blob", createdAt: "2026-10-04T10:00:00.000Z",
+        updatedAt: "2026-10-04T10:00:00.000Z",
+      }],
+    };
+    expect(questionSourceFingerprint(annotated, document)).toBe(before);
+  });
+
   it("reads only the pages the question's own provenance points at", () => {
     expect(questionSourcePages(question)).toEqual([1, 2]);
     const elsewhere = { ...document, pageTexts: [...document.pageTexts!, "A page about something else."] };

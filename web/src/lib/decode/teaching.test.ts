@@ -109,6 +109,86 @@ describe("questions that teach the same rule", () => {
     expect(groups.every((group) => group.evidence === "single-question")).toBe(true);
   });
 
+  it("counts distinct source-verified diagrams instead of collapsing identical text", () => {
+    const makeVisual = (id: string, checksum: string): QuestionRecord => ({
+      ...question({ id }),
+      content: {
+        id, source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+        provenance: { method: "pdf-import" },
+        assets: [{
+          id: "figure", questionId: id, role: "question", filename: "figure.png",
+          mimeType: "image/png", checksum,
+        }],
+      },
+      attachments: [{
+        id: `attachment-${id}`, assetId: "figure", role: "exhibit", blobKey: `blob-${id}`,
+        fileName: "figure.png", mimeType: "image/png", byteSize: 128, altText: "",
+        createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+      }],
+    });
+    const first = makeVisual("q-a", `sha256:${"a".repeat(64)}`);
+    const second = makeVisual("q-b", `sha256:${"b".repeat(64)}`);
+    const copy = makeVisual("q-c", `sha256:${"a".repeat(64)}`);
+    const withTeaching = [first, second, copy].map((item) => ({ ...item, analyses: [reviewed(item)] }));
+    const [group] = conceptGroups(withTeaching, documents);
+    expect(group.questionIds).toEqual(["q-a", "q-b", "q-c"]);
+    expect(group.uniqueQuestions).toBe(2);
+    expect(group.sources).toEqual([{ documentId: "doc-1", uniqueQuestions: 2 }]);
+    expect(group.evidence).toBe("single-source");
+  });
+
+  it("does not claim extra evidence from differently imported but unverified figure keys", () => {
+    const imported = (id: string, assetId: string, blobKey: string): QuestionRecord => ({
+      ...question({ id }),
+      content: {
+        id, source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+        provenance: { method: "pdf-import" },
+        assets: [{ id: assetId, questionId: id, role: "question", filename: "figure.png", mimeType: "image/png" }],
+      },
+      attachments: [{
+        id: `attachment-${id}`, assetId, role: "exhibit", blobKey,
+        fileName: "figure.png", mimeType: "image/png", byteSize: 128, altText: "",
+        createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+      }],
+    });
+    const a = imported("q-unverified-a", "local-a", "blob-a");
+    const b = imported("q-unverified-b", "local-b", "blob-b");
+    const attachedOnly = question({
+      id: "q-unverified-c", attachments: [{
+        id: "other-attachment", role: "exhibit", blobKey: "blob-c",
+        fileName: "other.png", mimeType: "image/png", byteSize: 256, altText: "",
+        createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+      }],
+    });
+    const items = [a, b, attachedOnly].map((item) => ({ ...item, analyses: [reviewed(item)] }));
+    const [group] = conceptGroups(items, documents);
+    expect(group.questionIds).toEqual(["q-unverified-a", "q-unverified-b", "q-unverified-c"]);
+    expect(group.uniqueQuestions).toBe(1);
+    expect(group.evidence).toBe("single-question");
+  });
+
+  it("does not let an unknown image inflate separate verified figure evidence", () => {
+    const make = (id: string, checksum?: string): QuestionRecord => ({
+      ...question({ id }),
+      content: {
+        id, source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+        provenance: { method: "pdf-import" },
+        assets: [{
+          id: `asset-${id}`, questionId: id, role: "question",
+          filename: `figure-${id}.png`, mimeType: "image/png", checksum,
+        }],
+      },
+    });
+    const verifiedA = make("q-verified-a", `sha256:${"a".repeat(64)}`);
+    const verifiedB = make("q-verified-b", `sha256:${"b".repeat(64)}`);
+    const unknown = make("q-unknown");
+    const invalidDigest = make("q-invalid-digest", "not-a-real-content-checksum");
+    const oneVerified = [verifiedA, unknown, invalidDigest].map((item) => ({ ...item, analyses: [reviewed(item)] }));
+    expect(conceptGroups(oneVerified, documents)[0].uniqueQuestions).toBe(1);
+    const twoVerified = [...oneVerified, { ...verifiedB, analyses: [reviewed(verifiedB)] }];
+    expect(conceptGroups(twoVerified, documents)[0].uniqueQuestions).toBe(2);
+  });
+
   it("uses only teaching that is reviewed and still fits", () => {
     const proposed = taught({ id: "q-2" }, { status: "proposed" });
     const stale = { ...taught({ id: "q-3" }), stem: "Reworded since." };
