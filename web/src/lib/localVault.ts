@@ -664,20 +664,59 @@ async function writeVault(
   });
 }
 
-// IndexedDB owns the large serialized workspace. localStorage keeps only the
-// tiny active-profile pointer and device preferences; remove the mirrored
-// state, and the marker that called it newer, after a confirmed vault write.
-function clearFallbackCopy(fallbackStore: Storage | null, name: string, userId: string): void {
-  // These optional mirrors must not turn a confirmed IndexedDB write into a
-  // failed save when localStorage is full or unavailable.
+// IndexedDB owns the workspace, but a second tab may write an acknowledged
+// offline fallback while this tab awaits its IndexedDB transaction. Never
+// treat an earlier, successful IDB commit as authority to delete that newer
+// fallback. localStorage has no compare-and-delete transaction, so this
+// conditional cleanup narrows the race but is NOT a cross-tab atomic lock.
+type FallbackCleanupSnapshot = {
+  value: string | null;
+  marker: string | null;
+  pointer: string | null;
+  scoped: string | null;
+};
+
+function captureFallbackCleanup(
+  fallbackStore: Storage | null,
+  name: string,
+  userId: string,
+): FallbackCleanupSnapshot | null {
+  if (!fallbackStore) return null;
   try {
-    fallbackStore?.removeItem(name);
-    fallbackStore?.removeItem(fallbackMarkerKey(name));
+    return {
+      value: fallbackStore.getItem(name),
+      marker: fallbackStore.getItem(fallbackMarkerKey(name)),
+      pointer: fallbackStore.getItem(activeUserKey(name)),
+      scoped: userId ? fallbackStore.getItem(scopedStateKey(name, userId)) : null,
+    };
+  } catch {
+    // If the prior state cannot be observed, never clean recovery bytes.
+    return null;
+  }
+}
+
+function clearFallbackCopy(
+  fallbackStore: Storage | null,
+  name: string,
+  userId: string,
+  expected: FallbackCleanupSnapshot | null,
+): void {
+  // Optional cleanup must not make an already confirmed IDB save fail.
+  if (!fallbackStore || !expected) return;
+  try {
+    if (
+      fallbackStore.getItem(name) !== expected.value
+      || fallbackStore.getItem(fallbackMarkerKey(name)) !== expected.marker
+      || fallbackStore.getItem(activeUserKey(name)) !== expected.pointer
+      || (userId && fallbackStore.getItem(scopedStateKey(name, userId)) !== expected.scoped)
+    ) return;
+    fallbackStore.removeItem(fallbackMarkerKey(name));
+    fallbackStore.removeItem(name);
     if (userId) {
-      fallbackStore?.setItem(activeUserKey(name), userId);
-      fallbackStore?.removeItem(scopedStateKey(name, userId));
+      fallbackStore.setItem(activeUserKey(name), userId);
+      fallbackStore.removeItem(scopedStateKey(name, userId));
     }
-  } catch { /* IndexedDB already holds the durable workspace. */ }
+  } catch { /* Preserve the available fallback if optional cleanup fails. */ }
 }
 
 async function readVaultSnapshot(name: string): Promise<string | null> {
@@ -787,8 +826,14 @@ const vaultStorage: StateStorage = {
         // The marker records the IndexedDB snapshot on which this fallback was
         // based. Comparing that base and the fallback itself in one transaction
         // prevents a late promotion from replacing a newer tab's commit.
+        const cleanupSnapshot = captureFallbackCleanup(fallbackStore, name, userId);
+        // The promoted bytes/marker must match the copy selected at getItem
+        // start, even if a competing tab replaced them before this capture.
+        const expectedCleanup = cleanupSnapshot === null ? null : {
+          ...cleanupSnapshot, value: newer.value, marker: newer.marker,
+        };
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
-        clearFallbackCopy(fallbackStore, name, userId);
+        clearFallbackCopy(fallbackStore, name, userId, expectedCleanup);
       } catch (promotionError) {
         if (isVaultConflictError(promotionError)) {
           try {
@@ -903,6 +948,7 @@ const vaultStorage: StateStorage = {
     const writeSequence = ++vaultWriteSequence;
     const userId = persistedUserId(value);
     const fallbackStore = localFallback();
+    const cleanupSnapshot = captureFallbackCleanup(fallbackStore, name, userId);
     let fallbackBaseFingerprint: string | null | undefined;
     try {
       const expected = workspaceExpectation(name);
@@ -929,7 +975,7 @@ const vaultStorage: StateStorage = {
         ? fallbackExpectation(currentFallback)
         : expected;
       await writeVault(name, value, userId, vaultExpectation);
-      clearFallbackCopy(fallbackStore, name, userId);
+      clearFallbackCopy(fallbackStore, name, userId, cleanupSnapshot);
       rememberVaultSnapshot(name, value);
       if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
     } catch (indexedDbError) {
@@ -1076,9 +1122,11 @@ const vaultStorage: StateStorage = {
 async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
+  const fallbackStore = localFallback();
+  const cleanupSnapshot = captureFallbackCleanup(fallbackStore, name, userId);
   try {
     await writeVault(name, value, userId);
-    clearFallbackCopy(localFallback(), name, userId);
+    clearFallbackCopy(fallbackStore, name, userId, cleanupSnapshot);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
     if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
