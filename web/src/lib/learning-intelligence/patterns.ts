@@ -233,14 +233,14 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
         id: "first-vs-repeat",
         kind: "first-vs-repeat",
         title: `${firstTally.accuracy}% on new questions, ${repeatTally.accuracy}% on ones you have seen`,
-        detail: `Different questions and difficulty mixes can contribute to this gap; the unmatched groups do not establish how much remembering helped. ${unseenIds.length
+        detail: `Different questions and difficulty mixes can contribute to this gap; the unmatched groups cannot establish whether remembering improved performance. ${unseenIds.length
           ? "Use the unattempted questions in this selection to check your first-pass performance."
-          : "There are no unseen questions in this selection to practise."}`,
+          : "No answer-ready unattempted questions are available in this selection."}`,
         basis: "computed",
         sample: firstTally.attempts + repeatTally.attempts,
         weight: 60,
         questionIds: unseenIds,
-        actionLabel: unseenIds.length ? "Practise unseen questions" : "No unseen questions in this selection",
+        actionLabel: unseenIds.length ? "Practise unseen questions" : "No answer-ready unseen questions",
       });
     }
   } else if (scored.length > 0) {
