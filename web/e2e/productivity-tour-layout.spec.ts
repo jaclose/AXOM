@@ -72,7 +72,10 @@ async function advanceAndFinish(page: Page): Promise<void> {
   const finalDialog = page.getByRole("dialog", { name: "Read trends" });
   await expect(finalDialog).toBeVisible();
   await expect(finalDialog).toHaveClass(/centered/);
-  await page.getByRole("button", { name: "Finish" }).click();
+  // Scope to the active tour step: the top-bar quote is also a button and can contain "finish".
+  const finish = finalDialog.getByRole("button", { name: "Finish", exact: true });
+  await expect(finish).toHaveCount(1);
+  await finish.click();
 }
 
 async function assertRestoredLayout(page: Page, baseline: LayoutSnapshot): Promise<void> {
