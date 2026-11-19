@@ -999,7 +999,19 @@ const vaultStorage: StateStorage = {
 
   async removeItem(name) {
     const workspace = observesWorkspace(name);
-    const expected = workspace ? workspaceExpectation(name) : undefined;
+    const writeSequence = ++vaultWriteSequence;
+    const fail = (error: unknown): Error => {
+      const failure = error instanceof Error ? error : new Error("AXOM could not remove the local workspace.");
+      vaultWriteFailures.set(writeSequence, failure);
+      if (workspace) markVaultWriteFailure();
+      return failure;
+    };
+    let expected: VaultExpectation | undefined;
+    try {
+      expected = workspace ? workspaceExpectation(name) : undefined;
+    } catch (error) {
+      throw fail(error);
+    }
     const fallback = localFallback();
     const markerKey = fallbackMarkerKey(name);
     const pointerKey = activeUserKey(name);
@@ -1015,8 +1027,7 @@ const vaultStorage: StateStorage = {
       value !== null && !expected.fingerprints.includes(workspaceFingerprint(value))
     )) {
       conflictedWorkspaceKeys.add(name);
-      markVaultWriteFailure();
-      throw new VaultConflictError();
+      throw fail(new VaultConflictError());
     }
 
     try {
@@ -1026,8 +1037,7 @@ const vaultStorage: StateStorage = {
     } catch (error) {
       if (workspace) {
         if (isVaultConflictError(error)) conflictedWorkspaceKeys.add(name);
-        markVaultWriteFailure();
-        throw error;
+        throw fail(error);
       }
       // Non-workspace cache cleanup remains best effort when IDB is absent.
     }
