@@ -94,7 +94,9 @@ export function questionVisualIdentity(
       if (block.type === "table" && block.sourceImageAssetId) {
         record(block.sourceImageAssetId, `${location}:table:${semanticIndex}`);
       }
-      if (block.type === "image" || block.type === "table" || blockToPlainText(block).trim()) {
+      if (block.type === "image"
+        || (block.type === "table" && Boolean(block.sourceImageAssetId))
+        || blockToPlainText(block).trim()) {
         semanticIndex += 1;
       }
     }
