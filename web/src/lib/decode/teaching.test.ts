@@ -120,6 +120,11 @@ describe("questions that teach the same rule", () => {
           mimeType: "image/png", checksum,
         }],
       },
+      attachments: [{
+        id: `attachment-${id}`, assetId: "figure", role: "exhibit", blobKey: `blob-${id}`,
+        fileName: "figure.png", mimeType: "image/png", byteSize: 128, altText: "",
+        createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+      }],
     });
     const first = makeVisual("q-a", `sha256:${"a".repeat(64)}`);
     const second = makeVisual("q-b", `sha256:${"b".repeat(64)}`);
