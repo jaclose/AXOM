@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Term, TrackerItem, Course } from "./types";
-import type { PrimaryTrackerScope } from "./trackerFocus";
+import { normalizePrimaryScopes, pathInScopes, type PrimaryTrackerScope } from "./trackerFocus";
 import { absenceStanding, buildModuleWeeks } from "./course-engine/weekView";
 import { planTermRename } from "./termRename";
 
@@ -152,12 +152,12 @@ describe("term rename keeps Course Tracker attendance and source provenance", ()
 
   it("changes only the term segment while preserving legacy descendant whitespace and identity", () => {
     const legacyRows = [
-      row("legacy-a", " Term 1 / FTM   1  / Week 3 ", "lecture", "missed"),
+      row("legacy-a", " Term 1 / FTM   1/ Week 3 ", "lecture", "missed"),
       row("legacy-b", "Term 1/FTM 1/Week 3", "lecture", "missed"),
       tracker[2],
     ];
     const legacyFocus: PrimaryTrackerScope[] = [
-      { path: " Term 1 / FTM   1  ", since: originalUpdated },
+      { path: " Term 1 / FTM   1", since: originalUpdated },
       focus[1],
     ];
     const before = JSON.stringify({ terms, legacyRows, legacyFocus });
@@ -165,7 +165,7 @@ describe("term rename keeps Course Tracker attendance and source provenance", ()
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.tracker.map((r) => r.path)).toEqual([
-      "Foundations/ FTM   1  / Week 3 ",
+      "Foundations/ FTM   1/ Week 3 ",
       "Foundations/FTM 1/Week 3",
       "Term 10/ER/Week 1",
     ]);
@@ -173,8 +173,39 @@ describe("term rename keeps Course Tracker attendance and source provenance", ()
     expect(result.tracker.map(({ path: _path, ...rest }) => rest))
       .toEqual(legacyRows.map(({ path: _path, ...rest }) => rest));
     expect(result.primaryTrackerScopes?.map((s) => s.path))
-      .toEqual(["Foundations/ FTM   1  ", "Term 10/ER"]);
+      .toEqual(["Foundations/ FTM   1", "Term 10/ER"]);
+    const restored = normalizePrimaryScopes(result.primaryTrackerScopes);
+    expect(restored?.map((s) => s.path)).toEqual(result.primaryTrackerScopes?.map((s) => s.path));
+    expect(pathInScopes(result.tracker[0].path, restored!.map((s) => s.path))).toBe(true);
+    expect(pathInScopes(result.tracker[1].path, [restored![0].path])).toBe(false);
     expect(JSON.stringify({ terms, legacyRows, legacyFocus })).toBe(before);
+  });
+
+
+  it("fails closed when focus suffix whitespace would lose descendant membership after reload", () => {
+    const historical = [row("historical", " Term 1 / FTM   1  / Week 3 ", "lecture", "missed")];
+    const pinned: PrimaryTrackerScope[] = [{ path: " Term 1 / FTM   1  ", since: originalUpdated }];
+    // R140 could rename both raw paths, but normalization removes the trailing
+    // focus spaces on hydration and pathInScopes then misses its own descendant.
+    const oldRowAfterRename = "Foundations/ FTM   1  / Week 3 ";
+    const oldFocusAfterRename = "Foundations/ FTM   1  ";
+    expect(pathInScopes(oldRowAfterRename, [oldFocusAfterRename])).toBe(true);
+    const rehydrated = normalizePrimaryScopes([{ path: oldFocusAfterRename, since: originalUpdated }]);
+    expect(pathInScopes(oldRowAfterRename, rehydrated!.map((s) => s.path))).toBe(false);
+
+    const before = JSON.stringify({ historical, pinned });
+    const result = planTermRename(terms, historical, pinned, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/focus|reload|hydration|preserv/i);
+    expect(JSON.stringify({ historical, pinned })).toBe(before);
+  });
+
+  it("does not rename a focus that loses its trailing slash during hydration", () => {
+    const pinned: PrimaryTrackerScope[] = [{ path: "Term 1/FTM 1/", since: originalUpdated }];
+    const before = JSON.stringify({ tracker, pinned });
+    const result = planTermRename(terms, tracker, pinned, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify({ tracker, pinned })).toBe(before);
   });
 
   it("holds malformed non-leading term roots instead of slicing the wrong raw segment", () => {
