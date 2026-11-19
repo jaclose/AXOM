@@ -4,6 +4,7 @@
 // ===========================================================================
 import type { SourceDocument } from "../library";
 import type { QuestionRecord } from "../questions";
+import { blockToPlainText } from "../question-content/blocks";
 import { normalizeQuestionAnalyses } from "./normalize";
 import type { QuestionAnalysis } from "./types";
 
@@ -82,12 +83,21 @@ export function questionVisualIdentity(
     placements.set(assetId, existing);
   };
   const scan = (blocks: NonNullable<typeof question.content>["stem"], location: string) => {
-    blocks.forEach((block, index) => {
-      if (block.type === "image") record(block.assetId, `${location}:image:${index}`);
+    // Importers may retain empty text/rich-text/equation placeholders or
+    // layout-only dividers. These are not source evidence and must not shift
+    // the image's semantic position on otherwise identical source questions.
+    // Count actual displayed source content, preserving order around real
+    // text, tables and other figures.
+    let semanticIndex = 0;
+    for (const block of blocks) {
+      if (block.type === "image") record(block.assetId, `${location}:image:${semanticIndex}`);
       if (block.type === "table" && block.sourceImageAssetId) {
-        record(block.sourceImageAssetId, `${location}:table:${index}`);
+        record(block.sourceImageAssetId, `${location}:table:${semanticIndex}`);
       }
-    });
+      if (block.type === "image" || block.type === "table" || blockToPlainText(block).trim()) {
+        semanticIndex += 1;
+      }
+    }
   };
   if (includePlacement) {
     scan(question.content?.stem ?? [], "stem");
