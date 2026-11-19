@@ -351,6 +351,7 @@ describe("questions that teach the same rule", () => {
       { type: "text", text: "" },
       { type: "rich_text", html: "<b></b>" },
       { type: "equation" },
+      { type: "table", rows: [] },
       { type: "divider" },
     ]);
     const whitespaceOnly = makeVisual("q-layout-whitespace-only", [
