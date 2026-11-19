@@ -187,3 +187,44 @@ describe("what the source teaches, after an answer", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("This is a different version of the file.");
   });
 });
+
+describe("source teaching after an answer-readiness downgrade", () => {
+  it("never offers a Keep action on an unreviewed, disputed or keyless source, but keeps the source page inspectable", async () => {
+    const user = userEvent.setup();
+    for (const patch of [
+      { extraction: { confidence: "medium" as const, reviewed: false, warnings: [] } },
+      { needsReview: true },
+      { correctKey: undefined },
+    ]) {
+      const onChange = vi.fn();
+      const view = render(<SourceTeaching compact question={{ ...first, ...patch }} document={source} onChange={onChange} />);
+      expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+      expect(screen.queryByText("Match the leads to the wall, then the wall to the artery.")).toBeNull();
+      const sourceButton = screen.getByRole("button", { name: "See the source, page 1" });
+      await user.click(sourceButton);
+      expect(screen.getByText("Text of this page")).toBeTruthy();
+      expect(onChange).not.toHaveBeenCalled();
+      view.unmount();
+    }
+  });
+
+  it("does not display or remove previously reviewed source or AI teaching while mapping is disputed", () => {
+    for (const origin of ["source", "ai"] as const) {
+      const saved: QuestionRecord = { ...first, analyses: [{
+        id: "old-validated", questionId: first.id, sourceFingerprint: questionSourceFingerprint(first, source),
+        version: 1, origin, status: "reviewed", concept: "Historic reviewed material",
+        rule: "Only when answer mapping remains ready.", decisiveClues: [], mechanism: [], distractors: [],
+        references: [{ documentId: source.id, page: 3, role: "teaching" }],
+        generatedAt: "2026-10-07T12:00:00.000Z",
+      }] };
+      const onChange = vi.fn();
+      const view = render(<SourceTeaching compact question={{ ...saved, needsReview: true }} document={source} onChange={onChange} />);
+      expect(screen.queryByText("Only when answer mapping remains ready.")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+      expect(onChange).not.toHaveBeenCalled();
+      expect(saved.analyses?.[0].status).toBe("reviewed");
+      view.unmount();
+    }
+  });
+});

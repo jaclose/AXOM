@@ -7,7 +7,7 @@ import {
 } from "../../lib/decode";
 import { ICON_SIZE } from "../../lib/iconSize";
 import type { SourceDocument } from "../../lib/library";
-import type { QuestionRecord } from "../../lib/questions";
+import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
 import { GButton, GhostButton } from "../ui/primitives";
 import { SourcePagePreview } from "./SourcePagePreview";
 
@@ -39,23 +39,24 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   const [undo, setUndo] = useState<{ questionId: string; analyses: QuestionAnalysis[] | undefined; what: string }>();
 
   const view = useMemo(() => teachingView(question, source), [question, source]);
-  const kept = view.analysis;
+  const ready = questionMappingStatus(question) === "ready";
+  const kept = ready ? view.analysis : undefined;
   // A proposal already stored on the question (a model's), or else what the source's own slides give, read now.
   const proposal = useMemo(() => {
-    if (kept) return undefined;
+    if (!ready || kept) return undefined;
     const stored = pendingAnalyses(question, source)[0];
     if (stored || !source) return stored;
     // The question as it is on screen stands in for its own entry among the questions of its source.
     const group = [question, ...(siblings ?? []).filter((entry) => entry.id !== question.id)];
     return sourceTeachingProposals(source, group, new Date().toISOString()).find((analysis) => analysis.questionId === question.id);
-  }, [kept, question, siblings, source]);
+  }, [ready, kept, question, siblings, source]);
   const shown = kept ?? proposal;
 
   const hasSourceText = questionSourcePages(question).some((number) => source?.pageTexts?.[number - 1]?.trim());
   const canAsk = Boolean(provider) && hasSourceText && !shown && view.answer !== undefined;
   const pages = shown ? analysisPages(shown) : questionSourcePages(question);
   const page = pagePicked && pages.includes(pagePicked) ? pagePicked : pages[0];
-  const taken = undo?.questionId === question.id ? undo : undefined;
+  const taken = ready && undo?.questionId === question.id ? undo : undefined;
   // With nothing to teach and no way to ask, the feedback above already says all there is.
   if (!shown && !canAsk && !taken && !(compact && source && pages.length)) return null;
 
@@ -63,6 +64,8 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   const ownExplanation = shown?.explanation && !same(shown.explanation, question.explanation) ? shown.explanation : undefined;
 
   function decide(analysis: QuestionAnalysis, status: "reviewed" | "rejected") {
+    // A stale Keep click must never turn an unreviewed mapping into reviewed teaching.
+    if (questionMappingStatus(question) !== "ready") return;
     // A discarded reading is not offered again, so the step can be taken back while the question is on screen.
     setUndo(status === "rejected"
       ? { questionId: question.id, analyses: question.analyses, what: analysis.status === "reviewed" ? "Teaching removed." : "Proposal discarded." }
@@ -77,7 +80,7 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   }
 
   async function ask() {
-    if (!provider) return;
+    if (!provider || questionMappingStatus(question) !== "ready") return;
     setBusy(true);
     setProblem("");
     try {

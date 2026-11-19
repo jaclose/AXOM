@@ -3,7 +3,7 @@
 // document go in, a value comes out. Nothing here touches the store.
 // ===========================================================================
 import type { SourceDocument } from "../library";
-import type { QuestionRecord } from "../questions";
+import { questionMappingStatus, type QuestionRecord } from "../questions";
 import { normalizeQuestionAnalyses } from "./normalize";
 import type { QuestionAnalysis } from "./types";
 
@@ -84,9 +84,11 @@ export function analysisIsCurrent(analysis: QuestionAnalysis, question: SourceBe
  * a newer one before an older one. A proposal is never teaching.
  */
 export function currentTeaching(
-  question: SourceBearing & Pick<QuestionRecord, "analyses">,
+  question: QuestionRecord,
   document?: PageSource,
 ): QuestionAnalysis | undefined {
+  // A stored verdict is preserved, but cannot teach while its answer key is disputed.
+  if (questionMappingStatus(question) !== "ready") return undefined;
   return (question.analyses ?? [])
     .filter((analysis) => analysis.status === "reviewed" && analysisIsCurrent(analysis, question, document))
     .sort((a, b) => Number(b.origin === "source") - Number(a.origin === "source") || Date.parse(b.generatedAt) - Date.parse(a.generatedAt))[0];
@@ -94,9 +96,11 @@ export function currentTeaching(
 
 /** Proposals waiting for the learner, written about the question as it is now. */
 export function pendingAnalyses(
-  question: SourceBearing & Pick<QuestionRecord, "analyses">,
+  question: QuestionRecord,
   document?: PageSource,
 ): QuestionAnalysis[] {
+  // Waiting proposals are still stored; they are not actionable until the key is reviewed.
+  if (questionMappingStatus(question) !== "ready") return [];
   return (question.analyses ?? []).filter((analysis) => analysis.status === "proposed" && analysisIsCurrent(analysis, question, document));
 }
 

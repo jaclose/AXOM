@@ -177,3 +177,20 @@ describe("reading the sections of a teaching slide", () => {
     expect(teaching).toEqual({ concept: "Rate control", rule: "Beta for the beat.", distractors: [], lecture: "DLA 3 Cardiac pharmacology" });
   });
 });
+
+describe("source proposals respect canonical answer readiness", () => {
+  it("holds unreviewed, explicitly disputed, and keyless imported mappings without changing source material", () => {
+    const reviewed = imported(0, { extraction: { confidence: "medium", reviewed: true, warnings: [] } });
+    const cases: QuestionRecord[] = [
+      { ...reviewed, extraction: { confidence: "medium", reviewed: false, warnings: [] } },
+      { ...reviewed, needsReview: true },
+      { ...reviewed, correctKey: undefined },
+    ];
+    for (const unready of cases) {
+      expect(sourceTeachingProposals(document, [unready], NOW)).toEqual([]);
+      expect(unready.sourceDocumentId).toBe("doc-1");
+      expect(unready.sourcePage).toBe(2);
+    }
+    expect(sourceTeachingProposals(document, [reviewed], NOW)).toHaveLength(1);
+  });
+});
