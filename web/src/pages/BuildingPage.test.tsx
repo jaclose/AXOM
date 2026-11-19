@@ -40,4 +40,47 @@ describe("Building preview", () => {
     expect(document.querySelectorAll(".system-card")).toHaveLength(SYSTEM_PREVIEWS.length);
   });
 
+  it("exposes a roving tablist with arrow, Home and End navigation and an associated panel", () => {
+    render(<BuildingPage />);
+    const overview = screen.getByRole("tab", { name: "Overview" });
+    const systems = screen.getByRole("tab", { name: "Systems" });
+    expect(overview.tabIndex).toBe(0);
+    expect(systems.tabIndex).toBe(-1);
+    expect(overview.getAttribute("aria-controls")).toBe("building-active-panel");
+    expect(systems.getAttribute("aria-controls")).toBe("building-active-panel");
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(overview.id);
+
+    overview.focus();
+    fireEvent.keyDown(overview, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(systems);
+    expect(systems.getAttribute("aria-selected")).toBe("true");
+    expect(overview.tabIndex).toBe(-1);
+    expect(systems.tabIndex).toBe(0);
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(systems.id);
+
+    fireEvent.keyDown(systems, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(overview);
+    expect(overview.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(overview, { key: "End" });
+    expect(document.activeElement).toBe(systems);
+    fireEvent.keyDown(systems, { key: "Home" });
+    expect(document.activeElement).toBe(overview);
+    fireEvent.keyDown(overview, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(systems);
+  });
+
+  it("moves focus to the Systems tab when a focused overview horizon is replaced", () => {
+    render(<BuildingPage />);
+    const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;
+    const link = within(nextCard).getByRole("button", { name: /^See \d+ systems$/ });
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.click(link);
+    const systems = screen.getByRole("tab", { name: "Systems" });
+    expect(document.activeElement).toBe(systems);
+    expect(systems.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(systems.id);
+    expect(screen.getByRole("button", { name: /^Next / }).getAttribute("aria-pressed")).toBe("true");
+  });
 });
