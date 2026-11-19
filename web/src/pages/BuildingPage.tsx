@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowRight, Blocks, FlaskConical, Network, Route } from "lucide-react";
 import { GlassCard, Tag } from "../components/ui/primitives";
 import { SYSTEM_PREVIEWS, type BuildStatus, type SystemPreview } from "../lib/buildingSystems";
@@ -19,6 +19,8 @@ export function BuildingPage() {
   const [view, setView] = useState<"overview" | "systems">("overview");
   const [filter, setFilter] = useState<BuildStatus | "all" | "next">("all");
   const [hovered, setHovered] = useState<string | null>(null);
+  const overviewTabRef = useRef<HTMLButtonElement>(null);
+  const systemsTabRef = useRef<HTMLButtonElement>(null);
   const counts = useMemo(() => Object.fromEntries(STATUS_ORDER.map((status) => [status, SYSTEM_PREVIEWS.filter((item) => item.status === status).length])) as Record<BuildStatus, number>, []);
   const visible = filter === "all" ? SYSTEM_PREVIEWS : SYSTEM_PREVIEWS.filter((item) =>
     filter === "next" ? item.status === "in-development" || item.status === "planned" : item.status === filter);
@@ -29,9 +31,34 @@ export function BuildingPage() {
   const hoveredItem = SYSTEM_PREVIEWS.find((item) => item.id === hovered);
   const related = new Set(hoveredItem ? [hoveredItem.name, ...hoveredItem.connectsTo] : []);
 
+  function selectView(target: "overview" | "systems") {
+    setView(target);
+    (target === "overview" ? overviewTabRef : systemsTabRef).current?.focus();
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: "overview" | "systems") {
+    let target: "overview" | "systems";
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowRight":
+        target = current === "overview" ? "systems" : "overview";
+        break;
+      case "Home":
+        target = "overview";
+        break;
+      case "End":
+        target = "systems";
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    selectView(target);
+  }
+
   function openHorizon(horizon: (typeof HORIZONS)[number]) {
     setFilter(horizon.id === "next" ? "next" : (horizon.statuses[0] ?? "all"));
-    setView("systems");
+    selectView("systems");
   }
 
   return (
@@ -42,11 +69,38 @@ export function BuildingPage() {
         <p>A preview of how today’s working study tools could become a connected medical-learning system. These cards describe direction, not shipped capability.</p>
       </header>
       <div className="ecosystem-tabs" role="tablist" aria-label="Building views">
-        <button role="tab" aria-selected={view === "overview"} onClick={() => setView("overview")}>Overview</button>
-        <button role="tab" aria-selected={view === "systems"} onClick={() => setView("systems")}>Systems <span className="building-count" aria-hidden="true">{SYSTEM_PREVIEWS.length}</span></button>
+        <button
+          ref={overviewTabRef}
+          id="building-tab-overview"
+          type="button"
+          role="tab"
+          aria-controls="building-active-panel"
+          aria-selected={view === "overview"}
+          tabIndex={view === "overview" ? 0 : -1}
+          onClick={() => setView("overview")}
+          onKeyDown={(event) => handleTabKeyDown(event, "overview")}
+        >Overview</button>
+        <button
+          ref={systemsTabRef}
+          id="building-tab-systems"
+          type="button"
+          role="tab"
+          aria-controls="building-active-panel"
+          aria-selected={view === "systems"}
+          tabIndex={view === "systems" ? 0 : -1}
+          onClick={() => setView("systems")}
+          onKeyDown={(event) => handleTabKeyDown(event, "systems")}
+        >Systems <span className="building-count" aria-hidden="true">{SYSTEM_PREVIEWS.length}</span></button>
       </div>
 
-      <div className="building-panel" key={view}>
+      <div
+        className="building-panel"
+        id="building-active-panel"
+        role="tabpanel"
+        tabIndex={0}
+        aria-labelledby={view === "overview" ? "building-tab-overview" : "building-tab-systems"}
+        key={view}
+      >
         {view === "overview" ? (
           <section className="building-overview">
             {HORIZONS.map((horizon, index) => {
