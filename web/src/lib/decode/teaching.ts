@@ -116,6 +116,10 @@ export function conceptGroups(
 ): ConceptGroup[] {
   const groups = new Map<string, { concept: string; rule: string; members: Array<{ question: QuestionRecord; analysis: QuestionAnalysis }> }>();
   for (const question of questions) {
+    // A retained reviewed analysis is not current evidence if its scoring
+    // mapping or required source-figure binding has since become unresolved.
+    // Preserve the stored analysis for repair, but do not count it as a recurrence.
+    if (questionMappingStatus(question) !== "ready") continue;
     const analysis = currentTeaching(question, question.sourceDocumentId ? documentsById.get(question.sourceDocumentId) : undefined);
     if (!analysis?.rule) continue;
     const key = `${fold(analysis.concept)}\u001f${fold(analysis.rule)}`;
