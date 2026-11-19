@@ -1,0 +1,219 @@
+import { describe, expect, it } from "vitest";
+import type { Term, TrackerItem, Course } from "./types";
+import { normalizePrimaryScopes, pathInScopes, type PrimaryTrackerScope } from "./trackerFocus";
+import { absenceStanding, buildModuleWeeks } from "./course-engine/weekView";
+import { planTermRename } from "./termRename";
+
+const terms: Term[] = [
+  { id: "term-one", name: "Term 1", absenceAllowances: { lecture: 2, "small-group": 1 } },
+  { id: "term-ten", name: "Term 10" },
+];
+const courses: Course[] = [
+  { id: "core", termId: "term-one", code: "BPM 500", name: "Core", files: 0,
+    modules: [{ id: "ftm", name: "FTM 1" }] },
+];
+const originalUpdated = "2026-10-05T12:00:00.000Z";
+const row = (id: string, path: string, activity: TrackerItem["activity"], attendance?: TrackerItem["attendance"]): TrackerItem => ({
+  id, path, label: id, kind: "Lecture", passes: id === "a" ? 3 : 1, ankiPasses: 2,
+  yield: "high", note: "keep original notes", updated: originalUpdated,
+  activity, attendance, templateKey: `source-${id}`, weekSource: "template",
+  passEvents: [{ id: `pass-${id}`, method: "study", at: originalUpdated }],
+});
+const tracker = [
+  row("a", "Term 1/FTM 1/Week 3", "lecture", "missed"),
+  row("b", "Term 1/BPM 500/FTM 1/Week 4", "small-group", "missed"),
+  row("c", "Term 10/ER/Week 1", "lecture", "missed"),
+];
+const focus: PrimaryTrackerScope[] = [
+  { path: "Term 1/FTM 1", since: originalUpdated },
+  { path: "Term 10/ER", since: originalUpdated },
+];
+
+describe("term rename keeps Course Tracker attendance and source provenance", () => {
+  it("moves both legacy and canonical term paths atomically without altering activity records", () => {
+    const before = JSON.stringify({ terms, tracker, focus });
+    const result = planTermRename(terms, tracker, focus, "term-one", "Foundations");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.terms[0]).toEqual({ ...terms[0], name: "Foundations" });
+    expect(result.terms[1]).toEqual(terms[1]);
+    expect(result.tracker.map(({ path }) => path)).toEqual([
+      "Foundations/FTM 1/Week 3",
+      "Foundations/BPM 500/FTM 1/Week 4",
+      "Term 10/ER/Week 1",
+    ]);
+    expect(result.tracker.map(({ path: _path, ...rest }) => rest)).toEqual(tracker.map(({ path: _path, ...rest }) => rest));
+    expect(result.primaryTrackerScopes).toEqual([
+      { ...focus[0], path: "Foundations/FTM 1" }, focus[1],
+    ]);
+    expect(absenceStanding(result.tracker, result.terms[0])).toEqual([
+      { category: "lecture", missed: 1, allowed: 2, remaining: 1 },
+      { category: "small-group", missed: 1, allowed: 1, remaining: 0 },
+    ]);
+    const modules = buildModuleWeeks(result.tracker, [], undefined, {
+      terms: result.terms, courses,
+    });
+    expect(modules.filter((m) => m.term === "Foundations")).toHaveLength(2);
+    expect(modules.filter((m) => m.term === "Foundations").every((m) => m.courseId === "core")).toBe(true);
+    expect(JSON.stringify({ terms, tracker, focus })).toBe(before);
+  });
+
+  it("renames only complete term-path segments, including casing-only corrections", () => {
+    const result = planTermRename(terms, tracker, focus, "term-one", "term 1");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.tracker.map((r) => r.path)).toEqual([
+      "term 1/FTM 1/Week 3",
+      "term 1/BPM 500/FTM 1/Week 4",
+      "Term 10/ER/Week 1",
+    ]);
+  });
+
+  it("fails closed when the destination already contains tracker or focused data", () => {
+    for (const destination of ["Term 10", "Claimed"]) {
+      const existing = destination === "Claimed"
+        ? [...tracker, row("unrelated", "Claimed/Independent/Week 1", "lecture", "missed")]
+        : tracker;
+      const result = planTermRename(terms, existing, focus, "term-one", destination);
+      expect(result.ok).toBe(false);
+    }
+    expect(planTermRename(terms, tracker, [...focus, { path: "Claimed/Other", since: originalUpdated }],
+      "term-one", "Claimed").ok).toBe(false);
+  });
+
+  it("does not move a historic path when the old term label belongs to two IDs", () => {
+    const ambiguous = [...terms, { id: "collision", name: "TERM 1" }];
+    expect(planTermRename(ambiguous, tracker, focus, "term-one", "Foundations").ok).toBe(false);
+  });
+
+  it("rejects invalid paths, unknown IDs, and accidental same-label collisions", () => {
+    for (const name of ["", "  ", "Term 2/ER", "Term 10", "term 10"]) {
+      expect(planTermRename(terms, tracker, focus, "term-one", name).ok).toBe(false);
+    }
+    expect(planTermRename(terms, tracker, focus, "missing", "New Term").ok).toBe(false);
+  });
+
+  it("preserves empty term scopes and allows a rename when no tracker rows exist", () => {
+    const result = planTermRename(terms, [], undefined, "term-one", "New Term");
+    expect(result).toMatchObject({ ok: true, tracker: [], terms: [
+      { id: "term-one", name: "New Term" }, { id: "term-ten", name: "Term 10" },
+    ] });
+  });
+  it("holds a rename rather than moving a second term under a nested historical label", () => {
+    const nestedTerms: Term[] = [
+      ...terms,
+      { id: "nested", name: " term 1 / semester 2 " },
+    ];
+    const secondTermRow = row(
+      "nested-row", "Term 1/Semester 2/BPM 500/Week 1", "lecture", "missed",
+    );
+    const rows = [...tracker, secondTermRow];
+    const pinned = [...focus, { path: "Term 1/Semester 2/BPM 500", since: originalUpdated }];
+    const before = JSON.stringify({ nestedTerms, rows, pinned });
+    const result = planTermRename(nestedTerms, rows, pinned, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/overlap|ambiguous|term/i);
+    expect(JSON.stringify({ nestedTerms, rows, pinned })).toBe(before);
+  });
+
+  it("refuses a target root already used by a nested term even when that term has no tracker rows", () => {
+    const nestedTerms: Term[] = [...terms, { id: "nested", name: "Foundations / Semester 2" }];
+    const result = planTermRename(nestedTerms, tracker, focus, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    expect(tracker[0].path).toBe("Term 1/FTM 1/Week 3");
+    expect(focus[0].path).toBe("Term 1/FTM 1");
+  });
+
+  it("keeps unrelated longer labels disjoint from source and target roots", () => {
+    const disjointTerms: Term[] = [...terms, { id: "longer", name: "Foundations Seminar" }];
+    const result = planTermRename(disjointTerms, tracker, focus, "term-one", "Foundations");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.tracker[0].path).toBe("Foundations/FTM 1/Week 3");
+      expect(result.terms.find((term) => term.id === "longer")?.name).toBe("Foundations Seminar");
+    }
+  });
+
+  it.each(["Term 2", "Term 1"])(
+    "refuses a duplicate immutable selected term ID even when the other label is %s",
+    (secondLabel) => {
+      const duplicated: Term[] = [
+        terms[0],
+        { ...terms[0], name: secondLabel },
+        terms[1],
+      ];
+      const before = JSON.stringify({ duplicated, tracker, focus });
+      const result = planTermRename(duplicated, tracker, focus, "term-one", "Foundations");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toMatch(/duplicate|unique|id|identity/i);
+      expect(JSON.stringify({ duplicated, tracker, focus })).toBe(before);
+    },
+  );
+
+  it("changes only the term segment while preserving legacy descendant whitespace and identity", () => {
+    const legacyRows = [
+      row("legacy-a", " Term 1 / FTM   1/ Week 3 ", "lecture", "missed"),
+      row("legacy-b", "Term 1/FTM 1/Week 3", "lecture", "missed"),
+      tracker[2],
+    ];
+    const legacyFocus: PrimaryTrackerScope[] = [
+      { path: " Term 1 / FTM   1", since: originalUpdated },
+      focus[1],
+    ];
+    const before = JSON.stringify({ terms, legacyRows, legacyFocus });
+    const result = planTermRename(terms, legacyRows, legacyFocus, "term-one", "Foundations");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.tracker.map((r) => r.path)).toEqual([
+      "Foundations/ FTM   1/ Week 3 ",
+      "Foundations/FTM 1/Week 3",
+      "Term 10/ER/Week 1",
+    ]);
+    expect(result.tracker[0].path).not.toBe(result.tracker[1].path);
+    expect(result.tracker.map(({ path: _path, ...rest }) => rest))
+      .toEqual(legacyRows.map(({ path: _path, ...rest }) => rest));
+    expect(result.primaryTrackerScopes?.map((s) => s.path))
+      .toEqual(["Foundations/ FTM   1", "Term 10/ER"]);
+    const restored = normalizePrimaryScopes(result.primaryTrackerScopes);
+    expect(restored?.map((s) => s.path)).toEqual(result.primaryTrackerScopes?.map((s) => s.path));
+    expect(pathInScopes(result.tracker[0].path, restored!.map((s) => s.path))).toBe(true);
+    expect(pathInScopes(result.tracker[1].path, [restored![0].path])).toBe(false);
+    expect(JSON.stringify({ terms, legacyRows, legacyFocus })).toBe(before);
+  });
+
+
+  it("fails closed when focus suffix whitespace would lose descendant membership after reload", () => {
+    const historical = [row("historical", " Term 1 / FTM   1  / Week 3 ", "lecture", "missed")];
+    const pinned: PrimaryTrackerScope[] = [{ path: " Term 1 / FTM   1  ", since: originalUpdated }];
+    // R140 could rename both raw paths, but normalization removes the trailing
+    // focus spaces on hydration and pathInScopes then misses its own descendant.
+    const oldRowAfterRename = "Foundations/ FTM   1  / Week 3 ";
+    const oldFocusAfterRename = "Foundations/ FTM   1  ";
+    expect(pathInScopes(oldRowAfterRename, [oldFocusAfterRename])).toBe(true);
+    const rehydrated = normalizePrimaryScopes([{ path: oldFocusAfterRename, since: originalUpdated }]);
+    expect(pathInScopes(oldRowAfterRename, rehydrated!.map((s) => s.path))).toBe(false);
+
+    const before = JSON.stringify({ historical, pinned });
+    const result = planTermRename(terms, historical, pinned, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/focus|reload|hydration|preserv/i);
+    expect(JSON.stringify({ historical, pinned })).toBe(before);
+  });
+
+  it("does not rename a focus that loses its trailing slash during hydration", () => {
+    const pinned: PrimaryTrackerScope[] = [{ path: "Term 1/FTM 1/", since: originalUpdated }];
+    const before = JSON.stringify({ tracker, pinned });
+    const result = planTermRename(terms, tracker, pinned, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify({ tracker, pinned })).toBe(before);
+  });
+
+  it("holds malformed non-leading term roots instead of slicing the wrong raw segment", () => {
+    const malformed = [row("bad-prefix", "/Term 1/FTM 1/Week 3", "lecture", "missed")];
+    const before = JSON.stringify(malformed);
+    const result = planTermRename(terms, malformed, focus, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(malformed)).toBe(before);
+  });
+
+});

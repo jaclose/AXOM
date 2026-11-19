@@ -55,6 +55,8 @@ interface ApplyTrackOptions {
   seedStructure?: boolean;
 }
 import { normalizeTrackerPath, trackerPathKey } from "./pathUtils";
+import { planTermRename } from "./termRename";
+import { planTermAdmission } from "./termAdmission";
 import { normalizeResourceUrl } from "./resourceUtils";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
 import { normalizeStudyStreaks } from "./studyStreaks";
@@ -200,8 +202,8 @@ interface Actions {
   applyEducationTrack: (trackId: EducationTrackId, opts?: ApplyTrackOptions) => void;
 
   // terms
-  addTerm: (name: string) => void;
-  renameTerm: (id: string, name: string) => void;
+  addTerm: (name: string) => { ok: boolean; reason?: string };
+  renameTerm: (id: string, name: string) => { ok: boolean; reason?: string };
   /** Sessions of one attended activity the term lets a learner miss; undefined clears it. */
   setTermAbsenceAllowance: (termId: string, activity: CourseActivity, allowed: number | undefined) => void;
   removeTerm: (id: string) => void;
@@ -452,9 +454,40 @@ export const useStore = create<Store>()(
           };
         }),
 
-      addTerm: (name) => set((s) => ({ terms: [...s.terms, { id: uid(), name }] })),
-      renameTerm: (id, name) =>
-        set((s) => ({ terms: s.terms.map((t) => (t.id === id ? { ...t, name } : t)) })),
+      addTerm: (name) => {
+        let status: { ok: boolean; reason?: string } = { ok: false, reason: "Unable to add term." };
+        set((s) => {
+          const plan = planTermAdmission(s.terms, s.tracker, s.profile.primaryTrackerScopes, name);
+          if (!plan.ok) {
+            status = { ok: false, reason: plan.reason };
+            return s;
+          }
+          status = { ok: true };
+          return { terms: [...s.terms, { id: uid(), name: plan.name }] };
+        });
+        return status;
+      },
+      renameTerm: (id, name) => {
+        let status: { ok: boolean; reason?: string } = { ok: false, reason: "Term rename could not complete." };
+        set((s) => {
+          const plan = planTermRename(s.terms, s.tracker, s.profile.primaryTrackerScopes, id, name);
+          if (!plan.ok) {
+            status = { ok: false, reason: plan.reason };
+            return s;
+          }
+          status = { ok: true };
+          return {
+            terms: plan.terms,
+            tracker: plan.tracker,
+            // Keep attendance, passes, row update timestamps, template IDs and
+            // other profile fields unchanged. Rename scope metadata atomically.
+            profile: s.profile.primaryTrackerScopes
+              ? { ...s.profile, primaryTrackerScopes: plan.primaryTrackerScopes }
+              : s.profile,
+          };
+        });
+        return status;
+      },
       setTermAbsenceAllowance: (termId, activity, allowed) =>
         set((s) => ({
           terms: s.terms.map((term) => {

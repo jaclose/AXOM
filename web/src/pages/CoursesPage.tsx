@@ -28,7 +28,10 @@ export function CoursesPage() {
                 <GhostButton title="Rename term"
                   onClick={() => {
                     const name = prompt("Rename term", term.name);
-                    if (name) s.renameTerm(term.id, name);
+                    if (name !== null) {
+                      const outcome = s.renameTerm(term.id, name);
+                      if (!outcome.ok) window.alert(outcome.reason ?? "Unable to safely rename this term.");
+                    }
                   }}><Pencil size={ICON_SIZE.body} /></GhostButton>
                 <GhostButton className="danger" title="Delete term + its courses"
                   onClick={() => confirm(`Delete "${term.name}" and its ${courses.length} courses?`) && s.removeTerm(term.id)}>
@@ -191,11 +194,23 @@ function CourseEditor({ course, onClose }: { course: Course | null; onClose: () 
 function TermEditor({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const add = () => {
+    const outcome = s.addTerm(name);
+    if (!outcome.ok) {
+      setError(outcome.reason ?? "Unable to safely add this term.");
+      return;
+    }
+    onClose();
+  };
   return (
     <Modal title="Add term" onClose={onClose}
       footer={<><GButton onClick={onClose}>Cancel</GButton>
-        <GButton variant="primary" onClick={() => { if (name.trim()) { s.addTerm(name.trim()); onClose(); } }}>Add</GButton></>}>
-      <Field label="Term name" placeholder="Term 3" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <GButton variant="primary" onClick={add}>Add</GButton></>}>
+      <Field label="Term name" placeholder="Term 3" value={name}
+        onChange={(e) => { setName(e.target.value); setError(null); }}
+        aria-invalid={error !== null} aria-describedby={error ? "add-term-error" : undefined} autoFocus />
+      {error && <p id="add-term-error" role="alert" className="muted">{error}</p>}
     </Modal>
   );
 }
