@@ -99,4 +99,39 @@ describe("term rename keeps Course Tracker attendance and source provenance", ()
       { id: "term-one", name: "New Term" }, { id: "term-ten", name: "Term 10" },
     ] });
   });
+  it("holds a rename rather than moving a second term under a nested historical label", () => {
+    const nestedTerms: Term[] = [
+      ...terms,
+      { id: "nested", name: " term 1 / semester 2 " },
+    ];
+    const secondTermRow = row(
+      "nested-row", "Term 1/Semester 2/BPM 500/Week 1", "lecture", "missed",
+    );
+    const rows = [...tracker, secondTermRow];
+    const pinned = [...focus, { path: "Term 1/Semester 2/BPM 500", since: originalUpdated }];
+    const before = JSON.stringify({ nestedTerms, rows, pinned });
+    const result = planTermRename(nestedTerms, rows, pinned, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/overlap|ambiguous|term/i);
+    expect(JSON.stringify({ nestedTerms, rows, pinned })).toBe(before);
+  });
+
+  it("refuses a target root already used by a nested term even when that term has no tracker rows", () => {
+    const nestedTerms: Term[] = [...terms, { id: "nested", name: "Foundations / Semester 2" }];
+    const result = planTermRename(nestedTerms, tracker, focus, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    expect(tracker[0].path).toBe("Term 1/FTM 1/Week 3");
+    expect(focus[0].path).toBe("Term 1/FTM 1");
+  });
+
+  it("keeps unrelated longer labels disjoint from source and target roots", () => {
+    const disjointTerms: Term[] = [...terms, { id: "longer", name: "Foundations Seminar" }];
+    const result = planTermRename(disjointTerms, tracker, focus, "term-one", "Foundations");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.tracker[0].path).toBe("Foundations/FTM 1/Week 3");
+      expect(result.terms.find((term) => term.id === "longer")?.name).toBe("Foundations Seminar");
+    }
+  });
+
 });
