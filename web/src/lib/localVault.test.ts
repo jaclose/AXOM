@@ -13,7 +13,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
+import { invalidateVaultWrite, readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -27,6 +27,9 @@ const storage = {
 
 beforeEach(async () => {
   values.clear();
+  // Optional save receipts are throttled across writes: no cached status may
+  // leak from one synthetic tab/test into the next independent scenario.
+  invalidateVaultWrite();
   resetLocalVaultRuntimeForTests();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
@@ -294,7 +297,122 @@ describe("IndexedDB-first local vault", () => {
 
     expect(await localVaultStorage.getItem(key)).toBeNull();
     expect(readLastVaultWrite()).toBeNull();
-    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+    // Hydration cannot erase another tab's shared receipt.
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+  });
+
+  it("retires a stale save receipt when IndexedDB is temporarily unreadable without losing vault bytes", async () => {
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "private recoverable text" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    expect(readLastVaultWrite()?.scope).toBe("workspace");
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+    expect(storage.getItem(key)).toBeNull();
+
+    vi.stubGlobal("indexedDB", undefined);
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+
+    // A failed read must never erase data from a temporarily inaccessible IDB.
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(saved);
+    // Reading existing bytes is not a new verified write receipt.
+    expect(readLastVaultWrite()).toBeNull();
+  });
+
+  it("preserves a competing tab's newer receipt when the hydration vault read is unavailable", async () => {
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const old = JSON.stringify({ state: { profile: { userId: "jd" }, note: "old" }, version: 34 });
+    await localVaultStorage.setItem(key, old);
+    // The status helper throttles optional metadata across tests. Explicitly
+    // seed the previously confirmed receipt, rather than depend on wall time.
+    const oldMarker = JSON.stringify({ at: "2026-11-19T06:00:00.000Z", target: "indexeddb", version: 2, scope: "workspace" });
+    storage.setItem(STORAGE_KEYS.lastVaultWriteAt, oldMarker);
+
+    // The first tab cannot access IndexedDB. The second tab has independently
+    // renewed its saved receipt while the first is finishing a stale read.
+    vi.stubGlobal("indexedDB", undefined);
+    const renewed = JSON.stringify({ at: "2099-01-01T00:00:00.000Z", target: "indexeddb", version: 2, scope: "workspace" });
+    let injected = false;
+    const getItem = vi.spyOn(storage, "getItem").mockImplementation((item) => {
+      if (item === key && !injected) {
+        injected = true;
+        values.set(STORAGE_KEYS.lastVaultWriteAt, renewed);
+      }
+      return values.get(item) ?? null;
+    });
+    try {
+      expect(await localVaultStorage.getItem(key)).toBeNull();
+    } finally {
+      getItem.mockRestore();
+    }
+    expect(injected).toBe(true);
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBe(renewed);
+    expect(readLastVaultWrite()?.at).toBe("2099-01-01T00:00:00.000Z");
+
+    // Recovery still reads the original bytes. No hydration operation erased them.
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(old);
+  });
+
+  it("does not invalidate a competing write that commits after the initial empty-vault read", async () => {
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    await localVaultStorage.setItem(key, snapshot("older"));
+    const db = await openCurrentVault();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("state", "readwrite");
+      for (const id of [key, `${key}:user:jd`, `${key}:active-user`]) tx.objectStore("state").delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    const renewed = JSON.stringify({ at: "2099-01-01T00:00:01.000Z", target: "indexeddb", version: 2, scope: "workspace" });
+    let competing: Promise<void> | null = null;
+    const getItem = vi.spyOn(storage, "getItem").mockImplementation((item) => {
+      if (item === key && competing === null) {
+        // This hook fires at the fallback read, after the first vault misses.
+        competing = putDirect(db, key, snapshot("newer"));
+        values.set(STORAGE_KEYS.lastVaultWriteAt, renewed);
+      }
+      return values.get(item) ?? null;
+    });
+    try {
+      const hydrated = await localVaultStorage.getItem(key);
+      await competing;
+      expect(hydrated === null || hydrated === snapshot("newer")).toBe(true);
+      expect(await getDirect(db, key)).toBe(snapshot("newer"));
+    } finally {
+      getItem.mockRestore();
+      db.close();
+    }
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBe(renewed);
+  });
+
+  it("keeps a valid receipt when hydration recovers the surviving per-account IndexedDB copy", async () => {
+    vi.stubGlobal("window", { localStorage: storage, dispatchEvent: vi.fn() });
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "scoped copy" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    const receipt = readLastVaultWrite();
+    expect(receipt?.scope).toBe("workspace");
+    const db = await openCurrentVault();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("state", "readwrite");
+      tx.objectStore("state").delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+
+    expect(await localVaultStorage.getItem(key)).toBe(saved);
+    expect(readLastVaultWrite()).toEqual(receipt);
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
   });
 
   it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {

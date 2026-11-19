@@ -162,3 +162,48 @@ test("quota-only receipt cannot show saved when BroadcastChannel is absent or th
     await second.close();
   }
 });
+
+
+test("a hidden quota-only tab drops unverifiable success without deleting workspace bytes", async ({ context }) => {
+  await context.route("**/__axom_vault_marker_probe__", (route) => route.fulfill({
+    status: 200, contentType: "text/html; charset=utf-8",
+    body: "<!doctype html><html><body><output id='vault-status'></output></body></html>",
+  }));
+  const first = await context.newPage();
+  const second = await context.newPage();
+  await Promise.all([first.goto("/__axom_vault_marker_probe__"), second.goto("/__axom_vault_marker_probe__")]);
+  await first.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    const vault = await import("/src/lib/vaultActivity.ts");
+    window.localStorage.removeItem(STORAGE_KEYS.lastVaultWriteAt);
+    window.localStorage.setItem(STORAGE_KEYS.persistedState, '{"synthetic":"never delete"}');
+    const badge = document.getElementById("vault-status");
+    if (!badge) throw new Error("Missing status output");
+    const paint = () => { badge.textContent = vault.readLastVaultWrite() ? "saved" : "waiting"; };
+    vault.subscribeVaultWriteStatus(paint);
+    const nativeSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key: string, value: string) {
+      if (key === STORAGE_KEYS.lastVaultWriteAt) throw new Error("synthetic marker-only quota");
+      return nativeSet.call(this, key, value);
+    };
+    try { vault.markVaultWrite("indexeddb", new Date("2026-11-06T20:00:00.000Z")); }
+    finally { Storage.prototype.setItem = nativeSet; }
+    paint();
+  });
+  await expect(first.locator("#vault-status")).toHaveText("saved");
+
+  // Simulate a BFCache/frozen-tab transition, for which a channel
+  // message sent during suspension is not guaranteed to be delivered.
+  await first.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+  await expect(first.locator("#vault-status")).toHaveText("waiting");
+
+  await second.evaluate(async () => { (await import("/src/lib/vaultActivity.ts")).invalidateVaultWrite(); });
+  await first.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await expect(first.locator("#vault-status")).toHaveText("waiting");
+  expect(await first.evaluate(async () => {
+    const { STORAGE_KEYS } = await import("/src/lib/brand.ts");
+    return window.localStorage.getItem(STORAGE_KEYS.persistedState);
+  })).toBe('{"synthetic":"never delete"}');
+  await first.close();
+  await second.close();
+});

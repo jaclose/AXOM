@@ -16,9 +16,17 @@ export interface VaultWriteRecord {
   scope: "workspace";
 }
 
+/** The exact receipt observed before asynchronous vault hydration begins. */
+export interface VaultWriteObservation {
+  readonly rawMarker: string | null;
+  readonly memoryRecord: VaultWriteRecord | null;
+}
+
 export const VAULT_WRITE_EVENT = "axom:vault-write";
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
+/** A post-startup workspace save was confirmed by this runtime, not inferred from shared metadata. */
+let currentRuntimeConfirmedWrite = false;
 let lastPersistedAt = 0;
 /** Only advertise quota-only in-memory save receipts with an active cross-tab invalidation channel. */
 let memoryOnlyConfirmedWrite = false;
@@ -29,11 +37,82 @@ let statusInvalidated = false;
 let invalidatedMarkerValue: string | null = null;
 /** Same-origin, content-free notifications when quota blocks the optional localStorage marker. */
 const VAULT_STATUS_CHANNEL = "axom:vault-status";
+/** A missing hydration must not erase another tab's throttled, origin-wide
+ * save marker. Remember ambiguity per tab and through same-tab reload only. */
+const HYDRATION_TOMBSTONE_KEY = `${STORAGE_KEYS.lastVaultWriteAt}:hydration-invalidated`;
+let hydrationSessionWritable: boolean | null = null;
+/** A readable sessionStorage can still reject writes. Verify both once per module. */
+function canPersistHydrationTombstone(): boolean {
+  if (hydrationSessionWritable !== null) return hydrationSessionWritable;
+  try {
+    const storage = window.sessionStorage;
+    const probe = `${HYDRATION_TOMBSTONE_KEY}:probe`;
+    const previous = storage.getItem(probe);
+    storage.setItem(probe, "1");
+    if (storage.getItem(probe) !== "1") throw new Error("sessionStorage write not retained");
+    if (previous === null) storage.removeItem(probe);
+    else storage.setItem(probe, previous);
+    hydrationSessionWritable = true;
+  } catch {
+    hydrationSessionWritable = false;
+  }
+  return hydrationSessionWritable;
+}
+/** undefined means tombstones cannot be trusted across a module reload. */
+function readHydrationTombstone(): string | null | undefined {
+  if (!canPersistHydrationTombstone()) return undefined;
+  try { return window.sessionStorage.getItem(HYDRATION_TOMBSTONE_KEY); }
+  catch { hydrationSessionWritable = false; return undefined; }
+}
+function rememberHydrationTombstone(raw: string | null): void {
+  if (raw === null || !canPersistHydrationTombstone()) return;
+  try { window.sessionStorage.setItem(HYDRATION_TOMBSTONE_KEY, raw); }
+  catch { hydrationSessionWritable = false; }
+}
+function clearHydrationTombstone(): void {
+  if (!canPersistHydrationTombstone()) return;
+  try { window.sessionStorage.removeItem(HYDRATION_TOMBSTONE_KEY); }
+  catch { hydrationSessionWritable = false; }
+}
 let statusChannel: BroadcastChannel | null = null;
 function rawStoredMarker(): string | null {
   try { return window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt); }
   catch { return null; }
 }
+
+/** Capture both persisted and in-tab status before the first awaited read. */
+export function captureVaultWriteObservation(): VaultWriteObservation {
+  return { rawMarker: rawStoredMarker(), memoryRecord: lastWrite };
+}
+/**
+ * Browser-frozen tabs can miss BroadcastChannel invalidations. A quota-only
+ * successful workspace write has no persistent status receipt to reconcile on
+ * resume, so never carry its optimistic badge across a visibility/freeze edge.
+ * Do not touch the persisted workspace or its valid on-disk marker.
+ */
+let lifecycleMonitoringInstalled = false;
+function retireUnverifiableMemoryReceipt(): void {
+  if (!memoryOnlyConfirmedWrite) return;
+  invalidatedMarkerValue = rawStoredMarker();
+  statusInvalidated = true;
+  memoryOnlyConfirmedWrite = false;
+  currentRuntimeConfirmedWrite = false;
+  lastWrite = null;
+  lastPersistedAt = 0;
+  window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+}
+function watchMemoryReceiptLifecycle(): void {
+  if (lifecycleMonitoringInstalled || typeof window === "undefined") return;
+  lifecycleMonitoringInstalled = true;
+  window.addEventListener("pagehide", retireUnverifiableMemoryReceipt);
+  window.addEventListener("pageshow", (event: PageTransitionEvent) => {
+    if (event.persisted) retireUnverifiableMemoryReceipt();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") retireUnverifiableMemoryReceipt();
+  });
+}
+
 function listenForCrossTabInvalidation(): void {
   if (statusChannel || typeof window === "undefined" || typeof window.BroadcastChannel !== "function") return;
   try {
@@ -48,6 +127,7 @@ function listenForCrossTabInvalidation(): void {
       lastWrite = null;
       lastPersistedAt = 0;
       memoryOnlyConfirmedWrite = false;
+      currentRuntimeConfirmedWrite = false;
       window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
     };
     // A partially initialized/throwing constructor must not count as coverage.
@@ -79,6 +159,7 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
   statusInvalidated = false;
   invalidatedMarkerValue = null;
   lastWrite = { at: now.toISOString(), target, version: WORKSPACE_WRITE_MARKER_VERSION, scope: "workspace" };
+  currentRuntimeConfirmedWrite = true;
   failingSince = null;
   // Keep the tiny localStorage marker current without hammering it on every
   // keystroke: at most once per second.
@@ -86,14 +167,20 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
     lastPersistedAt = now.getTime();
     try {
       window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(lastWrite));
+      clearHydrationTombstone();
       memoryOnlyConfirmedWrite = false;
     } catch {
       // IndexedDB may have saved the bytes, but without a persistent marker
       // AND cross-tab invalidation we cannot trust an unqualified green badge.
       // Fail closed on status only; never remove or repeat the workspace write.
-      memoryOnlyConfirmedWrite = statusChannel !== null;
+      // A backgrounded tab cannot establish that invalidations are received.
+      // If it is still foregrounded, monitor lifecycle transitions so a
+      // suspended/BFCache tab does not revive an unverifiable in-memory badge.
+      memoryOnlyConfirmedWrite = statusChannel !== null && document.visibilityState === "visible";
+      if (memoryOnlyConfirmedWrite) watchMemoryReceiptLifecycle();
       if (!memoryOnlyConfirmedWrite) {
         lastWrite = null;
+        currentRuntimeConfirmedWrite = false;
         // Reject an earlier valid marker: it describes an older workspace,
         // not the quota-only write that just completed. Do not throttle the
         // next confirmed write's attempt to restore persistent evidence.
@@ -124,8 +211,10 @@ export function invalidateVaultWrite(): void {
   lastWrite = null;
   lastPersistedAt = 0;
   memoryOnlyConfirmedWrite = false;
+  currentRuntimeConfirmedWrite = false;
   statusInvalidated = true;
   invalidatedMarkerValue = invalidatedRaw;
+  clearHydrationTombstone();
   try {
     window.localStorage.removeItem(STORAGE_KEYS.lastVaultWriteAt);
   } catch {
@@ -138,6 +227,29 @@ export function invalidateVaultWrite(): void {
   if ((hadMemoryRecord || hadStoredRecord) && typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
   }
+}
+
+/**
+ * Missing/unreadable hydration is not evidence that every other tab's
+ * workspace was removed. Another tab may commit while its optional marker
+ * stays identical within the 1s throttle. Fail closed here, but never remove
+ * or broadcast invalidation for a shared marker on this ambiguous evidence.
+ * Explicit removal still uses invalidateVaultWrite().
+ */
+export function invalidateVaultWriteIfUnchanged(observed: VaultWriteObservation): boolean {
+  if (rawStoredMarker() !== observed.rawMarker || lastWrite !== observed.memoryRecord) return false;
+  const hadReceipt = lastWrite !== null || observed.rawMarker !== null;
+  lastWrite = null;
+  lastPersistedAt = 0;
+  memoryOnlyConfirmedWrite = false;
+  currentRuntimeConfirmedWrite = false;
+  statusInvalidated = true;
+  invalidatedMarkerValue = observed.rawMarker;
+  rememberHydrationTombstone(observed.rawMarker);
+  if (hadReceipt && typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+  }
+  return true;
 }
 
 /** Read only a valid workspace-specific marker, never a legacy auxiliary write. */
@@ -171,6 +283,33 @@ function readStoredWorkspaceMarker(): VaultWriteRecord | null {
  */
 export function readLastVaultWrite(): VaultWriteRecord | null {
   listenForCrossTabInvalidation();
+  const raw = rawStoredMarker();
+  const tombstone = readHydrationTombstone();
+  if (tombstone === undefined) {
+    // Without durable tab-local tombstones, an old origin-wide marker could
+    // survive an unreadable hydration across module/page reload. Only a save
+    // confirmed in THIS runtime can establish a positive receipt.
+    if (!currentRuntimeConfirmedWrite || statusInvalidated) return null;
+    const stored = readStoredWorkspaceMarker();
+    if (!memoryOnlyConfirmedWrite && !stored) return null;
+    // An actual write in this runtime can still coexist with another tab's
+    // newer verified marker. Preserve that newer status without requiring a
+    // session tombstone; only cold-start raw receipts remain untrusted.
+    if (stored && lastWrite && Date.parse(stored.at) > Date.parse(lastWrite.at)) lastWrite = stored;
+    return lastWrite;
+  }
+  if (tombstone !== null) {
+    if (raw === tombstone) {
+      // A same-byte marker is ambiguous even if another tab saved new bytes.
+      lastWrite = null;
+      memoryOnlyConfirmedWrite = false;
+      currentRuntimeConfirmedWrite = false;
+      statusInvalidated = true;
+      invalidatedMarkerValue = tombstone;
+      return null;
+    }
+    clearHydrationTombstone();
+  }
   const stored = readStoredWorkspaceMarker();
   if (statusInvalidated) {
     // A newer verified marker can arrive while Settings is unmounted. Do not
@@ -186,6 +325,7 @@ export function readLastVaultWrite(): VaultWriteRecord | null {
   if (lastWrite && memoryOnlyConfirmedWrite) return lastWrite;
   if (!stored) {
     lastWrite = null;
+    currentRuntimeConfirmedWrite = false;
     return null;
   }
   if (!lastWrite || Date.parse(stored.at) > Date.parse(lastWrite.at)) lastWrite = stored;
@@ -211,6 +351,7 @@ export function subscribeVaultWriteStatus(listener: () => void): () => void {
     lastWrite = null;
     lastPersistedAt = 0;
     memoryOnlyConfirmedWrite = false;
+    currentRuntimeConfirmedWrite = false;
     // Reconcile with the latest persisted value rather than the queued event.
     // When absent, a later valid renewal can be recognized even if Settings
     // unsubscribed before its event arrived.

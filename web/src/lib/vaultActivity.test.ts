@@ -8,10 +8,12 @@ const savedAt = "2026-11-06T20:00:00.000Z";
 beforeEach(() => {
   vi.resetModules();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
   vi.resetModules();
 });
 
@@ -66,6 +68,91 @@ describe("verified local workspace save timestamps across upgrades", () => {
     window.localStorage.setItem(markerKey, JSON.stringify(record));
     expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
   });
+  it("hides an ambiguous hydration receipt locally without deleting the shared marker", async () => {
+    const vault = await import("./vaultActivity");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const original = window.localStorage.getItem(markerKey);
+    expect(original).not.toBeNull();
+    const observed = vault.captureVaultWriteObservation();
+    // B's newer bytes can share A's origin-wide marker during the 1s throttle.
+    expect(vault.invalidateVaultWriteIfUnchanged(observed)).toBe(true);
+    expect(window.localStorage.getItem(markerKey)).toBe(original);
+    expect(window.sessionStorage.getItem(`${markerKey}:hydration-invalidated`)).toBe(original);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vi.resetModules();
+    expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
+  });
+
+  it("accepts a distinct remote marker after a local hydration tombstone", async () => {
+    const vault = await import("./vaultActivity");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    expect(vault.invalidateVaultWriteIfUnchanged(vault.captureVaultWriteObservation())).toBe(true);
+    const renewed = { at: "2026-11-19T07:30:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(renewed));
+    expect(vault.readLastVaultWrite()).toEqual(renewed);
+    expect(window.sessionStorage.getItem(`${markerKey}:hydration-invalidated`)).toBeNull();
+  });
+
+  it("retains a separate tab's valid status with a different sessionStorage", async () => {
+    const firstTab = await import("./vaultActivity");
+    firstTab.markVaultWrite("indexeddb", new Date(savedAt));
+    expect(firstTab.invalidateVaultWriteIfUnchanged(firstTab.captureVaultWriteObservation())).toBe(true);
+    const originalSessionStorage = Object.getOwnPropertyDescriptor(window, "sessionStorage");
+    const anotherTabSession = new Map<string, string>();
+    try {
+      Object.defineProperty(window, "sessionStorage", {
+        configurable: true,
+        value: {
+          getItem: (key: string) => anotherTabSession.get(key) ?? null,
+          setItem: (key: string, value: string) => { anotherTabSession.set(key, value); },
+          removeItem: (key: string) => { anotherTabSession.delete(key); },
+        },
+      });
+      vi.resetModules();
+      expect((await import("./vaultActivity")).readLastVaultWrite()?.at).toBe(savedAt);
+    } finally {
+      if (originalSessionStorage) Object.defineProperty(window, "sessionStorage", originalSessionStorage);
+    }
+    expect(firstTab.readLastVaultWrite()).toBeNull();
+  });
+
+  it.each(["all", "write-only"] as const)(
+    "does not revive an unverified shared receipt after hydration and module reload when sessionStorage denies %s access",
+    async (denial) => {
+      const vault = await import("./vaultActivity");
+      vault.markVaultWrite("indexeddb", new Date(savedAt));
+      const shared = window.localStorage.getItem(markerKey);
+      expect(shared).not.toBeNull();
+      const originalSessionStorage = Object.getOwnPropertyDescriptor(window, "sessionStorage");
+      const readableStorage = window.sessionStorage;
+      try {
+        Object.defineProperty(window, "sessionStorage", {
+          configurable: true,
+          value: denial === "all"
+            ? { getItem: () => { throw new DOMException("Denied", "SecurityError"); },
+                setItem: () => { throw new DOMException("Denied", "SecurityError"); },
+                removeItem: () => { throw new DOMException("Denied", "SecurityError"); } }
+            : { getItem: readableStorage.getItem.bind(readableStorage),
+                setItem: () => { throw new DOMException("Denied", "SecurityError"); },
+                removeItem: readableStorage.removeItem.bind(readableStorage) },
+        });
+        expect(vault.invalidateVaultWriteIfUnchanged(vault.captureVaultWriteObservation())).toBe(true);
+        expect(window.localStorage.getItem(markerKey)).toBe(shared);
+        expect(vault.readLastVaultWrite()).toBeNull();
+        vi.resetModules();
+        const afterReload = await import("./vaultActivity");
+        // A prior save receipt is not evidence of recovery after storage denied the tombstone.
+        expect(afterReload.readLastVaultWrite()).toBeNull();
+        const renewed = new Date("2026-11-19T10:00:00.000Z");
+        afterReload.markVaultWrite("indexeddb", renewed);
+        expect(afterReload.readLastVaultWrite()?.at).toBe(renewed.toISOString());
+        expect(window.localStorage.getItem(markerKey)).not.toBe(shared);
+      } finally {
+        if (originalSessionStorage) Object.defineProperty(window, "sessionStorage", originalSessionStorage);
+      }
+    },
+  );
+
   it("invalidates the marker without deleting a workspace and allows immediate renewal", async () => {
     const workspace = JSON.stringify({ state: { notebook: "preserve" } });
     window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
@@ -327,5 +414,103 @@ describe("independent-review save-marker regressions", () => {
       if (originalChannel) Object.defineProperty(window, "BroadcastChannel", originalChannel);
       else Reflect.deleteProperty(window, "BroadcastChannel");
     }
+  });
+});
+
+
+describe("lifecycle receipts fail-closed", () => {
+  it.each(["pagehide", "visibilitychange"] as const)(
+    "drops a quota-only green receipt on %s when a suspended tab could miss invalidation",
+    async (eventName) => {
+      const channelDescriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
+      class UnreliableChannel { onmessage: ((event: MessageEvent) => void) | null = null; postMessage() {} }
+      Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: UnreliableChannel });
+      const workspace = '{"synthetic":"bytes are never discarded"}';
+      window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
+      const vault = await import("./vaultActivity");
+      const originalSet = Storage.prototype.setItem;
+      const rejected = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+        if (key === markerKey) throw new Error("simulated marker-only quota error");
+        return originalSet.call(this, key, value);
+      });
+      try { vault.markVaultWrite("indexeddb", new Date(savedAt)); }
+      finally { rejected.mockRestore(); }
+      expect(vault.readLastVaultWrite()?.at).toBe(savedAt);
+      expect(window.localStorage.getItem(markerKey)).toBeNull();
+      const notify = vi.fn();
+      const unsub = vault.subscribeVaultWriteStatus(notify);
+      const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+      if (eventName === "visibilitychange") {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      } else {
+        window.dispatchEvent(new Event("pagehide"));
+      }
+      expect(vault.readLastVaultWrite()).toBeNull();
+      expect(notify).toHaveBeenCalled();
+      expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+      unsub();
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+      if (channelDescriptor) Object.defineProperty(window, "BroadcastChannel", channelDescriptor);
+      else Reflect.deleteProperty(window, "BroadcastChannel");
+    },
+  );
+
+  it("drops a quota-only receipt on a BFCache pageshow even if the hidden event was missed", async () => {
+    const channelDescriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
+    class Channel { onmessage: ((event: MessageEvent) => void) | null = null; postMessage() {} }
+    Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: Channel });
+    const nativeSet = Storage.prototype.setItem;
+    const rejected = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+      if (key === markerKey) throw new Error("optional metadata quota");
+      return nativeSet.call(this, key, value);
+    });
+    try {
+      const vault = await import("./vaultActivity");
+      vault.markVaultWrite("indexeddb", new Date(savedAt));
+      expect(vault.readLastVaultWrite()?.at).toBe(savedAt);
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      expect(vault.readLastVaultWrite()).toBeNull();
+      expect(window.localStorage.getItem(markerKey)).toBeNull();
+    } finally {
+      rejected.mockRestore();
+      if (channelDescriptor) Object.defineProperty(window, "BroadcastChannel", channelDescriptor);
+      else Reflect.deleteProperty(window, "BroadcastChannel");
+    }
+  });
+
+  it("does not create an unverifiable quota-only badge when saving from a hidden tab", async () => {
+    const channelDescriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    class Channel { onmessage: ((event: MessageEvent) => void) | null = null; postMessage() {} }
+    Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: Channel });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    const nativeSet = Storage.prototype.setItem;
+    const rejected = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+      if (key === markerKey) throw new Error("optional metadata quota");
+      return nativeSet.call(this, key, value);
+    });
+    try {
+      const vault = await import("./vaultActivity");
+      vault.markVaultWrite("indexeddb", new Date(savedAt));
+      expect(vault.readLastVaultWrite()).toBeNull();
+      expect(window.localStorage.getItem(markerKey)).toBeNull();
+    } finally {
+      rejected.mockRestore();
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+      if (channelDescriptor) Object.defineProperty(window, "BroadcastChannel", channelDescriptor);
+      else Reflect.deleteProperty(window, "BroadcastChannel");
+    }
+  });
+
+  it("keeps a persisted workspace receipt through page suspension", async () => {
+    const vault = await import("./vaultActivity");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const prior = vault.readLastVaultWrite();
+    window.dispatchEvent(new Event("pagehide"));
+    expect(vault.readLastVaultWrite()).toEqual(prior);
+    expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual(prior);
   });
 });

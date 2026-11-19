@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { invalidateVaultWrite, markVaultWrite, markVaultWriteFailure, readVaultWriteFailure } from "./vaultActivity";
+import { captureVaultWriteObservation, invalidateVaultWrite, invalidateVaultWriteIfUnchanged, markVaultWrite, markVaultWriteFailure, readVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -709,6 +709,7 @@ function clearFallbackCopyIfUnchanged(
 
 const vaultStorage: StateStorage = {
   async getItem(name) {
+    const initialReceipt = observesWorkspace(name) ? captureVaultWriteObservation() : null;
     // A save that could not reach IndexedDB leaves its snapshot here, ahead of
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
@@ -769,6 +770,19 @@ const vaultStorage: StateStorage = {
       } catch {
         // localStorage still has the data; no need to interrupt app load.
       }
+    }
+    // Do not invalidate a newer tab's saved receipt after a stale, delayed
+    // missing-vault read. Recheck the durable snapshot before touching status;
+    // on read errors, invalidate only the receipt observed at hydration start.
+    if (fallback === null && initialReceipt !== null) {
+      try {
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* IndexedDB may still be temporarily unavailable. */ }
+      invalidateVaultWriteIfUnchanged(initialReceipt);
     }
     rememberVaultSnapshot(name, fallback);
     return fallback;
@@ -957,12 +971,10 @@ export function flushLocalVaultWrites(): Promise<void> {
 }
 
 export const localVaultStorage: StateStorage = {
-  getItem: async (name) => {
-    const value = await vaultStorage.getItem(name);
-    // Hydration must not trust stale metadata if IndexedDB and fallback are empty.
-    if (name === STORAGE_KEYS.persistedState && value === null) invalidateVaultWrite();
-    return value;
-  },
+  // The internal adapter handles missing-vault receipt invalidation after a
+  // fresh durable recheck. A second unconditional invalidation here races a
+  // newer tab and would defeat that guard.
+  getItem: (name) => vaultStorage.getItem(name),
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };
