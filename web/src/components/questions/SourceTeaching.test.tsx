@@ -189,6 +189,21 @@ describe("what the source teaches, after an answer", () => {
 });
 
 describe("source teaching after an answer-readiness downgrade", () => {
+  it("does not offer an inert model Ask action while answer readiness is withdrawn", () => {
+    const generate = vi.fn(() => ({}));
+    for (const patch of [
+      { extraction: { confidence: "medium" as const, reviewed: false, warnings: [] } },
+      { needsReview: true },
+      { correctKey: undefined },
+    ]) {
+      const view = render(<SourceTeaching compact question={{ ...first, ...patch }} document={source} provider={provider(generate)} onChange={() => {}} />);
+      expect(screen.queryByRole("button", { name: /Ask for an analysis from the source/ })).toBeNull();
+      expect(screen.getByRole("button", { name: "See the source, page 1" })).toBeTruthy();
+      view.unmount();
+    }
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("never offers a Keep action on an unreviewed, disputed or keyless source, but keeps the source page inspectable", async () => {
     const user = userEvent.setup();
     for (const patch of [

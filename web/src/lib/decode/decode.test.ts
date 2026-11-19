@@ -220,7 +220,16 @@ describe("teaching cannot be treated as approved after answer-readiness withdraw
       ]) {
         const held = { ...saved, ...downgraded };
         const waiting = { ...pending, ...downgraded };
-        expect(questionSourceFingerprint(held, document)).toBe(questionSourceFingerprint(saved, document));
+        // Withdrawing the key changes the source identity; review flags alone do not.
+        // In either case, untrusted teaching stays hidden and its stored verdict survives.
+        const keyWithdrawn = "correctKey" in downgraded;
+        if (keyWithdrawn) {
+          expect(questionSourceFingerprint(held, document)).not.toBe(questionSourceFingerprint(saved, document));
+          expect(analysisIsCurrent(saved.analyses[0], held, document)).toBe(false);
+        } else {
+          expect(questionSourceFingerprint(held, document)).toBe(questionSourceFingerprint(saved, document));
+          expect(analysisIsCurrent(saved.analyses[0], held, document)).toBe(true);
+        }
         expect(currentTeaching(held, document)).toBeUndefined();
         expect(pendingAnalyses(waiting, document)).toEqual([]);
         expect(held.analyses).toEqual(saved.analyses);
