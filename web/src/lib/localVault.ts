@@ -771,6 +771,18 @@ const vaultStorage: StateStorage = {
     const fallback = fallbackStore?.getItem(name) ??
       fallbackStore?.getItem(scopedStateKey(name, fallbackStore?.getItem(activeUserKey(name)) ?? "")) ??
       null;
+    if (fallback && !verifiedVaultEmpty) {
+      // A transient read error may clear immediately. Prefer the authoritative
+      // live vault over an unmarked, potentially stale mirror if it recovers.
+      // If it stays unavailable, return the mirror without writing it to IDB.
+      try {
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* Keep the legacy copy for a future verified recovery. */ }
+    }
     if (fallback && verifiedVaultEmpty) {
       try {
         // The validation above happens before this transaction. A concurrent
