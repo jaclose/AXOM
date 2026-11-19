@@ -308,6 +308,63 @@ describe("IndexedDB-first local vault", () => {
     db.close();
   });
 
+  it("preserves a competing offline fallback written during a successful IndexedDB promotion", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+    const base = snapshot("vault-base");
+    const promoting = snapshot("promoting-edit");
+    const competing = snapshot("competing-offline-unique-edit");
+
+    await localVaultStorage.setItem(key, base);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, promoting);
+    const promotingMarker = storage.getItem(markerKey);
+    expect(promotingMarker).not.toBeNull();
+    await localVaultStorage.setItem(key, competing);
+    const competingMarker = storage.getItem(markerKey);
+    expect(competingMarker).not.toBe(promotingMarker);
+
+    // Stage the older fallback for hydration. Another tab saves a newer,
+    // acknowledged fallback after the IDB transaction starts but before the
+    // promoting tab performs its localStorage cleanup.
+    storage.setItem(key, promoting);
+    storage.setItem(markerKey, promotingMarker!);
+    storage.setItem(scopedKey, promoting);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let competingSaveOccurred = false;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, record, storeKey) {
+      if (!competingSaveOccurred && storeKey === key && record === promoting) {
+        competingSaveOccurred = true;
+        storage.setItem(markerKey, competingMarker!);
+        storage.setItem(key, competing);
+        storage.setItem(scopedKey, competing);
+      }
+      return Reflect.apply(originalPut, this, [record, storeKey]);
+    });
+
+    try {
+      expect(await localVaultStorage.getItem(key)).toBe(promoting);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const db = await openCurrentVault();
+    expect(competingSaveOccurred).toBe(true);
+    expect(await getDirect(db, key)).toBe(promoting);
+    expect(storage.getItem(key)).toBe(competing);
+    expect(storage.getItem(markerKey)).toBe(competingMarker);
+    expect(storage.getItem(scopedKey)).toBe(competing);
+    db.close();
+  });
+
   it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
