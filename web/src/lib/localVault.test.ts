@@ -876,6 +876,39 @@ describe("a save that could not reach IndexedDB", () => {
     db.close();
   });
 
+  it("still allows the same account to advance a generic-only fallback after quota clears", async () => {
+    const owner = "account-A";
+    const scoped = `${key}:user:${owner}`;
+    const snapshotFor = (id: string) => JSON.stringify({
+      state: { profile: { userId: owner }, questions: [{ id }], notes: [id] },
+      version: 34,
+    });
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === scoped) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    await localVaultStorage.setItem(key, snapshotFor("first-A-edit"));
+    expect(storage.getItem(scoped)).toBeNull();
+
+    vi.stubGlobal("localStorage", storage);
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshotFor("second-A-edit"));
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(storage.getItem(key)).toBe(snapshotFor("second-A-edit"));
+    expect(storage.getItem(scoped)).toBe(snapshotFor("second-A-edit"));
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshotFor("second-A-edit"));
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(snapshotFor("second-A-edit"));
+    db.close();
+  });
+
   it("is reported while no store accepts it, and the report clears once saving works", async () => {
     await localVaultStorage.setItem(key, snapshot("saved"));
     expect(readVaultWriteFailure()).toBeNull();
