@@ -323,6 +323,52 @@ describe("questions that teach the same rule", () => {
     expect(conceptGroups([unplaced, swapped, original], documents)[0].uniqueQuestions).toBe(2);
   });
 
+  it("ignores empty parser blocks in image placement but preserves meaningful source order", () => {
+    const makeVisual = (id: string, prefix: NonNullable<QuestionRecord["content"]>["stem"] = []) => {
+      const assetId = `asset-${id}`;
+      const base = question({
+        id,
+        content: {
+          id, source: { filename: "source.pdf", page: 1 },
+          stem: [...prefix, { type: "image", assetId }],
+          choices: [], provenance: { method: "pdf-import" },
+          assets: [{
+            id: assetId, questionId: id, role: "question", filename: "figure.png",
+            mimeType: "image/png", checksum: `sha256:${"a".repeat(64)}`,
+          }],
+        },
+        attachments: [{
+          id: `attachment-${id}`, assetId, role: "exhibit",
+          blobKey: `blob-${id}`, fileName: "figure.png", mimeType: "image/png",
+          byteSize: 128, altText: "",
+          createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+        }],
+      });
+      return { ...base, analyses: [reviewed(base)] };
+    };
+    const original = makeVisual("q-layout-original");
+    const formatOnly = makeVisual("q-layout-format-only", [
+      { type: "text", text: "" },
+      { type: "rich_text", html: "<b></b>" },
+      { type: "equation" },
+      { type: "table", rows: [] },
+      { type: "divider" },
+    ]);
+    const whitespaceOnly = makeVisual("q-layout-whitespace-only", [
+      { type: "text", text: "   " },
+    ]);
+    const meaningful = makeVisual("q-layout-meaningful", [
+      { type: "text", text: "First inspect the table." },
+    ]);
+    expect([original, formatOnly, whitespaceOnly, meaningful].map(questionMappingStatus))
+      .toEqual(["ready", "ready", "ready", "ready"]);
+    expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(formatOnly));
+    expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(whitespaceOnly));
+    expect(questionVisualIdentity(original)).not.toBe(questionVisualIdentity(meaningful));
+    expect(conceptGroups([original, formatOnly, whitespaceOnly], documents)[0].uniqueQuestions).toBe(1);
+    expect(conceptGroups([original, meaningful], documents)[0].uniqueQuestions).toBe(2);
+  });
+
   it("uses only teaching that is reviewed and still fits", () => {
     const proposed = taught({ id: "q-2" }, { status: "proposed" });
     const stale = { ...taught({ id: "q-3" }), stem: "Reworded since." };
