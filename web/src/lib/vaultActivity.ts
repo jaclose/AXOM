@@ -25,6 +25,8 @@ export interface VaultWriteObservation {
 export const VAULT_WRITE_EVENT = "axom:vault-write";
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
+/** A post-startup workspace save was confirmed by this runtime, not inferred from shared metadata. */
+let currentRuntimeConfirmedWrite = false;
 let lastPersistedAt = 0;
 /** Only advertise quota-only in-memory save receipts with an active cross-tab invalidation channel. */
 let memoryOnlyConfirmedWrite = false;
@@ -38,18 +40,39 @@ const VAULT_STATUS_CHANNEL = "axom:vault-status";
 /** A missing hydration must not erase another tab's throttled, origin-wide
  * save marker. Remember ambiguity per tab and through same-tab reload only. */
 const HYDRATION_TOMBSTONE_KEY = `${STORAGE_KEYS.lastVaultWriteAt}:hydration-invalidated`;
-function readHydrationTombstone(): string | null {
+let hydrationSessionWritable: boolean | null = null;
+/** A readable sessionStorage can still reject writes. Verify both once per module. */
+function canPersistHydrationTombstone(): boolean {
+  if (hydrationSessionWritable !== null) return hydrationSessionWritable;
+  try {
+    const storage = window.sessionStorage;
+    const probe = `${HYDRATION_TOMBSTONE_KEY}:probe`;
+    const previous = storage.getItem(probe);
+    storage.setItem(probe, "1");
+    if (storage.getItem(probe) !== "1") throw new Error("sessionStorage write not retained");
+    if (previous === null) storage.removeItem(probe);
+    else storage.setItem(probe, previous);
+    hydrationSessionWritable = true;
+  } catch {
+    hydrationSessionWritable = false;
+  }
+  return hydrationSessionWritable;
+}
+/** undefined means tombstones cannot be trusted across a module reload. */
+function readHydrationTombstone(): string | null | undefined {
+  if (!canPersistHydrationTombstone()) return undefined;
   try { return window.sessionStorage.getItem(HYDRATION_TOMBSTONE_KEY); }
-  catch { return null; }
+  catch { hydrationSessionWritable = false; return undefined; }
 }
 function rememberHydrationTombstone(raw: string | null): void {
-  if (raw === null) return;
+  if (raw === null || !canPersistHydrationTombstone()) return;
   try { window.sessionStorage.setItem(HYDRATION_TOMBSTONE_KEY, raw); }
-  catch { /* The current runtime still fails closed. */ }
+  catch { hydrationSessionWritable = false; }
 }
 function clearHydrationTombstone(): void {
+  if (!canPersistHydrationTombstone()) return;
   try { window.sessionStorage.removeItem(HYDRATION_TOMBSTONE_KEY); }
-  catch { /* Optional status metadata only. */ }
+  catch { hydrationSessionWritable = false; }
 }
 let statusChannel: BroadcastChannel | null = null;
 function rawStoredMarker(): string | null {
@@ -73,6 +96,7 @@ function retireUnverifiableMemoryReceipt(): void {
   invalidatedMarkerValue = rawStoredMarker();
   statusInvalidated = true;
   memoryOnlyConfirmedWrite = false;
+  currentRuntimeConfirmedWrite = false;
   lastWrite = null;
   lastPersistedAt = 0;
   window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
@@ -103,6 +127,7 @@ function listenForCrossTabInvalidation(): void {
       lastWrite = null;
       lastPersistedAt = 0;
       memoryOnlyConfirmedWrite = false;
+      currentRuntimeConfirmedWrite = false;
       window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
     };
     // A partially initialized/throwing constructor must not count as coverage.
@@ -134,6 +159,7 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
   statusInvalidated = false;
   invalidatedMarkerValue = null;
   lastWrite = { at: now.toISOString(), target, version: WORKSPACE_WRITE_MARKER_VERSION, scope: "workspace" };
+  currentRuntimeConfirmedWrite = true;
   failingSince = null;
   // Keep the tiny localStorage marker current without hammering it on every
   // keystroke: at most once per second.
@@ -154,6 +180,7 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
       if (memoryOnlyConfirmedWrite) watchMemoryReceiptLifecycle();
       if (!memoryOnlyConfirmedWrite) {
         lastWrite = null;
+        currentRuntimeConfirmedWrite = false;
         // Reject an earlier valid marker: it describes an older workspace,
         // not the quota-only write that just completed. Do not throttle the
         // next confirmed write's attempt to restore persistent evidence.
@@ -184,6 +211,7 @@ export function invalidateVaultWrite(): void {
   lastWrite = null;
   lastPersistedAt = 0;
   memoryOnlyConfirmedWrite = false;
+  currentRuntimeConfirmedWrite = false;
   statusInvalidated = true;
   invalidatedMarkerValue = invalidatedRaw;
   clearHydrationTombstone();
@@ -214,6 +242,7 @@ export function invalidateVaultWriteIfUnchanged(observed: VaultWriteObservation)
   lastWrite = null;
   lastPersistedAt = 0;
   memoryOnlyConfirmedWrite = false;
+  currentRuntimeConfirmedWrite = false;
   statusInvalidated = true;
   invalidatedMarkerValue = observed.rawMarker;
   rememberHydrationTombstone(observed.rawMarker);
@@ -256,11 +285,20 @@ export function readLastVaultWrite(): VaultWriteRecord | null {
   listenForCrossTabInvalidation();
   const raw = rawStoredMarker();
   const tombstone = readHydrationTombstone();
+  if (tombstone === undefined) {
+    // Without durable tab-local tombstones, an old origin-wide marker could
+    // survive an unreadable hydration across module/page reload. Only a save
+    // confirmed in THIS runtime can establish a positive receipt.
+    if (!currentRuntimeConfirmedWrite || statusInvalidated) return null;
+    if (!memoryOnlyConfirmedWrite && !readStoredWorkspaceMarker()) return null;
+    return lastWrite;
+  }
   if (tombstone !== null) {
     if (raw === tombstone) {
       // A same-byte marker is ambiguous even if another tab saved new bytes.
       lastWrite = null;
       memoryOnlyConfirmedWrite = false;
+      currentRuntimeConfirmedWrite = false;
       statusInvalidated = true;
       invalidatedMarkerValue = tombstone;
       return null;
@@ -282,6 +320,7 @@ export function readLastVaultWrite(): VaultWriteRecord | null {
   if (lastWrite && memoryOnlyConfirmedWrite) return lastWrite;
   if (!stored) {
     lastWrite = null;
+    currentRuntimeConfirmedWrite = false;
     return null;
   }
   if (!lastWrite || Date.parse(stored.at) > Date.parse(lastWrite.at)) lastWrite = stored;
@@ -307,6 +346,7 @@ export function subscribeVaultWriteStatus(listener: () => void): () => void {
     lastWrite = null;
     lastPersistedAt = 0;
     memoryOnlyConfirmedWrite = false;
+    currentRuntimeConfirmedWrite = false;
     // Reconcile with the latest persisted value rather than the queued event.
     // When absent, a later valid renewal can be recognized even if Settings
     // unsubscribed before its event arrived.
