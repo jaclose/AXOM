@@ -1,5 +1,5 @@
 import type { Term, TrackerItem } from "./types";
-import type { PrimaryTrackerScope } from "./trackerFocus";
+import { normalizePrimaryScopes, type PrimaryTrackerScope } from "./trackerFocus";
 import { normalizeTrackerPath, trackerPathKey } from "./pathUtils";
 
 export type TermRenamePlan =
@@ -93,12 +93,27 @@ export function planTermRename(
     return slash === -1 ? next : `${next}${path.slice(slash)}`;
   };
 
+  const renamedScopes = primaryTrackerScopes?.map((scope) => belongsTo(scope.path, fromKey)
+    ? { ...scope, path: relabel(scope.path) } : scope);
+
+  // Focus is serialized and normalized during workspace hydration/import.
+  // Unlike tracker rows, normalizePrimaryScopes trims the end of the path.
+  // A raw historic focus ending in spaces or a slash could match its moved
+  // descendants *now* but stop matching after reload, changing study ranking.
+  // Preserve the original tracker path identities: reject such a rename
+  // rather than canonicalizing rows or silently widening the pinned scope.
+  if (renamedScopes?.some((scope, index) =>
+    belongsTo(primaryTrackerScopes![index].path, fromKey)
+    && normalizePrimaryScopes([scope])?.[0]?.path !== scope.path
+  )) {
+    return { ok: false, reason: "A pinned study focus would change after reload. Resolve its historical path before renaming." };
+  }
+
   return {
     ok: true,
     terms: terms.map((term) => term.id === termId ? { ...term, name: next } : term),
     tracker: tracker.map((item) => belongsTo(item.path, fromKey)
       ? { ...item, path: relabel(item.path) } : item),
-    primaryTrackerScopes: primaryTrackerScopes?.map((scope) => belongsTo(scope.path, fromKey)
-      ? { ...scope, path: relabel(scope.path) } : scope),
+    primaryTrackerScopes: renamedScopes,
   };
 }
