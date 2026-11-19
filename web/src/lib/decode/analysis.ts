@@ -43,8 +43,13 @@ const QUESTION_VISUAL_ROLES = new Set(["question", "stem", "choice"]);
  * An unverified image is deliberately not counted as a second instance.
  * Metadata is retained separately by questionSourceFingerprint, which
  * must still make prior reviewed teaching stale on replacement.
+ * Set includePlacement=false only for conservative checksum/crop matching
+ * when a legacy import lacks the original image block placement.
  */
-export function questionVisualIdentity(question: Pick<QuestionRecord, "content" | "attachments">): string {
+export function questionVisualIdentity(
+  question: Pick<QuestionRecord, "content" | "attachments">,
+  includePlacement = true,
+): string {
   const sourceImages = (question.content?.assets ?? [])
     .filter((asset) => QUESTION_VISUAL_ROLES.has(asset.role));
   const boundIds = new Set((question.content?.assets ?? []).map((asset) => asset.id));
@@ -84,10 +89,12 @@ export function questionVisualIdentity(question: Pick<QuestionRecord, "content" 
       }
     });
   };
-  scan(question.content?.stem ?? [], "stem");
-  for (const choice of question.content?.choices ?? []) scan(choice.blocks, `choice:${choice.label}`);
-  if (question.content?.choiceTable?.sourceImageAssetId) {
-    record(question.content.choiceTable.sourceImageAssetId, "choice-table");
+  if (includePlacement) {
+    scan(question.content?.stem ?? [], "stem");
+    for (const choice of question.content?.choices ?? []) scan(choice.blocks, `choice:${choice.label}`);
+    if (question.content?.choiceTable?.sourceImageAssetId) {
+      record(question.content.choiceTable.sourceImageAssetId, "choice-table");
+    }
   }
   const verified = sourceImages.map((asset) => JSON.stringify([
     asset.checksum!.trim().toLowerCase(),
