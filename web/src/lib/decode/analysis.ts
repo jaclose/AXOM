@@ -48,6 +48,10 @@ export function questionVisualIdentity(question: Pick<QuestionRecord, "content" 
   const sourceImages = (question.content?.assets ?? [])
     .filter((asset) => QUESTION_VISUAL_ROLES.has(asset.role));
   const boundIds = new Set((question.content?.assets ?? []).map((asset) => asset.id));
+  const sourceBindings = new Set((question.attachments ?? [])
+    .filter((attachment) => attachment.assetId
+      && (attachment.role === "exhibit" || QUESTION_VISUAL_ROLES.has(attachment.role ?? "")))
+    .map((attachment) => attachment.assetId));
   const unboundExhibits = (question.attachments ?? [])
     .filter((attachment) => (attachment.role === "exhibit" || QUESTION_VISUAL_ROLES.has(attachment.role ?? ""))
       && (!attachment.assetId || !boundIds.has(attachment.assetId)));
@@ -55,11 +59,15 @@ export function questionVisualIdentity(question: Pick<QuestionRecord, "content" 
   // Unverified is one conservative identity, regardless of locally allocated
   // blob/asset keys, file names, byte counts or image render roles.
   if (!sourceImages.length || unboundExhibits.length
-    || sourceImages.some((asset) => !/^sha256:[0-9a-f]{64}$/i.test(asset.checksum?.trim() ?? ""))) {
+    || sourceImages.some((asset) => !sourceBindings.has(asset.id)
+      || !/^sha256:[0-9a-f]{64}$/i.test(asset.checksum?.trim() ?? ""))) {
     return "unverified-figure";
   }
+  // Crop is a semantic tuple. JSON serialization of the raw object changes
+  // when equivalent fields arrive in a different property insertion order.
   const verified = sourceImages.map((asset) => JSON.stringify([
-    asset.checksum!.trim().toLowerCase(), asset.crop ?? null,
+    asset.checksum!.trim().toLowerCase(),
+    asset.crop ? [asset.crop.left, asset.crop.top, asset.crop.right, asset.crop.bottom] : null,
   ]));
   return JSON.stringify([...new Set(verified)].sort());
 }
