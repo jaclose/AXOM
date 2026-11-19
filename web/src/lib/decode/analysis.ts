@@ -8,7 +8,7 @@ import { normalizeQuestionAnalyses } from "./normalize";
 import type { QuestionAnalysis } from "./types";
 
 type SourceBearing = Pick<QuestionRecord,
-  "id" | "stem" | "options" | "correctKey" | "explanation" | "choiceRationales" | "objective" | "sourceDocumentId" | "sourcePage" | "extraction">;
+  "id" | "stem" | "options" | "correctKey" | "explanation" | "choiceRationales" | "objective" | "sourceDocumentId" | "sourcePage" | "extraction" | "content" | "attachments">;
 type PageSource = Pick<SourceDocument, "id" | "checksum" | "pageTexts">;
 
 function hash(value: unknown): string {
@@ -34,6 +34,57 @@ export function questionSourcePages(question: Pick<QuestionRecord, "sourcePage" 
   return [...new Set(pages)].sort((a, b) => a - b);
 }
 
+const QUESTION_VISUAL_ROLES = new Set(["question", "stem", "choice"]);
+
+/**
+ * Canonical displayed-figure identity for concept evidence. Repeated text
+ * with the same source-image checksum is still one question; another actual
+ * figure must not be collapsed into that wording. An unknown checksum uses
+ * its explicit asset identity, never a guessed match based on filename.
+ * Learner note images and post-answer answer-reveal assets are not question
+ * wording evidence.
+ */
+export function questionVisualIdentity(question: Pick<QuestionRecord, "content" | "attachments">): string {
+  const sourceImages = (question.content?.assets ?? [])
+    .filter((asset) => QUESTION_VISUAL_ROLES.has(asset.role))
+    .map((asset) => [asset.role, asset.checksum?.toLowerCase() ?? `asset:${asset.id}`, asset.crop ?? null]);
+  const boundIds = new Set((question.content?.assets ?? []).map((asset) => asset.id));
+  const standaloneExhibits = (question.attachments ?? [])
+    .filter((attachment) => (attachment.role === "exhibit" || QUESTION_VISUAL_ROLES.has(attachment.role ?? ""))
+      && (!attachment.assetId || !boundIds.has(attachment.assetId)))
+    .map((attachment) => [attachment.role, attachment.blobKey, attachment.mimeType, attachment.byteSize]);
+  return JSON.stringify([sourceImages, standaloneExhibits]);
+}
+
+/**
+ * Only source-linked exhibits/figures are source-bearing; adding an image
+ * solely to the learner's personal notes must not revoke reviewed teaching.
+ * This becomes part of the fingerprint only when real source media exists,
+ * retaining existing fingerprints for text-only questions after upgrades.
+ */
+function sourceVisualRevision(question: SourceBearing): unknown[] | undefined {
+  const content = question.content;
+  const associated = (question.attachments ?? []).filter((attachment) => (
+    Boolean(attachment.assetId) || Boolean(attachment.role)
+  ));
+  if (!content?.assets.length && associated.length === 0) return undefined;
+  return [
+    content ? [
+      content.source,
+      content.stem,
+      content.choices,
+      content.choiceTable,
+      content.explanation,
+      content.correctAnswer,
+      content.assets,
+    ] : null,
+    associated.map((attachment) => [
+      attachment.id, attachment.assetId, attachment.role, attachment.blobKey,
+      attachment.mimeType, attachment.byteSize, attachment.width, attachment.height,
+    ]),
+  ];
+}
+
 /**
  * What an analysis was written about: the question's wording, its key, its
  * explanation, and the text of the pages it came from. Only source-bearing
@@ -55,6 +106,7 @@ export function questionSourceFingerprint(question: SourceBearing, document?: Pa
 const FINGERPRINTS = new WeakMap<object, { source: PageSource | undefined; value: string }>();
 
 function computeFingerprint(question: SourceBearing, source: PageSource | undefined): string {
+  const visualRevision = sourceVisualRevision(question);
   return hash([
     question.id,
     question.stem,
@@ -71,6 +123,7 @@ function computeFingerprint(question: SourceBearing, source: PageSource | undefi
     question.extraction?.explanationSourceSnippet,
     source?.checksum,
     questionSourcePages(question).map((page) => [page, source?.pageTexts?.[page - 1]]),
+    ...(visualRevision === undefined ? [] : [visualRevision]),
   ]);
 }
 
