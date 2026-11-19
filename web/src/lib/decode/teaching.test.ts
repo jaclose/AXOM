@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SourceDocument } from "../library";
-import type { QuestionRecord } from "../questions";
-import { questionSourceFingerprint } from "./analysis";
+import { questionMappingStatus, type QuestionRecord } from "../questions";
+import { questionSourceFingerprint, questionVisualIdentity } from "./analysis";
 import { conceptGroups, questionsWithoutTeaching, teachingView } from "./teaching";
 import type { QuestionAnalysis } from "./types";
 
@@ -224,6 +224,11 @@ describe("questions that teach the same rule", () => {
     const missing = visual("q-missing-image", "b", "missing");
     const mismatched = visual("q-mismatched-image", "c", "mismatched");
     const unreviewed = visual("q-unreviewed-image", "d", "linked", false);
+    expect([ready, missing, mismatched, unreviewed].map(questionMappingStatus))
+      .toEqual(["ready", "unresolved", "unresolved", "review-suggested"]);
+    expect(questionVisualIdentity(ready)).not.toBe("unverified-figure");
+    expect(questionVisualIdentity(missing)).toBe("unverified-figure");
+    expect(questionVisualIdentity(mismatched)).toBe("unverified-figure");
     const [group] = conceptGroups([ready, missing, mismatched, unreviewed], documents);
     expect(group.questionIds).toEqual(["q-ready-image"]);
     expect(group.uniqueQuestions).toBe(1);
@@ -255,6 +260,8 @@ describe("questions that teach the same rule", () => {
     const a = make("q-crop-a", { left: 0.1, top: 0.2, right: 0.9, bottom: 0.8 });
     const b = make("q-crop-b", { bottom: 0.8, right: 0.9, top: 0.2, left: 0.1 });
     const changed = make("q-crop-changed", { left: 0.1, top: 0.2, right: 0.7, bottom: 0.8 });
+    expect(questionVisualIdentity(a)).toBe(questionVisualIdentity(b));
+    expect(questionVisualIdentity(changed)).not.toBe(questionVisualIdentity(a));
     const [equivalent] = conceptGroups([a, b], documents);
     expect(equivalent.questionIds).toEqual(["q-crop-a", "q-crop-b"]);
     expect(equivalent.uniqueQuestions).toBe(1);
