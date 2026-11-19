@@ -22,6 +22,7 @@ import {
   validateQuestionAttachmentFile,
   validateMissingQuestionAttachmentFile,
   type QuestionImageAttachment,
+  type QuestionAttachmentBlobRecord,
 } from "./questionAttachments";
 import { DB_NAME, DB_VERSION, STORE_NAME, BACKUP_STORE_NAME, ATTACHMENT_STORE_NAME, ensureVaultStores } from "./localVault";
 
@@ -35,6 +36,20 @@ function deleteDatabase(name: string): Promise<void> {
 }
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+
+// Actual one-pixel PNGs, unlike synthetic header-only fixtures, for recovery
+// paths that must prove a stored image can be decoded before reporting a skip.
+const VALID_RED_PNG = base64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==")!;
+const VALID_BLUE_PNG = base64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/5ncLrgAAAABJRU5ErkJggg==")!;
+function stubValidRecoveryImageDecode(): void {
+  vi.stubGlobal("createImageBitmap", vi.fn(async (blob: Blob) => {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const known = [VALID_RED_PNG, VALID_BLUE_PNG].some(expected =>
+      expected.byteLength === bytes.byteLength && expected.every((value, index) => value === bytes[index]));
+    if (!known) throw new Error("Image decoding failed");
+    return { width: 1, height: 1, close: vi.fn() };
+  }));
+}
 
 function pngFile(name = "figure.png", bytes: Uint8Array = PNG_BYTES): File {
   return new File([bytes.buffer as ArrayBuffer], name, { type: "image/png" });
@@ -410,10 +425,14 @@ describe("portable backup payloads", () => {
   it("same id, different bytes: the payload wins only when at least as new (deterministic)", async () => {
     const older = "2026-07-17T09:00:00.000Z";
     const newer = "2026-07-17T12:00:00.000Z";
-    await putQuestionAttachmentBlob("attachment-c", { blob: new Blob(["current"]), mimeType: "image/png", byteSize: 7, questionId: "q1", updatedAt: newer });
-    const meta = metadata({ id: "attachment-c", updatedAt: older });
+    stubValidRecoveryImageDecode();
+    await putQuestionAttachmentBlob("attachment-c", {
+      blob: new Blob([VALID_RED_PNG.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png", byteSize: VALID_RED_PNG.byteLength, questionId: "q1", updatedAt: newer,
+    });
+    const meta = metadata({ id: "attachment-c", updatedAt: older, byteSize: VALID_RED_PNG.byteLength });
     const skipped = await restoreQuestionAttachmentPayloads(
-      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["imported"])) }],
+      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["olddata"])) }],
       [{ id: "q1", attachments: [meta] }],
     );
     expect(skipped).toEqual({ restored: 0, skipped: 1 });
@@ -426,6 +445,139 @@ describe("portable backup payloads", () => {
     expect(won.restored).toBe(1);
     const record = await getQuestionAttachmentBlob("attachment-c");
     expect(await record!.blob.text()).toBe("imported");
+  });
+
+  it("validates surviving question metadata before skipping a newer legacy image", async () => {
+    const meta = metadata({
+      id: "legacy-newer-conflicting-source",
+      byteSize: 4,
+      updatedAt: "2026-07-17T14:00:00.000Z",
+    });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["KEEP"], { type: "image/png" }),
+      mimeType: "image/png", byteSize: 4,
+      questionId: "original-question", updatedAt: "2026-07-17T15:00:00.000Z",
+    });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, mimeType: "image/jpeg", questionId: "q1", base64: btoa("OLD!") }],
+      [{ id: "q1", attachments: [meta] }],
+    )).rejects.toThrow("surviving question metadata");
+    const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(retained?.updatedAt).toBe("2026-07-17T15:00:00.000Z");
+    expect(await retained!.blob.text()).toBe("KEEP");
+  });
+
+  it("rejects an unreadable newer local legacy image instead of silently reporting it as skipped", async () => {
+    const newer = "2026-07-17T15:00:00.000Z";
+    const older = "2026-07-17T14:00:00.000Z";
+    const defects: Array<{ label: string; blob: Blob | undefined; mimeType: QuestionAttachmentBlobRecord["mimeType"]; byteSize: number }> = [
+      { label: "zero bytes", blob: new Blob([]), mimeType: "image/png", byteSize: 4 },
+      { label: "truncated bytes", blob: new Blob(["AB"]), mimeType: "image/png", byteSize: 4 },
+      { label: "missing Blob", blob: undefined, mimeType: "image/png", byteSize: 4 },
+      { label: "wrong Blob MIME", blob: new Blob(["NEW!"], { type: "image/jpeg" }), mimeType: "image/png", byteSize: 4 },
+    ];
+    for (const [index, defect] of defects.entries()) {
+      const meta = metadata({ id: `legacy-newer-bad-${index}`, byteSize: 4, updatedAt: older });
+      await putQuestionAttachmentBlob(meta.blobKey, {
+        blob: defect.blob as Blob,
+        mimeType: defect.mimeType,
+        byteSize: defect.byteSize,
+        questionId: "q1",
+        updatedAt: newer,
+      });
+      await expect(restoreQuestionAttachmentPayloads(
+        [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+        [{ id: "q1", attachments: [meta] }],
+      ), defect.label).rejects.toThrow("newer stored image");
+      const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+      expect(retained?.updatedAt).toBe(newer);
+      expect(retained?.blob?.size).toBe(defect.blob?.size);
+    }
+  });
+
+  it("rejects a complete but incompatible newer image descriptor instead of falsely skipping it", async () => {
+    const newer = "2026-07-17T15:00:00.000Z";
+    const older = "2026-07-17T14:00:00.000Z";
+    const defects: Array<{ name: string; mimeType: QuestionAttachmentBlobRecord["mimeType"]; content: string }> = [
+      { name: "newer MIME differs", mimeType: "image/jpeg", content: "NEW!" },
+      { name: "newer length differs", mimeType: "image/png", content: "NEW!!" },
+    ];
+    for (const [index, defect] of defects.entries()) {
+      const meta = metadata({ id: `legacy-newer-mismatch-${index}`, byteSize: 4, updatedAt: older });
+      await putQuestionAttachmentBlob(meta.blobKey, {
+        blob: new Blob([defect.content], { type: defect.mimeType }),
+        mimeType: defect.mimeType,
+        byteSize: defect.content.length,
+        questionId: "q1",
+        updatedAt: newer,
+      });
+      await expect(restoreQuestionAttachmentPayloads(
+        [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+        [{ id: "q1", attachments: [meta] }],
+      ), defect.name).rejects.toThrow("newer stored image");
+      const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+      expect(retained).toMatchObject({
+        mimeType: defect.mimeType,
+        byteSize: defect.content.length,
+        updatedAt: newer,
+      });
+      expect(await retained!.blob.text()).toBe(defect.content);
+    }
+  });
+
+  it("skips only a decodable newer image, preserving its bytes and provenance", async () => {
+    stubValidRecoveryImageDecode();
+    const newer = "2026-07-17T15:00:00.000Z";
+    const meta = metadata({ id: "legacy-newer-complete", byteSize: VALID_RED_PNG.byteLength, updatedAt: "2026-07-17T14:00:00.000Z" });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob([VALID_RED_PNG.buffer as ArrayBuffer], { type: "image/png" }),
+      mimeType: "image/png",
+      byteSize: VALID_RED_PNG.byteLength,
+      questionId: "original-question",
+      updatedAt: newer,
+    });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+      [{ id: "q1", attachments: [meta] }],
+    )).resolves.toEqual({ restored: 0, skipped: 1 });
+    const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(retained).toMatchObject({ updatedAt: newer, questionId: "original-question" });
+    expect([...new Uint8Array(await retained!.blob.arrayBuffer())]).toEqual([...VALID_RED_PNG]);
+    expect(createImageBitmap).toHaveBeenCalled();
+  });
+
+  it("rejects byte-readable PNG-shaped text when browser decoding fails instead of certifying a skip", async () => {
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => { throw new Error("Not a valid image"); }));
+    const newer = "2026-07-17T15:00:00.000Z";
+    const meta = metadata({ id: "legacy-newer-invalid-png", byteSize: 4, updatedAt: "2026-07-17T14:00:00.000Z" });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["NEW!"], { type: "image/png" }), mimeType: "image/png", byteSize: 4,
+      questionId: "original-question", updatedAt: newer,
+    });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+      [{ id: "q1", attachments: [meta] }],
+    )).rejects.toThrow("newer stored image");
+    const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(await retained!.blob.text()).toBe("NEW!");
+    expect(retained).toMatchObject({ updatedAt: newer, questionId: "original-question" });
+  });
+
+  it("fails closed when image decoding is unavailable, preserving a valid newer PNG", async () => {
+    vi.stubGlobal("createImageBitmap", undefined);
+    const newer = "2026-07-17T15:00:00.000Z";
+    const meta = metadata({ id: "legacy-newer-no-decoder", byteSize: VALID_RED_PNG.byteLength, updatedAt: "2026-07-17T14:00:00.000Z" });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob([VALID_RED_PNG.buffer as ArrayBuffer], { type: "image/png" }), mimeType: "image/png",
+      byteSize: VALID_RED_PNG.byteLength, questionId: "original-question", updatedAt: newer,
+    });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+      [{ id: "q1", attachments: [meta] }],
+    )).rejects.toThrow("newer stored image");
+    const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect([...new Uint8Array(await retained!.blob.arrayBuffer())]).toEqual([...VALID_RED_PNG]);
+    expect(retained?.updatedAt).toBe(newer);
   });
 
   it("rejects same-revision legacy image collisions instead of treating different bytes as restored", async () => {
@@ -519,20 +671,21 @@ describe("portable backup payloads", () => {
       blob: new Blob(["BASE"]), mimeType: "image/png", byteSize: 4,
       questionId: "q1", updatedAt: initial,
     });
-    const restore = (updatedAt: string, content: string) => {
-      const meta = metadata({ id: key, byteSize: 4, updatedAt });
+    stubValidRecoveryImageDecode();
+    const restore = (updatedAt: string, bytes: Uint8Array) => {
+      const meta = metadata({ id: key, byteSize: bytes.byteLength, updatedAt });
       return restoreQuestionAttachmentPayloads(
-        [{ ...meta, questionId: "q1", base64: btoa(content) }],
+        [{ ...meta, questionId: "q1", base64: btoa(String.fromCharCode(...bytes)) }],
         [{ id: "q1", attachments: [meta] }],
       );
     };
     // Both calls are made before either awaits a storage read. Even if a
     // newer writer commits first, an older writer must never downgrade it.
-    const results = await Promise.all([restore(newer, "NEW2"), restore(older, "OLD1")]);
+    const results = await Promise.all([restore(newer, VALID_RED_PNG), restore(older, VALID_BLUE_PNG)]);
     expect(results.every(result => result.restored + result.skipped === 1)).toBe(true);
     const stored = await getQuestionAttachmentBlob(key, { localOnly: true });
-    expect(stored).toMatchObject({ updatedAt: newer, byteSize: 4 });
-    expect(await stored!.blob.text()).toBe("NEW2");
+    expect(stored).toMatchObject({ updatedAt: newer, byteSize: VALID_RED_PNG.byteLength });
+    expect([...new Uint8Array(await stored!.blob.arrayBuffer())]).toEqual([...VALID_RED_PNG]);
   });
 
   it("does not overwrite a concurrent same-revision legacy image with different bytes", async () => {
