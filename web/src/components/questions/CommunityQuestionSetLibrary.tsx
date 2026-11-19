@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BookOpen, Download, Heart, Play, RefreshCw, Search } from "lucide-react";
 import type { QuestionSet } from "../../lib/library";
 import { useAccount } from "../../lib/account/accountStore";
-import { readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
+import { importSharedQuestionSet, readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
 import {
   authorizeQuestionSetLibraryImport, loadQuestionSetLibraryPreview, searchQuestionSetLibrary, setQuestionSetLibraryLike,
   type LibraryQuestionSet, type LibraryQuestionSetPreview,
@@ -473,6 +473,23 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       || memberIds.size !== set.questionIds.length
       || set.questionIds.some(id => found.get(id) !== 1)) {
       setPreviewError("This saved set has missing or duplicate question records. Recover the original question IDs in Question Bank before practicing. Reimport will not replace your attempts.");
+      return;
+    }
+    // Reuse the side-effect-free canonical import identity check. The receipt
+    // and original ID alone do not prove the reviewed answer/source survives
+    // a partial restore. Learner notes, flags and attempts are ignored.
+    try {
+      const plan = importSharedQuestionSet({
+        snapshot: activePreview.snapshot,
+        identity: { shareId: activePreview.id, contentDigest: activePreview.contentDigest },
+        existingQuestions: bank,
+        existingSets: store.questionSets,
+      });
+      if (!plan.alreadyImported || plan.set.id !== set.id) {
+        throw new Error("The saved receipt no longer identifies the reviewed import.");
+      }
+    } catch {
+      setPreviewError("This saved set's reviewed question text, options, answer keys, explanations, sources or order no longer match the approved publication. Restore the original records in Question Bank before practicing; attempts are unchanged.");
       return;
     }
     cancelPendingPreview();
