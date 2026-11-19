@@ -10,7 +10,7 @@ import type { QuestionSet } from "../../lib/library";
 
 const mock = vi.hoisted(() => ({
   sets: [] as QuestionSet[],
-  questions: [] as { id: string }[],
+  questions: [] as QuestionRecord[],
   accountId: "account-1", observers: new Set<(state: { user: { id: string } }) => void>(), search: vi.fn(), preview: vi.fn(), authorize: vi.fn(), like: vi.fn(), commit: vi.fn(), owned: vi.fn(), submit: vi.fn(), withdraw: vi.fn(),
 }));
 vi.mock("../../lib/account/accountStore", () => {
@@ -47,7 +47,7 @@ const summary = {
 const snapshot = {
   shareFormatVersion: 1, title: summary.title, tags: ["sample"], orderedQuestionIds: ["shared-question-1"],
   questions: [{ id: "shared-question-1", stem: "Which synthetic answer is supported?",
-    options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }], correctKey: "B", tags: [], citation: "Synthetic source" }],
+    options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }], correctKey: "B", correctAnswerText: "Second", tags: [], citation: "Synthetic source" }],
   createdAt: "2026-11-01T12:00:00Z", copyrightNotice: "Synthetic test content",
 };
 
@@ -72,12 +72,20 @@ describe("Community Question Set Library", () => {
     tags: [], parserWarnings: [], aiEnhanced: false, createdAt: "2026-11-09T12:00:00Z",
     importProvenance: { version: 1, shareId: summary.id, contentDigest: "a".repeat(64) },
   };
+  // Match actual saved imported source content; an ID-only mock cannot catch
+  // incorrect answers silently bound to the original learner attempts.
+  const savedQuestion: QuestionRecord = {
+    id: "local-q1", source: "imported", stem: snapshot.questions[0].stem,
+    options: snapshot.questions[0].options.map(choice => ({ ...choice })),
+    correctKey: "B", correctAnswerText: "Second", tags: [], citation: "Synthetic source",
+    status: "unseen", attempts: [], createdAt: "2026-11-09T12:00:00Z", updatedAt: "2026-11-09T12:00:00Z",
+  };
 
   it("opens the exact saved copy directly in practice after a cloud import", async () => {
     const onPractice = vi.fn();
     mock.commit.mockImplementationOnce(async () => {
       mock.sets = [savedSet];
-      mock.questions = [{ id: "local-q1" }];
+      mock.questions = [savedQuestion];
       return { ok: true, questionSetId: savedSet.id };
     });
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
@@ -103,7 +111,7 @@ describe("Community Question Set Library", () => {
 
   it.each([
     ["missing", []],
-    ["duplicate", [{ id: "local-q1" }, { id: "local-q1" }]],
+    ["duplicate", [savedQuestion, savedQuestion]],
   ])("does not launch practice with %s imported question records after restoration", async (_failure, questions) => {
     mock.sets = [savedSet];
     mock.questions = questions;
@@ -129,7 +137,7 @@ describe("Community Question Set Library", () => {
       importProvenance: { version: 1, shareId: summary.id, contentDigest: otherDigest },
     };
     mock.sets = [savedSet, conflictingSet];
-    mock.questions = [{ id: "local-q1" }];
+    mock.questions = [savedQuestion];
     const onPractice = vi.fn();
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
     fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
@@ -137,11 +145,44 @@ describe("Community Question Set Library", () => {
     expect(onPractice).not.toHaveBeenCalled();
     expect((await screen.findByRole("alert")).textContent).toContain("Multiple saved copies");
     expect(mock.sets).toEqual([savedSet, conflictingSet]);
-    expect(mock.questions).toEqual([{ id: "local-q1" }]);
+    expect(mock.questions).toEqual([savedQuestion]);
     // Preserve original IDs, learner attempts and import receipts. A
     // click-time ambiguity must not trigger a replacement cloud import.
     expect(mock.commit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+  });
+
+  it.each([
+    ["a changed reviewed answer key", { ...savedQuestion, correctKey: "A", correctAnswerText: "First" }],
+    ["a changed clinical stem", { ...savedQuestion, stem: "An unrelated clinical question?" }],
+    ["reordered answer options", { ...savedQuestion, options: [...savedQuestion.options].reverse() }],
+    ["an unreviewed explanation", { ...savedQuestion, explanation: "An unsourced replacement rationale." }],
+    ["a changed source citation", { ...savedQuestion, citation: "Different unreviewed source" }],
+  ])("refuses practice when restored content has %s despite the original question ID", async (_change, changedQuestion) => {
+    mock.sets = [savedSet];
+    mock.questions = [changedQuestion];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect((await screen.findByRole("alert")).textContent).toContain("no longer match the approved publication");
+    expect(mock.sets).toEqual([savedSet]);
+    expect(mock.questions).toEqual([changedQuestion]);
+    expect(mock.commit).not.toHaveBeenCalled();
+  });
+
+  it("preserves learner-owned notes and flags when reviewed question content is intact", async () => {
+    const annotatedQuestion = { ...savedQuestion, notes: "Keep my private reasoning", marked: true };
+    mock.sets = [savedSet];
+    mock.questions = [annotatedQuestion];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect(onPractice).toHaveBeenCalledWith(savedSet);
+    expect(mock.questions).toEqual([annotatedQuestion]);
+    expect(mock.commit).not.toHaveBeenCalled();
   });
 
   it("searches approved listings, opens a safe preview, imports, and likes", async () => {
