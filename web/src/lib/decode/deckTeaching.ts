@@ -14,7 +14,7 @@
 // ===========================================================================
 import { readSlideDeck, type DeckQuestion } from "../deckPages";
 import type { SourceDocument } from "../library";
-import type { QuestionRecord } from "../questions";
+import { questionMappingStatus, type QuestionRecord } from "../questions";
 import { questionSourceFingerprint } from "./analysis";
 import { ANALYSIS_LIMITS, type DistractorNote, type QuestionAnalysis, type SourceTrace } from "./types";
 
@@ -206,6 +206,8 @@ export function sourceTeachingProposals(
   for (const question of own) perPage.set(question.sourcePage!, (perPage.get(question.sourcePage!) ?? 0) + 1);
 
   return own.flatMap((question) => {
+    // Answer/teaching slides cannot adjudicate a key the canonical importer still holds.
+    if (questionMappingStatus(question) !== "ready") return [];
     const place = places.get(question.sourcePage!);
     if (!place || perPage.get(question.sourcePage!) !== 1) return [];
     const fingerprint = questionSourceFingerprint(question, document);
