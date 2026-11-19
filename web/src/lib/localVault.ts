@@ -742,6 +742,9 @@ const vaultStorage: StateStorage = {
       return newer.value;
     }
 
+    // An unmarked legacy localStorage mirror is not proof that IndexedDB is
+    // empty. A transient read failure must never become a write authorization.
+    let verifiedVaultEmpty = false;
     try {
       const value = await readVaultRecord(name, openExistingVault);
       if (value) {
@@ -757,18 +760,48 @@ const vaultStorage: StateStorage = {
           return scoped;
         }
       }
+      // Both the primary and the active-profile snapshot were read successfully
+      // and neither exists. Only this state may migrate an unmarked legacy copy.
+      verifiedVaultEmpty = true;
     } catch {
-      // Fall back below.
+      // An inaccessible vault may still hold newer bytes. Keep any old mirror
+      // readable below, but do not promote it until an empty vault is verified.
     }
 
     const fallback = fallbackStore?.getItem(name) ??
       fallbackStore?.getItem(scopedStateKey(name, fallbackStore?.getItem(activeUserKey(name)) ?? "")) ??
       null;
-    if (fallback) {
+    if (fallback && !verifiedVaultEmpty) {
+      // A transient read error may clear immediately. Prefer the authoritative
+      // live vault over an unmarked, potentially stale mirror if it recovers.
+      // If it stays unavailable, return the mirror without writing it to IDB.
       try {
-        await writeVault(name, fallback, persistedUserId(fallback));
-      } catch {
-        // localStorage still has the data; no need to interrupt app load.
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* Keep the legacy copy for a future verified recovery. */ }
+    }
+    if (fallback && verifiedVaultEmpty) {
+      try {
+        // The validation above happens before this transaction. A concurrent
+        // tab may save in between, so compare against an EMPTY vault atomically.
+        await writeVault(name, fallback, persistedUserId(fallback), {
+          fingerprints: [null],
+          latchConflict: false,
+        });
+      } catch (promotionError) {
+        if (isVaultConflictError(promotionError)) {
+          try {
+            const current = await readVaultSnapshot(name);
+            if (current !== null) {
+              rememberVaultSnapshot(name, current);
+              return current;
+            }
+          } catch { /* Keep the legacy mirror if the winner is still unreadable. */ }
+        }
+        // Keep the mirror for recovery on any failed migration.
       }
     }
     // A delayed empty or inaccessible hydration must not erase another tab's
