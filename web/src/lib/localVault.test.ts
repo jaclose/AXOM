@@ -431,7 +431,90 @@ describe("IndexedDB-first local vault", () => {
     }
   });
 
-  it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
+  it("never automatically deletes a marked workspace fallback after an IndexedDB promotion", async () => {
+    // Web Storage compares and removes are separate cross-tab operations.
+    // If cleanup starts removing keys, another tab may acknowledge B between
+    // the final read and the first removal. The only safe automatic policy is
+    // retaining the recovery copy until an explicit reconciliation.
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] },
+      version: 34,
+    });
+    const acknowledged = snapshot("unique-offline-question");
+    await localVaultStorage.setItem(key, snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, acknowledged);
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+
+    const remove = vi.spyOn(storage, "removeItem");
+    try {
+      expect(await localVaultStorage.getItem(key)).toBe(acknowledged);
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBe(acknowledged);
+      } finally {
+        db.close();
+      }
+      expect(remove).not.toHaveBeenCalledWith(markerKey);
+      expect(remove).not.toHaveBeenCalledWith(key);
+      expect(remove).not.toHaveBeenCalledWith(scopedKey);
+      expect(storage.getItem(key)).toBe(acknowledged);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(scopedKey)).toBe(acknowledged);
+    } finally {
+      remove.mockRestore();
+    }
+  });
+
+  it("fails closed on reload when a retained acknowledged fallback predates a newer vault save", async () => {
+    // A nondestructive safety fence must not silently restore the older
+    // fallback over a later successful IndexedDB revision. Until explicit
+    // dual-version recovery exists, the user must reconcile the two copies.
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] },
+      version: 34,
+    });
+    const original = snapshot("initial");
+    const offline = snapshot("acknowledged-offline");
+    const advanced = snapshot("newer-indexeddb");
+    await localVaultStorage.setItem(key, original);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, offline);
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(offline);
+    await localVaultStorage.setItem(key, advanced);
+    await flushLocalVaultWrites();
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(advanced);
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+    db.close();
+
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(advanced);
+    expect(readVaultWriteFailure()).not.toBeNull();
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("unreconciled-edit"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    const preserved = await openCurrentVault();
+    expect(await getDirect(preserved, key)).toBe(advanced);
+    preserved.close();
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+  });
+
+  it("retains an acknowledged fallback even after matching bytes become durable", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
     const snapshot = (label: string) => JSON.stringify({ state: {
@@ -448,8 +531,8 @@ describe("IndexedDB-first local vault", () => {
 
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("same-revision"));
     expect(await getDirect(db, key)).toBe(snapshot("same-revision"));
-    expect(localStorage.getItem(key)).toBeNull();
-    expect(localStorage.getItem(markerKey)).toBeNull();
+    expect(localStorage.getItem(key)).toBe(snapshot("same-revision"));
+    expect(localStorage.getItem(markerKey)).not.toBeNull();
     db.close();
   });
 
@@ -685,13 +768,11 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(key)).toBe(latest);
     oldConnection.close();
 
-    // The next read promotes the fallback only after the v4 barrier can land.
+    // Promotion requires the v5 barrier, but cannot safely remove an
+    // acknowledged fallback: a second tab may write between check and delete.
     expect(await localVaultStorage.getItem(key)).toBe(latest);
-    await waitFor(async () => {
-      await localVaultStorage.getItem(key);
-      return localStorage.getItem(key) === null;
-    });
-    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(key)).toBe(latest);
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     const upgraded = await openCurrentVault();
     expect(upgraded.version).toBe(DB_VERSION);
     expect(JSON.parse((await getDirect(upgraded, key))!)).toMatchObject({
@@ -914,12 +995,13 @@ describe("a save that could not reach IndexedDB", () => {
     vi.stubGlobal("indexedDB", fakeIndexedDb);
 
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
-    // Once the vault is writable the copy moves across and the fallback goes.
-    await waitFor(async () => {
-      await localVaultStorage.getItem(key);
-      return localStorage.getItem(key) === null;
-    });
-    expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+    // Once IndexedDB recovers the copy is durably promoted, while the
+    // acknowledged fallback remains available for cross-tab reconciliation.
+    const promoted = await openCurrentVault();
+    expect(await getDirect(promoted, key)).toBe(snapshot("newer"));
+    promoted.close();
+    expect(localStorage.getItem(key)).toBe(snapshot("newer"));
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
   });
 
@@ -937,11 +1019,14 @@ describe("a save that could not reach IndexedDB", () => {
     expect(localStorage.getItem(key)).toBe(snapshot("third"));
     vi.stubGlobal("indexedDB", fakeIndexedDb);
 
-    // Once IndexedDB is available the vault takes over again.
-    await waitFor(async () => {
-      await localVaultStorage.setItem(key, snapshot("fourth"));
-      return localStorage.getItem(key) === null;
-    });
+    // A resumed IndexedDB save wins without destroying the earlier fallback.
+    await localVaultStorage.setItem(key, snapshot("fourth"));
+    await flushLocalVaultWrites();
+    const resumed = await openCurrentVault();
+    expect(await getDirect(resumed, key)).toBe(snapshot("fourth"));
+    resumed.close();
+    expect(localStorage.getItem(key)).toBe(snapshot("third"));
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("fourth"));
   });
 
@@ -1321,14 +1406,6 @@ describe("v5-preserving save receipt integration", () => {
     v5.close();
   });
 });
-
-async function waitFor(check: () => Promise<boolean>, attempts = 20): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (await check()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("Condition was not met in time.");
-}
 
 function putDirect(db: IDBDatabase, key: string, value: string): Promise<void> {
   return new Promise((resolve, reject) => {

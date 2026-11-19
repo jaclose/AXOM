@@ -701,7 +701,31 @@ function clearFallbackCopy(
   userId: string,
   expected: FallbackCleanupSnapshot | null,
 ): void {
-  // Optional cleanup must not make an already confirmed IDB save fail.
+  // An acknowledged workspace fallback may contain the only copy of edits
+  // saved by another tab immediately AFTER the checks below but BEFORE any
+  // removeItem call. Web Storage has no compare-and-delete transaction, and
+  // IndexedDB success cannot authorize deleting bytes written by another tab.
+  // Retain workspace recovery copies until an explicit, user-reviewed recovery
+  // or pruning operation can reconcile their revisions. This is a fail-closed
+  // durability policy: a stale retained marker may require manual reconciliation
+  // before subsequent saves, but must never silently lose unique edits.
+  if (observesWorkspace(name)) {
+    // Preserve the historical lightweight profile locator only when there is
+    // no acknowledged generic fallback to reassign. This is metadata, not
+    // permission to delete a different tab's recovery payload or marker.
+    if (fallbackStore && userId && expected?.value === null && expected.marker === null) {
+      try {
+        if (fallbackStore.getItem(name) === null
+          && fallbackStore.getItem(fallbackMarkerKey(name)) === null
+          && (!fallbackStore.getItem(activeUserKey(name))
+            || fallbackStore.getItem(activeUserKey(name)) === userId)) {
+          fallbackStore.setItem(activeUserKey(name), userId);
+        }
+      } catch { /* Optional locator; never misreport a confirmed IndexedDB save. */ }
+    }
+    return;
+  }
+  // Optional cleanup of non-workspace cache must not make a confirmed IDB save fail.
   if (!fallbackStore || !expected) return;
   try {
     if (
