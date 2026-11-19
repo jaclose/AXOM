@@ -59,6 +59,70 @@ describe("IndexedDB-first local vault", () => {
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("first tab edit"));
   });
 
+  it.each(["single-record", "chunked"] as const)(
+    "does not resurrect a deleted %s workspace from a stale second tab",
+    async (layout) => {
+      const key = STORAGE_KEYS.persistedState;
+      const rawText = layout === "chunked" ? "source ".repeat(180_000) : "short";
+      const snapshot = (label: string) => JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: label }], rawText },
+        version: 34,
+      });
+      const original = snapshot("original-question");
+      const staleEdit = snapshot("stale-question");
+
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(original);
+
+      vi.resetModules();
+      const deletingTab = await import("./localVault");
+      expect(await deletingTab.localVaultStorage.getItem(key)).toBe(original);
+      await deletingTab.localVaultStorage.removeItem(key);
+      await deletingTab.flushLocalVaultWrites();
+
+      const db = await openCurrentVault();
+      expect(await getDirect(db, key)).toBeUndefined();
+      expect(await getDirect(db, `${key}:user:jd`)).toBeUndefined();
+      db.close();
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, staleEdit);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+
+      const verification = await openCurrentVault();
+      expect(await getDirect(verification, key)).toBeUndefined();
+      expect(await getDirect(verification, `${key}:user:jd`)).toBeUndefined();
+      verification.close();
+      expect(localStorage.getItem(key)).toBeNull();
+      expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+      expect(await deletingTab.localVaultStorage.getItem(key)).toBeNull();
+    },
+  );
+
+  it("allows a verified same-tab delete followed by a new intentional workspace save", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] },
+      version: 34,
+    });
+    await localVaultStorage.setItem(key, snapshot("before-removal"));
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("before-removal"));
+
+    await localVaultStorage.removeItem(key);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("intentional-new-workspace"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("intentional-new-workspace"));
+    expect(DB_VERSION).toBe(5);
+  });
+
   it("rejects a fallback save when another tab commits before its vault transaction", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
