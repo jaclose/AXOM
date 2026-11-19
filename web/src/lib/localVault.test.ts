@@ -472,7 +472,7 @@ describe("IndexedDB-first local vault", () => {
     }
   });
 
-  it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
+  it("retains an acknowledged fallback even after matching bytes become durable", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
     const snapshot = (label: string) => JSON.stringify({ state: {
@@ -489,8 +489,8 @@ describe("IndexedDB-first local vault", () => {
 
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("same-revision"));
     expect(await getDirect(db, key)).toBe(snapshot("same-revision"));
-    expect(localStorage.getItem(key)).toBeNull();
-    expect(localStorage.getItem(markerKey)).toBeNull();
+    expect(localStorage.getItem(key)).toBe(snapshot("same-revision"));
+    expect(localStorage.getItem(markerKey)).not.toBeNull();
     db.close();
   });
 
@@ -955,12 +955,13 @@ describe("a save that could not reach IndexedDB", () => {
     vi.stubGlobal("indexedDB", fakeIndexedDb);
 
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
-    // Once the vault is writable the copy moves across and the fallback goes.
-    await waitFor(async () => {
-      await localVaultStorage.getItem(key);
-      return localStorage.getItem(key) === null;
-    });
-    expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+    // Once IndexedDB recovers the copy is durably promoted, while the
+    // acknowledged fallback remains available for cross-tab reconciliation.
+    const promoted = await openCurrentVault();
+    expect(await getDirect(promoted, key)).toBe(snapshot("newer"));
+    promoted.close();
+    expect(localStorage.getItem(key)).toBe(snapshot("newer"));
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
   });
 
@@ -978,11 +979,14 @@ describe("a save that could not reach IndexedDB", () => {
     expect(localStorage.getItem(key)).toBe(snapshot("third"));
     vi.stubGlobal("indexedDB", fakeIndexedDb);
 
-    // Once IndexedDB is available the vault takes over again.
-    await waitFor(async () => {
-      await localVaultStorage.setItem(key, snapshot("fourth"));
-      return localStorage.getItem(key) === null;
-    });
+    // A resumed IndexedDB save wins without destroying the earlier fallback.
+    await localVaultStorage.setItem(key, snapshot("fourth"));
+    await flushLocalVaultWrites();
+    const resumed = await openCurrentVault();
+    expect(await getDirect(resumed, key)).toBe(snapshot("fourth"));
+    resumed.close();
+    expect(localStorage.getItem(key)).toBe(snapshot("third"));
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("fourth"));
   });
 
