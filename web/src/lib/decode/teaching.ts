@@ -132,10 +132,33 @@ export function conceptGroups(
     // Conservatively assign an unverified image to an existing confirmed
     // identity for the same wording, if any. Genuine distinct SHA-256 figures
     // remain separate; unknown-only duplicates count as a single instance.
-    const knownByWording = new Map<string, string>();
+    // A legacy import can retain verified image checksums but lose which
+    // source choice contained each image. Missing placement cannot justify
+    // counting another independent question when a placed example with the
+    // same wording/digest/crop exists. Do not collapse two *known* different
+    // A/B placements, though. Choose a stable representative independent
+    // of input order so imports cannot change the aggregate count.
+    const imageEvidence = new Map<QuestionRecord, { wording: string; visual: string; base: string }>();
+    const placedByBase = new Map<string, string>();
     for (const { question } of group.members) {
       const wording = questionSignature(question);
       const visual = questionVisualIdentity(question);
+      const base = questionVisualIdentity(question, false);
+      imageEvidence.set(question, { wording, visual, base });
+      if (visual !== base && visual !== "unverified-figure") {
+        const key = `${wording}\u001f${base}`;
+        const previous = placedByBase.get(key);
+        if (previous === undefined || visual < previous) placedByBase.set(key, visual);
+      }
+    }
+    const normalizedVisual = (question: QuestionRecord) => {
+      const { wording, visual, base } = imageEvidence.get(question)!;
+      return visual === base ? placedByBase.get(`${wording}\u001f${base}`) ?? visual : visual;
+    };
+    const knownByWording = new Map<string, string>();
+    for (const { question } of group.members) {
+      const wording = questionSignature(question);
+      const visual = normalizedVisual(question);
       if (visual !== "unverified-figure"
         && (!knownByWording.has(wording) || visual !== "text-only")) {
         knownByWording.set(wording, visual);
@@ -143,7 +166,7 @@ export function conceptGroups(
     }
     const evidenceIdentity = (question: QuestionRecord) => {
       const wording = questionSignature(question);
-      const visual = questionVisualIdentity(question);
+      const visual = normalizedVisual(question);
       return `${wording}\u001f${visual === "unverified-figure" ? knownByWording.get(wording) ?? visual : visual}`;
     };
     const wordings = new Set(group.members.map(({ question }) => evidenceIdentity(question)));

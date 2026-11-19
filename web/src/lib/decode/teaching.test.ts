@@ -271,6 +271,58 @@ describe("questions that teach the same rule", () => {
     expect(distinct.evidence).toBe("single-source");
   });
 
+  it("treats actually placed image choices as distinct evidence without trusting import IDs or changed keys", () => {
+    const make = (id: string, swap: boolean, assetPrefix: string, correctKey = "A", placed = true) => {
+      const firstId = `asset-${assetPrefix}-first`;
+      const secondId = `asset-${assetPrefix}-second`;
+      const asset = (assetId: string, digest: string) => ({
+        id: assetId, questionId: id, role: "choice" as const,
+        filename: "choice.png", mimeType: "image/png", checksum: `sha256:${digest.repeat(64)}`,
+      });
+      const base = question({
+        id, correctKey,
+        content: {
+          id, source: { filename: "source.pdf", page: 1 }, stem: [],
+          choices: [
+            { id: `${id}-a`, label: "A", blocks: placed ? [{ type: "image", assetId: swap ? secondId : firstId }] : [] },
+            { id: `${id}-b`, label: "B", blocks: placed ? [{ type: "image", assetId: swap ? firstId : secondId }] : [] },
+          ],
+          provenance: { method: "pdf-import" },
+          assets: [asset(firstId, "a"), asset(secondId, "b")],
+        },
+        attachments: [firstId, secondId].map((assetId) => ({
+          id: `attachment-${id}-${assetId}`, assetId, role: "exhibit" as const,
+          blobKey: `blob-${assetId}`, fileName: "choice.png", mimeType: "image/png",
+          byteSize: 128, altText: "",
+          createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+        })),
+      });
+      return { ...base, analyses: [reviewed(base)] };
+    };
+    const original = make("q-ordered-a", false, "first-import");
+    const reimport = make("q-ordered-copy", false, "second-import");
+    const swapped = make("q-ordered-swapped", true, "third-import");
+    const changedKeyOnly = make("q-ordered-rekeyed", false, "fourth-import", "B");
+    expect([original, reimport, swapped, changedKeyOnly].map(questionMappingStatus))
+      .toEqual(["ready", "ready", "ready", "ready"]);
+    expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(reimport));
+    expect(questionVisualIdentity(original)).not.toBe(questionVisualIdentity(swapped));
+    expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(changedKeyOnly));
+    const [group] = conceptGroups([original, reimport, swapped], documents);
+    expect(group.questionIds).toEqual(["q-ordered-a", "q-ordered-copy", "q-ordered-swapped"]);
+    expect(group.uniqueQuestions).toBe(2);
+    expect(group.sources).toEqual([{ documentId: "doc-1", uniqueQuestions: 2 }]);
+    expect(group.evidence).toBe("single-source");
+    expect(conceptGroups([original, reimport, changedKeyOnly], documents)[0].uniqueQuestions).toBe(1);
+    // A legacy copy may retain the same source digests while losing only
+    // placement metadata. That absence cannot establish an extra instance.
+    const unplaced = make("q-ordered-unplaced", false, "legacy-import", "A", false);
+    expect(questionMappingStatus(unplaced)).toBe("ready");
+    expect(conceptGroups([original, reimport, unplaced], documents)[0].uniqueQuestions).toBe(1);
+    expect(conceptGroups([original, swapped, unplaced], documents)[0].uniqueQuestions).toBe(2);
+    expect(conceptGroups([unplaced, swapped, original], documents)[0].uniqueQuestions).toBe(2);
+  });
+
   it("uses only teaching that is reviewed and still fits", () => {
     const proposed = taught({ id: "q-2" }, { status: "proposed" });
     const stale = { ...taught({ id: "q-3" }), stem: "Reworded since." };

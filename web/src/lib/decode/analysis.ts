@@ -43,8 +43,13 @@ const QUESTION_VISUAL_ROLES = new Set(["question", "stem", "choice"]);
  * An unverified image is deliberately not counted as a second instance.
  * Metadata is retained separately by questionSourceFingerprint, which
  * must still make prior reviewed teaching stale on replacement.
+ * Set includePlacement=false only for conservative checksum/crop matching
+ * when a legacy import lacks the original image block placement.
  */
-export function questionVisualIdentity(question: Pick<QuestionRecord, "content" | "attachments">): string {
+export function questionVisualIdentity(
+  question: Pick<QuestionRecord, "content" | "attachments">,
+  includePlacement = true,
+): string {
   const sourceImages = (question.content?.assets ?? [])
     .filter((asset) => QUESTION_VISUAL_ROLES.has(asset.role));
   const boundIds = new Set((question.content?.assets ?? []).map((asset) => asset.id));
@@ -65,9 +70,36 @@ export function questionVisualIdentity(question: Pick<QuestionRecord, "content" 
   }
   // Crop is a semantic tuple. JSON serialization of the raw object changes
   // when equivalent fields arrive in a different property insertion order.
+  // Identical image bytes in a different labeled answer choice represent a
+  // different displayed question. Asset IDs and attachment blob keys cannot
+  // express that: they are reallocated on import, while ordered source blocks
+  // preserve the actual location the learner sees. Absent block placement
+  // remains unknown, not an invented source location.
+  const placements = new Map<string, Set<string>>();
+  const record = (assetId: string, at: string) => {
+    const existing = placements.get(assetId) ?? new Set<string>();
+    existing.add(at);
+    placements.set(assetId, existing);
+  };
+  const scan = (blocks: NonNullable<typeof question.content>["stem"], location: string) => {
+    blocks.forEach((block, index) => {
+      if (block.type === "image") record(block.assetId, `${location}:image:${index}`);
+      if (block.type === "table" && block.sourceImageAssetId) {
+        record(block.sourceImageAssetId, `${location}:table:${index}`);
+      }
+    });
+  };
+  if (includePlacement) {
+    scan(question.content?.stem ?? [], "stem");
+    for (const choice of question.content?.choices ?? []) scan(choice.blocks, `choice:${choice.label}`);
+    if (question.content?.choiceTable?.sourceImageAssetId) {
+      record(question.content.choiceTable.sourceImageAssetId, "choice-table");
+    }
+  }
   const verified = sourceImages.map((asset) => JSON.stringify([
     asset.checksum!.trim().toLowerCase(),
     asset.crop ? [asset.crop.left, asset.crop.top, asset.crop.right, asset.crop.bottom] : null,
+    [...(placements.get(asset.id) ?? [])].sort(),
   ]));
   return JSON.stringify([...new Set(verified)].sort());
 }
