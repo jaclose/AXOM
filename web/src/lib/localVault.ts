@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
+import { captureVaultWriteObservation, invalidateVaultWrite, invalidateVaultWriteIfUnchanged, markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -709,6 +709,7 @@ function clearFallbackCopyIfUnchanged(
 
 const vaultStorage: StateStorage = {
   async getItem(name) {
+    const initialReceipt = observesWorkspace(name) ? captureVaultWriteObservation() : null;
     // A save that could not reach IndexedDB leaves its snapshot here, ahead of
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
@@ -770,6 +771,19 @@ const vaultStorage: StateStorage = {
         // localStorage still has the data; no need to interrupt app load.
       }
     }
+    // A delayed empty or inaccessible hydration must not erase another tab's
+    // valid receipt, including a save inside the shared marker's 1s throttle.
+    // Recheck the live v5 vault before retiring only this tab's stale status.
+    if (fallback === null && initialReceipt !== null) {
+      try {
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* Temporarily unavailable IndexedDB is not proof of data loss. */ }
+      invalidateVaultWriteIfUnchanged(initialReceipt);
+    }
     rememberVaultSnapshot(name, fallback);
     return fallback;
   },
@@ -805,12 +819,12 @@ const vaultStorage: StateStorage = {
       await writeVault(name, value, userId, vaultExpectation);
       clearFallbackCopy(fallbackStore, name, userId);
       rememberVaultSnapshot(name, value);
-      markVaultWrite("indexeddb");
+      if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
     } catch (indexedDbError) {
       if (isVaultConflictError(indexedDbError)) {
         if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         vaultWriteFailures.set(writeSequence, indexedDbError);
-        markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
         return;
       }
       // Try the established localStorage recovery path for any workspace.
@@ -845,7 +859,7 @@ const vaultStorage: StateStorage = {
       }
       if (saved) {
         rememberVaultSnapshot(name, value);
-        markVaultWrite("local-fallback");
+        if (name === STORAGE_KEYS.persistedState) markVaultWrite("local-fallback");
       } else {
         // A quota failure leaves the preceding workspace in place. Keep its
         // valid marker too, or the next start would prefer the older vault.
@@ -865,12 +879,14 @@ const vaultStorage: StateStorage = {
             : combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
-        markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
       }
     }
   },
 
   async removeItem(name) {
+    // Only an explicit workspace removal invalidates the shared save receipt.
+    if (name === STORAGE_KEYS.persistedState) invalidateVaultWrite();
     const fallback = localFallback();
     let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
     if (!active) {
@@ -906,13 +922,13 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
     clearFallbackCopy(localFallback(), name, userId);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
-    markVaultWrite("indexeddb");
+    if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
   } catch (error) {
     vaultWriteFailures.set(
       writeSequence,
       error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
     );
-    markVaultWriteFailure();
+    if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
   }
 }
 

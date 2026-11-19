@@ -1,0 +1,41 @@
+name: AXOM Local Save Regression
+
+on:
+  pull_request:
+    paths:
+      - "web/src/lib/localVault.ts"
+      - "web/src/lib/localVault.test.ts"
+      - "web/src/lib/vaultActivity.ts"
+      - "web/src/lib/vaultActivity.test.ts"
+      - "web/src/lib/retryLocalWorkspaceSave.ts"
+      - "web/src/lib/retryLocalWorkspaceSave.test.ts"
+      - "web/src/components/shell/AccountSyncPanel.tsx"
+      - "web/src/components/shell/AccountSyncPanel.test.tsx"
+      - "web/src/components/shell/DataHealthPanel.tsx"
+      - ".github/workflows/local-save-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-save:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: node scripts/toolchain.mjs
+      - run: npm --prefix web ci
+      - name: Storage and Account recovery regressions
+        run: npm --prefix web run test -- src/lib/localVault.test.ts src/components/shell/AccountSyncPanel.test.tsx src/components/shell/DataHealthPanel.test.tsx src/lib/retryLocalWorkspaceSave.test.ts src/lib/vaultActivity.test.ts
+      - name: Typecheck current web source
+        run: npm --prefix web run typecheck
+      - name: Build release frontend
+        run: npm --prefix web run build

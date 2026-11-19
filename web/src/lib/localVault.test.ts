@@ -638,6 +638,34 @@ describe("a save that could not reach IndexedDB", () => {
   });
 });
 
+
+describe("v5-preserving save receipt integration", () => {
+  it("never reports an auxiliary cache write as a new workspace save", async () => {
+    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    const start = new Date("2026-11-19T08:00:00.000Z");
+    markVaultWrite("indexeddb", start);
+    const receipt = readLastVaultWrite();
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, JSON.stringify({ generations: ["synthetic"] }));
+    await flushLocalVaultWrites();
+    expect(readLastVaultWrite()).toEqual(receipt);
+    expect(DB_VERSION).toBe(5);
+  });
+
+  it("retires an unverified missing-workspace badge without deleting a newer tab's marker", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    markVaultWrite("indexeddb", new Date("2026-11-19T08:01:00.000Z"));
+    const marker = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt);
+    expect(marker).not.toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBe(marker);
+    const v5 = await openCurrentVault();
+    expect(v5.version).toBe(5);
+    v5.close();
+  });
+});
+
 async function waitFor(check: () => Promise<boolean>, attempts = 20): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await check()) return;
