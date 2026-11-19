@@ -1,8 +1,8 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BookOpen, Check, Eye, EyeOff, Sparkles, Undo2, X } from "lucide-react";
 import type { AIProvider } from "../../lib/ai/types";
 import {
-  analysisPages, pendingAnalyses, proposeAnalyses, questionSourcePages, sourceTeachingProposals, teachingView, withAnalysis,
+  analysisPages, pendingAnalyses, proposeAnalyses, questionSourceFingerprint, questionSourcePages, sourceTeachingProposals, teachingView, withAnalysis,
   withAnalysisStatus, type QuestionAnalysis,
 } from "../../lib/decode";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -12,6 +12,10 @@ import { GButton, GhostButton } from "../ui/primitives";
 import { SourcePagePreview } from "./SourcePagePreview";
 
 const same = (a: string | undefined, b: string | undefined) => (a ?? "").replace(/\s+/g, " ").trim() === (b ?? "").replace(/\s+/g, " ").trim();
+// Undo is safe only against the exact post-discard state. Never restore an old
+// analysis snapshot over newer work from another tab, reviewer or account.
+const sameAnalyses = (a: readonly QuestionAnalysis[] | undefined, b: readonly QuestionAnalysis[] | undefined) =>
+  JSON.stringify(a) === JSON.stringify(b);
 
 /**
  * What the question's source teaches about it, shown once the learner has
@@ -36,7 +40,28 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   const [showPage, setShowPage] = useState(false);
   const [pagePicked, setPagePicked] = useState<number>();
   /** What the question's analyses were before the last discard or removal, so it can be taken back. */
-  const [undo, setUndo] = useState<{ questionId: string; analyses: QuestionAnalysis[] | undefined; what: string }>();
+  const [undo, setUndo] = useState<{
+    questionId: string;
+    sourceFingerprint: string;
+    analyses: QuestionAnalysis[] | undefined;
+    expectedAfter: QuestionAnalysis[] | undefined;
+    what: string;
+  }>();
+  // Provider replies must never write to a different question/account view,
+  // even when a component remains mounted under the same question ID.
+  const latest = useRef({ question, source, provider, onChange });
+  latest.current = { question, source, provider, onChange };
+  const mounted = useRef(false);
+  const requestEpoch = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; requestEpoch.current += 1; };
+  }, []);
+  useEffect(() => {
+    setBusy(false);
+    setProblem("");
+    return () => { requestEpoch.current += 1; };
+  }, [question, source, provider, onChange]);
 
   const view = useMemo(() => teachingView(question, source), [question, source]);
   const ready = questionMappingStatus(question) === "ready";
@@ -56,7 +81,9 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   const canAsk = ready && Boolean(provider) && hasSourceText && !shown && view.answer !== undefined;
   const pages = shown ? analysisPages(shown) : questionSourcePages(question);
   const page = pagePicked && pages.includes(pagePicked) ? pagePicked : pages[0];
-  const taken = ready && undo?.questionId === question.id ? undo : undefined;
+  const taken = ready && undo?.questionId === question.id
+    && undo.sourceFingerprint === questionSourceFingerprint(question, source)
+    && sameAnalyses(question.analyses, undo.expectedAfter) ? undo : undefined;
   // With nothing to teach and no way to ask, the feedback above already says all there is.
   if (!shown && !canAsk && !taken && !(compact && source && pages.length)) return null;
 
@@ -67,10 +94,17 @@ export function SourceTeaching({ question, document: source, siblings, provider,
     // A stale Keep click must never turn an unreviewed mapping into reviewed teaching.
     if (questionMappingStatus(question) !== "ready") return;
     // A discarded reading is not offered again, so the step can be taken back while the question is on screen.
+    const nextAnalyses = withAnalysisStatus(withAnalysis(question.analyses, analysis), analysis.id, status);
     setUndo(status === "rejected"
-      ? { questionId: question.id, analyses: question.analyses, what: analysis.status === "reviewed" ? "Teaching removed." : "Proposal discarded." }
+      ? {
+        questionId: question.id,
+        sourceFingerprint: questionSourceFingerprint(question, source),
+        analyses: question.analyses,
+        expectedAfter: nextAnalyses,
+        what: analysis.status === "reviewed" ? "Teaching removed." : "Proposal discarded.",
+      }
       : undefined);
-    onChange(withAnalysisStatus(withAnalysis(question.analyses, analysis), analysis.id, status));
+    onChange(nextAnalyses);
   }
 
   function takeBack() {
@@ -81,17 +115,28 @@ export function SourceTeaching({ question, document: source, siblings, provider,
 
   async function ask() {
     if (!provider || questionMappingStatus(question) !== "ready") return;
+    const started = latest.current;
+    const epoch = ++requestEpoch.current;
+    // Identity is deliberately stricter than matching question IDs/fingerprints:
+    // a parent can replace a workspace/account with an equally numbered record.
+    const stillCurrent = () => mounted.current && requestEpoch.current === epoch
+      && latest.current.question === started.question
+      && latest.current.source === started.source
+      && latest.current.provider === started.provider
+      && latest.current.onChange === started.onChange
+      && questionMappingStatus(latest.current.question) === "ready";
     setBusy(true);
     setProblem("");
     try {
       const batch = await proposeAnalyses(provider, { questions: [question], documentsById: source ? new Map([[source.id, source]]) : undefined });
+      if (!stillCurrent()) return;
       const analysis = batch.analyses[0];
-      if (analysis) onChange(withAnalysis(question.analyses, analysis));
+      if (analysis) onChange(withAnalysis(latest.current.question.analyses, analysis));
       else setProblem(batch.errors[0]?.message ?? "No analysis came back. Try again.");
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : "The source could not be read. Try again.");
+      if (stillCurrent()) setProblem(error instanceof Error ? error.message : "The source could not be read. Try again.");
     } finally {
-      setBusy(false);
+      if (mounted.current && requestEpoch.current === epoch) setBusy(false);
     }
   }
 

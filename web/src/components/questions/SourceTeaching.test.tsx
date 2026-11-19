@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AIProvider } from "../../lib/ai/types";
@@ -185,6 +185,82 @@ describe("what the source teaches, after an answer", () => {
     await screen.findByRole("button", { name: "Attach the original file" });
     await user.upload(screen.getByLabelText("Attach the original file of Cardiology review"), new File(["%PDF other"], "other.pdf", { type: "application/pdf" }));
     expect((await screen.findByRole("alert")).textContent).toBe("This is a different version of the file.");
+  });
+});
+
+describe("source teaching stale-action fences", () => {
+  const reply = {
+    concept: "Synthetic source review", task: "Identify the pattern.",
+    rule: "Match the observation to the answer.", explanation: "Fixture explanation.",
+    decisiveClues: [], mechanism: [], distractors: [],
+    references: [{ documentId: source.id, page: 4, role: "question" }],
+  };
+
+  it("does not persist a provider reply after the same question's answer readiness is withdrawn", async () => {
+    let finish!: (value: typeof reply) => void;
+    const pending = new Promise<typeof reply>((resolve) => { finish = resolve; });
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const bare = siblings[1];
+    const generate = provider(() => pending);
+    const view = render(<SourceTeaching question={bare} document={source} provider={generate} onChange={onChange} />);
+    await user.click(screen.getByRole("button", { name: /Ask for an analysis/ }));
+    view.rerender(<SourceTeaching question={{ ...bare, needsReview: true }} document={source} provider={generate} onChange={onChange} />);
+    await act(async () => { finish(reply); await pending; });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does not append a provider reply after a same-ID revision changes the saved analyses", async () => {
+    let finish!: (value: typeof reply) => void;
+    const pending = new Promise<typeof reply>((resolve) => { finish = resolve; });
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const bare = siblings[1];
+    const generate = provider(() => pending);
+    const view = render(<SourceTeaching question={bare} document={source} provider={generate} onChange={onChange} />);
+    await user.click(screen.getByRole("button", { name: /Ask for an analysis/ }));
+    view.rerender(<SourceTeaching question={{ ...bare, analyses: [{
+      id: "reviewed-in-another-tab", questionId: bare.id, sourceFingerprint: questionSourceFingerprint(bare, source),
+      version: 1, origin: "ai", status: "reviewed", concept: "Newer reviewer decision",
+      decisiveClues: [], mechanism: [], distractors: [], references: [], generatedAt: "2026-11-19T09:00:00Z",
+    }] }} document={source} provider={generate} onChange={onChange} />);
+    await act(async () => { finish(reply); await pending; });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver an in-flight result into a replaced account callback or an unmounted view", async () => {
+    for (const unmount of [false, true]) {
+      let finish!: (value: typeof reply) => void;
+      const pending = new Promise<typeof reply>((resolve) => { finish = resolve; });
+      const oldChange = vi.fn();
+      const newChange = vi.fn();
+      const generate = provider(() => pending);
+      const user = userEvent.setup();
+      const view = render(<SourceTeaching question={siblings[1]} document={source} provider={generate} onChange={oldChange} />);
+      await user.click(screen.getByRole("button", { name: /Ask for an analysis/ }));
+      if (unmount) view.unmount();
+      else view.rerender(<SourceTeaching question={siblings[1]} document={source} provider={generate} onChange={newChange} />);
+      await act(async () => { finish(reply); await pending; });
+      expect(oldChange).not.toHaveBeenCalled();
+      expect(newChange).not.toHaveBeenCalled();
+      if (!unmount) view.unmount();
+    }
+  });
+
+  it("does not expose stale Undo after a same-ID concurrent analysis or source revision", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const view = render(<SourceTeaching question={first} document={source} siblings={siblings} onChange={onChange} />);
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    const discarded = onChange.mock.calls[0][0] as QuestionAnalysis[];
+    view.rerender(<SourceTeaching question={{ ...first, analyses: discarded }} document={source} siblings={siblings} onChange={onChange} />);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+    const newer = [{ ...discarded[0], id: "newer-review", status: "reviewed" as const }, ...discarded];
+    view.rerender(<SourceTeaching question={{ ...first, analyses: newer }} document={source} siblings={siblings} onChange={onChange} />);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    view.rerender(<SourceTeaching question={{ ...first, stem: first.stem + " Updated evidence.", analyses: discarded }} document={source} siblings={siblings} onChange={onChange} />);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });
 
