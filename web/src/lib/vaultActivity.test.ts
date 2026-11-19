@@ -98,9 +98,15 @@ describe("verified local workspace save timestamps across upgrades", () => {
     firstTab.markVaultWrite("indexeddb", new Date(savedAt));
     expect(firstTab.invalidateVaultWriteIfUnchanged(firstTab.captureVaultWriteObservation())).toBe(true);
     const originalSessionStorage = Object.getOwnPropertyDescriptor(window, "sessionStorage");
+    const anotherTabSession = new Map<string, string>();
     try {
       Object.defineProperty(window, "sessionStorage", {
-        configurable: true, value: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+        configurable: true,
+        value: {
+          getItem: (key: string) => anotherTabSession.get(key) ?? null,
+          setItem: (key: string, value: string) => { anotherTabSession.set(key, value); },
+          removeItem: (key: string) => { anotherTabSession.delete(key); },
+        },
       });
       vi.resetModules();
       expect((await import("./vaultActivity")).readLastVaultWrite()?.at).toBe(savedAt);
