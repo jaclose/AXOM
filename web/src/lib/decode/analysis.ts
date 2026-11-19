@@ -37,23 +37,31 @@ export function questionSourcePages(question: Pick<QuestionRecord, "sourcePage" 
 const QUESTION_VISUAL_ROLES = new Set(["question", "stem", "choice"]);
 
 /**
- * Canonical displayed-figure identity for concept evidence. Repeated text
- * with the same source-image checksum is still one question; another actual
- * figure must not be collapsed into that wording. An unknown checksum uses
- * its explicit asset identity, never a guessed match based on filename.
- * Learner note images and post-answer answer-reveal assets are not question
- * wording evidence.
+ * Evidence identity, not a storage lookup key. A local asset ID / blobKey
+ * can change when the SAME image is imported twice. Only a canonical
+ * SHA-256 digest can distinguish source figures for recurrence estimates.
+ * An unverified image is deliberately not counted as a second instance.
+ * Metadata is retained separately by questionSourceFingerprint, which
+ * must still make prior reviewed teaching stale on replacement.
  */
 export function questionVisualIdentity(question: Pick<QuestionRecord, "content" | "attachments">): string {
   const sourceImages = (question.content?.assets ?? [])
-    .filter((asset) => QUESTION_VISUAL_ROLES.has(asset.role))
-    .map((asset) => [asset.role, asset.checksum?.toLowerCase() ?? `asset:${asset.id}`, asset.crop ?? null]);
+    .filter((asset) => QUESTION_VISUAL_ROLES.has(asset.role));
   const boundIds = new Set((question.content?.assets ?? []).map((asset) => asset.id));
-  const standaloneExhibits = (question.attachments ?? [])
+  const unboundExhibits = (question.attachments ?? [])
     .filter((attachment) => (attachment.role === "exhibit" || QUESTION_VISUAL_ROLES.has(attachment.role ?? ""))
-      && (!attachment.assetId || !boundIds.has(attachment.assetId)))
-    .map((attachment) => [attachment.role, attachment.blobKey, attachment.mimeType, attachment.byteSize]);
-  return JSON.stringify([sourceImages, standaloneExhibits]);
+      && (!attachment.assetId || !boundIds.has(attachment.assetId)));
+  if (!sourceImages.length && !unboundExhibits.length) return "text-only";
+  // Unverified is one conservative identity, regardless of locally allocated
+  // blob/asset keys, file names, byte counts or image render roles.
+  if (!sourceImages.length || unboundExhibits.length
+    || sourceImages.some((asset) => !/^sha256:[0-9a-f]{64}$/i.test(asset.checksum?.trim() ?? ""))) {
+    return "unverified-figure";
+  }
+  const verified = sourceImages.map((asset) => JSON.stringify([
+    asset.checksum!.trim().toLowerCase(), asset.crop ?? null,
+  ]));
+  return JSON.stringify([...new Set(verified)].sort());
 }
 
 /**
