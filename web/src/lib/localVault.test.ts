@@ -87,7 +87,10 @@ describe("IndexedDB-first local vault", () => {
 
       // The removing tab is still hydrated against X. Its delete must not
       // remove the newer Y, the active account pointer, or Y's v5 chunks.
-      await expect(localVaultStorage.removeItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      const deleteCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
       const db = await openCurrentVault();
       expect(await getDirect(db, `${key}:active-user`)).toBe(winnerId);
       expect(await getDirect(db, key)).toBeDefined();
@@ -106,7 +109,11 @@ describe("IndexedDB-first local vault", () => {
 
     vi.resetModules();
     const unhydratedTab = await import("./localVault");
-    await expect(unhydratedTab.localVaultStorage.removeItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    const deleteCheckpoint = unhydratedTab.getVaultWriteCheckpoint();
+    await unhydratedTab.localVaultStorage.removeItem(key);
+    await unhydratedTab.flushLocalVaultWrites();
+    expect(() => unhydratedTab.assertVaultWritesSince(deleteCheckpoint))
+      .toThrow(unhydratedTab.VAULT_CONFLICT_MESSAGE);
     expect(await localVaultStorage.getItem(key)).toBe(original);
   });
 
@@ -131,7 +138,10 @@ describe("IndexedDB-first local vault", () => {
     expect(savedMarker).not.toBeNull();
     expect(localStorage.getItem(key)).toBe(snapshot("acknowledged-offline-edit"));
 
-    await expect(localVaultStorage.removeItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    const deleteCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.removeItem(key);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
     expect(localStorage.getItem(key)).toBe(snapshot("acknowledged-offline-edit"));
     expect(localStorage.getItem(marker)).toBe(savedMarker);
     const db = await openCurrentVault();
