@@ -291,6 +291,16 @@ function assertFallbackStillCurrent(name: string, current: NewerFallbackCopy | n
   }
 }
 
+/** A newer local fallback is an acknowledged workspace, even if quota left
+ * only its generic copy. A different account must not replace it through IDB
+ * or another generic localStorage save before explicit recovery. */
+function assertFallbackOwnerUnchanged(name: string, current: NewerFallbackCopy | null, userId: string): void {
+  if (!observesWorkspace(name) || current === null) return;
+  if (persistedUserId(current.value) === userId) return;
+  conflictedWorkspaceKeys.add(name);
+  throw new VaultConflictError();
+}
+
 function fallbackExpectation(copy: NewerFallbackCopy, latchConflict = true): VaultExpectation {
   const fingerprints = copy.baseFingerprint === undefined
     ? [copy.fingerprint]
@@ -823,6 +833,7 @@ const vaultStorage: StateStorage = {
       const expected = workspaceExpectation(name);
       const currentFallback = newerFallbackCopy(fallbackStore, name);
       assertFallbackStillCurrent(name, currentFallback, expected);
+      assertFallbackOwnerUnchanged(name, currentFallback, userId);
       fallbackBaseFingerprint = currentFallback !== null
         ? currentFallback.baseFingerprint
         : observedVaultFingerprint(name);
@@ -862,6 +873,7 @@ const vaultStorage: StateStorage = {
       try {
         const expected = workspaceExpectation(name);
         assertFallbackStillCurrent(name, previousFallback, expected);
+        assertFallbackOwnerUnchanged(name, previousFallback, userId);
         // Marker first: it is tiny, and one that does not match the copy beside
         // it is ignored, so a copy that failed to land is never read as newer.
         // Retain the original vault base across a chain of fallback-only saves.
