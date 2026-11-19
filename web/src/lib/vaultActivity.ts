@@ -290,7 +290,12 @@ export function readLastVaultWrite(): VaultWriteRecord | null {
     // survive an unreadable hydration across module/page reload. Only a save
     // confirmed in THIS runtime can establish a positive receipt.
     if (!currentRuntimeConfirmedWrite || statusInvalidated) return null;
-    if (!memoryOnlyConfirmedWrite && !readStoredWorkspaceMarker()) return null;
+    const stored = readStoredWorkspaceMarker();
+    if (!memoryOnlyConfirmedWrite && !stored) return null;
+    // An actual write in this runtime can still coexist with another tab's
+    // newer verified marker. Preserve that newer status without requiring a
+    // session tombstone; only cold-start raw receipts remain untrusted.
+    if (stored && lastWrite && Date.parse(stored.at) > Date.parse(lastWrite.at)) lastWrite = stored;
     return lastWrite;
   }
   if (tombstone !== null) {
