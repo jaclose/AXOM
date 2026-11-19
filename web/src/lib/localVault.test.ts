@@ -564,6 +564,57 @@ describe("a save that could not reach IndexedDB", () => {
     vi.stubGlobal("indexedDB", fakeIndexedDb);
   });
 
+  it.each(["unmarked", "invalid marker"])(
+    "does not overwrite a newer vault from a %s legacy mirror after a transient read failure",
+    async (marker) => {
+      const durable = snapshot("newer durable");
+      const stale = snapshot("older mirror");
+      await localVaultStorage.setItem(key, durable);
+      await flushLocalVaultWrites();
+      localStorage.setItem(key, stale);
+      if (marker === "invalid marker") localStorage.setItem(`${key}:fallback-newer`, "12:deadbeef");
+
+      // The first open fails during hydration, but the subsequent write path
+      // can reach the SAME real fake-IndexedDB database. An unguarded promotion
+      // must not replace the workspace already present there.
+      resetLocalVaultRuntimeForTests();
+      let failFirstOpen = true;
+      vi.stubGlobal("indexedDB", {
+        open: (database: string, version?: number) => {
+          if (failFirstOpen) {
+            failFirstOpen = false;
+            throw new Error("Transient IndexedDB hydration read failure");
+          }
+          return version === undefined
+            ? fakeIndexedDb.open(database)
+            : fakeIndexedDb.open(database, version);
+        },
+      });
+      expect(await localVaultStorage.getItem(key)).toBe(stale);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+      const db = await openCurrentVault();
+      expect(await getDirect(db, key)).toBe(durable);
+      expect(await getDirect(db, `${key}:user:jd`)).toBe(durable);
+      db.close();
+      expect(localStorage.getItem(key)).toBe(stale);
+      expect(await localVaultStorage.getItem(key)).toBe(durable);
+    },
+  );
+
+  it("keeps an unmarked legacy fallback readable while the vault is inaccessible", async () => {
+    const legacy = snapshot("only surviving legacy copy");
+    localStorage.setItem(key, legacy);
+    vi.stubGlobal("indexedDB", undefined);
+    expect(await localVaultStorage.getItem(key)).toBe(legacy);
+    expect(localStorage.getItem(key)).toBe(legacy);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(legacy);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(legacy);
+    db.close();
+  });
+
   it("never lets an unmarked localStorage copy override the vault", async () => {
     // A copy mirrored by an older build carries no marker and may be stale.
     await localVaultStorage.setItem(key, snapshot("newer"));
