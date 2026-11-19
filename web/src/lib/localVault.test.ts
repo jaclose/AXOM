@@ -590,7 +590,9 @@ describe("a save that could not reach IndexedDB", () => {
             : fakeIndexedDb.open(database, version);
         },
       });
-      expect(await localVaultStorage.getItem(key)).toBe(stale);
+      // If the transient outage clears on the read-only recheck, hydrate the
+      // authoritative newer workspace, not the ambiguous legacy mirror.
+      expect(await localVaultStorage.getItem(key)).toBe(durable);
       vi.stubGlobal("indexedDB", fakeIndexedDb);
 
       const db = await openCurrentVault();
@@ -601,6 +603,33 @@ describe("a save that could not reach IndexedDB", () => {
       expect(await localVaultStorage.getItem(key)).toBe(durable);
     },
   );
+
+  it("never promotes an unverified mirror even when two reads fail before writes recover", async () => {
+    const durable = snapshot("newer durable");
+    const stale = snapshot("old unmarked mirror");
+    await localVaultStorage.setItem(key, durable);
+    await flushLocalVaultWrites();
+    localStorage.setItem(key, stale);
+    resetLocalVaultRuntimeForTests();
+    let failedReads = 0;
+    vi.stubGlobal("indexedDB", {
+      open: (database: string, version?: number) => {
+        if (failedReads < 2) {
+          failedReads += 1;
+          throw new Error("Transient IndexedDB reads unavailable");
+        }
+        return version === undefined ? fakeIndexedDb.open(database) : fakeIndexedDb.open(database, version);
+      },
+    });
+    expect(await localVaultStorage.getItem(key)).toBe(stale);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(durable);
+    expect(await getDirect(db, `${key}:user:jd`)).toBe(durable);
+    db.close();
+    expect(localStorage.getItem(key)).toBe(stale);
+    expect(await localVaultStorage.getItem(key)).toBe(durable);
+  });
 
   it("keeps an unmarked legacy fallback readable while the vault is inaccessible", async () => {
     const legacy = snapshot("only surviving legacy copy");
