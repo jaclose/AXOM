@@ -688,27 +688,88 @@ async function readVaultSnapshot(name: string): Promise<string | null> {
   return await readVaultRecord(scopedStateKey(name, activeUser), openExistingVault) ?? null;
 }
 
-async function removeVaultRecords(name: string, active?: string): Promise<void> {
+/** A delete is a write: authorize it against the exact workspace revision
+ * observed by this runtime, in the same transaction as deleting its records.
+ * Reading the active pointer and scoped snapshot inside that transaction also
+ * prevents a stale localStorage pointer from targeting another account. */
+async function removeVaultRecords(name: string, expected?: VaultExpectation): Promise<void> {
   const db = await openExistingVault();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const keys = [name, ...(active ? [scopedStateKey(name, active)] : [])];
-    for (const key of keys) {
-      const request = store.get(key);
-      request.onsuccess = () => {
-        const manifest = readChunkedValueManifest(typeof request.result === "string" ? request.result : undefined);
-        if (!manifest) return;
-        for (let index = 0; index < manifest.chunkCount; index += 1) {
-          store.delete(`${manifest.chunkPrefix}:${index}`);
+    let conflict: VaultConflictError | null = null;
+    let settled = false;
+
+    const deny = () => {
+      conflict = new VaultConflictError();
+      if (expected?.latchConflict !== false && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+      tx.abort();
+    };
+
+    const removeVerified = (primary: string | undefined, scoped: string | undefined, active: string | undefined) => {
+      const current = primary ?? scoped ?? null;
+      // Neither a missing record nor a separately advanced scoped mirror is
+      // equivalent to the workspace the deleting tab previously hydrated.
+      if (expected && (
+        !expected.fingerprints.includes(workspaceFingerprint(current))
+        || (scoped !== undefined && !expected.fingerprints.includes(workspaceFingerprint(scoped)))
+        || (primary !== undefined && !expected.fingerprints.includes(workspaceFingerprint(primary)))
+        || (active !== undefined && primary !== undefined
+          && stablePersistedUserId(primary) !== null && stablePersistedUserId(primary) !== active)
+      )) {
+        deny();
+        return;
+      }
+
+      const keys = [name, ...(active ? [scopedStateKey(name, active)] : [])];
+      for (const key of keys) {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const manifest = readChunkedValueManifest(typeof request.result === "string" ? request.result : undefined);
+          if (!manifest) return;
+          for (let index = 0; index < manifest.chunkCount; index += 1) {
+            store.delete(`${manifest.chunkPrefix}:${index}`);
+          }
+        };
+        store.delete(key);
+      }
+      store.delete(activeUserKey(name));
+    };
+
+    const primary = store.get(name);
+    primary.onsuccess = () => {
+      const primaryValue = typeof primary.result === "string" ? primary.result : undefined;
+      const active = store.get(activeUserKey(name));
+      active.onsuccess = () => {
+        const currentActive = typeof active.result === "string" && active.result ? active.result : undefined;
+        if (!currentActive) {
+          removeVerified(primaryValue, undefined, undefined);
+          return;
         }
+        const scoped = store.get(scopedStateKey(name, currentActive));
+        scoped.onsuccess = () => {
+          const scopedValue = typeof scoped.result === "string" ? scoped.result : undefined;
+          removeVerified(primaryValue, scopedValue, currentActive);
+        };
       };
-      store.delete(key);
-    }
-    store.delete(activeUserKey(name));
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Unable to remove the local workspace.")); };
-    tx.onabort = tx.onerror;
+    };
+
+    tx.oncomplete = () => {
+      db.close();
+      if (!settled) resolve();
+      settled = true;
+    };
+    tx.onerror = () => {
+      if (conflict || settled) return;
+      db.close();
+      reject(tx.error ?? new Error("Unable to remove the local workspace."));
+      settled = true;
+    };
+    tx.onabort = () => {
+      db.close();
+      if (!settled) reject(conflict ?? tx.error ?? new Error("Unable to remove the local workspace."));
+      settled = true;
+    };
   });
 }
 
@@ -937,30 +998,62 @@ const vaultStorage: StateStorage = {
   },
 
   async removeItem(name) {
-    // Only an explicit workspace removal invalidates the shared save receipt.
-    if (name === STORAGE_KEYS.persistedState) invalidateVaultWrite();
+    const workspace = observesWorkspace(name);
+    const expected = workspace ? workspaceExpectation(name) : undefined;
     const fallback = localFallback();
-    let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
-    if (!active) {
-      try {
-        active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
-      } catch {
-        // Continue with the localStorage cleanup path below.
-      }
+    const markerKey = fallbackMarkerKey(name);
+    const pointerKey = activeUserKey(name);
+    // Capture optional recovery bytes. A concurrent fallback writer must not
+    // lose its only acknowledged copy if this tab deletes a different revision.
+    const beforeValue = fallback?.getItem(name) ?? null;
+    const beforeMarker = fallback?.getItem(markerKey) ?? null;
+    const beforeActive = fallback?.getItem(pointerKey) ?? null;
+    const scopeKey = beforeActive ? scopedStateKey(name, beforeActive) : null;
+    const beforeScoped = scopeKey ? fallback?.getItem(scopeKey) ?? null : null;
+
+    if (expected && [beforeValue, beforeScoped].some((value) =>
+      value !== null && !expected.fingerprints.includes(workspaceFingerprint(value))
+    )) {
+      conflictedWorkspaceKeys.add(name);
+      markVaultWriteFailure();
+      throw new VaultConflictError();
     }
-    fallback?.removeItem(name);
-    fallback?.removeItem(fallbackMarkerKey(name));
-    fallback?.removeItem(activeUserKey(name));
-    if (active) fallback?.removeItem(scopedStateKey(name, active));
+
     try {
-      await removeVaultRecords(name, active);
-      // Only an IndexedDB transaction completion establishes that this tab
-      // intentionally cleared the hydrated workspace. A failed removal must
-      // not grant this runtime permission to overwrite the old vault.
-      if (observesWorkspace(name)) rememberVaultSnapshot(name, null);
-    } catch {
-      // No-op; best effort cleanup. Keep the old observed revision.
+      // This compares the live primary, scoped snapshot and pointer *inside*
+      // IndexedDB's write transaction before any record is deleted.
+      await removeVaultRecords(name, expected);
+    } catch (error) {
+      if (workspace) {
+        if (isVaultConflictError(error)) conflictedWorkspaceKeys.add(name);
+        markVaultWriteFailure();
+        throw error;
+      }
+      // Non-workspace cache cleanup remains best effort when IDB is absent.
     }
+
+    // A failed or conflicting delete never clears a recovery copy. Even after
+    // a verified IDB delete, leave a fallback written by another tab untouched.
+    try {
+      if (fallback?.getItem(name) === beforeValue
+        && fallback?.getItem(markerKey) === beforeMarker
+        && fallback?.getItem(pointerKey) === beforeActive
+        && (!scopeKey || fallback?.getItem(scopeKey) === beforeScoped)) {
+        fallback?.removeItem(name);
+        fallback?.removeItem(markerKey);
+        fallback?.removeItem(pointerKey);
+        if (scopeKey) fallback?.removeItem(scopeKey);
+      }
+    } catch {
+      // Preserving a redundant local copy is safer than masking IDB success.
+    }
+    if (workspace) {
+      invalidateVaultWrite();
+      // A confirmed delete permits this tab to intentionally create a new
+      // workspace, while a rejected delete retains the older observation.
+      rememberVaultSnapshot(name, null);
+    }
+
   },
 };
 
