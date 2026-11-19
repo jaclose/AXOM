@@ -7,7 +7,7 @@
 import type { SourceDocument } from "../library";
 import { questionSignature } from "../questionDuplicates";
 import { questionMappingStatus, type QuestionRecord } from "../questions";
-import { analysisPages, currentTeaching, questionSourcePages } from "./analysis";
+import { analysisPages, currentTeaching, questionSourcePages, questionVisualIdentity } from "./analysis";
 import type { QuestionAnalysis, SourceTrace } from "./types";
 
 export interface TeachingOption {
@@ -95,7 +95,7 @@ export interface ConceptGroup {
   rule: string;
   questionIds: string[];
   analysisIds: string[];
-  /** Questions counted once per wording: a question printed in two decks is one question. */
+  /** Distinct source question wording plus canonical displayed-figure identity, not source-copy count. */
   uniqueQuestions: number;
   sources: Array<{ documentId: string; uniqueQuestions: number }>;
   /** How far the grouping can be leaned on. One question is an instance, not a pattern. */
@@ -124,12 +124,15 @@ export function conceptGroups(
     groups.set(key, group);
   }
   return [...groups.entries()].map(([key, group]) => {
-    const wordings = new Set(group.members.map(({ question }) => questionSignature(question)));
+    // Text-identical image interpretation questions remain distinct only
+    // when their displayed source-figure identities differ.
+    const evidenceIdentity = (question: QuestionRecord) => `${questionSignature(question)}\u001f${questionVisualIdentity(question)}`;
+    const wordings = new Set(group.members.map(({ question }) => evidenceIdentity(question)));
     const bySource = new Map<string, Set<string>>();
     for (const { question } of group.members) {
       if (!question.sourceDocumentId) continue;
       const seen = bySource.get(question.sourceDocumentId) ?? new Set<string>();
-      seen.add(questionSignature(question));
+      seen.add(evidenceIdentity(question));
       bySource.set(question.sourceDocumentId, seen);
     }
     const evidence: ConceptGroup["evidence"] = wordings.size < 2 ? "single-question" : bySource.size > 1 ? "several-sources" : "single-source";
