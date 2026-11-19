@@ -12,7 +12,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readVaultWriteFailure } from "./vaultActivity";
+import { markVaultWrite, readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -641,7 +641,7 @@ describe("a save that could not reach IndexedDB", () => {
 
 describe("v5-preserving save receipt integration", () => {
   it("never reports an auxiliary cache write as a new workspace save", async () => {
-    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    // Use the same module instance as the statically imported localVault adapter.
     const start = new Date("2026-11-19T08:00:00.000Z");
     markVaultWrite("indexeddb", start);
     const receipt = readLastVaultWrite();
@@ -667,7 +667,7 @@ describe("v5-preserving save receipt integration", () => {
       dispatchEvent: vi.fn(),
       BroadcastChannel: undefined,
     });
-    const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    // Use the same module instance as the statically imported localVault adapter.
     markVaultWrite("indexeddb", new Date("2026-11-19T08:01:00.000Z"));
     const marker = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt);
     expect(marker).not.toBeNull();
