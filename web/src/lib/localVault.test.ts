@@ -819,6 +819,83 @@ describe("a save that could not reach IndexedDB", () => {
   it.each([
     ["IndexedDB unavailable", false],
     ["IndexedDB recovered", true],
+  ])("rejects legacy profile-name collisions against a quota-limited generic fallback (%s)", async (_label, recovered) => {
+    const markerKey = `${key}:fallback-newer`;
+    const scopedSlug = `${key}:user:a-lex`;
+    const legacy = (name: string, id: string) => JSON.stringify({
+      state: { profile: { name }, questions: [{ id }], notes: [id] }, version: 34,
+    });
+    // Both profiles lack userId. Their different names normalize to "a-lex".
+    const savedA = legacy("A Léx", "A-unique-question");
+    const attemptedB = legacy("A Lex", "B-unique-question");
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === scopedSlug) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    const aCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, savedA);
+    expect(() => assertVaultWritesSince(aCheckpoint)).not.toThrow();
+    expect(storage.getItem(scopedSlug)).toBeNull();
+    const markerA = storage.getItem(markerKey);
+    expect(markerA).not.toBeNull();
+
+    vi.stubGlobal("localStorage", storage);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(savedA);
+    if (recovered) vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const bCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, attemptedB);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(bCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(storage.getItem(key)).toBe(savedA);
+    expect(storage.getItem(markerKey)).toBe(markerA);
+    expect(storage.getItem(scopedSlug)).toBeNull();
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(savedA);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(savedA);
+    expect(DB_VERSION).toBe(5);
+    db.close();
+  });
+
+  it("fails closed on changed legacy bytes even with identical display names", async () => {
+    const legacy = (id: string) => JSON.stringify({
+      state: { profile: { name: "Same display name" }, questions: [{ id }] }, version: 34,
+    });
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, legacy("first-person-question"));
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(legacy("first-person-question"));
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, legacy("second-person-question"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(storage.getItem(key)).toBe(legacy("first-person-question"));
+  });
+
+  it("permits byte-identical legacy retries without an immutable user ID", async () => {
+    const snapshot = JSON.stringify({
+      state: { profile: { name: "A Léx" }, questions: [{ id: "preserved" }] }, version: 34,
+    });
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot);
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(storage.getItem(key)).toBe(snapshot);
+  });
+
+  it.each([
+    ["IndexedDB unavailable", false],
+    ["IndexedDB recovered", true],
   ])("does not erase account A's acknowledged generic-only fallback when B saves (%s)", async (_label, recovered) => {
     const ownerA = "account-A";
     const ownerB = "account-B";

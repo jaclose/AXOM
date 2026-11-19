@@ -291,12 +291,27 @@ function assertFallbackStillCurrent(name: string, current: NewerFallbackCopy | n
   }
 }
 
-/** A newer local fallback is an acknowledged workspace, even if quota left
- * only its generic copy. A different account must not replace it through IDB
- * or another generic localStorage save before explicit recovery. */
-function assertFallbackOwnerUnchanged(name: string, current: NewerFallbackCopy | null, userId: string): void {
+/** Legacy name slugs are storage locators, not immutable owner identities:
+ * two different names can normalize to the same slug. */
+function stablePersistedUserId(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as { state?: { profile?: { userId?: unknown } } };
+    const id = parsed.state?.profile?.userId;
+    return typeof id === "string" && id.trim() ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Preserve an acknowledged fallback across account changes, including
+ * legacy snapshots whose owner cannot be established by a stable user ID.
+ * Exact-byte retries are harmless; changed unkeyed bytes require recovery. */
+function assertFallbackOwnerUnchanged(name: string, current: NewerFallbackCopy | null, incomingValue: string): void {
   if (!observesWorkspace(name) || current === null) return;
-  if (persistedUserId(current.value) === userId) return;
+  if (current.value === incomingValue) return;
+  const previousId = stablePersistedUserId(current.value);
+  const nextId = stablePersistedUserId(incomingValue);
+  if (previousId !== null && previousId === nextId) return;
   conflictedWorkspaceKeys.add(name);
   throw new VaultConflictError();
 }
@@ -833,7 +848,7 @@ const vaultStorage: StateStorage = {
       const expected = workspaceExpectation(name);
       const currentFallback = newerFallbackCopy(fallbackStore, name);
       assertFallbackStillCurrent(name, currentFallback, expected);
-      assertFallbackOwnerUnchanged(name, currentFallback, userId);
+      assertFallbackOwnerUnchanged(name, currentFallback, value);
       fallbackBaseFingerprint = currentFallback !== null
         ? currentFallback.baseFingerprint
         : observedVaultFingerprint(name);
@@ -873,7 +888,7 @@ const vaultStorage: StateStorage = {
       try {
         const expected = workspaceExpectation(name);
         assertFallbackStillCurrent(name, previousFallback, expected);
-        assertFallbackOwnerUnchanged(name, previousFallback, userId);
+        assertFallbackOwnerUnchanged(name, previousFallback, value);
         // Marker first: it is tiny, and one that does not match the copy beside
         // it is ignored, so a copy that failed to land is never read as newer.
         // Retain the original vault base across a chain of fallback-only saves.
