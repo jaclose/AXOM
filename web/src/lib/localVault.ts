@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { invalidateVaultWrite, markVaultWrite, markVaultWriteFailure, readVaultWriteFailure } from "./vaultActivity";
+import { captureVaultWriteObservation, invalidateVaultWrite, invalidateVaultWriteIfUnchanged, markVaultWrite, markVaultWriteFailure, readVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -709,6 +709,7 @@ function clearFallbackCopyIfUnchanged(
 
 const vaultStorage: StateStorage = {
   async getItem(name) {
+    const initialReceipt = observesWorkspace(name) ? captureVaultWriteObservation() : null;
     // A save that could not reach IndexedDB leaves its snapshot here, ahead of
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
@@ -770,11 +771,19 @@ const vaultStorage: StateStorage = {
         // localStorage still has the data; no need to interrupt app load.
       }
     }
-    // A previously confirmed workspace write is not proof of durability when
-    // hydration finds neither an IndexedDB primary/scoped record nor a fallback.
-    // This also fails closed when IndexedDB cannot be read. Only tiny status
-    // metadata is invalidated; the storage bytes and recovery copies remain.
-    if (fallback === null && observesWorkspace(name)) invalidateVaultWrite();
+    // Do not invalidate a newer tab's saved receipt after a stale, delayed
+    // missing-vault read. Recheck the durable snapshot before touching status;
+    // on read errors, invalidate only the receipt observed at hydration start.
+    if (fallback === null && initialReceipt !== null) {
+      try {
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* IndexedDB may still be temporarily unavailable. */ }
+      invalidateVaultWriteIfUnchanged(initialReceipt);
+    }
     rememberVaultSnapshot(name, fallback);
     return fallback;
   },

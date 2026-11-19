@@ -16,6 +16,12 @@ export interface VaultWriteRecord {
   scope: "workspace";
 }
 
+/** The exact receipt observed before asynchronous vault hydration begins. */
+export interface VaultWriteObservation {
+  readonly rawMarker: string | null;
+  readonly memoryRecord: VaultWriteRecord | null;
+}
+
 export const VAULT_WRITE_EVENT = "axom:vault-write";
 export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
@@ -33,6 +39,11 @@ let statusChannel: BroadcastChannel | null = null;
 function rawStoredMarker(): string | null {
   try { return window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt); }
   catch { return null; }
+}
+
+/** Capture both persisted and in-tab status before the first awaited read. */
+export function captureVaultWriteObservation(): VaultWriteObservation {
+  return { rawMarker: rawStoredMarker(), memoryRecord: lastWrite };
 }
 /**
  * Browser-frozen tabs can miss BroadcastChannel invalidations. A quota-only
@@ -170,6 +181,18 @@ export function invalidateVaultWrite(): void {
   if ((hadMemoryRecord || hadStoredRecord) && typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
     window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
   }
+}
+
+/**
+ * A delayed missing-vault read may finish after another tab has confirmed a
+ * newer save. Never erase a changed receipt on the strength of that stale read.
+ * Storage comparison and deletion are not a cross-tab atomic transaction;
+ * callers should also re-read the vault before invoking this guard.
+ */
+export function invalidateVaultWriteIfUnchanged(observed: VaultWriteObservation): boolean {
+  if (rawStoredMarker() !== observed.rawMarker || lastWrite !== observed.memoryRecord) return false;
+  invalidateVaultWrite();
+  return true;
 }
 
 /** Read only a valid workspace-specific marker, never a legacy auxiliary write. */
