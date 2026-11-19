@@ -357,12 +357,15 @@ describe("IndexedDB-first local vault", () => {
     }
 
     const db = await openCurrentVault();
-    expect(competingSaveOccurred).toBe(true);
-    expect(await getDirect(db, key)).toBe(promoting);
-    expect(storage.getItem(key)).toBe(competing);
-    expect(storage.getItem(markerKey)).toBe(competingMarker);
-    expect(storage.getItem(scopedKey)).toBe(competing);
-    db.close();
+    try {
+      expect(competingSaveOccurred).toBe(true);
+      expect(await getDirect(db, key)).toBe(promoting);
+      expect(storage.getItem(key)).toBe(competing);
+      expect(storage.getItem(markerKey)).toBe(competingMarker);
+      expect(storage.getItem(scopedKey)).toBe(competing);
+    } finally {
+      db.close(); // Failing RED assertions must not block the next fake-IDB reset.
+    }
   });
 
   it("retains a new account B fallback while account A's IndexedDB save finishes", async () => {
@@ -415,14 +418,17 @@ describe("IndexedDB-first local vault", () => {
     }
 
     const db = await openCurrentVault();
-    expect(injected).toBe(true);
-    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
-    expect(await getDirect(db, key)).toBe(nextA);
-    expect(storage.getItem(key)).toBe(fallbackB);
-    expect(storage.getItem(markerKey)).toBe(markerB);
-    expect(storage.getItem(pointerKey)).toBe("account-B");
-    expect(storage.getItem(scopedB)).toBe(fallbackB);
-    db.close();
+    try {
+      expect(injected).toBe(true);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      expect(await getDirect(db, key)).toBe(nextA);
+      expect(storage.getItem(key)).toBe(fallbackB);
+      expect(storage.getItem(markerKey)).toBe(markerB);
+      expect(storage.getItem(pointerKey)).toBe("account-B");
+      expect(storage.getItem(scopedB)).toBe(fallbackB);
+    } finally {
+      db.close();
+    }
   });
 
   it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
