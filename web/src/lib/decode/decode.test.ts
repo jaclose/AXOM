@@ -205,3 +205,27 @@ describe("analyses travel with their question", () => {
     expect(again.questions?.[0].analyses).toEqual([analysis({ status: "rejected" })]);
   });
 });
+
+describe("teaching cannot be treated as approved after answer-readiness withdrawal", () => {
+  it("hides source and model teaching and proposals without deleting stored verdicts", () => {
+    for (const origin of ["source", "ai"] as const) {
+      const saved = { ...question, analyses: [analysis({ origin })] };
+      expect(currentTeaching(saved, document)?.origin).toBe(origin);
+      const pending = { ...question, analyses: [analysis({ origin, status: "proposed" })] };
+      expect(pendingAnalyses(pending, document)).toHaveLength(1);
+      for (const downgraded of [
+        { extraction: { ...question.extraction!, reviewed: false } },
+        { needsReview: true },
+        { correctKey: undefined },
+      ]) {
+        const held = { ...saved, ...downgraded };
+        const waiting = { ...pending, ...downgraded };
+        expect(questionSourceFingerprint(held, document)).toBe(questionSourceFingerprint(saved, document));
+        expect(currentTeaching(held, document)).toBeUndefined();
+        expect(pendingAnalyses(waiting, document)).toEqual([]);
+        expect(held.analyses).toEqual(saved.analyses);
+      }
+      expect(currentTeaching({ ...saved, needsReview: false }, document)?.origin).toBe(origin);
+    }
+  });
+});
