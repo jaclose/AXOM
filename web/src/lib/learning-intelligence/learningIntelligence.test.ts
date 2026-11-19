@@ -234,10 +234,16 @@ describe("pattern findings", () => {
       attempts: [attempt(1, index < 3 ? "correct" : "incorrect"), attempt(4, "correct")],
     }));
     const unseen = [question(), question()];
-    const finding = buildPatternReport([...seen, ...unseen]).find((item) => item.kind === "first-vs-repeat");
+    // A bare flag is not a scored answer, but keyless or unreviewed items
+    // must not be recommended as answer-ready practice.
+    const flaggedOnly = question({ attempts: [{ at: "2026-07-02T09:00:00.000Z", status: "flagged" }] });
+    const unkeyed = question({ correctKey: undefined });
+    const pendingReview = question({ extraction: { confidence: "medium", reviewed: false } });
+    const finding = buildPatternReport([...seen, ...unseen, flaggedOnly, unkeyed, pendingReview])
+      .find((item) => item.kind === "first-vs-repeat");
     expect(finding).toMatchObject({
       basis: "computed",
-      questionIds: unseen.map((item) => item.id),
+      questionIds: [...unseen.map((item) => item.id), flaggedOnly.id],
       actionLabel: "Practise unseen questions",
     });
     expect(finding?.detail).toContain("Different questions");
