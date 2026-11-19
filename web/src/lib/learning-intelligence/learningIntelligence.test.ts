@@ -222,10 +222,11 @@ describe("pattern findings", () => {
       sample: 24,
       title: "50% on new questions, 100% on ones you have seen",
       questionIds: [],
-      actionLabel: "No unseen questions in this selection",
+      actionLabel: "No answer-ready unseen questions",
     });
     expect(finding?.detail).toContain("Different questions");
     expect(finding?.detail).not.toContain("remembering the question adds");
+    expect(finding?.detail).toContain("cannot establish whether remembering improved performance");
   });
 
   it("offers real unattempted IDs when a descriptive first/repeat gap has available practice", () => {
