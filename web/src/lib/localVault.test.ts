@@ -726,13 +726,11 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(key)).toBe(latest);
     oldConnection.close();
 
-    // The next read promotes the fallback only after the v4 barrier can land.
+    // Promotion requires the v5 barrier, but cannot safely remove an
+    // acknowledged fallback: a second tab may write between check and delete.
     expect(await localVaultStorage.getItem(key)).toBe(latest);
-    await waitFor(async () => {
-      await localVaultStorage.getItem(key);
-      return localStorage.getItem(key) === null;
-    });
-    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(key)).toBe(latest);
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     const upgraded = await openCurrentVault();
     expect(upgraded.version).toBe(DB_VERSION);
     expect(JSON.parse((await getDirect(upgraded, key))!)).toMatchObject({
