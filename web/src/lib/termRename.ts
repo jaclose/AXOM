@@ -41,6 +41,19 @@ export function planTermRename(
     return { ok: false, reason: "Another term already has that name." };
   }
 
+  // Historical term labels could contain "/" even though new rename inputs
+  // cannot. Exact-name checks alone would let the source root swallow a nested
+  // term's rows/focus, or create a target root overlapping a still-empty term.
+  // Without immutable term IDs on tracker paths, keep both roots disjoint.
+  const overlapsRoot = (otherKey: string, rootKey: string): boolean =>
+    otherKey.startsWith(`${rootKey}/`) || rootKey.startsWith(`${otherKey}/`);
+  if (terms.some((term) => term.id !== termId && (
+    overlapsRoot(trackerPathKey(term.name), fromKey)
+    || overlapsRoot(trackerPathKey(term.name), toKey)
+  ))) {
+    return { ok: false, reason: "Another term has an overlapping tracker root. Resolve term ownership before renaming." };
+  }
+
   const belongsTo = (path: string, prefix: string): boolean => {
     const key = trackerPathKey(path);
     return key === prefix || key.startsWith(`${prefix}/`);
