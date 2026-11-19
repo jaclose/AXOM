@@ -56,6 +56,7 @@ interface ApplyTrackOptions {
 }
 import { normalizeTrackerPath, trackerPathKey } from "./pathUtils";
 import { planTermRename } from "./termRename";
+import { planTermAdmission } from "./termAdmission";
 import { normalizeResourceUrl } from "./resourceUtils";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
 import { normalizeStudyStreaks } from "./studyStreaks";
@@ -201,7 +202,7 @@ interface Actions {
   applyEducationTrack: (trackId: EducationTrackId, opts?: ApplyTrackOptions) => void;
 
   // terms
-  addTerm: (name: string) => void;
+  addTerm: (name: string) => { ok: boolean; reason?: string };
   renameTerm: (id: string, name: string) => { ok: boolean; reason?: string };
   /** Sessions of one attended activity the term lets a learner miss; undefined clears it. */
   setTermAbsenceAllowance: (termId: string, activity: CourseActivity, allowed: number | undefined) => void;
@@ -453,7 +454,19 @@ export const useStore = create<Store>()(
           };
         }),
 
-      addTerm: (name) => set((s) => ({ terms: [...s.terms, { id: uid(), name }] })),
+      addTerm: (name) => {
+        let status: { ok: boolean; reason?: string } = { ok: false, reason: "Unable to add term." };
+        set((s) => {
+          const plan = planTermAdmission(s.terms, s.tracker, s.profile.primaryTrackerScopes, name);
+          if (!plan.ok) {
+            status = { ok: false, reason: plan.reason };
+            return s;
+          }
+          status = { ok: true };
+          return { terms: [...s.terms, { id: uid(), name: plan.name }] };
+        });
+        return status;
+      },
       renameTerm: (id, name) => {
         let status: { ok: boolean; reason?: string } = { ok: false, reason: "Term rename could not complete." };
         set((s) => {
