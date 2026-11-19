@@ -653,6 +653,20 @@ describe("v5-preserving save receipt integration", () => {
 
   it("retires an unverified missing-workspace badge without deleting a newer tab's marker", async () => {
     const key = STORAGE_KEYS.persistedState;
+    // This suite runs in Node, unlike vaultActivity.test.ts (jsdom).
+    // Model one tab's optional storage without changing the environment
+    // of unrelated v5 persistence and conflict tests.
+    const tabSession = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: storage,
+      sessionStorage: {
+        getItem: (name: string) => tabSession.get(name) ?? null,
+        setItem: (name: string, value: string) => { tabSession.set(name, value); },
+        removeItem: (name: string) => { tabSession.delete(name); },
+      },
+      dispatchEvent: vi.fn(),
+      BroadcastChannel: undefined,
+    });
     const { markVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
     markVaultWrite("indexeddb", new Date("2026-11-19T08:01:00.000Z"));
     const marker = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt);
