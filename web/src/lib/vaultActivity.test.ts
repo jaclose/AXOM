@@ -110,6 +110,43 @@ describe("verified local workspace save timestamps across upgrades", () => {
     expect(firstTab.readLastVaultWrite()).toBeNull();
   });
 
+  it.each(["all", "write-only"] as const)(
+    "does not revive an unverified shared receipt after hydration and module reload when sessionStorage denies %s access",
+    async (denial) => {
+      const vault = await import("./vaultActivity");
+      vault.markVaultWrite("indexeddb", new Date(savedAt));
+      const shared = window.localStorage.getItem(markerKey);
+      expect(shared).not.toBeNull();
+      const originalSessionStorage = Object.getOwnPropertyDescriptor(window, "sessionStorage");
+      const readableStorage = window.sessionStorage;
+      try {
+        Object.defineProperty(window, "sessionStorage", {
+          configurable: true,
+          value: denial === "all"
+            ? { getItem: () => { throw new DOMException("Denied", "SecurityError"); },
+                setItem: () => { throw new DOMException("Denied", "SecurityError"); },
+                removeItem: () => { throw new DOMException("Denied", "SecurityError"); } }
+            : { getItem: readableStorage.getItem.bind(readableStorage),
+                setItem: () => { throw new DOMException("Denied", "SecurityError"); },
+                removeItem: readableStorage.removeItem.bind(readableStorage) },
+        });
+        expect(vault.invalidateVaultWriteIfUnchanged(vault.captureVaultWriteObservation())).toBe(true);
+        expect(window.localStorage.getItem(markerKey)).toBe(shared);
+        expect(vault.readLastVaultWrite()).toBeNull();
+        vi.resetModules();
+        const afterReload = await import("./vaultActivity");
+        // A prior save receipt is not evidence of recovery after storage denied the tombstone.
+        expect(afterReload.readLastVaultWrite()).toBeNull();
+        const renewed = new Date("2026-11-19T10:00:00.000Z");
+        afterReload.markVaultWrite("indexeddb", renewed);
+        expect(afterReload.readLastVaultWrite()?.at).toBe(renewed.toISOString());
+        expect(window.localStorage.getItem(markerKey)).not.toBe(shared);
+      } finally {
+        if (originalSessionStorage) Object.defineProperty(window, "sessionStorage", originalSessionStorage);
+      }
+    },
+  );
+
   it("invalidates the marker without deleting a workspace and allows immediate renewal", async () => {
     const workspace = JSON.stringify({ state: { notebook: "preserve" } });
     window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
