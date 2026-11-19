@@ -365,6 +365,66 @@ describe("IndexedDB-first local vault", () => {
     db.close();
   });
 
+  it("retains a new account B fallback while account A's IndexedDB save finishes", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const pointerKey = `${key}:active-user`;
+    const scopedB = `${key}:user:account-B`;
+    const snapshot = (userId: string, label: string) => JSON.stringify({
+      state: { profile: { userId }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+    const baseA = snapshot("account-A", "base-A");
+    const nextA = snapshot("account-A", "saved-A");
+    const fallbackB = snapshot("account-B", "unmerged-B");
+    await localVaultStorage.setItem(key, baseA);
+    expect(await localVaultStorage.getItem(key)).toBe(baseA);
+
+    // Obtain a valid acknowledged B marker from the real fallback writer;
+    // stage it for delivery while A's pending transaction is committing.
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, fallbackB);
+    const markerB = storage.getItem(markerKey);
+    expect(markerB).not.toBeNull();
+    storage.removeItem(key);
+    storage.removeItem(markerKey);
+    storage.removeItem(scopedB);
+    storage.setItem(pointerKey, "account-A");
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(baseA);
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, record, storeKey) {
+      if (!injected && storeKey === key && record === nextA) {
+        injected = true;
+        storage.setItem(markerKey, markerB!);
+        storage.setItem(key, fallbackB);
+        storage.setItem(pointerKey, "account-B");
+        storage.setItem(scopedB, fallbackB);
+      }
+      return Reflect.apply(originalPut, this, [record, storeKey]);
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.setItem(key, nextA);
+      await flushLocalVaultWrites();
+    } finally {
+      spy.mockRestore();
+    }
+
+    const db = await openCurrentVault();
+    expect(injected).toBe(true);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(await getDirect(db, key)).toBe(nextA);
+    expect(storage.getItem(key)).toBe(fallbackB);
+    expect(storage.getItem(markerKey)).toBe(markerB);
+    expect(storage.getItem(pointerKey)).toBe("account-B");
+    expect(storage.getItem(scopedB)).toBe(fallbackB);
+    db.close();
+  });
+
   it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
