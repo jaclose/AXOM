@@ -431,6 +431,47 @@ describe("IndexedDB-first local vault", () => {
     }
   });
 
+  it("never automatically deletes a marked workspace fallback after an IndexedDB promotion", async () => {
+    // Web Storage compares and removes are separate cross-tab operations.
+    // If cleanup starts removing keys, another tab may acknowledge B between
+    // the final read and the first removal. The only safe automatic policy is
+    // retaining the recovery copy until an explicit reconciliation.
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] },
+      version: 34,
+    });
+    const acknowledged = snapshot("unique-offline-question");
+    await localVaultStorage.setItem(key, snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, acknowledged);
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+
+    const remove = vi.spyOn(storage, "removeItem");
+    try {
+      expect(await localVaultStorage.getItem(key)).toBe(acknowledged);
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBe(acknowledged);
+      } finally {
+        db.close();
+      }
+      expect(remove).not.toHaveBeenCalledWith(markerKey);
+      expect(remove).not.toHaveBeenCalledWith(key);
+      expect(remove).not.toHaveBeenCalledWith(scopedKey);
+      expect(storage.getItem(key)).toBe(acknowledged);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(scopedKey)).toBe(acknowledged);
+    } finally {
+      remove.mockRestore();
+    }
+  });
+
   it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
