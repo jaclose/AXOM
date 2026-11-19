@@ -109,6 +109,34 @@ describe("questions that teach the same rule", () => {
     expect(groups.every((group) => group.evidence === "single-question")).toBe(true);
   });
 
+  it("counts distinct source-verified diagrams instead of collapsing identical text", () => {
+    const makeVisual = (id: string, checksum: string): QuestionRecord => ({
+      ...question({ id }),
+      content: {
+        id, source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+        provenance: { method: "pdf-import" },
+        assets: [{
+          id: "figure", questionId: id, role: "question", filename: "figure.png",
+          mimeType: "image/png", checksum,
+        }],
+      },
+      attachments: [{
+        id: `attachment-${id}`, assetId: "figure", role: "exhibit", blobKey: `blob-${id}`,
+        fileName: "figure.png", mimeType: "image/png", byteSize: 128, altText: "",
+        createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+      }],
+    });
+    const first = makeVisual("q-a", `sha256:${"a".repeat(64)}`);
+    const second = makeVisual("q-b", `sha256:${"b".repeat(64)}`);
+    const copy = makeVisual("q-c", `sha256:${"a".repeat(64)}`);
+    const withTeaching = [first, second, copy].map((item) => ({ ...item, analyses: [reviewed(item)] }));
+    const [group] = conceptGroups(withTeaching, documents);
+    expect(group.questionIds).toEqual(["q-a", "q-b", "q-c"]);
+    expect(group.uniqueQuestions).toBe(2);
+    expect(group.sources).toEqual([{ documentId: "doc-1", uniqueQuestions: 2 }]);
+    expect(group.evidence).toBe("single-source");
+  });
+
   it("uses only teaching that is reviewed and still fits", () => {
     const proposed = taught({ id: "q-2" }, { status: "proposed" });
     const stale = { ...taught({ id: "q-3" }), stem: "Reworded since." };
