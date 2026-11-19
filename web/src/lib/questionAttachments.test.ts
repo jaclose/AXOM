@@ -428,6 +428,53 @@ describe("portable backup payloads", () => {
     expect(await record!.blob.text()).toBe("imported");
   });
 
+  it("rejects an unreadable newer local legacy image instead of silently reporting it as skipped", async () => {
+    const newer = "2026-07-17T15:00:00.000Z";
+    const older = "2026-07-17T14:00:00.000Z";
+    const defects: Array<{ label: string; blob: Blob | undefined; mimeType: string; byteSize: number }> = [
+      { label: "zero bytes", blob: new Blob([]), mimeType: "image/png", byteSize: 4 },
+      { label: "truncated bytes", blob: new Blob(["AB"]), mimeType: "image/png", byteSize: 4 },
+      { label: "missing Blob", blob: undefined, mimeType: "image/png", byteSize: 4 },
+      { label: "wrong Blob MIME", blob: new Blob(["NEW!"], { type: "image/jpeg" }), mimeType: "image/png", byteSize: 4 },
+    ];
+    for (const [index, defect] of defects.entries()) {
+      const meta = metadata({ id: `legacy-newer-bad-${index}`, byteSize: 4, updatedAt: older });
+      await putQuestionAttachmentBlob(meta.blobKey, {
+        blob: defect.blob as Blob,
+        mimeType: defect.mimeType,
+        byteSize: defect.byteSize,
+        questionId: "q1",
+        updatedAt: newer,
+      });
+      await expect(restoreQuestionAttachmentPayloads(
+        [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+        [{ id: "q1", attachments: [meta] }],
+      ), defect.label).rejects.toThrow("newer stored image");
+      const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+      expect(retained?.updatedAt).toBe(newer);
+      expect(retained?.blob?.size).toBe(defect.blob?.size);
+    }
+  });
+
+  it("still skips a complete, readable newer legacy image without replacing its bytes or provenance", async () => {
+    const newer = "2026-07-17T15:00:00.000Z";
+    const meta = metadata({ id: "legacy-newer-complete", byteSize: 4, updatedAt: "2026-07-17T14:00:00.000Z" });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["NEW!"], { type: "image/png" }),
+      mimeType: "image/png",
+      byteSize: 4,
+      questionId: "original-question",
+      updatedAt: newer,
+    });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+      [{ id: "q1", attachments: [meta] }],
+    )).resolves.toEqual({ restored: 0, skipped: 1 });
+    const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(retained).toMatchObject({ updatedAt: newer, questionId: "original-question" });
+    expect(await retained!.blob.text()).toBe("NEW!");
+  });
+
   it("rejects same-revision legacy image collisions instead of treating different bytes as restored", async () => {
     const meta = metadata({ id: "legacy-equal-revision-different-bytes", byteSize: 4 });
     await putQuestionAttachmentBlob(meta.blobKey, {
