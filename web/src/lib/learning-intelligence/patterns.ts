@@ -223,16 +223,22 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   const repeatTally = tally(repeat);
   if (firstTally.attempts >= MIN_GROUP_ANSWERS && repeatTally.attempts >= MIN_GROUP_ANSWERS) {
     if (repeatTally.accuracy! - firstTally.accuracy! >= 15) {
+      // These are different cohorts: the repeat group contains only items
+      // revisited, while the first-time group includes items never revisited.
+      // A raw accuracy gap therefore cannot identify a memory/learning effect.
+      const unseenIds = questions.filter((question) => question.attempts.length === 0).map((question) => question.id);
       findings.push({
         id: "first-vs-repeat",
         kind: "first-vs-repeat",
         title: `${firstTally.accuracy}% on new questions, ${repeatTally.accuracy}% on ones you have seen`,
-        detail: "The gap is what remembering the question adds. Your score on questions you have not seen is the one an exam will measure, so weight new questions over repeats.",
+        detail: `Different questions and difficulty mixes can contribute to this gap; the unmatched groups do not establish how much remembering helped. ${unseenIds.length
+          ? "Use the unattempted questions in this selection to check your first-pass performance."
+          : "There are no unseen questions in this selection to practise."}`,
         basis: "computed",
         sample: firstTally.attempts + repeatTally.attempts,
         weight: 60,
-        questionIds: questions.filter((question) => question.attempts.length === 0).map((question) => question.id),
-        actionLabel: "Practise unseen questions",
+        questionIds: unseenIds,
+        actionLabel: unseenIds.length ? "Practise unseen questions" : "No unseen questions in this selection",
       });
     }
   } else if (scored.length > 0) {
