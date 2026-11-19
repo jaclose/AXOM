@@ -94,9 +94,19 @@ export function questionVisualIdentity(
       if (block.type === "table" && block.sourceImageAssetId) {
         record(block.sourceImageAssetId, `${location}:table:${semanticIndex}`);
       }
+      // A blank multi-column table serializes as delimiter-only " | ".
+      // Its separators are layout, not displayed source evidence. Inspect
+      // actual cells, headers, caption and choice-row keys instead; rich
+      // cells use the same text normalization as all other question blocks.
+      const hasSemanticText = block.type === "table"
+        ? Boolean(block.caption?.trim()
+          || [...(block.headers ?? []), ...(block.rowKeys ?? []), ...block.rows.flat()].some((cell) => (
+            block.rich ? blockToPlainText({ type: "rich_text", html: cell }) : cell
+          ).trim()))
+        : Boolean(blockToPlainText(block).trim());
       if (block.type === "image"
         || (block.type === "table" && Boolean(block.sourceImageAssetId))
-        || blockToPlainText(block).trim()) {
+        || hasSemanticText) {
         semanticIndex += 1;
       }
     }
