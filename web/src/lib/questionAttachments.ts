@@ -826,7 +826,7 @@ async function conditionallyRestoreLegacyAttachment(
 async function assertReadableNewerLegacyAttachment(
   blobKey: string,
   incomingRevision: string,
-  target: Pick<QuestionImageAttachment, "mimeType" | "byteSize">,
+  target: Pick<QuestionImageAttachment, "mimeType" | "byteSize" | "width" | "height">,
   scope: QuestionAttachmentScope,
 ): Promise<void> {
   assertScope(scope);
@@ -837,17 +837,27 @@ async function assertReadableNewerLegacyAttachment(
   }
   let readable = false;
   try {
-    readable = current.mimeType === target.mimeType
+    if (current.mimeType === target.mimeType
       && current.byteSize === target.byteSize
       && current.byteSize <= MAX_QUESTION_ATTACHMENT_BYTES
       && await readableAttachmentRecord(current)
-      && (!current.blob.type || current.blob.type === current.mimeType);
+      && (!current.blob.type || current.blob.type === current.mimeType)) {
+      // A Blob returning N bytes is not proof that those bytes are an image.
+      // Decode before certifying a newer revision as preserved. Browsers without
+      // an image decoder must fail closed and leave the stored bytes untouched.
+      const decoded = await probeImageDimensions(current.blob);
+      readable = !!decoded
+        && Number.isSafeInteger(decoded.width) && decoded.width > 0
+        && Number.isSafeInteger(decoded.height) && decoded.height > 0
+        && (!target.width || target.width === decoded.width)
+        && (!target.height || target.height === decoded.height);
+    }
   } catch {
-    // An unreadable Blob must not be reported as a successful newer skip.
+    // Decode errors and unreadable blobs are unverified, not successful skips.
   }
   assertScope(scope);
   if (!readable) {
-    throw new Error("A newer stored image is incomplete or unreadable. Backup restoration cannot safely skip it; no existing image was overwritten.");
+    throw new Error("A newer stored image could not be decoded or verified. Backup restoration cannot safely skip it; no existing image was overwritten.");
   }
 }
 
