@@ -53,7 +53,8 @@ describe("term rename keeps Course Tracker attendance and source provenance", ()
     const modules = buildModuleWeeks(result.tracker, [], undefined, {
       terms: result.terms, courses,
     });
-    expect(modules.filter((m) => m.term === "Foundations").map((m) => m.courseId)).toEqual(["core"]);
+    expect(modules.filter((m) => m.term === "Foundations")).toHaveLength(2);
+    expect(modules.filter((m) => m.term === "Foundations").every((m) => m.courseId === "core")).toBe(true);
     expect(JSON.stringify({ terms, tracker, focus })).toBe(before);
   });
 
