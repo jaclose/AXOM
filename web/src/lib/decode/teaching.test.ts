@@ -272,7 +272,7 @@ describe("questions that teach the same rule", () => {
   });
 
   it("treats actually placed image choices as distinct evidence without trusting import IDs or changed keys", () => {
-    const make = (id: string, swap: boolean, assetPrefix: string, correctKey = "A") => {
+    const make = (id: string, swap: boolean, assetPrefix: string, correctKey = "A", placed = true) => {
       const firstId = `asset-${assetPrefix}-first`;
       const secondId = `asset-${assetPrefix}-second`;
       const asset = (assetId: string, digest: string) => ({
@@ -284,8 +284,8 @@ describe("questions that teach the same rule", () => {
         content: {
           id, source: { filename: "source.pdf", page: 1 }, stem: [],
           choices: [
-            { id: `${id}-a`, label: "A", blocks: [{ type: "image", assetId: swap ? secondId : firstId }] },
-            { id: `${id}-b`, label: "B", blocks: [{ type: "image", assetId: swap ? firstId : secondId }] },
+            { id: `${id}-a`, label: "A", blocks: placed ? [{ type: "image", assetId: swap ? secondId : firstId }] : [] },
+            { id: `${id}-b`, label: "B", blocks: placed ? [{ type: "image", assetId: swap ? firstId : secondId }] : [] },
           ],
           provenance: { method: "pdf-import" },
           assets: [asset(firstId, "a"), asset(secondId, "b")],
@@ -314,6 +314,13 @@ describe("questions that teach the same rule", () => {
     expect(group.sources).toEqual([{ documentId: "doc-1", uniqueQuestions: 2 }]);
     expect(group.evidence).toBe("single-source");
     expect(conceptGroups([original, reimport, changedKeyOnly], documents)[0].uniqueQuestions).toBe(1);
+    // A legacy copy may retain the same source digests while losing only
+    // placement metadata. That absence cannot establish an extra instance.
+    const unplaced = make("q-ordered-unplaced", false, "legacy-import", "A", false);
+    expect(questionMappingStatus(unplaced)).toBe("ready");
+    expect(conceptGroups([original, reimport, unplaced], documents)[0].uniqueQuestions).toBe(1);
+    expect(conceptGroups([original, swapped, unplaced], documents)[0].uniqueQuestions).toBe(2);
+    expect(conceptGroups([unplaced, swapped, original], documents)[0].uniqueQuestions).toBe(2);
   });
 
   it("uses only teaching that is reviewed and still fits", () => {
