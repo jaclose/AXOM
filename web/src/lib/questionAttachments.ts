@@ -826,6 +826,7 @@ async function conditionallyRestoreLegacyAttachment(
 async function assertReadableNewerLegacyAttachment(
   blobKey: string,
   incomingRevision: string,
+  target: Pick<QuestionImageAttachment, "mimeType" | "byteSize">,
   scope: QuestionAttachmentScope,
 ): Promise<void> {
   assertScope(scope);
@@ -836,7 +837,9 @@ async function assertReadableNewerLegacyAttachment(
   }
   let readable = false;
   try {
-    readable = current.byteSize <= MAX_QUESTION_ATTACHMENT_BYTES
+    readable = current.mimeType === target.mimeType
+      && current.byteSize === target.byteSize
+      && current.byteSize <= MAX_QUESTION_ATTACHMENT_BYTES
       && await readableAttachmentRecord(current)
       && (!current.blob.type || current.blob.type === current.mimeType);
   } catch {
@@ -878,7 +881,7 @@ export async function restoreQuestionAttachmentPayloads(
       throw new Error("A backup image failed validation against surviving question metadata. No existing image was overwritten.");
     }
     if (existing && existing.updatedAt > payload.updatedAt) {
-      await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, scope);
+      await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, target, scope);
       skipped += 1;
       continue;
     }
@@ -920,7 +923,7 @@ export async function restoreQuestionAttachmentPayloads(
     }, scope);
     assertScope(scope);
     if (outcome === "newer") {
-      await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, scope);
+      await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, target, scope);
       skipped += 1;
       continue;
     }
@@ -930,7 +933,7 @@ export async function restoreQuestionAttachmentPayloads(
       const winner = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
       assertScope(scope);
       if (winner && winner.updatedAt > payload.updatedAt) {
-        await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, scope);
+        await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, target, scope);
         skipped += 1;
         continue;
       }
