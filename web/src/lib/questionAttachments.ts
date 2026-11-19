@@ -819,6 +819,35 @@ async function conditionallyRestoreLegacyAttachment(
   });
 }
 
+/** A legacy restore must not call an unreadable newer local record a
+ * successful skip. Its newer revision protects it against overwrite, but its
+ * claimed byte length/format alone cannot establish that image bytes survived.
+ * Do not repair or delete it here: the owner may recover the original later. */
+async function assertReadableNewerLegacyAttachment(
+  blobKey: string,
+  incomingRevision: string,
+  scope: QuestionAttachmentScope,
+): Promise<void> {
+  assertScope(scope);
+  const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope });
+  assertScope(scope);
+  if (!current || current.updatedAt <= incomingRevision) {
+    throw new Error("A newer stored image could not be verified after a concurrent restore. No existing image was overwritten.");
+  }
+  let readable = false;
+  try {
+    readable = current.byteSize <= MAX_QUESTION_ATTACHMENT_BYTES
+      && await readableAttachmentRecord(current)
+      && (!current.blob.type || current.blob.type === current.mimeType);
+  } catch {
+    // An unreadable Blob must not be reported as a successful newer skip.
+  }
+  assertScope(scope);
+  if (!readable) {
+    throw new Error("A newer stored image is incomplete or unreadable. Backup restoration cannot safely skip it; no existing image was overwritten.");
+  }
+}
+
 /** Write imported payload bytes for every attachment the merged/restored state
  * still references. Deterministic conflicts: the surviving metadata's updatedAt
  * decides — bytes are written when the store has nothing for that key or when
@@ -845,9 +874,13 @@ export async function restoreQuestionAttachmentPayloads(
     } catch {
       existing = undefined;
     }
-    if (existing && existing.updatedAt > payload.updatedAt) { skipped += 1; continue; }
     if (payload.mimeType !== target.mimeType || payload.byteSize !== target.byteSize) {
       throw new Error("A backup image failed validation against surviving question metadata. No existing image was overwritten.");
+    }
+    if (existing && existing.updatedAt > payload.updatedAt) {
+      await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, scope);
+      skipped += 1;
+      continue;
     }
     if (existing && existing.updatedAt === payload.updatedAt) {
       // Equal timestamps do not establish content equality. In particular, a
@@ -886,7 +919,11 @@ export async function restoreQuestionAttachmentPayloads(
       updatedAt: payload.updatedAt,
     }, scope);
     assertScope(scope);
-    if (outcome === "newer") { skipped += 1; continue; }
+    if (outcome === "newer") {
+      await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, scope);
+      skipped += 1;
+      continue;
+    }
     if (outcome === "equal") {
       // A parallel restore may have installed this revision after our first
       // lookup. The transaction never overwrites it. Reuse only exact bytes.
