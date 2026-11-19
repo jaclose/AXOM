@@ -929,7 +929,11 @@ export async function restoreQuestionAttachmentPayloads(
       // lookup. The transaction never overwrites it. Reuse only exact bytes.
       const winner = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
       assertScope(scope);
-      if (winner && winner.updatedAt > payload.updatedAt) { skipped += 1; continue; }
+      if (winner && winner.updatedAt > payload.updatedAt) {
+        await assertReadableNewerLegacyAttachment(payload.blobKey, payload.updatedAt, scope);
+        skipped += 1;
+        continue;
+      }
       let identical = false;
       try {
         if (winner?.updatedAt === payload.updatedAt
