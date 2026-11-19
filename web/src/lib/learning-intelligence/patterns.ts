@@ -7,7 +7,7 @@
 // enough answers; otherwise the report says what it is waiting for.
 // ===========================================================================
 import type { ID } from "../types";
-import { ERROR_TYPE_LABEL, errorPatterns, type QuestionRecord } from "../questions";
+import { ERROR_TYPE_LABEL, errorPatterns, questionMappingStatus, type QuestionRecord } from "../questions";
 import { attemptEvents, median, tally, type AttemptEvent, type Tally } from "./attempts";
 import { QUESTION_TASK_LABEL, questionFeatures, type QuestionFeatures } from "./questionFeatures";
 
@@ -223,16 +223,24 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   const repeatTally = tally(repeat);
   if (firstTally.attempts >= MIN_GROUP_ANSWERS && repeatTally.attempts >= MIN_GROUP_ANSWERS) {
     if (repeatTally.accuracy! - firstTally.accuracy! >= 15) {
+      // These are different cohorts: the repeat group contains only items
+      // revisited, while the first-time group includes items never revisited.
+      // A raw accuracy gap therefore cannot identify a memory/learning effect.
+      const answeredIds = new Set(events.map((event) => event.questionId));
+      const unseenIds = questions.filter((question) => !answeredIds.has(question.id)
+        && questionMappingStatus(question) === "ready").map((question) => question.id);
       findings.push({
         id: "first-vs-repeat",
         kind: "first-vs-repeat",
         title: `${firstTally.accuracy}% on new questions, ${repeatTally.accuracy}% on ones you have seen`,
-        detail: "The gap is what remembering the question adds. Your score on questions you have not seen is the one an exam will measure, so weight new questions over repeats.",
+        detail: `Different questions and difficulty mixes can contribute to this gap; the unmatched groups cannot establish whether remembering improved performance. ${unseenIds.length
+          ? "Use the unattempted questions in this selection to check your first-pass performance."
+          : "No answer-ready unattempted questions are available in this selection."}`,
         basis: "computed",
         sample: firstTally.attempts + repeatTally.attempts,
         weight: 60,
-        questionIds: questions.filter((question) => question.attempts.length === 0).map((question) => question.id),
-        actionLabel: "Practise unseen questions",
+        questionIds: unseenIds,
+        actionLabel: unseenIds.length ? "Practise unseen questions" : "No answer-ready unseen questions",
       });
     }
   } else if (scored.length > 0) {

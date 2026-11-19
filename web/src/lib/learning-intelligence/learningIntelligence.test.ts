@@ -206,6 +206,50 @@ describe("pattern findings", () => {
     expect(finding).toMatchObject({ basis: "computed", title: "38% on new questions, 100% on ones you have seen" });
   });
 
+  it("reports unmatched first/repeat cohorts without a causal memory claim or an empty practice action", () => {
+    // Every repeated item was already correct on its first exposure.
+    // Easier repeated items and harder once-only items cannot identify a
+    // within-question improvement or the effect of remembering.
+    const harder = Array.from({ length: 8 }, () => question({
+      status: "incorrect", attempts: [attempt(1, "incorrect")],
+    }));
+    const easier = Array.from({ length: 8 }, () => question({
+      status: "correct", attempts: [attempt(1, "correct"), attempt(4, "correct")],
+    }));
+    const finding = buildPatternReport([...harder, ...easier]).findings.find((item) => item.kind === "first-vs-repeat");
+    expect(finding).toMatchObject({
+      basis: "computed",
+      sample: 24,
+      title: "50% on new questions, 100% on ones you have seen",
+      questionIds: [],
+      actionLabel: "No answer-ready unseen questions",
+    });
+    expect(finding?.detail).toContain("Different questions");
+    expect(finding?.detail).not.toContain("remembering the question adds");
+    expect(finding?.detail).toContain("cannot establish whether remembering improved performance");
+  });
+
+  it("offers real unattempted IDs when a descriptive first/repeat gap has available practice", () => {
+    const seen = Array.from({ length: 8 }, (_, index) => question({
+      status: "correct",
+      attempts: [attempt(1, index < 3 ? "correct" : "incorrect"), attempt(4, "correct")],
+    }));
+    const unseen = [question(), question()];
+    // A bare flag is not a scored answer, but keyless or unreviewed items
+    // must not be recommended as answer-ready practice.
+    const flaggedOnly = question({ attempts: [{ at: "2026-07-02T09:00:00.000Z", status: "flagged" }] });
+    const unkeyed = question({ correctKey: undefined });
+    const pendingReview = question({ extraction: { confidence: "medium", reviewed: false } });
+    const finding = buildPatternReport([...seen, ...unseen, flaggedOnly, unkeyed, pendingReview])
+      .findings.find((item) => item.kind === "first-vs-repeat");
+    expect(finding).toMatchObject({
+      basis: "computed",
+      questionIds: [...unseen.map((item) => item.id), flaggedOnly.id],
+      actionLabel: "Practise unseen questions",
+    });
+    expect(finding?.detail).toContain("Different questions");
+  });
+
   it("contrasts question types on first-time answers and labels the reading as inferred", () => {
     const recall = Array.from({ length: 8 }, () => question({ status: "correct", attempts: [attempt(1, "correct")] }));
     const treatment = Array.from({ length: 8 }, (_, index) => question({
