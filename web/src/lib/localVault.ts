@@ -688,25 +688,6 @@ async function removeVaultRecords(name: string, active?: string): Promise<void> 
   });
 }
 
-function clearFallbackCopyIfUnchanged(
-  fallbackStore: Storage | null,
-  name: string,
-  copy: NewerFallbackCopy,
-  currentUserId: string,
-): void {
-  try {
-    if (
-      fallbackStore?.getItem(fallbackMarkerKey(name)) !== copy.marker
-      || fallbackStore.getItem(name) !== copy.value
-    ) return;
-    const fallbackUserId = persistedUserId(copy.value);
-    fallbackStore.removeItem(name);
-    fallbackStore.removeItem(fallbackMarkerKey(name));
-    if (fallbackUserId) fallbackStore.removeItem(scopedStateKey(name, fallbackUserId));
-    if (currentUserId) fallbackStore.setItem(activeUserKey(name), currentUserId);
-  } catch { /* The durable IndexedDB snapshot remains authoritative. */ }
-}
-
 const vaultStorage: StateStorage = {
   async getItem(name) {
     const initialReceipt = observesWorkspace(name) ? captureVaultWriteObservation() : null;
@@ -724,11 +705,23 @@ const vaultStorage: StateStorage = {
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
         clearFallbackCopy(fallbackStore, name, userId);
       } catch (promotionError) {
-        if (isVaultConflictError(promotionError) && newer.baseFingerprint !== undefined) {
+        if (isVaultConflictError(promotionError)) {
           try {
             const current = await readVaultSnapshot(name);
             if (current !== null) {
-              clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              // A conflict's subsequent readonly observation is not an
+              // atomic proof of redundancy: another tab can advance the
+              // vault again before cleanup. Never delete an acknowledged
+              // fallback after any failed promotion. A successful writeVault
+              // transaction below is the sole automatic cleanup authority.
+              if (current !== newer.value && observesWorkspace(name)) {
+                // Both versions may hold unique edits. Keep the marker and
+                // scoped copy and block follow-up autosave until reconciliation.
+                // Legacy bare markers must fail closed as well.
+                conflictedWorkspaceKeys.add(name);
+                if (initialReceipt !== null) invalidateVaultWriteIfUnchanged(initialReceipt);
+                markVaultWriteFailure(); // Existing watcher offers export.
+              }
               rememberVaultSnapshot(name, current);
               return current;
             }
