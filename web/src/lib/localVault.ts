@@ -724,11 +724,24 @@ const vaultStorage: StateStorage = {
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
         clearFallbackCopy(fallbackStore, name, userId);
       } catch (promotionError) {
-        if (isVaultConflictError(promotionError) && newer.baseFingerprint !== undefined) {
+        if (isVaultConflictError(promotionError)) {
           try {
             const current = await readVaultSnapshot(name);
             if (current !== null) {
-              clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              if (current === newer.value) {
+                // Only exact duplicate bytes prove the acknowledged fallback
+                // is redundant. Never erase edits merely because its marker
+                // stayed unchanged while another tab saved.
+                clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              } else if (observesWorkspace(name)) {
+                // Both saved versions may contain unique learner edits. Keep
+                // the fallback, its marker and profile copy for recovery, and
+                // block this tab's next save until explicit reconciliation.
+                // A valid legacy bare marker needs the same protection.
+                conflictedWorkspaceKeys.add(name);
+                if (initialReceipt !== null) invalidateVaultWriteIfUnchanged(initialReceipt);
+                markVaultWriteFailure(); // Existing watcher offers export.
+              }
               rememberVaultSnapshot(name, current);
               return current;
             }

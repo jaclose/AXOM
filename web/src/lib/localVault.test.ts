@@ -176,6 +176,39 @@ describe("IndexedDB-first local vault", () => {
     db.close();
   });
 
+  it("prefers the readable vault but retains an unmerged valid legacy bare-marker fallback", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] }, version: 34,
+    });
+    const fallback = snapshot("unmerged-legacy-edit");
+    const winner = snapshot("newer-vault-edit");
+    await localVaultStorage.setItem(key, snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, fallback);
+    const v1 = JSON.parse(localStorage.getItem(markerKey)!) as { valueFingerprint: string };
+    localStorage.setItem(markerKey, v1.valueFingerprint);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    await putDirect(db, key, winner);
+    await putDirect(db, `${key}:user:jd`, winner);
+    resetLocalVaultRuntimeForTests();
+
+    expect(await localVaultStorage.getItem(key)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(markerKey)).toBe(v1.valueFingerprint);
+    expect(localStorage.getItem(`${key}:user:jd`)).toBe(fallback);
+    expect(readVaultWriteFailure()).not.toBeNull(); // Existing backup warning
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("post-conflict-attempt"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(await getDirect(db, key)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    db.close();
+  });
+
   it("does not promote a fallback over a commit that wins before promotion", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
