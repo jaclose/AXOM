@@ -1365,14 +1365,6 @@ describe("v5-preserving save receipt integration", () => {
   });
 });
 
-async function waitFor(check: () => Promise<boolean>, attempts = 20): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (await check()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("Condition was not met in time.");
-}
-
 function putDirect(db: IDBDatabase, key: string, value: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction("state", "readwrite");
