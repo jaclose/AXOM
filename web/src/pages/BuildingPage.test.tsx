@@ -28,7 +28,7 @@ describe("Building preview", () => {
   it("shows exactly the planned and in-development systems when opening the Next horizon", () => {
     render(<BuildingPage />);
     const nextSystems = SYSTEM_PREVIEWS.filter((system) => system.status === "planned" || system.status === "in-development");
-    const nextCard = screen.getByRole("heading", { name: "Next" }).closest(".building-horizon")!;
+    const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;
     fireEvent.click(within(nextCard).getByRole("button", { name: `See ${nextSystems.length} systems` }));
 
     const shown = [...document.querySelectorAll(".system-card h3")]
