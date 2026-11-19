@@ -575,13 +575,12 @@ async function writeVault(
     let settled = false;
 
     const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
-      // A missing record is a fresh/recreated vault, not a competing revision.
-      // Conflicts only exist when another concrete workspace replaced the one
-      // this runtime hydrated.
+      // Missing data is a competing revision when this tab hydrated a concrete
+      // workspace. Otherwise a stale tab could resurrect another tab's explicit
+      // deletion. A genuinely empty hydrated vault still expects null.
       if (
         expected
-        && typeof current === "string"
-        && !expected.fingerprints.includes(workspaceFingerprint(current))
+        && !expected.fingerprints.includes(workspaceFingerprint(current ?? null))
       ) {
         conflict = new VaultConflictError();
         if (expected.latchConflict !== false && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
@@ -955,8 +954,12 @@ const vaultStorage: StateStorage = {
     if (active) fallback?.removeItem(scopedStateKey(name, active));
     try {
       await removeVaultRecords(name, active);
+      // Only an IndexedDB transaction completion establishes that this tab
+      // intentionally cleared the hydrated workspace. A failed removal must
+      // not grant this runtime permission to overwrite the old vault.
+      if (observesWorkspace(name)) rememberVaultSnapshot(name, null);
     } catch {
-      // No-op; best effort cleanup.
+      // No-op; best effort cleanup. Keep the old observed revision.
     }
   },
 };
