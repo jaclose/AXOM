@@ -53,7 +53,7 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   const shown = kept ?? proposal;
 
   const hasSourceText = questionSourcePages(question).some((number) => source?.pageTexts?.[number - 1]?.trim());
-  const canAsk = Boolean(provider) && hasSourceText && !shown && view.answer !== undefined;
+  const canAsk = ready && Boolean(provider) && hasSourceText && !shown && view.answer !== undefined;
   const pages = shown ? analysisPages(shown) : questionSourcePages(question);
   const page = pagePicked && pages.includes(pagePicked) ? pagePicked : pages[0];
   const taken = ready && undo?.questionId === question.id ? undo : undefined;
