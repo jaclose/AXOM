@@ -1021,6 +1021,10 @@ describe("searchable Question Set client boundary", () => {
     ["combining grapheme joiner only stem", "stem", "\u034F"],
     ["variation selector only stem", "stem", "\uFE0F"],
     ["combining grapheme joiner duplicate text", "choice", "Fir\u034Fst"],
+    ["soft hyphen only stem", "stem", "\u00AD"],
+    ["encoded soft hyphen only stem", "stem", "%C2%AD"],
+    ["soft hyphen duplicate answer text", "choice", "Fi\u00ADrst"],
+    ["encoded soft hyphen duplicate answer text", "choice", "Fi%C2%ADrst"],
   ] as const)("blocks %s in a schema-valid direct submission before account RPC", async (_label, field, replacement) => {
     const original = snapshot();
     if (field === "stem") original.questions[0].stem = replacement;
@@ -1042,6 +1046,10 @@ describe("searchable Question Set client boundary", () => {
     ["legacy combining grapheme joiner only stem", "stem", "\u034F"],
     ["legacy variation selector only stem", "stem", "\uFE0F"],
     ["legacy combining grapheme joiner duplicate answer", "choice", "Fir\u034Fst"],
+    ["legacy soft hyphen only stem", "stem", "\u00AD"],
+    ["legacy encoded soft hyphen only stem", "stem", "%C2%AD"],
+    ["legacy soft hyphen duplicate answer", "choice", "Fi\u00ADrst"],
+    ["legacy encoded soft hyphen duplicate answer", "choice", "Fi%C2%ADrst"],
   ] as const)("holds %s at pending academic approval, while preserving rejection", async (_label, field, replacement) => {
     const original = snapshot();
     if (field === "stem") original.questions[0].stem = replacement;
