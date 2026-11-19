@@ -22,6 +22,7 @@ import {
   validateQuestionAttachmentFile,
   validateMissingQuestionAttachmentFile,
   type QuestionImageAttachment,
+  type QuestionAttachmentBlobRecord,
 } from "./questionAttachments";
 import { DB_NAME, DB_VERSION, STORE_NAME, BACKUP_STORE_NAME, ATTACHMENT_STORE_NAME, ensureVaultStores } from "./localVault";
 
@@ -411,9 +412,9 @@ describe("portable backup payloads", () => {
     const older = "2026-07-17T09:00:00.000Z";
     const newer = "2026-07-17T12:00:00.000Z";
     await putQuestionAttachmentBlob("attachment-c", { blob: new Blob(["current"]), mimeType: "image/png", byteSize: 7, questionId: "q1", updatedAt: newer });
-    const meta = metadata({ id: "attachment-c", updatedAt: older });
+    const meta = metadata({ id: "attachment-c", updatedAt: older, byteSize: 7 });
     const skipped = await restoreQuestionAttachmentPayloads(
-      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["imported"])) }],
+      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["olddata"])) }],
       [{ id: "q1", attachments: [meta] }],
     );
     expect(skipped).toEqual({ restored: 0, skipped: 1 });
@@ -451,7 +452,7 @@ describe("portable backup payloads", () => {
   it("rejects an unreadable newer local legacy image instead of silently reporting it as skipped", async () => {
     const newer = "2026-07-17T15:00:00.000Z";
     const older = "2026-07-17T14:00:00.000Z";
-    const defects: Array<{ label: string; blob: Blob | undefined; mimeType: string; byteSize: number }> = [
+    const defects: Array<{ label: string; blob: Blob | undefined; mimeType: QuestionAttachmentBlobRecord["mimeType"]; byteSize: number }> = [
       { label: "zero bytes", blob: new Blob([]), mimeType: "image/png", byteSize: 4 },
       { label: "truncated bytes", blob: new Blob(["AB"]), mimeType: "image/png", byteSize: 4 },
       { label: "missing Blob", blob: undefined, mimeType: "image/png", byteSize: 4 },
@@ -473,6 +474,36 @@ describe("portable backup payloads", () => {
       const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
       expect(retained?.updatedAt).toBe(newer);
       expect(retained?.blob?.size).toBe(defect.blob?.size);
+    }
+  });
+
+  it("rejects a complete but incompatible newer image descriptor instead of falsely skipping it", async () => {
+    const newer = "2026-07-17T15:00:00.000Z";
+    const older = "2026-07-17T14:00:00.000Z";
+    const defects: Array<{ name: string; mimeType: QuestionAttachmentBlobRecord["mimeType"]; content: string }> = [
+      { name: "newer MIME differs", mimeType: "image/jpeg", content: "NEW!" },
+      { name: "newer length differs", mimeType: "image/png", content: "NEW!!" },
+    ];
+    for (const [index, defect] of defects.entries()) {
+      const meta = metadata({ id: `legacy-newer-mismatch-${index}`, byteSize: 4, updatedAt: older });
+      await putQuestionAttachmentBlob(meta.blobKey, {
+        blob: new Blob([defect.content], { type: defect.mimeType }),
+        mimeType: defect.mimeType,
+        byteSize: defect.content.length,
+        questionId: "q1",
+        updatedAt: newer,
+      });
+      await expect(restoreQuestionAttachmentPayloads(
+        [{ ...meta, questionId: "q1", base64: btoa("OLD!") }],
+        [{ id: "q1", attachments: [meta] }],
+      ), defect.name).rejects.toThrow("newer stored image");
+      const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+      expect(retained).toMatchObject({
+        mimeType: defect.mimeType,
+        byteSize: defect.content.length,
+        updatedAt: newer,
+      });
+      expect(await retained!.blob.text()).toBe(defect.content);
     }
   });
 
