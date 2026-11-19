@@ -472,6 +472,48 @@ describe("IndexedDB-first local vault", () => {
     }
   });
 
+  it("fails closed on reload when a retained acknowledged fallback predates a newer vault save", async () => {
+    // A nondestructive safety fence must not silently restore the older
+    // fallback over a later successful IndexedDB revision. Until explicit
+    // dual-version recovery exists, the user must reconcile the two copies.
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] },
+      version: 34,
+    });
+    const original = snapshot("initial");
+    const offline = snapshot("acknowledged-offline");
+    const advanced = snapshot("newer-indexeddb");
+    await localVaultStorage.setItem(key, original);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, offline);
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(offline);
+    await localVaultStorage.setItem(key, advanced);
+    await flushLocalVaultWrites();
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(advanced);
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+    db.close();
+
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(advanced);
+    expect(readVaultWriteFailure()).not.toBeNull();
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("unreconciled-edit"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    const preserved = await openCurrentVault();
+    expect(await getDirect(preserved, key)).toBe(advanced);
+    preserved.close();
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+  });
+
   it("retains an acknowledged fallback even after matching bytes become durable", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
