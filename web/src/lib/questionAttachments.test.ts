@@ -428,6 +428,26 @@ describe("portable backup payloads", () => {
     expect(await record!.blob.text()).toBe("imported");
   });
 
+  it("validates surviving question metadata before skipping a newer legacy image", async () => {
+    const meta = metadata({
+      id: "legacy-newer-conflicting-source",
+      byteSize: 4,
+      updatedAt: "2026-07-17T14:00:00.000Z",
+    });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["KEEP"], { type: "image/png" }),
+      mimeType: "image/png", byteSize: 4,
+      questionId: "original-question", updatedAt: "2026-07-17T15:00:00.000Z",
+    });
+    await expect(restoreQuestionAttachmentPayloads(
+      [{ ...meta, mimeType: "image/jpeg", questionId: "q1", base64: btoa("OLD!") }],
+      [{ id: "q1", attachments: [meta] }],
+    )).rejects.toThrow("surviving question metadata");
+    const retained = await getQuestionAttachmentBlob(meta.blobKey, { localOnly: true });
+    expect(retained?.updatedAt).toBe("2026-07-17T15:00:00.000Z");
+    expect(await retained!.blob.text()).toBe("KEEP");
+  });
+
   it("rejects an unreadable newer local legacy image instead of silently reporting it as skipped", async () => {
     const newer = "2026-07-17T15:00:00.000Z";
     const older = "2026-07-17T14:00:00.000Z";
