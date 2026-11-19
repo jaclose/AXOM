@@ -21,8 +21,15 @@ export function planTermRename(
   termId: string,
   requestedName: string,
 ): TermRenamePlan {
-  const current = terms.find((term) => term.id === termId);
-  if (!current) return { ok: false, reason: "This term no longer exists." };
+  // Restored replacement backups may contain duplicate immutable term IDs.
+  // Never rename every matching record while relocating only the first label's
+  // tracker root; refuse the operation without modifying the imported data.
+  const selected = terms.filter((term) => term.id === termId);
+  if (selected.length === 0) return { ok: false, reason: "This term no longer exists." };
+  if (selected.length !== 1) {
+    return { ok: false, reason: "Duplicate term identity. Resolve the imported term IDs before renaming." };
+  }
+  const current = selected[0];
   if (typeof requestedName !== "string" || requestedName.includes("/")) {
     return { ok: false, reason: "Use a term name without path separators." };
   }
@@ -58,6 +65,16 @@ export function planTermRename(
     const key = trackerPathKey(path);
     return key === prefix || key.startsWith(`${prefix}/`);
   };
+  // The normalized membership test can match malformed historical paths
+  // such as "/Term 1/Week 3", whose raw first segment is empty. Refuse these
+  // rather than slicing at the wrong slash and rewriting a descendant.
+  const invalidRawRoot = (path: string): boolean =>
+    belongsTo(path, fromKey) && trackerPathKey(path.split("/")[0] ?? "") !== fromKey;
+  if (tracker.some((item) => invalidRawRoot(item.path))
+    || (primaryTrackerScopes ?? []).some((scope) => invalidRawRoot(scope.path))) {
+    return { ok: false, reason: "A tracker path has an ambiguous term root. Resolve its original filing before renaming." };
+  }
+
   // Never combine two distinct path roots, including otherwise orphaned rows
   // or pinned primary-focus paths. No silent overwrite or guessing ownership.
   if (fromKey !== toKey && (
@@ -68,10 +85,12 @@ export function planTermRename(
   }
 
   const relabel = (path: string): string => {
-    const clean = normalizeTrackerPath(path);
-    if (!belongsTo(clean, fromKey)) return path;
-    const first = clean.split("/")[0];
-    return `${next}${clean.slice(first.length)}`;
+    if (!belongsTo(path, fromKey)) return path;
+    // Replace only the first raw segment. Normalizing the entire descendant
+    // would silently rewrite historical module/week spelling and whitespace,
+    // potentially collapsing two distinct raw paths into one.
+    const slash = path.indexOf("/");
+    return slash === -1 ? next : `${next}${path.slice(slash)}`;
   };
 
   return {

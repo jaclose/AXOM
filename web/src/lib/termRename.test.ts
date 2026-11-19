@@ -134,4 +134,55 @@ describe("term rename keeps Course Tracker attendance and source provenance", ()
     }
   });
 
+  it.each(["Term 2", "Term 1"])(
+    "refuses a duplicate immutable selected term ID even when the other label is %s",
+    (secondLabel) => {
+      const duplicated: Term[] = [
+        terms[0],
+        { ...terms[0], name: secondLabel },
+        terms[1],
+      ];
+      const before = JSON.stringify({ duplicated, tracker, focus });
+      const result = planTermRename(duplicated, tracker, focus, "term-one", "Foundations");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toMatch(/duplicate|unique|id|identity/i);
+      expect(JSON.stringify({ duplicated, tracker, focus })).toBe(before);
+    },
+  );
+
+  it("changes only the term segment while preserving legacy descendant whitespace and identity", () => {
+    const legacyRows = [
+      row("legacy-a", " Term 1 / FTM   1  / Week 3 ", "lecture", "missed"),
+      row("legacy-b", "Term 1/FTM 1/Week 3", "lecture", "missed"),
+      tracker[2],
+    ];
+    const legacyFocus: PrimaryTrackerScope[] = [
+      { path: " Term 1 / FTM   1  ", since: originalUpdated },
+      focus[1],
+    ];
+    const before = JSON.stringify({ terms, legacyRows, legacyFocus });
+    const result = planTermRename(terms, legacyRows, legacyFocus, "term-one", "Foundations");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.tracker.map((r) => r.path)).toEqual([
+      "Foundations/ FTM   1  / Week 3 ",
+      "Foundations/FTM 1/Week 3",
+      "Term 10/ER/Week 1",
+    ]);
+    expect(result.tracker[0].path).not.toBe(result.tracker[1].path);
+    expect(result.tracker.map(({ path: _path, ...rest }) => rest))
+      .toEqual(legacyRows.map(({ path: _path, ...rest }) => rest));
+    expect(result.primaryTrackerScopes?.map((s) => s.path))
+      .toEqual(["Foundations/ FTM   1  ", "Term 10/ER"]);
+    expect(JSON.stringify({ terms, legacyRows, legacyFocus })).toBe(before);
+  });
+
+  it("holds malformed non-leading term roots instead of slicing the wrong raw segment", () => {
+    const malformed = [row("bad-prefix", "/Term 1/FTM 1/Week 3", "lecture", "missed")];
+    const before = JSON.stringify(malformed);
+    const result = planTermRename(terms, malformed, focus, "term-one", "Foundations");
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(malformed)).toBe(before);
+  });
+
 });
