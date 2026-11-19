@@ -360,12 +360,41 @@ describe("questions that teach the same rule", () => {
     const meaningful = makeVisual("q-layout-meaningful", [
       { type: "text", text: "First inspect the table." },
     ]);
+    // A layout-only table's separators are not source words. Imported blank
+    // multi-column rows and headers must not shift the adjacent figure.
+    const emptyGrid = makeVisual("q-layout-blank-grid", [
+      { type: "table", headers: ["", "  "], rows: [["", ""], [" ", "\t"]] },
+    ]);
+    const richEmptyGrid = makeVisual("q-layout-rich-blank-grid", [
+      { type: "table", rich: true, headers: ["<b></b>", "&nbsp;"], rows: [["<i></i>", "<b> </b>"]] },
+    ]);
+    const meaningfulHeader = makeVisual("q-layout-header", [
+      { type: "table", headers: ["Value", ""], rows: [["", ""]] },
+    ]);
+    const meaningfulCell = makeVisual("q-layout-cell", [
+      { type: "table", rows: [["", "42"]] },
+    ]);
+    const meaningfulCaption = makeVisual("q-layout-caption", [
+      { type: "table", caption: "Clinical measurements", rows: [["", ""]] },
+    ]);
+    const meaningfulRowKey = makeVisual("q-layout-row-key", [
+      { type: "table", rowKeys: ["A"], rows: [["", ""]] },
+    ]);
+    const figureTable = makeVisual("q-layout-image-table", [
+      { type: "table", sourceImageAssetId: "asset-q-layout-image-table", rows: [["", ""]] },
+    ]);
     expect([original, formatOnly, whitespaceOnly, meaningful].map(questionMappingStatus))
       .toEqual(["ready", "ready", "ready", "ready"]);
     expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(formatOnly));
     expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(whitespaceOnly));
+    expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(emptyGrid));
+    expect(questionVisualIdentity(original)).toBe(questionVisualIdentity(richEmptyGrid));
     expect(questionVisualIdentity(original)).not.toBe(questionVisualIdentity(meaningful));
-    expect(conceptGroups([original, formatOnly, whitespaceOnly], documents)[0].uniqueQuestions).toBe(1);
+    for (const semantic of [meaningfulHeader, meaningfulCell, meaningfulCaption, meaningfulRowKey, figureTable]) {
+      expect(questionVisualIdentity(original)).not.toBe(questionVisualIdentity(semantic));
+      expect(conceptGroups([original, semantic], documents)[0].uniqueQuestions).toBe(2);
+    }
+    expect(conceptGroups([original, formatOnly, whitespaceOnly, emptyGrid, richEmptyGrid], documents)[0].uniqueQuestions).toBe(1);
     expect(conceptGroups([original, meaningful], documents)[0].uniqueQuestions).toBe(2);
   });
 
