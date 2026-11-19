@@ -731,7 +731,7 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(`${STORAGE_KEYS.persistedState}:active-user`)).toBeNull();
   });
 
-  it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
+  it("requires the physical v5 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
     const oldConnection = await openVersionThreeVault();
     let upgraded: IDBDatabase | null = null;
     try {
@@ -740,22 +740,22 @@ describe("IndexedDB-first local vault", () => {
       await putDirect(oldConnection, key, base);
       expect(await localVaultStorage.getItem(key)).toBe(base);
       const persisted = JSON.stringify({
-      state: {
-        profile: { userId: "jd" },
-        documents: [{
-          id: "private-review-large",
-          fileType: "axom-private-bank-review",
-          libraryOnly: true,
-          rawText: "review source ".repeat(500_000),
-        }],
-      },
-      version: 34,
+        state: {
+          profile: { userId: "jd" },
+          documents: [{
+            id: "private-review-large",
+            fileType: "axom-private-bank-review",
+            libraryOnly: true,
+            rawText: "review source ".repeat(500_000),
+          }],
+        },
+        version: 34,
       });
       const latest = persisted.replace("private-review-large", "private-review-latest");
       const checkpoint = getVaultWriteCheckpoint();
       await expect(Promise.race([
-      localVaultStorage.setItem(key, persisted),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("setItem hung")), 500)),
+        localVaultStorage.setItem(key, persisted),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("setItem hung")), 500)),
       ])).resolves.toBeUndefined();
       await flushLocalVaultWrites();
       expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
@@ -763,8 +763,8 @@ describe("IndexedDB-first local vault", () => {
       expect(localStorage.getItem(key)).toBe(persisted);
 
       await expect(Promise.race([
-      localVaultStorage.setItem(key, latest),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("later setItem hung")), 500)),
+        localVaultStorage.setItem(key, latest),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("later setItem hung")), 500)),
       ])).resolves.toBeUndefined();
       expect(await getDirect(oldConnection, key)).toBe(base);
       expect(localStorage.getItem(key)).toBe(latest);
@@ -783,9 +783,9 @@ describe("IndexedDB-first local vault", () => {
       expect(await localVaultStorage.getItem(key)).toBe(latest);
       expect(upgraded.version).toBe(DB_VERSION);
       expect(JSON.parse((await getDirect(upgraded, key))!)).toMatchObject({
-      format: "axom-local-vault-chunks",
-      version: 1,
-      length: latest.length,
+        format: "axom-local-vault-chunks",
+        version: 1,
+        length: latest.length,
       });
     } finally {
       // A failing assertion must not leave an open v3/v5 connection that
