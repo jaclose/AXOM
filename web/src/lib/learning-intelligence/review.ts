@@ -166,15 +166,36 @@ export function reviewCandidates(
   return candidates.sort((left, right) => right.priority - left.priority);
 }
 
-/** The review candidates of a finished block, read from the workspace. */
+/**
+ * The review candidates of a finished block, read from the workspace.
+ * A historical block must be read against its own past, not future answers:
+ * opening an old result after more practice must never rewrite its reasons.
+ *
+ * Equal or malformed timestamps are not proof that another event preceded
+ * this block. Keep the block itself for scoring, but fail closed on ambiguous
+ * external history instead of inventing repeat misses or a faster baseline.
+ */
 export function reviewCandidatesForSession(
   quizSessionId: ID,
   questions: readonly QuestionRecord[],
 ): ReviewCandidate[] {
   const events = attemptEvents(questions);
   const block = events.filter((event) => event.quizSessionId === quizSessionId);
+  if (!block.length) return [];
+
+  // Use the first answer in the selected session as a conservative cutoff.
+  // Events from other sessions interleaved with this one are not prior
+  // knowledge of the whole block, even if they precede its final answer.
+  const blockTimes = block.map((event) => Date.parse(event.at));
+  const start = blockTimes.every(Number.isFinite) ? Math.min(...blockTimes) : undefined;
   const inBlock = new Set(block.map((event) => event.questionId));
-  return reviewCandidates(block, events.filter((event) => inBlock.has(event.questionId) || event.seconds));
+  const history = events.filter((event) => {
+    if (event.quizSessionId === quizSessionId) return true;
+    const at = Date.parse(event.at);
+    return start !== undefined && Number.isFinite(at) && at < start
+      && (inBlock.has(event.questionId) || event.seconds);
+  });
+  return reviewCandidates(block, history);
 }
 
 /**
