@@ -297,7 +297,8 @@ describe("IndexedDB-first local vault", () => {
 
     expect(await localVaultStorage.getItem(key)).toBeNull();
     expect(readLastVaultWrite()).toBeNull();
-    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+    // Hydration cannot erase another tab's shared receipt.
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
   });
 
   it("retires a stale save receipt when IndexedDB is temporarily unreadable without losing vault bytes", async () => {
@@ -312,7 +313,7 @@ describe("IndexedDB-first local vault", () => {
     vi.stubGlobal("indexedDB", undefined);
     expect(await localVaultStorage.getItem(key)).toBeNull();
     expect(readLastVaultWrite()).toBeNull();
-    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+    expect(storage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
 
     // A failed read must never erase data from a temporarily inaccessible IDB.
     vi.stubGlobal("indexedDB", fakeIndexedDb);

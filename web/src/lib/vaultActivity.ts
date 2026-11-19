@@ -35,6 +35,22 @@ let statusInvalidated = false;
 let invalidatedMarkerValue: string | null = null;
 /** Same-origin, content-free notifications when quota blocks the optional localStorage marker. */
 const VAULT_STATUS_CHANNEL = "axom:vault-status";
+/** A missing hydration must not erase another tab's throttled, origin-wide
+ * save marker. Remember ambiguity per tab and through same-tab reload only. */
+const HYDRATION_TOMBSTONE_KEY = `${STORAGE_KEYS.lastVaultWriteAt}:hydration-invalidated`;
+function readHydrationTombstone(): string | null {
+  try { return window.sessionStorage.getItem(HYDRATION_TOMBSTONE_KEY); }
+  catch { return null; }
+}
+function rememberHydrationTombstone(raw: string | null): void {
+  if (raw === null) return;
+  try { window.sessionStorage.setItem(HYDRATION_TOMBSTONE_KEY, raw); }
+  catch { /* The current runtime still fails closed. */ }
+}
+function clearHydrationTombstone(): void {
+  try { window.sessionStorage.removeItem(HYDRATION_TOMBSTONE_KEY); }
+  catch { /* Optional status metadata only. */ }
+}
 let statusChannel: BroadcastChannel | null = null;
 function rawStoredMarker(): string | null {
   try { return window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt); }
@@ -125,6 +141,7 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
     lastPersistedAt = now.getTime();
     try {
       window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(lastWrite));
+      clearHydrationTombstone();
       memoryOnlyConfirmedWrite = false;
     } catch {
       // IndexedDB may have saved the bytes, but without a persistent marker
@@ -169,6 +186,7 @@ export function invalidateVaultWrite(): void {
   memoryOnlyConfirmedWrite = false;
   statusInvalidated = true;
   invalidatedMarkerValue = invalidatedRaw;
+  clearHydrationTombstone();
   try {
     window.localStorage.removeItem(STORAGE_KEYS.lastVaultWriteAt);
   } catch {
@@ -184,14 +202,24 @@ export function invalidateVaultWrite(): void {
 }
 
 /**
- * A delayed missing-vault read may finish after another tab has confirmed a
- * newer save. Never erase a changed receipt on the strength of that stale read.
- * Storage comparison and deletion are not a cross-tab atomic transaction;
- * callers should also re-read the vault before invoking this guard.
+ * Missing/unreadable hydration is not evidence that every other tab's
+ * workspace was removed. Another tab may commit while its optional marker
+ * stays identical within the 1s throttle. Fail closed here, but never remove
+ * or broadcast invalidation for a shared marker on this ambiguous evidence.
+ * Explicit removal still uses invalidateVaultWrite().
  */
 export function invalidateVaultWriteIfUnchanged(observed: VaultWriteObservation): boolean {
   if (rawStoredMarker() !== observed.rawMarker || lastWrite !== observed.memoryRecord) return false;
-  invalidateVaultWrite();
+  const hadReceipt = lastWrite !== null || observed.rawMarker !== null;
+  lastWrite = null;
+  lastPersistedAt = 0;
+  memoryOnlyConfirmedWrite = false;
+  statusInvalidated = true;
+  invalidatedMarkerValue = observed.rawMarker;
+  rememberHydrationTombstone(observed.rawMarker);
+  if (hadReceipt && typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+  }
   return true;
 }
 
@@ -226,6 +254,19 @@ function readStoredWorkspaceMarker(): VaultWriteRecord | null {
  */
 export function readLastVaultWrite(): VaultWriteRecord | null {
   listenForCrossTabInvalidation();
+  const raw = rawStoredMarker();
+  const tombstone = readHydrationTombstone();
+  if (tombstone !== null) {
+    if (raw === tombstone) {
+      // A same-byte marker is ambiguous even if another tab saved new bytes.
+      lastWrite = null;
+      memoryOnlyConfirmedWrite = false;
+      statusInvalidated = true;
+      invalidatedMarkerValue = tombstone;
+      return null;
+    }
+    clearHydrationTombstone();
+  }
   const stored = readStoredWorkspaceMarker();
   if (statusInvalidated) {
     // A newer verified marker can arrive while Settings is unmounted. Do not

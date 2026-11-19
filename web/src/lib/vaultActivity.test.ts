@@ -8,10 +8,12 @@ const savedAt = "2026-11-06T20:00:00.000Z";
 beforeEach(() => {
   vi.resetModules();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
   vi.resetModules();
 });
 
@@ -66,6 +68,48 @@ describe("verified local workspace save timestamps across upgrades", () => {
     window.localStorage.setItem(markerKey, JSON.stringify(record));
     expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
   });
+  it("hides an ambiguous hydration receipt locally without deleting the shared marker", async () => {
+    const vault = await import("./vaultActivity");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    const original = window.localStorage.getItem(markerKey);
+    expect(original).not.toBeNull();
+    const observed = vault.captureVaultWriteObservation();
+    // B's newer bytes can share A's origin-wide marker during the 1s throttle.
+    expect(vault.invalidateVaultWriteIfUnchanged(observed)).toBe(true);
+    expect(window.localStorage.getItem(markerKey)).toBe(original);
+    expect(window.sessionStorage.getItem(`${markerKey}:hydration-invalidated`)).toBe(original);
+    expect(vault.readLastVaultWrite()).toBeNull();
+    vi.resetModules();
+    expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
+  });
+
+  it("accepts a distinct remote marker after a local hydration tombstone", async () => {
+    const vault = await import("./vaultActivity");
+    vault.markVaultWrite("indexeddb", new Date(savedAt));
+    expect(vault.invalidateVaultWriteIfUnchanged(vault.captureVaultWriteObservation())).toBe(true);
+    const renewed = { at: "2026-11-19T07:30:00.000Z", target: "indexeddb", version: 2, scope: "workspace" };
+    window.localStorage.setItem(markerKey, JSON.stringify(renewed));
+    expect(vault.readLastVaultWrite()).toEqual(renewed);
+    expect(window.sessionStorage.getItem(`${markerKey}:hydration-invalidated`)).toBeNull();
+  });
+
+  it("retains a separate tab's valid status with a different sessionStorage", async () => {
+    const firstTab = await import("./vaultActivity");
+    firstTab.markVaultWrite("indexeddb", new Date(savedAt));
+    expect(firstTab.invalidateVaultWriteIfUnchanged(firstTab.captureVaultWriteObservation())).toBe(true);
+    const originalSessionStorage = Object.getOwnPropertyDescriptor(window, "sessionStorage");
+    try {
+      Object.defineProperty(window, "sessionStorage", {
+        configurable: true, value: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+      });
+      vi.resetModules();
+      expect((await import("./vaultActivity")).readLastVaultWrite()?.at).toBe(savedAt);
+    } finally {
+      if (originalSessionStorage) Object.defineProperty(window, "sessionStorage", originalSessionStorage);
+    }
+    expect(firstTab.readLastVaultWrite()).toBeNull();
+  });
+
   it("invalidates the marker without deleting a workspace and allows immediate renewal", async () => {
     const workspace = JSON.stringify({ state: { notebook: "preserve" } });
     window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
