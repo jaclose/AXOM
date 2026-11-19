@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BookOpen, Check, Eye, EyeOff, Sparkles, Undo2, X } from "lucide-react";
 import type { AIProvider } from "../../lib/ai/types";
 import {
-  analysisPages, pendingAnalyses, proposeAnalyses, questionSourcePages, sourceTeachingProposals, teachingView, withAnalysis,
+  analysisPages, pendingAnalyses, proposeAnalyses, questionSourceFingerprint, questionSourcePages, sourceTeachingProposals, teachingView, withAnalysis,
   withAnalysisStatus, type QuestionAnalysis,
 } from "../../lib/decode";
 import { ICON_SIZE } from "../../lib/iconSize";
