@@ -323,8 +323,10 @@ describe("IndexedDB-first local vault", () => {
     const key = STORAGE_KEYS.persistedState;
     const old = JSON.stringify({ state: { profile: { userId: "jd" }, note: "old" }, version: 34 });
     await localVaultStorage.setItem(key, old);
-    const oldMarker = storage.getItem(STORAGE_KEYS.lastVaultWriteAt);
-    expect(oldMarker).not.toBeNull();
+    // The status helper throttles optional metadata across tests. Explicitly
+    // seed the previously confirmed receipt, rather than depend on wall time.
+    const oldMarker = JSON.stringify({ at: "2026-11-19T06:00:00.000Z", target: "indexeddb", version: 2, scope: "workspace" });
+    storage.setItem(STORAGE_KEYS.lastVaultWriteAt, oldMarker);
 
     // The first tab cannot access IndexedDB. The second tab has independently
     // renewed its saved receipt while the first is finishing a stale read.
