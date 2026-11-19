@@ -12,7 +12,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readVaultWriteFailure } from "./vaultActivity";
+import { markVaultWrite, readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -635,6 +635,48 @@ describe("a save that could not reach IndexedDB", () => {
     await localVaultStorage.setItem(key, snapshot("saved again"));
     expect(readVaultWriteFailure()).toBeNull();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("saved again"));
+  });
+});
+
+
+describe("v5-preserving save receipt integration", () => {
+  it("never reports an auxiliary cache write as a new workspace save", async () => {
+    // Use the same module instance as the statically imported localVault adapter.
+    const start = new Date("2026-11-19T08:00:00.000Z");
+    markVaultWrite("indexeddb", start);
+    const receipt = readLastVaultWrite();
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, JSON.stringify({ generations: ["synthetic"] }));
+    await flushLocalVaultWrites();
+    expect(readLastVaultWrite()).toEqual(receipt);
+    expect(DB_VERSION).toBe(5);
+  });
+
+  it("retires an unverified missing-workspace badge without deleting a newer tab's marker", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    // This suite runs in Node, unlike vaultActivity.test.ts (jsdom).
+    // Model one tab's optional storage without changing the environment
+    // of unrelated v5 persistence and conflict tests.
+    const tabSession = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: storage,
+      sessionStorage: {
+        getItem: (name: string) => tabSession.get(name) ?? null,
+        setItem: (name: string, value: string) => { tabSession.set(name, value); },
+        removeItem: (name: string) => { tabSession.delete(name); },
+      },
+      dispatchEvent: vi.fn(),
+      BroadcastChannel: undefined,
+    });
+    // Use the same module instance as the statically imported localVault adapter.
+    markVaultWrite("indexeddb", new Date("2026-11-19T08:01:00.000Z"));
+    const marker = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt);
+    expect(marker).not.toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBe(marker);
+    const v5 = await openCurrentVault();
+    expect(v5.version).toBe(5);
+    v5.close();
   });
 });
 
