@@ -971,12 +971,10 @@ export function flushLocalVaultWrites(): Promise<void> {
 }
 
 export const localVaultStorage: StateStorage = {
-  getItem: async (name) => {
-    const value = await vaultStorage.getItem(name);
-    // Hydration must not trust stale metadata if IndexedDB and fallback are empty.
-    if (name === STORAGE_KEYS.persistedState && value === null) invalidateVaultWrite();
-    return value;
-  },
+  // The internal adapter handles missing-vault receipt invalidation after a
+  // fresh durable recheck. A second unconditional invalidation here races a
+  // newer tab and would defeat that guard.
+  getItem: (name) => vaultStorage.getItem(name),
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };

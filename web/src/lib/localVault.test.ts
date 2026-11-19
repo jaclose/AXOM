@@ -13,7 +13,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
+import { invalidateVaultWrite, readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -27,6 +27,9 @@ const storage = {
 
 beforeEach(async () => {
   values.clear();
+  // Optional save receipts are throttled across writes: no cached status may
+  // leak from one synthetic tab/test into the next independent scenario.
+  invalidateVaultWrite();
   resetLocalVaultRuntimeForTests();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
