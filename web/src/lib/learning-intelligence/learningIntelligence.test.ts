@@ -216,7 +216,7 @@ describe("pattern findings", () => {
     const easier = Array.from({ length: 8 }, () => question({
       status: "correct", attempts: [attempt(1, "correct"), attempt(4, "correct")],
     }));
-    const finding = buildPatternReport([...harder, ...easier]).find((item) => item.kind === "first-vs-repeat");
+    const finding = buildPatternReport([...harder, ...easier]).findings.find((item) => item.kind === "first-vs-repeat");
     expect(finding).toMatchObject({
       basis: "computed",
       sample: 24,
@@ -241,7 +241,7 @@ describe("pattern findings", () => {
     const unkeyed = question({ correctKey: undefined });
     const pendingReview = question({ extraction: { confidence: "medium", reviewed: false } });
     const finding = buildPatternReport([...seen, ...unseen, flaggedOnly, unkeyed, pendingReview])
-      .find((item) => item.kind === "first-vs-repeat");
+      .findings.find((item) => item.kind === "first-vs-repeat");
     expect(finding).toMatchObject({
       basis: "computed",
       questionIds: [...unseen.map((item) => item.id), flaggedOnly.id],
