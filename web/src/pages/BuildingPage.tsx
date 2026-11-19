@@ -17,10 +17,11 @@ const HORIZONS: Array<{ id: Horizon; title: string; icon: typeof Route; statuses
 
 export function BuildingPage() {
   const [view, setView] = useState<"overview" | "systems">("overview");
-  const [filter, setFilter] = useState<BuildStatus | "all">("all");
+  const [filter, setFilter] = useState<BuildStatus | "all" | "next">("all");
   const [hovered, setHovered] = useState<string | null>(null);
   const counts = useMemo(() => Object.fromEntries(STATUS_ORDER.map((status) => [status, SYSTEM_PREVIEWS.filter((item) => item.status === status).length])) as Record<BuildStatus, number>, []);
-  const visible = filter === "all" ? SYSTEM_PREVIEWS : SYSTEM_PREVIEWS.filter((item) => item.status === filter);
+  const visible = filter === "all" ? SYSTEM_PREVIEWS : SYSTEM_PREVIEWS.filter((item) =>
+    filter === "next" ? item.status === "in-development" || item.status === "planned" : item.status === filter);
   const groups = useMemo(() => Object.entries(visible.reduce<Record<string, SystemPreview[]>>((all, item) => {
     (all[item.area] ??= []).push(item);
     return all;
@@ -29,7 +30,7 @@ export function BuildingPage() {
   const related = new Set(hoveredItem ? [hoveredItem.name, ...hoveredItem.connectsTo] : []);
 
   function openHorizon(horizon: (typeof HORIZONS)[number]) {
-    setFilter(horizon.statuses.length === 1 ? horizon.statuses[0] : "all");
+    setFilter(horizon.id === "next" ? "next" : (horizon.statuses[0] ?? "all"));
     setView("systems");
   }
 
@@ -70,6 +71,7 @@ export function BuildingPage() {
           <section className="system-groups">
             <div className="building-filters" role="group" aria-label="Filter systems by status">
               <button type="button" className={`filter-pill ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All <small>{SYSTEM_PREVIEWS.length}</small></button>
+              <button type="button" className={`filter-pill ${filter === "next" ? "on" : ""}`} aria-pressed={filter === "next"} onClick={() => setFilter("next")}>Next <small>{counts["in-development"] + counts.planned}</small></button>
               {STATUS_ORDER.map((status) => (
                 <button key={status} type="button" className={`filter-pill ${filter === status ? "on" : ""}`} aria-pressed={filter === status} onClick={() => setFilter(status)}>
                   {STATUS[status].toLowerCase().replace(/^\w/, (c) => c.toUpperCase())} <small>{counts[status]}</small>

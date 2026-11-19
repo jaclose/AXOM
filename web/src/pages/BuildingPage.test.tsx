@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { BuildingPage } from "./BuildingPage";
+import { SYSTEM_PREVIEWS } from "../lib/buildingSystems";
 afterEach(cleanup);
 describe("Building preview", () => {
   it("labels concepts honestly and exposes the system map", () => {
@@ -24,4 +25,19 @@ describe("Building preview", () => {
     expect(screen.getByRole("heading", { name: "Semantic Search" }).closest(".system-card")!.className).toContain("is-related");
     expect(screen.getByRole("heading", { name: "Native AXOM" }).closest(".system-card")!.className).toContain("is-dim");
   });
+  it("shows exactly the planned and in-development systems when opening the Next horizon", () => {
+    render(<BuildingPage />);
+    const nextSystems = SYSTEM_PREVIEWS.filter((system) => system.status === "planned" || system.status === "in-development");
+    const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;
+    fireEvent.click(within(nextCard).getByRole("button", { name: `See ${nextSystems.length} systems` }));
+
+    const shown = [...document.querySelectorAll(".system-card h3")]
+      .map((element) => element.textContent).sort();
+    expect(shown).toEqual(nextSystems.map((system) => system.name).sort());
+    expect(screen.getByRole("button", { name: /^Next / }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: /^All / }));
+    expect(document.querySelectorAll(".system-card")).toHaveLength(SYSTEM_PREVIEWS.length);
+  });
+
 });
