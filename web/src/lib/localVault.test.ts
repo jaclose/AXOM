@@ -94,6 +94,88 @@ describe("IndexedDB-first local vault", () => {
     expect(saved).toBe(snapshot("newer tab edit"));
   });
 
+  it.each([
+    ["same profile", "jd"],
+    ["different active profile", "other"],
+  ])("preserves acknowledged fallback edits when a %s vault commit wins", async (_scenario, winnerId) => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string, userId = "jd") => JSON.stringify({
+      state: { profile: { userId }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+    const base = snapshot("base");
+    const fallback = snapshot("acknowledged-fallback-unique-question");
+    const winner = snapshot("competing-vault-unique-question", winnerId);
+
+    await localVaultStorage.setItem(key, base);
+    await flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", undefined);
+    const saveCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, fallback);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(saveCheckpoint)).not.toThrow();
+    const marker = localStorage.getItem(markerKey);
+    expect(JSON.parse(marker!)).toMatchObject({
+      version: 1,
+      baseFingerprint: expect.any(String),
+      valueFingerprint: expect.any(String),
+    });
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(scopedKey)).toBe(fallback);
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    await putDirect(db, key, winner);
+    await putDirect(db, `${key}:user:${winnerId}`, winner);
+    if (winnerId !== "jd") await putDirect(db, `${key}:active-user`, winnerId);
+    resetLocalVaultRuntimeForTests(); // a new tab/hydration sees both saved revisions
+
+    expect(await localVaultStorage.getItem(key)).toBe(winner);
+    expect(await getDirect(db, key)).toBe(winner);
+    expect(await getDirect(db, `${key}:user:${winnerId}`)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(markerKey)).toBe(marker);
+    expect(localStorage.getItem(scopedKey)).toBe(fallback);
+
+    // Until an explicit reconciliation, neither a subsequent read nor an
+    // ordinary edit may silently overwrite Z or erase the saved Y revision.
+    expect(await localVaultStorage.getItem(key)).toBe(winner);
+    const editCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("unreconciled-post-conflict-edit", winnerId));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(editCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(await getDirect(db, key)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(markerKey)).toBe(marker);
+    expect(localStorage.getItem(scopedKey)).toBe(fallback);
+    expect(DB_VERSION).toBe(5);
+    db.close();
+  });
+
+  it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({ state: {
+      profile: { userId: "jd" }, questions: [{ id: label }],
+    }, version: 34 });
+    await localVaultStorage.setItem(key, snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot("same-revision"));
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    await putDirect(db, key, snapshot("same-revision"));
+    await putDirect(db, `${key}:user:jd`, snapshot("same-revision"));
+    resetLocalVaultRuntimeForTests();
+
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("same-revision"));
+    expect(await getDirect(db, key)).toBe(snapshot("same-revision"));
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(markerKey)).toBeNull();
+    db.close();
+  });
+
   it("does not promote a fallback over a commit that wins before promotion", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
