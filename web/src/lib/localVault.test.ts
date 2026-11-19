@@ -12,7 +12,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readVaultWriteFailure } from "./vaultActivity";
+import { markVaultWrite, readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -59,6 +59,160 @@ describe("IndexedDB-first local vault", () => {
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("first tab edit"));
   });
 
+  it.each([
+    ["single-record", "jd"],
+    ["chunked", "jd"],
+    ["cross-account", "other"],
+  ] as const)(
+    "refuses a stale %s delete after another tab saved newer %s data",
+    async (layout, winnerId) => {
+      const key = STORAGE_KEYS.persistedState;
+      const rawText = layout === "chunked" ? "question attachment ".repeat(100_000) : "short";
+      const snapshot = (label: string, userId = "jd") => JSON.stringify({
+        state: { profile: { userId }, questions: [{ id: label }], rawText },
+        version: 34,
+      });
+      const original = snapshot("original");
+      const winner = snapshot("newer-owner-edit", winnerId);
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(original);
+
+      vi.resetModules();
+      const newerTab = await import("./localVault");
+      expect(await newerTab.localVaultStorage.getItem(key)).toBe(original);
+      await newerTab.localVaultStorage.setItem(key, winner);
+      await newerTab.flushLocalVaultWrites();
+      expect(await newerTab.localVaultStorage.getItem(key)).toBe(winner);
+
+      // The removing tab is still hydrated against X. Its delete must not
+      // remove the newer Y, the active account pointer, or Y's v5 chunks.
+      const deleteCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      const db = await openCurrentVault();
+      expect(await getDirect(db, `${key}:active-user`)).toBe(winnerId);
+      expect(await getDirect(db, key)).toBeDefined();
+      expect(await getDirect(db, `${key}:user:${winnerId}`)).toBeDefined();
+      db.close();
+      expect(await newerTab.localVaultStorage.getItem(key)).toBe(winner);
+      expect(localStorage.getItem(key)).toBeNull();
+    },
+  );
+
+  it("cannot remove an existing workspace from a tab that has not hydrated it", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const original = JSON.stringify({ state: { profile: { userId: "jd" }, notes: ["saved"] }, version: 34 });
+    await localVaultStorage.setItem(key, original);
+    await flushLocalVaultWrites();
+
+    vi.resetModules();
+    const unhydratedTab = await import("./localVault");
+    const deleteCheckpoint = unhydratedTab.getVaultWriteCheckpoint();
+    await unhydratedTab.localVaultStorage.removeItem(key);
+    await unhydratedTab.flushLocalVaultWrites();
+    expect(() => unhydratedTab.assertVaultWritesSince(deleteCheckpoint))
+      .toThrow(unhydratedTab.VAULT_CONFLICT_MESSAGE);
+    expect(await localVaultStorage.getItem(key)).toBe(original);
+  });
+
+  it("preserves a different tab's acknowledged fallback when stale deletion is refused", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const marker = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] }, version: 34,
+    });
+    await localVaultStorage.setItem(key, snapshot("base"));
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("base"));
+
+    vi.resetModules();
+    const fallbackTab = await import("./localVault");
+    expect(await fallbackTab.localVaultStorage.getItem(key)).toBe(snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await fallbackTab.localVaultStorage.setItem(key, snapshot("acknowledged-offline-edit"));
+    await fallbackTab.flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const savedMarker = localStorage.getItem(marker);
+    expect(savedMarker).not.toBeNull();
+    expect(localStorage.getItem(key)).toBe(snapshot("acknowledged-offline-edit"));
+
+    const deleteCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.removeItem(key);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(localStorage.getItem(key)).toBe(snapshot("acknowledged-offline-edit"));
+    expect(localStorage.getItem(marker)).toBe(savedMarker);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(snapshot("base"));
+    db.close();
+  });
+
+  it.each(["single-record", "chunked"] as const)(
+    "does not resurrect a deleted %s workspace from a stale second tab",
+    async (layout) => {
+      const key = STORAGE_KEYS.persistedState;
+      const rawText = layout === "chunked" ? "source ".repeat(180_000) : "short";
+      const snapshot = (label: string) => JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: label }], rawText },
+        version: 34,
+      });
+      const original = snapshot("original-question");
+      const staleEdit = snapshot("stale-question");
+
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(original);
+
+      vi.resetModules();
+      const deletingTab = await import("./localVault");
+      expect(await deletingTab.localVaultStorage.getItem(key)).toBe(original);
+      await deletingTab.localVaultStorage.removeItem(key);
+      await deletingTab.flushLocalVaultWrites();
+
+      const db = await openCurrentVault();
+      expect(await getDirect(db, key)).toBeUndefined();
+      expect(await getDirect(db, `${key}:user:jd`)).toBeUndefined();
+      db.close();
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, staleEdit);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+
+      const verification = await openCurrentVault();
+      expect(await getDirect(verification, key)).toBeUndefined();
+      expect(await getDirect(verification, `${key}:user:jd`)).toBeUndefined();
+      verification.close();
+      expect(localStorage.getItem(key)).toBeNull();
+      expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+      expect(await deletingTab.localVaultStorage.getItem(key)).toBeNull();
+    },
+  );
+
+  it("allows a verified same-tab delete followed by a new intentional workspace save", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] },
+      version: 34,
+    });
+    await localVaultStorage.setItem(key, snapshot("before-removal"));
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("before-removal"));
+
+    await localVaultStorage.removeItem(key);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("intentional-new-workspace"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("intentional-new-workspace"));
+    expect(DB_VERSION).toBe(5);
+  });
+
   it("rejects a fallback save when another tab commits before its vault transaction", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
@@ -92,6 +246,244 @@ describe("IndexedDB-first local vault", () => {
 
     expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
     expect(saved).toBe(snapshot("newer tab edit"));
+  });
+
+  it.each([
+    ["same profile", "jd"],
+    ["different active profile", "other"],
+  ])("preserves acknowledged fallback edits when a %s vault commit wins", async (_scenario, winnerId) => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string, userId = "jd") => JSON.stringify({
+      state: { profile: { userId }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+    const base = snapshot("base");
+    const fallback = snapshot("acknowledged-fallback-unique-question");
+    const winner = snapshot("competing-vault-unique-question", winnerId);
+
+    await localVaultStorage.setItem(key, base);
+    await flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", undefined);
+    const saveCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, fallback);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(saveCheckpoint)).not.toThrow();
+    const marker = localStorage.getItem(markerKey);
+    expect(JSON.parse(marker!)).toMatchObject({
+      version: 1,
+      baseFingerprint: expect.any(String),
+      valueFingerprint: expect.any(String),
+    });
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(scopedKey)).toBe(fallback);
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    await putDirect(db, key, winner);
+    await putDirect(db, `${key}:user:${winnerId}`, winner);
+    if (winnerId !== "jd") await putDirect(db, `${key}:active-user`, winnerId);
+    resetLocalVaultRuntimeForTests(); // a new tab/hydration sees both saved revisions
+
+    expect(await localVaultStorage.getItem(key)).toBe(winner);
+    expect(await getDirect(db, key)).toBe(winner);
+    expect(await getDirect(db, `${key}:user:${winnerId}`)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(markerKey)).toBe(marker);
+    expect(localStorage.getItem(scopedKey)).toBe(fallback);
+
+    // Until an explicit reconciliation, neither a subsequent read nor an
+    // ordinary edit may silently overwrite Z or erase the saved Y revision.
+    expect(await localVaultStorage.getItem(key)).toBe(winner);
+    const editCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("unreconciled-post-conflict-edit", winnerId));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(editCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(await getDirect(db, key)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(markerKey)).toBe(marker);
+    expect(localStorage.getItem(scopedKey)).toBe(fallback);
+    expect(DB_VERSION).toBe(5);
+    db.close();
+  });
+
+  it("preserves a competing offline fallback written during a successful IndexedDB promotion", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+    const base = snapshot("vault-base");
+    const promoting = snapshot("promoting-edit");
+    const competing = snapshot("competing-offline-unique-edit");
+
+    await localVaultStorage.setItem(key, base);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, promoting);
+    const promotingMarker = storage.getItem(markerKey);
+    expect(promotingMarker).not.toBeNull();
+    await localVaultStorage.setItem(key, competing);
+    const competingMarker = storage.getItem(markerKey);
+    expect(competingMarker).not.toBe(promotingMarker);
+
+    // Stage the older fallback for hydration. Another tab saves a newer,
+    // acknowledged fallback after the IDB transaction starts but before the
+    // promoting tab performs its localStorage cleanup.
+    storage.setItem(key, promoting);
+    storage.setItem(markerKey, promotingMarker!);
+    storage.setItem(scopedKey, promoting);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let competingSaveOccurred = false;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, record, storeKey) {
+      if (!competingSaveOccurred && storeKey === key && record === promoting) {
+        competingSaveOccurred = true;
+        storage.setItem(markerKey, competingMarker!);
+        storage.setItem(key, competing);
+        storage.setItem(scopedKey, competing);
+      }
+      return Reflect.apply(originalPut, this, [record, storeKey]);
+    });
+
+    try {
+      expect(await localVaultStorage.getItem(key)).toBe(promoting);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const db = await openCurrentVault();
+    try {
+      expect(competingSaveOccurred).toBe(true);
+      expect(await getDirect(db, key)).toBe(promoting);
+      expect(storage.getItem(key)).toBe(competing);
+      expect(storage.getItem(markerKey)).toBe(competingMarker);
+      expect(storage.getItem(scopedKey)).toBe(competing);
+    } finally {
+      db.close(); // Failing RED assertions must not block the next fake-IDB reset.
+    }
+  });
+
+  it("retains a new account B fallback while account A's IndexedDB save finishes", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const pointerKey = `${key}:active-user`;
+    const scopedB = `${key}:user:account-B`;
+    const snapshot = (userId: string, label: string) => JSON.stringify({
+      state: { profile: { userId }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+    const baseA = snapshot("account-A", "base-A");
+    const nextA = snapshot("account-A", "saved-A");
+    const fallbackB = snapshot("account-B", "unmerged-B");
+    await localVaultStorage.setItem(key, baseA);
+    expect(await localVaultStorage.getItem(key)).toBe(baseA);
+
+    // Obtain a valid acknowledged B marker from the real fallback writer;
+    // stage it for delivery while A's pending transaction is committing.
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, fallbackB);
+    const markerB = storage.getItem(markerKey);
+    expect(markerB).not.toBeNull();
+    storage.removeItem(key);
+    storage.removeItem(markerKey);
+    storage.removeItem(scopedB);
+    storage.setItem(pointerKey, "account-A");
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(baseA);
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, record, storeKey) {
+      if (!injected && storeKey === key && record === nextA) {
+        injected = true;
+        storage.setItem(markerKey, markerB!);
+        storage.setItem(key, fallbackB);
+        storage.setItem(pointerKey, "account-B");
+        storage.setItem(scopedB, fallbackB);
+      }
+      return Reflect.apply(originalPut, this, [record, storeKey]);
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.setItem(key, nextA);
+      await flushLocalVaultWrites();
+    } finally {
+      spy.mockRestore();
+    }
+
+    const db = await openCurrentVault();
+    try {
+      expect(injected).toBe(true);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      expect(await getDirect(db, key)).toBe(nextA);
+      expect(storage.getItem(key)).toBe(fallbackB);
+      expect(storage.getItem(markerKey)).toBe(markerB);
+      expect(storage.getItem(pointerKey)).toBe("account-B");
+      expect(storage.getItem(scopedB)).toBe(fallbackB);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("cleans an acknowledged fallback only after matching bytes are durable", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({ state: {
+      profile: { userId: "jd" }, questions: [{ id: label }],
+    }, version: 34 });
+    await localVaultStorage.setItem(key, snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot("same-revision"));
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    await putDirect(db, key, snapshot("same-revision"));
+    await putDirect(db, `${key}:user:jd`, snapshot("same-revision"));
+    resetLocalVaultRuntimeForTests();
+
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("same-revision"));
+    expect(await getDirect(db, key)).toBe(snapshot("same-revision"));
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(markerKey)).toBeNull();
+    db.close();
+  });
+
+  it("prefers the readable vault but retains an unmerged valid legacy bare-marker fallback", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] }, version: 34,
+    });
+    const fallback = snapshot("unmerged-legacy-edit");
+    const winner = snapshot("newer-vault-edit");
+    await localVaultStorage.setItem(key, snapshot("base"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, fallback);
+    const v1 = JSON.parse(localStorage.getItem(markerKey)!) as { valueFingerprint: string };
+    localStorage.setItem(markerKey, v1.valueFingerprint);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    await putDirect(db, key, winner);
+    await putDirect(db, `${key}:user:jd`, winner);
+    resetLocalVaultRuntimeForTests();
+
+    expect(await localVaultStorage.getItem(key)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    expect(localStorage.getItem(markerKey)).toBe(v1.valueFingerprint);
+    expect(localStorage.getItem(`${key}:user:jd`)).toBe(fallback);
+    expect(readVaultWriteFailure()).not.toBeNull(); // Existing backup warning
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("post-conflict-attempt"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(await getDirect(db, key)).toBe(winner);
+    expect(localStorage.getItem(key)).toBe(fallback);
+    db.close();
   });
 
   it("does not promote a fallback over a commit that wins before promotion", async () => {
@@ -564,6 +956,86 @@ describe("a save that could not reach IndexedDB", () => {
     vi.stubGlobal("indexedDB", fakeIndexedDb);
   });
 
+  it.each(["unmarked", "invalid marker"])(
+    "does not overwrite a newer vault from a %s legacy mirror after a transient read failure",
+    async (marker) => {
+      const durable = snapshot("newer durable");
+      const stale = snapshot("older mirror");
+      await localVaultStorage.setItem(key, durable);
+      await flushLocalVaultWrites();
+      localStorage.setItem(key, stale);
+      if (marker === "invalid marker") localStorage.setItem(`${key}:fallback-newer`, "12:deadbeef");
+
+      // The first open fails during hydration, but the subsequent write path
+      // can reach the SAME real fake-IndexedDB database. An unguarded promotion
+      // must not replace the workspace already present there.
+      resetLocalVaultRuntimeForTests();
+      let failFirstOpen = true;
+      vi.stubGlobal("indexedDB", {
+        open: (database: string, version?: number) => {
+          if (failFirstOpen) {
+            failFirstOpen = false;
+            throw new Error("Transient IndexedDB hydration read failure");
+          }
+          return version === undefined
+            ? fakeIndexedDb.open(database)
+            : fakeIndexedDb.open(database, version);
+        },
+      });
+      // If the transient outage clears on the read-only recheck, hydrate the
+      // authoritative newer workspace, not the ambiguous legacy mirror.
+      expect(await localVaultStorage.getItem(key)).toBe(durable);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+      const db = await openCurrentVault();
+      expect(await getDirect(db, key)).toBe(durable);
+      expect(await getDirect(db, `${key}:user:jd`)).toBe(durable);
+      db.close();
+      expect(localStorage.getItem(key)).toBe(stale);
+      expect(await localVaultStorage.getItem(key)).toBe(durable);
+    },
+  );
+
+  it("never promotes an unverified mirror even when two reads fail before writes recover", async () => {
+    const durable = snapshot("newer durable");
+    const stale = snapshot("old unmarked mirror");
+    await localVaultStorage.setItem(key, durable);
+    await flushLocalVaultWrites();
+    localStorage.setItem(key, stale);
+    resetLocalVaultRuntimeForTests();
+    let failedReads = 0;
+    vi.stubGlobal("indexedDB", {
+      open: (database: string, version?: number) => {
+        if (failedReads < 2) {
+          failedReads += 1;
+          throw new Error("Transient IndexedDB reads unavailable");
+        }
+        return version === undefined ? fakeIndexedDb.open(database) : fakeIndexedDb.open(database, version);
+      },
+    });
+    expect(await localVaultStorage.getItem(key)).toBe(stale);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(durable);
+    expect(await getDirect(db, `${key}:user:jd`)).toBe(durable);
+    db.close();
+    expect(localStorage.getItem(key)).toBe(stale);
+    expect(await localVaultStorage.getItem(key)).toBe(durable);
+  });
+
+  it("keeps an unmarked legacy fallback readable while the vault is inaccessible", async () => {
+    const legacy = snapshot("only surviving legacy copy");
+    localStorage.setItem(key, legacy);
+    vi.stubGlobal("indexedDB", undefined);
+    expect(await localVaultStorage.getItem(key)).toBe(legacy);
+    expect(localStorage.getItem(key)).toBe(legacy);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(legacy);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(legacy);
+    db.close();
+  });
+
   it("never lets an unmarked localStorage copy override the vault", async () => {
     // A copy mirrored by an older build carries no marker and may be stale.
     await localVaultStorage.setItem(key, snapshot("newer"));
@@ -621,6 +1093,176 @@ describe("a save that could not reach IndexedDB", () => {
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
   });
 
+  it.each([
+    ["IndexedDB unavailable", false],
+    ["IndexedDB recovered", true],
+  ])("rejects legacy profile-name collisions against a quota-limited generic fallback (%s)", async (_label, recovered) => {
+    const markerKey = `${key}:fallback-newer`;
+    const scopedSlug = `${key}:user:a-lex`;
+    const legacy = (name: string, id: string) => JSON.stringify({
+      state: { profile: { name }, questions: [{ id }], notes: [id] }, version: 34,
+    });
+    // Both profiles lack userId. Their different names normalize to "a-lex".
+    const savedA = legacy("A Léx", "A-unique-question");
+    const attemptedB = legacy("A Lex", "B-unique-question");
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === scopedSlug) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    const aCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, savedA);
+    expect(() => assertVaultWritesSince(aCheckpoint)).not.toThrow();
+    expect(storage.getItem(scopedSlug)).toBeNull();
+    const markerA = storage.getItem(markerKey);
+    expect(markerA).not.toBeNull();
+
+    vi.stubGlobal("localStorage", storage);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(savedA);
+    if (recovered) vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const bCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, attemptedB);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(bCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(storage.getItem(key)).toBe(savedA);
+    expect(storage.getItem(markerKey)).toBe(markerA);
+    expect(storage.getItem(scopedSlug)).toBeNull();
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(savedA);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(savedA);
+    expect(DB_VERSION).toBe(5);
+    db.close();
+  });
+
+  it("fails closed on changed legacy bytes even with identical display names", async () => {
+    const legacy = (id: string) => JSON.stringify({
+      state: { profile: { name: "Same display name" }, questions: [{ id }] }, version: 34,
+    });
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, legacy("first-person-question"));
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(legacy("first-person-question"));
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, legacy("second-person-question"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(storage.getItem(key)).toBe(legacy("first-person-question"));
+  });
+
+  it("permits byte-identical legacy retries without an immutable user ID", async () => {
+    const snapshot = JSON.stringify({
+      state: { profile: { name: "A Léx" }, questions: [{ id: "preserved" }] }, version: 34,
+    });
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot);
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(storage.getItem(key)).toBe(snapshot);
+  });
+
+  it.each([
+    ["IndexedDB unavailable", false],
+    ["IndexedDB recovered", true],
+  ])("does not erase account A's acknowledged generic-only fallback when B saves (%s)", async (_label, recovered) => {
+    const ownerA = "account-A";
+    const ownerB = "account-B";
+    const markerKey = `${key}:fallback-newer`;
+    const scopedA = `${key}:user:${ownerA}`;
+    const snapshotFor = (userId: string, label: string) => JSON.stringify({
+      state: { profile: { userId }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+    const savedA = snapshotFor(ownerA, "A-unique-question-and-note");
+    const attemptedB = snapshotFor(ownerB, "B-unique-question-and-note");
+
+    // An account A save can be acknowledged even when its optional scoped
+    // duplicate hits quota: the generic fallback is its only surviving bytes.
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === scopedA) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    const aCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, savedA);
+    expect(() => assertVaultWritesSince(aCheckpoint)).not.toThrow();
+    expect(storage.getItem(key)).toBe(savedA);
+    expect(storage.getItem(scopedA)).toBeNull();
+    const markerA = storage.getItem(markerKey);
+    expect(markerA).not.toBeNull();
+
+    // B hydrates while IDB is offline, then tries saving its own workspace.
+    // The recovered case checks that an available IDB cannot be used to erase
+    // A's unpromoted fallback by directly committing B instead.
+    vi.stubGlobal("localStorage", storage);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(savedA);
+    if (recovered) vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const bCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, attemptedB);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(bCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(storage.getItem(key)).toBe(savedA);
+    expect(storage.getItem(markerKey)).toBe(markerA);
+    expect(storage.getItem(scopedA)).toBeNull();
+
+    // Neither failed B write nor tab reload can erase A. A can still be
+    // safely promoted once IndexedDB returns, preserving original IDs.
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(savedA);
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(savedA);
+    expect(await getDirect(db, scopedA)).toBe(savedA);
+    expect(DB_VERSION).toBe(5);
+    db.close();
+  });
+
+  it("still allows the same account to advance a generic-only fallback after quota clears", async () => {
+    const owner = "account-A";
+    const scoped = `${key}:user:${owner}`;
+    const snapshotFor = (id: string) => JSON.stringify({
+      state: { profile: { userId: owner }, questions: [{ id }], notes: [id] },
+      version: 34,
+    });
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === scoped) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    await localVaultStorage.setItem(key, snapshotFor("first-A-edit"));
+    expect(storage.getItem(scoped)).toBeNull();
+
+    vi.stubGlobal("localStorage", storage);
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshotFor("second-A-edit"));
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(storage.getItem(key)).toBe(snapshotFor("second-A-edit"));
+    expect(storage.getItem(scoped)).toBe(snapshotFor("second-A-edit"));
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshotFor("second-A-edit"));
+    const db = await openCurrentVault();
+    expect(await getDirect(db, key)).toBe(snapshotFor("second-A-edit"));
+    db.close();
+  });
+
   it("is reported while no store accepts it, and the report clears once saving works", async () => {
     await localVaultStorage.setItem(key, snapshot("saved"));
     expect(readVaultWriteFailure()).toBeNull();
@@ -635,6 +1277,48 @@ describe("a save that could not reach IndexedDB", () => {
     await localVaultStorage.setItem(key, snapshot("saved again"));
     expect(readVaultWriteFailure()).toBeNull();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("saved again"));
+  });
+});
+
+
+describe("v5-preserving save receipt integration", () => {
+  it("never reports an auxiliary cache write as a new workspace save", async () => {
+    // Use the same module instance as the statically imported localVault adapter.
+    const start = new Date("2026-11-19T08:00:00.000Z");
+    markVaultWrite("indexeddb", start);
+    const receipt = readLastVaultWrite();
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, JSON.stringify({ generations: ["synthetic"] }));
+    await flushLocalVaultWrites();
+    expect(readLastVaultWrite()).toEqual(receipt);
+    expect(DB_VERSION).toBe(5);
+  });
+
+  it("retires an unverified missing-workspace badge without deleting a newer tab's marker", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    // This suite runs in Node, unlike vaultActivity.test.ts (jsdom).
+    // Model one tab's optional storage without changing the environment
+    // of unrelated v5 persistence and conflict tests.
+    const tabSession = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: storage,
+      sessionStorage: {
+        getItem: (name: string) => tabSession.get(name) ?? null,
+        setItem: (name: string, value: string) => { tabSession.set(name, value); },
+        removeItem: (name: string) => { tabSession.delete(name); },
+      },
+      dispatchEvent: vi.fn(),
+      BroadcastChannel: undefined,
+    });
+    // Use the same module instance as the statically imported localVault adapter.
+    markVaultWrite("indexeddb", new Date("2026-11-19T08:01:00.000Z"));
+    const marker = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt);
+    expect(marker).not.toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBe(marker);
+    const v5 = await openCurrentVault();
+    expect(v5.version).toBe(5);
+    v5.close();
   });
 });
 
