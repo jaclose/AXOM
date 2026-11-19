@@ -124,9 +124,24 @@ export function conceptGroups(
     groups.set(key, group);
   }
   return [...groups.entries()].map(([key, group]) => {
-    // Text-identical image interpretation questions remain distinct only
-    // when their displayed source-figure identities differ.
-    const evidenceIdentity = (question: QuestionRecord) => `${questionSignature(question)}\u001f${questionVisualIdentity(question)}`;
+    // Unknown per-import figure keys cannot establish a new source example.
+    // Conservatively assign an unverified image to an existing confirmed
+    // identity for the same wording, if any. Genuine distinct SHA-256 figures
+    // remain separate; unknown-only duplicates count as a single instance.
+    const knownByWording = new Map<string, string>();
+    for (const { question } of group.members) {
+      const wording = questionSignature(question);
+      const visual = questionVisualIdentity(question);
+      if (visual !== "unverified-figure"
+        && (!knownByWording.has(wording) || visual !== "text-only")) {
+        knownByWording.set(wording, visual);
+      }
+    }
+    const evidenceIdentity = (question: QuestionRecord) => {
+      const wording = questionSignature(question);
+      const visual = questionVisualIdentity(question);
+      return `${wording}\u001f${visual === "unverified-figure" ? knownByWording.get(wording) ?? visual : visual}`;
+    };
     const wordings = new Set(group.members.map(({ question }) => evidenceIdentity(question)));
     const bySource = new Map<string, Set<string>>();
     for (const { question } of group.members) {
