@@ -265,7 +265,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       setPreview(result);
       setImported(useStore.getState().questionSets.some(set => {
         const provenance = readSharedQuestionImportProvenance(set);
-        return provenance?.shareId === result.id && provenance.contentDigest === result.contentDigest;
+        return provenance?.shareId.toLowerCase() === result.id.toLowerCase()
+          && provenance.contentDigest === result.contentDigest;
       }));
       // Keep the observer until the accepted preview is closed, replaced,
       // revoked, or unmounted. Account-ID equality is not session authority.
@@ -443,8 +444,11 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     // share ID, even when their digests match. A partial restore can violate
     // that invariant after import: choosing the first receipt would silently
     // launch practice against arbitrary membership and learner attempts.
+    // The importer treats UUIDs as case-insensitive. Restored receipts must
+    // follow the same identity rule so learners can reopen their original copy.
+    const publicationId = activePreview.id.toLowerCase();
     const copies = store.questionSets.filter(candidate =>
-      readSharedQuestionImportProvenance(candidate)?.shareId === activePreview.id);
+      readSharedQuestionImportProvenance(candidate)?.shareId.toLowerCase() === publicationId);
     if (copies.length > 1) {
       setPreviewError("Multiple saved copies reference this publication. Resolve the original import receipts in Question Bank before practicing. Your original question IDs and attempts are unchanged.");
       return;

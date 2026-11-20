@@ -96,6 +96,54 @@ describe("Community Question Set Library", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("opens an existing saved import when a restored UUID uses different hex casing", async () => {
+    const publicationId = "a1111111-b222-4222-8222-c33333333333";
+    const restoredSet: QuestionSet = {
+      ...savedSet,
+      importProvenance: { version: 1, shareId: publicationId.toUpperCase(), contentDigest: "A".repeat(64) },
+    };
+    mock.sets = [restoredSet];
+    mock.questions = [savedQuestion];
+    mock.search.mockResolvedValueOnce([{ ...summary, id: publicationId }]);
+    mock.preview.mockResolvedValueOnce({
+      id: publicationId, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect(onPractice).toHaveBeenCalledWith(restoredSet);
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([restoredSet]);
+    expect(mock.questions).toEqual([savedQuestion]);
+  });
+
+  it("detects duplicate saved receipts even when only UUID casing differs", async () => {
+    const publicationId = "a1111111-b222-4222-8222-c33333333333";
+    const first: QuestionSet = {
+      ...savedSet,
+      importProvenance: { version: 1, shareId: publicationId, contentDigest: "a".repeat(64) },
+    };
+    const duplicate: QuestionSet = {
+      ...savedSet, id: "duplicate-saved-set",
+      importProvenance: { version: 1, shareId: publicationId.toUpperCase(), contentDigest: "a".repeat(64) },
+    };
+    mock.sets = [first, duplicate];
+    mock.questions = [savedQuestion];
+    mock.search.mockResolvedValueOnce([{ ...summary, id: publicationId }]);
+    mock.preview.mockResolvedValueOnce({
+      id: publicationId, snapshot, contentDigest: "a".repeat(64), status: "approved", reviewRevision: 2,
+    });
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect((await screen.findByRole("alert")).textContent).toContain("Multiple saved copies");
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([first, duplicate]);
+  });
+
   it("keeps the preview recoverable if the saved copy was removed before practice", async () => {
     mock.sets = [savedSet];
     const onPractice = vi.fn();
