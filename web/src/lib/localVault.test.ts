@@ -6,6 +6,7 @@ import {
   DB_VERSION,
   getVaultWriteCheckpoint,
   flushLocalVaultWrites,
+  inspectLocalVaultRecoveryCopies,
   localVaultStorage,
   resetLocalVaultRuntimeForTests,
   VAULT_CONFLICT_MESSAGE,
@@ -534,6 +535,154 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(key)).toBe(snapshot("same-revision"));
     expect(localStorage.getItem(markerKey)).not.toBeNull();
     db.close();
+  });
+
+
+  describe("read-only dual-copy recovery inspection", () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = key + ":fallback-newer";
+    const snapshot = (userId: string, label: string) => JSON.stringify({
+      state: { profile: { userId }, questions: [{ id: label }], notes: [label] },
+      version: 34,
+    });
+
+
+    it("does not create an IndexedDB database when inspecting a missing vault", async () => {
+      const before = await fakeIndexedDb.databases();
+      expect(before.some(database => database.name === STORAGE_KEYS.vaultDb)).toBe(false);
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.indexedDbReadable).toBe(false);
+      expect(result.fallbackReadable).toBe(true);
+      expect(result.copies).toEqual([]);
+      const after = await fakeIndexedDb.databases();
+      expect(after.some(database => database.name === STORAGE_KEYS.vaultDb)).toBe(false);
+      expect(values.size).toBe(0);
+    });
+
+    it("reports two divergent same-owner copies without writing or promoting either", async () => {
+      const original = snapshot("jd", "base");
+      const offline = snapshot("jd", "acknowledged-offline");
+      const winner = snapshot("jd", "newer-indexeddb");
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      await flushLocalVaultWrites();
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      const db = await openCurrentVault();
+      try {
+        await putDirect(db, key, winner);
+        await putDirect(db, key + ":user:jd", winner);
+      } finally {
+        db.close();
+      }
+
+      const before = [...values.entries()];
+      const checkpoint = getVaultWriteCheckpoint();
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.indexedDbReadable).toBe(true);
+      expect(result.fallbackReadable).toBe(true);
+      expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(false);
+      expect(result.divergent).toBe(true);
+      expect(result.copies).toEqual([
+        { source: "indexeddb", fingerprint: expect.any(String), value: winner },
+        { source: "local-fallback", fingerprint: expect.any(String), value: offline },
+      ]);
+      expect([...values.entries()]).toEqual(before);
+      expect(getVaultWriteCheckpoint()).toBe(checkpoint);
+      const check = await openCurrentVault();
+      try {
+        expect(await getDirect(check, key)).toBe(winner);
+      } finally {
+        check.close();
+      }
+    });
+
+    it("recognizes identical copies without deleting the acknowledged fallback", async () => {
+      const raw = snapshot("jd", "same-revision");
+      await localVaultStorage.setItem(key, snapshot("jd", "base"));
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, raw);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      const db = await openCurrentVault();
+      try {
+        await putDirect(db, key, raw);
+        await putDirect(db, key + ":user:jd", raw);
+      } finally {
+        db.close();
+      }
+      const marker = storage.getItem(markerKey);
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.copies.map(copy => copy.value)).toEqual([raw, raw]);
+      expect(result.divergent).toBe(false);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(key)).toBe(raw);
+    });
+
+    it("does not expose another stable profile's bytes to the requested profile", async () => {
+      const accountA = snapshot("account-A", "private-A");
+      const accountB = snapshot("account-B", "private-B");
+      await localVaultStorage.setItem(key, accountA);
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, accountB);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      const a = await inspectLocalVaultRecoveryCopies("account-A");
+      const b = await inspectLocalVaultRecoveryCopies("account-B");
+      expect(a.copies.map(copy => copy.value)).toEqual([accountA]);
+      expect(b.copies.map(copy => copy.value)).toEqual([accountB]);
+      expect(a.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(b.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(JSON.stringify(a)).not.toContain("private-B");
+      expect(JSON.stringify(b)).not.toContain("private-A");
+      expect(storage.getItem(key)).toBe(accountB);
+    });
+
+    it("withholds tampered and unmarked fallback bytes from trusted candidates", async () => {
+      const vault = snapshot("jd", "verified-vault");
+      const offline = snapshot("jd", "unverified-offline");
+      await localVaultStorage.setItem(key, vault);
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      storage.setItem(markerKey, "invalid-fingerprint");
+      const corrupted = await inspectLocalVaultRecoveryCopies("jd");
+      expect(corrupted.copies.map(copy => copy.value)).toEqual([vault]);
+      expect(corrupted.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(storage.getItem(key)).toBe(offline);
+      storage.removeItem(markerKey);
+      const unmarked = await inspectLocalVaultRecoveryCopies("jd");
+      expect(unmarked.copies.map(copy => copy.value)).toEqual([vault]);
+      expect(unmarked.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(storage.getItem(key)).toBe(offline);
+    });
+
+    it("preserves a valid offline copy when IndexedDB cannot be read", async () => {
+      const offline = snapshot("jd", "unique-offline");
+      await localVaultStorage.setItem(key, snapshot("jd", "base"));
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      const marker = storage.getItem(markerKey);
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.indexedDbReadable).toBe(false);
+      expect(result.fallbackReadable).toBe(true);
+      expect(result.copies).toEqual([
+        { source: "local-fallback", fingerprint: expect.any(String), value: offline },
+      ]);
+      expect(result.divergent).toBe(false);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(key)).toBe(offline);
+    });
+
+    it("rejects a missing stable identity before attempting browser storage reads", async () => {
+      const getItem = vi.spyOn(storage, "getItem");
+      try {
+        await expect(inspectLocalVaultRecoveryCopies("")).rejects.toThrow("verified stable profile ID");
+        await expect(inspectLocalVaultRecoveryCopies("  ")).rejects.toThrow("verified stable profile ID");
+        expect(getItem).not.toHaveBeenCalled();
+      } finally {
+        getItem.mockRestore();
+      }
+    });
   });
 
   it("prefers the readable vault but retains an unmerged valid legacy bare-marker fallback", async () => {
