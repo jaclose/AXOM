@@ -549,7 +549,7 @@ function isModuleNumberPrefix(prefix: string, module: string): boolean {
 }
 
 /** Older imports accepted any code prefix; do not transfer that row's progress to a now-valid number. */
-function isInvalidForeignNumberKey(label: string, key: string, module: string): boolean {
+export function isInvalidForeignNumberKey(label: string, key: string, module: string): boolean {
   const parts = normalizedTemplateIdentity(key, module).split("|");
   if (parts.at(-3) !== canonicalModuleKey(module) || parts.at(-2) !== "lecture") return false;
   const prefix = label.match(/^([A-Z][A-Z0-9-]{1,9})\s+/i)?.[1];
