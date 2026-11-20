@@ -304,6 +304,41 @@ describe("what to look at again after a block", () => {
     expect(byQuestion.has(block[5].id)).toBe(false);
   });
 
+  it("does not establish a paced-correct baseline from six historically correct flags on withdrawn keys", () => {
+    const held = Array.from({ length: 6 }, () => question({
+      needsReview: true,
+      attempts: [attempt(1, "correct", { timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100, quizSessionId: "later" })] });
+    const originals = JSON.stringify([...held, later]);
+    const historic = attemptEvents(held);
+    expect(historic.filter((event) => event.correct === true)).toHaveLength(0);
+    expect(reviewCandidatesForSession("later", [...held, later])).toEqual([]);
+    expect(JSON.stringify([...held, later])).toBe(originals);
+  });
+
+  it("does not establish paced-correct baseline from six saved correct flags contradicting a reviewed key", () => {
+    const contradicted = Array.from({ length: 6 }, () => question({
+      correctKey: "B",
+      attempts: [attempt(1, "correct", { answerKey: "A", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100, quizSessionId: "later" })] });
+    const originals = JSON.stringify([...contradicted, later]);
+    expect(attemptEvents(contradicted).filter((event) => event.correct === true)).toHaveLength(0);
+    expect(reviewCandidatesForSession("later", [...contradicted, later])).toEqual([]);
+    expect(JSON.stringify([...contradicted, later])).toBe(originals);
+  });
+
+  it("keeps six actually reviewed, matching correct timings sufficient for a slow-right observation", () => {
+    const trusted = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", { answerKey: "B", timeSpentSeconds: 100, quizSessionId: "later" })] });
+    expect(reviewCandidatesForSession("later", [...trusted, later])).toEqual([
+      expect.objectContaining({ questionId: later.id, reasons: ["slow-right"], retry: ["this-week"] }),
+    ]);
+  });
+
   it("does not infer slow-right from five unscored timed attempts and one trusted correct pace", () => {
     const baseline = question({ attempts: [attempt(1, "correct", { timeSpentSeconds: 10 })] });
     const held = Array.from({ length: 5 }, () => question({
