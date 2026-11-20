@@ -49,8 +49,8 @@ class VaultConflictError extends Error {
 /** Invalid physical chunk metadata is not an ordinary unavailable-IDB event:
  * a pre-existing, unmarked localStorage mirror is not safe hydration input. */
 class InvalidVaultManifestError extends Error {
-  constructor() {
-    super("The local vault workspace has an invalid chunk manifest.");
+  constructor(message = "The local vault workspace has an invalid chunk manifest.") {
+    super(message);
     this.name = "InvalidVaultManifestError";
   }
 }
@@ -794,7 +794,10 @@ async function readVaultRecord(
         const request = store.get(`${manifest.chunkPrefix}:${index}`);
         request.onsuccess = () => {
           if (typeof request.result !== "string") {
-            failure ??= new Error("The local vault workspace is missing one or more storage chunks.");
+            // A readable manifest with a missing physical chunk is corruption,
+            // not an unavailable IndexedDB tier. Never hydrate an unmarked
+            // browser mirror over the retained damaged physical record.
+            failure ??= new InvalidVaultManifestError("The local vault workspace is missing one or more storage chunks.");
             return;
           }
           chunks[index] = request.result;
@@ -807,7 +810,14 @@ async function readVaultRecord(
       db.close();
       if (!failure && chunked) {
         try { result = validateReassembledValue(chunked.manifest, chunked.chunks); }
-        catch (error) { failure = error instanceof Error ? error : new Error("Unable to rebuild the local workspace."); }
+        catch (error) {
+          // Failed length/fingerprint reconstruction is also a damaged
+          // physical workspace, rather than a transient storage failure.
+          // The caller must quarantine it and retain every raw record.
+          failure = new InvalidVaultManifestError(
+            error instanceof Error ? error.message : "Unable to rebuild the local workspace.",
+          );
+        }
       }
       if (failure) reject(failure);
       else resolve(result);
