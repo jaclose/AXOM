@@ -791,6 +791,82 @@ describe("IndexedDB-first local vault", () => {
       expect(storage.getItem(key)).toBe(offline);
     });
 
+    it("surfaces A's orphaned scoped fallback only as unverified after B takes the generic fallback", async () => {
+      const accountA = snapshot("account-A", "only-retained-in-A-localStorage");
+      const accountB = snapshot("account-B", "B-in-IndexedDB");
+      const offlineB = snapshot("account-B", "B-acknowledged-offline");
+      await localVaultStorage.setItem(key, accountB);
+      await flushLocalVaultWrites();
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offlineB);
+      await flushLocalVaultWrites();
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      storage.setItem(key + ":user:account-A", accountA);
+      const before = [...values.entries()];
+      const checkpoint = getVaultWriteCheckpoint();
+
+      const a = await inspectLocalVaultRecoveryCopies("account-A");
+      const b = await inspectLocalVaultRecoveryCopies("account-B");
+      expect(a.copies).toEqual([]);
+      expect(a.unverifiedScopedFallback).toEqual({
+        source: "local-fallback-scoped-unverified", fingerprint: expect.any(String), value: accountA,
+      });
+      expect(a.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(JSON.stringify(a)).not.toContain("B-acknowledged-offline");
+      expect(b.copies.map(copy => copy.value)).toEqual([accountB, offlineB]);
+      expect(b.unverifiedScopedFallback).toBeNull();
+      expect(JSON.stringify(b)).not.toContain("only-retained-in-A-localStorage");
+      expect([...values.entries()]).toEqual(before);
+      expect(getVaultWriteCheckpoint()).toBe(checkpoint);
+    });
+
+    it("withholds foreign and malformed scoped fallback bytes from owner A", async () => {
+      const scopedKey = key + ":user:account-A";
+      for (const raw of [snapshot("account-B", "private-B"), "{malformed private bytes"]) {
+        storage.setItem(scopedKey, raw);
+        const result = await inspectLocalVaultRecoveryCopies("account-A");
+        expect(result.unverifiedScopedFallback).toBeNull();
+        expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+        expect(result.copies).toEqual([]);
+        expect(JSON.stringify(result)).not.toContain("private-B");
+        expect(JSON.stringify(result)).not.toContain("malformed private bytes");
+        expect(storage.getItem(scopedKey)).toBe(raw);
+      }
+    });
+
+    it("withholds a scoped fallback that changes during inspection", async () => {
+      const scopedKey = key + ":user:jd";
+      const first = snapshot("jd", "first-unique-edit");
+      const newer = snapshot("jd", "newer-unique-edit");
+      storage.setItem(scopedKey, newer);
+      let reads = 0;
+      vi.stubGlobal("localStorage", {
+        ...storage,
+        getItem: (name: string) => {
+          if (name === scopedKey) return ++reads === 1 ? first : newer;
+          return storage.getItem(name);
+        },
+      });
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(reads).toBeGreaterThanOrEqual(2);
+      expect(result.unverifiedScopedFallback).toBeNull();
+      expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(result.copies).toEqual([]);
+      expect(storage.getItem(scopedKey)).toBe(newer);
+    });
+
+    it("does not duplicate a trusted vault snapshot as an unverified scoped fallback", async () => {
+      const retained = snapshot("jd", "same-verified-edits");
+      await localVaultStorage.setItem(key, retained);
+      await flushLocalVaultWrites();
+      storage.setItem(key + ":user:jd", retained);
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.copies.map(copy => copy.value)).toEqual([retained]);
+      expect(result.unverifiedScopedFallback).toBeNull();
+      expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(false);
+      expect(storage.getItem(key + ":user:jd")).toBe(retained);
+    });
+
     it("rejects a missing stable identity before attempting browser storage reads", async () => {
       const getItem = vi.spyOn(storage, "getItem");
       try {
