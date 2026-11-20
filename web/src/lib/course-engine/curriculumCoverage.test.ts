@@ -354,6 +354,68 @@ describe("curriculum evidence coverage", () => {
     expect(preview.issues.some((issue) => /mixed with source files/i.test(issue.reason))).toBe(true);
   });
 
+  it("holds a recoverable saved source with invalid metadata rather than advertising its week", () => {
+    const source = doc("FTCM-invalid-revision.txt", [
+      "T4 - FTCM - Lectures:",
+      "@source-revision: yesterday",
+      "Week 2:",
+      "FTCM Lecture 01 Unverified revision [Lecture]",
+    ].join("\n"));
+    const installed = row("Term 4/FTCM/Week 2", "Student-owned lecture");
+    const before = JSON.stringify([source, installed]);
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [source], [installed]);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, installedTemplateItems: 0,
+      notInstalled: 0, installedRows: 1, statedWeeks: [], inferredWeeks: [],
+      mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toMatch(/source revision must be YYYY-MM-DD/i);
+    expect(coverage.sourceTemplateFiles).toBe(1);
+    expect(coverage.unmappedTemplateModules).toContain("FTCM");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [installed] },
+    );
+    expect(preview.create).toBe(0);
+    expect(preview.issues.some((issue) => /Source parsing needs review/i.test(issue.reason))).toBe(true);
+    expect(JSON.stringify([source, installed])).toBe(before);
+  });
+
+  for (const malformedDirective of ["@cohort:", "@cohort D"]) {
+    it("holds an entire saved module when a companion file has malformed " + malformedDirective + " metadata", () => {
+      const valid = doc("FTCM-valid.txt", [
+        "T4 - FTCM - Lectures:",
+        "Week 1:",
+        "FTCM Lecture 01 Valid source [Lecture]",
+      ].join("\n"));
+      const invalid = doc("FTCM-malformed-cohort.txt", [
+        "T4 - FTCM - Small Groups:",
+        malformedDirective,
+        "Week 2:",
+        "FTCM SG 01 Unverified source [Small Group]",
+      ].join("\n"));
+      const documents = [valid, invalid];
+      const installed = row("Term 4/FTCM/Week 1", "Existing personal item");
+      const before = JSON.stringify({ documents, installed });
+      const coverage = buildCurriculumCoverage(SGU_CURRICULUM, documents, [installed]);
+      const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+      expect(ftcm).toMatchObject({
+        templateFiles: 0, availableTemplateItems: 0, installedTemplateItems: 0,
+        installedRows: 1, statedWeeks: [], inferredWeeks: [], mapping: "ambiguous",
+      });
+      expect(ftcm.sourceProblems.join(" ")).toMatch(/unrecognized source metadata/i);
+      expect(coverage.sourceTemplateFiles).toBe(2);
+      expect(coverage.sourceItems).toBe(0);
+      expect(coverage.unmappedTemplateModules).toContain("FTCM");
+      const preview = previewCurriculumTemplateInstallation(
+        SGU_CURRICULUM, documents, { terms: [], courses: [], tracker: [installed] },
+      );
+      expect(preview.create).toBe(0);
+      expect(preview.issues.some((issue) => /Source parsing needs review/i.test(issue.reason))).toBe(true);
+      expect(JSON.stringify({ documents, installed })).toBe(before);
+    });
+  }
+
   it("uses current template revisions rather than summing historical source versions", () => {
     const first = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 Old [Lecture]", "2026-01-01");
     const revised = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 New [Lecture]\nNCRS Lecture 02 More [Lecture]", "2026-10-14");
