@@ -198,7 +198,7 @@ test("Building filter results are announced after keyboard activation without fo
     await page.setViewportSize({ width, height: width === 1280 ? 900 : 844 });
     await page.getByRole("tab", { name: "Systems" }).click();
 
-    const status = page.getByRole("status");
+    const status = page.getByRole("tabpanel").getByRole("status");
     await expect(status).toHaveAttribute("aria-live", "polite");
     await expect(status).toHaveAttribute("aria-atomic", "true");
     await expect(status).toHaveText("Showing 11 systems (all statuses).");
