@@ -838,6 +838,7 @@ async function writeVault(
   value: string,
   userId: string,
   expected?: VaultExpectation,
+  verifyPhysicalBeforeReplacement = false,
 ): Promise<void> {
   const plan = storedValuePlan(name, value, userId);
   // A chunk manifest is only safe after the physical v4 upgrade succeeds.
@@ -901,25 +902,84 @@ async function writeVault(
       }
     };
 
+    // A marked fallback's base fingerprint may come from an IDB manifest
+    // header. Validate actual physical bytes in the same transaction before
+    // replacing a manifest or deleting any potentially recoverable chunks.
+    const writeAfterPhysicalCheck = (
+      current: string | undefined,
+      previous: readonly (string | undefined)[],
+    ) => {
+      if (!verifyPhysicalBeforeReplacement) {
+        write(current, previous);
+        return;
+      }
+      const manifests: { manifest: ChunkedValueManifest; chunks: string[] }[] = [];
+      const abortCorrupt = () => {
+        if (conflict) return;
+        conflict = new VaultConflictError();
+        if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        tx.abort();
+      };
+      for (const raw of [current, ...previous]) {
+        if (raw === undefined) continue;
+        const manifest = readChunkedValueManifest(raw);
+        if (!manifest) {
+          if (isMalformedChunkedValueManifest(raw)) abortCorrupt();
+          if (conflict) return;
+          continue;
+        }
+        manifests.push({ manifest, chunks: new Array<string>(manifest.chunkCount) });
+      }
+      let remaining = manifests.reduce((count, entry) => count + entry.manifest.chunkCount, 0);
+      if (remaining === 0) {
+        write(current, previous);
+        return;
+      }
+      for (const entry of manifests) {
+        for (let index = 0; index < entry.manifest.chunkCount; index += 1) {
+          const request = store.get(`${entry.manifest.chunkPrefix}:${index}`);
+          request.onsuccess = () => {
+            if (conflict) return;
+            if (typeof request.result !== "string") {
+              abortCorrupt();
+              return;
+            }
+            entry.chunks[index] = request.result;
+            remaining -= 1;
+            if (remaining !== 0) return;
+            try {
+              for (const verified of manifests) {
+                validateReassembledValue(verified.manifest, verified.chunks);
+              }
+            } catch {
+              abortCorrupt();
+              return;
+            }
+            write(current, previous);
+          };
+        }
+      }
+    };
+
     const primary = store.get(name);
     primary.onsuccess = () => {
       const primaryValue = typeof primary.result === "string" ? primary.result : undefined;
       const userScoped = userId ? store.get(scopedStateKey(name, userId)) : undefined;
       const finish = (userScopedValue?: string) => {
         if (primaryValue !== undefined) {
-          write(primaryValue, [primaryValue, userScopedValue]);
+          writeAfterPhysicalCheck(primaryValue, [primaryValue, userScopedValue]);
           return;
         }
         const active = store.get(activeUserKey(name));
         active.onsuccess = () => {
           if (typeof active.result !== "string" || !active.result) {
-            write(userScopedValue, [userScopedValue]);
+            writeAfterPhysicalCheck(userScopedValue, [userScopedValue]);
             return;
           }
           const scoped = store.get(scopedStateKey(name, active.result));
           scoped.onsuccess = () => {
             const activeValue = typeof scoped.result === "string" ? scoped.result : undefined;
-            write(activeValue ?? userScopedValue, [userScopedValue, activeValue]);
+            writeAfterPhysicalCheck(activeValue ?? userScopedValue, [userScopedValue, activeValue]);
           };
         };
       };
@@ -1141,7 +1201,7 @@ const vaultStorage: StateStorage = {
         const expectedCleanup = cleanupSnapshot === null ? null : {
           ...cleanupSnapshot, value: newer.value, marker: newer.marker,
         };
-        await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
+        await writeVault(name, newer.value, userId, fallbackExpectation(newer, false), true);
         clearFallbackCopy(fallbackStore, name, userId, expectedCleanup);
       } catch (promotionError) {
         if (isVaultConflictError(promotionError)) {
@@ -1167,6 +1227,12 @@ const vaultStorage: StateStorage = {
           } catch {
             // Keep the fallback below when the winning vault cannot be reread.
           }
+        }
+        if (observesWorkspace(name) && conflictedWorkspaceKeys.has(name)) {
+          // The acknowledged fallback remains readable, but physical corruption
+          // blocks further autosaves until an explicit recovery decision.
+          if (initialReceipt !== null) invalidateVaultWriteIfUnchanged(initialReceipt);
+          markVaultWriteFailure();
         }
         // Still not writable: the copy stays in localStorage for the next start.
       }
@@ -1293,7 +1359,7 @@ const vaultStorage: StateStorage = {
       const vaultExpectation = currentFallback !== null
         ? fallbackExpectation(currentFallback)
         : expected;
-      await writeVault(name, value, userId, vaultExpectation);
+      await writeVault(name, value, userId, vaultExpectation, currentFallback !== null);
       clearFallbackCopy(fallbackStore, name, userId, cleanupSnapshot);
       rememberVaultSnapshot(name, value);
       if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
