@@ -18,7 +18,8 @@ const HORIZONS: Array<{ id: Horizon; title: string; icon: typeof Route; statuses
 export function BuildingPage() {
   const [view, setView] = useState<"overview" | "systems">("overview");
   const [filter, setFilter] = useState<BuildStatus | "all" | "next">("all");
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [pointerOver, setPointerOver] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
   const overviewTabRef = useRef<HTMLButtonElement>(null);
   const systemsTabRef = useRef<HTMLButtonElement>(null);
   const counts = useMemo(() => Object.fromEntries(STATUS_ORDER.map((status) => [status, SYSTEM_PREVIEWS.filter((item) => item.status === status).length])) as Record<BuildStatus, number>, []);
@@ -28,11 +29,13 @@ export function BuildingPage() {
     (all[item.area] ??= []).push(item);
     return all;
   }, {})), [visible]);
-  const hoveredItem = SYSTEM_PREVIEWS.find((item) => item.id === hovered);
+  const activeId = focused ?? pointerOver;
+  const hoveredItem = SYSTEM_PREVIEWS.find((item) => item.id === activeId);
   const related = new Set(hoveredItem ? [hoveredItem.name, ...hoveredItem.connectsTo] : []);
 
   function selectView(target: "overview" | "systems") {
-    setHovered(null);
+    setPointerOver(null);
+    setFocused(null);
     setView(target);
     (target === "overview" ? overviewTabRef : systemsTabRef).current?.focus();
   }
@@ -58,7 +61,8 @@ export function BuildingPage() {
   }
 
   function selectFilter(target: BuildStatus | "all" | "next") {
-    setHovered(null);
+    setPointerOver(null);
+    setFocused(null);
     setFilter(target);
   }
 
@@ -152,10 +156,10 @@ export function BuildingPage() {
                         className={`system-card ${state}`}
                         style={{ "--stagger": groupIndex * 2 + index } as CSSProperties}
                         tabIndex={0}
-                        onMouseEnter={() => setHovered(item.id)}
-                        onMouseLeave={() => setHovered(null)}
-                        onFocus={() => setHovered(item.id)}
-                        onBlur={() => setHovered(null)}
+                        onMouseEnter={() => setPointerOver(item.id)}
+                        onMouseLeave={() => setPointerOver(null)}
+                        onFocus={() => setFocused(item.id)}
+                        onBlur={() => setFocused(null)}
                       >
                         <div className={`build-status build-status--${item.status}`}>{STATUS[item.status]}</div>
                         <h3>{item.name}</h3>
