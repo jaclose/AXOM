@@ -633,6 +633,46 @@ describe("curriculum evidence coverage", () => {
     expect(JSON.stringify({ source, foreign, valid })).toBe(before);
   });
 
+  it("does not count a valid keyed row when a foreign-prefix legacy row claims the same identity", () => {
+    const source = doc("NCRS-foreign-and-valid-collision.txt", [
+      "T4 - NCRS - Lectures:",
+      "Week 3:",
+      "NCRS Lecture 01 Heart Failure [Lecture]",
+    ].join("\n"));
+    const path = "Term 4/PPM 500/NCRS/Week 3";
+    const foreign = row(path, "DLA 01 Case Review", "ncrs|lecture|1");
+    const valid = row(path, "NCRS Lecture 01 Heart Failure", "ncrs|lecture|1");
+    const saved = [foreign, valid];
+    const before = JSON.stringify({ source, saved });
+
+    // The installer regards BOTH rows as the same disputed canonical identity;
+    // the invalid legacy row cannot vanish from collision accounting.
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: saved },
+    );
+    expect(preview.issues).toHaveLength(0);
+    expect(preview.modules).toHaveLength(1);
+    const reconciliation = preview.modules[0].reconcile;
+    expect(reconciliation.review).toHaveLength(1);
+    expect(reconciliation.review?.[0]?.reason).toMatch(/repeated identity or duplicate workspace rows/i);
+    expect(reconciliation.review?.[0]?.candidateIds).toEqual(
+      expect.arrayContaining([foreign.id, valid.id]),
+    );
+    expect(reconciliation.review?.[0]?.candidateIds).toHaveLength(2);
+    expect(reconciliation.create).toHaveLength(0);
+    expect(reconciliation.update).toHaveLength(0);
+    expect(reconciliation.unchanged).toBe(0);
+
+    const matrix = buildCurriculumCoverage(SGU_CURRICULUM, [source], saved);
+    const ncrs = matrix.terms[3].modules.find((item) => item.module === "NCRS")!;
+    expect(ncrs).toMatchObject({
+      availableTemplateItems: 1, installedTemplateItems: 0, notInstalled: 1,
+      installedRows: 2, duplicateRows: 1,
+    });
+    expect(matrix.installedTemplateItems).toBe(0);
+    expect(JSON.stringify({ source, saved })).toBe(before);
+  });
+
   it("holds repeated planned template identities instead of double-counting one saved activity", () => {
     const sources = [
       doc("NCRS-plan-collision-A.txt", [
