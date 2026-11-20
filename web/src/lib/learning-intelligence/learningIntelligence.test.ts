@@ -304,6 +304,41 @@ describe("what to look at again after a block", () => {
     expect(byQuestion.has(block[5].id)).toBe(false);
   });
 
+  it("does not infer slow-right from five unscored timed attempts and one trusted correct pace", () => {
+    const baseline = question({ attempts: [attempt(1, "correct", { timeSpentSeconds: 10 })] });
+    const held = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(2, "needs-review", { answerKey: "A", timeSpentSeconds: 7 })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100 })] });
+    const source = [...held, baseline, slow];
+    const original = JSON.stringify(source);
+    const block = attemptEvents([slow]);
+    const history = attemptEvents([...held, baseline]);
+    expect(history.filter((event) => event.correct === true)).toHaveLength(1);
+    expect(history.filter((event) => event.seconds)).toHaveLength(6);
+    expect(reviewCandidates(block, history)).toEqual([]);
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it("does not use timed incorrect attempts to satisfy the correct-pace minimum", () => {
+    const baseline = question({ attempts: [attempt(1, "correct", { timeSpentSeconds: 10 })] });
+    const misses = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(2, "incorrect", { timeSpentSeconds: 7 })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100 })] });
+    expect(reviewCandidates(attemptEvents([slow]), attemptEvents([baseline, ...misses]))).toEqual([]);
+  });
+
+  it("still identifies slow-right when six scored correct timed baselines support the median", () => {
+    const baseline = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { timeSpentSeconds: 10 })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100 })] });
+    expect(reviewCandidates(attemptEvents([slow]), attemptEvents(baseline))).toEqual([
+      expect.objectContaining({ questionId: slow.id, reasons: ["slow-right"], retry: ["this-week"] }),
+    ]);
+  });
+
   it("orders candidates by priority, and a question with no reason has none", () => {
     expect(reviewPriority([])).toBe(0);
     const block = [
