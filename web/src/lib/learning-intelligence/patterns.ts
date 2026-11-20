@@ -159,8 +159,14 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   for (const event of scored) if (event.correct === false) missCounts.set(event.questionId, (missCounts.get(event.questionId) ?? 0) + 1);
   const repeatMisses = [...missCounts.entries()].filter(([, count]) => count >= 2).sort((left, right) => right[1] - left[1]).map(([id]) => id);
 
-  const correctTimes = scored.filter((event) => event.correct && event.seconds).map((event) => event.seconds!);
-  const incorrectTimes = scored.filter((event) => event.correct === false && event.seconds).map((event) => event.seconds!);
+  // A scoreable answer is not necessarily a valid timing observation.
+  // Keep malformed imported durations out of medians, sample thresholds and
+  // the retry list without changing the underlying attempts or score totals.
+  const timedScored = scored.filter((event) =>
+    typeof event.seconds === "number" && Number.isFinite(event.seconds) && event.seconds > 0
+  );
+  const correctTimes = timedScored.filter((event) => event.correct === true).map((event) => event.seconds!);
+  const incorrectTimes = timedScored.filter((event) => event.correct === false).map((event) => event.seconds!);
   const timing = { correctMedian: median(correctTimes), incorrectMedian: median(incorrectTimes) };
 
   const findings: Finding[] = [];
@@ -249,7 +255,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
       basis: "computed",
       sample: correctTimes.length + incorrectTimes.length,
       weight: 45,
-      questionIds: [...new Set(scored.filter((event) => event.correct === false && event.seconds && event.seconds <= timing.incorrectMedian!).map((event) => event.questionId))],
+      questionIds: [...new Set(timedScored.filter((event) => event.correct === false && event.seconds! <= timing.incorrectMedian!).map((event) => event.questionId))],
       actionLabel: "Retry the quick misses",
     });
   }

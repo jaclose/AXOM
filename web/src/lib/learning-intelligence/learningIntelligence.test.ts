@@ -317,6 +317,53 @@ describe("verified current misses versus historical error classifications", () =
   });
 });
 
+describe("computed pattern timing evidence must be valid", () => {
+  const right = (seconds: number[]) => seconds.map((timeSpentSeconds) => question({
+    attempts: [attempt(1, "correct", { timeSpentSeconds })],
+  }));
+  const wrong = (seconds: number[]) => seconds.map((timeSpentSeconds) => question({
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { timeSpentSeconds })],
+  }));
+  const invalidDurations = [
+    Number.POSITIVE_INFINITY, Number.NaN, -5, 0, "25" as unknown as number,
+  ];
+
+  it("never counts invalid correct durations as a sixth valid fast-miss comparison sample", () => {
+    for (const invalid of invalidDurations) {
+      const records = [...right([80, 80, 80, 80, 80, invalid]), ...wrong([25, 25, 25, 25, 25, 25])];
+      const original = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+      expect(report.findings.some((finding) => finding.kind === "fast-misses")).toBe(false);
+      expect(JSON.stringify(records)).toBe(original);
+    }
+  });
+
+  it("never counts invalid incorrect durations as a sixth valid fast-miss comparison sample", () => {
+    for (const invalid of invalidDurations) {
+      const records = [...right([80, 80, 80, 80, 80, 80]), ...wrong([25, 25, 25, 25, 25, invalid])];
+      const original = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+      expect(report.findings.some((finding) => finding.kind === "fast-misses")).toBe(false);
+      expect(JSON.stringify(records)).toBe(original);
+    }
+  });
+
+  it("preserves six genuinely timed correct and incorrect samples and their action IDs", () => {
+    const correct = right([80, 80, 80, 80, 80, 80]);
+    const incorrect = wrong([25, 25, 25, 25, 25, 25]);
+    const report = buildPatternReport([...correct, ...incorrect]);
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(report.findings.find((finding) => finding.kind === "fast-misses")).toMatchObject({
+      basis: "computed", sample: 12, questionIds: incorrect.map((q) => q.id),
+    });
+  });
+});
+
 describe("pattern findings", () => {
   it("says nothing, and waits for nothing, before any answer exists", () => {
     const report = buildPatternReport([question(), question()]);
