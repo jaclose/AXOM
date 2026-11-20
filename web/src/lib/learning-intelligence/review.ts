@@ -110,6 +110,17 @@ function retryFor(reasons: readonly ReviewReason[]): RetryWhen[] {
 }
 
 /**
+ * A saved status alone cannot establish a trustworthy pace observation after
+ * answer-key revisions. For timing advice require a recorded selected option
+ * that can still be checked against the currently reviewed key. This does not
+ * regrade or erase legacy status-only attempts used elsewhere in analytics.
+ */
+function hasVerifiableCorrectChoice(event: AttemptEvent): boolean {
+  return event.correct === true && event.answerKey !== undefined
+    && event.correctKey !== undefined && event.answerKey === event.correctKey;
+}
+
+/**
  * The questions of one block worth a second look. `history` is every earlier
  * event for the same questions, so a miss can be told from a repeat miss and
  * "slow" is judged against the learner's own pace.
@@ -119,11 +130,11 @@ export function reviewCandidates(
   history: readonly AttemptEvent[] = block,
   rank: ReviewRanker = rankByReasons,
 ): ReviewCandidate[] {
-  // A pace benchmark must have six *scoreable correct* timed observations.
-  // Unscored/key-held and incorrect attempts do not establish correct-answer
-  // speed, even though their original elapsed times remain in history.
+  // Require six positive, finite, currently verifiable saved correct choices.
+  // Legacy status-only, key-held and contradictory outcomes retain their
+  // recorded times, but cannot substantiate a diagnostic pace benchmark.
   const trustedCorrectSeconds = history
-    .filter((event) => event.correct === true && typeof event.seconds === "number"
+    .filter((event) => hasVerifiableCorrectChoice(event) && typeof event.seconds === "number"
       && Number.isFinite(event.seconds) && event.seconds > 0)
     .map((event) => event.seconds!);
   const usualSeconds = trustedCorrectSeconds.length >= 6 ? median(trustedCorrectSeconds) : undefined;
@@ -149,7 +160,7 @@ export function reviewCandidates(
       if (!reasons.length) reasons.push("wrong");
     } else {
       if (event.certainty === "guess" || event.certainty === "unsure") reasons.push("unsure-right");
-      if (usualSeconds && event.seconds && event.seconds >= usualSeconds * SLOW_FACTOR) reasons.push("slow-right");
+      if (hasVerifiableCorrectChoice(event) && usualSeconds && event.seconds && event.seconds >= usualSeconds * SLOW_FACTOR) reasons.push("slow-right");
     }
     if (reasons.length) {
       const signals: ReviewSignals = {
