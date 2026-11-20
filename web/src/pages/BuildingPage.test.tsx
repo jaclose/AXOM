@@ -88,7 +88,7 @@ describe("Building preview", () => {
     render(<BuildingPage />);
     fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
     const first = screen.getByRole("heading", { name: "Accounts & Sync" }).closest<HTMLElement>(".system-card")!;
-    const unrelated = screen.getByRole("heading", { name: "Native AXOM" }).closest<HTMLElement>(".system-card")!;
+    const unrelated = screen.getByRole("heading", { name: "Knowledge Graph" }).closest<HTMLElement>(".system-card")!;
     fireEvent.mouseEnter(first);
     expect(first.className).toContain("is-focus");
     expect(unrelated.className).toContain("is-dim");
@@ -97,7 +97,7 @@ describe("Building preview", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
     fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
     const restored = screen.getByRole("heading", { name: "Accounts & Sync" }).closest<HTMLElement>(".system-card")!;
-    const restoredOther = screen.getByRole("heading", { name: "Native AXOM" }).closest<HTMLElement>(".system-card")!;
+    const restoredOther = screen.getByRole("heading", { name: "Knowledge Graph" }).closest<HTMLElement>(".system-card")!;
     expect(restored.className).not.toContain("is-focus");
     expect(restoredOther.className).not.toContain("is-dim");
 
