@@ -308,7 +308,7 @@ describe("verified current misses versus historical error classifications", () =
     const report = buildPatternReport(records);
     expect(report.totals.all).toEqual({ attempts: 8, correct: 3, accuracy: 38 });
     expect(report.findings.find((finding) => finding.kind === "error-pattern")).toMatchObject({
-      title: "100% of the misses you explained: missed clue",
+      title: "100% of the misses you explained: missed a clue",
       basis: "observed",
       sample: 5,
       questionIds: currentMisses.map((item) => item.id),
