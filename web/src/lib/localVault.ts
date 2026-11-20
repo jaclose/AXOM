@@ -186,9 +186,18 @@ function readChunkedValueManifest(value: string | null | undefined): ChunkedValu
 }
 
 function chunkPrefix(name: string, userId: string): string {
-  return `${name}:chunks:${snapshotFingerprint(userId || "local-workspace")}`;
+  // Physical chunk keys MUST be injective over stable profile identities.
+  // The previous 32-bit fingerprint can collide for different user IDs,
+  // causing later saves to overwrite another owner's retained scoped chunks.
+  // Every UTF-16 code unit becomes exactly four hex digits; distinct IDs
+  // and the explicit no-ID namespace cannot alias. Existing v1 manifests
+  // keep their recorded legacy prefix and remain readable without migration.
+  const ownerKey = userId
+    ? "id:" + Array.from({ length: userId.length }, (_, index) =>
+      userId.charCodeAt(index).toString(16).padStart(4, "0")).join("")
+    : "no-id";
+  return `${name}:chunks:owner-v2:${ownerKey}`;
 }
-
 function storedValuePlan(name: string, value: string, userId: string): StoredValuePlan {
   if (!observesWorkspace(name) || value.length <= VAULT_CHUNK_CHARACTERS) {
     return { storedValue: value, chunks: [] };
