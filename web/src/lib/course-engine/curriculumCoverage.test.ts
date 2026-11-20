@@ -524,6 +524,39 @@ describe("curriculum evidence coverage", () => {
     });
   }
 
+  for (const [key, name] of [
+    ["ncrs|lecture|1", "duplicate keyed progress rows"],
+    [undefined, "duplicate unkeyed rows at the same place"],
+  ] as const) {
+    it("holds " + name + " instead of reporting an installed template activity", () => {
+      const source = doc("NCRS-duplicate-learner-rows.txt", [
+        "T4 - NCRS - Lectures:",
+        "Week 3:",
+        "NCRS Lecture 01 Heart Failure [Lecture]",
+      ].join("\n"));
+      const first = row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 01 Heart Failure", key);
+      const duplicate = { ...first, id: `${first.id}-distinct-saved-row`, passes: 4 };
+      const before = JSON.stringify({ source, first, duplicate });
+      const preview = previewCurriculumTemplateInstallation(
+        SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [first, duplicate] },
+      );
+      expect(preview.modules).toHaveLength(1);
+      expect(preview.modules[0].reconcile.review).toHaveLength(1);
+      expect(preview.modules[0].reconcile.review?.[0].reason)
+        .toMatch(/repeated identity or duplicate workspace rows/i);
+      expect(preview.modules[0].reconcile.unchanged).toBe(0);
+      expect(preview.modules[0].reconcile.update).toHaveLength(0);
+      const matrix = buildCurriculumCoverage(SGU_CURRICULUM, [source], [first, duplicate]);
+      const ncrs = matrix.terms[3].modules.find((module) => module.module === "NCRS")!;
+      expect(ncrs).toMatchObject({
+        availableTemplateItems: 1, installedTemplateItems: 0, notInstalled: 1,
+        installedRows: 2, duplicateRows: 1,
+      });
+      expect(matrix.installedTemplateItems).toBe(0);
+      expect(JSON.stringify({ source, first, duplicate })).toBe(before);
+    });
+  }
+
   it("uses current template revisions rather than summing historical source versions", () => {
     const first = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 Old [Lecture]", "2026-01-01");
     const revised = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 New [Lecture]\nNCRS Lecture 02 More [Lecture]", "2026-10-14");
