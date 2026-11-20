@@ -1136,6 +1136,28 @@ describe("IndexedDB-first local vault", () => {
     expect(await localVaultStorage.getItem(key)).toBe(nextValue);
   });
 
+  it("rejects an unreadably long owner chunk manifest without committing partial IndexedDB data", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const userId = "u".repeat(1100);
+    const value = JSON.stringify({
+      state: { profile: { userId }, rawText: "oversized ".repeat(140_000) }, version: 34,
+    });
+    const storageSetter = vi.spyOn(storage, "setItem").mockImplementation(() => {
+      throw new DOMException("Fallback quota reached", "QuotaExceededError");
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.setItem(key, value);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(/profile identity is too long/i);
+      const db = await openCurrentVault();
+      expect(await getDirect(db, key)).toBeUndefined();
+      expect(await getDirect(db, key + ":user:" + userId)).toBeUndefined();
+      db.close();
+    } finally {
+      storageSetter.mockRestore();
+    }
+  });
   it("round-trips the live-size private workspace through chunks across a fresh runtime", async () => {
     const key = STORAGE_KEYS.persistedState;
     const persisted = JSON.stringify({
