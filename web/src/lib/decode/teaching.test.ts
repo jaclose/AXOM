@@ -323,6 +323,49 @@ describe("questions that teach the same rule", () => {
     expect(conceptGroups([unplaced, swapped, original], documents)[0].uniqueQuestions).toBe(2);
   });
 
+  it("does not attribute unknown same-wording figures to an arbitrary other source when imports reorder", () => {
+    const make = (id: string, sourceDocumentId: string, checksum?: string) => {
+      const assetId = `asset-${id}`;
+      const base = question({
+        id, sourceDocumentId,
+        content: {
+          id, source: { filename: "source.pdf", page: 1 }, stem: [], choices: [],
+          provenance: { method: "pdf-import" },
+          assets: [{ id: assetId, questionId: id, role: "question", filename: "figure.png", mimeType: "image/png", checksum }],
+        },
+        attachments: [{
+          id: `attachment-${id}`, assetId, role: "exhibit", blobKey: `blob-${id}`,
+          fileName: "figure.png", mimeType: "image/png", byteSize: 128, altText: "",
+          createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+        }],
+      });
+      return { ...base, analyses: [reviewed(base)] };
+    };
+    const verifiedOne = make("q-source-one-a", "doc-1", `sha256:${"a".repeat(64)}`);
+    const verifiedTwo = make("q-source-two-b", "doc-2", `sha256:${"b".repeat(64)}`);
+    const unknownOne = make("q-source-one-unknown", "doc-1");
+    const sourceCounts = (items: QuestionRecord[]) => {
+      const [group] = conceptGroups(items, documents);
+      expect(group.uniqueQuestions).toBe(2);
+      return Object.fromEntries(group.sources.map((source) => [source.documentId, source.uniqueQuestions]));
+    };
+    // Unknown bytes in source 1 cannot manufacture another instance when
+    // that source already contains a matching-wording, verified example.
+    for (const order of [
+      [verifiedOne, verifiedTwo, unknownOne],
+      [verifiedTwo, verifiedOne, unknownOne],
+      [unknownOne, verifiedTwo, verifiedOne],
+    ]) {
+      expect(sourceCounts(order)).toEqual({ "doc-1": 1, "doc-2": 1 });
+    }
+    // Even if a canonical global candidate sorts before this source's own
+    // verified figure, the local source evidence takes precedence.
+    const verifiedOneB = make("q-source-one-b", "doc-1", `sha256:${"b".repeat(64)}`);
+    const verifiedTwoA = make("q-source-two-a", "doc-2", `sha256:${"a".repeat(64)}`);
+    expect(sourceCounts([verifiedOneB, verifiedTwoA, unknownOne])).toEqual({ "doc-1": 1, "doc-2": 1 });
+    expect(sourceCounts([verifiedTwoA, unknownOne, verifiedOneB])).toEqual({ "doc-1": 1, "doc-2": 1 });
+  });
+
   it("ignores empty parser blocks in image placement but preserves meaningful source order", () => {
     const makeVisual = (id: string, prefix: NonNullable<QuestionRecord["content"]>["stem"] = []) => {
       const assetId = `asset-${id}`;
