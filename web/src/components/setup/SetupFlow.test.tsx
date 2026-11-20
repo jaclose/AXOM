@@ -199,8 +199,11 @@ describe("SetupFlow", () => {
     const onComplete = vi.fn();
     render(<SetupFlow mode="rerun" onComplete={onComplete} />);
     fireEvent.change(screen.getByLabelText("What should we call you?"), { target: { value: "Unsafe A change" } });
+    next();
+    next();
     useAccount.setState({ phase: "signed-in", user: accountUser("B") });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // Submit the stale A dialog, not Cancel, to test the actual protected write.
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(onComplete).not.toHaveBeenCalled();
     expect(useStore.getState().profile.name).toBe("Original");
   });
