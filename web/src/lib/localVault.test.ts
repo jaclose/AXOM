@@ -9,6 +9,7 @@ import {
   inspectLocalVaultRecoveryCopies,
   localVaultStorage,
   resetLocalVaultRuntimeForTests,
+  resolveVaultSnapshotRecord,
   VAULT_CONFLICT_MESSAGE,
   writeLocalFallback,
 } from "./localVault";
@@ -1079,9 +1080,14 @@ describe("IndexedDB-first local vault", () => {
       // This failed before R166: two different UUIDs generated the same prefix.
       expect(secondManifest.chunkPrefix).not.toBe(firstManifest.chunkPrefix);
       expect(await getDirect(saved, firstScoped)).toBe(firstManifestString);
+      const firstPhysicalRecords: Record<string, string> = { [firstScoped]: firstManifestString! };
       for (let index = 0; index < firstManifest.chunkCount; index += 1) {
-        expect(await getDirect(saved, firstManifest.chunkPrefix + ":" + index)).toBe(firstChunks[index]);
+        const chunkKey = firstManifest.chunkPrefix + ":" + index;
+        const retained = await getDirect(saved, chunkKey);
+        expect(retained).toBe(firstChunks[index]);
+        if (retained !== undefined) firstPhysicalRecords[chunkKey] = retained;
       }
+      expect(resolveVaultSnapshotRecord(firstPhysicalRecords, firstScoped)).toBe(first);
     } finally {
       saved.close();
     }
