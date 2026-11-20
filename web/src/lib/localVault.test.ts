@@ -9,6 +9,7 @@ import {
   inspectLocalVaultRecoveryCopies,
   localVaultStorage,
   resetLocalVaultRuntimeForTests,
+  resolveVaultSnapshotRecord,
   VAULT_CONFLICT_MESSAGE,
   writeLocalFallback,
 } from "./localVault";
@@ -1037,6 +1038,138 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
   });
 
+  it("keeps colliding profile UUID chunk records physically isolated across a synthetic account switch", async () => {
+    // Both real UUID-shaped IDs have identical legacy 32-bit FNV fingerprints.
+    // Directly seed B's small active workspace to model the persisted state
+    // after A -> B while deliberately retaining A's scoped recovery record.
+    const key = STORAGE_KEYS.persistedState;
+    const firstId = "00000000-0000-4000-8000-00000004b9cc";
+    const secondId = "00000000-0000-4000-8000-0000000b2b18";
+    const snapshot = (userId: string, fill: string) => JSON.stringify({
+      state: { profile: { userId }, notes: [fill], rawText: fill.repeat(2_150_000) },
+      version: 34,
+    });
+    const first = snapshot(firstId, "A");
+    const second = snapshot(secondId, "B");
+    const secondSmall = JSON.stringify({ state: { profile: { userId: secondId }, notes: ["B before large save"] }, version: 34 });
+    await localVaultStorage.setItem(key, first);
+    await flushLocalVaultWrites();
+
+    const db = await openCurrentVault();
+    const firstScoped = key + ":user:" + firstId;
+    const secondScoped = key + ":user:" + secondId;
+    const firstManifestString = await getDirect(db, firstScoped);
+    expect(firstManifestString).toBeDefined();
+    const firstManifest = JSON.parse(firstManifestString!) as { chunkPrefix: string; chunkCount: number };
+    expect(firstManifest.chunkCount).toBeGreaterThan(1);
+    const firstChunks = await Promise.all(Array.from({ length: firstManifest.chunkCount }, (_, i) =>
+      getDirect(db, firstManifest.chunkPrefix + ":" + i)));
+    await putDirect(db, key, secondSmall);
+    await putDirect(db, key + ":active-user", secondId);
+    await putDirect(db, secondScoped, secondSmall);
+    db.close();
+
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(secondSmall);
+    await localVaultStorage.setItem(key, second);
+    await flushLocalVaultWrites();
+    const saved = await openCurrentVault();
+    try {
+      const secondManifest = JSON.parse((await getDirect(saved, secondScoped))!) as { chunkPrefix: string; chunkCount: number };
+      expect(secondManifest.chunkCount).toBeGreaterThan(1);
+      // This failed before R166: two different UUIDs generated the same prefix.
+      expect(secondManifest.chunkPrefix).not.toBe(firstManifest.chunkPrefix);
+      expect(await getDirect(saved, firstScoped)).toBe(firstManifestString);
+      const firstPhysicalRecords: Record<string, string> = { [firstScoped]: firstManifestString! };
+      for (let index = 0; index < firstManifest.chunkCount; index += 1) {
+        const chunkKey = firstManifest.chunkPrefix + ":" + index;
+        const retained = await getDirect(saved, chunkKey);
+        expect(retained).toBe(firstChunks[index]);
+        if (retained !== undefined) firstPhysicalRecords[chunkKey] = retained;
+      }
+      expect(resolveVaultSnapshotRecord(firstPhysicalRecords, firstScoped)).toBe(first);
+    } finally {
+      saved.close();
+    }
+    expect(await localVaultStorage.getItem(key)).toBe(second);
+  });
+
+  it("reads a legacy FNV-namespaced chunk manifest and preserves its bytes on a new save", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const owner = "00000000-0000-4000-8000-00000004b9cc";
+    const legacyPrefix = key + ":chunks:36:16264256";
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: owner }, notes: [label], rawText: label.repeat(1_250_000) },
+      version: 34,
+    });
+    const oldValue = snapshot("legacy");
+    const nextValue = snapshot("modern");
+    const chunks = oldValue.match(/[\s\S]{1,1048576}/g)!;
+    const fingerprint = (value: string) => {
+      let hash = 0x811c9dc5;
+      for (let i = 0; i < value.length; i += 1) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+      }
+      return value.length + ":" + (hash >>> 0).toString(16);
+    };
+    const legacyManifest = JSON.stringify({
+      format: "axom-local-vault-chunks", version: 1, fingerprint: fingerprint(oldValue),
+      length: oldValue.length, chunkPrefix: legacyPrefix, chunkCount: chunks.length,
+    });
+    // Initialize the actual v5 object stores before installing a historical
+    // manifest. The direct test helper intentionally does not create stores.
+    await localVaultStorage.setItem(key, JSON.stringify({ state: { profile: { userId: owner }, seed: true }, version: 34 }));
+    await flushLocalVaultWrites();
+    const db = await openCurrentVault();
+    for (let index = 0; index < chunks.length; index += 1) {
+      await putDirect(db, legacyPrefix + ":" + index, chunks[index]);
+    }
+    await putDirect(db, key, legacyManifest);
+    await putDirect(db, key + ":active-user", owner);
+    await putDirect(db, key + ":user:" + owner, legacyManifest);
+    db.close();
+
+    expect(await localVaultStorage.getItem(key)).toBe(oldValue);
+    await localVaultStorage.setItem(key, nextValue);
+    await flushLocalVaultWrites();
+    const verification = await openCurrentVault();
+    try {
+      const newManifest = JSON.parse((await getDirect(verification, key))!) as { chunkPrefix: string };
+      expect(newManifest.chunkPrefix).not.toBe(legacyPrefix);
+      for (let index = 0; index < chunks.length; index += 1) {
+        expect(await getDirect(verification, legacyPrefix + ":" + index)).toBe(chunks[index]);
+      }
+    } finally {
+      verification.close();
+    }
+    expect(await localVaultStorage.getItem(key)).toBe(nextValue);
+  });
+
+  it("rejects an unreadably long owner chunk manifest without committing partial IndexedDB data", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const userId = "u".repeat(1100);
+    // Establish the vault store before the tested pretransactional refusal.
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    const value = JSON.stringify({
+      state: { profile: { userId }, rawText: "oversized ".repeat(140_000) }, version: 34,
+    });
+    const storageSetter = vi.spyOn(storage, "setItem").mockImplementation(() => {
+      throw new DOMException("Fallback quota reached", "QuotaExceededError");
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.setItem(key, value);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(/profile identity is too long/i);
+      const db = await openCurrentVault();
+      expect(await getDirect(db, key)).toBeUndefined();
+      expect(await getDirect(db, key + ":user:" + userId)).toBeUndefined();
+      db.close();
+    } finally {
+      storageSetter.mockRestore();
+    }
+  });
   it("round-trips the live-size private workspace through chunks across a fresh runtime", async () => {
     const key = STORAGE_KEYS.persistedState;
     const persisted = JSON.stringify({
