@@ -289,8 +289,15 @@ export function readSetupDraft(fallback: SetupChoices, mode: OnboardingMode = "f
   }
 }
 
-export function writeSetupDraft(choices: SetupChoices, mode: OnboardingMode = "first-run"): void {
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...choices, mode })); } catch { /* storage blocked */ }
+/** A draft is saved only when the browser accepts and returns the exact bytes. */
+export function writeSetupDraft(choices: SetupChoices, mode: OnboardingMode = "first-run"): boolean {
+  try {
+    const raw = JSON.stringify({ ...choices, mode });
+    localStorage.setItem(DRAFT_KEY, raw);
+    return localStorage.getItem(DRAFT_KEY) === raw;
+  } catch {
+    return false;
+  }
 }
 
 export function clearSetupDraft(): void {
