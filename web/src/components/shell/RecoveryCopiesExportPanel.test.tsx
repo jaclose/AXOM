@@ -87,10 +87,10 @@ describe("authenticated read-only recovery export", () => {
     render(<RecoveryCopiesExportPanel />);
     fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
     await screen.findByText("Retained account vault");
-    fireEvent.click(screen.getByRole("button", { name: "Review export" }));
-    expect(screen.getByRole("button", { name: "Download this copy" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Review export: Retained account vault" }));
+    expect(screen.getByRole("button", { name: "Download raw copy: Retained account vault" })).toBeTruthy();
     expect(createUrl).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Download this copy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download raw copy: Retained account vault" }));
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
     expect(inspect).toHaveBeenCalledTimes(2);
     expect(getUser).toHaveBeenCalledTimes(4);
@@ -102,8 +102,8 @@ describe("authenticated read-only recovery export", () => {
     render(<RecoveryCopiesExportPanel />);
     fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
     await screen.findByText("Retained account vault");
-    fireEvent.click(screen.getByRole("button", { name: "Review export" }));
-    fireEvent.click(screen.getByRole("button", { name: "Download this copy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review export: Retained account vault" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download raw copy: Retained account vault" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/changed in another tab/i));
     expect(createUrl).not.toHaveBeenCalled();
     expect(click).not.toHaveBeenCalled();
