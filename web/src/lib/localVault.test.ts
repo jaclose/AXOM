@@ -667,6 +667,55 @@ describe("IndexedDB-first local vault", () => {
       }
     });
 
+    it("keeps an intact scoped recovery copy visible when the generic chunk manifest is damaged", async () => {
+      const retained = snapshot("jd", "only-valid-scoped-revision");
+      const damaged = JSON.stringify({
+        format: "axom-local-vault-chunks", version: 1,
+        fingerprint: "1:deadbeef", length: 1,
+        chunkPrefix: key + ":chunks:missing", chunkCount: 1,
+      });
+      await localVaultStorage.setItem(key, retained);
+      await flushLocalVaultWrites();
+      const db = await openCurrentVault();
+      try {
+        await putDirect(db, key, damaged);
+      } finally {
+        db.close();
+      }
+      const inspection = await inspectLocalVaultRecoveryCopies("jd");
+      expect(inspection.indexedDbReadable).toBe(true);
+      expect(inspection.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(inspection.copies).toEqual([
+        { source: "indexeddb-scoped", fingerprint: expect.any(String), value: retained },
+      ]);
+      const verification = await openCurrentVault();
+      try {
+        expect(await getDirect(verification, key)).toBe(damaged);
+        expect(await getDirect(verification, key + ":user:jd")).toBe(retained);
+      } finally {
+        verification.close();
+      }
+    });
+
+    it("withholds a foreign-owner record even when stored under the requested account key", async () => {
+      const a = snapshot("account-A", "private-A");
+      const b = snapshot("account-B", "private-B");
+      await localVaultStorage.setItem(key, a);
+      await flushLocalVaultWrites();
+      const db = await openCurrentVault();
+      try {
+        await putDirect(db, key, b);
+        await putDirect(db, key + ":user:account-A", b);
+        await putDirect(db, key + ":active-user", "account-B");
+      } finally {
+        db.close();
+      }
+      const result = await inspectLocalVaultRecoveryCopies("account-A");
+      expect(result.copies).toEqual([]);
+      expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("private-B");
+    });
+
     it("recognizes identical copies without deleting the acknowledged fallback", async () => {
       const raw = snapshot("jd", "same-revision");
       await localVaultStorage.setItem(key, snapshot("jd", "base"));
