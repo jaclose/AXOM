@@ -1025,6 +1025,11 @@ describe("searchable Question Set client boundary", () => {
     ["encoded soft hyphen only stem", "stem", "%C2%AD"],
     ["soft hyphen duplicate answer text", "choice", "Fi\u00ADrst"],
     ["encoded soft hyphen duplicate answer text", "choice", "Fi%C2%ADrst"],
+    ["deprecated bidi control only stem", "stem", "\u206A"],
+    ["Arabic letter mark only stem", "stem", "\u061C"],
+    ["deprecated bidi control duplicate answer", "choice", "Fi\u206Arst"],
+    ["Arabic letter mark duplicate answer", "choice", "Fi\u061Crst"],
+    ["percent-encoded deprecated bidi duplicate answer", "choice", "Fi%E2%81%AArst"],
   ] as const)("blocks %s in a schema-valid direct submission before account RPC", async (_label, field, replacement) => {
     const original = snapshot();
     if (field === "stem") original.questions[0].stem = replacement;
@@ -1050,6 +1055,10 @@ describe("searchable Question Set client boundary", () => {
     ["legacy encoded soft hyphen only stem", "stem", "%C2%AD"],
     ["legacy soft hyphen duplicate answer", "choice", "Fi\u00ADrst"],
     ["legacy encoded soft hyphen duplicate answer", "choice", "Fi%C2%ADrst"],
+    ["legacy deprecated bidi control only stem", "stem", "\u206A"],
+    ["legacy Arabic letter mark only stem", "stem", "\u061C"],
+    ["legacy deprecated bidi duplicate answer", "choice", "Fi\u206Arst"],
+    ["legacy Arabic letter mark duplicate answer", "choice", "Fi\u061Crst"],
   ] as const)("holds %s at pending academic approval, while preserving rejection", async (_label, field, replacement) => {
     const original = snapshot();
     if (field === "stem") original.questions[0].stem = replacement;

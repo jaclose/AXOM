@@ -45,6 +45,10 @@ describe("explicitly reviewed Community AI keywords", () => {
     ["zero-width web citation", "https\u200B://example.edu/clinical"],
     ["fullwidth web citation", "ｈｔｔｐｓ：／／example.edu/clinical"],
     ["hidden private file URI", "file\u200B:///Users/student/private.pdf"],
+    ["deprecated bidi hidden rights claim", "rights\u206A:approved"],
+    ["Arabic letter mark hidden source claim", "source\u061C:reviewed"],
+    ["deprecated bidi only subject tag", "\u206A"],
+
     ["invisible-only subject tag", "\u200B\uFEFF"],
   ])("rejects unicode-disguised publication evidence or reference: %s", (_label, keyword) => {
     const authored = ["original", "rights:reviewed"];
@@ -69,6 +73,7 @@ describe("explicitly reviewed Community AI keywords", () => {
     ["zero-width obfuscated PMID", "PM\u200BID: 12345678"],
     ["joiner-disguised PMID", "PM\u200DID: 12345678"],
     ["word-joiner DOI", "10.1234\u2060/arterial-study"],
+    ["deprecated bidi hidden DOI", "10.1234\u206A/arterial-study"],
   ])("keeps a proposed %s out of reviewed subject keywords", (_label, keyword) => {
     const authored = ["histology", "source:reviewed"];
     expect(() => mergeReviewedCommunityKeywords(authored, keyword))
