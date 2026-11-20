@@ -191,15 +191,19 @@ export function buildCurriculumCoverage(
           && !heldSourceProblems.length && (identity.term
             ? identity.term === normalizedTerm(term.name)
             : moduleOwners.length === 1)).map(({ section }) => section);
-        const ambiguous = sourceSections.length > 0 && sections.length === 0
-          && termOwners.length > 0
-          && (heldSourceProblems.length > 0 || (moduleOwners.length > 1
-            && sourceEvidence.some(({ identity }) => !identity.term
-              || identity.term === normalizedTerm(term.name))));
-        if (sections.length) mappedTemplateModuleKeys.add(key);
         const plan = sections.length
           ? planCourseTemplate(sections, { term: term.name, course: course.code, moduleName: module })
           : undefined;
+        // The canonical installer also holds planner-generated chronology
+        // errors, not just raw parser errors. Preserve the problem evidence,
+        // but never publish rejected plan rows as available activities/weeks.
+        const eligiblePlan = plan?.problems.length ? undefined : plan;
+        const ambiguous = sourceSections.length > 0 && termOwners.length > 0
+          && (Boolean(plan?.problems.length) || (sections.length === 0
+            && (heldSourceProblems.length > 0 || (moduleOwners.length > 1
+              && sourceEvidence.some(({ identity }) => !identity.term
+                || identity.term === normalizedTerm(term.name))))));
+        if (eligiblePlan) mappedTemplateModuleKeys.add(key);
         const existing = tracker.filter((row) =>
           belongsToCourse(row, term, course.code, module, termOwners.length));
         for (const row of existing) accountedTrackerIds.add(row.id);
@@ -208,10 +212,10 @@ export function buildCurriculumCoverage(
           ?? (termOwners.length === 1
             ? availability?.byModule.get(questionAvailabilityModuleKey(term.name, module))
             : undefined);
-        const identityModule = plan?.module ?? module;
+        const identityModule = eligiblePlan?.module ?? module;
         const keys = new Set(existing.flatMap((row) => row.templateKey ? [normalizedTemplateIdentity(row.templateKey, identityModule)] : []));
         const places = new Set(existing.map((row) => `${row.path.toLowerCase()}|${row.label.toLowerCase()}`));
-        const available = plan?.items ?? [];
+        const available = eligiblePlan?.items ?? [];
         const installedTemplateItems = available.filter((row) =>
           keys.has(normalizedTemplateIdentity(row.templateKey, identityModule)) || places.has(`${row.path.toLowerCase()}|${row.label.toLowerCase()}`)).length;
         const counts = new Map<string, number>();
@@ -221,7 +225,7 @@ export function buildCurriculumCoverage(
         }
         modules.push({
           term: term.name, courseCode: course.code, courseName: course.name, module,
-          templateFiles: sections.length,
+          templateFiles: eligiblePlan ? sections.length : 0,
           availableTemplateItems: available.length,
           installedTemplateItems,
           notInstalled: available.length - installedTemplateItems,
@@ -238,7 +242,7 @@ export function buildCurriculumCoverage(
           missingQuestionReferences: indexedQuestions?.missingReferencedQuestions ?? 0,
           indexedQuestionWeeks: indexedQuestions?.indexedWeeks ?? [],
           unresolvedQuestionWeeks: indexedQuestions?.unresolvedWeekQuestions ?? 0,
-          mapping: ambiguous ? "ambiguous" : sections.length ? "outline-match" : "no-template",
+          mapping: ambiguous ? "ambiguous" : eligiblePlan ? "outline-match" : "no-template",
         });
       }
     }
