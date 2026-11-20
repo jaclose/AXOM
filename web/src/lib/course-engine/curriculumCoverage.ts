@@ -155,15 +155,21 @@ export function buildCurriculumCoverage(
         const sourceEvidence = sourceSections.map((section) => ({
           section, identity: sourceTermEvidence(section),
         }));
-        // Do not count conflicting or unsupported academic declarations as
-        // installable activities. Keep them visible as review-held source files.
-        const heldSourceProblems = sourceEvidence.flatMap(({ identity }) =>
-          identity.problem ? [identity.problem] : []);
-        // Undated module-only files require a unique outline owner. A valid
-        // explicit term can distinguish owners across terms, never two courses
-        // in the same term. Context metadata is as binding as the heading.
+        // The install preview holds the whole module when its saved files
+        // disagree about an explicit term, even if each file is valid alone.
+        const declaredTerms = new Set(sourceEvidence.flatMap(({ identity }) =>
+          identity.term ? [identity.term] : []));
+        const heldSourceProblems = [
+          ...sourceEvidence.flatMap(({ identity }) => identity.problem ? [identity.problem] : []),
+          ...(declaredTerms.size > 1
+            ? ["Conflicting explicit academic terms across source files; review source identity."]
+            : []),
+        ];
+        // A held module remains saved in the vault, but its rows and weeks
+        // cannot inflate the coverage matrix. Undated module-only files still
+        // require one outline owner; metadata is as binding as the heading.
         const sections = sourceEvidence.filter(({ identity }) => termOwners.length === 1
-          && !identity.problem && (identity.term
+          && !heldSourceProblems.length && (identity.term
             ? identity.term === normalizedTerm(term.name)
             : moduleOwners.length === 1)).map(({ section }) => section);
         const ambiguous = sourceSections.length > 0 && sections.length === 0
