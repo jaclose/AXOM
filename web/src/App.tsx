@@ -175,6 +175,13 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   const [promiseCutsceneOpen, setPromiseCutsceneOpen] = useState(false);
   const accountPhase = useAccount((state) => state.phase);
   const accountId = useAccount((state) => state.user?.id);
+  // The first-run branch returns before AccountSyncWatcher mounts. Start the
+  // idempotent SDK session subscription from App itself so a cold cloud-enabled
+  // visitor cannot remain in an unresolved identity forever. The loading phase
+  // still has no draft scope until INITIAL_SESSION confirms the actual owner.
+  useEffect(() => {
+    useAccount.getState().init();
+  }, []);
   const draftScope = setupDraftScope(accountPhase, accountId);
   const [setupRequest, setSetupRequest] = useState<{ mode: OnboardingMode; scope: string | null } | null>(() => (
     useStore.getState().profile.onboarded && readSetupDraftMode(draftScope) === "rerun"
