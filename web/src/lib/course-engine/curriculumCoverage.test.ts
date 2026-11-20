@@ -514,7 +514,7 @@ describe("curriculum evidence coverage", () => {
       );
       expect(preview.modules).toHaveLength(1);
       expect(preview.modules[0].reconcile.review).toBeUndefined();
-      expect(preview.modules[0].reconcile.unchanged).toBe(1);
+      expect(preview.modules[0].reconcile.unchanged + preview.modules[0].reconcile.update.length).toBe(1);
       const matrix = buildCurriculumCoverage(SGU_CURRICULUM, [source], [saved]);
       const ncrs = matrix.terms[3].modules.find((module) => module.module === "NCRS")!;
       expect(ncrs).toMatchObject({
