@@ -214,7 +214,11 @@ export function buildCurriculumCoverage(
             : undefined);
         const identityModule = eligiblePlan?.module ?? module;
         const keys = new Set(existing.flatMap((row) => row.templateKey ? [normalizedTemplateIdentity(row.templateKey, identityModule)] : []));
-        const places = new Set(existing.map((row) => `${row.path.toLowerCase()}|${row.label.toLowerCase()}`));
+        // A path/title match may adopt an unkeyed learner row, but cannot
+        // override a conflicting canonical template identity. The installer
+        // holds that collision for review rather than reusing its progress.
+        const places = new Set(existing.filter((row) => !row.templateKey)
+          .map((row) => `${row.path.toLowerCase()}|${row.label.toLowerCase()}`));
         const available = eligiblePlan?.items ?? [];
         const installedTemplateItems = available.filter((row) =>
           keys.has(normalizedTemplateIdentity(row.templateKey, identityModule)) || places.has(`${row.path.toLowerCase()}|${row.label.toLowerCase()}`)).length;

@@ -473,6 +473,57 @@ describe("curriculum evidence coverage", () => {
     });
   });
 
+
+  it("does not claim conflicting keyed progress as installed solely from matching location and title", () => {
+    const source = doc("NCRS-template-key-conflict.txt", [
+      "T4 - NCRS - Lectures:",
+      "Week 3:",
+      "NCRS Lecture 01 Heart Failure [Lecture]",
+    ].join("\n"));
+    const saved = row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 01 Heart Failure", "ncrs|lecture|99");
+    const before = JSON.stringify({ source, saved });
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [saved] },
+    );
+    expect(preview.modules).toHaveLength(1);
+    expect(preview.modules[0].reconcile.review?.[0]?.reason).toMatch(/different template identity/i);
+    expect(preview.modules[0].reconcile.unchanged).toBe(0);
+    const matrix = buildCurriculumCoverage(SGU_CURRICULUM, [source], [saved]);
+    const ncrs = matrix.terms[3].modules.find((module) => module.module === "NCRS")!;
+    expect(ncrs).toMatchObject({
+      availableTemplateItems: 1, installedTemplateItems: 0, notInstalled: 1, installedRows: 1,
+    });
+    expect(matrix.installedTemplateItems).toBe(0);
+    expect(JSON.stringify({ source, saved })).toBe(before);
+  });
+
+  for (const [existingKey, title] of [
+    ["ncrs|lecture|1", "matching keyed identity"],
+    [undefined, "unkeyed learner activity at identical place"],
+  ] as const) {
+    it("retains installed coverage for " + title, () => {
+      const source = doc("NCRS-template-key-control.txt", [
+        "T4 - NCRS - Lectures:",
+        "Week 3:",
+        "NCRS Lecture 01 Heart Failure [Lecture]",
+      ].join("\n"));
+      const saved = row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 01 Heart Failure", existingKey);
+      const before = JSON.stringify({ source, saved });
+      const preview = previewCurriculumTemplateInstallation(
+        SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [saved] },
+      );
+      expect(preview.modules).toHaveLength(1);
+      expect(preview.modules[0].reconcile.review).toBeUndefined();
+      expect(preview.modules[0].reconcile.unchanged + preview.modules[0].reconcile.update.length).toBe(1);
+      const matrix = buildCurriculumCoverage(SGU_CURRICULUM, [source], [saved]);
+      const ncrs = matrix.terms[3].modules.find((module) => module.module === "NCRS")!;
+      expect(ncrs).toMatchObject({
+        availableTemplateItems: 1, installedTemplateItems: 1, notInstalled: 0, installedRows: 1,
+      });
+      expect(JSON.stringify({ source, saved })).toBe(before);
+    });
+  }
+
   it("uses current template revisions rather than summing historical source versions", () => {
     const first = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 Old [Lecture]", "2026-01-01");
     const revised = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 New [Lecture]\nNCRS Lecture 02 More [Lecture]", "2026-10-14");
