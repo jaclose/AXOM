@@ -5,6 +5,19 @@ import { BuildingPage } from "./BuildingPage";
 import { SYSTEM_PREVIEWS } from "../lib/buildingSystems";
 afterEach(cleanup);
 describe("Building preview", () => {
+  it("gives each overview horizon a unique descriptive accessible action name", () => {
+    render(<BuildingPage />);
+    const names = (["now", "next", "later"] as const).map((horizon) =>
+      screen.getByRole("button", { name: new RegExp(`^See \\d+ ${horizon} roadmap systems?// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { BuildingPage } from "./BuildingPage";
+import { SYSTEM_PREVIEWS } from "../lib/buildingSystems";
+afterEach(cleanup);
+, "i") }).getAttribute("aria-label")
+    );
+    expect(new Set(names).size).toBe(3);
+  });
   it("labels concepts honestly and exposes the system map", () => {
     render(<BuildingPage />);
     expect(screen.getByText(/direction, not shipped capability/i)).toBeTruthy();
@@ -15,7 +28,7 @@ describe("Building preview", () => {
   });
   it("filters by status from the overview and lights up connected systems", () => {
     render(<BuildingPage />);
-    fireEvent.click(screen.getAllByRole("button", { name: /^See \d+ systems?/ })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /^See \d+ now roadmap systems?$/i }));
     expect(screen.getByRole("tab", { name: "Systems" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("button", { name: /^Foundation/ }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.queryByRole("heading", { name: "Knowledge Graph" })).toBeNull();
@@ -29,7 +42,7 @@ describe("Building preview", () => {
     render(<BuildingPage />);
     const nextSystems = SYSTEM_PREVIEWS.filter((system) => system.status === "planned" || system.status === "in-development");
     const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;
-    fireEvent.click(within(nextCard).getByRole("button", { name: `See ${nextSystems.length} systems` }));
+    fireEvent.click(within(nextCard).getByRole("button", { name: `See ${nextSystems.length} next roadmap systems` }));
 
     const shown = [...document.querySelectorAll(".system-card h3")]
       .map((element) => element.textContent).sort();
@@ -73,7 +86,7 @@ describe("Building preview", () => {
   it("moves focus to the Systems tab when a focused overview horizon is replaced", () => {
     render(<BuildingPage />);
     const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;
-    const link = within(nextCard).getByRole("button", { name: /^See \d+ systems$/ });
+    const link = within(nextCard).getByRole("button", { name: /^See \d+ next roadmap systems$/i });
     link.focus();
     expect(document.activeElement).toBe(link);
     fireEvent.click(link);
