@@ -85,7 +85,7 @@ describe("Building preview", () => {
   it("moves focus to the Systems tab when a focused overview horizon is replaced", () => {
     render(<BuildingPage />);
     const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;
-    const link = within(nextCard).getByRole("button", { name: /^See \d+ next roadmap systems$/i });
+    const link = within(nextCard).getByRole("button", { name: /^See \d+ systems? in Next roadmap$/i });
     link.focus();
     expect(document.activeElement).toBe(link);
     fireEvent.click(link);
