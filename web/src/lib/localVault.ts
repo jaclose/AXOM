@@ -215,7 +215,14 @@ function storedValuePlan(name: string, value: string, userId: string): StoredVal
     chunkPrefix: prefix,
     chunkCount: chunks.length,
   };
-  return { storedValue: JSON.stringify(manifest), manifest, chunks };
+  const storedValue = JSON.stringify(manifest);
+  // Recovery readers cap manifest JSON at 4096 characters. A malformed or
+  // excessively long legacy profile ID must fail before the IDB transaction
+  // rather than record a manifest that future reads cannot reconstruct.
+  if (storedValue.length > 4096) {
+    throw new Error("The profile identity is too long for a chunked local workspace.");
+  }
+  return { storedValue, manifest, chunks };
 }
 
 function validateReassembledValue(manifest: ChunkedValueManifest, chunks: readonly string[]): string {
