@@ -3,6 +3,7 @@ import { SGU_CURRICULUM, type CurriculumTemplate } from "../curricula";
 import type { SourceDocument } from "../library";
 import type { TrackerItem } from "../types";
 import { buildCurriculumCoverage } from "./curriculumCoverage";
+import { previewCurriculumTemplateInstallation } from "./bulkCourseInstall";
 
 function doc(name: string, rawText: string, revision = "2026-10-14"): SourceDocument {
   return {
@@ -177,6 +178,180 @@ describe("curriculum evidence coverage", () => {
     });
     expect(matrix.unmappedTrackerRows).toBe(0);
     expect(matrix.unmappedTemplateModules).toEqual([]);
+  });
+
+
+  it("holds contradictory heading and metadata terms rather than claiming a verified T4 week", () => {
+    const source = doc("FTCM-conflict.txt", [
+      "T4 - FTCM - Lectures:",
+      "@academic-term: T5",
+      "Week 2:",
+      "FTCM Lecture 01 Contradictory [Lecture]",
+    ].join("\n"));
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [source], []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, installedTemplateItems: 0,
+      mapping: "ambiguous", statedWeeks: [], inferredWeeks: [],
+    });
+    expect(ftcm.sourceProblems.join(" ")).toContain("Conflicting explicit academic terms");
+    expect(coverage.sourceTemplateFiles).toBe(1);
+    expect(coverage.unmappedTemplateModules).toContain("FTCM");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.create).toBe(0);
+    expect(preview.issues.some((issue) => issue.reason.includes("Conflicting explicit academic terms"))).toBe(true);
+  });
+
+  it("does not attribute a metadata-only T5 source or unsupported term to T4", () => {
+    const t5 = doc("FTCM-T5.txt", [
+      "FTCM - Lectures:",
+      "@academic-term: T5",
+      "Week 2:",
+      "FTCM Lecture 01 In Term 5 [Lecture]",
+    ].join("\n"));
+    const unsupported = doc("FTCM-unsupported.txt", [
+      "T4 - FTCM - Small Groups:",
+      "@academic-term: Term 6",
+      "Week 4:",
+      "FTCM SG 01 Unverified [Small Group]",
+    ].join("\n"));
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [t5, unsupported], []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm.templateFiles).toBe(0);
+    expect(ftcm.availableTemplateItems).toBe(0);
+    expect(ftcm.statedWeeks).toEqual([]);
+    expect(ftcm.sourceProblems.join(" ")).toContain("Unsupported explicit academic term");
+  });
+
+  it("holds different explicit academic terms across saved files of the same module", () => {
+    const term4 = doc("FTCM-T4.txt", [
+      "T4 - FTCM - Lectures:",
+      "Week 2:",
+      "FTCM Lecture 01 In T4 [Lecture]",
+    ].join("\n"));
+    const term5 = doc("FTCM-T5.txt", [
+      "FTCM - Small Groups:",
+      "@academic-term: T5",
+      "Week 3:",
+      "FTCM SG 01 In T5 [Small Group]",
+    ].join("\n"));
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [term4, term5], []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0,
+      statedWeeks: [], mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toContain("Conflicting explicit academic terms across source files");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [term4, term5], { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.create).toBe(0);
+    expect(preview.issues.some((issue) => issue.reason.includes("Conflicting explicit academic terms"))).toBe(true);
+  });
+
+  it("accepts matching explicit term aliases and uniquely owned legacy templates", () => {
+    const aligned = doc("FTCM-aligned.txt", [
+      "T4 - FTCM - Lectures:",
+      "@academic-term: Term 04",
+      "Week 2:",
+      "FTCM Lecture 01 Verified alignment [Lecture]",
+    ].join("\n"));
+    const legacy = doc("FTCM-legacy.txt", [
+      "FTCM - Small Groups:",
+      "Week 3:",
+      "FTCM SG 02 Source-stated week [Small Group]",
+    ].join("\n"));
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [aligned, legacy], []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 2, availableTemplateItems: 2,
+      statedWeeks: [2, 3], mapping: "outline-match", sourceProblems: [],
+    });
+    expect(coverage.unmappedTemplateModules).not.toContain("FTCM");
+  });
+
+  it("holds a matching-term D cohort template pending an approved cohort owner", () => {
+    const source = doc("FTCM-D.txt", [
+      "T4 - FTCM - Lectures:",
+      "@academic-term: Term 4",
+      "@cohort: D",
+      "Week 2:",
+      "FTCM Lecture 01 Explicit D cohort [Lecture]",
+    ].join("\n"));
+    const existing = row("Term 4/FTCM/Week 2", "Student-owned existing activity");
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [source], [existing]);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, installedTemplateItems: 0,
+      notInstalled: 0, installedRows: 1, statedWeeks: [], inferredWeeks: [],
+      mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toMatch(/cohort/i);
+    expect(coverage.sourceTemplateFiles).toBe(1);
+    expect(coverage.unmappedTemplateModules).toContain("FTCM");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [existing] },
+    );
+    expect(preview.modules).toHaveLength(0);
+    expect(preview.issues.some((issue) => /cohort/i.test(issue.reason))).toBe(true);
+  });
+
+  it("holds cross-file D and E cohorts rather than summing both into Term 4 week coverage", () => {
+    const documents = [
+      doc("FTCM-D.txt", [
+        "T4 - FTCM - Lectures:",
+        "@cohort: D",
+        "Week 2:",
+        "FTCM Lecture 01 D activity [Lecture]",
+      ].join("\n")),
+      doc("FTCM-E.txt", [
+        "T4 - FTCM - Small Groups:",
+        "@cohort: E",
+        "Week 3:",
+        "FTCM SG 01 E activity [Small Group]",
+      ].join("\n")),
+    ];
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, documents, []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, statedWeeks: [],
+      mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toMatch(/cohort/i);
+    expect(coverage.sourceTemplateFiles).toBe(2);
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, documents, { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.modules).toHaveLength(0);
+    expect(preview.issues.some((issue) => /conflicting cohorts/i.test(issue.reason))).toBe(true);
+  });
+
+  it("holds mixed explicit and unversioned cohorts without hiding the saved sources", () => {
+    const documents = [
+      doc("FTCM-D.txt", [
+        "T4 - FTCM - Lectures:",
+        "@cohort: D",
+        "FTCM Lecture 01 D-specific [Lecture]",
+      ].join("\n")),
+      doc("FTCM-legacy.txt", [
+        "FTCM - Small Groups:",
+        "FTCM SG 01 Legacy unspecific [Small Group]",
+      ].join("\n")),
+    ];
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, documents, []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toMatch(/cohort/i);
+    expect(coverage.unmappedTemplateModules).toContain("FTCM");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, documents, { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.modules).toHaveLength(0);
+    expect(preview.issues.some((issue) => /mixed with source files/i.test(issue.reason))).toBe(true);
   });
 
   it("uses current template revisions rather than summing historical source versions", () => {
