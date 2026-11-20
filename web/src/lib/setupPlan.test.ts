@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cardSystemFor } from "./cardSystem";
 import { makeSeed } from "./seed";
 import { useStore } from "./store";
@@ -15,6 +15,8 @@ beforeEach(() => {
   localStorage.clear();
   useStore.setState(makeSeed());
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("path and focus", () => {
   it("offers SGU terms only to SGU, and clinical phases to other medical schools", () => {
@@ -96,5 +98,29 @@ describe("draft", () => {
     writeSetupDraft(choices({ step: 1, path: "premed", focus: "mcat", tools: ["anki", "nonsense" as never] }));
     const restored = readSetupDraft(defaultChoices());
     expect(restored).toMatchObject({ step: 1, path: "premed", focus: "mcat", tools: ["anki"] });
+  });
+  it("reports an actual saved draft and preserves the choices after reading", () => {
+    const draft = choices({ name: "Saved", step: 2 });
+    expect(writeSetupDraft(draft, "first-run")).toBe(true);
+    expect(readSetupDraft(defaultChoices(), "first-run")).toMatchObject({ name: "Saved", step: 2 });
+  });
+
+  it("does not treat a silently ignored storage write as saved", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {});
+    expect(writeSetupDraft(choices({ name: "not actually persisted" }), "first-run")).toBe(false);
+    expect(readSetupDraft(defaultChoices(), "first-run").name).not.toBe("not actually persisted");
+    setItem.mockRestore();
+  });
+
+  it("reports a blocked storage write instead of falsely claiming persistence, and supports retry", () => {
+    const draft = choices({ name: "Not yet saved", step: 1 });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    expect(writeSetupDraft(draft, "first-run")).toBe(false);
+    expect(readSetupDraft(defaultChoices(), "first-run").name).not.toBe("Not yet saved");
+    setItem.mockRestore();
+    expect(writeSetupDraft(draft, "first-run")).toBe(true);
+    expect(readSetupDraft(defaultChoices(), "first-run")).toMatchObject({ name: "Not yet saved", step: 1 });
   });
 });
