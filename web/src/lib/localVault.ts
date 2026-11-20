@@ -413,7 +413,8 @@ export type LocalVaultUnverifiedScopedFallback = Readonly<{
 export type LocalVaultRecoveryReviewReason =
   | "trusted-copies-diverge"
   | "unverified-owner-scoped-copy"
-  | "other-owner-or-unverifiable-bytes";
+  | "other-owner-or-unverifiable-bytes"
+  | "storage-source-unreadable";
 
 export type LocalVaultRecoveryInspection = Readonly<{
   copies: readonly LocalVaultRecoveryCopy[];
@@ -548,6 +549,9 @@ export async function inspectLocalVaultRecoveryCopies(
   if (divergent) reviewReasons.push("trusted-copies-diverge");
   if (unverifiedScopedFallback !== null) reviewReasons.push("unverified-owner-scoped-copy");
   if (unverifiedOrOtherOwnerCopyPresent) reviewReasons.push("other-owner-or-unverifiable-bytes");
+  // A readable copy cannot prove completeness while another storage tier is
+  // inaccessible. Report uncertainty, never silently classify it as safe.
+  if (!indexedDbReadable || !fallbackReadable) reviewReasons.push("storage-source-unreadable");
 
   return {
     copies,
