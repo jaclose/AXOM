@@ -394,7 +394,7 @@ function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFa
  * Legacy name-only records are withheld for manual account-identity review.
  */
 export type LocalVaultRecoveryCopy = Readonly<{
-  source: "indexeddb" | "local-fallback";
+  source: "indexeddb" | "indexeddb-scoped" | "local-fallback";
   fingerprint: string;
   value: string;
 }>;
@@ -434,7 +434,32 @@ export async function inspectLocalVaultRecoveryCopies(
       }
     }
   } catch {
-    // An unavailable or damaged vault is not proof that it is empty.
+    // An unavailable or damaged primary vault is not proof that the owner's
+    // separately retained scoped record is empty.
+  }
+
+  // Switching A -> B changes the generic active vault, but A's per-account
+  // record can still hold unique edits. Inspect that record directly under
+  // the same read-only, no-create guard, rather than trusting the active
+  // pointer or exposing B's generic snapshot as A's recovery data.
+  try {
+    const scoped = await readVaultRecord(scopedStateKey(name, expectedProfileUserId), openVaultForInspection);
+    indexedDbReadable = true;
+    if (scoped !== undefined) {
+      if (stablePersistedUserId(scoped) === expectedProfileUserId) {
+        // The primary and scoped copies can be different revisions of the
+        // same owner. Never choose a winner or discard either here.
+        if (!copies.some(copy => copy.source === "indexeddb" && copy.value === scoped)) {
+          copies.push({ source: "indexeddb-scoped", fingerprint: snapshotFingerprint(scoped), value: scoped });
+        }
+      } else {
+        unverifiedOrOtherOwnerCopyPresent = true;
+      }
+    }
+  } catch {
+    // A corrupted scoped manifest may contain unique bytes; do not claim a
+    // readable primary proves it is redundant. Neither path writes or clears.
+    if (indexedDbReadable) unverifiedOrOtherOwnerCopyPresent = true;
   }
 
   const fallbackStore = localFallback();
