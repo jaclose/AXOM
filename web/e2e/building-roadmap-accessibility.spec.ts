@@ -126,3 +126,64 @@ test("Building system emphasis honors real pointer and keyboard focus precedence
     await expect(highlighted).toHaveCount(0);
   }
 });
+
+test("Building is reachable by keyboard through its real desktop sidebar and mobile drawer", async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/", { waitUntil: "networkidle" });
+  await completeSetup(page, "AXOM Building Navigation E2E", { ifVisible: true });
+  const reviewLater = page.getByRole("button", { name: "Review later" });
+  if (await reviewLater.count()) await reviewLater.click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  const sidebar = page.locator("#app-sidebar");
+  const menu = page.getByRole("button", { name: "Open navigation menu" });
+  const building = sidebar.locator('[data-tour="nav-building"]');
+  const dashboard = sidebar.locator('[data-tour="nav-dashboard"]');
+
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 900 : 844 });
+    const mobile = width < 881;
+    if (mobile) {
+      await expect(sidebar).toHaveAttribute("aria-hidden", "true");
+      await expect(sidebar).toHaveAttribute("inert", "");
+      await menu.focus();
+      await menu.press("Enter");
+      await expect(menu).toHaveAttribute("aria-expanded", "true");
+      await expect(sidebar).toBeFocused();
+      await expect(sidebar).not.toHaveAttribute("inert", "");
+    } else {
+      await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
+    }
+
+    await building.focus();
+    await expect(building).toBeFocused();
+    await building.press("Enter");
+    await expect(page.getByRole("heading", { level: 1, name: "Building AXOM" })).toBeVisible();
+    await expect(page).toHaveURL(/#building$/);
+    await expect(building).toHaveAttribute("aria-current", "page");
+
+    if (mobile) {
+      await expect(menu).toHaveAttribute("aria-expanded", "false");
+      await expect(sidebar).toHaveAttribute("aria-hidden", "true");
+      await expect(sidebar).toHaveAttribute("inert", "");
+      await expect(menu).toBeFocused();
+      await menu.press("Enter");
+      await expect(menu).toHaveAttribute("aria-expanded", "true");
+      await expect(sidebar).toBeFocused();
+    }
+
+    await dashboard.focus();
+    await dashboard.press("Enter");
+    await expect(page).toHaveURL(/#dashboard$/);
+    await expect(dashboard).toHaveAttribute("aria-current", "page");
+    if (mobile) {
+      await expect(menu).toHaveAttribute("aria-expanded", "false");
+      await expect(sidebar).toHaveAttribute("inert", "");
+      await expect(menu).toBeFocused();
+    }
+  }
+
+  expect(errors).toEqual([]);
+});
