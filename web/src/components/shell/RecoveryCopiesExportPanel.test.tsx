@@ -243,6 +243,60 @@ describe("authenticated read-only recovery export", () => {
     expect(screen.queryByText("Retained account vault")).toBeNull();
   });
 
+  it("does not resume a raw export after panel unmount and an A to B to A sign-in round-trip", async () => {
+    let finishLastAuth: ((answer: { data: { user: { id: string } }; error: null }) => void) | undefined;
+    let authCalls = 0;
+    getUser.mockImplementation(() => {
+      authCalls++;
+      if (authCalls === 4) return new Promise((resolve) => { finishLastAuth = resolve; });
+      return Promise.resolve({ data: { user: { id: "account-A" } }, error: null });
+    });
+
+    const panel = render(<RecoveryCopiesExportPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await screen.findByText("Retained account vault");
+    fireEvent.click(screen.getByRole("button", { name: "Review export: Retained account vault" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download raw copy: Retained account vault" }));
+    await waitFor(() => expect(getUser).toHaveBeenCalledTimes(4));
+    expect(finishLastAuth).toBeDefined();
+
+    // Sign-out removes the Settings panel. An old A network request must not
+    // regain authority merely because a later session signs into A again.
+    act(() => {
+      panel.unmount();
+      useAccount.setState({ phase: "signed-out", user: null });
+      useAccount.setState({ phase: "signed-in", user: userB });
+      useAccount.setState({ phase: "signed-in", user: userA });
+    });
+    await act(async () => {
+      finishLastAuth!({ data: { user: { id: "account-A" } }, error: null });
+    });
+    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(createUrl).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("does not inspect retained bytes after the panel unmounts during remote auth", async () => {
+    let finishFirstAuth: ((answer: { data: { user: { id: string } }; error: null }) => void) | undefined;
+    getUser.mockImplementationOnce(() => new Promise((resolve) => { finishFirstAuth = resolve; }));
+    const panel = render(<RecoveryCopiesExportPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await waitFor(() => expect(getUser).toHaveBeenCalledTimes(1));
+    expect(finishFirstAuth).toBeDefined();
+
+    act(() => {
+      panel.unmount();
+      useAccount.setState({ phase: "signed-out", user: null });
+      useAccount.setState({ phase: "signed-in", user: userB });
+      useAccount.setState({ phase: "signed-in", user: userA });
+    });
+    await act(async () => {
+      finishFirstAuth!({ data: { user: { id: "account-A" } }, error: null });
+    });
+    expect(inspect).not.toHaveBeenCalled();
+    expect(createUrl).not.toHaveBeenCalled();
+  });
+
   it("renders no recovery actions when signed out", () => {
     useAccount.setState({ phase: "signed-out", user: null });
     render(<RecoveryCopiesExportPanel />);
