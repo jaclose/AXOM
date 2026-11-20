@@ -71,15 +71,26 @@ describe("IndexedDB-first local vault", () => {
       chunkCount: 1,
       ...patch,
     });
+    const retainedScoped = JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: "retained-scoped-recovery" }] },
+      version: 34,
+    });
     const db = await openCurrentVault();
     await putDirect(db, key, corrupted);
+    await putDirect(db, `${key}:user:jd`, retainedScoped);
+    await putDirect(db, `${key}:active-user`, "jd");
     db.close();
     resetLocalVaultRuntimeForTests();
     expect(() => resolveVaultSnapshotRecord({ [key]: corrupted }, key))
       .toThrow(/invalid chunk manifest/i);
     expect(await localVaultStorage.getItem(key)).toBeNull();
+    const inspection = await inspectLocalVaultRecoveryCopies("jd");
+    expect(inspection.copies.map((copy) => copy.value)).toEqual([retainedScoped]);
+    expect(inspection.reviewReasons).toContain("other-owner-or-unverifiable-bytes");
+    expect(inspection.requiresExplicitReview).toBe(true);
     const verified = await openCurrentVault();
     expect(await getDirect(verified, key)).toBe(corrupted);
+    expect(await getDirect(verified, `${key}:user:jd`)).toBe(retainedScoped);
     verified.close();
   });
 
