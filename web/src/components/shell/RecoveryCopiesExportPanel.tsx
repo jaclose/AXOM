@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Download, HardDrive, ShieldCheck } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { loadSupabase } from "../../lib/account/supabase";
@@ -69,12 +69,43 @@ export function RecoveryCopiesExportPanel() {
   const [confirmation, setConfirmation] = useState<Candidate["source"] | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  // Identity changes invalidate pending network/storage work. The old request
+  // may settle after the next account starts its own inspection.
+  const operationSequence = useRef(0);
+  const inFlightOperation = useRef<number | null>(null);
 
   useEffect(() => {
+    operationSequence.current += 1;
+    inFlightOperation.current = null;
+    setBusy(false);
     setInspection(null);
     setConfirmation(null);
     setNotice(null);
   }, [accountId, phase]);
+
+  function beginOperation(): number | null {
+    // A state update can be batched. The ref prevents rapid clicks from
+    // launching overlapping requests before React renders the disabled button.
+    if (inFlightOperation.current !== null) return null;
+    const sequence = ++operationSequence.current;
+    inFlightOperation.current = sequence;
+    setBusy(true);
+    return sequence;
+  }
+
+  function isCurrentOperation(sequence: number, id: string): boolean {
+    const current = useAccount.getState();
+    return inFlightOperation.current === sequence
+      && current.phase === "signed-in"
+      && current.user?.id === id;
+  }
+
+  function finishOperation(sequence: number) {
+    // Never allow a late A response to unlock or overwrite B's in-flight UI.
+    if (inFlightOperation.current !== sequence) return;
+    inFlightOperation.current = null;
+    setBusy(false);
+  }
 
   if (!accountId || phase !== "signed-in") return null;
   const visible = inspection?.accountId === accountId ? inspection.result : null;
@@ -82,31 +113,39 @@ export function RecoveryCopiesExportPanel() {
 
   async function inspect() {
     if (!accountId || busy) return;
-    setBusy(true);
+    const sequence = beginOperation();
+    if (sequence === null) return;
     setInspection(null);
     setConfirmation(null);
     setNotice(null);
     try {
       await assertVerifiedAccount(accountId);
+      if (!isCurrentOperation(sequence, accountId)) return;
       const result = await inspectLocalVaultRecoveryCopies(accountId);
+      if (!isCurrentOperation(sequence, accountId)) return;
       await assertVerifiedAccount(accountId);
-      if (useAccount.getState().user?.id !== accountId) throw new Error("The account changed during inspection.");
+      if (!isCurrentOperation(sequence, accountId)) return;
       setInspection({ accountId, result });
       setNotice({ text: "Read-only inspection finished. No workspace copy was changed.", error: false });
     } catch (error) {
-      setNotice({ text: error instanceof Error ? error.message : "Recovery inspection could not finish.", error: true });
+      if (isCurrentOperation(sequence, accountId)) {
+        setNotice({ text: error instanceof Error ? error.message : "Recovery inspection could not finish.", error: true });
+      }
     } finally {
-      setBusy(false);
+      finishOperation(sequence);
     }
   }
 
   async function download(copy: Candidate) {
     if (!accountId || busy || confirmation !== copy.source || !visible) return;
-    setBusy(true);
+    const sequence = beginOperation();
+    if (sequence === null) return;
     setNotice(null);
     try {
       await assertVerifiedAccount(accountId);
+      if (!isCurrentOperation(sequence, accountId)) return;
       const fresh = await inspectLocalVaultRecoveryCopies(accountId);
+      if (!isCurrentOperation(sequence, accountId)) return;
       const current = candidates(fresh).find((candidate) => candidate.source === copy.source);
       // Comparing full bytes, not the short vault fingerprint, prevents an
       // intervening tab write from turning an approved export into another copy.
@@ -114,16 +153,14 @@ export function RecoveryCopiesExportPanel() {
         throw new Error("This saved copy changed in another tab. Inspect again before exporting it.");
       }
       await assertVerifiedAccount(accountId);
+      if (!isCurrentOperation(sequence, accountId)) return;
       // The last network identity check can take long enough for another tab
       // to save a different version. Re-inspect AFTER that await and do not
       // yield again between the final byte comparison and download creation.
       // This is a best-effort sampled copy, not an atomic cross-tab snapshot.
       const finalInspection = await inspectLocalVaultRecoveryCopies(accountId);
       const finalCopy = candidates(finalInspection).find((candidate) => candidate.source === copy.source);
-      if (
-        useAccount.getState().phase !== "signed-in"
-        || useAccount.getState().user?.id !== accountId
-      ) throw new Error("The account changed. Inspect again before exporting.");
+      if (!isCurrentOperation(sequence, accountId)) return;
       if (!finalCopy || finalCopy.value !== copy.value || finalCopy.unverified !== copy.unverified) {
         throw new Error("This saved copy changed in another tab. Inspect again before exporting it.");
       }
@@ -141,11 +178,13 @@ export function RecoveryCopiesExportPanel() {
       setConfirmation(null);
       setNotice({ text: "Sampled recovery version download started. Another tab may save a newer version afterward; this is not an import-ready backup.", error: false });
     } catch (error) {
-      setConfirmation(null);
-      setInspection(null);
-      setNotice({ text: error instanceof Error ? error.message : "Recovery export was stopped.", error: true });
+      if (isCurrentOperation(sequence, accountId)) {
+        setConfirmation(null);
+        setInspection(null);
+        setNotice({ text: error instanceof Error ? error.message : "Recovery export was stopped.", error: true });
+      }
     } finally {
-      setBusy(false);
+      finishOperation(sequence);
     }
   }
 
