@@ -83,7 +83,7 @@ export function BuildingPage() {
           aria-controls="building-active-panel"
           aria-selected={view === "overview"}
           tabIndex={view === "overview" ? 0 : -1}
-          onClick={() => setView("overview")}
+          onClick={() => selectView("overview")}
           onKeyDown={(event) => handleTabKeyDown(event, "overview")}
         >Overview</button>
         <button
@@ -94,7 +94,7 @@ export function BuildingPage() {
           aria-controls="building-active-panel"
           aria-selected={view === "systems"}
           tabIndex={view === "systems" ? 0 : -1}
-          onClick={() => setView("systems")}
+          onClick={() => selectView("systems")}
           onKeyDown={(event) => handleTabKeyDown(event, "systems")}
         >Systems <span className="building-count" aria-hidden="true">{SYSTEM_PREVIEWS.length}</span></button>
       </div>
