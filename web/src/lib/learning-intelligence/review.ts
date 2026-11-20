@@ -119,9 +119,14 @@ export function reviewCandidates(
   history: readonly AttemptEvent[] = block,
   rank: ReviewRanker = rankByReasons,
 ): ReviewCandidate[] {
-  const usual = median(history.filter((event) => event.correct && event.seconds).map((event) => event.seconds!));
-  // Needs a few timed answers before "usual" means anything.
-  const usualSeconds = usual && history.filter((item) => item.seconds).length >= 6 ? usual : undefined;
+  // A pace benchmark must have six *scoreable correct* timed observations.
+  // Unscored/key-held and incorrect attempts do not establish correct-answer
+  // speed, even though their original elapsed times remain in history.
+  const trustedCorrectSeconds = history
+    .filter((event) => event.correct === true && typeof event.seconds === "number"
+      && Number.isFinite(event.seconds) && event.seconds > 0)
+    .map((event) => event.seconds!);
+  const usualSeconds = trustedCorrectSeconds.length >= 6 ? median(trustedCorrectSeconds) : undefined;
   const earlierMisses = new Map<ID, number>();
   const firstAnswers = new Map<ID, boolean | undefined>();
   const blockKeys = new Set(block.map((event) => `${event.questionId}\u001f${event.at}`));
