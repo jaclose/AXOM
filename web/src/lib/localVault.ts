@@ -408,7 +408,7 @@ export async function inspectLocalVaultRecoveryCopies(
   // cannot hide a valid offline backup, and a readable vault does not mean
   // the fallback is redundant.
   try {
-    const value = await readVaultSnapshot(name);
+    const value = await readVaultSnapshot(name, openVaultForInspection);
     indexedDbReadable = true;
     if (value !== null) {
       if (stablePersistedUserId(value) === expectedProfileUserId) {
@@ -548,6 +548,37 @@ function openExistingVault(): Promise<IDBDatabase> {
       resolve(req.result);
     };
     req.onerror = () => reject(req.error ?? new Error("Unable to open existing local vault"));
+  });
+}
+
+
+/**
+ * Open an existing vault for inspection only. IndexedDB.open(name) normally
+ * creates a new database when none exists, even for a readonly transaction.
+ * Abort that implicit versionchange transaction so recovery inspection cannot
+ * create a new vault or mask a missing one.
+ */
+function openVaultForInspection(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB is unavailable"));
+      return;
+    }
+    const req = indexedDB.open(DB_NAME);
+    req.onupgradeneeded = () => {
+      req.transaction?.abort();
+    };
+    req.onsuccess = () => {
+      if (!req.result.objectStoreNames.contains(STORE_NAME)) {
+        req.result.close();
+        reject(new Error("The existing local vault has no workspace store."));
+        return;
+      }
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
+    req.onerror = () => reject(req.error ?? new Error("No existing local vault is available to inspect."));
+    req.onblocked = () => reject(new Error("The existing local vault is blocked by another tab."));
   });
 }
 
@@ -828,12 +859,15 @@ function clearFallbackCopy(
   } catch { /* Preserve the available fallback if optional cleanup fails. */ }
 }
 
-async function readVaultSnapshot(name: string): Promise<string | null> {
-  const primary = await readVaultRecord(name, openExistingVault);
+async function readVaultSnapshot(
+  name: string,
+  open: () => Promise<IDBDatabase> = openExistingVault,
+): Promise<string | null> {
+  const primary = await readVaultRecord(name, open);
   if (primary) return primary;
-  const activeUser = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
+  const activeUser = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), open);
   if (!activeUser) return null;
-  return await readVaultRecord(scopedStateKey(name, activeUser), openExistingVault) ?? null;
+  return await readVaultRecord(scopedStateKey(name, activeUser), open) ?? null;
 }
 
 /** A delete is a write: authorize it against the exact workspace revision
