@@ -812,9 +812,16 @@ describe("IndexedDB-first local vault", () => {
         source: "local-fallback-scoped-unverified", fingerprint: expect.any(String), value: accountA,
       });
       expect(a.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(a.divergent).toBe(false); // Trusted-only signal cannot hide unverified A bytes.
+      expect(a.requiresExplicitReview).toBe(true);
+      expect(a.reviewReasons).toContain("unverified-owner-scoped-copy");
+      expect(a.reviewReasons).not.toContain("trusted-copies-diverge");
       expect(JSON.stringify(a)).not.toContain("B-acknowledged-offline");
       expect(b.copies.map(copy => copy.value)).toEqual([accountB, offlineB]);
       expect(b.unverifiedScopedFallback).toBeNull();
+      expect(b.divergent).toBe(true);
+      expect(b.reviewReasons).toContain("trusted-copies-diverge");
+      expect(b.reviewReasons).not.toContain("unverified-owner-scoped-copy");
       expect(JSON.stringify(b)).not.toContain("only-retained-in-A-localStorage");
       expect([...values.entries()]).toEqual(before);
       expect(getVaultWriteCheckpoint()).toBe(checkpoint);
@@ -828,6 +835,8 @@ describe("IndexedDB-first local vault", () => {
         expect(result.unverifiedScopedFallback).toBeNull();
         expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(true);
         expect(result.copies).toEqual([]);
+        expect(result.requiresExplicitReview).toBe(true);
+        expect(result.reviewReasons).toEqual(["other-owner-or-unverifiable-bytes", "storage-source-unreadable"]);
         expect(JSON.stringify(result)).not.toContain("private-B");
         expect(JSON.stringify(result)).not.toContain("malformed private bytes");
         expect(storage.getItem(scopedKey)).toBe(raw);
@@ -864,7 +873,54 @@ describe("IndexedDB-first local vault", () => {
       expect(result.copies.map(copy => copy.value)).toEqual([retained]);
       expect(result.unverifiedScopedFallback).toBeNull();
       expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(false);
+      expect(result.requiresExplicitReview).toBe(false);
+      expect(result.reviewReasons).toEqual([]);
       expect(storage.getItem(key + ":user:jd")).toBe(retained);
+    });
+
+    it("requires explicit review for differing trusted primary and owner-scoped revisions", async () => {
+      const base = snapshot("jd", "confirmed-primary");
+      const scoped = snapshot("jd", "unique-scoped-edit");
+      await localVaultStorage.setItem(key, base);
+      await flushLocalVaultWrites();
+      const db = await openCurrentVault();
+      try {
+        await putDirect(db, key + ":user:jd", scoped);
+      } finally {
+        db.close();
+      }
+      const before = [...values.entries()];
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.copies.map(copy => copy.value)).toEqual([base, scoped]);
+      expect(result.divergent).toBe(true);
+      expect(result.requiresExplicitReview).toBe(true);
+      expect(result.reviewReasons).toEqual(["trusted-copies-diverge"]);
+      expect(result.unverifiedScopedFallback).toBeNull();
+      expect([...values.entries()]).toEqual(before);
+    });
+
+    it("does not manufacture a review reason for a single verified owner workspace", async () => {
+      const onlyCopy = snapshot("jd", "one-owner-copy");
+      await localVaultStorage.setItem(key, onlyCopy);
+      await flushLocalVaultWrites();
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.copies.map(copy => copy.value)).toEqual([onlyCopy]);
+      expect(result.unverifiedScopedFallback).toBeNull();
+      expect(result.divergent).toBe(false);
+      expect(result.requiresExplicitReview).toBe(false);
+      expect(result.reviewReasons).toEqual([]);
+    });
+
+    it("treats an unreadable storage tier as uncertainty, not verified owner divergence", async () => {
+      vi.stubGlobal("indexedDB", undefined);
+      const before = [...values.entries()];
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.copies).toEqual([]);
+      expect(result.indexedDbReadable).toBe(false);
+      expect(result.divergent).toBe(false);
+      expect(result.requiresExplicitReview).toBe(true);
+      expect(result.reviewReasons).toEqual(["storage-source-unreadable"]);
+      expect([...values.entries()]).toEqual(before);
     });
 
     it("rejects a missing stable identity before attempting browser storage reads", async () => {
