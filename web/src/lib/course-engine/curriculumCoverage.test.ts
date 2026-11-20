@@ -272,6 +272,88 @@ describe("curriculum evidence coverage", () => {
     expect(coverage.unmappedTemplateModules).not.toContain("FTCM");
   });
 
+  it("holds a matching-term D cohort template pending an approved cohort owner", () => {
+    const source = doc("FTCM-D.txt", [
+      "T4 - FTCM - Lectures:",
+      "@academic-term: Term 4",
+      "@cohort: D",
+      "Week 2:",
+      "FTCM Lecture 01 Explicit D cohort [Lecture]",
+    ].join("\n"));
+    const existing = row("Term 4/FTCM/Week 2", "Student-owned existing activity");
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [source], [existing]);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, installedTemplateItems: 0,
+      notInstalled: 0, installedRows: 1, statedWeeks: [], inferredWeeks: [],
+      mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toMatch(/cohort/i);
+    expect(coverage.sourceTemplateFiles).toBe(1);
+    expect(coverage.unmappedTemplateModules).toContain("FTCM");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [existing] },
+    );
+    expect(preview.modules).toHaveLength(0);
+    expect(preview.issues.some((issue) => /cohort/i.test(issue.reason))).toBe(true);
+  });
+
+  it("holds cross-file D and E cohorts rather than summing both into Term 4 week coverage", () => {
+    const documents = [
+      doc("FTCM-D.txt", [
+        "T4 - FTCM - Lectures:",
+        "@cohort: D",
+        "Week 2:",
+        "FTCM Lecture 01 D activity [Lecture]",
+      ].join("\n")),
+      doc("FTCM-E.txt", [
+        "T4 - FTCM - Small Groups:",
+        "@cohort: E",
+        "Week 3:",
+        "FTCM SG 01 E activity [Small Group]",
+      ].join("\n")),
+    ];
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, documents, []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, statedWeeks: [],
+      mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toMatch(/cohort/i);
+    expect(coverage.sourceTemplateFiles).toBe(2);
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, documents, { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.modules).toHaveLength(0);
+    expect(preview.issues.some((issue) => /conflicting cohorts/i.test(issue.reason))).toBe(true);
+  });
+
+  it("holds mixed explicit and unversioned cohorts without hiding the saved sources", () => {
+    const documents = [
+      doc("FTCM-D.txt", [
+        "T4 - FTCM - Lectures:",
+        "@cohort: D",
+        "FTCM Lecture 01 D-specific [Lecture]",
+      ].join("\n")),
+      doc("FTCM-legacy.txt", [
+        "FTCM - Small Groups:",
+        "FTCM SG 01 Legacy unspecific [Small Group]",
+      ].join("\n")),
+    ];
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, documents, []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0, mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toMatch(/cohort/i);
+    expect(coverage.unmappedTemplateModules).toContain("FTCM");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, documents, { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.modules).toHaveLength(0);
+    expect(preview.issues.some((issue) => /mixed with source files/i.test(issue.reason))).toBe(true);
+  });
+
   it("uses current template revisions rather than summing historical source versions", () => {
     const first = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 Old [Lecture]", "2026-01-01");
     const revised = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 New [Lecture]\nNCRS Lecture 02 More [Lecture]", "2026-10-14");
