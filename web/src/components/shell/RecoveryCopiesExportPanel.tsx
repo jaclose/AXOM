@@ -81,6 +81,13 @@ export function RecoveryCopiesExportPanel() {
     setInspection(null);
     setConfirmation(null);
     setNotice(null);
+    return () => {
+      // Sign-out and route changes unmount this component. A network request
+      // from that old instance must never resume after a later sign-in to the
+      // same account, even when the account id matches again.
+      operationSequence.current += 1;
+      inFlightOperation.current = null;
+    };
   }, [accountId, phase]);
 
   function beginOperation(): number | null {
