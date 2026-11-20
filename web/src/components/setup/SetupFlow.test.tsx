@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
-import { defaultChoices, readSetupDraft } from "../../lib/setupPlan";
+import { useAccount } from "../../lib/account/accountStore";
+import { defaultChoices, readSetupDraft, setupDraftScope } from "../../lib/setupPlan";
 import { SetupFlow } from "./SetupFlow";
 
 beforeEach(() => {
@@ -12,6 +13,7 @@ beforeEach(() => {
   seed.profile.onboarded = false;
   seed.profile.tourDone = undefined;
   useStore.setState(seed);
+  useAccount.setState({ phase: "signed-out", user: null });
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
 
@@ -29,7 +31,7 @@ describe("SetupFlow", () => {
     let blocked = true;
     const originalSetItem = Storage.prototype.setItem;
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
-      if (key === "axom.setup.v2" && blocked) throw new DOMException("Denied", "SecurityError");
+      if (key === "axom.setup.v2.scoped.device" && blocked) throw new DOMException("Denied", "SecurityError");
       return originalSetItem.call(this, key, value);
     });
     render(<SetupFlow mode="first-run" />);
@@ -41,13 +43,13 @@ describe("SetupFlow", () => {
     blocked = false;
     fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(readSetupDraft(defaultChoices(), "first-run").step).toBe(1);
+    expect(readSetupDraft(defaultChoices(), "first-run", "device").step).toBe(1);
   });
 
   it("announces a saved draft only after a successful storage write", async () => {
     render(<SetupFlow mode="first-run" />);
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/setup draft saved on this device/i));
-    expect(readSetupDraft(defaultChoices(), "first-run")).toMatchObject({ step: 0, version: 2 });
+    expect(readSetupDraft(defaultChoices(), "first-run", "device")).toMatchObject({ step: 0, version: 2 });
   });
 
   it("offers the other hosted workspace without leaving or changing apex work", () => {
@@ -81,7 +83,7 @@ describe("SetupFlow", () => {
     expect(state.terms.map((term) => term.name)).toEqual(["Term 1", "Term 2", "Term 3", "Term 4", "Term 5", "Boards"]);
     expect(state.tracker.some((row) => /^example/i.test(row.label))).toBe(false);
     expect(state.profile.dailySuccess?.requirements.map((requirement) => requirement.label)).toContain("Anki cards");
-    expect(localStorage.getItem("axom.setup.v2")).toBeNull();
+    expect(localStorage.getItem("axom.setup.v2.scoped.device")).toBeNull();
   });
 
   it("starts a non-SGU student clean, and a no-flashcards routine gets no card target", () => {
@@ -157,4 +159,50 @@ describe("SetupFlow", () => {
     render(<SetupFlow mode="rerun" />);
     expect(screen.getByRole("heading", { name: "Who are you studying as?" })).toBeTruthy();
   });
+  it("keeps account A's interrupted rerun for A and makes B finish its own first run", () => {
+    const accountUser = (id: string) => ({
+      id, email: `${id}@example.test`, displayName: id, emailConfirmed: true,
+    });
+    useAccount.setState({ phase: "signed-in", user: accountUser("A") });
+    useStore.getState().updateProfile({ onboarded: true, name: "A", tourDone: true });
+    const a = render(<SetupFlow mode="rerun" />);
+    fireEvent.change(screen.getByLabelText("What should we call you?"), { target: { value: "A unfinished" } });
+    next();
+    a.unmount();
+
+    useAccount.setState({ phase: "signed-in", user: accountUser("B") });
+    const fresh = makeSeed();
+    fresh.profile.onboarded = false;
+    fresh.profile.tourDone = undefined;
+    useStore.setState(fresh);
+    const b = render(<SetupFlow mode="first-run" />);
+    expect(screen.getByText("Welcome to AXOM")).toBeTruthy();
+    expect((screen.getByLabelText("What should we call you?") as HTMLInputElement).value).not.toBe("A unfinished");
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(useStore.getState().profile.dailySuccess?.requirements.length).toBeGreaterThan(0);
+    expect(useStore.getState().courses.length).toBeGreaterThan(0);
+    b.unmount();
+
+    useAccount.setState({ phase: "signed-in", user: accountUser("A") });
+    useStore.getState().updateProfile({ onboarded: true, name: "A", tourDone: true });
+    render(<SetupFlow mode="rerun" />);
+    expect((screen.getByLabelText("What should we call you?") as HTMLInputElement).value).toBe("A unfinished");
+    expect(setupDraftScope("signed-in", "A")).not.toBe(setupDraftScope("signed-in", "B"));
+  });
+
+  it("refuses a stale A completion after the account identity changes in a mounted flow", () => {
+    const accountUser = (id: string) => ({
+      id, email: `${id}@example.test`, displayName: id, emailConfirmed: true,
+    });
+    useAccount.setState({ phase: "signed-in", user: accountUser("A") });
+    useStore.getState().updateProfile({ onboarded: true, name: "Original", tourDone: true });
+    const onComplete = vi.fn();
+    render(<SetupFlow mode="rerun" onComplete={onComplete} />);
+    fireEvent.change(screen.getByLabelText("What should we call you?"), { target: { value: "Unsafe A change" } });
+    useAccount.setState({ phase: "signed-in", user: accountUser("B") });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(useStore.getState().profile.name).toBe("Original");
+  });
+
 });

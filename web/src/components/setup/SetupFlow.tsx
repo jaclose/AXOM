@@ -14,13 +14,14 @@ import { PaletteOrbs } from "./PaletteOrbs";
 import { ChoiceChips, ChoiceSegment, ChoiceSummary, ChoiceTiles, type ChoiceSummaryRows } from "../ui/Choice";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
+import { useAccount } from "../../lib/account/accountStore";
 import { setThemePreference, type ThemePreference } from "../../lib/theme";
 import { useThemePreference } from "../../lib/useThemePreference";
 import { notificationPermission, requestNotificationPermission, type NotifyPermission } from "../../lib/notify";
 import type { OnboardingDestination, OnboardingMode } from "../../lib/onboardingProgress";
 import {
   applySetup, cardSystemFromTools, clearSetupDraft, defaultChoices, focusChoices, PATH_OPTIONS, QUESTION_TIMINGS,
-  readSetupDraft, TOOL_OPTIONS, usesLectures, usesQuestions, writeSetupDraft,
+  readSetupDraft, setupDraftScope, TOOL_OPTIONS, usesLectures, usesQuestions, writeSetupDraft,
   type SetupChoices, type SetupPath, type SetupTool,
 } from "../../lib/setupPlan";
 import { SGU_CURRICULUM } from "../../lib/curricula";
@@ -42,8 +43,13 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
   onCancel?: () => void;
 }) {
   const profile = useStore((state) => state.profile);
-  const effectiveMode: OnboardingMode = mode ?? (profile.onboarded ? "rerun" : "first-run");
-  const [choices, setChoices] = useState<SetupChoices>(() => readSetupDraft(defaultChoices(useStore.getState().profile), effectiveMode));
+  const accountPhase = useAccount((state) => state.phase);
+  const accountId = useAccount((state) => state.user?.id);
+  const scope = setupDraftScope(accountPhase, accountId);
+  // New profiles always need first-run seeding, even after another account's rerun.
+  const effectiveMode: OnboardingMode = profile.onboarded ? (mode ?? "rerun") : "first-run";
+  const boundScope = useRef(scope);
+  const [choices, setChoices] = useState<SetupChoices>(() => readSetupDraft(defaultChoices(useStore.getState().profile), effectiveMode, scope));
   const [direction, setDirection] = useState<"forward" | "back">("forward");
   const [draftSaveState, setDraftSaveState] = useState<"checking" | "saved" | "failed">("checking");
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -52,8 +58,11 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
   const otherWorkspace = otherWorkspaceUrl(location.hostname);
 
   useEffect(() => {
-    setDraftSaveState(writeSetupDraft(choices, effectiveMode) ? "saved" : "failed");
-  }, [choices, effectiveMode]);
+    // App keys this component by account scope. A stale instance never writes
+    // its former user's choices into the new account during an identity switch.
+    if (boundScope.current !== scope) { setDraftSaveState("failed"); return; }
+    setDraftSaveState(writeSetupDraft(choices, effectiveMode, scope) ? "saved" : "failed");
+  }, [choices, effectiveMode, scope]);
   useEffect(() => {
     // The first screen puts the caret in the name field; later screens move
     // focus to their heading so screen readers hear where they are.
@@ -65,21 +74,28 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
     setDraftSaveState("checking");
     setChoices((current) => ({ ...current, ...patch }));
   };
-  const retryDraftSave = () => setDraftSaveState(writeSetupDraft(choices, effectiveMode) ? "saved" : "failed");
+  const retryDraftSave = () => setDraftSaveState(boundScope.current === scope && writeSetupDraft(choices, effectiveMode, scope) ? "saved" : "failed");
   const go = (step: number) => {
     setDirection(step > choices.step ? "forward" : "back");
     update({ step: Math.max(0, Math.min(STEPS.length - 1, step)) });
   };
 
   function finish() {
-    applySetup(choices, effectiveMode);
-    clearSetupDraft();
+    const currentAccount = useAccount.getState();
+    const currentScope = setupDraftScope(currentAccount.phase, currentAccount.user?.id);
+    if (!scope || scope !== boundScope.current || scope !== currentScope) {
+      setDraftSaveState("failed");
+      return;
+    }
+    // An unonboarded learner must never run the rerun path that skips seeding.
+    applySetup(choices, useStore.getState().profile.onboarded ? effectiveMode : "first-run");
+    clearSetupDraft(scope);
     onComplete?.("dashboard");
   }
 
   function leave() {
     if (effectiveMode === "rerun") {
-      clearSetupDraft();
+      if (boundScope.current === scope) clearSetupDraft(scope);
       onCancel?.();
       return;
     }

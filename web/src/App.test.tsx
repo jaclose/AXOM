@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { makeSeed } from "./lib/seed";
 import { useStore } from "./lib/store";
+import { useAccount } from "./lib/account/accountStore";
 import { useUi } from "./lib/uiStore";
 import { GUIDED_TOUR_STEPS } from "./components/shell/GuidedTour";
 import * as localVault from "./lib/localVault";
@@ -35,6 +36,7 @@ beforeEach(() => {
   seed.profile.promise = undefined;
   seed.profile.promisePromptStatus = undefined;
   useStore.setState(seed);
+  useAccount.setState({ phase: "signed-out", user: null });
   useUi.setState({ settingsRequest: null, onboardingRequested: false, journalDay: null });
   communicationsMocks.request.mockReset();
   communicationsMocks.remote.data = null;

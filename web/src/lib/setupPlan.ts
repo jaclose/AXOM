@@ -5,6 +5,7 @@
 // sensible targets the student edits later.
 import type { AcademicStageId, DailySuccessRequirement, DashboardLayoutPreferences, EducationTrackId, ExperienceFocusId, Profile } from "./types";
 import type { OnboardingMode } from "./onboardingProgress";
+import type { AccountPhase } from "./account/accountStore";
 import { markFirstRunDay } from "./firstRun";
 import { makeDailyRequirement } from "./dailySuccess";
 import { adaptLegacyDashboardLayout, applyDashboardLayoutPreset } from "./dashboardWidgets";
@@ -244,31 +245,50 @@ export function completeCurriculumMap(template: CurriculumTemplate): CurriculumM
   return added;
 }
 
-// --- Draft (survives a refresh mid-setup) ----------------------------------
+// --- Owner-bound draft (survives refresh, never crosses account identities) --
 
-const DRAFT_KEY = "axom.setup.v2";
+/**
+ * The legacy axom.setup.v2 key contains no owner and may have been written by
+ * another signed-in account on this origin. Leave its bytes intact for manual
+ * recovery, but never silently adopt, rewrite or delete them.
+ */
+const LEGACY_DRAFT_KEY = "axom.setup.v2";
+const SCOPED_DRAFT_PREFIX = `${LEGACY_DRAFT_KEY}.scoped.`;
+
+/** Unknown authenticated identity is not the device-only learner. */
+export function setupDraftScope(phase: AccountPhase, userId?: string | null): string | null {
+  if (phase === "signed-in") return userId?.trim() ? `account:${userId}` : null;
+  if (phase === "recovering-password") return null;
+  return "device";
+}
+
+function draftKey(scope: string | null): string | null {
+  return scope ? `${SCOPED_DRAFT_PREFIX}${encodeURIComponent(scope)}` : null;
+}
 
 type StoredDraft = Partial<SetupChoices> & { mode?: OnboardingMode };
 
-function storedDraft(): StoredDraft | null {
+function storedDraft(scope: string | null): StoredDraft | null {
+  const key = draftKey(scope);
+  if (!key) return null;
   try {
-    const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "null") as StoredDraft | null;
+    const raw = JSON.parse(localStorage.getItem(key) ?? "null") as StoredDraft | null;
     return raw && raw.version === 2 ? raw : null;
   } catch {
     return null;
   }
 }
 
-/** Which setup a refresh interrupted, so App can reopen a rerun (a first run reopens by itself). */
-export function readSetupDraftMode(): OnboardingMode | null {
-  const mode = storedDraft()?.mode;
+/** A rerun may resume only in its owning account's scope. */
+export function readSetupDraftMode(scope: string | null): OnboardingMode | null {
+  const mode = storedDraft(scope)?.mode;
   return mode === "first-run" || mode === "rerun" ? mode : null;
 }
 
-/** A draft resumes only in the setup it came from: a first-run draft never leaks into a later rerun. */
-export function readSetupDraft(fallback: SetupChoices, mode: OnboardingMode = "first-run"): SetupChoices {
+/** First-run and rerun drafts remain separate even for the same account. */
+export function readSetupDraft(fallback: SetupChoices, mode: OnboardingMode, scope: string | null): SetupChoices {
   try {
-    const raw = storedDraft();
+    const raw = storedDraft(scope);
     if (!raw || (raw.mode ?? "first-run") !== mode) return fallback;
     const path = PATH_OPTIONS.some((option) => option.id === raw.path) ? raw.path as SetupPath : fallback.path;
     const tools = Array.isArray(raw.tools) ? raw.tools.filter((tool): tool is SetupTool => TOOL_OPTIONS.some((option) => option.id === tool)) : fallback.tools;
@@ -289,19 +309,24 @@ export function readSetupDraft(fallback: SetupChoices, mode: OnboardingMode = "f
   }
 }
 
-/** A draft is saved only when the browser accepts and returns the exact bytes. */
-export function writeSetupDraft(choices: SetupChoices, mode: OnboardingMode = "first-run"): boolean {
+/** A scoped draft is saved only after exact write/readback. */
+export function writeSetupDraft(choices: SetupChoices, mode: OnboardingMode, scope: string | null): boolean {
+  const key = draftKey(scope);
+  if (!key) return false;
   try {
     const raw = JSON.stringify({ ...choices, mode });
-    localStorage.setItem(DRAFT_KEY, raw);
-    return localStorage.getItem(DRAFT_KEY) === raw;
+    localStorage.setItem(key, raw);
+    return localStorage.getItem(key) === raw;
   } catch {
     return false;
   }
 }
 
-export function clearSetupDraft(): void {
-  try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage blocked */ }
+/** Never clear the unbound legacy key or another account's draft. */
+export function clearSetupDraft(scope: string | null): void {
+  const key = draftKey(scope);
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch { /* storage blocked */ }
 }
 
 function clamp(value: number, min: number, max: number): number {
