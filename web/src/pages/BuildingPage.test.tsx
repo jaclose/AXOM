@@ -83,4 +83,28 @@ describe("Building preview", () => {
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(systems.id);
     expect(screen.getByRole("button", { name: /^Next / }).getAttribute("aria-pressed")).toBe("true");
   });
+
+  it("clears stale connected-system emphasis after leaving and returning to Systems", () => {
+    render(<BuildingPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
+    const first = screen.getByRole("heading", { name: "Accounts & Sync" }).closest<HTMLElement>(".system-card")!;
+    const unrelated = screen.getByRole("heading", { name: "Native AXOM" }).closest<HTMLElement>(".system-card")!;
+    fireEvent.mouseEnter(first);
+    expect(first.className).toContain("is-focus");
+    expect(unrelated.className).toContain("is-dim");
+
+    // Simulate keyboard tab activation while the pointer remains over the old card.
+    fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
+    const restored = screen.getByRole("heading", { name: "Accounts & Sync" }).closest<HTMLElement>(".system-card")!;
+    const restoredOther = screen.getByRole("heading", { name: "Native AXOM" }).closest<HTMLElement>(".system-card")!;
+    expect(restored.className).not.toContain("is-focus");
+    expect(restoredOther.className).not.toContain("is-dim");
+
+    fireEvent.mouseEnter(restored);
+    expect(restored.className).toContain("is-focus");
+    fireEvent.click(screen.getByRole("button", { name: /^Foundation/ }));
+    expect(screen.getByRole("button", { name: /^Foundation/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelectorAll(".system-card.is-focus, .system-card.is-related, .system-card.is-dim")).toHaveLength(0);
+  });
 });
