@@ -4,7 +4,7 @@ import type { TrackerItem } from "../types";
 import { assessCohortTarget } from "./bulkCourseInstall";
 import { buildQuestionAvailabilityIndex, questionAvailabilityModuleKey, type QuestionAvailabilityInput } from "./moduleQuestionAvailability";
 import { courseTemplateVersions, savedCourseTemplates } from "./templateLibrary";
-import { normalizedTemplateIdentity, planCourseTemplate, type CourseTemplateSection } from "./templateParse";
+import { isInvalidForeignNumberKey, normalizedTemplateIdentity, planCourseTemplate, type CourseTemplateSection } from "./templateParse";
 import { canonicalModuleKey } from "./vocabulary";
 
 export interface CurriculumModuleCoverage {
@@ -220,6 +220,10 @@ export function buildCurriculumCoverage(
           const place = `${saved.path.toLowerCase()}|${saved.label.toLowerCase()}`;
           placeCounts.set(place, (placeCounts.get(place) ?? 0) + 1);
           if (saved.templateKey) {
+            // Legacy imports could use another module's lecture number to
+            // manufacture a matching key. The canonical reconciler holds
+            // these rows for review; do not turn them into installed progress.
+            if (isInvalidForeignNumberKey(saved.label, saved.templateKey, identityModule)) continue;
             const identity = normalizedTemplateIdentity(saved.templateKey, identityModule);
             keyCounts.set(identity, (keyCounts.get(identity) ?? 0) + 1);
           } else {
