@@ -61,7 +61,7 @@ describe("authenticated read-only recovery export", () => {
     expect(screen.queryByText(rawA)).toBeNull();
     expect(screen.queryByText("private-A")).toBeNull();
     expect(createUrl).not.toHaveBeenCalled();
-    expect(screen.getByText(/not standard portable backups/i)).toBeTruthy();
+    expect(screen.getByText(/not a standard portable backup/i)).toBeTruthy();
   });
 
   it("refuses a mismatched server user before inspecting any storage", async () => {
@@ -92,7 +92,7 @@ describe("authenticated read-only recovery export", () => {
     expect(createUrl).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Download raw copy: Retained account vault" }));
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
-    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(inspect).toHaveBeenCalledTimes(3);
     expect(getUser).toHaveBeenCalledTimes(4);
     expect(createUrl).toHaveBeenCalledTimes(1);
   });
