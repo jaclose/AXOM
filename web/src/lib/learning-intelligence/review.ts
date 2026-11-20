@@ -133,11 +133,30 @@ export function reviewCandidates(
   // Require six positive, finite, currently verifiable saved correct choices.
   // Legacy status-only, key-held and contradictory outcomes retain their
   // recorded times, but cannot substantiate a diagnostic pace benchmark.
-  const trustedCorrectSeconds = history
+  const trustedTimed = history
     .filter((event) => hasVerifiableCorrectChoice(event) && typeof event.seconds === "number"
-      && Number.isFinite(event.seconds) && event.seconds > 0)
-    .map((event) => event.seconds!);
-  const usualSeconds = trustedCorrectSeconds.length >= 6 ? median(trustedCorrectSeconds) : undefined;
+      && Number.isFinite(event.seconds) && event.seconds > 0);
+  const trustedCorrectSeconds = trustedTimed.map((event) => event.seconds!).sort((a, b) => a - b);
+  const overallUsualSeconds = trustedCorrectSeconds.length >= 6 ? median(trustedCorrectSeconds) : undefined;
+  // Session history can contain the block being reviewed. A candidate cannot
+  // be its own sixth supporting observation; duplicate identities are held.
+  const identity = (event: AttemptEvent) => JSON.stringify([event.questionId, event.at, event.exposure, event.quizSessionId]);
+  const paceIdentityCounts = new Map<string, number>();
+  for (const event of trustedTimed) {
+    const key = identity(event);
+    paceIdentityCounts.set(key, (paceIdentityCounts.get(key) ?? 0) + 1);
+  }
+  const usualWithoutSelf = (event: AttemptEvent): number | undefined => {
+    const matches = paceIdentityCounts.get(identity(event)) ?? 0;
+    if (matches === 0) return overallUsualSeconds;
+    if (matches !== 1 || trustedCorrectSeconds.length < 7 || event.seconds === undefined) return undefined;
+    const index = trustedCorrectSeconds.indexOf(event.seconds);
+    if (index < 0) return undefined;
+    const remaining = trustedCorrectSeconds.length - 1;
+    const at = (position: number) => trustedCorrectSeconds[position + (position >= index ? 1 : 0)];
+    const mid = Math.floor(remaining / 2);
+    return remaining % 2 ? at(mid) : (at(mid - 1) + at(mid)) / 2;
+  };
   const earlierMisses = new Map<ID, number>();
   const firstAnswers = new Map<ID, boolean | undefined>();
   const blockKeys = new Set(block.map((event) => `${event.questionId}\u001f${event.at}`));
@@ -152,6 +171,7 @@ export function reviewCandidates(
 
   const candidates: ReviewCandidate[] = [];
   for (const event of block) {
+    const usualSeconds = usualWithoutSelf(event);
     const reasons: ReviewReason[] = [];
     if (event.correct === undefined) reasons.push("unscored");
     else if (event.correct === false) {
