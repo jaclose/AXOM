@@ -25,6 +25,7 @@ export function BuildingPage() {
   const counts = useMemo(() => Object.fromEntries(STATUS_ORDER.map((status) => [status, SYSTEM_PREVIEWS.filter((item) => item.status === status).length])) as Record<BuildStatus, number>, []);
   const visible = filter === "all" ? SYSTEM_PREVIEWS : SYSTEM_PREVIEWS.filter((item) =>
     filter === "next" ? item.status === "in-development" || item.status === "planned" : item.status === filter);
+  const filterDescription = filter === "all" ? "all statuses" : filter === "next" ? "Next roadmap" : STATUS[filter].toLowerCase();
   const groups = useMemo(() => Object.entries(visible.reduce<Record<string, SystemPreview[]>>((all, item) => {
     (all[item.area] ??= []).push(item);
     return all;
@@ -142,7 +143,10 @@ export function BuildingPage() {
                 </button>
               ))}
             </div>
-            <p className="building-hint">Hover or focus a system to light up what it connects to.</p>
+            <p className="building-hint">
+              <span role="status" aria-live="polite" aria-atomic="true">Showing {visible.length} {visible.length === 1 ? "system" : "systems"} ({filterDescription}).</span>{" "}
+              Hover or focus a system to light up what it connects to.
+            </p>
             {groups.map(([area, items], groupIndex) => (
               <div key={area} className="system-area">
                 <h2>{area}</h2>

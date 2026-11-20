@@ -187,3 +187,38 @@ test("Building is reachable by keyboard through its real desktop sidebar and mob
 
   expect(errors).toEqual([]);
 });
+
+
+test("Building filter results are announced after keyboard activation without focus loss", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openBuilding(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 900 : 844 });
+    await page.getByRole("tab", { name: "Systems" }).click();
+
+    const status = page.getByRole("status");
+    await expect(status).toHaveAttribute("aria-live", "polite");
+    await expect(status).toHaveAttribute("aria-atomic", "true");
+    await expect(status).toHaveText("Showing 11 systems (all statuses).");
+
+    for (const [label, count, description] of [
+      ["Next", 5, "Next roadmap"],
+      ["Foundation", 1, "foundation"],
+      ["Research", 5, "research"],
+      ["All", 11, "all statuses"],
+    ] as const) {
+      const filterButton = page.getByRole("button", { name: new RegExp(`^${label} \\d+`) });
+      await filterButton.focus();
+      await filterButton.press("Enter");
+      await expect(filterButton).toBeFocused();
+      await expect(filterButton).toHaveAttribute("aria-pressed", "true");
+      await expect(status).toHaveText(`Showing ${count} ${count === 1 ? "system" : "systems"} (${description}).`);
+      await expect(page.locator(".system-card")).toHaveCount(count);
+    }
+
+    const fitsViewport = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+    expect(fitsViewport, `Building status live region overflow at ${width}px`).toBe(true);
+  }
+});

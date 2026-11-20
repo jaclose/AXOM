@@ -146,4 +146,40 @@ describe("Building preview", () => {
     expect(card.className).not.toContain("is-focus");
     expect(unrelated.className).not.toContain("is-dim");
   });
+
+  it("announces the filtered system count and preserves filter-button focus", () => {
+    render(<BuildingPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.getAttribute("aria-atomic")).toBe("true");
+    expect(status.textContent).toBe(`Showing ${SYSTEM_PREVIEWS.length} systems (all statuses).`);
+
+    const next = screen.getByRole("button", { name: /^Next / });
+    next.focus();
+    fireEvent.click(next);
+    const nextCount = SYSTEM_PREVIEWS.filter((item) => item.status === "planned" || item.status === "in-development").length;
+    expect(document.activeElement).toBe(next);
+    expect(status.textContent).toBe(`Showing ${nextCount} systems (Next roadmap).`);
+    expect(document.querySelectorAll(".system-card")).toHaveLength(nextCount);
+
+    const foundation = screen.getByRole("button", { name: /^Foundation / });
+    foundation.focus();
+    fireEvent.click(foundation);
+    expect(document.activeElement).toBe(foundation);
+    expect(status.textContent).toBe("Showing 1 system (foundation).");
+    expect(document.querySelectorAll(".system-card")).toHaveLength(1);
+
+    const research = screen.getByRole("button", { name: /^Research / });
+    research.focus();
+    fireEvent.click(research);
+    const researchCount = SYSTEM_PREVIEWS.filter((item) => item.status === "research").length;
+    expect(document.activeElement).toBe(research);
+    expect(status.textContent).toBe(`Showing ${researchCount} systems (research).`);
+    expect(document.querySelectorAll(".system-card")).toHaveLength(researchCount);
+
+    fireEvent.click(screen.getByRole("button", { name: /^All / }));
+    expect(status.textContent).toBe(`Showing ${SYSTEM_PREVIEWS.length} systems (all statuses).`);
+  });
+
 });
