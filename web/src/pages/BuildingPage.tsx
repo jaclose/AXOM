@@ -160,13 +160,15 @@ export function BuildingPage() {
                         className={`system-card ${state}`}
                         style={{ "--stagger": groupIndex * 2 + index } as CSSProperties}
                         tabIndex={0}
+                        role="group"
+                        aria-labelledby={`building-system-${item.id}`}
                         onMouseEnter={() => setPointerOver(item.id)}
                         onMouseLeave={() => setPointerOver(null)}
                         onFocus={() => setFocused(item.id)}
                         onBlur={() => setFocused(null)}
                       >
                         <div className={`build-status build-status--${item.status}`}>{STATUS[item.status]}</div>
-                        <h3>{item.name}</h3>
+                        <h3 id={`building-system-${item.id}`}>{item.name}</h3>
                         <p>{item.promise}</p>
                         <div className="connection-list" aria-label={`${item.name} connections`}>
                           {item.connectsTo.map((connection) => <span key={connection} className={related.has(connection) && hoveredItem?.id === item.id ? "on" : ""}>{connection}</span>)}
