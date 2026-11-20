@@ -130,7 +130,7 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
         <footer className="setup-nav">
           {choices.step > 0
             ? <button type="button" className="setup-back" onClick={() => go(choices.step - 1)}><ArrowLeft size={ICON_SIZE.body} aria-hidden="true" /> Back</button>
-            : <span className="setup-reassure" role="status" aria-live="polite"><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> {draftSaveState === "saved" ? "Setup draft saved on this device" : draftSaveState === "checking" ? "Checking draft storage" : "Draft not saved"}</span>}
+            : draftSaveState !== "failed" && <span className="setup-reassure" role="status" aria-live="polite"><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> {draftSaveState === "saved" ? "Setup draft saved on this device" : "Checking draft storage"}</span>}
           <button type="submit" className="setup-next">
             <span>{last ? (effectiveMode === "rerun" ? "Save changes" : "Enter AXOM") : "Continue"}</span>
             <span className="setup-next-icon" aria-hidden="true"><ArrowRight size={ICON_SIZE.body} /></span>
