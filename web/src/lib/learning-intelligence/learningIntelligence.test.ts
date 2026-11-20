@@ -534,6 +534,45 @@ describe("what to look at again after a block", () => {
     expect(JSON.stringify([...contradicted, later])).toBe(originals);
   });
 
+  it.each([
+    ["nonfinite Infinity", Number.POSITIVE_INFINITY],
+    ["nonfinite NaN", Number.NaN],
+    ["numeric string", "100"],
+    ["zero", 0],
+    ["negative", -30],
+  ])("does not recommend slow-right from %s as a recorded target duration", (_description, seconds) => {
+    const trusted = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    // Simulate malformed imported legacy data at the runtime boundary. Do not
+    // normalize an invalid duration into trusted evidence or mutate attempts.
+    const target = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: seconds as number, quizSessionId: "later",
+    })] });
+    const source = [...trusted, target];
+    const originalAttempts = source.map((record) => [...record.attempts]);
+    const current = attemptEvents(source);
+    expect(current.filter((event) => event.correct === true)).toHaveLength(7);
+    expect(reviewCandidatesForSession("later", source)).toEqual([]);
+    expect(source.map((record) => record.attempts)).toEqual(originalAttempts);
+  });
+
+  it("keeps slow-right advice for valid finite slow timings, but not normal pace", () => {
+    const trusted = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 100, quizSessionId: "slow",
+    })] });
+    const normal = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 12, quizSessionId: "normal",
+    })] });
+    expect(reviewCandidatesForSession("slow", [...trusted, slow])).toEqual([
+      expect.objectContaining({ questionId: slow.id, reasons: ["slow-right"] }),
+    ]);
+    expect(reviewCandidatesForSession("normal", [...trusted, normal])).toEqual([]);
+  });
+
   it("keeps six actually reviewed, matching correct timings sufficient for a slow-right observation", () => {
     const trusted = Array.from({ length: 6 }, () => question({
       attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
