@@ -1111,6 +1111,10 @@ describe("IndexedDB-first local vault", () => {
       format: "axom-local-vault-chunks", version: 1, fingerprint: fingerprint(oldValue),
       length: oldValue.length, chunkPrefix: legacyPrefix, chunkCount: chunks.length,
     });
+    // Initialize the actual v5 object stores before installing a historical
+    // manifest. The direct test helper intentionally does not create stores.
+    await localVaultStorage.setItem(key, JSON.stringify({ state: { profile: { userId: owner }, seed: true }, version: 34 }));
+    await flushLocalVaultWrites();
     const db = await openCurrentVault();
     for (let index = 0; index < chunks.length; index += 1) {
       await putDirect(db, legacyPrefix + ":" + index, chunks[index]);
@@ -1139,6 +1143,8 @@ describe("IndexedDB-first local vault", () => {
   it("rejects an unreadably long owner chunk manifest without committing partial IndexedDB data", async () => {
     const key = STORAGE_KEYS.persistedState;
     const userId = "u".repeat(1100);
+    // Establish the vault store before the tested pretransactional refusal.
+    expect(await localVaultStorage.getItem(key)).toBeNull();
     const value = JSON.stringify({
       state: { profile: { userId }, rawText: "oversized ".repeat(140_000) }, version: 34,
     });
