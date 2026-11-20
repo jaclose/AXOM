@@ -34,6 +34,7 @@ describe("SetupFlow", () => {
     });
     render(<SetupFlow mode="first-run" />);
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/draft not saved/i));
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText("Setup draft saved on this device")).toBeNull();
     next();
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/keep this tab open/i));
