@@ -120,6 +120,13 @@ function hasVerifiableCorrectChoice(event: AttemptEvent): boolean {
     && event.correctKey !== undefined && event.answerKey === event.correctKey;
 }
 
+/** Imported or legacy attempt durations are untrusted at runtime. Invalid
+ * duration values must not establish either a pace baseline or slow-right
+ * advice; this does not change stored answers or ordinary score tallies. */
+function hasValidDurationSeconds(seconds: unknown): seconds is number {
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0;
+}
+
 /**
  * The questions of one block worth a second look. `history` is every earlier
  * event for the same questions, so a miss can be told from a repeat miss and
@@ -134,8 +141,7 @@ export function reviewCandidates(
   // Legacy status-only, key-held and contradictory outcomes retain their
   // recorded times, but cannot substantiate a diagnostic pace benchmark.
   const trustedTimed = history
-    .filter((event) => hasVerifiableCorrectChoice(event) && typeof event.seconds === "number"
-      && Number.isFinite(event.seconds) && event.seconds > 0);
+    .filter((event) => hasVerifiableCorrectChoice(event) && hasValidDurationSeconds(event.seconds));
   const trustedCorrectSeconds = trustedTimed.map((event) => event.seconds!).sort((a, b) => a - b);
   const overallUsualSeconds = trustedCorrectSeconds.length >= 6 ? median(trustedCorrectSeconds) : undefined;
   // Session history can contain the block being reviewed. A candidate cannot
@@ -180,7 +186,8 @@ export function reviewCandidates(
       if (!reasons.length) reasons.push("wrong");
     } else {
       if (event.certainty === "guess" || event.certainty === "unsure") reasons.push("unsure-right");
-      if (hasVerifiableCorrectChoice(event) && usualSeconds && event.seconds && event.seconds >= usualSeconds * SLOW_FACTOR) reasons.push("slow-right");
+      if (hasVerifiableCorrectChoice(event) && hasValidDurationSeconds(event.seconds)
+        && usualSeconds !== undefined && event.seconds >= usualSeconds * SLOW_FACTOR) reasons.push("slow-right");
     }
     if (reasons.length) {
       const signals: ReviewSignals = {
