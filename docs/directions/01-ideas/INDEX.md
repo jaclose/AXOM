@@ -69,7 +69,7 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 | I4-07 | "Overwhelmed?" timing: after logging data, or ~1 min of active scrolling/clicking through 3-4 sidebar tabs or widget links | PLANNED | feat/wave2-home |
 | I4-08 | Second arrow at Edit dashboard; a how-to for moving sidebar items (like the Daily Word demo), then the dashboard edit how-to | PLANNED | feat/wave2-home |
 | I1-19 | First-visit hints per page (not hand-holding) | VERIFIED | 69ae330 |
-| I3-19 | "Save your progress" banner after the first saved data, no account | PLANNED | feat/wave2-home |
+| I3-19 | "Save your progress" banner after the first saved data, no account | PARTIAL | `feat/wave2-home` (historical); 2026-11-20 main [`9f6b381`](https://github.com/jaclose/AXOM/commit/9f6b381f9a0a15dbc947a4f65a71f8ad1db002fa): [banner](../../../web/src/components/shell/SaveProgressBanner.tsx), [rules](../../../web/src/lib/saveProgress.ts) and App mount implemented; first *durably saved* trigger is **unverified** because eligibility derives from in-memory data, not a confirmed vault write. [Platform #108](https://github.com/jaclose/AXOM/issues/108) owns persistence; browser/hosted acceptance open, [FORGE #140](https://github.com/jaclose/AXOM/issues/140) HELD. |
 
 ## 2. Dashboard, widgets, check-in, energy, notifications
 
@@ -228,7 +228,7 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 | I4-19 | Sign-in and loading account details faster | SHIPPED | Wave 1.2 (f20f81e): saved session shows at once |
 | I4-18 | Email and password only (no code); welcome email with a beautiful, reactive graphic | PLANNED | coordinate with Codex's email templates (I2-15) |
 | I4-20 | Fully local account in the desktop app | PLANNED | feat/wave2-home |
-| I3-20 | Signing in loads the most recent backup (conflict-safe) | PLANNED | feat/wave2-home |
+| I3-20 | Signing in loads the most recent backup (conflict-safe) | PARTIAL | `feat/wave2-home` (historical); 2026-11-20 main [`9f6b381`](https://github.com/jaclose/AXOM/commit/9f6b381f9a0a15dbc947a4f65a71f8ad1db002fa): [accountStore](../../../web/src/lib/account/accountStore.ts) offers latest-revision restore for a clean device and an explicit choice when local learner work exists, with [focused source tests](../../../web/src/lib/account/accountStore.test.ts). Authenticated cloud/multi-device/media restoration and hosted acceptance **unverified**; [Platform #108](https://github.com/jaclose/AXOM/issues/108) owns; [FORGE #140](https://github.com/jaclose/AXOM/issues/140) HELD. |
 | I3-31 | "Action needed" says what; "Merge both" clickable | PLANNED | wave/1.2 |
 | I3-32 | Keep 10 saves (adjustable) | PLANNED | feat/wave2-home |
 | I1-14 | "Is my account and data safe?" | ANSWERED | PLAN D6 |
