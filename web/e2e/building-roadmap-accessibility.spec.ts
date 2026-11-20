@@ -70,3 +70,59 @@ test("Building tabs and Next horizon retain keyboard focus and semantics on desk
   }
   expect(errors).toEqual([]);
 });
+
+test("Building system emphasis honors real pointer and keyboard focus precedence across viewports", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openBuilding(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 900 : 844 });
+    await page.getByRole("tab", { name: "Systems" }).click();
+    const all = page.getByRole("button", { name: /^All \d+/ });
+    await all.click();
+
+    const accountCard = page.locator(".system-card").filter({
+      has: page.getByRole("heading", { name: "Accounts & Sync", exact: true }),
+    });
+    const unrelatedCard = page.locator(".system-card").filter({
+      has: page.getByRole("heading", { name: "Knowledge Graph", exact: true }),
+    });
+    const highlighted = page.locator(".system-card.is-focus, .system-card.is-related, .system-card.is-dim");
+
+    // Losing pointer hover must not clear keyboard focus.
+    await accountCard.focus();
+    await accountCard.hover();
+    await expect(accountCard).toHaveClass(/\bis-focus\b/);
+    await page.mouse.move(0, 0);
+    await expect(accountCard).toHaveClass(/\bis-focus\b/);
+    await expect(unrelatedCard).toHaveClass(/\bis-dim\b/);
+    await all.focus();
+    await expect(highlighted).toHaveCount(0);
+
+    // Losing keyboard focus must not clear the pointer's hover highlight.
+    await accountCard.hover();
+    await accountCard.focus();
+    await all.focus();
+    await expect(accountCard).toHaveClass(/\bis-focus\b/);
+    await page.mouse.move(0, 0);
+    await expect(highlighted).toHaveCount(0);
+
+    // Keyboard focus takes precedence when the pointer hovers another system.
+    await accountCard.focus();
+    await unrelatedCard.hover();
+    await expect(accountCard).toHaveClass(/\bis-focus\b/);
+    await expect(unrelatedCard).toHaveClass(/\bis-dim\b/);
+    await all.focus();
+    await expect(unrelatedCard).toHaveClass(/\bis-focus\b/);
+    await page.mouse.move(0, 0);
+    await expect(highlighted).toHaveCount(0);
+
+    // Filtering must clear interaction state and not dim unrelated new cards.
+    await accountCard.hover();
+    await page.getByRole("button", { name: /^Foundation \d+/ }).click();
+    await expect(highlighted).toHaveCount(0);
+    await all.click();
+    await expect(highlighted).toHaveCount(0);
+  }
+});
