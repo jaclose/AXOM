@@ -1839,6 +1839,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           )}
           <SourceTeaching
             key={question.id}
+            viewScope={runId}
             compact
             question={question}
             document={sourceDocument}
