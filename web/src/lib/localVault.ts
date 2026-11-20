@@ -399,8 +399,18 @@ export type LocalVaultRecoveryCopy = Readonly<{
   value: string;
 }>;
 
+/** Not an authenticated or integrity-verified backup. Never auto-restore it.
+ * The caller must verify the active session's stable user ID before showing
+ * these exact bytes for explicit user-reviewed manual recovery/export. */
+export type LocalVaultUnverifiedScopedFallback = Readonly<{
+  source: "local-fallback-scoped-unverified";
+  fingerprint: string;
+  value: string;
+}>;
+
 export type LocalVaultRecoveryInspection = Readonly<{
   copies: readonly LocalVaultRecoveryCopy[];
+  unverifiedScopedFallback: LocalVaultUnverifiedScopedFallback | null;
   indexedDbReadable: boolean;
   fallbackReadable: boolean;
   unverifiedOrOtherOwnerCopyPresent: boolean;
@@ -467,6 +477,7 @@ export async function inspectLocalVaultRecoveryCopies(
     if (indexedDbReadable) unverifiedOrOtherOwnerCopyPresent = true;
   }
 
+  let unverifiedScopedFallback: LocalVaultUnverifiedScopedFallback | null = null;
   const fallbackStore = localFallback();
   if (fallbackStore) {
     try {
@@ -484,12 +495,41 @@ export async function inspectLocalVaultRecoveryCopies(
         }
       }
     } catch {
-      // Denied browser storage is not equivalent to a missing fallback.
+      // Denied generic browser storage is not equivalent to a missing copy.
+    }
+
+    // An account A -> B transition can leave A's account-specific localStorage
+    // copy behind even though B replaced the generic fallback and its marker.
+    // The generic marker NEVER verifies a different scoped copy. Surface A's
+    // owner-matching bytes in a separate unverified lane for manual export,
+    // without admitting them to the trusted candidates above.
+    try {
+      const scopedKey = scopedStateKey(name, expectedProfileUserId);
+      const first = fallbackStore.getItem(scopedKey);
+      const second = fallbackStore.getItem(scopedKey);
+      if (first !== second) {
+        // This is only a read-read stability check, not a cross-tab lock.
+        unverifiedOrOtherOwnerCopyPresent = true;
+      } else if (first !== null && !copies.some(copy => copy.value === first)) {
+        unverifiedOrOtherOwnerCopyPresent = true;
+        if (stablePersistedUserId(first) === expectedProfileUserId) {
+          unverifiedScopedFallback = {
+            source: "local-fallback-scoped-unverified",
+            fingerprint: snapshotFingerprint(first),
+            value: first,
+          };
+        }
+        // Foreign-owner or invalid JSON bytes are intentionally withheld.
+      }
+    } catch {
+      // Scoped storage may be denied even when the generic fallback is readable.
+      unverifiedOrOtherOwnerCopyPresent = true;
     }
   }
 
   return {
     copies,
+    unverifiedScopedFallback,
     indexedDbReadable,
     fallbackReadable,
     unverifiedOrOtherOwnerCopyPresent,
