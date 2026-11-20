@@ -213,19 +213,25 @@ export function buildCurriculumCoverage(
             ? availability?.byModule.get(questionAvailabilityModuleKey(term.name, module))
             : undefined);
         const identityModule = eligiblePlan?.module ?? module;
+        // The canonical installer counts every row claiming a template key
+        // when deciding collisions. A legacy row with an invalid foreign
+        // number still disputes that identity; it is not an eligible match.
         const keyCounts = new Map<string, number>();
+        const eligibleKeyCounts = new Map<string, number>();
         const placeCounts = new Map<string, number>();
         const unkeyedPlaces = new Set<string>();
         for (const saved of existing) {
           const place = `${saved.path.toLowerCase()}|${saved.label.toLowerCase()}`;
           placeCounts.set(place, (placeCounts.get(place) ?? 0) + 1);
           if (saved.templateKey) {
-            // Legacy imports could use another module's lecture number to
-            // manufacture a matching key. The canonical reconciler holds
-            // these rows for review; do not turn them into installed progress.
-            if (isInvalidForeignNumberKey(saved.label, saved.templateKey, identityModule)) continue;
             const identity = normalizedTemplateIdentity(saved.templateKey, identityModule);
             keyCounts.set(identity, (keyCounts.get(identity) ?? 0) + 1);
+            // Reject foreign-prefix legacy number matches as evidence, but
+            // retain them in the total candidate count above so a valid row
+            // beside a conflicting legacy row cannot bypass manual review.
+            if (!isInvalidForeignNumberKey(saved.label, saved.templateKey, identityModule)) {
+              eligibleKeyCounts.set(identity, (eligibleKeyCounts.get(identity) ?? 0) + 1);
+            }
           } else {
             unkeyedPlaces.add(place);
           }
@@ -246,8 +252,10 @@ export function buildCurriculumCoverage(
           // Like the canonical installer, duplicate identities OR duplicate
           // exact places require review; never treat either as proven progress.
           if ((placeCounts.get(place) ?? 0) > 1) return false;
-          const keyedMatches = keyCounts.get(identity) ?? 0;
-          return keyedMatches === 1 || (keyedMatches === 0 && unkeyedPlaces.has(place));
+          const keyedCandidates = keyCounts.get(identity) ?? 0;
+          const eligibleMatches = eligibleKeyCounts.get(identity) ?? 0;
+          return (keyedCandidates === 1 && eligibleMatches === 1)
+            || (keyedCandidates === 0 && unkeyedPlaces.has(place));
         }).length;
         const counts = new Map<string, number>();
         for (const row of existing) {
