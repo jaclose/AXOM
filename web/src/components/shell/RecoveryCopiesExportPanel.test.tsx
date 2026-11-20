@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAccount, type AccountUser } from "../../lib/account/accountStore";
@@ -150,6 +150,97 @@ describe("authenticated read-only recovery export", () => {
     expect(screen.getByText(/separate unverified local copy/i)).toBeTruthy();
     expect(createUrl).not.toHaveBeenCalled();
     expect(click).not.toHaveBeenCalled();
+  });
+
+  it("frees account B inspection while account A's remote verification remains pending", async () => {
+    let finishA: ((answer: { data: { user: { id: string } }; error: null }) => void) | undefined;
+    getUser
+      .mockImplementationOnce(() => new Promise((resolve) => { finishA = resolve; }))
+      .mockResolvedValue({ data: { user: { id: "account-B" } }, error: null });
+    inspect.mockImplementation(async (id: string) => inspection(id === "account-B" ? rawB : rawA));
+
+    render(<RecoveryCopiesExportPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await waitFor(() => expect(getUser).toHaveBeenCalledTimes(1));
+    useAccount.setState({ phase: "signed-in", user: userB });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect saved versions" }).hasAttribute("disabled")).toBe(false));
+
+    // B must not depend on the previous account's network completing.
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await screen.findByText("Retained account vault");
+    expect(inspect).toHaveBeenCalledTimes(1);
+    expect(inspect).toHaveBeenCalledWith("account-B");
+    expect(screen.getByText("Retained account vault")).toBeTruthy();
+    expect(finishA).toBeDefined();
+    await act(async () => {
+      finishA!({ data: { user: { id: "account-A" } }, error: null });
+    });
+    expect(inspect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("Retained account vault")).toBeTruthy();
+    expect(createUrl).not.toHaveBeenCalled();
+  });
+
+  it("does not let A's late verification failure unlock or replace B's pending inspection", async () => {
+    let finishA: ((answer: { data: { user: { id: string } }; error: null }) => void) | undefined;
+    let finishB: ((answer: { data: { user: { id: string } }; error: null }) => void) | undefined;
+    let calls = 0;
+    getUser.mockImplementation(() => {
+      calls++;
+      if (calls === 2) return new Promise((resolve) => { finishA = resolve; });
+      if (calls === 3) return new Promise((resolve) => { finishB = resolve; });
+      return Promise.resolve({ data: { user: { id: calls === 1 ? "account-A" : "account-B" } }, error: null });
+    });
+    inspect.mockImplementation(async (id: string) => inspection(id === "account-B" ? rawB : rawA));
+
+    render(<RecoveryCopiesExportPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await waitFor(() => expect(getUser).toHaveBeenCalledTimes(2));
+    useAccount.setState({ phase: "signed-in", user: userB });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect saved versions" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await waitFor(() => expect(getUser).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("button", { name: "Checking…" }).hasAttribute("disabled")).toBe(true);
+
+    await act(async () => {
+      finishA!({ data: { user: { id: "account-A" } }, error: null });
+    });
+    // A's rejected post-await account check must not clear B's active request.
+    expect(screen.getByRole("button", { name: "Checking…" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => {
+      finishB!({ data: { user: { id: "account-B" } }, error: null });
+    });
+    await screen.findByText("Retained account vault");
+    expect(screen.getByRole("button", { name: "Inspect saved versions" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(createUrl).not.toHaveBeenCalled();
+  });
+
+  it("abandons account A's pending export after switching accounts without starting a download", async () => {
+    let finishLastAuth: ((answer: { data: { user: { id: string } }; error: null }) => void) | undefined;
+    let authCalls = 0;
+    getUser.mockImplementation(() => {
+      authCalls++;
+      if (authCalls === 4) return new Promise((resolve) => { finishLastAuth = resolve; });
+      return Promise.resolve({ data: { user: { id: "account-A" } }, error: null });
+    });
+    render(<RecoveryCopiesExportPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await screen.findByText("Retained account vault");
+    fireEvent.click(screen.getByRole("button", { name: "Review export: Retained account vault" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download raw copy: Retained account vault" }));
+    await waitFor(() => expect(getUser).toHaveBeenCalledTimes(4));
+
+    useAccount.setState({ phase: "signed-in", user: userB });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Inspect saved versions" }).hasAttribute("disabled")).toBe(false));
+    await act(async () => {
+      finishLastAuth!({ data: { user: { id: "account-A" } }, error: null });
+    });
+    expect(createUrl).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Retained account vault")).toBeNull();
   });
 
   it("renders no recovery actions when signed out", () => {
