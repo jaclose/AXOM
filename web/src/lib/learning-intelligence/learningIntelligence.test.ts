@@ -463,6 +463,52 @@ describe("what to look at again after a block", () => {
     expect(byQuestion.has(block[5].id)).toBe(false);
   });
 
+  it("does not learn a fast correct-answer pace from six legacy status-only records", () => {
+    const legacy = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: undefined, timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 100, quizSessionId: "later",
+    })] });
+    const all = [...legacy, later];
+    const original = JSON.stringify(all);
+    // Preserve the legacy analytics contract and its raw histories; only the
+    // evidence standard for a diagnostic timing recommendation becomes stricter.
+    expect(attemptEvents(legacy).every((event) => event.correct === true && event.answerKey === undefined)).toBe(true);
+    expect(tally(attemptEvents(legacy))).toEqual({ attempts: 6, correct: 6, accuracy: 100 });
+    expect(reviewCandidatesForSession("later", all)).toEqual([]);
+    expect(JSON.stringify(all)).toBe(original);
+  });
+
+  it("does not satisfy six verified pace samples by adding one legacy status-only flag", () => {
+    const matched = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const unverified = question({ attempts: [attempt(1, "correct", {
+      answerKey: undefined, timeSpentSeconds: 10, quizSessionId: "earlier",
+    })] });
+    const later = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 100, quizSessionId: "later",
+    })] });
+    const all = [...matched, unverified, later];
+    const original = JSON.stringify(all);
+    expect(reviewCandidatesForSession("later", all)).toEqual([]);
+    expect(JSON.stringify(all)).toBe(original);
+  });
+
+  it("does not label a legacy status-only target slow even with six valid pace samples", () => {
+    const matched = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", {
+      answerKey: undefined, timeSpentSeconds: 100, quizSessionId: "later",
+    })] });
+    const all = [...matched, later];
+    const original = JSON.stringify(all);
+    expect(reviewCandidatesForSession("later", all)).toEqual([]);
+    expect(JSON.stringify(all)).toBe(original);
+  });
+
   it("does not establish a paced-correct baseline from six historically correct flags on withdrawn keys", () => {
     const held = Array.from({ length: 6 }, () => question({
       needsReview: true,
