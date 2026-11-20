@@ -111,9 +111,17 @@ describe("IndexedDB-first local vault", () => {
         state: { profile: { userId: "jd" }, questions: [{ id: "unverified-old-browser-copy" }] },
         version: 34,
       });
+      // Create the v5 stores through the real adapter. Opening a fresh fake
+      // IndexedDB at version 5 directly would create no "state" object store,
+      // and leave an open connection poisoning subsequent tests.
+      await localVaultStorage.setItem(key, JSON.stringify({
+        state: { profile: { userId: "jd" }, seed: true }, version: 34,
+      }));
+      await flushLocalVaultWrites();
       const db = await openCurrentVault();
       if (location === "primary") await putDirect(db, key, malformed);
       else {
+        await deleteDirect(db, key);
         await putDirect(db, `${key}:active-user`, "jd");
         await putDirect(db, scopedKey, malformed);
       }
@@ -138,6 +146,61 @@ describe("IndexedDB-first local vault", () => {
       retained.close();
       expect(localStorage.getItem(key)).toBe(staleMirror);
       expect(localStorage.getItem(scopedKey)).toBe(staleMirror);
+    },
+  );
+
+  it.each([
+    ["primary", "missing chunk"],
+    ["scoped", "missing chunk"],
+    ["primary", "incorrect checksum"],
+    ["scoped", "incorrect checksum"],
+  ] as const)(
+    "quarantines %s IndexedDB chunk manifest with %s instead of hydrating an unmarked mirror",
+    async (location, fault) => {
+      const key = STORAGE_KEYS.persistedState;
+      const scopedKey = `${key}:user:jd`;
+      const prefix = `${key}:chunks:synthetic-corrupt`;
+      const manifest = JSON.stringify({
+        format: "axom-local-vault-chunks",
+        version: 1,
+        fingerprint: "1:deadbeef",
+        length: 1,
+        chunkPrefix: prefix,
+        chunkCount: 1,
+      });
+      const mirror = JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: "unverified-old-browser-copy" }] },
+        version: 34,
+      });
+      await localVaultStorage.setItem(key, JSON.stringify({
+        state: { profile: { userId: "jd" }, seed: true }, version: 34,
+      }));
+      await flushLocalVaultWrites();
+      const db = await openCurrentVault();
+      if (location === "scoped") await deleteDirect(db, key);
+      await putDirect(db, location === "primary" ? key : scopedKey, manifest);
+      if (fault === "incorrect checksum") await putDirect(db, `${prefix}:0`, "X");
+      db.close();
+      localStorage.setItem(key, mirror);
+      localStorage.setItem(`${key}:active-user`, "jd");
+      localStorage.setItem(scopedKey, mirror);
+      resetLocalVaultRuntimeForTests();
+
+      expect(await localVaultStorage.getItem(key)).toBeNull();
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: "forbidden-after-corruption" }] },
+        version: 34,
+      }));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      const verified = await openCurrentVault();
+      expect(await getDirect(verified, location === "primary" ? key : scopedKey)).toBe(manifest);
+      expect(await getDirect(verified, `${prefix}:0`))
+        .toBe(fault === "incorrect checksum" ? "X" : undefined);
+      verified.close();
+      expect(localStorage.getItem(key)).toBe(mirror);
+      expect(localStorage.getItem(scopedKey)).toBe(mirror);
     },
   );
 
@@ -2057,6 +2120,15 @@ function putDirect(db: IDBDatabase, key: string, value: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction("state", "readwrite");
     tx.objectStore("state").put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function deleteDirect(db: IDBDatabase, key: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("state", "readwrite");
+    tx.objectStore("state").delete(key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
