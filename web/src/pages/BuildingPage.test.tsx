@@ -107,4 +107,31 @@ describe("Building preview", () => {
     expect(screen.getByRole("button", { name: /^Foundation/ }).getAttribute("aria-pressed")).toBe("true");
     expect(document.querySelectorAll(".system-card.is-focus, .system-card.is-related, .system-card.is-dim")).toHaveLength(0);
   });
+
+  it("keeps system relationships highlighted while either pointer hover or keyboard focus remains", () => {
+    render(<BuildingPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
+    const card = screen.getByRole("heading", { name: "Accounts & Sync" }).closest<HTMLElement>(".system-card")!;
+    const unrelated = screen.getByRole("heading", { name: "Knowledge Graph" }).closest<HTMLElement>(".system-card")!;
+
+    // Mouse leaves a focused card: keyboard focus must still control emphasis.
+    fireEvent.focus(card);
+    fireEvent.mouseEnter(card);
+    fireEvent.mouseLeave(card);
+    expect(card.className).toContain("is-focus");
+    expect(unrelated.className).toContain("is-dim");
+    fireEvent.blur(card);
+    expect(card.className).not.toContain("is-focus");
+    expect(unrelated.className).not.toContain("is-dim");
+
+    // Focus leaves a hovered card: pointer hover must still control emphasis.
+    fireEvent.mouseEnter(card);
+    fireEvent.focus(card);
+    fireEvent.blur(card);
+    expect(card.className).toContain("is-focus");
+    expect(unrelated.className).toContain("is-dim");
+    fireEvent.mouseLeave(card);
+    expect(card.className).not.toContain("is-focus");
+    expect(unrelated.className).not.toContain("is-dim");
+  });
 });
