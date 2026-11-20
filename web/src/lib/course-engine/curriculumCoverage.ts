@@ -213,15 +213,29 @@ export function buildCurriculumCoverage(
             ? availability?.byModule.get(questionAvailabilityModuleKey(term.name, module))
             : undefined);
         const identityModule = eligiblePlan?.module ?? module;
-        const keys = new Set(existing.flatMap((row) => row.templateKey ? [normalizedTemplateIdentity(row.templateKey, identityModule)] : []));
-        // A path/title match may adopt an unkeyed learner row, but cannot
-        // override a conflicting canonical template identity. The installer
-        // holds that collision for review rather than reusing its progress.
-        const places = new Set(existing.filter((row) => !row.templateKey)
-          .map((row) => `${row.path.toLowerCase()}|${row.label.toLowerCase()}`));
+        const keyCounts = new Map<string, number>();
+        const placeCounts = new Map<string, number>();
+        const unkeyedPlaces = new Set<string>();
+        for (const saved of existing) {
+          const place = `${saved.path.toLowerCase()}|${saved.label.toLowerCase()}`;
+          placeCounts.set(place, (placeCounts.get(place) ?? 0) + 1);
+          if (saved.templateKey) {
+            const identity = normalizedTemplateIdentity(saved.templateKey, identityModule);
+            keyCounts.set(identity, (keyCounts.get(identity) ?? 0) + 1);
+          } else {
+            unkeyedPlaces.add(place);
+          }
+        }
         const available = eligiblePlan?.items ?? [];
-        const installedTemplateItems = available.filter((row) =>
-          keys.has(normalizedTemplateIdentity(row.templateKey, identityModule)) || places.has(`${row.path.toLowerCase()}|${row.label.toLowerCase()}`)).length;
+        const installedTemplateItems = available.filter((row) => {
+          const identity = normalizedTemplateIdentity(row.templateKey, identityModule);
+          const place = `${row.path.toLowerCase()}|${row.label.toLowerCase()}`;
+          // Like the canonical installer, duplicate identities OR duplicate
+          // exact places require review; never treat either as proven progress.
+          if ((placeCounts.get(place) ?? 0) > 1) return false;
+          const keyedMatches = keyCounts.get(identity) ?? 0;
+          return keyedMatches === 1 || (keyedMatches === 0 && unkeyedPlaces.has(place));
+        }).length;
         const counts = new Map<string, number>();
         for (const row of existing) {
           const identity = row.templateKey ?? `${row.path.toLowerCase()}|${row.label.toLowerCase()}`;
