@@ -38,6 +38,62 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("IndexedDB-first local vault", () => {
+  it("preserves ordinary learner JSON that mentions the chunk format token", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const plain = JSON.stringify({
+      state: { profile: { userId: "jd" }, notes: ["axom-local-vault-chunks"] },
+      version: 34,
+    });
+    expect(resolveVaultSnapshotRecord({ [key]: plain }, key)).toBe(plain);
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    const db = await openCurrentVault();
+    await putDirect(db, key, plain);
+    db.close();
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(plain);
+  });
+
+  it.each([
+    ["zero chunk count", { chunkCount: 0 }],
+    ["negative logical length", { length: -1 }],
+    ["unsupported manifest version", { version: 77 }],
+  ] as const)("refuses a malformed physical chunk manifest (%s) without deleting it", async (_label, patch) => {
+    const key = STORAGE_KEYS.persistedState;
+    // A corrupt physical manifest is not a valid logical Zustand workspace.
+    // It must be withheld, not returned as raw hydration/export content.
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    const corrupted = JSON.stringify({
+      format: "axom-local-vault-chunks",
+      version: 1,
+      fingerprint: "9:deadbeef",
+      length: 9,
+      chunkPrefix: `${key}:chunks:legacy`,
+      chunkCount: 1,
+      ...patch,
+    });
+    const retainedScoped = JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: "retained-scoped-recovery" }] },
+      version: 34,
+    });
+    const db = await openCurrentVault();
+    await putDirect(db, key, corrupted);
+    await putDirect(db, `${key}:user:jd`, retainedScoped);
+    await putDirect(db, `${key}:active-user`, "jd");
+    db.close();
+    resetLocalVaultRuntimeForTests();
+    expect(() => resolveVaultSnapshotRecord({ [key]: corrupted }, key))
+      .toThrow(/invalid chunk manifest/i);
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    const inspection = await inspectLocalVaultRecoveryCopies("jd");
+    expect(inspection.copies.map((copy) => copy.value)).toEqual([retainedScoped]);
+    expect(inspection.reviewReasons).toContain("other-owner-or-unverifiable-bytes");
+    expect(inspection.requiresExplicitReview).toBe(true);
+    const verified = await openCurrentVault();
+    expect(await getDirect(verified, key)).toBe(corrupted);
+    expect(await getDirect(verified, `${key}:user:jd`)).toBe(retainedScoped);
+    verified.close();
+  });
+
   it("prevents a stale second runtime from replacing a newer workspace", async () => {
     const key = STORAGE_KEYS.persistedState;
     const largeLibraryState = "source review ".repeat(90_000);
