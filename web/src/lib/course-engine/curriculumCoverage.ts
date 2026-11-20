@@ -170,6 +170,12 @@ export function buildCurriculumCoverage(
             ? `cohort ${cohort.cohortLabels[0]} mixed with source files that do not state a cohort`
             : `cohort ${cohort.cohortLabels[0]}`;
         const heldSourceProblems = [
+          // Legacy or imported saved documents may contain recoverable parser
+          // errors even though new uploads are rejected by the preparer.
+          // Match the install preview: one invalid file holds the whole module,
+          // without altering source versions or installed learner progress.
+          ...sourceSections.flatMap((section) => section.problems.map((problem) =>
+            `${section.sourceName ?? section.title}: Source parsing needs review: ${problem}`)),
           ...sourceEvidence.flatMap(({ identity }) => identity.problem ? [identity.problem] : []),
           ...(declaredTerms.size > 1
             ? ["Conflicting explicit academic terms across source files; review source identity."]
