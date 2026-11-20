@@ -20,6 +20,7 @@ import { readVaultWriteFailure } from "../../lib/vaultActivity";
 import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
 import { TechnicalDetails } from "./TechnicalDetails";
 import { CommunityPreferenceFields, CommunityPreferencesSettings } from "../community/CommunityPreferences";
+import { RecoveryCopiesExportPanel } from "./RecoveryCopiesExportPanel";
 import { SYNC_PHASE_LABELS, useSyncProgress } from "../../lib/sync/syncProgress";
 
 type AuthMode = "sign-in" | "create" | "code" | "forgot";
@@ -71,6 +72,7 @@ export function AccountSyncPanel({ onOpenBackup, onOpenCommunity }: { onOpenBack
             <DevicesCard devices={account.devices} />
           </div>
           <IdentityCard user={account.user} />
+          <RecoveryCopiesExportPanel />
         </div>
       )}
 
