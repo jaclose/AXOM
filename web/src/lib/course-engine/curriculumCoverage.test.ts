@@ -597,6 +597,42 @@ describe("curriculum evidence coverage", () => {
     expect(matrix.terms[3].modules.find((module) => module.module === "NCRS")?.availableTemplateItems).toBe(2);
   });
 
+  it("holds legacy lecture numbers inherited from another module instead of counting installed progress", () => {
+    const source = doc("NCRS-foreign-lecture-number.txt", [
+      "T4 - NCRS - Lectures:",
+      "Week 3:",
+      "NCRS Lecture 01 Heart Failure [Lecture]",
+    ].join("\n"));
+    // An old importer attributed DLA 01 to NCRS Lecture 01 by number alone.
+    // The reconciler must not reuse this other-module task's learner progress.
+    const foreign = row("Term 4/PPM 500/NCRS/Week 3", "DLA 01 Case Review", "ncrs|lecture|1");
+    const valid = row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 01 Heart Failure", "ncrs|lecture|1");
+    const before = JSON.stringify({ source, foreign, valid });
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [foreign] },
+    );
+    expect(preview.issues).toHaveLength(0);
+    expect(preview.modules).toHaveLength(1);
+    expect(preview.modules[0].reconcile.review?.[0]?.reason).toMatch(/another module.s number/i);
+    expect(preview.modules[0].reconcile.review?.[0]?.candidateIds).toEqual([foreign.id]);
+    expect(preview.modules[0].reconcile.unchanged).toBe(0);
+    expect(preview.modules[0].reconcile.update).toHaveLength(0);
+
+    const rejected = buildCurriculumCoverage(SGU_CURRICULUM, [source], [foreign]);
+    const rejectedNcrs = rejected.terms[3].modules.find((item) => item.module === "NCRS")!;
+    expect(rejectedNcrs).toMatchObject({
+      availableTemplateItems: 1, installedTemplateItems: 0, notInstalled: 1, installedRows: 1,
+    });
+    expect(rejected.installedTemplateItems).toBe(0);
+
+    const allowed = buildCurriculumCoverage(SGU_CURRICULUM, [source], [valid]);
+    const allowedNcrs = allowed.terms[3].modules.find((item) => item.module === "NCRS")!;
+    expect(allowedNcrs).toMatchObject({
+      availableTemplateItems: 1, installedTemplateItems: 1, notInstalled: 0, installedRows: 1,
+    });
+    expect(JSON.stringify({ source, foreign, valid })).toBe(before);
+  });
+
   it("holds repeated planned template identities instead of double-counting one saved activity", () => {
     const sources = [
       doc("NCRS-plan-collision-A.txt", [
