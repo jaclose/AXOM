@@ -28,7 +28,7 @@ describe("SetupFlow", () => {
   it("does not claim success when draft storage is blocked, then retries without losing the current step", async () => {
     let blocked = true;
     const originalSetItem = Storage.prototype.setItem;
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (key, value) {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
       if (key === "axom.setup.v2" && blocked) throw new DOMException("Denied", "SecurityError");
       return originalSetItem.call(this, key, value);
     });
