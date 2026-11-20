@@ -225,6 +225,32 @@ describe("curriculum evidence coverage", () => {
     expect(ftcm.sourceProblems.join(" ")).toContain("Unsupported explicit academic term");
   });
 
+  it("holds different explicit academic terms across saved files of the same module", () => {
+    const term4 = doc("FTCM-T4.txt", [
+      "T4 - FTCM - Lectures:",
+      "Week 2:",
+      "FTCM Lecture 01 In T4 [Lecture]",
+    ].join("\n"));
+    const term5 = doc("FTCM-T5.txt", [
+      "FTCM - Small Groups:",
+      "@academic-term: T5",
+      "Week 3:",
+      "FTCM SG 01 In T5 [Small Group]",
+    ].join("\n"));
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [term4, term5], []);
+    const ftcm = coverage.terms[3].modules.find((module) => module.module === "FTCM")!;
+    expect(ftcm).toMatchObject({
+      templateFiles: 0, availableTemplateItems: 0,
+      statedWeeks: [], mapping: "ambiguous",
+    });
+    expect(ftcm.sourceProblems.join(" ")).toContain("Conflicting explicit academic terms across source files");
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [term4, term5], { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.create).toBe(0);
+    expect(preview.issues.some((issue) => issue.reason.includes("Conflicting explicit academic terms"))).toBe(true);
+  });
+
   it("accepts matching explicit term aliases and uniquely owned legacy templates", () => {
     const aligned = doc("FTCM-aligned.txt", [
       "T4 - FTCM - Lectures:",
