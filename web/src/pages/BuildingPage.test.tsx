@@ -7,15 +7,12 @@ afterEach(cleanup);
 describe("Building preview", () => {
   it("gives each overview horizon a unique descriptive accessible action name", () => {
     render(<BuildingPage />);
-    const names = (["now", "next", "later"] as const).map((horizon) =>
-      screen.getByRole("button", { name: new RegExp(`^See \\d+ ${horizon} roadmap systems?// @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { BuildingPage } from "./BuildingPage";
-import { SYSTEM_PREVIEWS } from "../lib/buildingSystems";
-afterEach(cleanup);
-, "i") }).getAttribute("aria-label")
-    );
+    const names = [
+      screen.getByRole("button", { name: /^See \d+ now roadmap systems?$/i }),
+      screen.getByRole("button", { name: /^See \d+ next roadmap systems?$/i }),
+      screen.getByRole("button", { name: /^See \d+ later roadmap systems?$/i }),
+    ].map((button) => button.getAttribute("aria-label"));
+    expect(names.every(Boolean)).toBe(true);
     expect(new Set(names).size).toBe(3);
   });
   it("labels concepts honestly and exposes the system map", () => {
