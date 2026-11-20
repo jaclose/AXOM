@@ -7,11 +7,13 @@ afterEach(cleanup);
 describe("Building preview", () => {
   it("gives each overview horizon a unique descriptive accessible action name", () => {
     render(<BuildingPage />);
-    const names = [
-      screen.getByRole("button", { name: /^See \d+ now roadmap systems?$/i }),
-      screen.getByRole("button", { name: /^See \d+ next roadmap systems?$/i }),
-      screen.getByRole("button", { name: /^See \d+ later roadmap systems?$/i }),
-    ].map((button) => button.getAttribute("aria-label"));
+    const actions = [
+      screen.getByRole("button", { name: /^See \d+ systems? in Now roadmap$/i }),
+      screen.getByRole("button", { name: /^See \d+ systems? in Next roadmap$/i }),
+      screen.getByRole("button", { name: /^See \d+ systems? in Later roadmap$/i }),
+    ];
+    const names = actions.map((button) => button.getAttribute("aria-label"));
+    expect(actions.every((button) => button.getAttribute("aria-label")?.includes(button.textContent?.trim() ?? ""))).toBe(true);
     expect(names.every(Boolean)).toBe(true);
     expect(new Set(names).size).toBe(3);
   });
@@ -25,7 +27,7 @@ describe("Building preview", () => {
   });
   it("filters by status from the overview and lights up connected systems", () => {
     render(<BuildingPage />);
-    fireEvent.click(screen.getByRole("button", { name: /^See \d+ now roadmap systems?$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^See \d+ systems? in Now roadmap$/i }));
     expect(screen.getByRole("tab", { name: "Systems" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("button", { name: /^Foundation/ }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.queryByRole("heading", { name: "Knowledge Graph" })).toBeNull();
@@ -39,7 +41,7 @@ describe("Building preview", () => {
     render(<BuildingPage />);
     const nextSystems = SYSTEM_PREVIEWS.filter((system) => system.status === "planned" || system.status === "in-development");
     const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;
-    fireEvent.click(within(nextCard).getByRole("button", { name: `See ${nextSystems.length} next roadmap systems` }));
+    fireEvent.click(within(nextCard).getByRole("button", { name: `See ${nextSystems.length} systems in Next roadmap` }));
 
     const shown = [...document.querySelectorAll(".system-card h3")]
       .map((element) => element.textContent).sort();
