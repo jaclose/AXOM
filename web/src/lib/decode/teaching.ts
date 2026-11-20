@@ -155,19 +155,36 @@ export function conceptGroups(
       const { wording, visual, base } = imageEvidence.get(question)!;
       return visual === base ? placedByBase.get(`${wording}\u001f${base}`) ?? visual : visual;
     };
+    // An unverified figure must not become a *second* distinct question in
+    // its own document simply because another document's known figure was
+    // visited last. Prefer established same-source, same-wording evidence.
+    // When no such source-local identity exists, use a stable global fallback.
+    // Never infer a new digest or placement from unverified metadata.
     const knownByWording = new Map<string, string>();
+    const knownBySource = new Map<string, string>();
+    const chooseKnown = (previous: string | undefined, candidate: string): string => {
+      if (previous === undefined || previous === "text-only" && candidate !== "text-only") return candidate;
+      if (candidate === "text-only") return previous;
+      return candidate < previous ? candidate : previous;
+    };
+    const sourceWordKey = (wording: string, documentId: string) => JSON.stringify([wording, documentId]);
     for (const { question } of group.members) {
       const wording = questionSignature(question);
       const visual = normalizedVisual(question);
-      if (visual !== "unverified-figure"
-        && (!knownByWording.has(wording) || visual !== "text-only")) {
-        knownByWording.set(wording, visual);
+      if (visual === "unverified-figure") continue;
+      knownByWording.set(wording, chooseKnown(knownByWording.get(wording), visual));
+      if (question.sourceDocumentId) {
+        const sourceKey = sourceWordKey(wording, question.sourceDocumentId);
+        knownBySource.set(sourceKey, chooseKnown(knownBySource.get(sourceKey), visual));
       }
     }
     const evidenceIdentity = (question: QuestionRecord) => {
       const wording = questionSignature(question);
       const visual = normalizedVisual(question);
-      return `${wording}\u001f${visual === "unverified-figure" ? knownByWording.get(wording) ?? visual : visual}`;
+      const local = question.sourceDocumentId
+        ? knownBySource.get(sourceWordKey(wording, question.sourceDocumentId))
+        : undefined;
+      return `${wording}\u001f${visual === "unverified-figure" ? local ?? knownByWording.get(wording) ?? visual : visual}`;
     };
     const wordings = new Set(group.members.map(({ question }) => evidenceIdentity(question)));
     const bySource = new Map<string, Set<string>>();
