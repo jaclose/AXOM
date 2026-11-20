@@ -7,7 +7,7 @@
 // enough answers; otherwise the report says what it is waiting for.
 // ===========================================================================
 import type { ID } from "../types";
-import { ERROR_TYPE_LABEL, errorPatterns, type QuestionRecord } from "../questions";
+import { ERROR_TYPE_LABEL, type QuestionErrorType, type QuestionRecord } from "../questions";
 import { attemptEvents, median, tally, type AttemptEvent, type Tally } from "./attempts";
 import { QUESTION_TASK_LABEL, questionFeatures, type QuestionFeatures } from "./questionFeatures";
 
@@ -254,8 +254,20 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
     });
   }
 
-  const classified = errorPatterns(questions as QuestionRecord[]);
-  const classifiedTotal = classified.reduce((total, pattern) => total + pattern.count, 0);
+  // Raw error classifications are useful as history, but only a currently
+  // scoreable miss can support a finding about the learner's current misses.
+  // In particular, held keys and repaired answer mappings must not silently
+  // restore unscored attempts to a current-performance recommendation.
+  const classifiedMisses = scored.filter((event) => event.correct === false && event.errorType);
+  const errorCounts = new Map<QuestionErrorType, number>();
+  for (const event of classifiedMisses) {
+    const errorType = event.errorType!;
+    errorCounts.set(errorType, (errorCounts.get(errorType) ?? 0) + 1);
+  }
+  const classifiedTotal = classifiedMisses.length;
+  const classified = [...errorCounts.entries()]
+    .map(([errorType, count]) => ({ errorType, count, share: count / classifiedTotal }))
+    .sort((left, right) => right.count - left.count);
   if (classified[0] && classifiedTotal >= 5 && classified[0].share >= 0.4) {
     const top = classified[0];
     findings.push({
@@ -266,7 +278,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
       basis: "observed",
       sample: classifiedTotal,
       weight: 40,
-      questionIds: questions.filter((question) => question.attempts.some((attempt) => attempt.errorType === top.errorType)).map((question) => question.id),
+      questionIds: [...new Set(classifiedMisses.filter((event) => event.errorType === top.errorType).map((event) => event.questionId))],
       actionLabel: "Retry these",
     });
   }
