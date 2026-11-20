@@ -46,11 +46,18 @@ export function attemptEvents(questions: readonly QuestionRecord[]): AttemptEven
       // answer mapping or required source media is held for review.
       const recordedCorrect = attempt.status === "correct" || attempt.status === "guessed"
         ? true : attempt.status === "incorrect" ? false : undefined;
+      // A reviewed key may have been repaired since this attempt was saved.
+      // If the learner's recorded choice and old success flag contradict the
+      // *current* trusted key, neither old flag nor a retrospective regrade is
+      // defensible without the original key revision. Keep the raw attempt.
+      const contradictsCurrentKey = attempt.answerKey !== undefined
+        && recordedCorrect !== undefined
+        && (attempt.answerKey === correctKey) !== recordedCorrect;
       events.push({
         questionId: question.id,
         at: attempt.at,
         exposure,
-        correct: mappingReady ? recordedCorrect : undefined,
+        correct: mappingReady && !contradictsCurrentKey ? recordedCorrect : undefined,
         answerKey: attempt.answerKey,
         correctKey,
         seconds: attempt.timeSpentSeconds,
