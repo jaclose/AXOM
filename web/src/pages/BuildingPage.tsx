@@ -32,6 +32,7 @@ export function BuildingPage() {
   const related = new Set(hoveredItem ? [hoveredItem.name, ...hoveredItem.connectsTo] : []);
 
   function selectView(target: "overview" | "systems") {
+    setHovered(null);
     setView(target);
     (target === "overview" ? overviewTabRef : systemsTabRef).current?.focus();
   }
@@ -56,8 +57,13 @@ export function BuildingPage() {
     selectView(target);
   }
 
+  function selectFilter(target: BuildStatus | "all" | "next") {
+    setHovered(null);
+    setFilter(target);
+  }
+
   function openHorizon(horizon: (typeof HORIZONS)[number]) {
-    setFilter(horizon.id === "next" ? "next" : (horizon.statuses[0] ?? "all"));
+    selectFilter(horizon.id === "next" ? "next" : (horizon.statuses[0] ?? "all"));
     selectView("systems");
   }
 
@@ -124,10 +130,10 @@ export function BuildingPage() {
         ) : (
           <section className="system-groups">
             <div className="building-filters" role="group" aria-label="Filter systems by status">
-              <button type="button" className={`filter-pill ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All <small>{SYSTEM_PREVIEWS.length}</small></button>
-              <button type="button" className={`filter-pill ${filter === "next" ? "on" : ""}`} aria-pressed={filter === "next"} onClick={() => setFilter("next")}>Next <small>{counts["in-development"] + counts.planned}</small></button>
+              <button type="button" className={`filter-pill ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => selectFilter("all")}>All <small>{SYSTEM_PREVIEWS.length}</small></button>
+              <button type="button" className={`filter-pill ${filter === "next" ? "on" : ""}`} aria-pressed={filter === "next"} onClick={() => selectFilter("next")}>Next <small>{counts["in-development"] + counts.planned}</small></button>
               {STATUS_ORDER.map((status) => (
-                <button key={status} type="button" className={`filter-pill ${filter === status ? "on" : ""}`} aria-pressed={filter === status} onClick={() => setFilter(status)}>
+                <button key={status} type="button" className={`filter-pill ${filter === status ? "on" : ""}`} aria-pressed={filter === status} onClick={() => selectFilter(status)}>
                   {STATUS[status].toLowerCase().replace(/^\w/, (c) => c.toUpperCase())} <small>{counts[status]}</small>
                 </button>
               ))}
