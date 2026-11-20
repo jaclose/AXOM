@@ -10,6 +10,8 @@ on:
       - "web/src/lib/retryLocalWorkspaceSave.ts"
       - "web/src/lib/retryLocalWorkspaceSave.test.ts"
       - "web/src/components/shell/AccountSyncPanel.tsx"
+      - "web/src/components/shell/RecoveryCopiesExportPanel.tsx"
+      - "web/src/components/shell/RecoveryCopiesExportPanel.test.tsx"
       - "web/src/components/shell/AccountSyncPanel.test.tsx"
       - "web/src/components/shell/DataHealthPanel.tsx"
       - ".github/workflows/local-save-regression.yml"
@@ -34,7 +36,7 @@ jobs:
       - run: node scripts/toolchain.mjs
       - run: npm --prefix web ci
       - name: Storage and Account recovery regressions
-        run: npm --prefix web run test -- src/lib/localVault.test.ts src/components/shell/AccountSyncPanel.test.tsx src/components/shell/DataHealthPanel.test.tsx src/lib/retryLocalWorkspaceSave.test.ts src/lib/vaultActivity.test.ts
+        run: npm --prefix web run test -- src/lib/localVault.test.ts src/components/shell/AccountSyncPanel.test.tsx src/components/shell/RecoveryCopiesExportPanel.test.tsx src/components/shell/DataHealthPanel.test.tsx src/lib/retryLocalWorkspaceSave.test.ts src/lib/vaultActivity.test.ts
       - name: Typecheck current web source
         run: npm --prefix web run typecheck
       - name: Build release frontend
