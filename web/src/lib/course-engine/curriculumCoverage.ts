@@ -227,8 +227,17 @@ export function buildCurriculumCoverage(
           }
         }
         const available = eligiblePlan?.items ?? [];
+        // The canonical reconciler holds repeated identities within the
+        // *planned source items*, not just duplicate saved learner rows. One
+        // learner activity cannot verify two conflicting source declarations.
+        const plannedKeyCounts = new Map<string, number>();
+        for (const item of available) {
+          const identity = normalizedTemplateIdentity(item.templateKey, identityModule);
+          plannedKeyCounts.set(identity, (plannedKeyCounts.get(identity) ?? 0) + 1);
+        }
         const installedTemplateItems = available.filter((row) => {
           const identity = normalizedTemplateIdentity(row.templateKey, identityModule);
+          if ((plannedKeyCounts.get(identity) ?? 0) !== 1) return false;
           const place = `${row.path.toLowerCase()}|${row.label.toLowerCase()}`;
           // Like the canonical installer, duplicate identities OR duplicate
           // exact places require review; never treat either as proven progress.

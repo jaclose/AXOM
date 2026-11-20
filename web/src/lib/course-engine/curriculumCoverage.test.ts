@@ -596,4 +596,63 @@ describe("curriculum evidence coverage", () => {
     expect(matrix.sourceTemplateFiles).toBe(1);
     expect(matrix.terms[3].modules.find((module) => module.module === "NCRS")?.availableTemplateItems).toBe(2);
   });
+
+  it("holds repeated planned template identities instead of double-counting one saved activity", () => {
+    const sources = [
+      doc("NCRS-plan-collision-A.txt", [
+        "T4 - NCRS - Lectures:",
+        "Week 3:",
+        "NCRS Lecture 01 Heart Failure [Lecture]",
+      ].join("\n")),
+      doc("NCRS-plan-collision-B.txt", [
+        "T4 - NCRS - Lectures Part B:",
+        "Week 3:",
+        "NCRS Lecture 01 Arrhythmias [Lecture]",
+      ].join("\n")),
+    ];
+    const saved = row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 01 Heart Failure", "ncrs|lecture|1");
+    const before = JSON.stringify({ sources, saved });
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, sources, { terms: [], courses: [], tracker: [saved] },
+    );
+    expect(preview.issues).toHaveLength(0);
+    expect(preview.modules).toHaveLength(1);
+    expect(preview.modules[0].plan.items).toHaveLength(2);
+    expect(new Set(preview.modules[0].plan.items.map((item) => item.templateKey)).size).toBe(1);
+    expect(preview.modules[0].reconcile.review).toHaveLength(2);
+    expect(preview.modules[0].reconcile.unchanged).toBe(0);
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, sources, [saved]);
+    const ncrs = coverage.terms[3].modules.find((item) => item.module === "NCRS")!;
+    expect(ncrs).toMatchObject({
+      templateFiles: 2, availableTemplateItems: 2, installedTemplateItems: 0,
+      notInstalled: 2, installedRows: 1, mapping: "outline-match",
+    });
+    expect(coverage.installedTemplateItems).toBe(0);
+    expect(JSON.stringify({ sources, saved })).toBe(before);
+  });
+
+  it("keeps two independently keyed source activities installed without changing learner progress", () => {
+    const sources = [
+      doc("NCRS-unique-plan-A.txt", "T4 - NCRS - Lectures:\nWeek 3:\nNCRS Lecture 01 Heart Failure [Lecture]"),
+      doc("NCRS-unique-plan-B.txt", "T4 - NCRS - Lectures Part B:\nWeek 3:\nNCRS Lecture 02 Arrhythmias [Lecture]"),
+    ];
+    const saved = [
+      row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 01 Heart Failure", "ncrs|lecture|1"),
+      row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 02 Arrhythmias", "ncrs|lecture|2"),
+    ];
+    const before = JSON.stringify({ sources, saved });
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, sources, { terms: [], courses: [], tracker: saved },
+    );
+    expect(preview.issues).toHaveLength(0);
+    expect(preview.modules).toHaveLength(1);
+    expect(preview.modules[0].reconcile.review).toBeUndefined();
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, sources, saved);
+    const ncrs = coverage.terms[3].modules.find((item) => item.module === "NCRS")!;
+    expect(ncrs).toMatchObject({
+      templateFiles: 2, availableTemplateItems: 2, installedTemplateItems: 2,
+      notInstalled: 0, installedRows: 2,
+    });
+    expect(JSON.stringify({ sources, saved })).toBe(before);
+  });
 });
