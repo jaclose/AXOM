@@ -920,6 +920,7 @@ async function writeVault(
         if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         tx.abort();
       };
+      const seenManifests = new Set<string>();
       for (const raw of [current, ...previous]) {
         if (raw === undefined) continue;
         const manifest = readChunkedValueManifest(raw);
@@ -928,6 +929,10 @@ async function writeVault(
           if (conflict) return;
           continue;
         }
+        // Only hash the short manifest text, not a potentially large
+        // ordinary snapshot, and avoid repeated reads of shared chunks.
+        if (seenManifests.has(raw)) continue;
+        seenManifests.add(raw);
         manifests.push({ manifest, chunks: new Array<string>(manifest.chunkCount) });
       }
       let remaining = manifests.reduce((count, entry) => count + entry.manifest.chunkCount, 0);
@@ -1359,7 +1364,12 @@ const vaultStorage: StateStorage = {
       const vaultExpectation = currentFallback !== null
         ? fallbackExpectation(currentFallback)
         : expected;
-      await writeVault(name, value, userId, vaultExpectation, currentFallback !== null);
+      // An ordinary hydrated save can follow silent physical chunk damage.
+      // A manifest-declared fingerprint alone cannot authorize overwriting
+      // remaining raw chunks: verify every referenced physical chunk in the
+      // same readwrite transaction before any replacement, even without a
+      // newer fallback marker.
+      await writeVault(name, value, userId, vaultExpectation, true);
       clearFallbackCopy(fallbackStore, name, userId, cleanupSnapshot);
       rememberVaultSnapshot(name, value);
       if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
