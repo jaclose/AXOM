@@ -139,6 +139,18 @@ describe("draft", () => {
     expect(readSetupDraftMode(b)).toBeNull();
   });
 
+  it("does not adopt a device draft before pending authentication resolves", () => {
+    const guest = choices({ name: "Guest draft", step: 1 });
+    expect(writeSetupDraft(guest, "first-run", device)).toBe(true);
+    const unresolved = setupDraftScope("loading", null);
+    expect(unresolved).toBeNull();
+    expect(setupDraftScope("recovering-password", null)).toBeNull();
+    expect(readSetupDraft(defaultChoices(), "first-run", unresolved).name).not.toBe("Guest draft");
+    expect(writeSetupDraft(choices({ name: "Unattributed" }), "first-run", unresolved)).toBe(false);
+    expect(readSetupDraft(defaultChoices(), "first-run", device)).toMatchObject({ name: "Guest draft", step: 1 });
+    expect(setupDraftScope("unconfigured", null)).toBe("device");
+  });
+
   it("quarantines unowned legacy bytes and fails closed when a signed-in identity is unknown", () => {
     const legacy = JSON.stringify({ ...choices({ name: "Legacy A", step: 2 }), mode: "rerun" });
     localStorage.setItem("axom.setup.v2", legacy);

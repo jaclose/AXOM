@@ -258,8 +258,10 @@ const SCOPED_DRAFT_PREFIX = `${LEGACY_DRAFT_KEY}.scoped.`;
 /** Unknown authenticated identity is not the device-only learner. */
 export function setupDraftScope(phase: AccountPhase, userId?: string | null): string | null {
   if (phase === "signed-in") return userId?.trim() ? `account:${userId}` : null;
-  if (phase === "recovering-password") return null;
-  return "device";
+  // While authentication is pending, no device draft can be attributed to
+  // the eventual signed-in learner. Only explicit local-only phases use it.
+  if (phase === "signed-out" || phase === "unconfigured") return "device";
+  return null;
 }
 
 function draftKey(scope: string | null): string | null {

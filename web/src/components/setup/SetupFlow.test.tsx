@@ -186,6 +186,10 @@ describe("SetupFlow", () => {
     useAccount.setState({ phase: "signed-in", user: accountUser("A") });
     useStore.getState().updateProfile({ onboarded: true, name: "A", tourDone: true });
     render(<SetupFlow mode="rerun" />);
+    // A resumes at the saved second step. Return to the first step before
+    // asserting the name input; a resumed draft must not reset the step.
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect((screen.getByLabelText("What should we call you?") as HTMLInputElement).value).toBe("A unfinished");
     expect(setupDraftScope("signed-in", "A")).not.toBe(setupDraftScope("signed-in", "B"));
   });
