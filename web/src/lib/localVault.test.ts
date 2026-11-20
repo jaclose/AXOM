@@ -599,6 +599,74 @@ describe("IndexedDB-first local vault", () => {
       }
     });
 
+    it("inspects account A's retained scoped vault after B becomes the generic active workspace", async () => {
+      const accountA = snapshot("account-A", "retained-A-only");
+      const accountB = snapshot("account-B", "newer-B");
+      await localVaultStorage.setItem(key, accountA);
+      await flushLocalVaultWrites();
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key + ":user:account-A")).toBe(accountA);
+        await putDirect(db, key, accountB);
+        await putDirect(db, key + ":user:account-B", accountB);
+        await putDirect(db, key + ":active-user", "account-B");
+      } finally {
+        db.close();
+      }
+      const checkpoint = getVaultWriteCheckpoint();
+      const before = [...values.entries()];
+      const a = await inspectLocalVaultRecoveryCopies("account-A");
+      const b = await inspectLocalVaultRecoveryCopies("account-B");
+      expect(a.indexedDbReadable).toBe(true);
+      expect(a.copies).toEqual([
+        { source: "indexeddb-scoped", fingerprint: expect.any(String), value: accountA },
+      ]);
+      expect(a.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(JSON.stringify(a)).not.toContain("newer-B");
+      expect(b.copies).toEqual([
+        { source: "indexeddb", fingerprint: expect.any(String), value: accountB },
+      ]);
+      expect(JSON.stringify(b)).not.toContain("retained-A-only");
+      expect([...values.entries()]).toEqual(before);
+      expect(getVaultWriteCheckpoint()).toBe(checkpoint);
+      const preserved = await openCurrentVault();
+      try {
+        expect(await getDirect(preserved, key)).toBe(accountB);
+        expect(await getDirect(preserved, key + ":user:account-A")).toBe(accountA);
+      } finally {
+        preserved.close();
+      }
+    });
+
+    it("reports divergent same-owner generic and scoped vault records without choosing a winner", async () => {
+      const original = snapshot("jd", "retained-in-scoped");
+      const newer = snapshot("jd", "generic-updated-in-another-tab");
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      const db = await openCurrentVault();
+      try {
+        await putDirect(db, key, newer);
+      } finally {
+        db.close();
+      }
+      const checkpoint = getVaultWriteCheckpoint();
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.copies).toEqual([
+        { source: "indexeddb", fingerprint: expect.any(String), value: newer },
+        { source: "indexeddb-scoped", fingerprint: expect.any(String), value: original },
+      ]);
+      expect(result.divergent).toBe(true);
+      expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(false);
+      expect(getVaultWriteCheckpoint()).toBe(checkpoint);
+      const unchanged = await openCurrentVault();
+      try {
+        expect(await getDirect(unchanged, key)).toBe(newer);
+        expect(await getDirect(unchanged, key + ":user:jd")).toBe(original);
+      } finally {
+        unchanged.close();
+      }
+    });
+
     it("recognizes identical copies without deleting the acknowledged fallback", async () => {
       const raw = snapshot("jd", "same-revision");
       await localVaultStorage.setItem(key, snapshot("jd", "base"));
