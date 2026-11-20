@@ -367,6 +367,91 @@ function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFa
   }
 }
 
+
+/**
+ * Inspect the physical IndexedDB workspace and acknowledged browser fallback
+ * independently, without promoting, hydrating, clearing, or replacing either.
+ * Intended as a read-only prerequisite for an explicit export/recovery flow.
+ *
+ * expectedProfileUserId is an exact privacy filter, NOT authentication.
+ * Callers must obtain this ID from a verified session before exposing raw data.
+ * Legacy name-only records are withheld for manual account-identity review.
+ */
+export type LocalVaultRecoveryCopy = Readonly<{
+  source: "indexeddb" | "local-fallback";
+  fingerprint: string;
+  value: string;
+}>;
+
+export type LocalVaultRecoveryInspection = Readonly<{
+  copies: readonly LocalVaultRecoveryCopy[];
+  indexedDbReadable: boolean;
+  fallbackReadable: boolean;
+  unverifiedOrOtherOwnerCopyPresent: boolean;
+  divergent: boolean;
+}>;
+
+export async function inspectLocalVaultRecoveryCopies(
+  expectedProfileUserId: string,
+): Promise<LocalVaultRecoveryInspection> {
+  if (typeof expectedProfileUserId !== "string" || !expectedProfileUserId.trim()) {
+    throw new Error("A verified stable profile ID is required to inspect workspace recovery copies.");
+  }
+
+  const name = STORAGE_KEYS.persistedState;
+  const copies: LocalVaultRecoveryCopy[] = [];
+  let indexedDbReadable = false;
+  let fallbackReadable = false;
+  let unverifiedOrOtherOwnerCopyPresent = false;
+
+  // Bypass the adapter's fallback selection and conflict latch. A damaged vault
+  // cannot hide a valid offline backup, and a readable vault does not mean
+  // the fallback is redundant.
+  try {
+    const value = await readVaultSnapshot(name);
+    indexedDbReadable = true;
+    if (value !== null) {
+      if (stablePersistedUserId(value) === expectedProfileUserId) {
+        copies.push({ source: "indexeddb", fingerprint: snapshotFingerprint(value), value });
+      } else {
+        unverifiedOrOtherOwnerCopyPresent = true;
+      }
+    }
+  } catch {
+    // An unavailable or damaged vault is not proof that it is empty.
+  }
+
+  const fallbackStore = localFallback();
+  if (fallbackStore) {
+    try {
+      const raw = fallbackStore.getItem(name);
+      const marker = fallbackStore.getItem(fallbackMarkerKey(name));
+      fallbackReadable = true;
+      if (raw !== null || marker !== null) {
+        const copy = newerFallbackCopy(fallbackStore, name);
+        if (copy && stablePersistedUserId(copy.value) === expectedProfileUserId) {
+          copies.push({ source: "local-fallback", fingerprint: copy.fingerprint, value: copy.value });
+        } else {
+          // Do not elevate unmarked/tampered/foreign snapshots into recovery.
+          // Leave their bytes untouched for manual identity/integrity review.
+          unverifiedOrOtherOwnerCopyPresent = true;
+        }
+      }
+    } catch {
+      // Denied browser storage is not equivalent to a missing fallback.
+    }
+  }
+
+  return {
+    copies,
+    indexedDbReadable,
+    fallbackReadable,
+    unverifiedOrOtherOwnerCopyPresent,
+    // Fingerprints are diagnostics, not cryptographic equality evidence.
+    divergent: copies.length > 1 && copies.some(copy => copy.value !== copies[0].value),
+  };
+}
+
 /**
  * Workspace JSON only needs the long-lived `state` store. Open the current
  * database version instead of forcing a schema upgrade on every save: an
