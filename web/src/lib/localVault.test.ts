@@ -94,6 +94,53 @@ describe("IndexedDB-first local vault", () => {
     verified.close();
   });
 
+  it.each(["primary", "scoped"] as const)(
+    "withholds unmarked browser mirror when %s IndexedDB manifest is malformed",
+    async (location) => {
+      const key = STORAGE_KEYS.persistedState;
+      const scopedKey = `${key}:user:jd`;
+      const malformed = JSON.stringify({
+        format: "axom-local-vault-chunks",
+        version: 1,
+        fingerprint: "1:deadbeef",
+        length: 1,
+        chunkPrefix: `${key}:chunks:legacy`,
+        chunkCount: 0,
+      });
+      const staleMirror = JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: "unverified-old-browser-copy" }] },
+        version: 34,
+      });
+      const db = await openCurrentVault();
+      if (location === "primary") await putDirect(db, key, malformed);
+      else {
+        await putDirect(db, `${key}:active-user`, "jd");
+        await putDirect(db, scopedKey, malformed);
+      }
+      db.close();
+      // This mirror has no acknowledged freshness marker. It cannot prove
+      // owner, completeness or priority over the damaged physical record.
+      localStorage.setItem(key, staleMirror);
+      localStorage.setItem(`${key}:active-user`, "jd");
+      localStorage.setItem(scopedKey, staleMirror);
+      resetLocalVaultRuntimeForTests();
+
+      expect(await localVaultStorage.getItem(key)).toBeNull();
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: "unsafe-post-hydration-edit" }] },
+        version: 34,
+      }));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      const retained = await openCurrentVault();
+      expect(await getDirect(retained, location === "primary" ? key : scopedKey)).toBe(malformed);
+      retained.close();
+      expect(localStorage.getItem(key)).toBe(staleMirror);
+      expect(localStorage.getItem(scopedKey)).toBe(staleMirror);
+    },
+  );
+
   it("prevents a stale second runtime from replacing a newer workspace", async () => {
     const key = STORAGE_KEYS.persistedState;
     const largeLibraryState = "source review ".repeat(90_000);

@@ -46,6 +46,15 @@ class VaultConflictError extends Error {
   }
 }
 
+/** Invalid physical chunk metadata is not an ordinary unavailable-IDB event:
+ * a pre-existing, unmarked localStorage mirror is not safe hydration input. */
+class InvalidVaultManifestError extends Error {
+  constructor() {
+    super("The local vault workspace has an invalid chunk manifest.");
+    this.name = "InvalidVaultManifestError";
+  }
+}
+
 export function isVaultConflictError(error: unknown): error is Error & { code?: string } {
   return error instanceof Error && (
     error.name === "VaultConflictError"
@@ -271,7 +280,7 @@ export function resolveVaultSnapshotRecord(
   const manifest = readChunkedValueManifest(stored);
   if (!manifest) {
     if (isMalformedChunkedValueManifest(stored)) {
-      throw new Error("The local vault workspace has an invalid chunk manifest.");
+      throw new InvalidVaultManifestError();
     }
     return stored;
   }
@@ -773,7 +782,7 @@ async function readVaultRecord(
         // Never throw out of an IndexedDB event handler. Reject through the
         // transaction completion path while preserving the stored bytes.
         if (isMalformedChunkedValueManifest(primary.result)) {
-          failure ??= new Error("The local vault workspace has an invalid chunk manifest.");
+          failure ??= new InvalidVaultManifestError();
           return;
         }
         result = primary.result;
@@ -1176,7 +1185,17 @@ const vaultStorage: StateStorage = {
       // Both the primary and the active-profile snapshot were read successfully
       // and neither exists. Only this state may migrate an unmarked legacy copy.
       verifiedVaultEmpty = true;
-    } catch {
+    } catch (error) {
+      if (observesWorkspace(name) && error instanceof InvalidVaultManifestError) {
+        // A corrupt physical manifest is not proof that an unmarked browser
+        // mirror is the right account's latest revision. Never hydrate it as a
+        // workspace, nor grant a subsequent autosave authority over the raw
+        // physical record. Leave IDB and localStorage bytes for manual review.
+        conflictedWorkspaceKeys.add(name);
+        if (initialReceipt !== null) invalidateVaultWriteIfUnchanged(initialReceipt);
+        markVaultWriteFailure();
+        return null;
+      }
       // An inaccessible vault may still hold newer bytes. Keep any old mirror
       // readable below, but do not promote it until an empty vault is verified.
     }
