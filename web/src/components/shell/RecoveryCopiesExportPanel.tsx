@@ -170,13 +170,13 @@ export function RecoveryCopiesExportPanel() {
               {confirmation === copy.source ? (
                 <div>
                   <p className="sub">Download these exact raw bytes for private, manual review? They will not be restored or merged.</p>
-                  <GButton size="sm" variant="primary" disabled={busy} onClick={() => void download(copy)}>
+                  <GButton size="sm" variant="primary" disabled={busy} aria-label={`Download raw copy: ${sourceNames[copy.source]}`} onClick={() => void download(copy)}>
                     <Download size={ICON_SIZE.body} aria-hidden="true" /> Download this copy
                   </GButton>
                   <GButton size="sm" disabled={busy} onClick={() => setConfirmation(null)}>Cancel</GButton>
                 </div>
               ) : (
-                <GButton size="sm" disabled={busy} onClick={() => setConfirmation(copy.source)}>Review export</GButton>
+                <GButton size="sm" disabled={busy} aria-label={`Review export: ${sourceNames[copy.source]}`} onClick={() => setConfirmation(copy.source)}>Review export</GButton>
               )}
             </div>
           ))}
