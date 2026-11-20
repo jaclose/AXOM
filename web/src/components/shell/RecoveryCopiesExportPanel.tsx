@@ -114,7 +114,20 @@ export function RecoveryCopiesExportPanel() {
         throw new Error("This saved copy changed in another tab. Inspect again before exporting it.");
       }
       await assertVerifiedAccount(accountId);
-      const raw = new Blob([current.value], { type: "application/json" });
+      // The last network identity check can take long enough for another tab
+      // to save a different version. Re-inspect AFTER that await and do not
+      // yield again between the final byte comparison and download creation.
+      // This is a best-effort sampled copy, not an atomic cross-tab snapshot.
+      const finalInspection = await inspectLocalVaultRecoveryCopies(accountId);
+      const finalCopy = candidates(finalInspection).find((candidate) => candidate.source === copy.source);
+      if (
+        useAccount.getState().phase !== "signed-in"
+        || useAccount.getState().user?.id !== accountId
+      ) throw new Error("The account changed. Inspect again before exporting.");
+      if (!finalCopy || finalCopy.value !== copy.value || finalCopy.unverified !== copy.unverified) {
+        throw new Error("This saved copy changed in another tab. Inspect again before exporting it.");
+      }
+      const raw = new Blob([finalCopy.value], { type: "application/json" });
       const href = URL.createObjectURL(raw);
       try {
         const anchor = document.createElement("a");
@@ -126,7 +139,7 @@ export function RecoveryCopiesExportPanel() {
         window.setTimeout(() => URL.revokeObjectURL(href), 1000);
       }
       setConfirmation(null);
-      setNotice({ text: "Raw recovery copy download started. Store it privately; it is not an import-ready backup.", error: false });
+      setNotice({ text: "Sampled recovery version download started. Another tab may save a newer version afterward; this is not an import-ready backup.", error: false });
     } catch (error) {
       setConfirmation(null);
       setInspection(null);
@@ -145,7 +158,7 @@ export function RecoveryCopiesExportPanel() {
           <p>Inspect account-matching device copies without replacing your current workspace.</p>
         </div>
       </div>
-      <p className="sub">Requires a verified online account. Raw copies may disagree and are not standard portable backups. Separately stored question images and other attachments are not included. Use Emergency recovery for a complete portable backup.</p>
+      <p className="sub">Requires a verified online account. Raw copies may disagree or change in another tab. A download captures one inspected version, not an atomic latest snapshot; it is not a standard portable backup. Separately stored question images and other attachments are not included. Use Emergency recovery for a complete portable backup.</p>
       <GButton size="sm" disabled={busy} onClick={() => void inspect()}>
         {busy ? "Checking…" : "Inspect saved versions"}
       </GButton>
