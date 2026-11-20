@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AIProvider } from "../../lib/ai/types";
 import { questionSourceFingerprint, type QuestionAnalysis } from "../../lib/decode";
+import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
 import type { SourceDocument } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import { SourceTeaching } from "./SourceTeaching";
@@ -261,6 +262,80 @@ describe("source teaching stale-action fences", () => {
     view.rerender(<SourceTeaching question={{ ...first, stem: first.stem + " Updated evidence.", analyses: discarded }} document={source} siblings={siblings} onChange={onChange} />);
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("source teaching ownership boundaries", () => {
+  it("does not keep Undo available across A→B→A account-scope changes with identical question IDs and analyses", async () => {
+    const initialScope = getQuestionAttachmentScope();
+    const otherAccountId = initialScope.accountId === "apex-r155-other" ? "apex-r155-different" : "apex-r155-other";
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const view = render(<SourceTeaching question={first} document={source} siblings={siblings} onChange={onChange} />);
+    try {
+      await user.click(screen.getByRole("button", { name: "Discard" }));
+      const discarded = onChange.mock.calls[0][0] as QuestionAnalysis[];
+      view.rerender(<SourceTeaching question={{ ...first, analyses: discarded }} document={source} siblings={siblings} onChange={onChange} />);
+      expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+
+      // Same imported question and same post-discard analyses may be visible
+      // in a different account. Changing the account scope must revoke Undo.
+      act(() => { setQuestionAttachmentAccount(otherAccountId); });
+      expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+      act(() => { setQuestionAttachmentAccount(initialScope.accountId); });
+      expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+      expect(onChange).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      act(() => { setQuestionAttachmentAccount(initialScope.accountId); });
+    }
+  });
+});
+
+
+describe("source teaching session isolation", () => {
+  it("drops pending Undo on a saved-session switch even if record IDs and analyses are identical", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const view = render(<SourceTeaching viewScope="saved-session-A" question={first} document={source} siblings={siblings} onChange={onChange} />);
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    const discarded = onChange.mock.calls[0][0] as QuestionAnalysis[];
+    view.rerender(<SourceTeaching viewScope="saved-session-A" question={{ ...first, analyses: discarded }}
+      document={source} siblings={siblings} onChange={onChange} />);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+    view.rerender(<SourceTeaching viewScope="saved-session-B" question={{ ...first, analyses: discarded }}
+      document={source} siblings={siblings} onChange={onChange} />);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    view.rerender(<SourceTeaching viewScope="saved-session-A" question={{ ...first, analyses: discarded }}
+      document={source} siblings={siblings} onChange={onChange} />);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an in-flight source-model reply after A→B→A even when the same component stays mounted", async () => {
+    const initialScope = getQuestionAttachmentScope();
+    const other = initialScope.accountId === "apex-r155-other" ? "apex-r155-different" : "apex-r155-other";
+    const response = {
+      concept: "Synthetic safety", task: "Recognize the source.", rule: "Fixture only.",
+      explanation: "Synthetic explanation.", decisiveClues: [], mechanism: [], distractors: [],
+      references: [{ documentId: source.id, page: 4, role: "question" as const }],
+    };
+    let finish!: (value: typeof response) => void;
+    const pending = new Promise<typeof response>((resolve) => { finish = resolve; });
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const generate = provider(() => pending);
+    const view = render(<SourceTeaching question={siblings[1]} document={source} provider={generate} onChange={onChange} />);
+    try {
+      await user.click(screen.getByRole("button", { name: /Ask for an analysis/ }));
+      act(() => { setQuestionAttachmentAccount(other); });
+      act(() => { setQuestionAttachmentAccount(initialScope.accountId); });
+      await act(async () => { finish(response); await pending; });
+      expect(onChange).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      act(() => { setQuestionAttachmentAccount(initialScope.accountId); });
+    }
   });
 });
 

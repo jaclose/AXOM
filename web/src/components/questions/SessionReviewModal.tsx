@@ -88,7 +88,7 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
           </ol>
           </QuestionViewFrame>
           {!ready && <p role="status">The current answer key needs review. The saved result is historical, not a verified answer for this revision.</p>}
-          <SourceTeaching key={question.id} question={question} document={source}
+          <SourceTeaching key={`${session.id}:${question.id}`} viewScope={session.id} question={question} document={source}
             siblings={s.questions?.filter((entry) => entry.sourceDocumentId === source?.id)} provider={provider}
             compact onChange={(analyses) => s.updateQuestion(question.id, { analyses })} />
           <details className="session-review-explanation session-review-why">

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BookOpen, Check, Eye, EyeOff, Sparkles, Undo2, X } from "lucide-react";
 import type { AIProvider } from "../../lib/ai/types";
 import {
@@ -6,6 +6,7 @@ import {
   withAnalysisStatus, type QuestionAnalysis,
 } from "../../lib/decode";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import type { SourceDocument } from "../../lib/library";
 import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
 import { GButton, GhostButton } from "../ui/primitives";
@@ -23,7 +24,7 @@ const sameAnalyses = (a: readonly QuestionAnalysis[] | undefined, b: readonly Qu
  * as teaching. A reading of the source's slides, or a model's, is shown as a
  * proposal to keep or discard. Nothing is stored until the learner decides.
  */
-export function SourceTeaching({ question, document: source, siblings, provider, compact = false, onChange }: {
+export function SourceTeaching({ question, document: source, siblings, provider, compact = false, viewScope, onChange }: {
   question: QuestionRecord;
   /** The question's source document, when it is in the library. */
   document?: SourceDocument;
@@ -32,9 +33,13 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   provider?: AIProvider | null;
   /** Lead with the rule; leave mechanism and distractor detail one step away. */
   compact?: boolean;
+  /** Stable identity for the saved quiz/session being reviewed, if applicable. */
+  viewScope?: string;
   onChange: (analyses: QuestionAnalysis[] | undefined) => void;
 }) {
   const headingId = useId();
+  // Scope identity includes an epoch, so A → B → A never restores stale actions.
+  const accountScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [showPage, setShowPage] = useState(false);
@@ -43,6 +48,8 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   const [undo, setUndo] = useState<{
     questionId: string;
     sourceFingerprint: string;
+    accountScope: ReturnType<typeof getQuestionAttachmentScope>;
+    viewScope: string | undefined;
     analyses: QuestionAnalysis[] | undefined;
     expectedAfter: QuestionAnalysis[] | undefined;
     what: string;
@@ -61,7 +68,8 @@ export function SourceTeaching({ question, document: source, siblings, provider,
     setBusy(false);
     setProblem("");
     return () => { requestEpoch.current += 1; };
-  }, [question, source, provider, onChange]);
+  }, [question, source, provider, onChange, accountScope, viewScope]);
+  useEffect(() => { setUndo(undefined); }, [viewScope]);
 
   const view = useMemo(() => teachingView(question, source), [question, source]);
   const ready = questionMappingStatus(question) === "ready";
@@ -83,6 +91,7 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   const page = pagePicked && pages.includes(pagePicked) ? pagePicked : pages[0];
   const taken = ready && undo?.questionId === question.id
     && undo.sourceFingerprint === questionSourceFingerprint(question, source)
+    && undo.accountScope === accountScope && undo.viewScope === viewScope
     && sameAnalyses(question.analyses, undo.expectedAfter) ? undo : undefined;
   // With nothing to teach and no way to ask, the feedback above already says all there is.
   if (!shown && !canAsk && !taken && !(compact && source && pages.length)) return null;
@@ -99,6 +108,8 @@ export function SourceTeaching({ question, document: source, siblings, provider,
       ? {
         questionId: question.id,
         sourceFingerprint: questionSourceFingerprint(question, source),
+        accountScope,
+        viewScope,
         analyses: question.analyses,
         expectedAfter: nextAnalyses,
         what: analysis.status === "reviewed" ? "Teaching removed." : "Proposal discarded.",
@@ -108,7 +119,8 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   }
 
   function takeBack() {
-    if (!taken) return;
+    // Check again at click time, before any consumer can write an old snapshot.
+    if (!taken || !isQuestionAttachmentScopeCurrent(taken.accountScope) || taken.viewScope !== viewScope) return;
     onChange(taken.analyses);
     setUndo(undefined);
   }
@@ -116,10 +128,12 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   async function ask() {
     if (!provider || questionMappingStatus(question) !== "ready") return;
     const started = latest.current;
+    const startedAccountScope = accountScope;
     const epoch = ++requestEpoch.current;
     // Identity is deliberately stricter than matching question IDs/fingerprints:
     // a parent can replace a workspace/account with an equally numbered record.
     const stillCurrent = () => mounted.current && requestEpoch.current === epoch
+      && isQuestionAttachmentScopeCurrent(startedAccountScope)
       && latest.current.question === started.question
       && latest.current.source === started.source
       && latest.current.provider === started.provider
