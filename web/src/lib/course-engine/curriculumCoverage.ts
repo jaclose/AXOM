@@ -1,6 +1,7 @@
 import type { CurriculumTemplate } from "../curricula";
 import type { SourceDocument } from "../library";
 import type { TrackerItem } from "../types";
+import { assessCohortTarget } from "./bulkCourseInstall";
 import { buildQuestionAvailabilityIndex, questionAvailabilityModuleKey, type QuestionAvailabilityInput } from "./moduleQuestionAvailability";
 import { courseTemplateVersions, savedCourseTemplates } from "./templateLibrary";
 import { normalizedTemplateIdentity, planCourseTemplate, type CourseTemplateSection } from "./templateParse";
@@ -159,10 +160,22 @@ export function buildCurriculumCoverage(
         // disagree about an explicit term, even if each file is valid alone.
         const declaredTerms = new Set(sourceEvidence.flatMap(({ identity }) =>
           identity.term ? [identity.term] : []));
+        // Reuse the installer's cohort authorization contract. The read-only
+        // coverage view has no approved cohort binding, so explicitly scoped
+        // source files must remain visible as held evidence, not eligible rows.
+        const cohort = assessCohortTarget(sourceSections);
+        const cohortIdentity = cohort.cohortLabels.length > 1
+          ? `conflicting cohorts ${cohort.cohortLabels.join(", ")}`
+          : cohort.includesUnknown
+            ? `cohort ${cohort.cohortLabels[0]} mixed with source files that do not state a cohort`
+            : `cohort ${cohort.cohortLabels[0]}`;
         const heldSourceProblems = [
           ...sourceEvidence.flatMap(({ identity }) => identity.problem ? [identity.problem] : []),
           ...(declaredTerms.size > 1
             ? ["Conflicting explicit academic terms across source files; review source identity."]
+            : []),
+          ...(cohort.status === "needs-review"
+            ? [`Source identity declares ${cohortIdentity}, but no reviewed destination cohort binding exists. Choose a version-specific owner before counting its activities.`]
             : []),
         ];
         // A held module remains saved in the vault, but its rows and weeks
