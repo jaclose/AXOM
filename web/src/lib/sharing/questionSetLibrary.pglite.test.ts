@@ -78,6 +78,39 @@ async function approve(who: string, id: string, inspected: Snapshot = snapshot()
 }
 
 describe("reviewed Question Set Library SQL and RLS", () => {
+  it("rejects an absent or self reviewer at the SQL independent-review boundary", async () => {
+    // Isolate the actual installed trigger function from the other publication
+    // gates so an earlier provenance check cannot mask a NULL reviewer defect.
+    await db.exec(`
+      create temporary table reviewer_gate_probe (
+        id integer primary key, owner_id uuid not null, reviewed_by uuid, status text not null
+      );
+      create trigger reviewer_gate_probe_check before update of status on reviewer_gate_probe
+        for each row execute function private.question_set_library_require_independent_reviewer();
+    `);
+    try {
+      await db.query(
+        "insert into pg_temp.reviewer_gate_probe values (1,$1,null,'pending'),(2,$1,$1,'pending'),(3,$1,$2,'pending')",
+        [OWNER, REVIEWER],
+      );
+      await expect(db.query("update pg_temp.reviewer_gate_probe set status='approved' where id=1"))
+        .rejects.toThrow(/independent academic reviewer/i);
+      await expect(db.query("update pg_temp.reviewer_gate_probe set status='approved' where id=2"))
+        .rejects.toThrow(/independent academic reviewer/i);
+      await db.query("update pg_temp.reviewer_gate_probe set status='approved' where id=3");
+      const rows = (await db.query<{ id: number; status: string }>(
+        "select id,status from pg_temp.reviewer_gate_probe order by id",
+      )).rows;
+      expect(rows).toEqual([
+        { id: 1, status: "pending" },
+        { id: 2, status: "pending" },
+        { id: 3, status: "approved" },
+      ]);
+    } finally {
+      await db.exec("drop table if exists pg_temp.reviewer_gate_probe;");
+    }
+  });
+
   it("hides pending content from learners and anonymous clients", async () => {
     const id = await submit(OWNER, "private-pending");
     expect(await as<{ status: string; id: string }>(OWNER, "select id,status from public.my_question_set_library()"))

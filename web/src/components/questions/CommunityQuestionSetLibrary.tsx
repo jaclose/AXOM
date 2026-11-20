@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BookOpen, Download, Heart, Play, RefreshCw, Search } from "lucide-react";
 import type { QuestionSet } from "../../lib/library";
 import { useAccount } from "../../lib/account/accountStore";
-import { readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
+import { importSharedQuestionSet, readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
 import {
   authorizeQuestionSetLibraryImport, loadQuestionSetLibraryPreview, searchQuestionSetLibrary, setQuestionSetLibraryLike,
   type LibraryQuestionSet, type LibraryQuestionSetPreview,
@@ -265,7 +265,8 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       setPreview(result);
       setImported(useStore.getState().questionSets.some(set => {
         const provenance = readSharedQuestionImportProvenance(set);
-        return provenance?.shareId === result.id && provenance.contentDigest === result.contentDigest;
+        return provenance?.shareId.toLowerCase() === result.id.toLowerCase()
+          && provenance.contentDigest === result.contentDigest;
       }));
       // Keep the observer until the accepted preview is closed, replaced,
       // revoked, or unmounted. Account-ID equality is not session authority.
@@ -438,13 +439,61 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       || useAccount.getState().user?.id !== previewAccountId || !previewRequest.current) return;
     // Resolve the saved copy again at click time, so deletion or a replaced
     // local set cannot launch a stale imported membership.
-    const set = useStore.getState().questionSets.find(candidate => {
-      const receipt = readSharedQuestionImportProvenance(candidate);
-      return receipt?.shareId === activePreview.id && receipt.contentDigest === activePreview.contentDigest;
-    });
+    const store = useStore.getState();
+    // The canonical importer rejects multiple saved receipts for one public
+    // share ID, even when their digests match. A partial restore can violate
+    // that invariant after import: choosing the first receipt would silently
+    // launch practice against arbitrary membership and learner attempts.
+    // The importer treats UUIDs as case-insensitive. Restored receipts must
+    // follow the same identity rule so learners can reopen their original copy.
+    const publicationId = activePreview.id.toLowerCase();
+    const copies = store.questionSets.filter(candidate =>
+      readSharedQuestionImportProvenance(candidate)?.shareId.toLowerCase() === publicationId);
+    if (copies.length > 1) {
+      setPreviewError("Multiple saved copies reference this publication. Resolve the original import receipts in Question Bank before practicing. Your original question IDs and attempts are unchanged.");
+      return;
+    }
+    const set = copies[0];
     if (!set) {
       setImported(false);
       setPreviewError("This saved set is no longer in your library. Add it again to practice.");
+      return;
+    }
+    if (readSharedQuestionImportProvenance(set)?.contentDigest !== activePreview.contentDigest) {
+      setPreviewError("This saved publication revision no longer matches the preview. Close the preview and inspect your original saved set before practicing.");
+      return;
+    }
+    // A persisted import receipt does not prove that its question records
+    // survived a partial restore. Never launch practice with missing or
+    // ambiguous member IDs, or silently generate replacements that would
+    // detach learner attempts from their original questions.
+    const bank = store.questions;
+    const memberIds = new Set(set.questionIds);
+    const found = new Map<string, number>();
+    for (const question of bank) {
+      if (memberIds.has(question.id)) found.set(question.id, (found.get(question.id) ?? 0) + 1);
+    }
+    if (set.questionIds.length !== activePreview.snapshot.questions.length
+      || memberIds.size !== set.questionIds.length
+      || set.questionIds.some(id => found.get(id) !== 1)) {
+      setPreviewError("This saved set has missing or duplicate question records. Recover the original question IDs in Question Bank before practicing. Reimport will not replace your attempts.");
+      return;
+    }
+    // Reuse the side-effect-free canonical import identity check. The receipt
+    // and original ID alone do not prove the reviewed answer/source survives
+    // a partial restore. Learner notes, flags and attempts are ignored.
+    try {
+      const plan = importSharedQuestionSet({
+        snapshot: activePreview.snapshot,
+        identity: { shareId: activePreview.id, contentDigest: activePreview.contentDigest },
+        existingQuestions: bank,
+        existingSets: store.questionSets,
+      });
+      if (!plan.alreadyImported || plan.set.id !== set.id) {
+        throw new Error("The saved receipt no longer identifies the reviewed import.");
+      }
+    } catch {
+      setPreviewError("This saved set's reviewed question text, options, answer keys, explanations, sources or order no longer match the approved publication. Restore the original records in Question Bank before practicing; attempts are unchanged.");
       return;
     }
     cancelPendingPreview();

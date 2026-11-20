@@ -41,7 +41,13 @@ export function enrichPublicQuestionSetVisualTags(
     const intent = `${INTENT_PREFIX}${plan.kind}`;
     appendBoundedTag(tags, intent);
     appendBoundedTag(setTags, intent);
-    for (const keyword of plan.keywords) appendBoundedTag(tags, `${KEYWORD_PREFIX}${keyword}`);
+    for (const keyword of plan.keywords) {
+      const hint = `${KEYWORD_PREFIX}${keyword}`;
+      appendBoundedTag(tags, hint);
+      // The live library searches entry-level tags, not per-question tags.
+      // Make stem-derived keywords discoverable without exposing answer metadata.
+      appendBoundedTag(setTags, hint);
+    }
 
     return { ...question, tags };
   });
