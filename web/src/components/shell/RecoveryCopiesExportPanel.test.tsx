@@ -110,6 +110,36 @@ describe("authenticated read-only recovery export", () => {
     expect(screen.queryByText("Retained account vault")).toBeNull();
   });
 
+  it("refuses a version changed while the last server identity check is awaiting", async () => {
+    let finishLastCheck: ((answer: { data: { user: { id: string } }; error: null }) => void) | undefined;
+    let authCalls = 0;
+    getUser.mockImplementation(() => {
+      authCalls++;
+      if (authCalls === 4) {
+        return new Promise((resolve) => { finishLastCheck = resolve; });
+      }
+      return Promise.resolve({ data: { user: { id: "account-A" } }, error: null });
+    });
+    inspect
+      .mockResolvedValueOnce(inspection(rawA)) // The version shown for confirmation.
+      .mockResolvedValueOnce(inspection(rawA)) // The pre-auth read still matches.
+      .mockResolvedValueOnce(inspection(rawB)); // Another tab wins during auth.
+
+    render(<RecoveryCopiesExportPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect saved versions" }));
+    await screen.findByText("Retained account vault");
+    fireEvent.click(screen.getByRole("button", { name: "Review export: Retained account vault" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download raw copy: Retained account vault" }));
+    await waitFor(() => expect(getUser).toHaveBeenCalledTimes(4));
+    expect(createUrl).not.toHaveBeenCalled();
+    expect(finishLastCheck).toBeDefined();
+    finishLastCheck!({ data: { user: { id: "account-A" } }, error: null });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/changed in another tab/i));
+    expect(inspect).toHaveBeenCalledTimes(3);
+    expect(createUrl).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+  });
+
   it("labels unverified owner-scoped bytes without restoring, auto-exporting or trusting them", async () => {
     inspect.mockResolvedValue(inspection(rawA, true));
     render(<RecoveryCopiesExportPanel />);
