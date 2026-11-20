@@ -205,6 +205,85 @@ describe("IndexedDB-first local vault", () => {
   );
 
   it.each(["missing chunk", "altered chunk"] as const)(
+    "blocks an ordinary save when an already-hydrated physical chunk is damaged (%s)",
+    async (fault) => {
+      const key = STORAGE_KEYS.persistedState;
+      const snapshot = (label: string, content = "") => JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: label }], content },
+        version: 34,
+      });
+      const physical = snapshot("only-in-old-physical-workspace", "x".repeat(1_050_000));
+      const next = snapshot("unsaved-new-workspace");
+      await localVaultStorage.setItem(key, physical);
+      await flushLocalVaultWrites();
+      // Record an authoritative observation before a different actor damages
+      // the underlying chunks. There is deliberately NO fallback marker.
+      expect(await localVaultStorage.getItem(key)).toBe(physical);
+      expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+
+      const db = await openCurrentVault();
+      const originalManifest = await getDirect(db, key);
+      const originalScoped = await getDirect(db, `${key}:user:jd`);
+      const manifest = JSON.parse(originalManifest!) as { chunkPrefix: string; chunkCount: number };
+      expect(manifest.chunkCount).toBeGreaterThan(0);
+      const chunkKey = `${manifest.chunkPrefix}:0`;
+      db.close();
+
+      const damaged = await openCurrentVault();
+      if (fault === "missing chunk") await deleteDirect(damaged, chunkKey);
+      else await putDirect(damaged, chunkKey, "tampered-after-hydration");
+      damaged.close();
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, next);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+
+      const retained = await openCurrentVault();
+      expect(await getDirect(retained, key)).toBe(originalManifest);
+      expect(await getDirect(retained, `${key}:user:jd`)).toBe(originalScoped);
+      expect(await getDirect(retained, chunkKey))
+        .toBe(fault === "missing chunk" ? undefined : "tampered-after-hydration");
+      retained.close();
+      expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+      expect(localStorage.getItem(key)).not.toBe(next);
+    },
+  );
+
+  it("retains ordinary save behavior for an intact hydrated physical chunked workspace", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const original = JSON.stringify({
+      state: { profile: { userId: "jd" }, content: "x".repeat(1_050_000) },
+      version: 34,
+    });
+    const newer = JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: "ordinary-valid-save" }] },
+      version: 34,
+    });
+    await localVaultStorage.setItem(key, original);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(original);
+    const db = await openCurrentVault();
+    const manifest = JSON.parse((await getDirect(db, key))!) as {
+      chunkPrefix: string; chunkCount: number;
+    };
+    db.close();
+    expect(manifest.chunkCount).toBeGreaterThan(0);
+    const reads = vi.spyOn(IDBObjectStore.prototype, "get");
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, newer);
+    await flushLocalVaultWrites();
+    const physicalReads = reads.mock.calls.filter(([name]) =>
+      typeof name === "string" && name.startsWith(`${manifest.chunkPrefix}:`)).length;
+    reads.mockRestore();
+    // The primary and same-owner scoped records may point to the identical
+    // manifest. A safe preflight should not triple-read identical chunks.
+    expect(physicalReads).toBe(manifest.chunkCount);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(await localVaultStorage.getItem(key)).toBe(newer);
+  });
+
+  it.each(["missing chunk", "altered chunk"] as const)(
     "preserves a damaged physical vault during marked fallback promotion (%s)",
     async (fault) => {
       const key = STORAGE_KEYS.persistedState;
