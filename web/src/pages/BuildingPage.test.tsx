@@ -182,4 +182,15 @@ describe("Building preview", () => {
     expect(status.textContent).toBe(`Showing ${SYSTEM_PREVIEWS.length} systems (all statuses).`);
   });
 
+  it("gives each keyboard-focusable system preview a named group tied to its heading", () => {
+    render(<BuildingPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
+    for (const item of SYSTEM_PREVIEWS) {
+      const card = screen.getByRole("group", { name: item.name, exact: true });
+      expect(card.classList.contains("system-card")).toBe(true);
+      expect(card.tabIndex).toBe(0);
+      expect(card.getAttribute("aria-labelledby")).toBe(within(card).getByRole("heading", { name: item.name }).id);
+    }
+  });
+
 });
