@@ -605,7 +605,7 @@ describe("curriculum evidence coverage", () => {
         "NCRS Lecture 01 Heart Failure [Lecture]",
       ].join("\n")),
       doc("NCRS-plan-collision-B.txt", [
-        "T4 - NCRS - Lectures:",
+        "T4 - NCRS - Lectures Part B:",
         "Week 3:",
         "NCRS Lecture 01 Arrhythmias [Lecture]",
       ].join("\n")),
@@ -634,7 +634,7 @@ describe("curriculum evidence coverage", () => {
   it("keeps two independently keyed source activities installed without changing learner progress", () => {
     const sources = [
       doc("NCRS-unique-plan-A.txt", "T4 - NCRS - Lectures:\nWeek 3:\nNCRS Lecture 01 Heart Failure [Lecture]"),
-      doc("NCRS-unique-plan-B.txt", "T4 - NCRS - Lectures:\nWeek 3:\nNCRS Lecture 02 Arrhythmias [Lecture]"),
+      doc("NCRS-unique-plan-B.txt", "T4 - NCRS - Lectures Part B:\nWeek 3:\nNCRS Lecture 02 Arrhythmias [Lecture]"),
     ];
     const saved = [
       row("Term 4/PPM 500/NCRS/Week 3", "NCRS Lecture 01 Heart Failure", "ncrs|lecture|1"),
