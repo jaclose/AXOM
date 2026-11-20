@@ -50,9 +50,9 @@ test("Building tabs and Next horizon retain keyboard focus and semantics on desk
     const nextHorizon = page.locator(".building-horizon").filter({
       has: page.getByRole("heading", { name: "Next", exact: true }),
     });
-    const openNext = nextHorizon.getByRole("button", { name: /^See \d+ next roadmap systems$/i });
-    await expect(page.getByRole("button", { name: /^See \d+ later roadmap systems$/i })).toHaveCount(1);
-    await expect(page.getByRole("button", { name: /^See \d+ next roadmap systems$/i })).toHaveCount(1);
+    const openNext = nextHorizon.getByRole("button", { name: /^See \d+ systems in Next roadmap$/i });
+    await expect(page.getByRole("button", { name: /^See \d+ systems in Later roadmap$/i })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /^See \d+ systems in Next roadmap$/i })).toHaveCount(1);
     await openNext.focus();
     await expect(openNext).toBeFocused();
     await openNext.press("Enter");
