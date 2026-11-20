@@ -185,6 +185,29 @@ function readChunkedValueManifest(value: string | null | undefined): ChunkedValu
   }
 }
 
+/** A malformed physical chunk manifest must never become an ordinary
+ * hydrated workspace or an unverified logical export. Retain its bytes for
+ * manual recovery; this classifier never repairs or deletes storage.
+ *
+ * Ordinary learner JSON may legitimately mention the format token within
+ * notes/questions. Only a root object declaring the manifest format counts.
+ */
+function isMalformedChunkedValueManifest(value: string): boolean {
+  if (!value.includes(CHUNKED_VALUE_FORMAT)) return false;
+  // Generated manifests begin with "format". Avoid parsing multi-megabyte
+  // learner workspaces merely to classify a malformed physical record.
+  const canonicalPrefix = /^\s*\{\s*"format"\s*:\s*"axom-local-vault-chunks"/;
+  if (value.length > 8192) return canonicalPrefix.test(value);
+  try {
+    const parsed = JSON.parse(value) as { format?: unknown } | null;
+    return parsed !== null && typeof parsed === "object"
+      && !Array.isArray(parsed) && parsed.format === CHUNKED_VALUE_FORMAT;
+  } catch {
+    // A truncated canonical manifest is still physical recovery material.
+    return canonicalPrefix.test(value);
+  }
+}
+
 function chunkPrefix(name: string, userId: string): string {
   // Physical chunk keys MUST be injective over stable profile identities.
   // The previous 32-bit fingerprint can collide for different user IDs,
@@ -246,7 +269,12 @@ export function resolveVaultSnapshotRecord(
   const stored = records[key];
   if (typeof stored !== "string") return undefined;
   const manifest = readChunkedValueManifest(stored);
-  if (!manifest) return stored;
+  if (!manifest) {
+    if (isMalformedChunkedValueManifest(stored)) {
+      throw new Error("The local vault workspace has an invalid chunk manifest.");
+    }
+    return stored;
+  }
   const chunks: string[] = [];
   for (let index = 0; index < manifest.chunkCount; index += 1) {
     const chunk = records[`${manifest.chunkPrefix}:${index}`];
@@ -742,6 +770,12 @@ async function readVaultRecord(
       if (typeof primary.result !== "string") return;
       const manifest = readChunkedValueManifest(primary.result);
       if (!manifest) {
+        // Never throw out of an IndexedDB event handler. Reject through the
+        // transaction completion path while preserving the stored bytes.
+        if (isMalformedChunkedValueManifest(primary.result)) {
+          failure ??= new Error("The local vault workspace has an invalid chunk manifest.");
+          return;
+        }
         result = primary.result;
         return;
       }
