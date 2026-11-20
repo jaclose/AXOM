@@ -74,6 +74,24 @@ const normalizedCourse = (course: string): string =>
   course.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 /**
+ * The coverage read model must apply the same explicit-term integrity rule as
+ * the install preview. A heading and @academic-term are separate source claims:
+ * neither may silently override the other to manufacture scheduled activities.
+ */
+function sourceTermEvidence(section: CourseTemplateSection): { term?: string; problem?: string } {
+  const declarations = [section.term, section.context?.academicTerm]
+    .filter((value): value is string => Boolean(value?.trim()));
+  const identities = declarations.map(normalizedTerm);
+  if (identities.some((term) => !/^term[1-5]$/.test(term))) {
+    return { problem: `${section.sourceName ?? section.title}: Unsupported explicit academic term (${declarations.join(" / ")}); review source identity.` };
+  }
+  if (new Set(identities).size > 1) {
+    return { problem: `${section.sourceName ?? section.title}: Conflicting explicit academic terms (${declarations.join(" / ")}); review source identity.` };
+  }
+  return { term: identities[0] };
+}
+
+/**
  * Explicit course paths win. An old Term/Module path is only attributable
  * when exactly one course owns that module in this term. An arbitrary path
  * suffix (Unsorted, Custom, etc.) does not become the module itself.
@@ -134,17 +152,31 @@ export function buildCurriculumCoverage(
         const termOwners = moduleOwners.filter((entry) =>
           normalizedTerm(entry.term) === normalizedTerm(term.name));
         const sourceSections = templateModules.get(key) ?? [];
-        // An undated module-only file is safe to assign only when the outline
-        // has one owner. A source with its own explicit term can disambiguate
-        // different terms, but not two courses within that same term.
-        const sections = sourceSections.filter((section) => termOwners.length === 1
-          && (section.term
-            ? normalizedTerm(section.term) === normalizedTerm(term.name)
-            : moduleOwners.length === 1));
+        const sourceEvidence = sourceSections.map((section) => ({
+          section, identity: sourceTermEvidence(section),
+        }));
+        // The install preview holds the whole module when its saved files
+        // disagree about an explicit term, even if each file is valid alone.
+        const declaredTerms = new Set(sourceEvidence.flatMap(({ identity }) =>
+          identity.term ? [identity.term] : []));
+        const heldSourceProblems = [
+          ...sourceEvidence.flatMap(({ identity }) => identity.problem ? [identity.problem] : []),
+          ...(declaredTerms.size > 1
+            ? ["Conflicting explicit academic terms across source files; review source identity."]
+            : []),
+        ];
+        // A held module remains saved in the vault, but its rows and weeks
+        // cannot inflate the coverage matrix. Undated module-only files still
+        // require one outline owner; metadata is as binding as the heading.
+        const sections = sourceEvidence.filter(({ identity }) => termOwners.length === 1
+          && !heldSourceProblems.length && (identity.term
+            ? identity.term === normalizedTerm(term.name)
+            : moduleOwners.length === 1)).map(({ section }) => section);
         const ambiguous = sourceSections.length > 0 && sections.length === 0
-          && termOwners.length > 0 && moduleOwners.length > 1
-          && sourceSections.some((section) => !section.term
-            || normalizedTerm(section.term) === normalizedTerm(term.name));
+          && termOwners.length > 0
+          && (heldSourceProblems.length > 0 || (moduleOwners.length > 1
+            && sourceEvidence.some(({ identity }) => !identity.term
+              || identity.term === normalizedTerm(term.name))));
         if (sections.length) mappedTemplateModuleKeys.add(key);
         const plan = sections.length
           ? planCourseTemplate(sections, { term: term.name, course: course.code, moduleName: module })
@@ -179,7 +211,7 @@ export function buildCurriculumCoverage(
           statedWeeks: [...new Set(available.filter((row) => row.weekBasis === "stated").flatMap((row) => row.week ? [row.week] : []))].sort((a, b) => a - b),
           inferredWeeks: [...new Set(available.filter((row) => row.weekBasis === "spread" || row.weekBasis === "group-order").flatMap((row) => row.week ? [row.week] : []))].sort((a, b) => a - b),
           unscheduledItems: available.filter((row) => row.week === undefined).length,
-          sourceProblems: plan?.problems ?? [],
+          sourceProblems: [...(plan?.problems ?? []), ...heldSourceProblems],
           questionCollections: indexedQuestions?.collections ?? 0,
           storedQuestions: indexedQuestions?.storedQuestions ?? 0,
           readyQuestions: indexedQuestions?.readyQuestions ?? 0,
