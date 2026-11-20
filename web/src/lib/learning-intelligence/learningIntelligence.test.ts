@@ -123,6 +123,57 @@ describe("answer-readiness and historical analytics integrity", () => {
   });
 });
 
+
+describe("current scoring after answer-key repair", () => {
+  it("holds a formerly correct or guessed answer whose saved choice contradicts the now-ready key", () => {
+    const repaired = question({
+      correctKey: "B",
+      attempts: [
+        attempt(1, "correct", { answerKey: "A", certainty: "sure" }),
+        attempt(2, "guessed", { answerKey: "A", certainty: "guess" }),
+      ],
+    });
+    const original = JSON.stringify(repaired);
+    const events = attemptEvents([repaired]);
+    expect(events.map((event) => [event.exposure, event.answerKey, event.correctKey, event.correct])).toEqual([
+      [1, "A", "B", undefined],
+      [2, "A", "B", undefined],
+    ]);
+    expect(buildPatternReport([repaired]).totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(repaired)).toBe(original);
+  });
+
+  it("holds an old incorrect flag when its saved choice is the current trusted answer", () => {
+    const repaired = question({
+      correctKey: "B",
+      attempts: [attempt(1, "incorrect", { answerKey: "B", certainty: "sure" })],
+    });
+    const original = JSON.stringify(repaired);
+    expect(attemptEvents([repaired])[0].correct).toBeUndefined();
+    const report = buildPatternReport([repaired]);
+    expect(report.sureAndWrong).toEqual([]);
+    expect(report.confusionPairs).toEqual([]);
+    expect(report.totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(repaired)).toBe(original);
+  });
+
+  it("retains coherent saved outcomes, exposure order and legacy status-only attempts", () => {
+    const coherent = question({
+      correctKey: "B",
+      attempts: [
+        attempt(3, "guessed", { answerKey: "B" }),
+        attempt(1, "incorrect", { answerKey: "A" }),
+        attempt(2, "correct", { answerKey: "B" }),
+        attempt(4, "correct", { answerKey: undefined }),
+      ],
+    });
+    expect(attemptEvents([coherent]).map((event) => [event.exposure, event.correct])).toEqual([
+      [1, false], [2, true], [3, true], [4, true],
+    ]);
+    expect(buildPatternReport([coherent]).totals.all).toEqual({ attempts: 4, correct: 3, accuracy: 75 });
+  });
+});
+
 describe("reading a question from its wording", () => {
   it("separates a direct recall question from a case with a hidden step", () => {
     const recall = questionFeatures(question());
