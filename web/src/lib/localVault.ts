@@ -417,6 +417,7 @@ export async function inspectLocalVaultRecoveryCopies(
   const name = STORAGE_KEYS.persistedState;
   const copies: LocalVaultRecoveryCopy[] = [];
   let indexedDbReadable = false;
+  let primaryIndexedDbReadFailed = false;
   let fallbackReadable = false;
   let unverifiedOrOtherOwnerCopyPresent = false;
 
@@ -436,6 +437,7 @@ export async function inspectLocalVaultRecoveryCopies(
   } catch {
     // An unavailable or damaged primary vault is not proof that the owner's
     // separately retained scoped record is empty.
+    primaryIndexedDbReadFailed = true;
   }
 
   // Switching A -> B changes the generic active vault, but A's per-account
@@ -445,6 +447,9 @@ export async function inspectLocalVaultRecoveryCopies(
   try {
     const scoped = await readVaultRecord(scopedStateKey(name, expectedProfileUserId), openVaultForInspection);
     indexedDbReadable = true;
+    // A readable scoped copy does not establish that an unreadable generic
+    // manifest contained no other unique edits or owner records.
+    if (primaryIndexedDbReadFailed) unverifiedOrOtherOwnerCopyPresent = true;
     if (scoped !== undefined) {
       if (stablePersistedUserId(scoped) === expectedProfileUserId) {
         // The primary and scoped copies can be different revisions of the
