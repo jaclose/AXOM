@@ -267,6 +267,56 @@ describe("difficulty", () => {
   });
 });
 
+describe("verified current misses versus historical error classifications", () => {
+  it("does not call five review-held, self-classified attempts currently scored misses", () => {
+    const held = Array.from({ length: 5 }, () => question({
+      needsReview: true,
+      attempts: [attempt(1, "incorrect", { errorType: "missed-clue" })],
+    }));
+    const original = JSON.stringify(held);
+    const report = buildPatternReport(held);
+    expect(report.totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(report.findings.filter((finding) => finding.kind === "error-pattern")).toEqual([]);
+    expect(JSON.stringify(held)).toBe(original);
+  });
+
+  it("excludes five saved incorrect flags contradicted by the now-reviewed answer key", () => {
+    const repaired = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(1, "incorrect", { answerKey: "B", errorType: "missed-clue" })],
+    }));
+    const original = JSON.stringify(repaired);
+    expect(attemptEvents(repaired).every((event) => event.correct === undefined)).toBe(true);
+    const report = buildPatternReport(repaired);
+    expect(report.totals.all.attempts).toBe(0);
+    expect(report.findings.some((finding) => finding.kind === "error-pattern")).toBe(false);
+    expect(JSON.stringify(repaired)).toBe(original);
+  });
+
+  it("counts only verified incorrect error marks, not held or correct history", () => {
+    const currentMisses = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(1, "incorrect", { errorType: "missed-clue" })],
+    }));
+    const held = Array.from({ length: 5 }, () => question({
+      needsReview: true,
+      attempts: [attempt(1, "incorrect", { errorType: "missed-clue" })],
+    }));
+    const correct = Array.from({ length: 3 }, () => question({
+      attempts: [attempt(1, "correct", { errorType: "missed-clue" })],
+    }));
+    const records = [...held, ...correct, ...currentMisses];
+    const original = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 8, correct: 3, accuracy: 38 });
+    expect(report.findings.find((finding) => finding.kind === "error-pattern")).toMatchObject({
+      title: "100% of the misses you explained: missed a clue",
+      basis: "observed",
+      sample: 5,
+      questionIds: currentMisses.map((item) => item.id),
+    });
+    expect(JSON.stringify(records)).toBe(original);
+  });
+});
+
 describe("pattern findings", () => {
   it("says nothing, and waits for nothing, before any answer exists", () => {
     const report = buildPatternReport([question(), question()]);
