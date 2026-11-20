@@ -416,6 +416,63 @@ describe("curriculum evidence coverage", () => {
     });
   }
 
+
+  for (const [kind, body] of [
+    [
+      "contradictory stated weeks in one activity group",
+      "T4 - FTCM - Lectures:\nFTCM Lecture 01 Week 2 Alpha [Lecture]\nFTCM Lecture 02 Week 5 Beta [Lecture]",
+    ],
+    [
+      "incompatible week offsets in separate groups",
+      "T4 - FTCM - Lectures:\nFTCM Lecture 01 Week 2 Alpha [Lecture]\n\nFTCM Lecture 02 Week 5 Beta [Lecture]",
+    ],
+  ] as const) {
+    it("holds planner-invalid saved templates with " + kind + " instead of counting their weeks", () => {
+      const source = doc("FTCM-week-chronology.txt", body);
+      const installed = row("Term 4/FTCM/Week 2", "Existing personal activity");
+      const before = JSON.stringify({ source, installed });
+      const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [source], [installed]);
+      const ftcm = coverage.terms[3].modules.find((entry) => entry.module === "FTCM")!;
+      const preview = previewCurriculumTemplateInstallation(
+        SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [installed] },
+      );
+
+      expect(preview.modules).toHaveLength(0);
+      expect(preview.create).toBe(0);
+      expect(preview.issues.some((issue) => /explicit week labels conflict/i.test(issue.reason))).toBe(true);
+      expect(ftcm).toMatchObject({
+        templateFiles: 0, availableTemplateItems: 0, installedTemplateItems: 0,
+        notInstalled: 0, installedRows: 1, statedWeeks: [], inferredWeeks: [],
+        mapping: "ambiguous",
+      });
+      expect(ftcm.sourceProblems.join(" ")).toMatch(/explicit week labels conflict/i);
+      expect(coverage.unmappedTemplateModules).toContain("FTCM");
+      expect(coverage.sourceItems).toBe(0);
+      expect(JSON.stringify({ source, installed })).toBe(before);
+    });
+  }
+
+  it("keeps deliberately nonconsecutive source anchors eligible under explicit week policy", () => {
+    const source = doc("FTCM-explicit-week-policy.txt", [
+      "T4 - FTCM - Lectures:",
+      "@week-policy: explicit",
+      "FTCM Lecture 01 Week 2 Alpha [Lecture]",
+      "FTCM Lecture 02 Week 5 Beta [Lecture]",
+    ].join("\n"));
+    const coverage = buildCurriculumCoverage(SGU_CURRICULUM, [source], []);
+    const ftcm = coverage.terms[3].modules.find((entry) => entry.module === "FTCM")!;
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [source], { terms: [], courses: [], tracker: [] },
+    );
+    expect(preview.issues).toHaveLength(0);
+    expect(preview.modules).toHaveLength(1);
+    expect(preview.modules[0].sourceActivities).toBe(2);
+    expect(ftcm).toMatchObject({
+      templateFiles: 1, availableTemplateItems: 2, statedWeeks: [2, 5],
+      mapping: "outline-match", sourceProblems: [],
+    });
+  });
+
   it("uses current template revisions rather than summing historical source versions", () => {
     const first = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 Old [Lecture]", "2026-01-01");
     const revised = doc("NCRS.txt", "NCRS - Lectures:\n\nNCRS Lecture 01 New [Lecture]\nNCRS Lecture 02 More [Lecture]", "2026-10-14");
