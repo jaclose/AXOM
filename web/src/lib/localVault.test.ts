@@ -204,6 +204,102 @@ describe("IndexedDB-first local vault", () => {
     },
   );
 
+  it.each(["missing chunk", "altered chunk"] as const)(
+    "preserves a damaged physical vault during marked fallback promotion (%s)",
+    async (fault) => {
+      const key = STORAGE_KEYS.persistedState;
+      const markerKey = `${key}:fallback-newer`;
+      const snapshot = (label: string, content = "") => JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: label }], content },
+        version: 34,
+      });
+      const physical = snapshot("damaged-physical-unique-record", "x".repeat(1_050_000));
+      const acknowledged = snapshot("acknowledged-offline-unique-record");
+      await localVaultStorage.setItem(key, physical);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(physical);
+
+      const original = await openCurrentVault();
+      const rawManifest = await getDirect(original, key);
+      const manifest = JSON.parse(rawManifest!) as { chunkPrefix: string; chunkCount: number; fingerprint: string };
+      expect(manifest.chunkCount).toBeGreaterThan(0);
+      const chunkKey = `${manifest.chunkPrefix}:0`;
+      original.close();
+
+      vi.stubGlobal("indexedDB", undefined);
+      const acknowledgedCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, acknowledged);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(acknowledgedCheckpoint)).not.toThrow();
+      const marker = localStorage.getItem(markerKey);
+      expect(marker).not.toBeNull();
+      expect(JSON.parse(marker!)).toMatchObject({ baseFingerprint: manifest.fingerprint });
+
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      const damagedDb = await openCurrentVault();
+      if (fault === "missing chunk") await deleteDirect(damagedDb, chunkKey);
+      else await putDirect(damagedDb, chunkKey, "physically-corrupted-chunk");
+      damagedDb.close();
+      resetLocalVaultRuntimeForTests();
+
+      // An acknowledged fallback is still recoverable, but its marker cannot
+      // establish that the declared IDB fingerprint matches actual raw chunks.
+      expect(await localVaultStorage.getItem(key)).toBe(acknowledged);
+      const inspected = await openCurrentVault();
+      try {
+        expect(await getDirect(inspected, key)).toBe(rawManifest);
+        expect(await getDirect(inspected, chunkKey))
+          .toBe(fault === "missing chunk" ? undefined : "physically-corrupted-chunk");
+      } finally {
+        inspected.close();
+      }
+      expect(localStorage.getItem(key)).toBe(acknowledged);
+      expect(localStorage.getItem(markerKey)).toBe(marker);
+
+      const postConflict = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("unreviewed-post-corruption-edit"));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(postConflict)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(localStorage.getItem(key)).toBe(acknowledged);
+      const verified = await openCurrentVault();
+      expect(await getDirect(verified, key)).toBe(rawManifest);
+      verified.close();
+    },
+  );
+
+  it("promotes an acknowledged fallback only after verifying an intact chunked base", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string, content = "") => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }], content },
+      version: 34,
+    });
+    const physical = snapshot("original-chunked-workspace", "x".repeat(1_050_000));
+    const newer = snapshot("acknowledged-offline-workspace");
+    await localVaultStorage.setItem(key, physical);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(physical);
+    const db = await openCurrentVault();
+    const physicalManifest = await getDirect(db, key);
+    expect(JSON.parse(physicalManifest!).chunkCount).toBeGreaterThan(0);
+    db.close();
+
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, newer);
+    await flushLocalVaultWrites();
+    const marker = localStorage.getItem(`${key}:fallback-newer`);
+    expect(marker).not.toBeNull();
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(newer);
+    const promoted = await openCurrentVault();
+    expect(await getDirect(promoted, key)).toBe(newer);
+    promoted.close();
+    // Acknowledged browser bytes are retained for cross-tab recovery.
+    expect(localStorage.getItem(key)).toBe(newer);
+    expect(localStorage.getItem(`${key}:fallback-newer`)).toBe(marker);
+  });
+
   it("prevents a stale second runtime from replacing a newer workspace", async () => {
     const key = STORAGE_KEYS.persistedState;
     const largeLibraryState = "source review ".repeat(90_000);
