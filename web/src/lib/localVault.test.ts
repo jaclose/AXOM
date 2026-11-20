@@ -546,6 +546,19 @@ describe("IndexedDB-first local vault", () => {
       version: 34,
     });
 
+
+    it("does not create an IndexedDB database when inspecting a missing vault", async () => {
+      const before = await fakeIndexedDb.databases();
+      expect(before.some(database => database.name === STORAGE_KEYS.vaultDb)).toBe(false);
+      const result = await inspectLocalVaultRecoveryCopies("jd");
+      expect(result.indexedDbReadable).toBe(false);
+      expect(result.fallbackReadable).toBe(true);
+      expect(result.copies).toEqual([]);
+      const after = await fakeIndexedDb.databases();
+      expect(after.some(database => database.name === STORAGE_KEYS.vaultDb)).toBe(false);
+      expect(values.size).toBe(0);
+    });
+
     it("reports two divergent same-owner copies without writing or promoting either", async () => {
       const original = snapshot("jd", "base");
       const offline = snapshot("jd", "acknowledged-offline");
