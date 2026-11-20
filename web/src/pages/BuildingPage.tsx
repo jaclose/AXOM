@@ -124,7 +124,7 @@ export function BuildingPage() {
                   <ul className="building-horizon-list">
                     {items.map((item) => <li key={item.id}>{item.name}</li>)}
                   </ul>
-                  <button type="button" className="building-horizon-link" aria-label={`See ${items.length} ${horizon.title.toLowerCase()} roadmap system${items.length === 1 ? "" : "s"}`} onClick={() => openHorizon(horizon)}>
+                  <button type="button" className="building-horizon-link" aria-label={`See ${items.length} system${items.length === 1 ? "" : "s"} in ${horizon.title} roadmap`} onClick={() => openHorizon(horizon)}>
                     See {items.length} system{items.length === 1 ? "" : "s"} <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
                   </button>
                 </GlassCard>
