@@ -408,8 +408,20 @@ export type LocalVaultUnverifiedScopedFallback = Readonly<{
   value: string;
 }>;
 
+/** Reasons for a manual recovery review, not proof that any unverified bytes
+ * belong to the signed-in learner. Only the caller can authenticate a session. */
+export type LocalVaultRecoveryReviewReason =
+  | "trusted-copies-diverge"
+  | "unverified-owner-scoped-copy"
+  | "other-owner-or-unverifiable-bytes";
+
 export type LocalVaultRecoveryInspection = Readonly<{
   copies: readonly LocalVaultRecoveryCopy[];
+  /** Exhaustive observed reasons, never a command to restore or delete data. */
+  reviewReasons: readonly LocalVaultRecoveryReviewReason[];
+  /** An explicit user decision is needed before an eventual recovery/export UI
+   * treats the observed copies as interchangeable. Does NOT grant authorization. */
+  requiresExplicitReview: boolean;
   unverifiedScopedFallback: LocalVaultUnverifiedScopedFallback | null;
   indexedDbReadable: boolean;
   fallbackReadable: boolean;
@@ -527,14 +539,25 @@ export async function inspectLocalVaultRecoveryCopies(
     }
   }
 
+  // A trusted-only "divergent=false" does not mean the owner's unverified
+  // scoped fallback has no unique bytes. Keep the trusted divergence contract
+  // unchanged, but make competing/unverifiable evidence impossible to mistake
+  // for a safe, automatically reconcilable single copy.
+  const divergent = copies.length > 1 && copies.some(copy => copy.value !== copies[0].value);
+  const reviewReasons: LocalVaultRecoveryReviewReason[] = [];
+  if (divergent) reviewReasons.push("trusted-copies-diverge");
+  if (unverifiedScopedFallback !== null) reviewReasons.push("unverified-owner-scoped-copy");
+  if (unverifiedOrOtherOwnerCopyPresent) reviewReasons.push("other-owner-or-unverifiable-bytes");
+
   return {
     copies,
     unverifiedScopedFallback,
     indexedDbReadable,
     fallbackReadable,
     unverifiedOrOtherOwnerCopyPresent,
-    // Fingerprints are diagnostics, not cryptographic equality evidence.
-    divergent: copies.length > 1 && copies.some(copy => copy.value !== copies[0].value),
+    divergent,
+    reviewReasons,
+    requiresExplicitReview: reviewReasons.length > 0,
   };
 }
 
