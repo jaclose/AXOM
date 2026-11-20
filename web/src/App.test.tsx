@@ -60,6 +60,70 @@ afterEach(() => {
 });
 
 describe("post-global-guide promise flow", () => {
+  it("boots cloud authentication during cold first-run without borrowing another account's draft", () => {
+    const originalInit = useAccount.getState().init;
+    const startAuth = vi.fn();
+    const seed = makeSeed();
+    seed.profile.onboarded = false;
+    seed.profile.tourDone = undefined;
+    useStore.setState(seed);
+    const legacy = JSON.stringify({ version: 2, mode: "rerun", name: "Previous account", path: "premed", focus: "mcat", step: 1 });
+    localStorage.setItem("axom.setup.v2", legacy);
+    useAccount.setState({ phase: "loading", user: null, init: startAuth });
+    try {
+      render(<App />);
+      // No AccountSyncWatcher is mounted in first-run setup. App itself must
+      // start the idempotent SDK INITIAL_SESSION subscription.
+      expect(startAuth).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Welcome to AXOM")).toBeTruthy();
+      expect(screen.queryByDisplayValue("Previous account")).toBeNull();
+      expect(useStore.getState().profile.onboarded).toBe(false);
+
+      act(() => useAccount.setState({ phase: "signed-out", user: null }));
+      fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+      const { profile, terms, courses } = useStore.getState();
+      expect(profile.onboarded).toBe(true);
+      expect(profile.dailySuccess?.requirements.length).toBeGreaterThan(0);
+      expect(terms.length).toBeGreaterThan(0);
+      expect(courses.length).toBeGreaterThan(0);
+      expect(localStorage.getItem("axom.setup.v2")).toBe(legacy);
+    } finally {
+      useAccount.setState({ init: originalInit });
+    }
+  });
+
+  it("waits for a delayed signed-in identity before resuming only that owner's first-run draft", () => {
+    const originalInit = useAccount.getState().init;
+    const startAuth = vi.fn();
+    const seed = makeSeed();
+    seed.profile.onboarded = false;
+    seed.profile.tourDone = undefined;
+    useStore.setState(seed);
+    const deviceKey = `axom.setup.v2.scoped.${encodeURIComponent("device")}`;
+    const ownerKey = `axom.setup.v2.scoped.${encodeURIComponent("account:owner-a")}`;
+    const deviceDraft = JSON.stringify({ version: 2, mode: "first-run", step: 0, name: "Guest only", path: "sgu", tools: ["anki"] });
+    localStorage.setItem(deviceKey, deviceDraft);
+    localStorage.setItem(ownerKey, JSON.stringify({ version: 2, mode: "first-run", step: 0, name: "Owner A", path: "sgu", tools: ["lectures"] }));
+    useAccount.setState({ phase: "loading", user: null, init: startAuth });
+    try {
+      render(<App />);
+      expect(startAuth).toHaveBeenCalledTimes(1);
+      expect(screen.queryByDisplayValue("Guest only")).toBeNull();
+      expect(screen.queryByDisplayValue("Owner A")).toBeNull();
+      expect(useStore.getState().profile.onboarded).toBe(false);
+
+      act(() => useAccount.setState({
+        phase: "signed-in",
+        user: { id: "owner-a", email: "a@example.test", displayName: "Owner A", emailConfirmed: true },
+      }));
+      expect(screen.getByDisplayValue("Owner A")).toBeTruthy();
+      expect(localStorage.getItem(deviceKey)).toBe(deviceDraft);
+      expect(localStorage.getItem(ownerKey)).toContain("Owner A");
+    } finally {
+      useAccount.setState({ init: originalInit });
+    }
+  });
+
   it("does not let another profile's legacy rerun draft bypass a new learner's first-run seeding", () => {
     // A signed-in learner's old unbound rerun draft survives in the same browser origin.
     localStorage.setItem("axom.setup.v2", JSON.stringify({
