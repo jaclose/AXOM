@@ -186,7 +186,7 @@ describe("Building preview", () => {
     render(<BuildingPage />);
     fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
     for (const item of SYSTEM_PREVIEWS) {
-      const card = screen.getByRole("group", { name: item.name, exact: true });
+      const card = screen.getByRole("group", { name: item.name });
       expect(card.classList.contains("system-card")).toBe(true);
       expect(card.tabIndex).toBe(0);
       expect(card.getAttribute("aria-labelledby")).toBe(within(card).getByRole("heading", { name: item.name }).id);
