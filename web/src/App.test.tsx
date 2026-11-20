@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { makeSeed } from "./lib/seed";
 import { useStore } from "./lib/store";
+import { useAccount } from "./lib/account/accountStore";
 import { useUi } from "./lib/uiStore";
 import { GUIDED_TOUR_STEPS } from "./components/shell/GuidedTour";
 import * as localVault from "./lib/localVault";
@@ -35,6 +36,7 @@ beforeEach(() => {
   seed.profile.promise = undefined;
   seed.profile.promisePromptStatus = undefined;
   useStore.setState(seed);
+  useAccount.setState({ phase: "signed-out", user: null });
   useUi.setState({ settingsRequest: null, onboardingRequested: false, journalDay: null });
   communicationsMocks.request.mockReset();
   communicationsMocks.remote.data = null;
@@ -58,6 +60,30 @@ afterEach(() => {
 });
 
 describe("post-global-guide promise flow", () => {
+  it("does not let another profile's legacy rerun draft bypass a new learner's first-run seeding", () => {
+    // A signed-in learner's old unbound rerun draft survives in the same browser origin.
+    localStorage.setItem("axom.setup.v2", JSON.stringify({
+      version: 2, mode: "rerun", name: "Account A", path: "premed", focus: "mcat",
+      step: 2, tools: ["anki"],
+    }));
+    const seed = makeSeed();
+    seed.profile.onboarded = false;
+    seed.profile.tourDone = undefined;
+    useStore.setState(seed);
+
+    render(<App />);
+    expect(screen.getByText("Welcome to AXOM")).toBeTruthy();
+    expect(screen.queryByText("Update your setup")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    const { profile, terms, courses } = useStore.getState();
+    expect(profile.onboarded).toBe(true);
+    expect(profile.dailySuccess?.requirements.length).toBeGreaterThan(0);
+    expect(terms.length).toBeGreaterThan(0);
+    expect(courses.length).toBeGreaterThan(0);
+    // Do not erase an unowned legacy draft while preventing automatic adoption.
+    expect(localStorage.getItem("axom.setup.v2")).toContain("Account A");
+  });
+
   it("offers after the global guide is completed", () => {
     render(<App />);
     for (let step = 0; step < GUIDED_TOUR_STEPS.length - 1; step += 1) {

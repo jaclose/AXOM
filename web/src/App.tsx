@@ -35,12 +35,13 @@ import { useOperatorAccess } from "./lib/operator/hostClient";
 import { canOpenHost } from "./lib/operator/hostAccess";
 import { NotificationActionBridge } from "./components/shell/NotificationActionBridge";
 import { useStore } from "./lib/store";
+import { useAccount } from "./lib/account/accountStore";
 import { useUi } from "./lib/uiStore";
 import { pushToast } from "./lib/toast";
 import { markAppReady, usePageEntrance } from "./lib/presentation";
 import type { StorageMigrationResult } from "./lib/storageMigrations";
 import type { OnboardingDestination, OnboardingMode } from "./lib/onboardingProgress";
-import { readSetupDraftMode } from "./lib/setupPlan";
+import { readSetupDraftMode, setupDraftScope } from "./lib/setupPlan";
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
 
 import { DashboardPage } from "./pages/DashboardPage";
@@ -172,9 +173,16 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       && shouldOfferPromisePrompt(profile);
   });
   const [promiseCutsceneOpen, setPromiseCutsceneOpen] = useState(false);
-  const [setupMode, setSetupMode] = useState<OnboardingMode | null>(() =>
-    readSetupDraftMode() === "rerun" ? "rerun" : null,
-  );
+  const accountPhase = useAccount((state) => state.phase);
+  const accountId = useAccount((state) => state.user?.id);
+  const draftScope = setupDraftScope(accountPhase, accountId);
+  const [setupRequest, setSetupRequest] = useState<{ mode: OnboardingMode; scope: string | null } | null>(() => (
+    useStore.getState().profile.onboarded && readSetupDraftMode(draftScope) === "rerun"
+      ? { mode: "rerun", scope: draftScope }
+      : null
+  ));
+  // Never carry a rerun request into another account, including a fresh B.
+  const setupMode = setupRequest?.scope === draftScope ? setupRequest.mode : null;
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const restoreMenuFocusRef = useRef(false);
   const onboarded = useStore((s) => s.profile.onboarded);
@@ -352,14 +360,14 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     if (!onboardingRequested) return;
     void requestAppTransition(() => {
       setSettings(false);
-      setSetupMode("rerun");
+      setSetupRequest({ mode: "rerun", scope: draftScope });
       useUi.getState().clearOnboardingRequest();
     }).then((completed) => {
       // A failed durability gate leaves the Journal and Settings mounted. Clear
       // the one-shot request so the user can retry Run setup again explicitly.
       if (!completed) useUi.getState().clearOnboardingRequest();
     });
-  }, [onboardingRequested, requestAppTransition]);
+  }, [onboardingRequested, requestAppTransition, draftScope]);
 
   // First visit to a tab this session: its sections settle in (lib/presentation).
   const pageEnter = usePageEntrance(route.split("?")[0]);
@@ -384,7 +392,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
 
   function completeOnboarding(destination: OnboardingDestination) {
     const firstRun = setupMode !== "rerun";
-    setSetupMode(null);
+    setSetupRequest(null);
     go(destination);
     const profile = useStore.getState().profile;
     // Present the Promise only after setup has closed so it never competes with
@@ -440,9 +448,10 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         <DailyRolloverWatcher />
         <UpdateAvailableWatcher />
         <SetupFlow
-          mode={setupMode ?? "first-run"}
+          key={draftScope ?? "identity-unresolved"}
+          mode={onboarded ? (setupMode ?? "first-run") : "first-run"}
           onComplete={completeOnboarding}
-          onCancel={() => setSetupMode(null)}
+          onCancel={() => setSetupRequest(null)}
         />
         <PresentationReady />
         <Toaster />

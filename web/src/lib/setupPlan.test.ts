@@ -5,7 +5,7 @@ import { makeSeed } from "./seed";
 import { useStore } from "./store";
 import {
   applySetup, cardSystemFromTools, dashboardFromChoices, defaultChoices, defaultTargets, focusChoices,
-  readSetupDraft, resolveFocus, workflowFromChoices, writeSetupDraft, type SetupChoices,
+  clearSetupDraft, readSetupDraft, readSetupDraftMode, resolveFocus, setupDraftScope, workflowFromChoices, writeSetupDraft, type SetupChoices,
 } from "./setupPlan";
 
 const TODAY = "2026-09-30";
@@ -94,21 +94,23 @@ describe("applySetup", () => {
 });
 
 describe("draft", () => {
+  const device = setupDraftScope("signed-out", null)!;
+
   it("survives a refresh and drops anything it does not recognize", () => {
-    writeSetupDraft(choices({ step: 1, path: "premed", focus: "mcat", tools: ["anki", "nonsense" as never] }));
-    const restored = readSetupDraft(defaultChoices());
+    writeSetupDraft(choices({ step: 1, path: "premed", focus: "mcat", tools: ["anki", "nonsense" as never] }), "first-run", device);
+    const restored = readSetupDraft(defaultChoices(), "first-run", device);
     expect(restored).toMatchObject({ step: 1, path: "premed", focus: "mcat", tools: ["anki"] });
   });
   it("reports an actual saved draft and preserves the choices after reading", () => {
     const draft = choices({ name: "Saved", step: 2 });
-    expect(writeSetupDraft(draft, "first-run")).toBe(true);
-    expect(readSetupDraft(defaultChoices(), "first-run")).toMatchObject({ name: "Saved", step: 2 });
+    expect(writeSetupDraft(draft, "first-run", device)).toBe(true);
+    expect(readSetupDraft(defaultChoices(), "first-run", device)).toMatchObject({ name: "Saved", step: 2 });
   });
 
   it("does not treat a silently ignored storage write as saved", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {});
-    expect(writeSetupDraft(choices({ name: "not actually persisted" }), "first-run")).toBe(false);
-    expect(readSetupDraft(defaultChoices(), "first-run").name).not.toBe("not actually persisted");
+    expect(writeSetupDraft(choices({ name: "not actually persisted" }), "first-run", device)).toBe(false);
+    expect(readSetupDraft(defaultChoices(), "first-run", device).name).not.toBe("not actually persisted");
     setItem.mockRestore();
   });
 
@@ -117,10 +119,47 @@ describe("draft", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("Quota exceeded", "QuotaExceededError");
     });
-    expect(writeSetupDraft(draft, "first-run")).toBe(false);
-    expect(readSetupDraft(defaultChoices(), "first-run").name).not.toBe("Not yet saved");
+    expect(writeSetupDraft(draft, "first-run", device)).toBe(false);
+    expect(readSetupDraft(defaultChoices(), "first-run", device).name).not.toBe("Not yet saved");
     setItem.mockRestore();
-    expect(writeSetupDraft(draft, "first-run")).toBe(true);
-    expect(readSetupDraft(defaultChoices(), "first-run")).toMatchObject({ name: "Not yet saved", step: 1 });
+    expect(writeSetupDraft(draft, "first-run", device)).toBe(true);
+    expect(readSetupDraft(defaultChoices(), "first-run", device)).toMatchObject({ name: "Not yet saved", step: 1 });
+  });
+
+  it("keeps signed-in A and B drafts separate and does not delete A when B finishes", () => {
+    const a = setupDraftScope("signed-in", "user-A")!;
+    const b = setupDraftScope("signed-in", "user-B")!;
+    expect(writeSetupDraft(choices({ name: "A", step: 2 }), "rerun", a)).toBe(true);
+    expect(readSetupDraftMode(b)).toBeNull();
+    expect(readSetupDraft(defaultChoices(), "rerun", b).name).toBe("");
+    expect(writeSetupDraft(choices({ name: "B", step: 1 }), "first-run", b)).toBe(true);
+    clearSetupDraft(b);
+    expect(readSetupDraftMode(a)).toBe("rerun");
+    expect(readSetupDraft(defaultChoices(), "rerun", a)).toMatchObject({ name: "A", step: 2 });
+    expect(readSetupDraftMode(b)).toBeNull();
+  });
+
+  it("does not adopt a device draft before pending authentication resolves", () => {
+    const guest = choices({ name: "Guest draft", step: 1 });
+    expect(writeSetupDraft(guest, "first-run", device)).toBe(true);
+    const unresolved = setupDraftScope("loading", null);
+    expect(unresolved).toBeNull();
+    expect(setupDraftScope("recovering-password", null)).toBeNull();
+    expect(readSetupDraft(defaultChoices(), "first-run", unresolved).name).not.toBe("Guest draft");
+    expect(writeSetupDraft(choices({ name: "Unattributed" }), "first-run", unresolved)).toBe(false);
+    expect(readSetupDraft(defaultChoices(), "first-run", device)).toMatchObject({ name: "Guest draft", step: 1 });
+    expect(setupDraftScope("unconfigured", null)).toBe("device");
+  });
+
+  it("quarantines unowned legacy bytes and fails closed when a signed-in identity is unknown", () => {
+    const legacy = JSON.stringify({ ...choices({ name: "Legacy A", step: 2 }), mode: "rerun" });
+    localStorage.setItem("axom.setup.v2", legacy);
+    const b = setupDraftScope("signed-in", "user-B");
+    expect(readSetupDraftMode(b)).toBeNull();
+    expect(readSetupDraft(defaultChoices(), "rerun", b).name).not.toBe("Legacy A");
+    expect(setupDraftScope("signed-in", null)).toBeNull();
+    expect(writeSetupDraft(choices({ name: "Unknown" }), "rerun", null)).toBe(false);
+    clearSetupDraft(b);
+    expect(localStorage.getItem("axom.setup.v2")).toBe(legacy);
   });
 });
