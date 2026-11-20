@@ -105,6 +105,13 @@ describe("draft", () => {
     expect(readSetupDraft(defaultChoices(), "first-run")).toMatchObject({ name: "Saved", step: 2 });
   });
 
+  it("does not treat a silently ignored storage write as saved", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {});
+    expect(writeSetupDraft(choices({ name: "not actually persisted" }), "first-run")).toBe(false);
+    expect(readSetupDraft(defaultChoices(), "first-run").name).not.toBe("not actually persisted");
+    setItem.mockRestore();
+  });
+
   it("reports a blocked storage write instead of falsely claiming persistence, and supports retry", () => {
     const draft = choices({ name: "Not yet saved", step: 1 });
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
