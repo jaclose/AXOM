@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
+import { captureVaultWriteObservation, invalidateVaultWrite, invalidateVaultWriteIfUnchanged, markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -186,9 +186,18 @@ function readChunkedValueManifest(value: string | null | undefined): ChunkedValu
 }
 
 function chunkPrefix(name: string, userId: string): string {
-  return `${name}:chunks:${snapshotFingerprint(userId || "local-workspace")}`;
+  // Physical chunk keys MUST be injective over stable profile identities.
+  // The previous 32-bit fingerprint can collide for different user IDs,
+  // causing later saves to overwrite another owner's retained scoped chunks.
+  // Every UTF-16 code unit becomes exactly four hex digits; distinct IDs
+  // and the explicit no-ID namespace cannot alias. Existing v1 manifests
+  // keep their recorded legacy prefix and remain readable without migration.
+  const ownerKey = userId
+    ? "id:" + Array.from({ length: userId.length }, (_, index) =>
+      userId.charCodeAt(index).toString(16).padStart(4, "0")).join("")
+    : "no-id";
+  return `${name}:chunks:owner-v2:${ownerKey}`;
 }
-
 function storedValuePlan(name: string, value: string, userId: string): StoredValuePlan {
   if (!observesWorkspace(name) || value.length <= VAULT_CHUNK_CHARACTERS) {
     return { storedValue: value, chunks: [] };
@@ -206,7 +215,14 @@ function storedValuePlan(name: string, value: string, userId: string): StoredVal
     chunkPrefix: prefix,
     chunkCount: chunks.length,
   };
-  return { storedValue: JSON.stringify(manifest), manifest, chunks };
+  const storedValue = JSON.stringify(manifest);
+  // Recovery readers cap manifest JSON at 4096 characters. A malformed or
+  // excessively long legacy profile ID must fail before the IDB transaction
+  // rather than record a manifest that future reads cannot reconstruct.
+  if (storedValue.length > 4096) {
+    throw new Error("The profile identity is too long for a chunked local workspace.");
+  }
+  return { storedValue, manifest, chunks };
 }
 
 function validateReassembledValue(manifest: ChunkedValueManifest, chunks: readonly string[]): string {
@@ -291,6 +307,31 @@ function assertFallbackStillCurrent(name: string, current: NewerFallbackCopy | n
   }
 }
 
+/** Legacy name slugs are storage locators, not immutable owner identities:
+ * two different names can normalize to the same slug. */
+function stablePersistedUserId(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as { state?: { profile?: { userId?: unknown } } };
+    const id = parsed.state?.profile?.userId;
+    return typeof id === "string" && id.trim() ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Preserve an acknowledged fallback across account changes, including
+ * legacy snapshots whose owner cannot be established by a stable user ID.
+ * Exact-byte retries are harmless; changed unkeyed bytes require recovery. */
+function assertFallbackOwnerUnchanged(name: string, current: NewerFallbackCopy | null, incomingValue: string): void {
+  if (!observesWorkspace(name) || current === null) return;
+  if (current.value === incomingValue) return;
+  const previousId = stablePersistedUserId(current.value);
+  const nextId = stablePersistedUserId(incomingValue);
+  if (previousId !== null && previousId === nextId) return;
+  conflictedWorkspaceKeys.add(name);
+  throw new VaultConflictError();
+}
+
 function fallbackExpectation(copy: NewerFallbackCopy, latchConflict = true): VaultExpectation {
   const fingerprints = copy.baseFingerprint === undefined
     ? [copy.fingerprint]
@@ -340,6 +381,121 @@ function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFa
   } catch {
     return null;
   }
+}
+
+
+/**
+ * Inspect the physical IndexedDB workspace and acknowledged browser fallback
+ * independently, without promoting, hydrating, clearing, or replacing either.
+ * Intended as a read-only prerequisite for an explicit export/recovery flow.
+ *
+ * expectedProfileUserId is an exact privacy filter, NOT authentication.
+ * Callers must obtain this ID from a verified session before exposing raw data.
+ * Legacy name-only records are withheld for manual account-identity review.
+ */
+export type LocalVaultRecoveryCopy = Readonly<{
+  source: "indexeddb" | "indexeddb-scoped" | "local-fallback";
+  fingerprint: string;
+  value: string;
+}>;
+
+export type LocalVaultRecoveryInspection = Readonly<{
+  copies: readonly LocalVaultRecoveryCopy[];
+  indexedDbReadable: boolean;
+  fallbackReadable: boolean;
+  unverifiedOrOtherOwnerCopyPresent: boolean;
+  divergent: boolean;
+}>;
+
+export async function inspectLocalVaultRecoveryCopies(
+  expectedProfileUserId: string,
+): Promise<LocalVaultRecoveryInspection> {
+  if (typeof expectedProfileUserId !== "string" || !expectedProfileUserId.trim()) {
+    throw new Error("A verified stable profile ID is required to inspect workspace recovery copies.");
+  }
+
+  const name = STORAGE_KEYS.persistedState;
+  const copies: LocalVaultRecoveryCopy[] = [];
+  let indexedDbReadable = false;
+  let primaryIndexedDbReadFailed = false;
+  let fallbackReadable = false;
+  let unverifiedOrOtherOwnerCopyPresent = false;
+
+  // Bypass the adapter's fallback selection and conflict latch. A damaged vault
+  // cannot hide a valid offline backup, and a readable vault does not mean
+  // the fallback is redundant.
+  try {
+    const value = await readVaultSnapshot(name, openVaultForInspection);
+    indexedDbReadable = true;
+    if (value !== null) {
+      if (stablePersistedUserId(value) === expectedProfileUserId) {
+        copies.push({ source: "indexeddb", fingerprint: snapshotFingerprint(value), value });
+      } else {
+        unverifiedOrOtherOwnerCopyPresent = true;
+      }
+    }
+  } catch {
+    // An unavailable or damaged primary vault is not proof that the owner's
+    // separately retained scoped record is empty.
+    primaryIndexedDbReadFailed = true;
+  }
+
+  // Switching A -> B changes the generic active vault, but A's per-account
+  // record can still hold unique edits. Inspect that record directly under
+  // the same read-only, no-create guard, rather than trusting the active
+  // pointer or exposing B's generic snapshot as A's recovery data.
+  try {
+    const scoped = await readVaultRecord(scopedStateKey(name, expectedProfileUserId), openVaultForInspection);
+    indexedDbReadable = true;
+    // A readable scoped copy does not establish that an unreadable generic
+    // manifest contained no other unique edits or owner records.
+    if (primaryIndexedDbReadFailed) unverifiedOrOtherOwnerCopyPresent = true;
+    if (scoped !== undefined) {
+      if (stablePersistedUserId(scoped) === expectedProfileUserId) {
+        // The primary and scoped copies can be different revisions of the
+        // same owner. Never choose a winner or discard either here.
+        if (!copies.some(copy => copy.source === "indexeddb" && copy.value === scoped)) {
+          copies.push({ source: "indexeddb-scoped", fingerprint: snapshotFingerprint(scoped), value: scoped });
+        }
+      } else {
+        unverifiedOrOtherOwnerCopyPresent = true;
+      }
+    }
+  } catch {
+    // A corrupted scoped manifest may contain unique bytes; do not claim a
+    // readable primary proves it is redundant. Neither path writes or clears.
+    if (indexedDbReadable) unverifiedOrOtherOwnerCopyPresent = true;
+  }
+
+  const fallbackStore = localFallback();
+  if (fallbackStore) {
+    try {
+      const raw = fallbackStore.getItem(name);
+      const marker = fallbackStore.getItem(fallbackMarkerKey(name));
+      fallbackReadable = true;
+      if (raw !== null || marker !== null) {
+        const copy = newerFallbackCopy(fallbackStore, name);
+        if (copy && stablePersistedUserId(copy.value) === expectedProfileUserId) {
+          copies.push({ source: "local-fallback", fingerprint: copy.fingerprint, value: copy.value });
+        } else {
+          // Do not elevate unmarked/tampered/foreign snapshots into recovery.
+          // Leave their bytes untouched for manual identity/integrity review.
+          unverifiedOrOtherOwnerCopyPresent = true;
+        }
+      }
+    } catch {
+      // Denied browser storage is not equivalent to a missing fallback.
+    }
+  }
+
+  return {
+    copies,
+    indexedDbReadable,
+    fallbackReadable,
+    unverifiedOrOtherOwnerCopyPresent,
+    // Fingerprints are diagnostics, not cryptographic equality evidence.
+    divergent: copies.length > 1 && copies.some(copy => copy.value !== copies[0].value),
+  };
 }
 
 /**
@@ -438,6 +594,37 @@ function openExistingVault(): Promise<IDBDatabase> {
       resolve(req.result);
     };
     req.onerror = () => reject(req.error ?? new Error("Unable to open existing local vault"));
+  });
+}
+
+
+/**
+ * Open an existing vault for inspection only. IndexedDB.open(name) normally
+ * creates a new database when none exists, even for a readonly transaction.
+ * Abort that implicit versionchange transaction so recovery inspection cannot
+ * create a new vault or mask a missing one.
+ */
+function openVaultForInspection(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB is unavailable"));
+      return;
+    }
+    const req = indexedDB.open(DB_NAME);
+    req.onupgradeneeded = () => {
+      req.transaction?.abort();
+    };
+    req.onsuccess = () => {
+      if (!req.result.objectStoreNames.contains(STORE_NAME)) {
+        req.result.close();
+        reject(new Error("The existing local vault has no workspace store."));
+        return;
+      }
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
+    req.onerror = () => reject(req.error ?? new Error("No existing local vault is available to inspect."));
+    req.onblocked = () => reject(new Error("The existing local vault is blocked by another tab."));
   });
 }
 
@@ -550,13 +737,12 @@ async function writeVault(
     let settled = false;
 
     const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
-      // A missing record is a fresh/recreated vault, not a competing revision.
-      // Conflicts only exist when another concrete workspace replaced the one
-      // this runtime hydrated.
+      // Missing data is a competing revision when this tab hydrated a concrete
+      // workspace. Otherwise a stale tab could resurrect another tab's explicit
+      // deletion. A genuinely empty hydrated vault still expects null.
       if (
         expected
-        && typeof current === "string"
-        && !expected.fingerprints.includes(workspaceFingerprint(current))
+        && !expected.fingerprints.includes(workspaceFingerprint(current ?? null))
       ) {
         conflict = new VaultConflictError();
         if (expected.latchConflict !== false && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
@@ -640,75 +826,184 @@ async function writeVault(
   });
 }
 
-// IndexedDB owns the large serialized workspace. localStorage keeps only the
-// tiny active-profile pointer and device preferences; remove the mirrored
-// state, and the marker that called it newer, after a confirmed vault write.
-function clearFallbackCopy(fallbackStore: Storage | null, name: string, userId: string): void {
-  // These optional mirrors must not turn a confirmed IndexedDB write into a
-  // failed save when localStorage is full or unavailable.
+// IndexedDB owns the workspace, but a second tab may write an acknowledged
+// offline fallback while this tab awaits its IndexedDB transaction. Never
+// treat an earlier, successful IDB commit as authority to delete that newer
+// fallback. localStorage has no compare-and-delete transaction, so this
+// conditional cleanup narrows the race but is NOT a cross-tab atomic lock.
+type FallbackCleanupSnapshot = {
+  value: string | null;
+  marker: string | null;
+  pointer: string | null;
+  scoped: string | null;
+};
+
+function captureFallbackCleanup(
+  fallbackStore: Storage | null,
+  name: string,
+  userId: string,
+): FallbackCleanupSnapshot | null {
+  if (!fallbackStore) return null;
   try {
-    fallbackStore?.removeItem(name);
-    fallbackStore?.removeItem(fallbackMarkerKey(name));
-    if (userId) {
-      fallbackStore?.setItem(activeUserKey(name), userId);
-      fallbackStore?.removeItem(scopedStateKey(name, userId));
+    return {
+      value: fallbackStore.getItem(name),
+      marker: fallbackStore.getItem(fallbackMarkerKey(name)),
+      pointer: fallbackStore.getItem(activeUserKey(name)),
+      scoped: userId ? fallbackStore.getItem(scopedStateKey(name, userId)) : null,
+    };
+  } catch {
+    // If the prior state cannot be observed, never clean recovery bytes.
+    return null;
+  }
+}
+
+function clearFallbackCopy(
+  fallbackStore: Storage | null,
+  name: string,
+  userId: string,
+  expected: FallbackCleanupSnapshot | null,
+): void {
+  // An acknowledged workspace fallback may contain the only copy of edits
+  // saved by another tab immediately AFTER the checks below but BEFORE any
+  // removeItem call. Web Storage has no compare-and-delete transaction, and
+  // IndexedDB success cannot authorize deleting bytes written by another tab.
+  // Retain workspace recovery copies until an explicit, user-reviewed recovery
+  // or pruning operation can reconcile their revisions. This is a fail-closed
+  // durability policy: a stale retained marker may require manual reconciliation
+  // before subsequent saves, but must never silently lose unique edits.
+  if (observesWorkspace(name)) {
+    // Preserve the historical lightweight profile locator only when there is
+    // no acknowledged generic fallback to reassign. This is metadata, not
+    // permission to delete a different tab's recovery payload or marker.
+    if (fallbackStore && userId && expected?.value === null && expected.marker === null) {
+      try {
+        if (fallbackStore.getItem(name) === null
+          && fallbackStore.getItem(fallbackMarkerKey(name)) === null
+          && (!fallbackStore.getItem(activeUserKey(name))
+            || fallbackStore.getItem(activeUserKey(name)) === userId)) {
+          fallbackStore.setItem(activeUserKey(name), userId);
+        }
+      } catch { /* Optional locator; never misreport a confirmed IndexedDB save. */ }
     }
-  } catch { /* IndexedDB already holds the durable workspace. */ }
+    return;
+  }
+  // Optional cleanup of non-workspace cache must not make a confirmed IDB save fail.
+  if (!fallbackStore || !expected) return;
+  try {
+    if (
+      fallbackStore.getItem(name) !== expected.value
+      || fallbackStore.getItem(fallbackMarkerKey(name)) !== expected.marker
+      || fallbackStore.getItem(activeUserKey(name)) !== expected.pointer
+      || (userId && fallbackStore.getItem(scopedStateKey(name, userId)) !== expected.scoped)
+    ) return;
+    fallbackStore.removeItem(fallbackMarkerKey(name));
+    fallbackStore.removeItem(name);
+    if (userId) {
+      fallbackStore.setItem(activeUserKey(name), userId);
+      fallbackStore.removeItem(scopedStateKey(name, userId));
+    }
+  } catch { /* Preserve the available fallback if optional cleanup fails. */ }
 }
 
-async function readVaultSnapshot(name: string): Promise<string | null> {
-  const primary = await readVaultRecord(name, openExistingVault);
+async function readVaultSnapshot(
+  name: string,
+  open: () => Promise<IDBDatabase> = openExistingVault,
+): Promise<string | null> {
+  const primary = await readVaultRecord(name, open);
   if (primary) return primary;
-  const activeUser = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
+  const activeUser = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), open);
   if (!activeUser) return null;
-  return await readVaultRecord(scopedStateKey(name, activeUser), openExistingVault) ?? null;
+  return await readVaultRecord(scopedStateKey(name, activeUser), open) ?? null;
 }
 
-async function removeVaultRecords(name: string, active?: string): Promise<void> {
+/** A delete is a write: authorize it against the exact workspace revision
+ * observed by this runtime, in the same transaction as deleting its records.
+ * Reading the active pointer and scoped snapshot inside that transaction also
+ * prevents a stale localStorage pointer from targeting another account. */
+async function removeVaultRecords(name: string, expected?: VaultExpectation): Promise<void> {
   const db = await openExistingVault();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const keys = [name, ...(active ? [scopedStateKey(name, active)] : [])];
-    for (const key of keys) {
-      const request = store.get(key);
-      request.onsuccess = () => {
-        const manifest = readChunkedValueManifest(typeof request.result === "string" ? request.result : undefined);
-        if (!manifest) return;
-        for (let index = 0; index < manifest.chunkCount; index += 1) {
-          store.delete(`${manifest.chunkPrefix}:${index}`);
-        }
-      };
-      store.delete(key);
-    }
-    store.delete(activeUserKey(name));
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Unable to remove the local workspace.")); };
-    tx.onabort = tx.onerror;
-  });
-}
+    let conflict: VaultConflictError | null = null;
+    let settled = false;
 
-function clearFallbackCopyIfUnchanged(
-  fallbackStore: Storage | null,
-  name: string,
-  copy: NewerFallbackCopy,
-  currentUserId: string,
-): void {
-  try {
-    if (
-      fallbackStore?.getItem(fallbackMarkerKey(name)) !== copy.marker
-      || fallbackStore.getItem(name) !== copy.value
-    ) return;
-    const fallbackUserId = persistedUserId(copy.value);
-    fallbackStore.removeItem(name);
-    fallbackStore.removeItem(fallbackMarkerKey(name));
-    if (fallbackUserId) fallbackStore.removeItem(scopedStateKey(name, fallbackUserId));
-    if (currentUserId) fallbackStore.setItem(activeUserKey(name), currentUserId);
-  } catch { /* The durable IndexedDB snapshot remains authoritative. */ }
+    const deny = () => {
+      conflict = new VaultConflictError();
+      if (expected?.latchConflict !== false && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+      tx.abort();
+    };
+
+    const removeVerified = (primary: string | undefined, scoped: string | undefined, active: string | undefined) => {
+      const current = primary ?? scoped ?? null;
+      // Neither a missing record nor a separately advanced scoped mirror is
+      // equivalent to the workspace the deleting tab previously hydrated.
+      if (expected && (
+        !expected.fingerprints.includes(workspaceFingerprint(current))
+        || (scoped !== undefined && !expected.fingerprints.includes(workspaceFingerprint(scoped)))
+        || (primary !== undefined && !expected.fingerprints.includes(workspaceFingerprint(primary)))
+        || (active !== undefined && primary !== undefined
+          && stablePersistedUserId(primary) !== null && stablePersistedUserId(primary) !== active)
+      )) {
+        deny();
+        return;
+      }
+
+      const keys = [name, ...(active ? [scopedStateKey(name, active)] : [])];
+      for (const key of keys) {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const manifest = readChunkedValueManifest(typeof request.result === "string" ? request.result : undefined);
+          if (!manifest) return;
+          for (let index = 0; index < manifest.chunkCount; index += 1) {
+            store.delete(`${manifest.chunkPrefix}:${index}`);
+          }
+        };
+        store.delete(key);
+      }
+      store.delete(activeUserKey(name));
+    };
+
+    const primary = store.get(name);
+    primary.onsuccess = () => {
+      const primaryValue = typeof primary.result === "string" ? primary.result : undefined;
+      const active = store.get(activeUserKey(name));
+      active.onsuccess = () => {
+        const currentActive = typeof active.result === "string" && active.result ? active.result : undefined;
+        if (!currentActive) {
+          removeVerified(primaryValue, undefined, undefined);
+          return;
+        }
+        const scoped = store.get(scopedStateKey(name, currentActive));
+        scoped.onsuccess = () => {
+          const scopedValue = typeof scoped.result === "string" ? scoped.result : undefined;
+          removeVerified(primaryValue, scopedValue, currentActive);
+        };
+      };
+    };
+
+    tx.oncomplete = () => {
+      db.close();
+      if (!settled) resolve();
+      settled = true;
+    };
+    tx.onerror = () => {
+      if (conflict || settled) return;
+      db.close();
+      reject(tx.error ?? new Error("Unable to remove the local workspace."));
+      settled = true;
+    };
+    tx.onabort = () => {
+      db.close();
+      if (!settled) reject(conflict ?? tx.error ?? new Error("Unable to remove the local workspace."));
+      settled = true;
+    };
+  });
 }
 
 const vaultStorage: StateStorage = {
   async getItem(name) {
+    const initialReceipt = observesWorkspace(name) ? captureVaultWriteObservation() : null;
     // A save that could not reach IndexedDB leaves its snapshot here, ahead of
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
@@ -720,14 +1015,32 @@ const vaultStorage: StateStorage = {
         // The marker records the IndexedDB snapshot on which this fallback was
         // based. Comparing that base and the fallback itself in one transaction
         // prevents a late promotion from replacing a newer tab's commit.
+        const cleanupSnapshot = captureFallbackCleanup(fallbackStore, name, userId);
+        // The promoted bytes/marker must match the copy selected at getItem
+        // start, even if a competing tab replaced them before this capture.
+        const expectedCleanup = cleanupSnapshot === null ? null : {
+          ...cleanupSnapshot, value: newer.value, marker: newer.marker,
+        };
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
-        clearFallbackCopy(fallbackStore, name, userId);
+        clearFallbackCopy(fallbackStore, name, userId, expectedCleanup);
       } catch (promotionError) {
-        if (isVaultConflictError(promotionError) && newer.baseFingerprint !== undefined) {
+        if (isVaultConflictError(promotionError)) {
           try {
             const current = await readVaultSnapshot(name);
             if (current !== null) {
-              clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              // A conflict's subsequent readonly observation is not an
+              // atomic proof of redundancy: another tab can advance the
+              // vault again before cleanup. Never delete an acknowledged
+              // fallback after any failed promotion. A successful writeVault
+              // transaction below is the sole automatic cleanup authority.
+              if (current !== newer.value && observesWorkspace(name)) {
+                // Both versions may hold unique edits. Keep the marker and
+                // scoped copy and block follow-up autosave until reconciliation.
+                // Legacy bare markers must fail closed as well.
+                conflictedWorkspaceKeys.add(name);
+                if (initialReceipt !== null) invalidateVaultWriteIfUnchanged(initialReceipt);
+                markVaultWriteFailure(); // Existing watcher offers export.
+              }
               rememberVaultSnapshot(name, current);
               return current;
             }
@@ -741,6 +1054,9 @@ const vaultStorage: StateStorage = {
       return newer.value;
     }
 
+    // An unmarked legacy localStorage mirror is not proof that IndexedDB is
+    // empty. A transient read failure must never become a write authorization.
+    let verifiedVaultEmpty = false;
     try {
       const value = await readVaultRecord(name, openExistingVault);
       if (value) {
@@ -756,19 +1072,62 @@ const vaultStorage: StateStorage = {
           return scoped;
         }
       }
+      // Both the primary and the active-profile snapshot were read successfully
+      // and neither exists. Only this state may migrate an unmarked legacy copy.
+      verifiedVaultEmpty = true;
     } catch {
-      // Fall back below.
+      // An inaccessible vault may still hold newer bytes. Keep any old mirror
+      // readable below, but do not promote it until an empty vault is verified.
     }
 
     const fallback = fallbackStore?.getItem(name) ??
       fallbackStore?.getItem(scopedStateKey(name, fallbackStore?.getItem(activeUserKey(name)) ?? "")) ??
       null;
-    if (fallback) {
+    if (fallback && !verifiedVaultEmpty) {
+      // A transient read error may clear immediately. Prefer the authoritative
+      // live vault over an unmarked, potentially stale mirror if it recovers.
+      // If it stays unavailable, return the mirror without writing it to IDB.
       try {
-        await writeVault(name, fallback, persistedUserId(fallback));
-      } catch {
-        // localStorage still has the data; no need to interrupt app load.
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* Keep the legacy copy for a future verified recovery. */ }
+    }
+    if (fallback && verifiedVaultEmpty) {
+      try {
+        // The validation above happens before this transaction. A concurrent
+        // tab may save in between, so compare against an EMPTY vault atomically.
+        await writeVault(name, fallback, persistedUserId(fallback), {
+          fingerprints: [null],
+          latchConflict: false,
+        });
+      } catch (promotionError) {
+        if (isVaultConflictError(promotionError)) {
+          try {
+            const current = await readVaultSnapshot(name);
+            if (current !== null) {
+              rememberVaultSnapshot(name, current);
+              return current;
+            }
+          } catch { /* Keep the legacy mirror if the winner is still unreadable. */ }
+        }
+        // Keep the mirror for recovery on any failed migration.
       }
+    }
+    // A delayed empty or inaccessible hydration must not erase another tab's
+    // valid receipt, including a save inside the shared marker's 1s throttle.
+    // Recheck the live v5 vault before retiring only this tab's stale status.
+    if (fallback === null && initialReceipt !== null) {
+      try {
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* Temporarily unavailable IndexedDB is not proof of data loss. */ }
+      invalidateVaultWriteIfUnchanged(initialReceipt);
     }
     rememberVaultSnapshot(name, fallback);
     return fallback;
@@ -778,11 +1137,13 @@ const vaultStorage: StateStorage = {
     const writeSequence = ++vaultWriteSequence;
     const userId = persistedUserId(value);
     const fallbackStore = localFallback();
+    const cleanupSnapshot = captureFallbackCleanup(fallbackStore, name, userId);
     let fallbackBaseFingerprint: string | null | undefined;
     try {
       const expected = workspaceExpectation(name);
       const currentFallback = newerFallbackCopy(fallbackStore, name);
       assertFallbackStillCurrent(name, currentFallback, expected);
+      assertFallbackOwnerUnchanged(name, currentFallback, value);
       fallbackBaseFingerprint = currentFallback !== null
         ? currentFallback.baseFingerprint
         : observedVaultFingerprint(name);
@@ -803,14 +1164,14 @@ const vaultStorage: StateStorage = {
         ? fallbackExpectation(currentFallback)
         : expected;
       await writeVault(name, value, userId, vaultExpectation);
-      clearFallbackCopy(fallbackStore, name, userId);
+      clearFallbackCopy(fallbackStore, name, userId, cleanupSnapshot);
       rememberVaultSnapshot(name, value);
-      markVaultWrite("indexeddb");
+      if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
     } catch (indexedDbError) {
       if (isVaultConflictError(indexedDbError)) {
         if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         vaultWriteFailures.set(writeSequence, indexedDbError);
-        markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
         return;
       }
       // Try the established localStorage recovery path for any workspace.
@@ -822,6 +1183,7 @@ const vaultStorage: StateStorage = {
       try {
         const expected = workspaceExpectation(name);
         assertFallbackStillCurrent(name, previousFallback, expected);
+        assertFallbackOwnerUnchanged(name, previousFallback, value);
         // Marker first: it is tiny, and one that does not match the copy beside
         // it is ignored, so a copy that failed to land is never read as newer.
         // Retain the original vault base across a chain of fallback-only saves.
@@ -845,7 +1207,7 @@ const vaultStorage: StateStorage = {
       }
       if (saved) {
         rememberVaultSnapshot(name, value);
-        markVaultWrite("local-fallback");
+        if (name === STORAGE_KEYS.persistedState) markVaultWrite("local-fallback");
       } else {
         // A quota failure leaves the preceding workspace in place. Keep its
         // valid marker too, or the next start would prefer the older vault.
@@ -865,30 +1227,78 @@ const vaultStorage: StateStorage = {
             : combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
-        markVaultWriteFailure();
+        if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
       }
     }
   },
 
   async removeItem(name) {
-    const fallback = localFallback();
-    let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
-    if (!active) {
-      try {
-        active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
-      } catch {
-        // Continue with the localStorage cleanup path below.
-      }
-    }
-    fallback?.removeItem(name);
-    fallback?.removeItem(fallbackMarkerKey(name));
-    fallback?.removeItem(activeUserKey(name));
-    if (active) fallback?.removeItem(scopedStateKey(name, active));
+    const workspace = observesWorkspace(name);
+    const writeSequence = ++vaultWriteSequence;
+    const fail = (error: unknown): Error => {
+      const failure = error instanceof Error ? error : new Error("AXOM could not remove the local workspace.");
+      vaultWriteFailures.set(writeSequence, failure);
+      if (workspace) markVaultWriteFailure();
+      return failure;
+    };
+    let expected: VaultExpectation | undefined;
     try {
-      await removeVaultRecords(name, active);
-    } catch {
-      // No-op; best effort cleanup.
+      expected = workspace ? workspaceExpectation(name) : undefined;
+    } catch (error) {
+      throw fail(error);
     }
+    const fallback = localFallback();
+    const markerKey = fallbackMarkerKey(name);
+    const pointerKey = activeUserKey(name);
+    // Capture optional recovery bytes. A concurrent fallback writer must not
+    // lose its only acknowledged copy if this tab deletes a different revision.
+    const beforeValue = fallback?.getItem(name) ?? null;
+    const beforeMarker = fallback?.getItem(markerKey) ?? null;
+    const beforeActive = fallback?.getItem(pointerKey) ?? null;
+    const scopeKey = beforeActive ? scopedStateKey(name, beforeActive) : null;
+    const beforeScoped = scopeKey ? fallback?.getItem(scopeKey) ?? null : null;
+
+    if (expected && [beforeValue, beforeScoped].some((value) =>
+      value !== null && !expected.fingerprints.includes(workspaceFingerprint(value))
+    )) {
+      conflictedWorkspaceKeys.add(name);
+      throw fail(new VaultConflictError());
+    }
+
+    try {
+      // This compares the live primary, scoped snapshot and pointer *inside*
+      // IndexedDB's write transaction before any record is deleted.
+      await removeVaultRecords(name, expected);
+    } catch (error) {
+      if (workspace) {
+        if (isVaultConflictError(error)) conflictedWorkspaceKeys.add(name);
+        throw fail(error);
+      }
+      // Non-workspace cache cleanup remains best effort when IDB is absent.
+    }
+
+    // A failed or conflicting delete never clears a recovery copy. Even after
+    // a verified IDB delete, leave a fallback written by another tab untouched.
+    try {
+      if (fallback?.getItem(name) === beforeValue
+        && fallback?.getItem(markerKey) === beforeMarker
+        && fallback?.getItem(pointerKey) === beforeActive
+        && (!scopeKey || fallback?.getItem(scopeKey) === beforeScoped)) {
+        fallback?.removeItem(name);
+        fallback?.removeItem(markerKey);
+        fallback?.removeItem(pointerKey);
+        if (scopeKey) fallback?.removeItem(scopeKey);
+      }
+    } catch {
+      // Preserving a redundant local copy is safer than masking IDB success.
+    }
+    if (workspace) {
+      invalidateVaultWrite();
+      // A confirmed delete permits this tab to intentionally create a new
+      // workspace, while a rejected delete retains the older observation.
+      rememberVaultSnapshot(name, null);
+    }
+
   },
 };
 
@@ -901,18 +1311,20 @@ const vaultStorage: StateStorage = {
 async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
+  const fallbackStore = localFallback();
+  const cleanupSnapshot = captureFallbackCleanup(fallbackStore, name, userId);
   try {
     await writeVault(name, value, userId);
-    clearFallbackCopy(localFallback(), name, userId);
+    clearFallbackCopy(fallbackStore, name, userId, cleanupSnapshot);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
-    markVaultWrite("indexeddb");
+    if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
   } catch (error) {
     vaultWriteFailures.set(
       writeSequence,
       error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
     );
-    markVaultWriteFailure();
+    if (name === STORAGE_KEYS.persistedState) markVaultWriteFailure();
   }
 }
 
