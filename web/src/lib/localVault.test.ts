@@ -836,7 +836,7 @@ describe("IndexedDB-first local vault", () => {
         expect(result.unverifiedOrOtherOwnerCopyPresent).toBe(true);
         expect(result.copies).toEqual([]);
         expect(result.requiresExplicitReview).toBe(true);
-        expect(result.reviewReasons).toEqual(["other-owner-or-unverifiable-bytes"]);
+        expect(result.reviewReasons).toEqual(["other-owner-or-unverifiable-bytes", "storage-source-unreadable"]);
         expect(JSON.stringify(result)).not.toContain("private-B");
         expect(JSON.stringify(result)).not.toContain("malformed private bytes");
         expect(storage.getItem(scopedKey)).toBe(raw);
@@ -911,15 +911,15 @@ describe("IndexedDB-first local vault", () => {
       expect(result.reviewReasons).toEqual([]);
     });
 
-    it("does not treat unavailable IndexedDB with empty fallback as evidence of owner divergence", async () => {
+    it("treats an unreadable storage tier as uncertainty, not verified owner divergence", async () => {
       vi.stubGlobal("indexedDB", undefined);
       const before = [...values.entries()];
       const result = await inspectLocalVaultRecoveryCopies("jd");
       expect(result.copies).toEqual([]);
       expect(result.indexedDbReadable).toBe(false);
       expect(result.divergent).toBe(false);
-      expect(result.requiresExplicitReview).toBe(false);
-      expect(result.reviewReasons).toEqual([]);
+      expect(result.requiresExplicitReview).toBe(true);
+      expect(result.reviewReasons).toEqual(["storage-source-unreadable"]);
       expect([...values.entries()]).toEqual(before);
     });
 
