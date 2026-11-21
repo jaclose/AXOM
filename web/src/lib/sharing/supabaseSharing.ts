@@ -41,12 +41,18 @@ async function ownerClient(action: string) {
 export async function publishShare(
   sourceId: string,
   snapshot: SharedQuestionSetSnapshot,
+  expectedOwnerId?: string,
 ): Promise<OwnedQuestionSetShare> {
   if (!sourceId.trim() || sourceId !== sourceId.trim() || [...sourceId].length > 200) {
     throw new Error("Question Set identity is invalid.");
   }
   validateShare(snapshot);
   const operation = await ownerClient("Sign in to create an unlisted share link.");
+  // The UI may have validated A before an async session acquisition. Never
+  // dispatch an A snapshot under a newly authenticated B RPC credential.
+  if (expectedOwnerId !== undefined && operation.userId !== expectedOwnerId) {
+    throw new Error("The linked workspace account changed before share upload. Nothing was published.");
+  }
   const { data, error } = await operation.client.rpc("create_question_set_share", {
     p_source_id: sourceId,
     p_snapshot: snapshot,

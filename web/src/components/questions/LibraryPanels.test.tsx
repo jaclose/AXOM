@@ -24,6 +24,7 @@ const mocked = vi.hoisted(() => ({
     libraryOnly: true,
   },
   store: null as Record<string, unknown> | null,
+  account: { phase: "signed-in", user: { id: "account-A" }, link: "linked" },
 }));
 
 vi.mock("../../lib/store", () => {
@@ -33,6 +34,11 @@ vi.mock("../../lib/store", () => {
   );
   return { useStore };
 });
+vi.mock("../../lib/account/accountStore", () => ({
+  useAccount: Object.assign((selector: (state: typeof mocked.account) => unknown) => selector(mocked.account), {
+    getState: () => mocked.account,
+  }),
+}));
 vi.mock("../../lib/ai", () => ({
   enhanceQuestionSet: vi.fn(),
   resolveActiveProvider: vi.fn(() => null),
@@ -47,6 +53,7 @@ vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 afterEach(() => {
   cleanup();
   mocked.store = null;
+  mocked.account = { phase: "signed-in", user: { id: "account-A" }, link: "linked" };
   vi.clearAllMocks();
   // Do not leak unresolved per-test cloud responses into later disclosure cases.
   vi.mocked(listQuestionSetShares).mockReset();
@@ -83,6 +90,8 @@ describe("QuestionSetList sharing disclosure", () => {
   }
 
   function useSyntheticSet() {
+    setQuestionAttachmentAccount("account-A");
+    mocked.account = { phase: "signed-in", user: { id: "account-A" }, link: "linked" };
     const now = "2026-10-15T12:00:00.000Z";
     const set: QuestionSet = {
       id: "set-1",
@@ -120,6 +129,47 @@ describe("QuestionSetList sharing disclosure", () => {
     };
   }
 
+  it("blocks A's retained local Question Set from B's sharing account until explicit workspace adoption", () => {
+    useSyntheticSet();
+    // Account sign-in preserves the local A workspace. It cannot be B-shared
+    // merely because the authenticated identity changed.
+    mocked.account = { phase: "signed-in", user: { id: "account-B" }, link: "linked-elsewhere" };
+    act(() => setQuestionAttachmentAccount("account-B"));
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(listQuestionSetShares).not.toHaveBeenCalled();
+    expect(publishShare).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Create unlisted link" })).toBeNull();
+    expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Link your workspace before sharing",
+      tone: "warn",
+    }));
+  });
+
+  it("refuses publish when the active workspace link changes after share lookup", async () => {
+    useSyntheticSet();
+    vi.mocked(listQuestionSetShares).mockResolvedValueOnce([]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const create = await screen.findByRole("button", { name: "Create unlisted link" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed this set/ }));
+    mocked.account = { phase: "signed-in", user: { id: "account-A" }, link: "linked-elsewhere" };
+    fireEvent.click(create);
+    expect(publishShare).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a deleted local set from a stale open share dialog", async () => {
+    useSyntheticSet();
+    vi.mocked(listQuestionSetShares).mockResolvedValueOnce([]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const create = await screen.findByRole("button", { name: "Create unlisted link" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed this set/ }));
+    mocked.store = { ...mocked.store, questionSets: [] };
+    fireEvent.click(create);
+    expect(publishShare).not.toHaveBeenCalled();
+  });
+
   it("hides resolved A bearer links on B and A return without unmounting", async () => {
     useSyntheticSet();
     setQuestionAttachmentAccount("account-A");
@@ -139,6 +189,7 @@ describe("QuestionSetList sharing disclosure", () => {
     expect(screen.queryByRole("button", { name: "Revoke link" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create unlisted link" })).toBeNull();
 
+    mocked.account = { phase: "signed-in", user: { id: "account-A" }, link: "linked" };
     act(() => setQuestionAttachmentAccount("account-A"));
     expect(screen.queryByRole("textbox", { name: "Unlisted Question Set link" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
@@ -163,6 +214,7 @@ describe("QuestionSetList sharing disclosure", () => {
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
     expect(screen.getByText(/Checking this account for active links/)).toBeTruthy();
     act(() => setQuestionAttachmentAccount("account-B"));
+    mocked.account = { phase: "signed-in", user: { id: "account-B" }, link: "linked" };
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
     expect((await screen.findByRole("textbox", { name: "Unlisted Question Set link" }) as HTMLInputElement).value)
       .toContain("B".repeat(48));
@@ -187,6 +239,7 @@ describe("QuestionSetList sharing disclosure", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed this set/ }));
     fireEvent.click(create);
     expect(publishShare).toHaveBeenCalledTimes(1);
+    mocked.account = { phase: "signed-in", user: { id: "account-B" }, link: "linked" };
     act(() => setQuestionAttachmentAccount("account-B"));
     await act(async () => resolvePublish(ownedShare(
       "00000000-0000-4000-8000-000000000064", "A".repeat(48),

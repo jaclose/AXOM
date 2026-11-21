@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BookOpen, FileText, FolderInput, ListPlus, Search, Sparkles, Trash2 } from "lucide-react";
 import { useStore } from "../../lib/store";
+import { useAccount } from "../../lib/account/accountStore";
 import { digestHoldReason, digestMembership, digestSourceFingerprint, questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
 import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
@@ -168,6 +169,10 @@ export function QuestionSetList({
   const provider = useMemo(() => resolveActiveProvider(), []);
   const renderedDigestScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope);
   const currentDigestOwner = renderedDigestScope.owner;
+  // Authentication alone never transfers a local workspace to another account.
+  // Subscribe so a changed link state also curtains the mounted sharing modal.
+  const shareAccountLink = useAccount(state => state.link);
+  const shareAccountId = useAccount(state => state.user?.id);
   const [enhancing, setEnhancing] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filingSet, setFilingSet] = useState<QuestionSet | null>(null);
@@ -185,6 +190,22 @@ export function QuestionSetList({
   // must be bound to the exact account generation, not merely an owner string.
   function isCurrentShareScope(scope: QuestionAttachmentScope | null): scope is QuestionAttachmentScope {
     return scope !== null && scope === renderedDigestScope && isQuestionAttachmentScopeCurrent(scope);
+  }
+
+  function isLinkedShareWorkspace(scope: QuestionAttachmentScope | null): scope is QuestionAttachmentScope {
+    if (!isCurrentShareScope(scope) || !scope.accountId) return false;
+    const account = useAccount.getState();
+    return account.phase === "signed-in"
+      && account.user?.id === scope.accountId
+      && account.link === "linked";
+  }
+
+  function shareWorkspaceHold() {
+    pushToast({
+      title: "Link your workspace before sharing",
+      body: "This device's questions are not linked to the signed-in account. Protect or explicitly adopt this workspace before sharing; no local work was moved or uploaded.",
+      tone: "warn",
+    });
   }
 
   useEffect(() => {
@@ -301,7 +322,10 @@ export function QuestionSetList({
 
   async function openShare(set: QuestionSet) {
     const scope = renderedDigestScope;
-    if (!isCurrentShareScope(scope)) return;
+    if (!isLinkedShareWorkspace(scope)) {
+      shareWorkspaceHold();
+      return;
+    }
     const lookupId = ++shareLookupOperation.current;
     setShareScope(scope);
     setManagedShares({});
@@ -312,11 +336,11 @@ export function QuestionSetList({
     setShareLookupError("");
     try {
       const shares = await listQuestionSetShares();
-      if (lookupId !== shareLookupOperation.current || !isCurrentShareScope(scope)) return;
+      if (lookupId !== shareLookupOperation.current || !isLinkedShareWorkspace(scope)) return;
       installManagedShares(shares);
       setShareLookup("ready");
     } catch (error) {
-      if (lookupId !== shareLookupOperation.current || !isCurrentShareScope(scope)) return;
+      if (lookupId !== shareLookupOperation.current || !isLinkedShareWorkspace(scope)) return;
       const detail = error instanceof Error ? error.message : "Active links could not be loaded.";
       setShareLookupError(detail);
       setShareLookup("error");
@@ -330,15 +354,31 @@ export function QuestionSetList({
 
   async function createShare() {
     const scope = shareScope;
-    if (!shareSet || !shareConsent || shareLookup !== "ready" || !isCurrentShareScope(scope)
+    if (!shareSet || !shareConsent || shareLookup !== "ready"
       || shareOperation.current === scope || (managedShares[shareSet.id]?.length ?? 0) > 0) return;
+    if (!isLinkedShareWorkspace(scope)) {
+      shareWorkspaceHold();
+      return;
+    }
     const selected = shareSet;
     shareOperation.current = scope;
     setShareBusy(true);
     try {
-      const snapshot = createQuestionSetShare(selected, questions);
-      if (!isCurrentShareScope(scope)) return;
-      const result = await publishShare(selected.id, snapshot);
+      // The mounted dialog may have retained a prior owner/source snapshot.
+      // Always read the current store, refusing deletion/replacement since open.
+      const live = useStore.getState();
+      const liveSet = (live.questionSets ?? []).find(item => item.id === selected.id);
+      if (!liveSet || liveSet !== selected || live.questions !== questions) {
+        pushToast({
+          title: "Share source changed",
+          body: "The local set or question source changed. Reopen sharing from the current workspace; no question content was sent.",
+          tone: "warn",
+        });
+        return;
+      }
+      const snapshot = createQuestionSetShare(liveSet, live.questions ?? NO_QUESTIONS);
+      if (!isLinkedShareWorkspace(scope) || useStore.getState() !== live) return;
+      const result = await publishShare(liveSet.id, snapshot, scope.accountId);
       if (!isCurrentShareScope(scope)) return;
       const link = `${location.origin}${location.pathname}#shared-set?token=${encodeURIComponent(result.token)}`;
       const managed = { ...result, link };
@@ -409,7 +449,7 @@ export function QuestionSetList({
 
   async function copyShare(share: ManagedQuestionSetShare) {
     const scope = shareScope;
-    if (!isCurrentShareScope(scope) || !shareSet
+    if (!isLinkedShareWorkspace(scope) || !shareSet
       || !(managedShares[shareSet.id] ?? []).some(item => item.id === share.id && item.link === share.link)) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
@@ -425,7 +465,7 @@ export function QuestionSetList({
 
   async function revokeManagedShare(share: ManagedQuestionSetShare) {
     const scope = shareScope;
-    if (!isCurrentShareScope(scope) || !shareSet || shareOperation.current === scope
+    if (!isLinkedShareWorkspace(scope) || !shareSet || shareOperation.current === scope
       || !(managedShares[shareSet.id] ?? []).some(item => item.id === share.id && item.link === share.link)) return;
     shareOperation.current = scope;
     setShareBusy(true);
@@ -563,7 +603,8 @@ export function QuestionSetList({
       onClose={() => setFilingSet(null)}
       onSave={(scope) => { s.updateQuestionSet(filingSet.id, { scope }); setFilingSet(null); }} />
   );
-  const visibleShareSet = isCurrentShareScope(shareScope) ? shareSet : null;
+  const visibleShareSet = shareAccountLink === "linked" && shareAccountId === shareScope?.accountId
+    && isLinkedShareWorkspace(shareScope) ? shareSet : null;
   const managedShareList = visibleShareSet ? managedShares[visibleShareSet.id] ?? [] : [];
   const submissionDialog = submitSet && <QuestionSetLibrarySubmitDialog key={submitSet.id} set={submitSet}
     questions={questions} onClose={() => setSubmitSet(null)} />;
