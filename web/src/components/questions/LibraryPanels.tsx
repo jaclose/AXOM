@@ -166,7 +166,8 @@ export function QuestionSetList({
   const sets = s.questionSets ?? NO_SETS;
   const questions = s.questions ?? NO_QUESTIONS;
   const provider = useMemo(() => resolveActiveProvider(), []);
-  const currentDigestOwner = useSyncExternalStore(subscribeQuestionAttachmentScope, () => getQuestionAttachmentScope().owner);
+  const renderedDigestScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope);
+  const currentDigestOwner = renderedDigestScope.owner;
   const [enhancing, setEnhancing] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filingSet, setFilingSet] = useState<QuestionSet | null>(null);
@@ -196,15 +197,32 @@ export function QuestionSetList({
 
   async function enhance(set: QuestionSet) {
     if (!provider) return;
-    // Re-evaluate on activation, not only at render time. Missing/collided IDs
-    // must never reach the provider or create a persistent teaching digest.
-    const membership = digestMembership(set, questions);
-    if (membership.holdReason) {
-      pushToast({ title: "Digest held for source review", body: membership.holdReason, tone: "warn" });
+    // The rendered card is not a trustworthy source snapshot at click time:
+    // account transitions, answer corrections and imports can precede a React
+    // rerender. Block provider egress (not merely stale persistence) unless
+    // the live reviewed membership matches what the learner actually saw.
+    const renderedMembership = digestMembership(set, questions);
+    if (renderedMembership.holdReason) {
+      pushToast({ title: "Digest held for source review", body: renderedMembership.holdReason, tone: "warn" });
       return;
     }
     const accountScope = getQuestionAttachmentScope();
-    const fingerprint = digestSourceFingerprint(set, membership.records, accountScope.owner);
+    const live = useStore.getState();
+    const liveSet = (live.questionSets ?? []).find((candidate) => candidate.id === set.id);
+    const membership = liveSet && digestMembership(liveSet, live.questions ?? NO_QUESTIONS);
+    if (!liveSet || !membership || membership.holdReason
+      || !isQuestionAttachmentScopeCurrent(renderedDigestScope)
+      || digestSourceFingerprint(set, renderedMembership.records, renderedDigestScope.owner)
+        !== digestSourceFingerprint(liveSet, membership.records, accountScope.owner)) {
+      pushToast({
+        title: "Digest source changed",
+        body: membership?.holdReason
+          ?? "The account, saved questions, or reviewed answers changed before analysis. Refresh the source and retry; nothing was sent to the AI provider.",
+        tone: "warn",
+      });
+      return;
+    }
+    const fingerprint = digestSourceFingerprint(liveSet, membership.records, accountScope.owner);
     setEnhancing(set.id);
     try {
       const forDigest = membership.records.map((q) => ({
@@ -212,7 +230,7 @@ export function QuestionSetList({
         correct: q.options.find((o) => o.key === q.correctKey)?.text,
         explanation: q.explanation,
       }));
-      const digest = await enhanceQuestionSet(provider, { title: set.title, questions: forDigest });
+      const digest = await enhanceQuestionSet(provider, { title: liveSet.title, questions: forDigest });
       // Never commit a provider response into an account or question mapping that
       // changed while the async request was running (including A → B → A).
       if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
