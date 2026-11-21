@@ -222,7 +222,20 @@ export function reviewCandidatesForSession(
   quizSessionId: ID,
   questions: readonly QuestionRecord[],
 ): ReviewCandidate[] {
-  const events = attemptEvents(questions);
+  // Events retain canonical question IDs, not the imported source-row identity.
+  // If two records claim an ID, neither its attempts nor its history can be
+  // assigned to a defensible retry target. Quarantine both from actionable
+  // session review without modifying their saved attempts or scored history.
+  const seen = new Set<ID>();
+  const ambiguousIds = new Set<ID>();
+  for (const question of questions) {
+    if (seen.has(question.id)) ambiguousIds.add(question.id);
+    seen.add(question.id);
+  }
+  const attributable = ambiguousIds.size
+    ? questions.filter((question) => !ambiguousIds.has(question.id))
+    : questions;
+  const events = attemptEvents(attributable);
   const block = events.filter((event) => event.quizSessionId === quizSessionId);
   if (!block.length) return [];
 
