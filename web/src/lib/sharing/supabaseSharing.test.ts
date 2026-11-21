@@ -143,11 +143,19 @@ describe("question-share Supabase boundary", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it("never uploads a linked A workspace under a B owner after async session acquisition", async () => {
+    const rpc = vi.fn();
+    configured(rpc, { id: "account-B" });
+    await expect(publishShare("source-set", snapshot(), "account-A"))
+      .rejects.toThrow(/linked workspace account changed/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("returns bounded server metadata for a published owner link", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
     const operation = configured(rpc);
 
-    await expect(publishShare("source-set", snapshot())).resolves.toEqual({
+    await expect(publishShare("source-set", snapshot(), "owner")).resolves.toEqual({
       id: SHARE_ID,
       sourceId: "source-set",
       token: TOKEN,
