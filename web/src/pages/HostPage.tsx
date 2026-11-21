@@ -50,6 +50,9 @@ function HostAccountPage() {
   const [dashboard, setDashboard] = useState<OperatorDashboard>();
   // Reviewer UI requires a confirmed Host role for this exact account, not a stale snapshot.
   const [verifiedOperatorAccountId, setVerifiedOperatorAccountId] = useState<string | null>(null);
+  // A refresh increment invalidates the last Host authorization immediately in
+  // render, before effects clear stale data. The review modal portals to body.
+  const [verifiedDashboardRefresh, setVerifiedDashboardRefresh] = useState<number | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -85,6 +88,7 @@ function HostAccountPage() {
     void loadOperatorDashboard(userId).then(value => {
       if (!alive) return;
       setDashboard(value);
+      setVerifiedDashboardRefresh(refresh);
       setVerifiedOperatorAccountId(value.role && value.overview ? userId : null);
       // Older focus/initial reads must never release a newer mutation barrier.
       if (pendingReadbackVersion.current !== null && refresh >= pendingReadbackVersion.current) {
@@ -304,8 +308,9 @@ function HostAccountPage() {
         </>}
         {/* Academic reviewer authorization is checked independently of the Host snapshot.
             Keep this queue mounted during same-account Host refresh so the decision receipt survives. */}
-        {verifiedOperatorAccountId === userId && <div hidden={loading || !dashboard?.overview}>
+        {verifiedOperatorAccountId === userId && <div hidden={loading || verifiedDashboardRefresh !== refresh || !dashboard?.overview}>
           <QuestionSetLibraryReviewQueue key={userId} accountId={userId} refreshSignal={refresh}
+            accessSuspended={loading || verifiedDashboardRefresh !== refresh || !dashboard?.overview}
             onReviewed={() => { setMessage("Question Set review recorded. Checking Host queues."); requestRefresh(); }} />
         </div>}
         {dashboard?.overview && <>
