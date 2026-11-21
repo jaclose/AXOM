@@ -102,7 +102,7 @@ describe("Host page authorization and moderation", () => {
     expect(await screen.findByText("PRIVATE DIRECTORY ENTRY")).toBeTruthy();
 
     hostLayoutCapture.active = true;
-    await user.click(screen.getByRole("button", { name: "Refresh", exact: true }));
+    await user.click(screen.getByRole("button", { name: /^Refresh$/ }));
     expect(hostLayoutCapture.screens.some(snapshot => snapshot.includes("PRIVATE DIRECTORY ENTRY"))).toBe(false);
     expect(screen.queryByText("PRIVATE DIRECTORY ENTRY")).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
@@ -128,7 +128,7 @@ describe("Host page authorization and moderation", () => {
     expect((dismiss as HTMLButtonElement).disabled).toBe(false);
 
     act(() => {
-      fireEvent.click(screen.getByRole("button", { name: "Refresh", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
       // This old control has not yet been detached by React's batched commit.
       fireEvent.click(dismiss);
     });
