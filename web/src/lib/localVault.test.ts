@@ -444,6 +444,62 @@ describe("IndexedDB-first local vault", () => {
     },
   );
 
+  it.each(["missing chunk", "altered chunk"] as const)(
+    "rejects deletion of a hydrated workspace when its physical chunks have %s",
+    async (fault) => {
+      const key = STORAGE_KEYS.persistedState;
+      const scopedKey = \`${key}:user:jd\`;
+      const pointerKey = \`${key}:active-user\`;
+      const original = JSON.stringify({
+        state: {
+          profile: { userId: "jd" },
+          questions: [{ id: "only-physical-recovery-copy" }],
+          sourceText: "private source evidence ".repeat(65_000),
+        },
+        version: 34,
+      });
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(original);
+
+      const db = await openCurrentVault();
+      const physicalPrimary = await getDirect(db, key);
+      const physicalScoped = await getDirect(db, scopedKey);
+      const pointer = await getDirect(db, pointerKey);
+      const manifest = JSON.parse(physicalPrimary!) as { chunkPrefix: string; chunkCount: number };
+      expect(manifest.chunkCount).toBeGreaterThan(0);
+      const chunkKey = \`${manifest.chunkPrefix}:0\`;
+      db.close();
+
+      // A separate tab or storage failure can damage the chunks after hydration.
+      const altered = await openCurrentVault();
+      if (fault === "missing chunk") await deleteDirect(altered, chunkKey);
+      else await putDirect(altered, chunkKey, "tampered-after-hydration");
+      altered.close();
+
+      // Even an unmarked browser recovery copy must survive a rejected delete.
+      localStorage.setItem(key, original);
+      localStorage.setItem(scopedKey, original);
+      localStorage.setItem(pointerKey, "jd");
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+
+      const retained = await openCurrentVault();
+      expect(await getDirect(retained, key)).toBe(physicalPrimary);
+      expect(await getDirect(retained, scopedKey)).toBe(physicalScoped);
+      expect(await getDirect(retained, pointerKey)).toBe(pointer);
+      expect(await getDirect(retained, chunkKey))
+        .toBe(fault === "missing chunk" ? undefined : "tampered-after-hydration");
+      retained.close();
+      expect(localStorage.getItem(key)).toBe(original);
+      expect(localStorage.getItem(scopedKey)).toBe(original);
+      expect(localStorage.getItem(pointerKey)).toBe("jd");
+    },
+  );
+
   it("cannot remove an existing workspace from a tab that has not hydrated it", async () => {
     const key = STORAGE_KEYS.persistedState;
     const original = JSON.stringify({ state: { profile: { userId: "jd" }, notes: ["saved"] }, version: 34 });
