@@ -827,6 +827,79 @@ describe("what to look at again after a block", () => {
 });
 
 
+describe("session review cannot assign retry identity to duplicated canonical question IDs", () => {
+  const first = () => question({
+    id: "ambiguous-session-id",
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { quizSessionId: "earlier" })],
+  });
+  const second = () => question({
+    id: "ambiguous-session-id",
+    status: "incorrect",
+    attempts: [attempt(3, "incorrect", { quizSessionId: "later" })],
+  });
+
+  it("does not call two source rows with separate first misses a repeat miss, in either order", () => {
+    for (const records of [[first(), second()], [second(), first()]]) {
+      const original = JSON.stringify(records);
+      expect(tally(attemptEvents(records))).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+      expect(reviewCandidatesForSession("earlier", records)).toEqual([]);
+      expect(reviewCandidatesForSession("later", records)).toEqual([]);
+      expect(JSON.stringify(records)).toBe(original);
+    }
+  });
+
+  it("quarantines an answered row when another source row uses its ID, even if the alias is held", () => {
+    const scored = question({
+      id: "held-session-alias",
+      status: "incorrect",
+      attempts: [attempt(3, "incorrect", { quizSessionId: "later", certainty: "sure" })],
+    });
+    const alias = question({ id: scored.id, needsReview: true, attempts: [] });
+    for (const records of [[scored, alias], [alias, scored]]) {
+      expect(tally(attemptEvents(records))).toEqual({ attempts: 1, correct: 0, accuracy: 0 });
+      expect(reviewCandidatesForSession("later", records)).toEqual([]);
+    }
+  });
+
+  it("never offers a retry for copied identical imported attempts under the same ID", () => {
+    const source = first();
+    const copied = question({ ...source, attempts: source.attempts.map((saved) => ({ ...saved })) });
+    const records = [source, copied];
+    const original = JSON.stringify(records);
+    expect(tally(attemptEvents(records)).attempts).toBe(2);
+    expect(reviewCandidatesForSession("earlier", records)).toEqual([]);
+    expect(JSON.stringify(records)).toBe(original);
+  });
+
+  it("retains real repeat-miss and ordinary wrong recommendations for unique source IDs", () => {
+    const unique = question({
+      id: "unique-session-miss",
+      status: "incorrect",
+      attempts: [
+        attempt(1, "incorrect", { quizSessionId: "earlier" }),
+        attempt(3, "incorrect", { quizSessionId: "later" }),
+      ],
+    });
+    const once = question({
+      id: "unique-session-once",
+      status: "incorrect",
+      attempts: [attempt(3, "incorrect", { quizSessionId: "later" })],
+    });
+    const records = [first(), second(), unique, once];
+    const before = JSON.stringify(records);
+    expect(reviewCandidatesForSession("later", records)).toEqual([
+      expect.objectContaining({ questionId: unique.id, reasons: ["repeat-miss"], retry: ["today", "this-week"] }),
+      expect.objectContaining({ questionId: once.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
+    expect(reviewCandidatesForSession("earlier", records)).toEqual([
+      expect.objectContaining({ questionId: unique.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
+    expect(tally(attemptEvents(records)).attempts).toBe(5);
+    expect(JSON.stringify(records)).toBe(before);
+  });
+});
+
 describe("confusion-pair text requires an unambiguous question identity", () => {
   const sourceOptions = [
     { key: "A", text: "Gastrin" },
