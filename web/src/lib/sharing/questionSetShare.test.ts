@@ -162,6 +162,42 @@ describe("Question Set share boundary", () => {
     expect(result.set).not.toHaveProperty("scope");
   });
 
+  it("refuses ambiguous original IDs in either bank order before producing a public snapshot", () => {
+    const originalA = question("collision", {
+      stem: "First reviewed source stem",
+      correctKey: "A",
+      correctAnswerText: "One",
+    });
+    const originalB = question("collision", {
+      stem: "Second reviewed source stem",
+      correctKey: "B",
+      correctAnswerText: "Two",
+    });
+    const set = questionSet(["collision"]);
+
+    for (const bank of [[originalA, originalB], [originalB, originalA]]) {
+      expect(() => createQuestionSetShare(set, bank, NOW)).toThrow(/duplicate|ambiguous/i);
+    }
+    // Neither order may change the surviving local records or reviewed keys.
+    expect(originalA.correctKey).toBe("A");
+    expect(originalB.correctKey).toBe("B");
+  });
+
+  it("refuses even equal-content duplicate original IDs without an explicit identity reconciliation", () => {
+    expect(() => createQuestionSetShare(questionSet(), [question("q1"), question("q1")], NOW))
+      .toThrow(/duplicate|ambiguous/i);
+  });
+
+  it("does not let unrelated bank ID collisions veto a uniquely identified selected set", () => {
+    const value = createQuestionSetShare(
+      questionSet(["q1"]),
+      [question("q1"), question("unselected"), question("unselected", { stem: "Different other stem" })],
+      NOW,
+    );
+    expect(value.orderedQuestionIds).toEqual(["shared-question-1"]);
+    expect(value.questions[0]).toMatchObject({ id: "shared-question-1", correctKey: "B" });
+  });
+
   it("keeps distinct source memberships distinct when two questions have identical content", () => {
     const value = createQuestionSetShare(
       questionSet(["q1", "q2"]),
