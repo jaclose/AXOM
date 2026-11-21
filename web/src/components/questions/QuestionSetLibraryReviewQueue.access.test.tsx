@@ -59,7 +59,9 @@ describe("Host reviewer portal reauthorization", () => {
     const delayedReviewer = deferred<boolean>();
     vi.mocked(isAcademicReviewer).mockResolvedValueOnce(true).mockReturnValueOnce(delayedReviewer.promise);
     const { rerender } = render(<QuestionSetLibraryReviewQueue {...props(0, false)} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
+    const inspect = await screen.findByRole("button", { name: "Inspect" });
+    inspect.focus();
+    fireEvent.click(inspect);
     expect(await screen.findByRole("dialog")).toHaveProperty("textContent",
       expect.stringContaining("Restricted explanation"));
 
@@ -68,6 +70,7 @@ describe("Host reviewer portal reauthorization", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.body.textContent).not.toContain("Restricted explanation");
     expect(document.activeElement?.closest('[role="dialog"]')).toBeNull();
+    expect(document.activeElement?.closest(".qsl-review-queue")).toBeNull();
 
     await act(async () => { delayedReviewer.resolve(false); });
     rerender(<QuestionSetLibraryReviewQueue {...props(1, false)} />);
