@@ -53,6 +53,12 @@ const account = (id: string, name: string): OperatorAccount => ({
   ai_enabled: true, ai_daily_limit: 60, ai_used_today: 0,
 });
 
+function hostBanner() {
+  const banner = screen.getByRole("main", { name: "Host dashboard" }).querySelector(".host-banner");
+  expect(banner).not.toBeNull();
+  return within(banner as HTMLElement);
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
@@ -151,7 +157,8 @@ describe("Host page authorization and moderation", () => {
     await act(async () => { oldSearch.resolve([account("a-late", "Late A search result")]); });
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledWith("second-account"));
     expect(screen.queryByText("Late A search result")).toBeNull();
-    expect(screen.queryByText("Project CEO")).toBeNull();
+    expect(hostBanner().queryByText("Project CEO")).toBeNull();
+    await waitFor(() => expect(hostBanner().getByText("Moderator")).toBeTruthy());
   });
 
   it("ignores A's late privileged dashboard response after verified identity switches to B", async () => {
@@ -166,12 +173,13 @@ describe("Host page authorization and moderation", () => {
     await act(async () => {
       oldRead.resolve({ ...dashboard("owner"), accounts: [account("a-private", "A-only account")] });
     });
-    expect(screen.queryByText("Project CEO")).toBeNull();
+    expect(hostBanner().queryByText("Project CEO")).toBeNull();
     expect(screen.queryByText("A-only account")).toBeNull();
 
     await act(async () => { newRead.resolve(dashboard("moderator")); });
     expect(screen.getByRole("heading", { name: "Host dashboard" })).toBeTruthy();
-    expect(screen.queryByText("Project CEO")).toBeNull();
+    expect(hostBanner().queryByText("Project CEO")).toBeNull();
+    expect(hostBanner().getByText("Moderator")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
   });
 
