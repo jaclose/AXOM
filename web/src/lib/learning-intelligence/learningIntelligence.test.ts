@@ -902,11 +902,11 @@ describe("session review cannot assign retry identity to duplicated canonical qu
 
 describe("review-set membership is unique while historical attempts remain intact", () => {
   it("includes a question only once when repeated attempts create multiple review candidates", () => {
-    const candidates = [
+    const candidates: Parameters<typeof buildReviewSet>[0]["candidates"] = [
       { questionId: "q-repeat", reasons: ["repeat-miss"], priority: 5, retry: ["today"] },
       { questionId: "q-repeat", reasons: ["wrong"], priority: 2, retry: ["tomorrow"] },
       { questionId: "q-other", reasons: ["wrong"], priority: 1, retry: ["tomorrow"] },
-    ] as const;
+    ];
     const original = JSON.stringify(candidates);
     const result = buildReviewSet({
       id: "review-unique", candidates, reasons: ["repeat-miss", "wrong"],
