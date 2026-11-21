@@ -548,6 +548,87 @@ describe("IndexedDB-first local vault", () => {
     db.close();
   });
 
+  it("preserves an acknowledged cross-tab fallback arriving after delete cleanup comparisons", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const pointerKey = `${key}:active-user`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: label }] }, version: 34,
+    });
+    const original = snapshot("indexeddb-before-delete");
+    const newer = snapshot("sole-acknowledged-offline-edit");
+    await localVaultStorage.setItem(key, original);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(original);
+
+    // Obtain a genuine fallback receipt from the adapter, then stage it as a
+    // competing tab's write at the final comparison before old cleanup deletes.
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, newer);
+    await flushLocalVaultWrites();
+    const newerMarker = storage.getItem(markerKey);
+    expect(newerMarker).not.toBeNull();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    for (const field of [key, markerKey, pointerKey, scopedKey]) storage.removeItem(field);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(original);
+
+    let pointerReads = 0;
+    const read = vi.spyOn(storage, "getItem").mockImplementation((field) => {
+      const value = values.get(field) ?? null;
+      if (field === pointerKey && ++pointerReads === 2) {
+        values.set(markerKey, newerMarker!);
+        values.set(key, newer);
+        values.set(pointerKey, "jd");
+        values.set(scopedKey, newer);
+      }
+      return value;
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+    } finally {
+      read.mockRestore();
+    }
+
+    expect(pointerReads).toBeGreaterThanOrEqual(2);
+    expect(localStorage.getItem(key)).toBe(newer);
+    expect(localStorage.getItem(markerKey)).toBe(newerMarker);
+    expect(localStorage.getItem(scopedKey)).toBe(newer);
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+  });
+
+  it("refuses a workspace delete when an unmarked fallback may hold recoverable bytes", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const scopedKey = `${key}:user:jd`;
+    const original = JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: "recoverable" }] }, version: 34,
+    });
+    await localVaultStorage.setItem(key, original);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(original);
+    // An unmarked legacy mirror is not necessarily redundant or safe to erase.
+    localStorage.setItem(key, original);
+    localStorage.setItem(scopedKey, original);
+    localStorage.setItem(`${key}:active-user`, "jd");
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.removeItem(key);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(localStorage.getItem(key)).toBe(original);
+    expect(localStorage.getItem(scopedKey)).toBe(original);
+    const db = await openCurrentVault();
+    try {
+      expect(await getDirect(db, key)).toBe(original);
+      expect(await getDirect(db, scopedKey)).toBe(original);
+    } finally {
+      db.close();
+    }
+  });
+
   it.each(["single-record", "chunked"] as const)(
     "does not resurrect a deleted %s workspace from a stale second tab",
     async (layout) => {
@@ -1519,12 +1600,25 @@ describe("IndexedDB-first local vault", () => {
     expect(() => assertVaultWrite(failedSequence)).toThrow(/no local storage fallback/i);
   });
 
-  it("removes primary, profile pointer, and scoped IndexedDB records together", async () => {
+  it("deletes IndexedDB workspace records without erasing concurrent browser pointer metadata", async () => {
+    const key = STORAGE_KEYS.persistedState;
     const persisted = JSON.stringify({ state: { profile: { userId: "jd", name: "JD" } }, version: 32 });
-    await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
-    await localVaultStorage.removeItem(STORAGE_KEYS.persistedState);
-    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
-    expect(localStorage.getItem(`${STORAGE_KEYS.persistedState}:active-user`)).toBeNull();
+    await localVaultStorage.setItem(key, persisted);
+    await localVaultStorage.removeItem(key);
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    const db = await openCurrentVault();
+    try {
+      expect(await getDirect(db, key)).toBeUndefined();
+      expect(await getDirect(db, `${key}:active-user`)).toBeUndefined();
+      expect(await getDirect(db, `${key}:user:jd`)).toBeUndefined();
+    } finally {
+      db.close();
+    }
+    // An orphaned browser-only pointer has no workspace bytes. It is retained
+    // because a non-atomic removeItem could race a new offline recovery save.
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(`${key}:user:jd`)).toBeNull();
+    expect(localStorage.getItem(`${key}:active-user`)).toBe("jd");
   });
 
   it("requires the physical v5 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
