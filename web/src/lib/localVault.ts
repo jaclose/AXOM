@@ -1520,11 +1520,12 @@ const vaultStorage: StateStorage = {
     let beforeMarker: string | null;
     let beforeActive: string | null;
     let beforeScoped: string | null;
+    let scopeKey: string | null;
     try {
       beforeValue = fallback?.getItem(name) ?? null;
       beforeMarker = fallback?.getItem(markerKey) ?? null;
       beforeActive = fallback?.getItem(pointerKey) ?? null;
-      const scopeKey = beforeActive ? scopedStateKey(name, beforeActive) : null;
+      scopeKey = beforeActive ? scopedStateKey(name, beforeActive) : null;
       beforeScoped = scopeKey ? fallback?.getItem(scopeKey) ?? null : null;
     } catch (error) {
       if (workspace) {
