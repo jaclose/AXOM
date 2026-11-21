@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Profiler } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,20 +35,12 @@ vi.mock("../components/questions/QuestionSetLibraryReviewQueue", async () => {
     },
   };
 });
-vi.mock("../components/questions/CommunityUploads", async () => {
-  const { useLayoutEffect } = await import("react");
-  return {
-    CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) => {
-      // Layout-phase inspection catches old privileged data before the Host passive effect clears it.
-      useLayoutEffect(() => {
-        if (hostLayoutCapture.active) hostLayoutCapture.screens.push(document.body.textContent ?? "");
-      });
-      return <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
-        <button type="button" onClick={onReviewed}>Complete synthetic academic review</button>
-      </section>;
-    },
-  };
-});
+vi.mock("../components/questions/CommunityUploads", () => ({
+  CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) =>
+    <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
+      <button type="button" onClick={onReviewed}>Complete synthetic academic review</button>
+    </section>,
+}));
 vi.mock("../components/dashboard/JournalFeedbackReview", () => ({ JournalFeedbackReview: () => null }));
 
 const dashboard = (role: "owner" | "moderator"): OperatorDashboard => ({
@@ -98,11 +91,20 @@ describe("Host page authorization and moderation", () => {
     const newRole = deferred<OperatorDashboard>();
     const ownerSnapshot = { ...dashboard("owner"), accounts: [account("owner-private", "PRIVATE DIRECTORY ENTRY")] };
     vi.mocked(loadOperatorDashboard).mockResolvedValueOnce(ownerSnapshot).mockReturnValueOnce(newRole.promise);
-    render(<HostPage />);
-    expect(await screen.findByText("PRIVATE DIRECTORY ENTRY")).toBeTruthy();
-
+    // The Profiler stays mounted when Host unmounts its privileged children during
+    // reauthorization. A layout effect inside CommunityUploads would miss that commit.
     hostLayoutCapture.active = true;
+    render(<Profiler id="host-authorization" onRender={() => {
+      if (hostLayoutCapture.active) hostLayoutCapture.screens.push(document.body.textContent ?? "");
+    }}><HostPage /></Profiler>);
+    expect(await screen.findByText("PRIVATE DIRECTORY ENTRY")).toBeTruthy();
+    // Positive control: demonstrate this observer sees the authorized owner DOM.
+    expect(hostLayoutCapture.screens.some(snapshot => snapshot.includes("PRIVATE DIRECTORY ENTRY"))).toBe(true);
+
+    hostLayoutCapture.screens = [];
     await user.click(screen.getByRole("button", { name: /^Refresh$/ }));
+    // A nonempty refresh-commit sample is mandatory; an empty array cannot pass privacy.
+    expect(hostLayoutCapture.screens.length).toBeGreaterThan(0);
     expect(hostLayoutCapture.screens.some(snapshot => snapshot.includes("PRIVATE DIRECTORY ENTRY"))).toBe(false);
     expect(screen.queryByText("PRIVATE DIRECTORY ENTRY")).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
