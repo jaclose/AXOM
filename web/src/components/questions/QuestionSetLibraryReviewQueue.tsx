@@ -20,6 +20,9 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
   const [queue, setQueue] = useState<LibrarySubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Inspect is cancellable on permission refresh. A submitted decision is not:
+  // keep its duplicate-operation lock until its server request settles.
+  const decisionInFlight = useRef(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -38,6 +41,7 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
     const epoch = ++previewEpoch.current;
     let alive = true;
     setPreview(undefined); setReason(""); setAttested(false);
+    if (!decisionInFlight.current) setBusy(false);
     setLoading(true); setError(""); setQueue([]); setReviewer(false);
     if (accessSuspended) return () => { alive = false; };
 
@@ -70,16 +74,22 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
     }
   }
   async function decide(approved: boolean) {
-    if (accessSuspended || !preview || !reviewer || loading || busy || reason.trim().length < 8 || !attested) return;
+    if (accessSuspended || !preview || !reviewer || loading || busy || decisionInFlight.current
+      || reason.trim().length < 8 || !attested) return;
+    const epoch = previewEpoch.current;
+    decisionInFlight.current = true;
     setBusy(true); setError(""); setMessage("");
     try {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
+      // Completion after role/Host reauthorization must not restore an obsolete receipt.
+      if (previewEpoch.current !== epoch) return;
       setPreview(undefined);
       setMessage(approved ? "Question Set approved for search." : "Question Set returned to its contributor with your note.");
       // Host refresh also rechecks this queue and reviewer rights. A standalone
       // queue still refreshes itself when no Host callback was supplied.
       if (onReviewed) onReviewed(); else setRefresh(value => value + 1);
     } catch (cause) {
+      if (previewEpoch.current !== epoch) return;
       const message = cause instanceof Error ? cause.message : "The review could not be saved.";
       // An obsolete reviewed revision must not remain approvable by the same
       // checkbox. Require a fresh inspection and rights/answer attestation.
@@ -87,7 +97,10 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
         setPreview(undefined); setReason(""); setAttested(false);
       }
       setError(message);
-    } finally { setBusy(false); }
+    } finally {
+      decisionInFlight.current = false;
+      setBusy(false);
+    }
   }
   return <GlassCard pad className="qsl-review-queue">
     <PanelHeader headingLevel={2} title="Question Set Library review" sub="Learner submissions appear in search only after academic review."
