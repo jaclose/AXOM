@@ -1502,15 +1502,38 @@ const vaultStorage: StateStorage = {
       throw fail(error);
     }
     const fallback = localFallback();
+    // Browsers can deny access at the window.localStorage getter, which
+    // localFallback() deliberately converts to null for ordinary saves.
+    // An inaccessible recovery tier is not a verified empty recovery tier:
+    // destructive workspace deletion must stop before touching IndexedDB.
+    if (workspace && fallback === null && typeof window !== "undefined") {
+      conflictedWorkspaceKeys.add(name);
+      throw fail(new VaultConflictError());
+    }
     const markerKey = fallbackMarkerKey(name);
     const pointerKey = activeUserKey(name);
     // Capture optional recovery bytes. A concurrent fallback writer must not
     // lose its only acknowledged copy if this tab deletes a different revision.
-    const beforeValue = fallback?.getItem(name) ?? null;
-    const beforeMarker = fallback?.getItem(markerKey) ?? null;
-    const beforeActive = fallback?.getItem(pointerKey) ?? null;
-    const scopeKey = beforeActive ? scopedStateKey(name, beforeActive) : null;
-    const beforeScoped = scopeKey ? fallback?.getItem(scopeKey) ?? null : null;
+    // Unlike an absent value, an unreadable Storage tier cannot prove there is
+    // no competing recovery copy. Record the conflict before any IDB deletion.
+    let beforeValue: string | null;
+    let beforeMarker: string | null;
+    let beforeActive: string | null;
+    let beforeScoped: string | null;
+    let scopeKey: string | null;
+    try {
+      beforeValue = fallback?.getItem(name) ?? null;
+      beforeMarker = fallback?.getItem(markerKey) ?? null;
+      beforeActive = fallback?.getItem(pointerKey) ?? null;
+      scopeKey = beforeActive ? scopedStateKey(name, beforeActive) : null;
+      beforeScoped = scopeKey ? fallback?.getItem(scopeKey) ?? null : null;
+    } catch (error) {
+      if (workspace) {
+        conflictedWorkspaceKeys.add(name);
+        throw fail(new VaultConflictError());
+      }
+      throw fail(error);
+    }
 
     if (expected && [beforeValue, beforeScoped].some((value) =>
       value !== null && !expected.fingerprints.includes(workspaceFingerprint(value))

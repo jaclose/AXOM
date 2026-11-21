@@ -500,6 +500,96 @@ describe("IndexedDB-first local vault", () => {
     },
   );
 
+  it.each([
+    ["generic fallback", "generic"],
+    ["fallback marker", "marker"],
+    ["active account pointer", "pointer"],
+    ["owner-scoped fallback", "scoped"],
+  ] as const)(
+    "records a fail-closed delete conflict when %s cannot be read",
+    async (_description, unreadable) => {
+      const key = STORAGE_KEYS.persistedState;
+      const pointerKey = `${key}:active-user`;
+      const scopedKey = `${key}:user:jd`;
+      const markerKey = `${key}:fallback-newer`;
+      const original = JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: "must-not-delete" }] },
+        version: 34,
+      });
+      await localVaultStorage.setItem(key, original);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(original);
+      // Pointer metadata is independently readable; no fallback value or
+      // freshness marker has been acknowledged by the normal IDB save.
+      storage.setItem(pointerKey, "jd");
+      const deniedKey = {
+        generic: key,
+        marker: markerKey,
+        pointer: pointerKey,
+        scoped: scopedKey,
+      }[unreadable];
+      const read = vi.spyOn(storage, "getItem").mockImplementation((field) => {
+        if (field === deniedKey) throw new Error("SecurityError: browser storage denied");
+        return values.get(field) ?? null;
+      });
+      const checkpoint = getVaultWriteCheckpoint();
+      try {
+        await localVaultStorage.removeItem(key);
+        await flushLocalVaultWrites();
+      } finally {
+        read.mockRestore();
+      }
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(readVaultWriteFailure()).not.toBeNull();
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBe(original);
+        expect(await getDirect(db, scopedKey)).toBe(original);
+        expect(await getDirect(db, pointerKey)).toBe("jd");
+      } finally {
+        db.close();
+      }
+      expect(storage.getItem(key)).toBeNull();
+      expect(storage.getItem(markerKey)).toBeNull();
+    },
+  );
+
+  it("does not delete IndexedDB when browser localStorage access itself is denied", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const original = JSON.stringify({
+      state: { profile: { userId: "jd" }, questions: [{ id: "physical-only-workspace" }] },
+      version: 34,
+    });
+    await localVaultStorage.setItem(key, original);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(original);
+
+    // In privacy-restricted browsers the window.localStorage getter itself
+    // may throw, even before a Storage.getItem read can be attempted.
+    vi.stubGlobal("window", {
+      get localStorage() { throw new Error("SecurityError: browser storage unavailable"); },
+      dispatchEvent: vi.fn(),
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(readVaultWriteFailure()).not.toBeNull();
+    } finally {
+      vi.stubGlobal("window", undefined);
+    }
+
+    const db = await openCurrentVault();
+    try {
+      expect(await getDirect(db, key)).toBe(original);
+      expect(await getDirect(db, `${key}:user:jd`)).toBe(original);
+      expect(await getDirect(db, `${key}:active-user`)).toBe("jd");
+    } finally {
+      db.close();
+    }
+  });
+
   it("cannot remove an existing workspace from a tab that has not hydrated it", async () => {
     const key = STORAGE_KEYS.persistedState;
     const original = JSON.stringify({ state: { profile: { userId: "jd" }, notes: ["saved"] }, version: 34 });
