@@ -9,6 +9,10 @@ on:
       - 'web/src/components/questions/LibraryPanels.test.tsx'
       - 'web/src/components/questions/ImportPanel.tsx'
       - 'web/src/components/questions/ImportPanel.persistence.test.tsx'
+      - 'web/src/lib/sharing/questionSetShare.ts'
+      - 'web/src/lib/sharing/questionSetShare.test.ts'
+      - 'web/src/lib/sharing/supabaseSharing.ts'
+      - 'web/src/lib/sharing/supabaseSharing.test.ts'
       - '.github/workflows/apex-learning-intelligence.yml'
   workflow_dispatch:
 
@@ -39,7 +43,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix web ci
       - name: Focused actual repository regression suite
-        run: npm --prefix web test -- src/lib/learning-intelligence/learningIntelligence.test.ts src/lib/library.test.ts src/components/questions/LibraryPanels.test.tsx src/components/questions/ImportPanel.persistence.test.tsx
+        run: npm --prefix web test -- src/lib/learning-intelligence/learningIntelligence.test.ts src/lib/library.test.ts src/components/questions/LibraryPanels.test.tsx src/components/questions/ImportPanel.persistence.test.tsx src/lib/sharing/questionSetShare.test.ts src/lib/sharing/supabaseSharing.test.ts
       - name: Typecheck and lint
         run: |
           npm --prefix web run typecheck
