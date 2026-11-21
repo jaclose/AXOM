@@ -118,10 +118,11 @@ export function createQuestionSetShare(
     byId.set(question.id, question);
   }
   // A v1 bearer snapshot has no source review-state field. Exporting a
-  // provisional keyed mapping would silently turn it into a recipient-ready
-  // answer. Hold every non-ready original before serializing its key.
+  // provisional *keyed* mapping would silently turn it into a recipient-ready
+  // answer. Keyless questions may still be shared for non-scored practice;
+  // their missing answer remains explicit after import.
   for (const question of byId.values()) {
-    if (questionMappingStatus(question) !== "ready") {
+    if (question.correctKey?.trim() && questionMappingStatus(question) !== "ready") {
       throw new Error("Question Set contains an unresolved or unreviewed answer mapping and cannot be shared safely.");
     }
   }
