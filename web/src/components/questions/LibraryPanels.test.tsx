@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
@@ -8,6 +8,7 @@ import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { listQuestionSetShares, publishShare, revokeShare } from "../../lib/sharing/supabaseSharing";
 import { pushToast } from "../../lib/toast";
 import { QuestionSetList, SourceLibrary } from "./LibraryPanels";
+import { resetQuestionAttachmentScopeForTests, setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
 
 const mocked = vi.hoisted(() => ({
   document: {
@@ -25,9 +26,13 @@ const mocked = vi.hoisted(() => ({
   store: null as Record<string, unknown> | null,
 }));
 
-vi.mock("../../lib/store", () => ({
-  useStore: () => mocked.store ?? { documents: [mocked.document], removeDocument: vi.fn() },
-}));
+vi.mock("../../lib/store", () => {
+  const useStore = Object.assign(
+    () => mocked.store ?? { documents: [mocked.document], removeDocument: vi.fn() },
+    { getState: () => mocked.store ?? { documents: [mocked.document], removeDocument: vi.fn() } },
+  );
+  return { useStore };
+});
 vi.mock("../../lib/ai", () => ({
   enhanceQuestionSet: vi.fn(),
   resolveActiveProvider: vi.fn(() => null),
@@ -43,6 +48,7 @@ afterEach(() => {
   cleanup();
   mocked.store = null;
   vi.clearAllMocks();
+  resetQuestionAttachmentScopeForTests();
 });
 
 describe("SourceLibrary", () => {
@@ -319,6 +325,86 @@ describe("QuestionSetList AI digest identity", () => {
     expect(screen.getByText(/AI digest on hold:.*conflicting question records/i)).toBeTruthy();
     expect(screen.queryByText("Untrusted prior digest")).toBeNull();
     expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+
+  it("holds a unique source record when its answer mapping still needs review", async () => {
+    const held = { ...question("review", "Unreviewed source?", "Tentative"), needsReview: true };
+    const { updateQuestionSet } = prepare([held], ["review"], true);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText(/AI digest on hold:.*answer mapping/i)).toBeTruthy();
+    expect(screen.queryByText("Untrusted prior digest")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("holds uniquely keyed imported answers before extraction review", () => {
+    const held = { ...question("unreviewed", "Imported source?", "Tentative"),
+      extraction: { confidence: "high" as const, reviewed: false } };
+    prepare([held], ["unreviewed"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect((screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*answer mapping/i)).toBeTruthy();
+  });
+
+  it("holds a unique keyed question whose required source figure is absent", () => {
+    const held = { ...question("figure", "Interpret figure?", "Tentative"),
+      content: { assets: [{ id: "missing-figure", role: "stem" }] } as QuestionRecord["content"] };
+    prepare([held], ["figure"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect((screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*answer mapping/i)).toBeTruthy();
+  });
+
+  function deferDigest() {
+    let resolve!: (value: Awaited<ReturnType<typeof enhanceQuestionSet>>) => void;
+    vi.mocked(enhanceQuestionSet).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    return async () => {
+      await act(async () => resolve({
+        summary: "Outdated answer", pitfalls: [], suggestedReview: ["Outdated tracker suggestion"],
+      } as Awaited<ReturnType<typeof enhanceQuestionSet>>));
+    };
+  }
+
+  it("discards an in-flight digest when a valid member's stem/key changes without changing its ID", async () => {
+    const { updateQuestionSet } = prepare([question("same", "First stem?", "First key")], ["same"]);
+    const finish = deferDigest();
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    mocked.store = { ...mocked.store, questions: [question("same", "Different stem?", "Different key")] };
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    await finish();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+    expect(screen.queryByText("Outdated answer")).toBeNull();
+  });
+
+  it("discards an in-flight digest after a competing imported row causes a canonical ID collision", async () => {
+    const first = question("same", "First stem?", "First key");
+    const { updateQuestionSet } = prepare([first], ["same"]);
+    const finish = deferDigest();
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    mocked.store = { ...mocked.store, questions: [first, question("same", "Competing?", "Second key")] };
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    await finish();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+    expect(screen.queryByText("Outdated answer")).toBeNull();
+  });
+
+  it("discards an in-flight digest across account A to B to A even if the source IDs match", async () => {
+    setQuestionAttachmentAccount("account-A");
+    const { updateQuestionSet } = prepare([question("same", "Source?", "Answer")], ["same"]);
+    const finish = deferDigest();
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    setQuestionAttachmentAccount("account-B");
+    setQuestionAttachmentAccount("account-A");
+    await finish();
     expect(updateQuestionSet).not.toHaveBeenCalled();
   });
 
