@@ -6,6 +6,7 @@ import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperat
 import { HostPage } from "./HostPage";
 
 const accountIdentity = vi.hoisted(() => ({ current: "verified-account", userId: "verified-account" }));
+const hostLayoutCapture = vi.hoisted(() => ({ active: false, screens: [] as string[] }));
 
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: accountIdentity.userId } }),
@@ -33,12 +34,20 @@ vi.mock("../components/questions/QuestionSetLibraryReviewQueue", async () => {
     },
   };
 });
-vi.mock("../components/questions/CommunityUploads", () => ({
-  CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) =>
-    <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
-      <button type="button" onClick={onReviewed}>Complete synthetic academic review</button>
-    </section>,
-}));
+vi.mock("../components/questions/CommunityUploads", async () => {
+  const { useLayoutEffect } = await import("react");
+  return {
+    CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) => {
+      // Layout-phase inspection catches old privileged data before the Host passive effect clears it.
+      useLayoutEffect(() => {
+        if (hostLayoutCapture.active) hostLayoutCapture.screens.push(document.body.textContent ?? "");
+      });
+      return <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
+        <button type="button" onClick={onReviewed}>Complete synthetic academic review</button>
+      </section>;
+    },
+  };
+});
 vi.mock("../components/dashboard/JournalFeedbackReview", () => ({ JournalFeedbackReview: () => null }));
 
 const dashboard = (role: "owner" | "moderator"): OperatorDashboard => ({
@@ -77,12 +86,34 @@ function deferred<T>() {
 beforeEach(() => {
   accountIdentity.current = "verified-account";
   accountIdentity.userId = "verified-account";
+  hostLayoutCapture.active = false; hostLayoutCapture.screens = [];
   vi.clearAllMocks();
   vi.mocked(resolveReport).mockResolvedValue(undefined);
 });
 afterEach(cleanup);
 
 describe("Host page authorization and moderation", () => {
+  it("never renders an old owner directory during the layout phase of a same-account role recheck", async () => {
+    const user = userEvent.setup();
+    const newRole = deferred<OperatorDashboard>();
+    const ownerSnapshot = { ...dashboard("owner"), accounts: [account("owner-private", "PRIVATE DIRECTORY ENTRY")] };
+    vi.mocked(loadOperatorDashboard).mockResolvedValueOnce(ownerSnapshot).mockReturnValueOnce(newRole.promise);
+    render(<HostPage />);
+    expect(await screen.findByText("PRIVATE DIRECTORY ENTRY")).toBeTruthy();
+
+    hostLayoutCapture.active = true;
+    await user.click(screen.getByRole("button", { name: "Refresh", exact: true }));
+    expect(hostLayoutCapture.screens.some(snapshot => snapshot.includes("PRIVATE DIRECTORY ENTRY"))).toBe(false);
+    expect(screen.queryByText("PRIVATE DIRECTORY ENTRY")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
+
+    await act(async () => { newRole.resolve(dashboard("moderator")); });
+    await waitFor(() => expect(hostBanner().getByText("Moderator")).toBeTruthy());
+    expect(screen.queryByText("PRIVATE DIRECTORY ENTRY")).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Find account" })).toBeNull();
+  });
+
+
   it("finds an older account through server search and restores the recent view when cleared", async () => {
     const user = userEvent.setup();
     const older = deferred<OperatorAccount[]>();
