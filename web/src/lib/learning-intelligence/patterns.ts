@@ -110,6 +110,16 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 
 export function buildPatternReport(questions: readonly QuestionRecord[]): PatternReport {
   const byId = new Map(questions.map((question) => [question.id, question]));
+  // Attempt events retain their canonical question ID, not an origin-row
+  // pointer. Aliases can disagree on both offered choices and their text.
+  // Hold collided IDs from any inference that resolves option text or timing
+  // via the last-write-wins byId index. Preserve raw attempt history/totals.
+  const duplicateIds = new Set<ID>();
+  const seenIds = new Set<ID>();
+  for (const question of questions) {
+    if (seenIds.has(question.id)) duplicateIds.add(question.id);
+    else seenIds.add(question.id);
+  }
   const features = new Map<ID, QuestionFeatures>();
   const featuresOf = (id: ID) => {
     let value = features.get(id);
@@ -142,7 +152,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
 
   const pairs = new Map<string, ConfusionPair>();
   for (const event of scored) {
-    if (event.correct !== false || !event.answerKey || !event.correctKey) continue;
+    if (duplicateIds.has(event.questionId) || event.correct !== false || !event.answerKey || !event.correctKey) continue;
     const question = byId.get(event.questionId)!;
     const picked = question.options.find((option) => option.key === event.answerKey)?.text.trim();
     const correct = question.options.find((option) => option.key === event.correctKey)?.text.trim();
@@ -158,18 +168,6 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   const missCounts = new Map<ID, number>();
   for (const event of scored) if (event.correct === false) missCounts.set(event.questionId, (missCounts.get(event.questionId) ?? 0) + 1);
   const repeatMisses = [...missCounts.entries()].filter(([, count]) => count >= 2).sort((left, right) => right[1] - left[1]).map(([id]) => id);
-
-  // Attempt events retain their original record's ID, not an origin-row
-  // pointer. A duplicate-ID import may contain different offered choices,
-  // so the byId index cannot safely verify either row's timing evidence.
-  // Hold every such ID from diagnostics, regardless of input order; keep raw
-  // historical counts and the original question/attempt rows untouched.
-  const duplicateIds = new Set<ID>();
-  const seenIds = new Set<ID>();
-  for (const question of questions) {
-    if (seenIds.has(question.id)) duplicateIds.add(question.id);
-    else seenIds.add(question.id);
-  }
 
   // Retain legacy status-only results in raw scored totals, but do not
   // infer an answer-speed diagnostic without an independently checkable saved
