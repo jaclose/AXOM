@@ -64,7 +64,10 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
       if (previewEpoch.current === epoch) setPreview(next);
     } catch (cause) {
       if (previewEpoch.current === epoch) setError(cause instanceof Error ? cause.message : "This submission could not be opened.");
-    } finally { setBusy(false); }
+    } finally {
+      // A superseded Inspect request must not unlock a newer review operation.
+      if (previewEpoch.current === epoch) setBusy(false);
+    }
   }
   async function decide(approved: boolean) {
     if (accessSuspended || !preview || !reviewer || loading || busy || reason.trim().length < 8 || !attested) return;
