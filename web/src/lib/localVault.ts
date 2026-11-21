@@ -1134,19 +1134,67 @@ async function removeVaultRecords(name: string, expected?: VaultExpectation): Pr
         return;
       }
 
-      const keys = [name, ...(active ? [scopedStateKey(name, active)] : [])];
-      for (const key of keys) {
-        const request = store.get(key);
-        request.onsuccess = () => {
-          const manifest = readChunkedValueManifest(typeof request.result === "string" ? request.result : undefined);
-          if (!manifest) return;
-          for (let index = 0; index < manifest.chunkCount; index += 1) {
-            store.delete(`${manifest.chunkPrefix}:${index}`);
+      // Destructive deletion must validate physical chunks, not just a manifest
+      // header whose fingerprint may outlive missing or corrupted payloads.
+      // All checks and deletions share this single IndexedDB readwrite transaction.
+      const manifests: { manifest: ChunkedValueManifest; chunks: string[] }[] = [];
+      const seenManifests = new Set<string>();
+      for (const raw of [primary, scoped]) {
+        if (raw === undefined) continue;
+        const manifest = readChunkedValueManifest(raw);
+        if (!manifest) {
+          if (isMalformedChunkedValueManifest(raw)) {
+            deny();
+            return;
           }
-        };
-        store.delete(key);
+          continue;
+        }
+        if (seenManifests.has(raw)) continue;
+        seenManifests.add(raw);
+        manifests.push({ manifest, chunks: new Array<string>(manifest.chunkCount) });
       }
-      store.delete(activeUserKey(name));
+
+      const deleteVerified = () => {
+        if (conflict) return;
+        store.delete(name);
+        if (active) store.delete(scopedStateKey(name, active));
+        for (const entry of manifests) {
+          for (let index = 0; index < entry.manifest.chunkCount; index += 1) {
+            store.delete(`${entry.manifest.chunkPrefix}:${index}`);
+          }
+        }
+        store.delete(activeUserKey(name));
+      };
+
+      let remaining = manifests.reduce((total, entry) => total + entry.manifest.chunkCount, 0);
+      if (remaining === 0) {
+        deleteVerified();
+        return;
+      }
+      for (const entry of manifests) {
+        for (let index = 0; index < entry.manifest.chunkCount; index += 1) {
+          const request = store.get(`${entry.manifest.chunkPrefix}:${index}`);
+          request.onsuccess = () => {
+            if (conflict) return;
+            if (typeof request.result !== "string") {
+              deny();
+              return;
+            }
+            entry.chunks[index] = request.result;
+            remaining -= 1;
+            if (remaining !== 0) return;
+            try {
+              for (const verified of manifests) {
+                validateReassembledValue(verified.manifest, verified.chunks);
+              }
+            } catch {
+              deny();
+              return;
+            }
+            deleteVerified();
+          };
+        }
+      }
     };
 
     const primary = store.get(name);
