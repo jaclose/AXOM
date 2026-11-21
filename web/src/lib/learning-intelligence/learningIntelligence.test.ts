@@ -1050,3 +1050,78 @@ describe("duplicate-ID metadata evidence must not borrow another source row", ()
     expect(JSON.stringify(source)).toBe(before);
   });
 });
+
+describe("repeat-miss actions require an unambiguous question identity", () => {
+  const missed = (id: string, day: number) => question({
+    id, status: "incorrect", attempts: [attempt(day, "incorrect")],
+  });
+  const repeatFinding = (records: QuestionRecord[]) =>
+    buildPatternReport(records).findings.find((finding) => finding.kind === "repeat-miss");
+
+  it("does not turn two distinct single misses sharing an ID into a repeat-miss action", () => {
+    const records = [missed("collision-two-rows", 1), missed("collision-two-rows", 2)];
+    const before = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+    expect(report.totals.first).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+    expect(report.repeatMisses).toEqual([]);
+    expect(repeatFinding(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(before);
+  });
+
+  it("never claims a repeated miss from two copies of the identical imported attempt", () => {
+    const first = missed("collision-copy", 3);
+    const records = [first, question({ ...first, attempts: first.attempts.map((saved) => ({ ...saved })) })];
+    const report = buildPatternReport(records);
+    expect(report.totals.all.attempts).toBe(2);
+    expect(report.repeatMisses).toEqual([]);
+    expect(repeatFinding(records)).toBeUndefined();
+  });
+
+  it("is order-independent when colliding rows have different provenance or answer readiness", () => {
+    const source = missed("collision-order", 1);
+    const alias = missed("collision-order", 2);
+    alias.topic = "Unrelated concept";
+    const held = question({ id: "collision-held", needsReview: true, attempts: [] });
+    const answered = question({
+      id: held.id, status: "incorrect",
+      attempts: [attempt(1, "incorrect"), attempt(2, "incorrect")],
+    });
+    for (const records of [[source, alias], [alias, source], [answered, held], [held, answered]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.repeatMisses).toEqual([]);
+      expect(report.findings.some((finding) => finding.kind === "repeat-miss")).toBe(false);
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("keeps true repeated misses and retry IDs for a unique, verifiable source row", () => {
+    const original = question({
+      id: "unique-repeated-miss", status: "incorrect",
+      attempts: [attempt(1, "incorrect"), attempt(2, "incorrect")],
+    });
+    const report = buildPatternReport([original]);
+    expect(report.repeatMisses).toEqual([original.id]);
+    expect(report.findings.find((finding) => finding.kind === "repeat-miss")).toMatchObject({
+      title: "1 question missed more than once",
+      sample: 2, questionIds: [original.id],
+      actionLabel: "Retry 1 question",
+    });
+  });
+
+  it("preserves a unique repeat-miss recommendation alongside ambiguous collided histories", () => {
+    const distinct = question({
+      id: "unique-repeat-alongside-collision", status: "incorrect",
+      attempts: [attempt(1, "incorrect"), attempt(2, "incorrect")],
+    });
+    const collided = [missed("collision-mixed", 1), missed("collision-mixed", 2)];
+    const records = [...collided, distinct];
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 4, correct: 0, accuracy: 0 });
+    expect(report.repeatMisses).toEqual([distinct.id]);
+    expect(report.findings.find((finding) => finding.kind === "repeat-miss")).toMatchObject({
+      sample: 2, questionIds: [distinct.id],
+    });
+  });
+});
