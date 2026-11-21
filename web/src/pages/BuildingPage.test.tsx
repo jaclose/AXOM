@@ -182,6 +182,17 @@ describe("Building preview", () => {
     expect(status.textContent).toBe(`Showing ${SYSTEM_PREVIEWS.length} systems (all statuses).`);
   });
 
+  it("exposes every system's connections as a named list with readable items", () => {
+    render(<BuildingPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
+    for (const system of SYSTEM_PREVIEWS) {
+      const card = screen.getByRole("group", { name: system.name });
+      const connections = within(card).getByRole("list", { name: `${system.name} connections` });
+      const names = within(connections).getAllByRole("listitem").map((item) => item.textContent);
+      expect(names).toEqual(system.connectsTo);
+    }
+  });
+
   it("gives each keyboard-focusable system preview a named group tied to its heading", () => {
     render(<BuildingPage />);
     fireEvent.click(screen.getByRole("tab", { name: "Systems" }));

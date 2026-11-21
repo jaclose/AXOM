@@ -170,8 +170,8 @@ export function BuildingPage() {
                         <div className={`build-status build-status--${item.status}`}>{STATUS[item.status]}</div>
                         <h3 id={`building-system-${item.id}`}>{item.name}</h3>
                         <p>{item.promise}</p>
-                        <div className="connection-list" aria-label={`${item.name} connections`}>
-                          {item.connectsTo.map((connection) => <span key={connection} className={related.has(connection) && hoveredItem?.id === item.id ? "on" : ""}>{connection}</span>)}
+                        <div className="connection-list" role="list" aria-label={`${item.name} connections`}>
+                          {item.connectsTo.map((connection) => <span role="listitem" key={connection} className={related.has(connection) && hoveredItem?.id === item.id ? "on" : ""}>{connection}</span>)}
                         </div>
                       </GlassCard>
                     );

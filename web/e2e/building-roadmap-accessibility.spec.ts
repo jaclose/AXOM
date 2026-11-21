@@ -91,6 +91,9 @@ test("Building system emphasis honors real pointer and keyboard focus precedence
     const highlighted = page.locator(".system-card.is-focus, .system-card.is-related, .system-card.is-dim");
     await expect(page.getByRole("group", { name: "Accounts & Sync", exact: true })).toHaveCount(1);
     await expect(accountCard).toHaveAttribute("aria-labelledby", "building-system-accounts-sync");
+    const accountConnections = accountCard.getByRole("list", { name: "Accounts & Sync connections" });
+    await expect(accountConnections.getByRole("listitem")).toHaveText(["All learner data", "Backups", "Native AXOM"]);
+
 
     // Losing pointer hover must not clear keyboard focus.
     await accountCard.focus();
