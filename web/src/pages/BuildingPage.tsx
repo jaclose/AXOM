@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowRight, Blocks, FlaskConical, Network, Route } from "lucide-react";
 import { GlassCard, Tag } from "../components/ui/primitives";
 import { SYSTEM_PREVIEWS, type BuildStatus, type SystemPreview } from "../lib/buildingSystems";
@@ -18,20 +18,60 @@ const HORIZONS: Array<{ id: Horizon; title: string; icon: typeof Route; statuses
 export function BuildingPage() {
   const [view, setView] = useState<"overview" | "systems">("overview");
   const [filter, setFilter] = useState<BuildStatus | "all" | "next">("all");
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [pointerOver, setPointerOver] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const overviewTabRef = useRef<HTMLButtonElement>(null);
+  const systemsTabRef = useRef<HTMLButtonElement>(null);
   const counts = useMemo(() => Object.fromEntries(STATUS_ORDER.map((status) => [status, SYSTEM_PREVIEWS.filter((item) => item.status === status).length])) as Record<BuildStatus, number>, []);
   const visible = filter === "all" ? SYSTEM_PREVIEWS : SYSTEM_PREVIEWS.filter((item) =>
     filter === "next" ? item.status === "in-development" || item.status === "planned" : item.status === filter);
+  const filterDescription = filter === "all" ? "all statuses" : filter === "next" ? "Next roadmap" : STATUS[filter].toLowerCase();
   const groups = useMemo(() => Object.entries(visible.reduce<Record<string, SystemPreview[]>>((all, item) => {
     (all[item.area] ??= []).push(item);
     return all;
   }, {})), [visible]);
-  const hoveredItem = SYSTEM_PREVIEWS.find((item) => item.id === hovered);
+  const activeId = focused ?? pointerOver;
+  const hoveredItem = SYSTEM_PREVIEWS.find((item) => item.id === activeId);
   const related = new Set(hoveredItem ? [hoveredItem.name, ...hoveredItem.connectsTo] : []);
 
+  function selectView(target: "overview" | "systems") {
+    setPointerOver(null);
+    setFocused(null);
+    setView(target);
+    (target === "overview" ? overviewTabRef : systemsTabRef).current?.focus();
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: "overview" | "systems") {
+    // Modified arrows are reserved for browser and platform shortcuts.
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    let target: "overview" | "systems";
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowRight":
+        target = current === "overview" ? "systems" : "overview";
+        break;
+      case "Home":
+        target = "overview";
+        break;
+      case "End":
+        target = "systems";
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    selectView(target);
+  }
+
+  function selectFilter(target: BuildStatus | "all" | "next") {
+    setPointerOver(null);
+    setFocused(null);
+    setFilter(target);
+  }
+
   function openHorizon(horizon: (typeof HORIZONS)[number]) {
-    setFilter(horizon.id === "next" ? "next" : (horizon.statuses[0] ?? "all"));
-    setView("systems");
+    selectFilter(horizon.id === "next" ? "next" : (horizon.statuses[0] ?? "all"));
+    selectView("systems");
   }
 
   return (
@@ -42,11 +82,38 @@ export function BuildingPage() {
         <p>A preview of how today’s working study tools could become a connected medical-learning system. These cards describe direction, not shipped capability.</p>
       </header>
       <div className="ecosystem-tabs" role="tablist" aria-label="Building views">
-        <button role="tab" aria-selected={view === "overview"} onClick={() => setView("overview")}>Overview</button>
-        <button role="tab" aria-selected={view === "systems"} onClick={() => setView("systems")}>Systems <span className="building-count" aria-hidden="true">{SYSTEM_PREVIEWS.length}</span></button>
+        <button
+          ref={overviewTabRef}
+          id="building-tab-overview"
+          type="button"
+          role="tab"
+          aria-controls="building-active-panel"
+          aria-selected={view === "overview"}
+          tabIndex={view === "overview" ? 0 : -1}
+          onClick={() => selectView("overview")}
+          onKeyDown={(event) => handleTabKeyDown(event, "overview")}
+        >Overview</button>
+        <button
+          ref={systemsTabRef}
+          id="building-tab-systems"
+          type="button"
+          role="tab"
+          aria-controls="building-active-panel"
+          aria-selected={view === "systems"}
+          tabIndex={view === "systems" ? 0 : -1}
+          onClick={() => selectView("systems")}
+          onKeyDown={(event) => handleTabKeyDown(event, "systems")}
+        >Systems <span className="building-count" aria-hidden="true">{SYSTEM_PREVIEWS.length}</span></button>
       </div>
 
-      <div className="building-panel" key={view}>
+      <div
+        className="building-panel"
+        id="building-active-panel"
+        role="tabpanel"
+        tabIndex={0}
+        aria-labelledby={view === "overview" ? "building-tab-overview" : "building-tab-systems"}
+        key={view}
+      >
         {view === "overview" ? (
           <section className="building-overview">
             {HORIZONS.map((horizon, index) => {
@@ -60,7 +127,7 @@ export function BuildingPage() {
                   <ul className="building-horizon-list">
                     {items.map((item) => <li key={item.id}>{item.name}</li>)}
                   </ul>
-                  <button type="button" className="building-horizon-link" onClick={() => openHorizon(horizon)}>
+                  <button type="button" className="building-horizon-link" aria-label={`See ${items.length} system${items.length === 1 ? "" : "s"} in ${horizon.title} roadmap`} onClick={() => openHorizon(horizon)}>
                     See {items.length} system{items.length === 1 ? "" : "s"} <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
                   </button>
                 </GlassCard>
@@ -70,15 +137,18 @@ export function BuildingPage() {
         ) : (
           <section className="system-groups">
             <div className="building-filters" role="group" aria-label="Filter systems by status">
-              <button type="button" className={`filter-pill ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All <small>{SYSTEM_PREVIEWS.length}</small></button>
-              <button type="button" className={`filter-pill ${filter === "next" ? "on" : ""}`} aria-pressed={filter === "next"} onClick={() => setFilter("next")}>Next <small>{counts["in-development"] + counts.planned}</small></button>
+              <button type="button" className={`filter-pill ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => selectFilter("all")}>All <small>{SYSTEM_PREVIEWS.length}</small></button>
+              <button type="button" className={`filter-pill ${filter === "next" ? "on" : ""}`} aria-pressed={filter === "next"} onClick={() => selectFilter("next")}>Next <small>{counts["in-development"] + counts.planned}</small></button>
               {STATUS_ORDER.map((status) => (
-                <button key={status} type="button" className={`filter-pill ${filter === status ? "on" : ""}`} aria-pressed={filter === status} onClick={() => setFilter(status)}>
+                <button key={status} type="button" className={`filter-pill ${filter === status ? "on" : ""}`} aria-pressed={filter === status} onClick={() => selectFilter(status)}>
                   {STATUS[status].toLowerCase().replace(/^\w/, (c) => c.toUpperCase())} <small>{counts[status]}</small>
                 </button>
               ))}
             </div>
-            <p className="building-hint">Hover or focus a system to light up what it connects to.</p>
+            <p className="building-hint">
+              <span role="status" aria-live="polite" aria-atomic="true">Showing {visible.length} {visible.length === 1 ? "system" : "systems"} ({filterDescription}).</span>{" "}
+              Hover or focus a system to light up what it connects to.
+            </p>
             {groups.map(([area, items], groupIndex) => (
               <div key={area} className="system-area">
                 <h2>{area}</h2>
@@ -92,16 +162,19 @@ export function BuildingPage() {
                         className={`system-card ${state}`}
                         style={{ "--stagger": groupIndex * 2 + index } as CSSProperties}
                         tabIndex={0}
-                        onMouseEnter={() => setHovered(item.id)}
-                        onMouseLeave={() => setHovered(null)}
-                        onFocus={() => setHovered(item.id)}
-                        onBlur={() => setHovered(null)}
+                        role="group"
+                        aria-labelledby={`building-system-${item.id}`}
+                        aria-describedby={`building-system-${item.id}-status`}
+                        onMouseEnter={() => setPointerOver(item.id)}
+                        onMouseLeave={() => setPointerOver(null)}
+                        onFocus={() => setFocused(item.id)}
+                        onBlur={() => setFocused(null)}
                       >
-                        <div className={`build-status build-status--${item.status}`}>{STATUS[item.status]}</div>
-                        <h3>{item.name}</h3>
+                        <div id={`building-system-${item.id}-status`} className={`build-status build-status--${item.status}`}>{STATUS[item.status]}</div>
+                        <h3 id={`building-system-${item.id}`}>{item.name}</h3>
                         <p>{item.promise}</p>
-                        <div className="connection-list" aria-label={`${item.name} connections`}>
-                          {item.connectsTo.map((connection) => <span key={connection} className={related.has(connection) && hoveredItem?.id === item.id ? "on" : ""}>{connection}</span>)}
+                        <div className="connection-list" role="list" aria-label={`${item.name} connections`}>
+                          {item.connectsTo.map((connection) => <span role="listitem" key={connection} className={related.has(connection) && hoveredItem?.id === item.id ? "on" : ""}>{connection}</span>)}
                         </div>
                       </GlassCard>
                     );
