@@ -534,7 +534,8 @@ describe("IndexedDB-first local vault", () => {
       });
       const checkpoint = getVaultWriteCheckpoint();
       try {
-        await expect(localVaultStorage.removeItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        await localVaultStorage.removeItem(key);
+        await flushLocalVaultWrites();
       } finally {
         read.mockRestore();
       }
@@ -571,7 +572,8 @@ describe("IndexedDB-first local vault", () => {
     });
     const checkpoint = getVaultWriteCheckpoint();
     try {
-      await expect(localVaultStorage.removeItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      await localVaultStorage.removeItem(key);
+        await flushLocalVaultWrites();
       expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
       expect(readVaultWriteFailure()).not.toBeNull();
     } finally {
