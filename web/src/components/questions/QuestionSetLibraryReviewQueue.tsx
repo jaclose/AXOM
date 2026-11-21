@@ -23,6 +23,9 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
   // Inspect is cancellable on permission refresh. A submitted decision is not:
   // keep its duplicate-operation lock until its server request settles.
   const decisionInFlight = useRef(false);
+  // React state can stay stale until a batched click commits. Serialize Inspect
+  // synchronously so two requests cannot race within the same authorization epoch.
+  const inspectInFlight = useRef(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -39,6 +42,9 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
   canRestorePreviewFocus.current = !accessSuspended && !loading && reviewer;
   useEffect(() => {
     const epoch = ++previewEpoch.current;
+    // Superseded requests may settle late; their finally must not unlock a new
+    // Inspect started under this epoch.
+    inspectInFlight.current = false;
     let alive = true;
     setPreview(undefined); setReason(""); setAttested(false);
     if (!decisionInFlight.current) setBusy(false);
@@ -60,7 +66,9 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
   }, [accountId, refresh, refreshSignal, accessSuspended]);
 
   async function open(id: string) {
-    if (accessSuspended || loading || !reviewer || busy) return;
+    if (accessSuspended || loading || !reviewer || busy || inspectInFlight.current
+      || decisionInFlight.current) return;
+    inspectInFlight.current = true;
     const epoch = previewEpoch.current;
     setBusy(true); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
     try {
@@ -70,7 +78,10 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
       if (previewEpoch.current === epoch) setError(cause instanceof Error ? cause.message : "This submission could not be opened.");
     } finally {
       // A superseded Inspect request must not unlock a newer review operation.
-      if (previewEpoch.current === epoch) setBusy(false);
+      if (previewEpoch.current === epoch) {
+        inspectInFlight.current = false;
+        setBusy(false);
+      }
     }
   }
   async function decide(approved: boolean) {
