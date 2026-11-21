@@ -961,3 +961,92 @@ describe("fast-miss evidence rejects duplicate canonical question IDs", () => {
     expect(JSON.stringify(records)).toBe(before);
   });
 });
+
+
+describe("duplicate-ID metadata evidence must not borrow another source row", () => {
+  const wrong = (topic: string) => question({
+    topic,
+    stem: VIGNETTE_TREATMENT,
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect")],
+  });
+  const alias = (record: QuestionRecord) => question({
+    id: record.id,
+    topic: "Cardiac",
+    stem: "Which enzyme is deficient in classic galactosemia?",
+    needsReview: true,
+    attempts: [],
+  });
+
+  it("does not invent a weak Cardiac concept from six wrong Renal source rows when aliases reorder", () => {
+    const renal = Array.from({ length: 6 }, () => wrong("Renal"));
+    const cardiacAliases = renal.map(alias);
+    for (const records of [[...renal, ...cardiacAliases], [...cardiacAliases, ...renal]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 6, correct: 0, accuracy: 0 });
+      expect(report.byConcept).toEqual([]);
+      expect(report.findings.filter((finding) => finding.kind === "weak-concept")).toEqual([]);
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("does not attribute collided attempts to another record's inferred task or reasoning depth", () => {
+    const source = Array.from({ length: 8 }, () => wrong("Renal"));
+    const aliases = source.map(alias);
+    for (const records of [[...source, ...aliases], [...aliases, ...source]]) {
+      const report = buildPatternReport(records);
+      expect(report.totals.all.attempts).toBe(8);
+      expect(report.byTask).toEqual([]);
+      expect(report.byDepth).toEqual([]);
+      expect(report.findings.some((finding) => ["task-gap", "depth-gap"].includes(finding.kind))).toBe(false);
+    }
+  });
+
+  it("retains observed certainty and raw scores without alias-derived topic naming", () => {
+    const source = Array.from({ length: 2 }, () => question({
+      topic: "Renal",
+      attempts: [attempt(1, "incorrect", { certainty: "sure" })],
+    }));
+    const aliases = source.map(alias);
+    for (const records of [[...source, ...aliases], [...aliases, ...source]]) {
+      const report = buildPatternReport(records);
+      const finding = report.findings.find((item) => item.kind === "sure-and-wrong");
+      expect(report.sureAndWrong).toHaveLength(2);
+      expect(report.totals.all.attempts).toBe(2);
+      expect(finding).toMatchObject({ sample: 2, questionIds: source.map((record) => record.id) });
+      expect(finding?.detail).not.toContain("Cardiac");
+      expect(finding?.detail).not.toContain("Renal");
+    }
+  });
+
+  it("does not infer missing figure evidence or retry IDs from collided question sources", () => {
+    const source = question({ stem: "The arrow in the photograph shown below indicates which structure?" });
+    const duplicate = alias(source);
+    for (const records of [[source, duplicate], [duplicate, source]]) {
+      const report = buildPatternReport(records);
+      expect(report.findings.find((finding) => finding.kind === "figure-missing")).toBeUndefined();
+    }
+    expect(buildPatternReport([source]).findings.find((finding) => finding.kind === "figure-missing")).toMatchObject({
+      sample: 1, questionIds: [source.id],
+    });
+  });
+
+  it("preserves correctly attributed metadata and weak-concept actions for six unique ready questions", () => {
+    const source = Array.from({ length: 6 }, () => wrong("Renal"));
+    const before = JSON.stringify(source);
+    const report = buildPatternReport(source);
+    expect(report.byConcept).toEqual([expect.objectContaining({
+      key: "renal", first: { attempts: 6, correct: 0, accuracy: 0 },
+      questionIds: source.map((record) => record.id),
+    })]);
+    expect(report.findings.find((finding) => finding.kind === "weak-concept")).toMatchObject({
+      title: "Renal: 0% the first time",
+      sample: 6,
+      questionIds: source.map((record) => record.id),
+    });
+    expect(report.byTask).not.toEqual([]);
+    expect(report.byDepth).not.toEqual([]);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+});
