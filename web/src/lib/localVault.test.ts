@@ -448,8 +448,8 @@ describe("IndexedDB-first local vault", () => {
     "rejects deletion of a hydrated workspace when its physical chunks have %s",
     async (fault) => {
       const key = STORAGE_KEYS.persistedState;
-      const scopedKey = \`${key}:user:jd\`;
-      const pointerKey = \`${key}:active-user\`;
+      const scopedKey = `${key}:user:jd`;
+      const pointerKey = `${key}:active-user`;
       const original = JSON.stringify({
         state: {
           profile: { userId: "jd" },
@@ -468,7 +468,7 @@ describe("IndexedDB-first local vault", () => {
       const pointer = await getDirect(db, pointerKey);
       const manifest = JSON.parse(physicalPrimary!) as { chunkPrefix: string; chunkCount: number };
       expect(manifest.chunkCount).toBeGreaterThan(0);
-      const chunkKey = \`${manifest.chunkPrefix}:0\`;
+      const chunkKey = `${manifest.chunkPrefix}:0`;
       db.close();
 
       // A separate tab or storage failure can damage the chunks after hydration.
