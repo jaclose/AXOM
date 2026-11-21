@@ -8,12 +8,12 @@ import { useStore } from "../../lib/store";
 import { ImportPanel } from "./ImportPanel";
 import { importFromCsv } from "../../lib/questionImport";
 import { questionMappingStatus } from "../../lib/questions";
-import { digestMembership } from "../../lib/library";
+import { digestMembership, type SourceDocument } from "../../lib/library";
 import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { parseImport, toPortableState } from "../../lib/backup";
 import { DB_NAME } from "../../lib/localVault";
 import { hasReviewedImportInFlight, persistReviewedImportOnce, settledReviewedImportSnapshot, type ReviewedImportPersistenceResult } from "../../lib/questionImportFinalization";
-import type { SourceDocument } from "../../lib/library";
+
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
