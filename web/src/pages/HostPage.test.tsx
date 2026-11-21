@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
@@ -113,6 +113,29 @@ describe("Host page authorization and moderation", () => {
     expect(screen.queryByRole("searchbox", { name: "Find account" })).toBeNull();
   });
 
+
+  it("rejects a stale moderation click in the same event batch as an authorization refresh", async () => {
+    const newRole = deferred<OperatorDashboard>();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValue(dashboard("moderator"))
+      .mockResolvedValueOnce(dashboard("owner"))
+      .mockReturnValueOnce(newRole.promise);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    fireEvent.change(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/i }), {
+      target: { value: "Verified against the report evidence." },
+    });
+    expect((dismiss as HTMLButtonElement).disabled).toBe(false);
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Refresh", exact: true }));
+      // This old control has not yet been detached by React's batched commit.
+      fireEvent.click(dismiss);
+    });
+    expect(resolveReport).not.toHaveBeenCalled();
+    await act(async () => { newRole.resolve(dashboard("moderator")); });
+    expect(screen.queryByRole("searchbox", { name: "Find account" })).toBeNull();
+  });
 
   it("finds an older account through server search and restores the recent view when cleared", async () => {
     const user = userEvent.setup();
