@@ -128,18 +128,23 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   };
   const events = attemptEvents(questions);
   const scored = events.filter((event) => event.correct !== undefined);
+  // Attempt events only store a question ID, not the specific imported row.
+  // Never infer its topic, task, depth or figure cue through a collided ID:
+  // byId could resolve to an unrelated, last-written alias. Raw historical
+  // scores and direct attempt-based observations remain untouched.
+  const metadataScored = scored.filter((event) => !duplicateIds.has(event.questionId));
   const first = scored.filter((event) => event.exposure === 1);
   const repeat = scored.filter((event) => event.exposure > 1);
 
-  const byTask = group(scored, (event) => {
+  const byTask = group(metadataScored, (event) => {
     const task = featuresOf(event.questionId).task;
     return task === "other" ? undefined : { key: task, label: QUESTION_TASK_LABEL[task] };
   });
-  const byDepth = group(scored, (event) => {
+  const byDepth = group(metadataScored, (event) => {
     const depth = featuresOf(event.questionId).reasoningDepth;
     return { key: String(depth), label: depth === 1 ? "Answered directly" : depth === 2 ? "One step of reasoning" : "A hidden step in between" };
   });
-  const byConcept = group(scored, (event) => {
+  const byConcept = group(metadataScored, (event) => {
     const concept = conceptOf(byId.get(event.questionId)!);
     return concept ? { key: concept.toLowerCase(), label: concept } : undefined;
   });
@@ -192,6 +197,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
     const ids = [...new Set(sureAndWrong.map((event) => event.questionId))];
     const concepts = new Map<string, number>();
     for (const id of ids) {
+      if (duplicateIds.has(id)) continue;
       const concept = conceptOf(byId.get(id)!);
       if (concept) concepts.set(concept, (concepts.get(concept) ?? 0) + 1);
     }
@@ -362,7 +368,8 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
     });
   }
 
-  const figureMissing = questions.filter((question) => featuresOf(question.id).cues.includes("figure-missing"));
+  const figureMissing = questions.filter((question) =>
+    !duplicateIds.has(question.id) && featuresOf(question.id).cues.includes("figure-missing"));
   if (figureMissing.length > 0) {
     findings.push({
       id: "figure-missing",
