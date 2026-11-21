@@ -273,7 +273,10 @@ export function buildReviewSet(input: {
     title: `${input.parent ? `${input.parent.title}: ` : ""}review, ${new Date(input.now).toLocaleDateString()}`,
     sourceDocumentIds: [],
     createdAt: input.now,
-    questionIds: picked.map((candidate) => candidate.questionId),
+    // One retry target per canonical question ID, even if this block includes
+    // multiple attempts for the same question. Keep the first selected order;
+    // source attempts and their independent review reasons remain untouched.
+    questionIds: [...new Set(picked.map((candidate) => candidate.questionId))],
     // The existing "missed-review" tag keeps older filters and cards working.
     tags: ["missed-review"],
     aiEnhanced: false,
