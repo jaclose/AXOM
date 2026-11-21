@@ -48,6 +48,8 @@ export function HostPage() {
 function HostAccountPage() {
   const userId = useAccount(s => s.user?.id);
   const [dashboard, setDashboard] = useState<OperatorDashboard>();
+  // Reviewer UI requires a confirmed Host role for this exact account, not a stale snapshot.
+  const [verifiedOperatorAccountId, setVerifiedOperatorAccountId] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -78,11 +80,12 @@ function HostAccountPage() {
   useEffect(() => {
     let alive = true;
     setDashboard(undefined);
-    if (!userId) { setLoading(false); return; }
+    if (!userId) { setVerifiedOperatorAccountId(null); setLoading(false); return; }
     setLoading(true); setError("");
     void loadOperatorDashboard(userId).then(value => {
       if (!alive) return;
       setDashboard(value);
+      setVerifiedOperatorAccountId(value.role && value.overview ? userId : null);
       // Older focus/initial reads must never release a newer mutation barrier.
       if (pendingReadbackVersion.current !== null && refresh >= pendingReadbackVersion.current) {
         const result = mutationOutcome.current;
@@ -233,8 +236,9 @@ function HostAccountPage() {
       sub="This account does not have an operator role. Display names cannot grant executive access. The verified owner must be provisioned by immutable auth user ID." />
       <p className="sub">No private learner data is accessible through the public client.</p>
     </GlassCard>}
-    {dashboard?.overview && <div className="host-layout">
+    {userId && <div className="host-layout">
       <div className="stack">
+        {dashboard?.overview && <>
         <GlassCard pad className="host-overview">
           <div className="host-overview-intro">
             <div><span className="host-overview-eyebrow">CURRENT SNAPSHOT</span>
@@ -297,8 +301,14 @@ function HostAccountPage() {
         {userId && <CommunityUploads reviewOnly
           onOpenLibrary={() => { location.hash = "questions"; }}
           onReviewed={() => { setMessage("Academic course review recorded. Checking Host queues."); requestRefresh(); }} />}
-        {userId && <QuestionSetLibraryReviewQueue accountId={userId} refreshSignal={refresh}
-          onReviewed={() => { setMessage("Question Set review recorded. Checking Host queues."); requestRefresh(); }} />}
+        </>}
+        {/* Academic reviewer authorization is checked independently of the Host snapshot.
+            Keep this queue mounted during same-account Host refresh so the decision receipt survives. */}
+        {verifiedOperatorAccountId === userId && <div hidden={loading || !dashboard?.overview}>
+          <QuestionSetLibraryReviewQueue key={userId} accountId={userId} refreshSignal={refresh}
+            onReviewed={() => { setMessage("Question Set review recorded. Checking Host queues."); requestRefresh(); }} />
+        </div>}
+        {dashboard?.overview && <>
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Reported community posts" sub="Only reported posts enter this moderation queue." />
@@ -329,8 +339,9 @@ function HostAccountPage() {
             </div>
           </article>)}
         </GlassCard>
+        </>}
       </div>
-      <aside className="stack">
+      {dashboard?.overview && <aside className="stack">
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Permissions model" sub="Least privilege enforced in Postgres." />
           <div className="host-role" data-current={owner}><Crown size={17} aria-hidden="true"/><div><b>Project CEO</b><small>Account roles, AI limits, reports, operational data and audit history.</small></div></div>
@@ -347,7 +358,7 @@ function HostAccountPage() {
             {typeof item.metadata.reason === "string" && <p className="sub">{item.metadata.reason}</p>}
           </div>)}
         </GlassCard>}
-      </aside>
+      </aside>}
     </div>}
   </main>;
 }

@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
-const accountIdentity = vi.hoisted(() => ({ current: "verified-account" }));
+const accountIdentity = vi.hoisted(() => ({ current: "verified-account", userId: "verified-account" }));
 
 vi.mock("../lib/account/accountStore", () => ({
-  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: accountIdentity.current } }),
+  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: accountIdentity.userId } }),
 }));
 vi.mock("../lib/operator/hostClient", () => ({
   useAccountIdentity: () => accountIdentity.current,
@@ -18,12 +18,21 @@ vi.mock("../lib/operator/hostClient", () => ({
   setOperatorAI: vi.fn(),
   setOperatorRole: vi.fn(),
 }));
-vi.mock("../components/questions/QuestionSetLibraryReviewQueue", () => ({
-  QuestionSetLibraryReviewQueue: ({ refreshSignal, onReviewed }: { refreshSignal?: number; onReviewed?: () => void }) =>
-    <section data-testid="host-question-set-review" data-refresh={String(refreshSignal ?? 0)}>
-      <button type="button" onClick={onReviewed}>Complete synthetic Question Set review</button>
-    </section>,
-}));
+vi.mock("../components/questions/QuestionSetLibraryReviewQueue", async () => {
+  const { useState } = await import("react");
+  return {
+    QuestionSetLibraryReviewQueue: ({ refreshSignal, onReviewed }: { refreshSignal?: number; onReviewed?: () => void }) => {
+      const [receipt, setReceipt] = useState("");
+      return <section data-testid="host-question-set-review" data-refresh={String(refreshSignal ?? 0)}>
+        <button type="button" onClick={() => {
+          setReceipt("Question Set approved for search.");
+          onReviewed?.();
+        }}>Complete synthetic Question Set review</button>
+        {receipt && <p role="status">{receipt}</p>}
+      </section>;
+    },
+  };
+});
 vi.mock("../components/questions/CommunityUploads", () => ({
   CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) =>
     <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
@@ -67,6 +76,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   accountIdentity.current = "verified-account";
+  accountIdentity.userId = "verified-account";
   vi.clearAllMocks();
   vi.mocked(resolveReport).mockResolvedValue(undefined);
 });
@@ -149,6 +159,7 @@ describe("Host page authorization and moderation", () => {
     await waitFor(() => expect(searchOperatorAccounts).toHaveBeenCalledWith("verified-account", "private"));
 
     accountIdentity.current = "second-account";
+    accountIdentity.userId = "second-account";
     rerender(<HostPage />);
     expect(screen.queryByText("A-only account")).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
@@ -169,6 +180,7 @@ describe("Host page authorization and moderation", () => {
 
     const { rerender } = render(<HostPage />);
     accountIdentity.current = "second-account";
+    accountIdentity.userId = "second-account";
     rerender(<HostPage />);
     await act(async () => {
       oldRead.resolve({ ...dashboard("owner"), accounts: [account("a-private", "A-only account")] });
@@ -423,6 +435,79 @@ describe("Host page authorization and moderation", () => {
     // Review callbacks must use the same version generator as manual Host refresh.
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(3));
+  });
+
+  it("preserves the current account's Question Set review receipt across Host refresh, but not an identity switch", async () => {
+    const user = userEvent.setup();
+    const refreshRead = deferred<OperatorDashboard>();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(dashboard("owner"))
+      .mockReturnValueOnce(refreshRead.promise)
+      .mockResolvedValue(dashboard("moderator"));
+    const view = render(<HostPage />);
+    await screen.findByRole("heading", { name: "Attention queue" });
+    const queue = screen.getByTestId("host-question-set-review");
+    await user.click(within(queue).getByRole("button", { name: "Complete synthetic Question Set review" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    // A valid child receipt must not be erased by an unrelated Host snapshot refresh.
+    expect(screen.getByText("Question Set approved for search.")).toBeTruthy();
+    expect(screen.getByText("Question Set review recorded. Checking Host queues.")).toBeTruthy();
+    await act(async () => { refreshRead.resolve(dashboard("owner")); });
+    expect(screen.getByText("Question Set approved for search.")).toBeTruthy();
+
+    // A real identity epoch change is different: the old account's receipt must disappear.
+    accountIdentity.current = "different-account";
+    accountIdentity.userId = "different-account";
+    view.rerender(<HostPage />);
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledWith("different-account"));
+    expect(screen.queryByText("Question Set approved for search.")).toBeNull();
+    await waitFor(() => expect(hostBanner().getByText("Moderator")).toBeTruthy());
+  });
+
+  it("discards another account's review receipt even if the Host identity epoch lags", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("owner"));
+    const view = render(<HostPage />);
+    await screen.findByRole("heading", { name: "Attention queue" });
+    await user.click(within(screen.getByTestId("host-question-set-review"))
+      .getByRole("button", { name: "Complete synthetic Question Set review" }));
+    expect(await screen.findByText("Question Set approved for search.")).toBeTruthy();
+
+    // Account ID can update before the identity epoch subscription settles.
+    // The queue must be scoped to the actual ID, not just the parent refresh lifecycle.
+    accountIdentity.userId = "another-account";
+    view.rerender(<HostPage />);
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledWith("another-account"));
+    expect(screen.queryByText("Question Set approved for search.")).toBeNull();
+    expect(screen.getByTestId("host-question-set-review")).toBeTruthy();
+  });
+
+  it("withholds the Question Set queue until the current account is verified as a Host operator", async () => {
+    const pending = deferred<OperatorDashboard>();
+    vi.mocked(loadOperatorDashboard).mockReturnValue(pending.promise);
+    render(<HostPage />);
+    expect(screen.queryByTestId("host-question-set-review")).toBeNull();
+    await act(async () => { pending.resolve({ ...dashboard("moderator"), role: null, overview: null }); });
+    await screen.findByRole("heading", { name: "Operator permission required" });
+    expect(screen.queryByTestId("host-question-set-review")).toBeNull();
+  });
+
+  it("unmounts the review receipt when the current account loses Host authorization", async () => {
+    const user = userEvent.setup();
+    const refreshRead = deferred<OperatorDashboard>();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValueOnce(dashboard("owner"))
+      .mockReturnValueOnce(refreshRead.promise);
+    render(<HostPage />);
+    await screen.findByRole("heading", { name: "Attention queue" });
+    await user.click(within(screen.getByTestId("host-question-set-review"))
+      .getByRole("button", { name: "Complete synthetic Question Set review" }));
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Question Set approved for search.")).toBeTruthy();
+    await act(async () => { refreshRead.resolve({ ...dashboard("moderator"), role: null, overview: null }); });
+    await screen.findByRole("heading", { name: "Operator permission required" });
+    expect(screen.queryByTestId("host-question-set-review")).toBeNull();
+    expect(screen.queryByText("Question Set approved for search.")).toBeNull();
   });
 
   it("refreshes standalone Question Set reviewer permissions from Host and Host after a completed decision", async () => {
