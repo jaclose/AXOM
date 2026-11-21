@@ -35,7 +35,9 @@ vi.mock("../../lib/store", () => {
   return { useStore };
 });
 vi.mock("../../lib/account/accountStore", () => ({
-  useAccount: { getState: () => mocked.account },
+  useAccount: Object.assign((selector: (state: typeof mocked.account) => unknown) => selector(mocked.account), {
+    getState: () => mocked.account,
+  }),
 }));
 vi.mock("../../lib/ai", () => ({
   enhanceQuestionSet: vi.fn(),
@@ -187,6 +189,7 @@ describe("QuestionSetList sharing disclosure", () => {
     expect(screen.queryByRole("button", { name: "Revoke link" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create unlisted link" })).toBeNull();
 
+    mocked.account = { phase: "signed-in", user: { id: "account-A" }, link: "linked" };
     act(() => setQuestionAttachmentAccount("account-A"));
     expect(screen.queryByRole("textbox", { name: "Unlisted Question Set link" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
