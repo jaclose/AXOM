@@ -94,6 +94,52 @@ describe("Host reviewer portal reauthorization", () => {
     expect(document.body.textContent).not.toContain("Sensitive question stem");
   });
 
+  it("releases a superseded Inspect lock after same-account Host authorization, without unlocking newer Inspect", async () => {
+    const oldInspect = deferred<Preview>();
+    const newInspect = deferred<Preview>();
+    vi.mocked(loadPendingQuestionSetReviewPreview)
+      .mockReturnValueOnce(oldInspect.promise).mockReturnValueOnce(newInspect.promise);
+    const { rerender } = render(<QuestionSetLibraryReviewQueue {...props(0, false)} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
+    await waitFor(() => expect(loadPendingQuestionSetReviewPreview).toHaveBeenCalledTimes(1));
+
+    rerender(<QuestionSetLibraryReviewQueue {...props(1, true)} />);
+    rerender(<QuestionSetLibraryReviewQueue {...props(1, false)} />);
+    const inspect = await screen.findByRole("button", { name: "Inspect" });
+    await waitFor(() => expect((inspect as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(inspect);
+    await waitFor(() => expect(loadPendingQuestionSetReviewPreview).toHaveBeenCalledTimes(2));
+
+    await act(async () => { oldInspect.resolve(privatePreview); });
+    expect((screen.getByRole("button", { name: "Inspect" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => { newInspect.resolve(privatePreview); });
+    expect(await screen.findByRole("dialog")).toHaveProperty("textContent",
+      expect.stringContaining("Restricted explanation"));
+  });
+
+  it("keeps a pending review decision exclusive across reauthorization", async () => {
+    const decision = deferred<void>();
+    vi.mocked(reviewQuestionSetSubmission).mockReturnValueOnce(decision.promise);
+    const { rerender } = render(<QuestionSetLibraryReviewQueue {...props(0, false)} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), {
+      target: { value: "Reviewed rights and source evidence." },
+    });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Approve for library" }));
+    await waitFor(() => expect(reviewQuestionSetSubmission).toHaveBeenCalledTimes(1));
+
+    rerender(<QuestionSetLibraryReviewQueue {...props(1, true)} />);
+    rerender(<QuestionSetLibraryReviewQueue {...props(1, false)} />);
+    const inspect = await screen.findByRole("button", { name: "Inspect" });
+    expect((inspect as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { decision.resolve(); });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Inspect" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(reviewQuestionSetSubmission).toHaveBeenCalledTimes(1);
+  });
+
   it("retains a completed review receipt across same-account refresh, without retaining its modal", async () => {
     const { rerender } = render(<QuestionSetLibraryReviewQueue {...props(0, false)} />);
     fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));

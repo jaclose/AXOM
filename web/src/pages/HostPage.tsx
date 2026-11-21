@@ -37,6 +37,7 @@ type AccountSearchState = {
   query: string;
   status: "loading" | "ready" | "error";
   accounts: OperatorAccount[];
+  refreshVersion: number;
   message?: string;
 };
 
@@ -127,9 +128,16 @@ function HostAccountPage() {
       window.removeEventListener("axom:operator-access-changed", recheck);
     };
   }, [requestRefresh]);
-  const role = dashboard?.role;
+  // A new refresh epoch revokes the previous privileged snapshot at render time,
+  // before the effect can clear state. Otherwise owner emails/actions can appear
+  // in the DOM during the initial reauthorization commit.
+  const authorizedDashboard = verifiedOperatorAccountId === userId && verifiedDashboardRefresh === refresh
+    ? dashboard : undefined;
+  const role = authorizedDashboard?.role;
   const owner = role === "owner";
-  const attentionCount = (dashboard?.overview?.academic_review_pending ?? 0) + (dashboard?.overview?.reports_pending ?? 0);
+  const attentionCount = (authorizedDashboard?.overview?.academic_review_pending ?? 0)
+    + (authorizedDashboard?.overview?.reports_pending ?? 0);
+  const accessPending = !!userId && (loading || verifiedDashboardRefresh !== refresh);
   const canManageAccounts = owner || role === "admin";
   const normalizedSearch = search.trim();
   useEffect(() => {
@@ -138,21 +146,23 @@ function HostAccountPage() {
       return;
     }
     let active = true;
-    setAccountSearch({ query: normalizedSearch, status: "loading", accounts: [] });
+    setAccountSearch({ query: normalizedSearch, refreshVersion: refresh, status: "loading", accounts: [] });
     const timer = window.setTimeout(() => {
       void searchOperatorAccounts(userId, normalizedSearch)
-        .then(accounts => { if (active) setAccountSearch({ query: normalizedSearch, status: "ready", accounts }); })
-        .catch(cause => { if (active) setAccountSearch({ query: normalizedSearch, status: "error", accounts: [],
+        .then(accounts => { if (active) setAccountSearch({ query: normalizedSearch, refreshVersion: refresh, status: "ready", accounts }); })
+        .catch(cause => { if (active) setAccountSearch({ query: normalizedSearch, refreshVersion: refresh, status: "error", accounts: [],
           message: cause instanceof Error ? cause.message : "Account search is unavailable. Retry when connected." }); });
     }, 250);
     return () => { active = false; window.clearTimeout(timer); };
   }, [userId, canManageAccounts, loading, normalizedSearch, refresh, searchRetry]);
-  const activeSearch = accountSearch?.query === normalizedSearch ? accountSearch : undefined;
-  const accounts = normalizedSearch ? activeSearch?.status === "ready" ? activeSearch.accounts : [] : dashboard?.accounts ?? [];
+  const activeSearch = accountSearch?.query === normalizedSearch && accountSearch.refreshVersion === refresh
+    ? accountSearch : undefined;
+  const accounts = normalizedSearch ? activeSearch?.status === "ready" ? activeSearch.accounts : [] : authorizedDashboard?.accounts ?? [];
   async function change(fn: () => Promise<void>, success: string,
     verify: (next: OperatorDashboard) => boolean,
   ) {
-    if (mutationInFlight.current || busy) return;
+    // A stale onClick captured before a refresh must not issue a privileged RPC.
+    if (!authorizedDashboard || refreshVersion.current !== refresh || mutationInFlight.current || busy) return;
     mutationInFlight.current = true;
     setBusy(true); setError(""); setMessage("");
     try {
@@ -226,23 +236,23 @@ function HostAccountPage() {
       {role && <Tag tone="gold">{role === "owner" ? "Project CEO" : role === "admin" ? "Administrator" : "Moderator"}</Tag>}
     </section>
     <div className="host-toolbar">
-      <GButton size="sm" disabled={loading || busy} onClick={() => requestRefresh()}><RefreshCw size={15} aria-hidden="true"/> Refresh</GButton>
+      <GButton size="sm" disabled={accessPending || busy} onClick={() => requestRefresh()}><RefreshCw size={15} aria-hidden="true"/> Refresh</GButton>
       <nav className="host-quick-nav" aria-label="Host sections">
         <a className="ghost-btn" href="#communities">Communities</a>
         <a className="ghost-btn" href="#questions">Question Bank</a>
       </nav>
     </div>
-    {loading && <p role="status">Checking operator access…</p>}
+    {accessPending && <p role="status">Checking operator access…</p>}
     {error && <div role="alert" className="host-warning"><p>{error}</p><GButton size="sm" disabled={loading || (busy && pendingReadbackVersion.current === null)} onClick={() => requestRefresh()}>Retry Host</GButton></div>}
     {message && <p role="status" className="sub">{message}</p>}
     {!userId && <GlassCard pad><PanelHeader title="Sign-in required" headingLevel={2} sub="Use your verified AXOM account to access host operations." /></GlassCard>}
-    {!loading && userId && dashboard?.role === null && <GlassCard pad><PanelHeader title="Operator permission required" headingLevel={2}
+    {!accessPending && userId && verifiedDashboardRefresh === refresh && dashboard?.role === null && <GlassCard pad><PanelHeader title="Operator permission required" headingLevel={2}
       sub="This account does not have an operator role. Display names cannot grant executive access. The verified owner must be provisioned by immutable auth user ID." />
       <p className="sub">No private learner data is accessible through the public client.</p>
     </GlassCard>}
     {userId && <div className="host-layout">
       <div className="stack">
-        {dashboard?.overview && <>
+        {authorizedDashboard?.overview && <>
         <GlassCard pad className="host-overview">
           <div className="host-overview-intro">
             <div><span className="host-overview-eyebrow">CURRENT SNAPSHOT</span>
@@ -254,21 +264,21 @@ function HostAccountPage() {
           <div className="host-priority-metrics" data-has-attention={attentionCount > 0} aria-labelledby="host-overview-title">
             <div className="host-priority-metric">
               <span className="host-priority-icon"><CircleAlert size={18} aria-hidden="true" /></span>
-              <strong>{dashboard.overview.academic_review_pending}</strong>
+              <strong>{authorizedDashboard.overview.academic_review_pending}</strong>
               <span>Review submissions</span>
             </div>
             <div className="host-priority-metric">
               <span className="host-priority-icon"><ShieldX size={18} aria-hidden="true" /></span>
-              <strong>{dashboard.overview.reports_pending}</strong>
+              <strong>{authorizedDashboard.overview.reports_pending}</strong>
               <span>Moderation reports</span>
             </div>
           </div>
           <dl className="host-platform-metrics" aria-label="Platform totals">
             {([
-              ["Registered accounts", dashboard.overview.registered_accounts, Users],
-              ["Community profiles", dashboard.overview.shared_profiles, Users],
-              ["AI requests, 7 days", dashboard.overview.ai_requests_7d, Zap],
-              ["Approved shared collections", dashboard.overview.academic_approved, BarChart3],
+              ["Registered accounts", authorizedDashboard.overview.registered_accounts, Users],
+              ["Community profiles", authorizedDashboard.overview.shared_profiles, Users],
+              ["AI requests, 7 days", authorizedDashboard.overview.ai_requests_7d, Zap],
+              ["Approved shared collections", authorizedDashboard.overview.academic_approved, BarChart3],
             ] as const).map(([label, value, Icon]) => <div key={label}>
               <dt><Icon size={15} aria-hidden="true" />{label}</dt>
               <dd data-restricted={value === null}>{value ?? "Restricted"}</dd>
@@ -295,8 +305,8 @@ function HostAccountPage() {
         </GlassCard>}
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Submitted QBank review" sub="Revision-bound collections intentionally submitted for sharing. Pending review never implies approval." />
-          {dashboard.queue.length === 0 ? <p className="sub">No submitted Question Banks await review.</p> :
-            <div className="host-queue">{dashboard.queue.map(item => <div className="host-queue-row" key={item.collection_id}>
+          {authorizedDashboard.queue.length === 0 ? <p className="sub">No submitted Question Banks await review.</p> :
+            <div className="host-queue">{authorizedDashboard.queue.map(item => <div className="host-queue-row" key={item.collection_id}>
               <div><b>{item.title}</b><small>{item.module} · {item.term} · submitted for review · {date(item.updated_at)}</small></div>
               <div><Tag tone="orange">Pending</Tag><small>{item.ready_questions} candidate-ready · {item.review_questions} review</small></div>
             </div>)}</div>}
@@ -313,11 +323,11 @@ function HostAccountPage() {
             accessSuspended={loading || verifiedDashboardRefresh !== refresh || !dashboard?.overview}
             onReviewed={() => { setMessage("Question Set review recorded. Checking Host queues."); requestRefresh(); }} />
         </div>}
-        {dashboard?.overview && <>
+        {authorizedDashboard?.overview && <>
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Reported community posts" sub="Only reported posts enter this moderation queue." />
-          {dashboard.reports.length === 0 ? <p className="sub">No posts have been reported.</p> : dashboard.reports.map(report => <article key={report.post_id} className="host-report">
+          {authorizedDashboard.reports.length === 0 ? <p className="sub">No posts have been reported.</p> : authorizedDashboard.reports.map(report => <article key={report.post_id} className="host-report">
             <b>@{report.author_handle} · {report.post_kind}</b>
             <p>{report.reports} reports · {report.reason}</p>
             {report.note && <p className="sub">{report.note}</p>}
@@ -334,7 +344,7 @@ function HostAccountPage() {
                     "social.report.dismiss", reportReasons[report.post_id] ?? "")))}>Dismiss report</GButton>
               <GButton size="sm" variant="danger" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8} onClick={() => {
                 // Skip a second destructive prompt before React commits the busy state.
-                if (mutationInFlight.current || busy) return;
+                if (!authorizedDashboard || refreshVersion.current !== refresh || mutationInFlight.current || busy) return;
                 if (window.confirm("Remove this reported post? The author’s private workspace stays untouched."))
                   void change(() => resolveReport(userId!, report.post_id, "remove", reportReasons[report.post_id] ?? ""), "Reported post removed and audited.",
                     next => Boolean(next.role) && !next.reports.some(item => item.post_id === report.post_id)
@@ -346,7 +356,7 @@ function HostAccountPage() {
         </GlassCard>
         </>}
       </div>
-      {dashboard?.overview && <aside className="stack">
+      {authorizedDashboard?.overview && <aside className="stack">
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Permissions model" sub="Least privilege enforced in Postgres." />
           <div className="host-role" data-current={owner}><Crown size={17} aria-hidden="true"/><div><b>Project CEO</b><small>Account roles, AI limits, reports, operational data and audit history.</small></div></div>
@@ -356,8 +366,8 @@ function HostAccountPage() {
         </GlassCard>
         {owner && <GlassCard pad>
           <PanelHeader headingLevel={2} title="Audit history" sub="Recent privileged actions and their immutable account IDs." />
-          {dashboard.audit.length === 0 && <p className="sub">No privileged changes yet.</p>}
-          {dashboard.audit.map(item => <div className="host-audit" key={item.id}>
+          {authorizedDashboard.audit.length === 0 && <p className="sub">No privileged changes yet.</p>}
+          {authorizedDashboard.audit.map(item => <div className="host-audit" key={item.id}>
             <b>{item.action}</b><small>{date(item.created_at)}</small>
             <small>Actor: {item.actor_id?.slice(0,8) ?? "Deleted account"} · Target: {item.target_id?.slice(0,8) ?? "none"}</small>
             {typeof item.metadata.reason === "string" && <p className="sub">{item.metadata.reason}</p>}

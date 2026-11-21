@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
 const accountIdentity = vi.hoisted(() => ({ current: "verified-account", userId: "verified-account" }));
+const hostLayoutCapture = vi.hoisted(() => ({ active: false, screens: [] as string[] }));
 
 vi.mock("../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: accountIdentity.userId } }),
@@ -33,12 +34,20 @@ vi.mock("../components/questions/QuestionSetLibraryReviewQueue", async () => {
     },
   };
 });
-vi.mock("../components/questions/CommunityUploads", () => ({
-  CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) =>
-    <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
-      <button type="button" onClick={onReviewed}>Complete synthetic academic review</button>
-    </section>,
-}));
+vi.mock("../components/questions/CommunityUploads", async () => {
+  const { useLayoutEffect } = await import("react");
+  return {
+    CommunityUploads: ({ reviewOnly, onReviewed }: { reviewOnly?: boolean; onReviewed?: () => void }) => {
+      // Layout-phase inspection catches old privileged data before the Host passive effect clears it.
+      useLayoutEffect(() => {
+        if (hostLayoutCapture.active) hostLayoutCapture.screens.push(document.body.textContent ?? "");
+      });
+      return <section data-testid="host-community-review" data-review-only={String(reviewOnly)}>
+        <button type="button" onClick={onReviewed}>Complete synthetic academic review</button>
+      </section>;
+    },
+  };
+});
 vi.mock("../components/dashboard/JournalFeedbackReview", () => ({ JournalFeedbackReview: () => null }));
 
 const dashboard = (role: "owner" | "moderator"): OperatorDashboard => ({
@@ -77,12 +86,57 @@ function deferred<T>() {
 beforeEach(() => {
   accountIdentity.current = "verified-account";
   accountIdentity.userId = "verified-account";
+  hostLayoutCapture.active = false; hostLayoutCapture.screens = [];
   vi.clearAllMocks();
   vi.mocked(resolveReport).mockResolvedValue(undefined);
 });
 afterEach(cleanup);
 
 describe("Host page authorization and moderation", () => {
+  it("never renders an old owner directory during the layout phase of a same-account role recheck", async () => {
+    const user = userEvent.setup();
+    const newRole = deferred<OperatorDashboard>();
+    const ownerSnapshot = { ...dashboard("owner"), accounts: [account("owner-private", "PRIVATE DIRECTORY ENTRY")] };
+    vi.mocked(loadOperatorDashboard).mockResolvedValueOnce(ownerSnapshot).mockReturnValueOnce(newRole.promise);
+    render(<HostPage />);
+    expect(await screen.findByText("PRIVATE DIRECTORY ENTRY")).toBeTruthy();
+
+    hostLayoutCapture.active = true;
+    await user.click(screen.getByRole("button", { name: /^Refresh$/ }));
+    expect(hostLayoutCapture.screens.some(snapshot => snapshot.includes("PRIVATE DIRECTORY ENTRY"))).toBe(false);
+    expect(screen.queryByText("PRIVATE DIRECTORY ENTRY")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
+
+    await act(async () => { newRole.resolve(dashboard("moderator")); });
+    await waitFor(() => expect(hostBanner().getByText("Moderator")).toBeTruthy());
+    expect(screen.queryByText("PRIVATE DIRECTORY ENTRY")).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Find account" })).toBeNull();
+  });
+
+
+  it("rejects a stale moderation click in the same event batch as an authorization refresh", async () => {
+    const newRole = deferred<OperatorDashboard>();
+    vi.mocked(loadOperatorDashboard)
+      .mockResolvedValue(dashboard("moderator"))
+      .mockResolvedValueOnce(dashboard("owner"))
+      .mockReturnValueOnce(newRole.promise);
+    render(<HostPage />);
+    const dismiss = await screen.findByRole("button", { name: "Dismiss report" });
+    fireEvent.change(screen.getByRole("textbox", { name: /Reason for resolving @learner's report/i }), {
+      target: { value: "Verified against the report evidence." },
+    });
+    expect((dismiss as HTMLButtonElement).disabled).toBe(false);
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
+      // This old control has not yet been detached by React's batched commit.
+      fireEvent.click(dismiss);
+    });
+    expect(resolveReport).not.toHaveBeenCalled();
+    await act(async () => { newRole.resolve(dashboard("moderator")); });
+    expect(screen.queryByRole("searchbox", { name: "Find account" })).toBeNull();
+  });
+
   it("finds an older account through server search and restores the recent view when cleared", async () => {
     const user = userEvent.setup();
     const older = deferred<OperatorAccount[]>();
