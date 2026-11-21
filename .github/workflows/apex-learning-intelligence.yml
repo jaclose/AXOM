@@ -1,0 +1,46 @@
+name: APEX Learning Intelligence Focused
+on:
+  pull_request:
+    paths:
+      - 'web/src/lib/learning-intelligence/**'
+      - 'web/src/lib/library.ts'
+      - 'web/src/lib/library.test.ts'
+      - 'web/src/components/questions/LibraryPanels.tsx'
+      - 'web/src/components/questions/LibraryPanels.test.tsx'
+      - '.github/workflows/apex-learning-intelligence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apex-learning-intelligence-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  trusted-review-analytics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - name: Verify supported toolchain
+        run: node scripts/toolchain.mjs
+      - run: npm ci
+      - run: npm --prefix web ci
+      - name: Focused actual repository regression suite
+        run: npm --prefix web test -- src/lib/learning-intelligence/learningIntelligence.test.ts src/lib/library.test.ts src/components/questions/LibraryPanels.test.tsx
+      - name: Typecheck and lint
+        run: |
+          npm --prefix web run typecheck
+          npm --prefix web run lint
+      - name: Production compilation
+        run: npm --prefix web run build
