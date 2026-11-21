@@ -358,6 +358,56 @@ describe("QuestionSetList AI digest identity", () => {
     expect(screen.getByText(/AI digest on hold:.*answer mapping/i)).toBeTruthy();
   });
 
+  it("blocks a stale Build digest click before provider egress when the reviewed answer changes without a rerender", () => {
+    const oldQuestion = question("same", "Old stem?", "Old reviewed answer");
+    const { updateQuestionSet } = prepare([oldQuestion], ["same"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect((screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement).disabled).toBe(false);
+    mocked.store = { ...mocked.store, questions: [question("same", "Revised stem?", "Revised reviewed answer")] };
+
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+    expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Digest source changed" }));
+  });
+
+  it("blocks stale Build digest clicks before provider egress when another import creates an ID collision", () => {
+    const original = question("shared", "Original stem?", "Original answer");
+    const { updateQuestionSet } = prepare([original], ["shared"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    mocked.store = { ...mocked.store, questions: [original, question("shared", "Competing source?", "Different key")] };
+
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it.each(["B", "A"])("does not disclose a stale account A digest prompt before rerender after account A → B%s", (destination) => {
+    setQuestionAttachmentAccount("account-A");
+    const { updateQuestionSet } = prepare([question("shared", "Account A private stem?", "Account A key")], ["shared"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    setQuestionAttachmentAccount("account-B");
+    mocked.store = { ...mocked.store, questions: [question("shared", "Account B private stem?", "Account B key")] };
+    if (destination === "A") setQuestionAttachmentAccount("account-A");
+
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("still sends current reviewed source when only mutable progress timestamps change before rerender", async () => {
+    const record = question("stable", "Stable reviewed stem?", "Stable reviewed key");
+    prepare([record], ["stable"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    mocked.store = { ...mocked.store, questions: [{ ...record, updatedAt: "2026-11-22T00:00:00.000Z" }] };
+
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledWith(expect.anything(), {
+      title: "Synthetic identity test",
+      questions: [{ stem: "Stable reviewed stem?", correct: "Stable reviewed key", explanation: undefined }],
+    }));
+  });
+
   function deferDigest() {
     let resolve!: (value: Awaited<ReturnType<typeof enhanceQuestionSet>>) => void;
     vi.mocked(enhanceQuestionSet).mockImplementation(() => new Promise((done) => { resolve = done; }));
