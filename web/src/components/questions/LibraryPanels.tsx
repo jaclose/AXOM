@@ -12,7 +12,8 @@ import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
-import type { QuestionRecord } from "../../lib/questions";
+import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
 import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
@@ -64,7 +65,34 @@ function digestMembership(set: QuestionSet, questions: readonly QuestionRecord[]
     records: [],
     holdReason: `AI digest on hold: ${missing.length || 1} missing question records or empty membership. Restore the original questions first.`,
   };
-  return { records: [...ids].map((id) => byId.get(id)!), holdReason: null };
+  const records = [...ids].map((id) => byId.get(id)!);
+  const held = records.filter((question) => questionMappingStatus(question) !== "ready");
+  if (held.length > 0) return {
+    records: [],
+    holdReason: `AI digest on hold: ${held.length} question answer mapping${held.length === 1 ? " needs" : "s need"} source review or a required figure. Review the original key and media before AI teaching.`,
+  };
+  return { records, holdReason: null };
+}
+
+/** Compare the actual teaching inputs, source provenance and set membership.
+ * Mutable attempt/progress overlays are deliberately excluded; a changed key,
+ * figure, source binding, explanation or set filing invalidates a pending digest. */
+function digestSourceFingerprint(set: QuestionSet, records: readonly QuestionRecord[]): string {
+  return JSON.stringify({
+    set: {
+      id: set.id, title: set.title, questionIds: set.questionIds,
+      sourceDocumentIds: set.sourceDocumentIds, scope: set.scope, tags: set.tags,
+      parserWarnings: set.parserWarnings, digest: set.digest,
+    },
+    records: records.map((q) => ({
+      id: q.id, source: q.source, sourceFile: q.sourceFile, sourceDocumentId: q.sourceDocumentId,
+      sourcePage: q.sourcePage, questionNumber: q.questionNumber, stem: q.stem,
+      options: q.options, correctKey: q.correctKey, correctAnswerText: q.correctAnswerText,
+      explanation: q.explanation, choiceRationales: q.choiceRationales, needsReview: q.needsReview,
+      extraction: q.extraction, content: q.content, attachments: q.attachments,
+      citation: q.citation, updatedAt: q.updatedAt,
+    })),
+  });
 }
 
 export function SourceLibrary({
@@ -228,6 +256,8 @@ export function QuestionSetList({
       pushToast({ title: "Digest held for source review", body: membership.holdReason, tone: "warn" });
       return;
     }
+    const accountScope = getQuestionAttachmentScope();
+    const fingerprint = digestSourceFingerprint(set, membership.records);
     setEnhancing(set.id);
     try {
       const forDigest = membership.records.map((q) => ({
@@ -236,7 +266,22 @@ export function QuestionSetList({
         explanation: q.explanation,
       }));
       const digest = await enhanceQuestionSet(provider, { title: set.title, questions: forDigest });
-      s.updateQuestionSet(set.id, {
+      // Never commit a provider response into an account or question mapping that
+      // changed while the async request was running (including A → B → A).
+      if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
+      const latest = useStore.getState();
+      const currentSet = (latest.questionSets ?? []).find((candidate) => candidate.id === set.id);
+      const currentMembership = currentSet && digestMembership(currentSet, latest.questions ?? NO_QUESTIONS);
+      if (!currentSet || !currentMembership || currentMembership.holdReason
+        || digestSourceFingerprint(currentSet, currentMembership.records) !== fingerprint) {
+        pushToast({
+          title: "Digest source changed",
+          body: "The questions, answer review, or set changed during analysis. No old AI advice was saved; review the current source and retry.",
+          tone: "warn",
+        });
+        return;
+      }
+      latest.updateQuestionSet(set.id, {
         aiEnhanced: true,
         digest: { ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString() },
       });
