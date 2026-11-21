@@ -5,11 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
+const accountIdentity = vi.hoisted(() => ({ current: "verified-account" }));
+
 vi.mock("../lib/account/accountStore", () => ({
-  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "verified-account" } }),
+  useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: accountIdentity.current } }),
 }));
 vi.mock("../lib/operator/hostClient", () => ({
-  useAccountIdentity: () => "verified-account",
+  useAccountIdentity: () => accountIdentity.current,
   loadOperatorDashboard: vi.fn(),
   searchOperatorAccounts: vi.fn(),
   resolveReport: vi.fn(),
@@ -51,6 +53,12 @@ const account = (id: string, name: string): OperatorAccount => ({
   ai_enabled: true, ai_daily_limit: 60, ai_used_today: 0,
 });
 
+function hostBanner() {
+  const banner = screen.getByRole("main", { name: "Host dashboard" }).querySelector(".host-banner");
+  expect(banner).not.toBeNull();
+  return within(banner as HTMLElement);
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
@@ -58,6 +66,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  accountIdentity.current = "verified-account";
   vi.clearAllMocks();
   vi.mocked(resolveReport).mockResolvedValue(undefined);
 });
@@ -124,6 +133,54 @@ describe("Host page authorization and moderation", () => {
     await act(async () => { respond(dashboard("owner")); });
     await waitFor(() => expect(within(banner as HTMLElement).getByText("Project CEO")).toBeTruthy());
     expect(screen.getByText("1 item in review and moderation queues.")).toBeTruthy();
+  });
+
+  it("remounts Host without A-only controls or pending A search results after switching to B", async () => {
+    const user = userEvent.setup();
+    const oldSearch = deferred<OperatorAccount[]>();
+    const ownerDashboard = { ...dashboard("owner"), accounts: [account("a-private", "A-only account")] };
+    vi.mocked(loadOperatorDashboard).mockImplementation(id =>
+      Promise.resolve(id === "verified-account" ? ownerDashboard : dashboard("moderator")));
+    vi.mocked(searchOperatorAccounts).mockReturnValue(oldSearch.promise);
+
+    const { rerender } = render(<HostPage />);
+    expect(await screen.findByText("A-only account")).toBeTruthy();
+    await user.type(screen.getByRole("searchbox", { name: "Find account" }), "private");
+    await waitFor(() => expect(searchOperatorAccounts).toHaveBeenCalledWith("verified-account", "private"));
+
+    accountIdentity.current = "second-account";
+    rerender(<HostPage />);
+    expect(screen.queryByText("A-only account")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Find account" })).toBeNull();
+
+    await act(async () => { oldSearch.resolve([account("a-late", "Late A search result")]); });
+    await waitFor(() => expect(loadOperatorDashboard).toHaveBeenCalledWith("second-account"));
+    expect(screen.queryByText("Late A search result")).toBeNull();
+    expect(hostBanner().queryByText("Project CEO")).toBeNull();
+    await waitFor(() => expect(hostBanner().getByText("Moderator")).toBeTruthy());
+  });
+
+  it("ignores A's late privileged dashboard response after verified identity switches to B", async () => {
+    const oldRead = deferred<OperatorDashboard>();
+    const newRead = deferred<OperatorDashboard>();
+    vi.mocked(loadOperatorDashboard).mockImplementation(id =>
+      id === "verified-account" ? oldRead.promise : newRead.promise);
+
+    const { rerender } = render(<HostPage />);
+    accountIdentity.current = "second-account";
+    rerender(<HostPage />);
+    await act(async () => {
+      oldRead.resolve({ ...dashboard("owner"), accounts: [account("a-private", "A-only account")] });
+    });
+    expect(hostBanner().queryByText("Project CEO")).toBeNull();
+    expect(screen.queryByText("A-only account")).toBeNull();
+
+    await act(async () => { newRead.resolve(dashboard("moderator")); });
+    expect(screen.getByRole("heading", { name: "Host dashboard" })).toBeTruthy();
+    expect(hostBanner().queryByText("Project CEO")).toBeNull();
+    expect(hostBanner().getByText("Moderator")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Apply AI policy" })).toBeNull();
   });
 
   it("keeps every overview count visible while separating the attention queue", async () => {
