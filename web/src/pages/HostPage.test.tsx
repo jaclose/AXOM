@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
+import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -196,6 +196,39 @@ describe("Host page authorization and moderation", () => {
     expect(await screen.findByText("Report dismissed and audited.")).toBeTruthy();
     expect(resolveReport).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Dismiss report" })).toBeNull();
+  });
+
+  it("does not reinterpret a cleared daily AI cap as an explicit zero quota", async () => {
+    const user = userEvent.setup();
+    const target = account("target-account", "Target learner");
+    vi.mocked(loadOperatorDashboard).mockResolvedValue({
+      ...dashboard("owner"), accounts: [target],
+    });
+    vi.mocked(setOperatorAI).mockResolvedValue(undefined);
+    render(<HostPage />);
+    await screen.findByText("Target learner");
+
+    const cap = screen.getByRole("spinbutton", { name: "Daily AI request cap" });
+    const apply = screen.getByRole("button", { name: "Apply AI policy" }) as HTMLButtonElement;
+    await user.type(screen.getByRole("textbox", { name: /Reason for changing Target learner/ }),
+      "Reviewed intentional AI request cap adjustment");
+
+    // The operator is still editing. An empty HTML number field is not an
+    // instruction to replace the existing nonzero cap with zero.
+    await user.clear(cap);
+    expect((cap as HTMLInputElement).value).toBe("");
+    expect(apply.disabled).toBe(true);
+    await user.click(apply);
+    expect(setOperatorAI).not.toHaveBeenCalled();
+
+    // Entering a literal 0 is a deliberate, permitted disablement with audit.
+    await user.type(cap, "0");
+    expect((cap as HTMLInputElement).value).toBe("0");
+    expect(apply.disabled).toBe(false);
+    await user.click(apply);
+    expect(setOperatorAI).toHaveBeenCalledWith(
+      "verified-account", "target-account", true, 0, "Reviewed intentional AI request cap adjustment",
+    );
   });
 
   it("requires a new role-specific audit receipt and matching account state before reporting success", async () => {

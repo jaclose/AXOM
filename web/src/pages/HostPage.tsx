@@ -11,6 +11,13 @@ import { CommunityUploads } from "../components/questions/CommunityUploads";
 import { JournalFeedbackReview } from "../components/dashboard/JournalFeedbackReview";
 import "../styles/host-console.css";
 
+/** A cleared number input is an incomplete edit, not a deliberate zero-cap policy. */
+function parseDailyAiRequestCap(raw: string): number | null {
+  if (raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 && value <= 1000 ? value : null;
+}
+
 function date(value: string | null): string {
   return value ? new Date(value).toLocaleDateString() : "Never";
 }
@@ -156,6 +163,7 @@ function HostAccountPage() {
   function controlFor(account: OperatorAccount) {
     const draft = aiDrafts[account.user_id] ?? { enabled: account.ai_enabled, limit: String(account.ai_daily_limit) };
     const reason = reasons[account.user_id] ?? "";
+    const validDraftLimit = parseDailyAiRequestCap(draft.limit);
     return <div className="host-account-controls">
       <label>Role
         <select value={roleDrafts[account.user_id] ?? account.role ?? "member"}
@@ -184,11 +192,11 @@ function HostAccountPage() {
         <input type="number" min={0} max={1000} step={1} value={draft.limit} disabled={!owner || busy}
           onChange={e => setAiDrafts(current => ({...current,[account.user_id]:{...draft,limit:e.target.value}}))} />
       </label>
-      {owner && <GButton size="sm" disabled={busy || reason.trim().length < 8 || (!((aiDrafts[account.user_id]?.enabled ?? account.ai_enabled) !== account.ai_enabled)
-        && Number(aiDrafts[account.user_id]?.limit ?? account.ai_daily_limit) === account.ai_daily_limit)}
+      {owner && <GButton size="sm" disabled={busy || validDraftLimit === null || reason.trim().length < 8
+        || (draft.enabled === account.ai_enabled && validDraftLimit === account.ai_daily_limit)}
         onClick={() => {
-          const limit = Number(draft.limit);
-          if (!Number.isInteger(limit) || limit < 0 || limit > 1000) { setError("Quota must be 0 to 1000."); return; }
+          const limit = parseDailyAiRequestCap(draft.limit);
+          if (limit === null) { setError("Enter a whole-number quota from 0 to 1000."); return; }
           void change(() => setOperatorAI(userId!, account.user_id, draft.enabled, limit, reason), "AI policy saved and audited.",
             next => hasNewOperatorAudit(dashboard, next, userId!, account.user_id, "ai.policy", reason,
               { enabled: draft.enabled, daily_limit: limit })
