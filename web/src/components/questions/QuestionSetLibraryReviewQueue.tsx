@@ -30,6 +30,10 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
   // An Inspect response that started before an account/Host/reviewer refresh
   // must never reopen a privileged body-level modal after reauthorization.
   const previewEpoch = useRef(0);
+  // The portaled modal must not restore focus into a hidden, unverified Host
+  // subtree when its effect cleans up after an access change.
+  const canRestorePreviewFocus = useRef(false);
+  canRestorePreviewFocus.current = !accessSuspended && !loading && reviewer;
   useEffect(() => {
     const epoch = ++previewEpoch.current;
     let alive = true;
@@ -94,7 +98,9 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, ac
     </div>)}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert" className="qsl-error">{error}</p>}
-    {!accessSuspended && !loading && reviewer && preview && <Modal title={`Review ${preview.snapshot.title}`} onClose={busy ? () => {} : () => setPreview(undefined)}>
+    {!accessSuspended && !loading && reviewer && preview && <Modal title={`Review ${preview.snapshot.title}`}
+      shouldRestoreFocus={() => canRestorePreviewFocus.current}
+      onClose={busy ? () => {} : () => setPreview(undefined)}>
       <div className="qsl-review-detail stack gap12">
         <p><BookOpenCheck size={17} aria-hidden="true" /> {preview.snapshot.questions.length} questions. The contributor attested to rights and answer review. Check that evidence yourself before approval.</p>
         <ol>{preview.snapshot.questions.slice(0, shown).map(question => <li key={question.id}>
