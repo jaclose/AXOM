@@ -1518,6 +1518,15 @@ const vaultStorage: StateStorage = {
       conflictedWorkspaceKeys.add(name);
       throw fail(new VaultConflictError());
     }
+    // The browser Storage API offers no compare-and-remove operation. Even a
+    // matching fallback can have unique recoverable bytes, and another tab can
+    // publish a newer acknowledged copy between our final check and removeItem.
+    // Fail closed while a fallback exists. Never automatically delete workspace
+    // fallback bytes from this separate, non-transactional storage tier.
+    if (workspace && [beforeValue, beforeMarker, beforeScoped].some((value) => value !== null)) {
+      conflictedWorkspaceKeys.add(name);
+      throw fail(new VaultConflictError());
+    }
 
     try {
       // This compares the live primary, scoped snapshot and pointer *inside*
@@ -1531,20 +1540,53 @@ const vaultStorage: StateStorage = {
       // Non-workspace cache cleanup remains best effort when IDB is absent.
     }
 
-    // A failed or conflicting delete never clears a recovery copy. Even after
-    // a verified IDB delete, leave a fallback written by another tab untouched.
-    try {
-      if (fallback?.getItem(name) === beforeValue
-        && fallback?.getItem(markerKey) === beforeMarker
-        && fallback?.getItem(pointerKey) === beforeActive
-        && (!scopeKey || fallback?.getItem(scopeKey) === beforeScoped)) {
-        fallback?.removeItem(name);
-        fallback?.removeItem(markerKey);
-        fallback?.removeItem(pointerKey);
-        if (scopeKey) fallback?.removeItem(scopeKey);
+    if (workspace) {
+      // A verified IndexedDB deletion cannot authorize removal of a later
+      // localStorage-only save. No browser-storage removeItem occurs here.
+      // Detect a competing receipt, including one arriving during the last
+      // read, and block this tab's follow-up writes. A later arrival remains
+      // recoverable even if it is too late to detect in this operation.
+      let competingFallback = false;
+      try {
+        const afterValue = fallback?.getItem(name) ?? null;
+        const afterMarker = fallback?.getItem(markerKey) ?? null;
+        const afterActive = fallback?.getItem(pointerKey) ?? null;
+        const afterScoped = afterActive
+          ? fallback?.getItem(scopedStateKey(name, afterActive)) ?? null
+          : null;
+        // Another tab can write between these individual reads. Do not
+        // confuse a single matching comparison with an atomic snapshot.
+        const latestValue = fallback?.getItem(name) ?? null;
+        const latestMarker = fallback?.getItem(markerKey) ?? null;
+        competingFallback = afterValue !== beforeValue
+          || afterMarker !== beforeMarker
+          || afterActive !== beforeActive
+          || afterScoped !== beforeScoped
+          || latestValue !== null
+          || latestMarker !== null;
+      } catch {
+        // An unreadable fallback cannot be certified as redundant.
+        competingFallback = true;
       }
-    } catch {
-      // Preserving a redundant local copy is safer than masking IDB success.
+      if (competingFallback) {
+        conflictedWorkspaceKeys.add(name);
+        throw fail(new VaultConflictError());
+      }
+    } else {
+      // Non-workspace cache cleanup retains its prior best-effort behavior.
+      try {
+        if (fallback?.getItem(name) === beforeValue
+          && fallback?.getItem(markerKey) === beforeMarker
+          && fallback?.getItem(pointerKey) === beforeActive
+          && (!scopeKey || fallback?.getItem(scopeKey) === beforeScoped)) {
+          fallback?.removeItem(name);
+          fallback?.removeItem(markerKey);
+          fallback?.removeItem(pointerKey);
+          if (scopeKey) fallback?.removeItem(scopeKey);
+        }
+      } catch {
+        // Preserving a redundant local copy is safer than masking IDB success.
+      }
     }
     if (workspace) {
       invalidateVaultWrite();
