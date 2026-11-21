@@ -1,7 +1,7 @@
 import { sha256Hex } from "../checksum";
 import { canonicalJson } from "../compressedText";
 import type { QuestionSet } from "../library";
-import { validateQuestionRecord, type QuestionRecord } from "../questions";
+import { questionMappingStatus, validateQuestionRecord, type QuestionRecord } from "../questions";
 import { normalizeTagList } from "../questionTags";
 
 export const SHARE_FORMAT_VERSION = 1;
@@ -102,7 +102,13 @@ export function createQuestionSetShare(
   // Resolve only this set's members and fail closed on ambiguous original
   // identities. A last-wins Map would silently export different reviewed
   // answers when the same canonical ID appears twice in the local bank.
+  // Share-local IDs would conceal repeated *selected membership* even when
+  // the bank itself contains only one original row. Do not manufacture two
+  // apparently independent graded questions from one source.
   const selectedIds = new Set(set.questionIds);
+  if (selectedIds.size !== set.questionIds.length) {
+    throw new Error("Question Set contains duplicate membership IDs and cannot be shared safely.");
+  }
   const byId = new Map<string, QuestionRecord>();
   for (const question of bank) {
     if (!selectedIds.has(question.id)) continue;
@@ -110,6 +116,15 @@ export function createQuestionSetShare(
       throw new Error("Question Set contains duplicate original question IDs and cannot be shared safely.");
     }
     byId.set(question.id, question);
+  }
+  // A v1 bearer snapshot has no source review-state field. Exporting a
+  // provisional *keyed* mapping would silently turn it into a recipient-ready
+  // answer. Keyless questions may still be shared for non-scored practice;
+  // their missing answer remains explicit after import.
+  for (const question of byId.values()) {
+    if (question.correctKey?.trim() && questionMappingStatus(question) !== "ready") {
+      throw new Error("Question Set contains an unresolved or unreviewed answer mapping and cannot be shared safely.");
+    }
   }
   const questions = set.questionIds
     .map((id) => byId.get(id))
@@ -342,7 +357,10 @@ function importedQuestion(shared: SharedQuestion, now: string): QuestionRecord {
     choiceRationales: shared.choiceRationales
       ? Object.fromEntries(Object.entries(shared.choiceRationales).map(([key, rationale]) => [key.trim().toUpperCase(), rationale.trim()]))
       : undefined,
-    needsReview: correctKey ? undefined : true,
+    // Historical v1 shares do not carry sender review or extraction state.
+    // Preserve the answer text for inspection but never promote its presence
+    // into verified grading authority on a new recipient question.
+    needsReview: true,
     status: "unseen" as const,
     system: cleanOptional(shared.system),
     topic: cleanOptional(shared.topic),
