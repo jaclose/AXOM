@@ -168,7 +168,7 @@ function m(e, t) {
 	};
 }
 //#endregion
-//#region web/node_modules/react/cjs/react.production.min.js
+//#region ../../../Users/jd/Developer/AXOM-qbank-tracker-completion-20261109/web/node_modules/react/cjs/react.production.min.js
 var h = /* @__PURE__ */ e(((e) => {
 	var t = Symbol.for("react.element"), n = Symbol.for("react.portal"), r = Symbol.for("react.fragment"), i = Symbol.for("react.strict_mode"), a = Symbol.for("react.profiler"), o = Symbol.for("react.provider"), s = Symbol.for("react.context"), c = Symbol.for("react.forward_ref"), l = Symbol.for("react.suspense"), u = Symbol.for("react.memo"), d = Symbol.for("react.lazy"), f = Symbol.iterator;
 	function p(e) {
@@ -6031,7 +6031,11 @@ function Wt(e, t, r) {
 				"article-publish"
 			].includes(l)) {
 				let t = Y(await e.from("email_campaigns").select("*").eq("id", String(m.id)).single());
-				if (l === "campaign-cancel") return J(await e.from("email_campaigns").update({ status: "cancelled" }).eq("id", t.id)), J(await e.from("email_jobs").update({ status: "cancelled" }).eq("campaign_id", t.id).in("status", ["queued", "scheduled"])), Z({ cancelled: !0 }, 200, s);
+				if (l === "campaign-cancel") {
+					if (!["scheduled", "queued"].includes(t.status)) throw new X("Only scheduled or queued campaigns can be cancelled. Reload the campaign.", 409);
+					if (!J(await e.from("email_campaigns").update({ status: "cancelled" }).eq("id", t.id).in("status", ["scheduled", "queued"]).select("id").maybeSingle())) throw new X("Campaign changed before cancellation. Reload and review its status.", 409);
+					return J(await e.from("email_jobs").update({ status: "cancelled" }).eq("campaign_id", t.id).in("status", ["queued", "scheduled"])), Z({ cancelled: !0 }, 200, s);
+				}
 				if (l === "campaign-estimate") {
 					let e = await Rt(i, t.type, t.audience);
 					return Z({

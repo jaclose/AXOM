@@ -105,7 +105,22 @@ export function createCommunicationsHandler(db: SupabaseClient, env: Env, fetche
       }
       if (["campaign-estimate", "campaign-schedule", "campaign-cancel", "broadcast-export", "article-publish"].includes(action)) {
         const campaign = required(await db.from("email_campaigns").select("*").eq("id", String(body.id)).single());
-        if (action === "campaign-cancel") { checked(await db.from("email_campaigns").update({ status: "cancelled" }).eq("id", campaign.id)); checked(await db.from("email_jobs").update({ status: "cancelled" }).eq("campaign_id", campaign.id).in("status", ["queued", "scheduled"])); return json({ cancelled: true }, 200, cors); }
+        if (action === "campaign-cancel") {
+          if (!["scheduled", "queued"].includes(campaign.status)) {
+            throw new RequestError("Only scheduled or queued campaigns can be cancelled. Reload the campaign.", 409);
+          }
+          // The worker can finish after our preliminary SELECT. Qualify the
+          // status transition in the database and require a returned row before
+          // modifying jobs, or a stale admin request can rewrite completed
+          // campaign history as cancelled while sent jobs remain delivered.
+          const transitioned = checked(await db.from("email_campaigns")
+            .update({ status: "cancelled" }).eq("id", campaign.id)
+            .in("status", ["scheduled", "queued"]).select("id").maybeSingle());
+          if (!transitioned) throw new RequestError("Campaign changed before cancellation. Reload and review its status.", 409);
+          checked(await db.from("email_jobs").update({ status: "cancelled" })
+            .eq("campaign_id", campaign.id).in("status", ["queued", "scheduled"]));
+          return json({ cancelled: true }, 200, cors);
+        }
         if (action === "campaign-estimate") { const batch = await recipients(service, campaign.type, campaign.audience); return json({ eligible: batch.eligible.length, more: batch.scanned.length === 200 }, 200, cors); }
         if (action === "article-publish") {
           if (campaign.type !== "essay" || body.confirmation !== "PUBLISH ESSAY") throw new RequestError("Review the essay and type PUBLISH ESSAY.");

@@ -81,6 +81,70 @@ function database(results: BoundaryResult[] = []) {
 const job: EmailJob = { id: "job-a", user_id: "account-a", type: "weekly_report", category: "weekly_report", idempotency_key: "account-a:week", status: "processing", attempts: 1, variables: {}, created_at: new Date().toISOString() };
 const ok = (data: unknown = null) => ({ data, error: null });
 
+describe("campaign cancellation status integrity", () => {
+  const cancel = async (results: BoundaryResult[]) => {
+    const { db, calls } = database(results);
+    const handler = createCommunicationsHandler(db, { AXOM_COMMUNICATIONS_ADMINS: "account-a" });
+    const response = await handler(new Request("https://axom.invalid?action=campaign-cancel", {
+      method: "POST",
+      headers: { authorization: "Bearer valid-session", "content-type": "application/json" },
+      body: JSON.stringify({ id: "campaign-a" }),
+    }));
+    return { response, calls };
+  };
+
+  it.each(["completed", "cancelled", "draft"])(
+    "refuses to relabel an already %s campaign and leaves its jobs untouched",
+    async status => {
+      const { response, calls } = await cancel([ok({ id: "campaign-a", status })]);
+      expect(response.status).toBe(409);
+      expect(calls).not.toContainEqual({
+        table: "email_campaigns", method: "update", args: [{ status: "cancelled" }],
+      });
+      expect(calls.some(call => call.table === "email_jobs" && call.method === "update")).toBe(false);
+    },
+  );
+
+  it("rejects a queued-to-completed race after its preliminary status read", async () => {
+    // The worker completed after the handler's SELECT. No rows match the
+    // database-side queued/scheduled cancellation predicate.
+    const { response, calls } = await cancel([
+      ok({ id: "campaign-a", status: "queued" }), ok(null),
+    ]);
+    expect(response.status).toBe(409);
+    expect(calls).toContainEqual({
+      table: "email_campaigns", method: "in", args: ["status", ["scheduled", "queued"]],
+    });
+    expect(calls.some(call => call.table === "email_jobs" && call.method === "update")).toBe(false);
+  });
+
+  it.each(["scheduled", "queued"])(
+    "cancels a still-%s campaign and only unstarted jobs after a successful status CAS",
+    async status => {
+      const { response, calls } = await cancel([
+        ok({ id: "campaign-a", status }), ok({ id: "campaign-a" }), ok(null),
+      ]);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ cancelled: true });
+      expect(calls).toContainEqual({
+        table: "email_campaigns", method: "in", args: ["status", ["scheduled", "queued"]],
+      });
+      expect(calls).toContainEqual({
+        table: "email_jobs", method: "in", args: ["status", ["queued", "scheduled"]],
+      });
+    },
+  );
+
+  it("does not cancel jobs when the database rejects the guarded status update", async () => {
+    const { response, calls } = await cancel([
+      ok({ id: "campaign-a", status: "queued" }),
+      { data: null, error: { message: "database unavailable" } },
+    ]);
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(calls.some(call => call.table === "email_jobs" && call.method === "update")).toBe(false);
+  });
+});
+
 describe("communications server boundaries", () => {
   it("rejects administrator claims supplied through user metadata", async () => {
     const { db } = database(); const handler = createCommunicationsHandler(db, {});
