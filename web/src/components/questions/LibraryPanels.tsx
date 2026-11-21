@@ -4,7 +4,7 @@
 // shows its current mastery and historical accuracy, digest (when AI-enhanced), and can launch blocks or
 // generate more questions from its source document (review-gated).
 // ===========================================================================
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BookOpen, FileText, FolderInput, ListPlus, Search, Sparkles, Trash2 } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { digestHoldReason, digestMembership, digestSourceFingerprint, questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
@@ -13,7 +13,7 @@ import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from ".
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
 import type { QuestionRecord } from "../../lib/questions";
-import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope } from "../../lib/questionAttachmentScope";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope, type QuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
@@ -172,14 +172,36 @@ export function QuestionSetList({
   const [query, setQuery] = useState("");
   const [filingSet, setFilingSet] = useState<QuestionSet | null>(null);
   const [shareSet, setShareSet] = useState<QuestionSet | null>(null);
+  const [shareScope, setShareScope] = useState<QuestionAttachmentScope | null>(null);
   const [submitSet, setSubmitSet] = useState<QuestionSet | null>(null);
   const [shareConsent, setShareConsent] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [shareLookup, setShareLookup] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [shareLookupError, setShareLookupError] = useState("");
-  const shareOperation = useRef(false);
+  const shareOperation = useRef<QuestionAttachmentScope | null>(null);
   const shareLookupOperation = useRef(0);
   const [managedShares, setManagedShares] = useState<Record<string, ManagedQuestionSetShare[]>>({});
+  // Unlisted share URLs are bearer credentials. Their modal and all side effects
+  // must be bound to the exact account generation, not merely an owner string.
+  function isCurrentShareScope(scope: QuestionAttachmentScope | null): scope is QuestionAttachmentScope {
+    return scope !== null && scope === renderedDigestScope && isQuestionAttachmentScopeCurrent(scope);
+  }
+
+  useEffect(() => {
+    if (shareScope && shareScope !== renderedDigestScope) {
+      // Render-time ownership curtain below hides tokens before this cleanup.
+      // Drop local links without revoking or deleting server-side shares.
+      shareLookupOperation.current += 1;
+      setShareSet(null);
+      setShareScope(null);
+      setManagedShares({});
+      setShareLookup("idle");
+      setShareLookupError("");
+      setShareConsent(false);
+      setShareBusy(false);
+    }
+  }, [renderedDigestScope, shareScope]);
+
   const orderedSets = useMemo(
     // Uploads land newest-first in the store; the library reads in lecture order (I3-26).
     () => (recent ? sortQuestionSetsByRecency(sets, questions) : sortByNaturalTitle(sets)),
@@ -278,18 +300,23 @@ export function QuestionSetList({
   }
 
   async function openShare(set: QuestionSet) {
+    const scope = renderedDigestScope;
+    if (!isCurrentShareScope(scope)) return;
     const lookupId = ++shareLookupOperation.current;
+    setShareScope(scope);
+    setManagedShares({});
+    setShareBusy(false);
     setShareConsent(false);
     setShareSet(set);
     setShareLookup("loading");
     setShareLookupError("");
     try {
       const shares = await listQuestionSetShares();
-      if (lookupId !== shareLookupOperation.current) return;
+      if (lookupId !== shareLookupOperation.current || !isCurrentShareScope(scope)) return;
       installManagedShares(shares);
       setShareLookup("ready");
     } catch (error) {
-      if (lookupId !== shareLookupOperation.current) return;
+      if (lookupId !== shareLookupOperation.current || !isCurrentShareScope(scope)) return;
       const detail = error instanceof Error ? error.message : "Active links could not be loaded.";
       setShareLookupError(detail);
       setShareLookup("error");
@@ -302,14 +329,17 @@ export function QuestionSetList({
   }
 
   async function createShare() {
-    if (!shareSet || !shareConsent || shareLookup !== "ready" || shareOperation.current
-      || (managedShares[shareSet.id]?.length ?? 0) > 0) return;
+    const scope = shareScope;
+    if (!shareSet || !shareConsent || shareLookup !== "ready" || !isCurrentShareScope(scope)
+      || shareOperation.current === scope || (managedShares[shareSet.id]?.length ?? 0) > 0) return;
     const selected = shareSet;
-    shareOperation.current = true;
+    shareOperation.current = scope;
     setShareBusy(true);
     try {
       const snapshot = createQuestionSetShare(selected, questions);
+      if (!isCurrentShareScope(scope)) return;
       const result = await publishShare(selected.id, snapshot);
+      if (!isCurrentShareScope(scope)) return;
       const link = `${location.origin}${location.pathname}#shared-set?token=${encodeURIComponent(result.token)}`;
       const managed = { ...result, link };
       setManagedShares(current => ({
@@ -318,13 +348,16 @@ export function QuestionSetList({
       }));
       try {
         if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
+        if (!isCurrentShareScope(scope)) return;
         await navigator.clipboard.writeText(link);
+        if (!isCurrentShareScope(scope)) return;
         pushToast({
           title: "Unlisted Question Set link copied",
           body: "The active bearer link remains visible here so you can copy it again or revoke it.",
           tone: "success",
         });
       } catch {
+        if (!isCurrentShareScope(scope)) return;
         pushToast({
           title: "Unlisted link created — clipboard unavailable",
           body: "The cloud share exists. Copy the visible link manually or revoke it before closing this dialog.",
@@ -332,9 +365,12 @@ export function QuestionSetList({
         });
       }
     } catch (error) {
+      if (!isCurrentShareScope(scope)) return;
       const detail = error instanceof Error ? error.message : "Sign in and try again.";
       try {
-        const recovered = installManagedShares(await listQuestionSetShares())[selected.id] ?? [];
+        const recoveredShares = await listQuestionSetShares();
+        if (!isCurrentShareScope(scope)) return;
+        const recovered = installManagedShares(recoveredShares)[selected.id] ?? [];
         setShareLookup("ready");
         setShareLookupError("");
         if (recovered.length > 0) {
@@ -351,6 +387,7 @@ export function QuestionSetList({
           });
         }
       } catch (recoveryError) {
+        if (!isCurrentShareScope(scope)) return;
         const recoveryDetail = recoveryError instanceof Error
           ? recoveryError.message
           : "Active links could not be checked.";
@@ -363,27 +400,39 @@ export function QuestionSetList({
         });
       }
     } finally {
-      shareOperation.current = false;
-      setShareBusy(false);
+      if (shareOperation.current === scope) {
+        shareOperation.current = null;
+        if (isCurrentShareScope(scope)) setShareBusy(false);
+      }
     }
   }
 
   async function copyShare(share: ManagedQuestionSetShare) {
+    const scope = shareScope;
+    if (!isCurrentShareScope(scope) || !shareSet
+      || !(managedShares[shareSet.id] ?? []).some(item => item.id === share.id && item.link === share.link)) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
+      if (!isCurrentShareScope(scope)) return;
       await navigator.clipboard.writeText(share.link);
+      if (!isCurrentShareScope(scope)) return;
       pushToast({ title: "Unlisted link copied", body: "Anyone with the link can open this snapshot.", tone: "success" });
     } catch {
+      if (!isCurrentShareScope(scope)) return;
       pushToast({ title: "Copy failed", body: "Select and copy the visible link manually.", tone: "warn" });
     }
   }
 
   async function revokeManagedShare(share: ManagedQuestionSetShare) {
-    if (shareOperation.current) return;
-    shareOperation.current = true;
+    const scope = shareScope;
+    if (!isCurrentShareScope(scope) || !shareSet || shareOperation.current === scope
+      || !(managedShares[shareSet.id] ?? []).some(item => item.id === share.id && item.link === share.link)) return;
+    shareOperation.current = scope;
     setShareBusy(true);
     try {
+      if (!isCurrentShareScope(scope)) return;
       await revokeShare(share.id);
+      if (!isCurrentShareScope(scope)) return;
       setManagedShares(current => {
         const next = { ...current };
         const remaining = (next[share.sourceId] ?? []).filter(item => item.id !== share.id);
@@ -394,6 +443,7 @@ export function QuestionSetList({
       setShareConsent(false);
       pushToast({ title: "Unlisted link revoked", body: "That link can no longer open the snapshot.", tone: "success" });
     } catch (error) {
+      if (!isCurrentShareScope(scope)) return;
       const detail = error instanceof Error ? error.message : "The revoke request could not be confirmed.";
       pushToast({
         title: "Share not revoked",
@@ -401,8 +451,10 @@ export function QuestionSetList({
         tone: "warn",
       });
     } finally {
-      shareOperation.current = false;
-      setShareBusy(false);
+      if (shareOperation.current === scope) {
+        shareOperation.current = null;
+        if (isCurrentShareScope(scope)) setShareBusy(false);
+      }
     }
   }
 
@@ -511,22 +563,25 @@ export function QuestionSetList({
       onClose={() => setFilingSet(null)}
       onSave={(scope) => { s.updateQuestionSet(filingSet.id, { scope }); setFilingSet(null); }} />
   );
-  const managedShareList = shareSet ? managedShares[shareSet.id] ?? [] : [];
+  const visibleShareSet = isCurrentShareScope(shareScope) ? shareSet : null;
+  const managedShareList = visibleShareSet ? managedShares[visibleShareSet.id] ?? [] : [];
   const submissionDialog = submitSet && <QuestionSetLibrarySubmitDialog key={submitSet.id} set={submitSet}
     questions={questions} onClose={() => setSubmitSet(null)} />;
-  const shareDialog = shareSet && (
-    <Modal title={managedShareList.length > 0 ? `Manage links for ${shareSet.title}` : `Share ${shareSet.title}`}
+  const shareDialog = visibleShareSet && (
+    <Modal title={managedShareList.length > 0 ? `Manage links for ${visibleShareSet.title}` : `Share ${visibleShareSet.title}`}
       onClose={() => {
-        if (shareOperation.current) return;
+        if (shareOperation.current === shareScope) return;
         shareLookupOperation.current += 1;
         setShareSet(null);
+        setShareScope(null);
+        setManagedShares({});
         setShareLookup("idle");
       }}>
       {shareLookup === "loading" ? (
         <p className="sub" role="status">Checking this account for active links…</p>
       ) : shareLookup === "error" ? <div className="stack gap12">
         <p className="sub" role="alert">{shareLookupError} AXOM will not publish another link while the owner link list is unavailable.</p>
-        <GButton variant="primary" onClick={() => void openShare(shareSet)}>Retry owner link check</GButton>
+        <GButton variant="primary" onClick={() => void openShare(visibleShareSet)}>Retry owner link check</GButton>
       </div> : managedShareList.length > 0 ? <div className="stack gap12">
         <p className="sub" role="status">{managedShareList.length === 1 ? "This unlisted bearer link is" : `These ${managedShareList.length} unlisted bearer links are`} active. Anyone with a link can open and import its snapshot.</p>
         {managedShareList.map((managedShare, index) => {
