@@ -3,7 +3,7 @@ import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "../compressedText";
-import { putQuestionAttachmentBlob } from "../questionAttachments";
+import { deleteQuestionAttachmentBlobs, putQuestionAttachmentBlob } from "../questionAttachments";
 import { makeSeed } from "../seed";
 import type { NoctyriumState } from "../types";
 import { MEDIA_BUCKET, clearCloudMediaUploadCache, uploadCloudMedia } from "./cloudMedia";
@@ -98,6 +98,28 @@ describe("bounded account image uploads", () => {
     expect(upload).toHaveBeenCalledTimes(2);
     await uploadCloudMedia(client, "owner", state, guard);
     expect(upload).toHaveBeenCalledTimes(2);
+  });
+
+  it("never returns a protected image manifest while any source image is missing; exact restoration permits retry", async () => {
+    const { state, keys, hashes } = await fixture(2);
+    await deleteQuestionAttachmentBlobs([keys[0]]);
+    // The second image may already have uploaded concurrently. The important
+    // contract is that the complete protected-version manifest is not issued.
+    await expect(uploadCloudMedia(client, "owner", state, guard))
+      .rejects.toMatchObject({ failure: { kind: "rejected", rejection: "missing-image", status: 0 } });
+
+    const original = new Blob([new Uint8Array([137, 80, 78, 71, 1])], { type: "image/png" });
+    await putQuestionAttachmentBlob(keys[0], {
+      questionId: "q1",
+      blob: original,
+      mimeType: "image/png",
+      byteSize: original.size,
+      updatedAt: state.questions[0].attachments![0].updatedAt,
+    });
+    const protectedManifest = await uploadCloudMedia(client, "owner", state, guard);
+    expect(protectedManifest.map((entry) => entry.blobKey)).toEqual(keys);
+    expect(protectedManifest.map((entry) => entry.hash)).toEqual(hashes);
+    expect(upload.mock.calls.filter(([path]) => path.startsWith("owner/")).length).toBeLessThanOrEqual(2);
   });
 
   it("reports the first failed upload after a second in-flight upload fails", async () => {
