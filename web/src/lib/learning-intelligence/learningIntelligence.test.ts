@@ -364,6 +364,72 @@ describe("computed pattern timing evidence must be valid", () => {
   });
 });
 
+describe("fast-miss timing requires a verifiable saved answer choice", () => {
+  const right = (count: number, patch: Partial<QuestionAttempt> = {}) => Array.from({ length: count }, () => question({
+    attempts: [attempt(1, "correct", { timeSpentSeconds: 80, ...patch })],
+  }));
+  const wrong = (count: number, patch: Partial<QuestionAttempt> = {}) => Array.from({ length: count }, () => question({
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { timeSpentSeconds: 25, ...patch })],
+  }));
+  const fastMisses = (records: QuestionRecord[]) =>
+    buildPatternReport(records).findings.find((finding) => finding.kind === "fast-misses");
+
+  it("does not infer a current fast-miss pattern from twelve status-only legacy outcomes", () => {
+    const records = [...right(6, { answerKey: undefined }), ...wrong(6, { answerKey: undefined })];
+    const original = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    // Preserve historical recorded scores while withholding unsupported timing conclusions.
+    expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+    expect(report.timing).toEqual({ correctMedian: undefined, incorrectMedian: undefined });
+    expect(fastMisses(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(original);
+  });
+
+  it("does not allow one legacy status-only right answer to become the sixth comparison sample", () => {
+    const records = [...right(5), ...right(1, { answerKey: undefined }), ...wrong(6)];
+    const report = buildPatternReport(records);
+    expect(report.totals.all.attempts).toBe(12);
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(fastMisses(records)).toBeUndefined();
+  });
+
+  it("does not allow one legacy status-only wrong answer to become the sixth comparison sample", () => {
+    const records = [...right(6), ...wrong(5), ...wrong(1, { answerKey: undefined })];
+    const report = buildPatternReport(records);
+    expect(report.totals.all.attempts).toBe(12);
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(fastMisses(records)).toBeUndefined();
+  });
+
+  it("rejects an imported incorrect choice absent from the question's offered options", () => {
+    const records = [...right(6), ...wrong(5), ...wrong(1, { answerKey: "Z" })];
+    const original = JSON.stringify(records);
+    expect(buildPatternReport(records).totals.all.attempts).toBe(12);
+    expect(fastMisses(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(original);
+  });
+
+  it("keeps held mappings and contradictory saved statuses out of fast-miss samples", () => {
+    const held = question({ needsReview: true, attempts: [attempt(1, "incorrect", { timeSpentSeconds: 25 })] });
+    const contradictory = question({ attempts: [attempt(1, "incorrect", { answerKey: "B", timeSpentSeconds: 25 })] });
+    const records = [...right(6), ...wrong(4), held, contradictory];
+    expect(attemptEvents([held, contradictory]).every((event) => event.correct === undefined)).toBe(true);
+    expect(fastMisses(records)).toBeUndefined();
+  });
+
+  it("still recommends verified quick misses with exact retry IDs and no source mutation", () => {
+    const correct = right(6);
+    const incorrect = wrong(6);
+    const records = [...correct, ...incorrect];
+    const original = JSON.stringify(records);
+    expect(fastMisses(records)).toMatchObject({
+      basis: "computed", sample: 12, questionIds: incorrect.map((record) => record.id),
+    });
+    expect(JSON.stringify(records)).toBe(original);
+  });
+});
+
 describe("pattern findings", () => {
   it("says nothing, and waits for nothing, before any answer exists", () => {
     const report = buildPatternReport([question(), question()]);

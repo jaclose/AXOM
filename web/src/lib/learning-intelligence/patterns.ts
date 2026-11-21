@@ -159,12 +159,17 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   for (const event of scored) if (event.correct === false) missCounts.set(event.questionId, (missCounts.get(event.questionId) ?? 0) + 1);
   const repeatMisses = [...missCounts.entries()].filter(([, count]) => count >= 2).sort((left, right) => right[1] - left[1]).map(([id]) => id);
 
-  // A scoreable answer is not necessarily a valid timing observation.
-  // Keep malformed imported durations out of medians, sample thresholds and
-  // the retry list without changing the underlying attempts or score totals.
-  const timedScored = scored.filter((event) =>
-    typeof event.seconds === "number" && Number.isFinite(event.seconds) && event.seconds > 0
-  );
+  // Retain legacy status-only results in raw scored totals, but do not
+  // infer an answer-speed diagnostic without an independently checkable saved
+  // choice from the currently offered options. Historical key revisions are
+  // not reconstructed here; this verifies consistency with the *current* key.
+  // Malformed durations likewise cannot support medians or quick-miss retries.
+  const timedScored = scored.filter((event) => {
+    if (typeof event.seconds !== "number" || !Number.isFinite(event.seconds) || event.seconds <= 0
+      || typeof event.answerKey !== "string" || typeof event.correctKey !== "string") return false;
+    const offered = byId.get(event.questionId)?.options.some((option) => option.key === event.answerKey);
+    return offered === true && (event.answerKey === event.correctKey) === event.correct;
+  });
   const correctTimes = timedScored.filter((event) => event.correct === true).map((event) => event.seconds!);
   const incorrectTimes = timedScored.filter((event) => event.correct === false).map((event) => event.seconds!);
   const timing = { correctMedian: median(correctTimes), incorrectMedian: median(incorrectTimes) };
