@@ -239,6 +239,7 @@ describe("QuestionSetList sharing disclosure", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed this set/ }));
     fireEvent.click(create);
     expect(publishShare).toHaveBeenCalledTimes(1);
+    mocked.account = { phase: "signed-in", user: { id: "account-B" }, link: "linked" };
     act(() => setQuestionAttachmentAccount("account-B"));
     await act(async () => resolvePublish(ownedShare(
       "00000000-0000-4000-8000-000000000064", "A".repeat(48),
