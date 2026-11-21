@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'web/src/lib/learning-intelligence/**'
+      - 'web/src/lib/library.ts'
+      - 'web/src/lib/library.test.ts'
       - '.github/workflows/apex-learning-intelligence.yml'
   workflow_dispatch:
 
@@ -33,7 +35,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix web ci
       - name: Focused actual repository regression suite
-        run: npm --prefix web test -- src/lib/learning-intelligence/learningIntelligence.test.ts
+        run: npm --prefix web test -- src/lib/learning-intelligence/learningIntelligence.test.ts src/lib/library.test.ts
       - name: Typecheck and lint
         run: |
           npm --prefix web run typecheck
