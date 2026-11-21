@@ -193,6 +193,18 @@ describe("Building preview", () => {
     }
   });
 
+  it("describes each keyboard-focusable system with its honest roadmap status", () => {
+    render(<BuildingPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Systems" }));
+    const statuses = { foundation: "FOUNDATION", "in-development": "IN DEVELOPMENT", planned: "PLANNED", research: "RESEARCH" };
+    for (const item of SYSTEM_PREVIEWS) {
+      const card = screen.getByRole("group", { name: item.name });
+      const status = within(card).getByText(statuses[item.status]);
+      expect(status.id).toBe(`building-system-${item.id}-status`);
+      expect(card.getAttribute("aria-describedby")).toBe(status.id);
+    }
+  });
+
   it("gives each keyboard-focusable system preview a named group tied to its heading", () => {
     render(<BuildingPage />);
     fireEvent.click(screen.getByRole("tab", { name: "Systems" }));

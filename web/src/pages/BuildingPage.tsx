@@ -162,12 +162,13 @@ export function BuildingPage() {
                         tabIndex={0}
                         role="group"
                         aria-labelledby={`building-system-${item.id}`}
+                        aria-describedby={`building-system-${item.id}-status`}
                         onMouseEnter={() => setPointerOver(item.id)}
                         onMouseLeave={() => setPointerOver(null)}
                         onFocus={() => setFocused(item.id)}
                         onBlur={() => setFocused(null)}
                       >
-                        <div className={`build-status build-status--${item.status}`}>{STATUS[item.status]}</div>
+                        <div id={`building-system-${item.id}-status`} className={`build-status build-status--${item.status}`}>{STATUS[item.status]}</div>
                         <h3 id={`building-system-${item.id}`}>{item.name}</h3>
                         <p>{item.promise}</p>
                         <div className="connection-list" role="list" aria-label={`${item.name} connections`}>
