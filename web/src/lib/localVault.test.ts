@@ -600,6 +600,107 @@ describe("IndexedDB-first local vault", () => {
     expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
+  it.each([
+    ["before post-commit inspection", "postcheck"],
+    ["after the final marker read", "last-read"],
+  ] as const)(
+    "retains recoverable v5 bytes when an acknowledged fallback arrives %s",
+    async (_description, timing) => {
+      const key = STORAGE_KEYS.persistedState;
+      const markerKey = `${key}:fallback-newer`;
+      const pointerKey = `${key}:active-user`;
+      const scopedKey = `${key}:user:jd`;
+      const snapshot = (label: string) => JSON.stringify({
+        state: { profile: { userId: "jd" }, questions: [{ id: label }], notes: [label] },
+        version: 34,
+      });
+      const initial = snapshot("initial-verified-idb-question");
+      const incoming = snapshot("unique-acknowledged-offline-question");
+      await localVaultStorage.setItem(key, initial);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(initial);
+
+      // Obtain an actual fallback receipt from the adapter. The offline writer
+      // cannot be simulated by a bare marker whose fingerprint is unverifiable.
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, incoming);
+      await flushLocalVaultWrites();
+      const incomingMarker = storage.getItem(markerKey);
+      expect(incomingMarker).not.toBeNull();
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      for (const field of [key, markerKey, scopedKey, pointerKey]) storage.removeItem(field);
+      resetLocalVaultRuntimeForTests();
+      expect(await localVaultStorage.getItem(key)).toBe(initial);
+
+      // Before the IDB transaction, these reads return no browser recovery.
+      // The second pointer read happens only after the destructive transaction
+      // has resolved. The third marker read is the final post-commit inspection.
+      let pointerReads = 0;
+      let markerReads = 0;
+      let injected = false;
+      const read = vi.spyOn(storage, "getItem").mockImplementation((field) => {
+        const observed = values.get(field) ?? null;
+        if (field === pointerKey) pointerReads += 1;
+        if (field === markerKey) markerReads += 1;
+        if (!injected && ((timing === "postcheck" && field === pointerKey && pointerReads === 2)
+          || (timing === "last-read" && field === markerKey && markerReads === 3))) {
+          injected = true;
+          values.set(key, incoming);
+          values.set(markerKey, incomingMarker!);
+          values.set(pointerKey, "jd");
+          values.set(scopedKey, incoming);
+        }
+        return observed;
+      });
+      const deleteCheckpoint = getVaultWriteCheckpoint();
+      try {
+        await localVaultStorage.removeItem(key);
+        await flushLocalVaultWrites();
+      } finally {
+        read.mockRestore();
+      }
+      expect(injected).toBe(true);
+      if (timing === "postcheck") {
+        // Conflict is detected AFTER IDB was committed, not an IDB rollback.
+        expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      } else {
+        // A truly last-read arrival cannot be observed by this non-atomic tier.
+        expect(() => assertVaultWritesSince(deleteCheckpoint)).not.toThrow();
+      }
+
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBeUndefined();
+        expect(await getDirect(db, scopedKey)).toBeUndefined();
+        expect(await getDirect(db, pointerKey)).toBeUndefined();
+        expect(db.version).toBe(DB_VERSION);
+      } finally {
+        db.close();
+      }
+      expect(storage.getItem(key)).toBe(incoming);
+      expect(storage.getItem(markerKey)).toBe(incomingMarker);
+      expect(storage.getItem(scopedKey)).toBe(incoming);
+
+      // Whether or not this tab observed the race, no stale edit may replace
+      // the acknowledged fallback; its exact bytes remain exportable for review.
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("stale-post-delete-autosave"));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(storage.getItem(key)).toBe(incoming);
+      const recovery = await inspectLocalVaultRecoveryCopies("jd");
+      expect(recovery.copies).toEqual(expect.arrayContaining([
+        expect.objectContaining({ source: "local-fallback", value: incoming }),
+      ]));
+
+      // A fresh runtime can still read the recoverable copy, even though the
+      // preceding delete reported success in one interleaving and failure in the other.
+      resetLocalVaultRuntimeForTests();
+      expect(await localVaultStorage.getItem(key)).toBe(incoming);
+      expect(storage.getItem(markerKey)).toBe(incomingMarker);
+    },
+  );
+
   it("refuses a workspace delete when an unmarked fallback may hold recoverable bytes", async () => {
     const key = STORAGE_KEYS.persistedState;
     const scopedKey = `${key}:user:jd`;
