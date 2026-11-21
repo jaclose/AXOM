@@ -573,7 +573,7 @@ describe("IndexedDB-first local vault", () => {
     const checkpoint = getVaultWriteCheckpoint();
     try {
       await localVaultStorage.removeItem(key);
-        await flushLocalVaultWrites();
+      await flushLocalVaultWrites();
       expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
       expect(readVaultWriteFailure()).not.toBeNull();
     } finally {
