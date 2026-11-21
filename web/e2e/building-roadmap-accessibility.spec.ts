@@ -71,6 +71,37 @@ test("Building tabs and Next horizon retain keyboard focus and semantics on desk
   expect(errors).toEqual([]);
 });
 
+test("Building preserves native browser back navigation on modified arrow keys", async ({ page }) => {
+  await openBuilding(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Seed two distinct app-history entries after setup. Only the browser may handle Alt+Left.
+  await page.evaluate(() => {
+    window.location.hash = "dashboard";
+    window.location.hash = "building";
+  });
+  await expect(page).toHaveURL(/#building$/);
+
+  const overview = page.getByRole("tab", { name: "Overview" });
+  const systems = page.getByRole("tab", { name: "Systems" });
+  await overview.focus();
+  await expect(overview).toBeFocused();
+  await expect(overview).toHaveAttribute("aria-selected", "true");
+
+  // Genuine Chromium keyboard input must reach browser history, not switch Building tabs.
+  await overview.press("Alt+ArrowLeft");
+  await expect(page).toHaveURL(/#dashboard$/);
+  await page.goForward();
+  await expect(page.getByRole("heading", { level: 1, name: "Building AXOM" })).toBeVisible();
+
+  // Control: unmodified arrows still implement roving-tab navigation.
+  await overview.focus();
+  await overview.press("ArrowRight");
+  await expect(systems).toBeFocused();
+  await expect(systems).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/#building$/);
+});
+
 test("Building system emphasis honors real pointer and keyboard focus precedence across viewports", async ({ page }) => {
   test.setTimeout(120_000);
   await openBuilding(page);
