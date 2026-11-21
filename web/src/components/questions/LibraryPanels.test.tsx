@@ -424,4 +424,91 @@ describe("QuestionSetList AI digest identity", () => {
       digest: expect.objectContaining({ summary: "Teaching summary", generatedBy: "Synthetic provider" }),
     })));
   });
+  function applyGeneratedDigest(updateQuestionSet: ReturnType<typeof vi.fn>): Partial<QuestionSet> {
+    const [id, patch] = updateQuestionSet.mock.calls.at(-1) as [string, Partial<QuestionSet>];
+    const store = mocked.store as Record<string, unknown>;
+    const sets = store.questionSets as QuestionSet[];
+    mocked.store = { ...store, questionSets: sets.map((set) => set.id === id ? { ...set, ...patch } : set) };
+    return patch;
+  }
+
+  it("quarantines a legacy digest after reload but retains its original bytes when rebuilt", async () => {
+    const { updateQuestionSet } = prepare([question("legacy", "Legacy question?", "Reviewed A")], ["legacy"], true);
+    const original = (mocked.store!.questionSets as QuestionSet[])[0].digest;
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.queryByText("Untrusted prior digest")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(screen.getByText(/AI digest.*source (?:revision|verification)/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    const patch = applyGeneratedDigest(updateQuestionSet);
+    expect(patch.digestHistory).toEqual([original]);
+    expect(patch.digest).toEqual(expect.objectContaining({
+      summary: "Teaching summary",
+      sourceFingerprint: { version: 1, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    }));
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Add review to Tracker/i })).toBeTruthy();
+  });
+
+  it("holds a persisted digest after a valid source/key revision without deleting its record", async () => {
+    const first = question("same", "Initial stem?", "Reviewed A");
+    const { updateQuestionSet } = prepare([first], ["same"]);
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    applyGeneratedDigest(updateQuestionSet);
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    const current = mocked.store as Record<string, unknown>;
+    mocked.store = { ...current, questions: [{ ...first, stem: "Revised stem?", correctAnswerText: "Reviewed B",
+      options: [{ key: "A", text: "Reviewed B" }, { key: "B", text: "Distractor" }] }] };
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.queryByText("Teaching summary")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Rebuild digest/i })).toBeTruthy();
+    expect((mocked.store!.questionSets as QuestionSet[])[0].digest?.summary).toBe("Teaching summary");
+  });
+
+  it("rechecks live source data at Tracker click time even when the rendered card is stale", async () => {
+    const first = question("same", "Initial stem?", "Reviewed A");
+    const { updateQuestionSet } = prepare([first], ["same"]);
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    applyGeneratedDigest(updateQuestionSet);
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const oldButton = screen.getByRole("button", { name: /Add review to Tracker/i });
+    const store = mocked.store as Record<string, unknown>;
+    mocked.store = { ...store, questions: [{ ...first, stem: "Revised without rerender?" }] };
+    fireEvent.click(oldButton);
+    expect((mocked.store!.bulkAddTrackerItems as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ tone: "warn" }));
+  });
+
+  it("keeps a current digest across reload and mutable attempts while binding it to its account", async () => {
+    setQuestionAttachmentAccount("digest-owner-A");
+    const original = question("same", "Reviewed source?", "A");
+    const { updateQuestionSet } = prepare([original], ["same"]);
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    applyGeneratedDigest(updateQuestionSet);
+    view.unmount();
+    const reloaded = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    const state = mocked.store as Record<string, unknown>;
+    mocked.store = { ...state, questions: [{ ...original, status: "correct" as const,
+      updatedAt: "2026-11-22T00:00:00.000Z",
+      attempts: [{ status: "correct", at: "2026-11-22T00:00:00.000Z" }] }] };
+    reloaded.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    act(() => setQuestionAttachmentAccount("digest-owner-B"));
+    expect(screen.queryByText("Teaching summary")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    act(() => setQuestionAttachmentAccount("digest-owner-A"));
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+  });
+
 });
