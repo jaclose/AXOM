@@ -5,15 +5,14 @@
 // generate more questions from its source document (review-gated).
 // ===========================================================================
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { sha256 } from "@noble/hashes/sha2.js";
 import { BookOpen, FileText, FolderInput, ListPlus, Search, Sparkles, Trash2 } from "lucide-react";
 import { useStore } from "../../lib/store";
-import { questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
+import { digestHoldReason, digestMembership, digestSourceFingerprint, questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
 import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
-import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
+import type { QuestionRecord } from "../../lib/questions";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
@@ -41,80 +40,6 @@ interface ManagedQuestionSetShare extends OwnedQuestionSetShare {
   link: string;
 }
 
-interface DigestMembership {
-  records: QuestionRecord[];
-  holdReason: string | null;
-}
-
-/** The saved set is an ID snapshot, not authority to pick an arbitrary imported
- * row. Never send an ambiguous or incomplete membership to an AI provider. */
-function digestMembership(set: QuestionSet, questions: readonly QuestionRecord[]): DigestMembership {
-  const ids = new Set(set.questionIds);
-  const byId = new Map<string, QuestionRecord>();
-  const collisions = new Set<string>();
-  for (const question of questions) {
-    if (!ids.has(question.id)) continue;
-    if (byId.has(question.id)) collisions.add(question.id);
-    else byId.set(question.id, question);
-  }
-  if (collisions.size > 0) return {
-    records: [],
-    holdReason: `AI digest on hold: ${collisions.size} question ID${collisions.size === 1 ? " has" : "s have"} conflicting question records. Review source mapping first.`,
-  };
-  const missing = [...ids].filter((id) => !byId.has(id));
-  if (ids.size === 0 || missing.length > 0) return {
-    records: [],
-    holdReason: `AI digest on hold: ${missing.length || 1} missing question records or empty membership. Restore the original questions first.`,
-  };
-  const records = [...ids].map((id) => byId.get(id)!);
-  const held = records.filter((question) => questionMappingStatus(question) !== "ready");
-  if (held.length > 0) return {
-    records: [],
-    holdReason: `AI digest on hold: ${held.length} question answer mapping${held.length === 1 ? " needs" : "s need"} source review or a required figure. Review the original key and media before AI teaching.`,
-  };
-  return { records, holdReason: null };
-}
-
-/** A versioned SHA-256 of *source* inputs only. Never persist the original
- * question text in metadata; never include digest/history, attempts, status,
- * activity timestamps, or mutable progress in a teaching revision hash.
- * The stable account owner makes identical IDs from different accounts
- * non-interchangeable without storing a raw account ID in the digest. */
-function digestSourceFingerprint(set: QuestionSet, records: readonly QuestionRecord[], owner: string): string {
-  const serialized = JSON.stringify({
-    version: 1, owner,
-    set: {
-      id: set.id, title: set.title, questionIds: set.questionIds,
-      sourceDocumentIds: set.sourceDocumentIds, scope: set.scope, tags: set.tags,
-      parserWarnings: set.parserWarnings, kind: set.kind, parentSetId: set.parentSetId,
-      filterSnapshot: set.filterSnapshot, ordering: set.ordering, seed: set.seed,
-      importProvenance: set.importProvenance,
-    },
-    records: records.map((q) => ({
-      id: q.id, source: q.source, sourceFile: q.sourceFile, sourceDocumentId: q.sourceDocumentId,
-      sourcePage: q.sourcePage, questionNumber: q.questionNumber, stem: q.stem,
-      options: q.options, correctKey: q.correctKey, correctAnswerText: q.correctAnswerText,
-      explanation: q.explanation, choiceRationales: q.choiceRationales, needsReview: q.needsReview,
-      extraction: q.extraction, content: q.content, attachments: q.attachments,
-      citation: q.citation, objective: q.objective,
-    })),
-  });
-  return Array.from(sha256(new TextEncoder().encode(serialized)), (byte) =>
-    byte.toString(16).padStart(2, "0")).join("");
-}
-
-/** Persisted AI output is advice, never primary source evidence. Unknown legacy
- * signatures and changed reviewed source both fail closed until regenerated. */
-function digestHoldReason(set: QuestionSet, membership: DigestMembership, owner: string): string | null {
-  if (membership.holdReason) return membership.holdReason;
-  if (!set.digest) return null;
-  const saved = set.digest.sourceFingerprint;
-  if (saved?.version !== 1 || !/^[a-f0-9]{64}$/.test(saved.sha256)
-    || saved.sha256 !== digestSourceFingerprint(set, membership.records, owner)) {
-    return "AI digest source revision/verification required: this older teaching may not match the currently reviewed source. Its original content is preserved; rebuild the digest before using its advice or Tracker suggestions.";
-  }
-  return null;
-}
 
 export function SourceLibrary({
   onParseFrom,
