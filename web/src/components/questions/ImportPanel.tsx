@@ -21,7 +21,8 @@ import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/ext
 import { proposePdfMarkedAnswers } from "../../lib/pdfMarkedAnswers";
 import { attachPdfFigures } from "../../lib/pdfFigures";
 import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
-import { documentTitleFromFile, type SourceDocument } from "../../lib/library";
+import { digestMembership, digestSourceFingerprint, documentTitleFromFile, type SourceDocument } from "../../lib/library";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
 import {
   EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
   type QuestionDifficulty, type QuestionExamType, type QuestionRecord, type QuestionSource,
@@ -500,34 +501,78 @@ export function ImportPanel({
       tone: "success",
     });
 
-    // Optional AI enhancement — after save, clearly labeled, never blocking.
+    // Optional AI enhancement only uses the exact saved, source-reviewed
+    // membership. The provider may complete after import, account switching,
+    // answer correction, or another tab changing the question bank.
     if (aiEnhance && savedSetId && provider && !saved.joined) {
-      const forDigest = approved.map((draft) => ({
-        stem: draft.stem,
-        correct: draft.options.find((option) => option.key === draft.correctKey)?.text,
-        explanation: draft.explanation,
-      }));
-      enhanceQuestionSet(provider, { title: prepared.setTitle, questions: forDigest })
-        .then((digest) => {
-          s.updateQuestionSet(savedSetId, {
-            aiEnhanced: true,
-            digest: { ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString() },
-          });
-          void saveAiGeneration({
-            kind: "summary",
-            title: `${prepared.setTitle} digest`,
-            inputHash: hashGenerationInput({ kind: "question-set-digest", setId: savedSetId, questionIds }),
-            sourceIds: [savedSetId, ...(savedDocumentId ? [savedDocumentId] : [])],
-            model: provider.info.label,
-            promptVersion: "question-set-digest-v1",
-            content: digest,
-            metadata: { provider: provider.info.label, questionCount: questionIds.length },
-          });
-          if (mountedRef.current) pushToast({ title: "Question Intelligence ready", body: "The set's digest and pitfalls are on its card in Question Sets.", tone: "success" });
-        })
-        .catch((error) => {
-          if (mountedRef.current) pushToast({ title: "AI enhancement failed", body: error instanceof Error ? error.message : "Unknown error.", tone: "warn" });
+      const snapshot = useStore.getState();
+      const savedSet = (snapshot.questionSets ?? []).find((set) => set.id === savedSetId);
+      const membership = savedSet && digestMembership(savedSet, snapshot.questions ?? []);
+      if (!savedSet || !membership || membership.holdReason) {
+        if (mountedRef.current) pushToast({
+          title: "Digest held for source review",
+          body: membership?.holdReason ?? "The imported question set could not be verified after saving. Its source records were preserved.",
+          tone: "warn",
         });
+      } else {
+        const accountScope = getQuestionAttachmentScope();
+        const fingerprint = digestSourceFingerprint(savedSet, membership.records, accountScope.owner);
+        const forDigest = membership.records.map((question) => ({
+          stem: question.stem,
+          correct: question.options.find((option) => option.key === question.correctKey)?.text,
+          explanation: question.explanation,
+        }));
+        void enhanceQuestionSet(provider, { title: savedSet.title, questions: forDigest })
+          .then((digest) => {
+            if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
+            const latest = useStore.getState();
+            const current = (latest.questionSets ?? []).find((set) => set.id === savedSetId);
+            const currentMembership = current && digestMembership(current, latest.questions ?? []);
+            if (!current || !currentMembership || currentMembership.holdReason
+              || digestSourceFingerprint(current, currentMembership.records, getQuestionAttachmentScope().owner) !== fingerprint) {
+              if (mountedRef.current) pushToast({
+                title: "Digest source changed",
+                body: "The saved questions or reviewed answer changed during analysis. No stale AI digest was stored.",
+                tone: "warn",
+              });
+              return;
+            }
+            latest.updateQuestionSet(savedSetId, {
+              aiEnhanced: true,
+              digestHistory: current.digest
+                ? [...(current.digestHistory ?? []), current.digest]
+                : current.digestHistory,
+              digest: {
+                ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString(),
+                sourceFingerprint: { version: 1, sha256: fingerprint },
+              },
+            });
+            void saveAiGeneration({
+              kind: "summary",
+              title: `${current.title} digest`,
+              inputHash: hashGenerationInput({ kind: "question-set-digest", setId: savedSetId,
+                questionIds: current.questionIds, sourceFingerprint: fingerprint }),
+              sourceIds: [savedSetId, ...(savedDocumentId ? [savedDocumentId] : [])],
+              model: provider.info.label,
+              promptVersion: "question-set-digest-source-v1",
+              content: digest,
+              metadata: { provider: provider.info.label, questionCount: current.questionIds.length,
+                sourceFingerprint: fingerprint },
+            });
+            if (mountedRef.current) pushToast({
+              title: "Question Intelligence ready",
+              body: "The reviewed-source digest and pitfalls are available in Question Sets.",
+              tone: "success",
+            });
+          })
+          .catch((error) => {
+            if (mountedRef.current) pushToast({
+              title: "AI enhancement failed",
+              body: error instanceof Error ? error.message : "Unknown error.",
+              tone: "warn",
+            });
+          });
+      }
     }
 
     finishSuccessfulImport({
