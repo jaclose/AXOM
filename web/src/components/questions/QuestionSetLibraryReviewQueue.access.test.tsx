@@ -46,7 +46,8 @@ function props(refreshSignal: number, accessSuspended: boolean): Props {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // Reset queued mockOnce implementations between concurrent-request tests.
+  vi.resetAllMocks();
   vi.mocked(isAcademicReviewer).mockResolvedValue(true);
   vi.mocked(listPendingQuestionSets).mockResolvedValue(pending);
   vi.mocked(loadPendingQuestionSetReviewPreview).mockResolvedValue(privatePreview);
@@ -155,4 +156,46 @@ describe("Host reviewer portal reauthorization", () => {
     rerender(<QuestionSetLibraryReviewQueue {...props(1, false)} />);
     expect(screen.getByText("Question Set approved for search.")).toBeTruthy();
   });
+  it("serializes simultaneous same-epoch Inspect clicks before React can commit busy", async () => {
+    const first = deferred<Preview>();
+    const second = { ...pending[0], id: "pending-2", title: "Second private submission" };
+    vi.mocked(listPendingQuestionSets).mockResolvedValueOnce([...pending, second]);
+    vi.mocked(loadPendingQuestionSetReviewPreview)
+      .mockReturnValueOnce(first.promise).mockResolvedValueOnce(privatePreview);
+    render(<QuestionSetLibraryReviewQueue {...props(0, false)} />);
+    const inspect = await screen.findAllByRole("button", { name: "Inspect" });
+    expect(inspect).toHaveLength(2);
+
+    // One React event batch: both handlers see the same committed busy=false.
+    act(() => {
+      fireEvent.click(inspect[0]);
+      fireEvent.click(inspect[1]);
+    });
+    expect(loadPendingQuestionSetReviewPreview).toHaveBeenCalledTimes(1);
+    expect(loadPendingQuestionSetReviewPreview).toHaveBeenCalledWith("reviewer-a", "pending-1");
+    expect((screen.getAllByRole("button", { name: "Inspect" })[0] as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => { first.resolve(privatePreview); });
+    expect(await screen.findByRole("dialog")).toHaveProperty("textContent",
+      expect.stringContaining("Restricted explanation"));
+    expect(loadPendingQuestionSetReviewPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the Inspect lock after a failed request and permits a safe retry", async () => {
+    vi.mocked(loadPendingQuestionSetReviewPreview)
+      .mockRejectedValueOnce(new Error("Temporary preview failure"))
+      .mockResolvedValueOnce(privatePreview);
+    render(<QuestionSetLibraryReviewQueue {...props(0, false)} />);
+    const inspect = await screen.findByRole("button", { name: "Inspect" });
+    await waitFor(() => expect((inspect as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(inspect);
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent",
+      expect.stringContaining("Temporary preview failure"));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Inspect" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+    expect(await screen.findByRole("dialog")).toHaveProperty("textContent",
+      expect.stringContaining("Restricted explanation"));
+    expect(loadPendingQuestionSetReviewPreview).toHaveBeenCalledTimes(2);
+  });
+
 });
