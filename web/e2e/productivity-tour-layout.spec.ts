@@ -47,6 +47,22 @@ test("Productivity module tour restores layout after completion and skip at ever
   }
 });
 
+test("Productivity tour Next actions ignore a conflicting top-bar quote", async ({ page }) => {
+  await page.goto("/#productivity", { waitUntil: "networkidle" });
+  await completeOnboarding(page);
+  await page.evaluate(() => { window.location.hash = "productivity"; });
+  await prepareTour(page, "top");
+
+  // Force the already-reproduced collision without changing the application or quote catalog.
+  const topBarQuoteText = page.locator(".tb-quote-line .tb-quote-text");
+  await expect(topBarQuoteText).toHaveCount(1);
+  await topBarQuoteText.evaluate((element) => { element.textContent = "Next month begins now"; });
+  await expect(page.getByRole("button", { name: "Next" })).toHaveCount(2);
+
+  await advanceAndFinish(page);
+  await expect(page.getByRole("dialog", { name: "Read trends" })).toHaveCount(0);
+});
+
 async function prepareTour(page: Page, position: "scrolled" | "top"): Promise<LayoutSnapshot> {
   const surface = page.locator(".surface-scroll");
   await surface.evaluate((element, requestedPosition) => {
@@ -64,11 +80,12 @@ async function prepareTour(page: Page, position: "scrolled" | "top"): Promise<La
 }
 
 async function advanceAndFinish(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Next" }).click();
+  // The top-bar quote can contain "next month": global substring role locators are ambiguous.
+  await page.getByRole("dialog", { name: "Log activity", exact: true }).getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Choose targets" })).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("dialog", { name: "Choose targets", exact: true }).getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Use the focus timer" })).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("dialog", { name: "Use the focus timer", exact: true }).getByRole("button", { name: "Next", exact: true }).click();
   const finalDialog = page.getByRole("dialog", { name: "Read trends" });
   await expect(finalDialog).toBeVisible();
   await expect(finalDialog).toHaveClass(/centered/);
