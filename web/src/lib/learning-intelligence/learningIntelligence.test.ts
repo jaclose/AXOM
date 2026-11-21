@@ -825,3 +825,74 @@ describe("what to look at again after a block", () => {
     expect(set.title.startsWith("Week 2 practice: review, ")).toBe(true);
   });
 });
+
+
+describe("fast-miss evidence rejects duplicate canonical question IDs", () => {
+  const right = (count: number) => Array.from({ length: count }, () => question({
+    attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })],
+  }));
+  const wrong = (count: number, answerKey = "A") => Array.from({ length: count }, () => question({
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { answerKey, timeSpentSeconds: 25 })],
+  }));
+  const alias = (record: QuestionRecord, options = record.options) => question({
+    id: record.id,
+    options,
+    attempts: [],
+  });
+  const fast = (records: QuestionRecord[]) => buildPatternReport(records).findings.find((finding) => finding.kind === "fast-misses");
+
+  it("cannot validate unoffered imported choices using later aliases sharing their IDs, in either order", () => {
+    const correct = right(6);
+    const invalid = wrong(6, "Z");
+    const aliases = invalid.map((record) => alias(record, [...record.options, { key: "Z", text: "Not in source" }]));
+    for (const records of [[...correct, ...invalid, ...aliases], [...correct, ...aliases, ...invalid]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: undefined });
+      expect(fast(records)).toBeUndefined();
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("does not treat an otherwise valid, duplicated wrong question ID as a sixth independent timing sample", () => {
+    const correct = right(6);
+    const incorrect = wrong(6);
+    const duplicate = alias(incorrect[0]);
+    for (const records of [[...correct, ...incorrect, duplicate], [...correct, duplicate, ...incorrect]]) {
+      const report = buildPatternReport(records);
+      expect(report.totals.all.attempts).toBe(12);
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+      expect(fast(records)).toBeUndefined();
+    }
+  });
+
+  it("does not count duplicate correctly answered records toward the six-correct threshold", () => {
+    const correct = right(5);
+    const repeatedId = question({ attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })] });
+    const duplicate = question({ id: repeatedId.id, attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })] });
+    const incorrect = wrong(6);
+    const records = [...correct, repeatedId, ...incorrect, duplicate];
+    const before = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 13, correct: 7, accuracy: 54 });
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(fast(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(before);
+  });
+
+  it("retains the fast-miss finding and exact retry IDs for six unique, verifiable records per group", () => {
+    const correct = right(6);
+    const incorrect = wrong(6);
+    const records = [...correct, ...incorrect];
+    const before = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.findings.find((finding) => finding.kind === "fast-misses")).toMatchObject({
+      sample: 12,
+      basis: "computed",
+      questionIds: incorrect.map((record) => record.id),
+    });
+    expect(JSON.stringify(records)).toBe(before);
+  });
+});
