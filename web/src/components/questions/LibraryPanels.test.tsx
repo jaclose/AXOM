@@ -48,6 +48,10 @@ afterEach(() => {
   cleanup();
   mocked.store = null;
   vi.clearAllMocks();
+  // Do not leak unresolved per-test cloud responses into later disclosure cases.
+  vi.mocked(listQuestionSetShares).mockReset();
+  vi.mocked(publishShare).mockReset();
+  vi.mocked(revokeShare).mockReset();
   resetQuestionAttachmentScopeForTests();
 });
 
