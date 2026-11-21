@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
+import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { listQuestionSetShares, publishShare, revokeShare } from "../../lib/sharing/supabaseSharing";
 import { pushToast } from "../../lib/toast";
 import { QuestionSetList, SourceLibrary } from "./LibraryPanels";
+import { resetQuestionAttachmentScopeForTests, setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
 
 const mocked = vi.hoisted(() => ({
   document: {
@@ -24,9 +26,13 @@ const mocked = vi.hoisted(() => ({
   store: null as Record<string, unknown> | null,
 }));
 
-vi.mock("../../lib/store", () => ({
-  useStore: () => mocked.store ?? { documents: [mocked.document], removeDocument: vi.fn() },
-}));
+vi.mock("../../lib/store", () => {
+  const useStore = Object.assign(
+    () => mocked.store ?? { documents: [mocked.document], removeDocument: vi.fn() },
+    { getState: () => mocked.store ?? { documents: [mocked.document], removeDocument: vi.fn() } },
+  );
+  return { useStore };
+});
 vi.mock("../../lib/ai", () => ({
   enhanceQuestionSet: vi.fn(),
   resolveActiveProvider: vi.fn(() => null),
@@ -42,6 +48,7 @@ afterEach(() => {
   cleanup();
   mocked.store = null;
   vi.clearAllMocks();
+  resetQuestionAttachmentScopeForTests();
 });
 
 describe("SourceLibrary", () => {
@@ -236,4 +243,272 @@ describe("QuestionSetList sharing disclosure", () => {
     expect(screen.getByRole("button", { name: "Retry owner link check" })).toBeTruthy();
     expect(publishShare).not.toHaveBeenCalled();
   });
+});
+
+
+describe("QuestionSetList AI digest identity", () => {
+  const timestamp = "2026-11-21T00:00:00.000Z";
+  const question = (id: string, stem: string, correct: string): QuestionRecord => ({
+    id,
+    source: "manual",
+    stem,
+    options: [{ key: "A", text: correct }, { key: "B", text: "Distractor" }],
+    correctKey: "A",
+    correctAnswerText: correct,
+    status: "unseen",
+    tags: [],
+    attempts: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  function prepare(rows: QuestionRecord[], ids: string[], savedDigest = false) {
+    vi.mocked(resolveActiveProvider).mockReturnValue({ info: { label: "Synthetic provider" } } as
+      NonNullable<ReturnType<typeof resolveActiveProvider>>);
+    vi.mocked(enhanceQuestionSet).mockResolvedValue({
+      summary: "Teaching summary", pitfalls: [], suggestedReview: ["Review renal physiology"],
+    } as Awaited<ReturnType<typeof enhanceQuestionSet>>);
+    const set: QuestionSet = {
+      id: "set-digest",
+      title: "Synthetic identity test",
+      sourceDocumentIds: [],
+      createdAt: timestamp,
+      questionIds: ids,
+      tags: [],
+      aiEnhanced: savedDigest,
+      parserWarnings: [],
+      ...(savedDigest ? { digest: {
+        summary: "Untrusted prior digest",
+        pitfalls: ["Untrusted pitfall"],
+        suggestedReview: ["Untrusted tracker task"],
+        generatedBy: "Earlier model",
+        generatedAt: timestamp,
+      } } : {}),
+    };
+    const updateQuestionSet = vi.fn();
+    mocked.store = {
+      questionSets: [set], questions: rows, documents: [], tracker: [], courses: [], terms: [],
+      updateQuestionSet, removeQuestionSet: vi.fn(), bulkAddTrackerItems: vi.fn(),
+    };
+    return { updateQuestionSet };
+  }
+
+  it.each([false, true])("withholds AI generation for conflicting IDs in either record order (reverse=%s)", async (reverse) => {
+    const cardiac = question("shared", "Cardiac question?", "Gastrin");
+    const renal = question("shared", "Renal question?", "Secretin");
+    const { updateQuestionSet } = prepare(reverse ? [renal, cardiac] : [cardiac, renal], ["shared"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const build = screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement;
+    expect(build.disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*conflicting question records/i)).toBeTruthy();
+    await userEvent.setup().click(build);
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("holds partial digest construction when any saved member is missing", async () => {
+    const { updateQuestionSet } = prepare([question("only", "Available?", "Yes")], ["only", "missing"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const build = screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement;
+    expect(build.disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*missing question records/i)).toBeTruthy();
+    await userEvent.setup().click(build);
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("quarantines a previously saved digest and tracker suggestions while IDs conflict", () => {
+    const cardiac = question("shared", "Cardiac?", "Gastrin");
+    const renal = question("shared", "Renal?", "Secretin");
+    const { updateQuestionSet } = prepare([cardiac, renal], ["shared"], true);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText(/AI digest on hold:.*conflicting question records/i)).toBeTruthy();
+    expect(screen.queryByText("Untrusted prior digest")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+
+  it("holds a unique source record when its answer mapping still needs review", async () => {
+    const held = { ...question("review", "Unreviewed source?", "Tentative"), needsReview: true };
+    const { updateQuestionSet } = prepare([held], ["review"], true);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText(/AI digest on hold:.*answer mapping/i)).toBeTruthy();
+    expect(screen.queryByText("Untrusted prior digest")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("holds uniquely keyed imported answers before extraction review", () => {
+    const held = { ...question("unreviewed", "Imported source?", "Tentative"),
+      extraction: { confidence: "high" as const, reviewed: false } };
+    prepare([held], ["unreviewed"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect((screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*answer mapping/i)).toBeTruthy();
+  });
+
+  it("holds a unique keyed question whose required source figure is absent", () => {
+    const held = { ...question("figure", "Interpret figure?", "Tentative"),
+      content: { assets: [{ id: "missing-figure", role: "stem" }] } as QuestionRecord["content"] };
+    prepare([held], ["figure"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect((screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*answer mapping/i)).toBeTruthy();
+  });
+
+  function deferDigest() {
+    let resolve!: (value: Awaited<ReturnType<typeof enhanceQuestionSet>>) => void;
+    vi.mocked(enhanceQuestionSet).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    return async () => {
+      await act(async () => resolve({
+        summary: "Outdated answer", pitfalls: [], suggestedReview: ["Outdated tracker suggestion"],
+      } as Awaited<ReturnType<typeof enhanceQuestionSet>>));
+    };
+  }
+
+  it("discards an in-flight digest when a valid member's stem/key changes without changing its ID", async () => {
+    const { updateQuestionSet } = prepare([question("same", "First stem?", "First key")], ["same"]);
+    const finish = deferDigest();
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    mocked.store = { ...mocked.store, questions: [question("same", "Different stem?", "Different key")] };
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    await finish();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+    expect(screen.queryByText("Outdated answer")).toBeNull();
+  });
+
+  it("discards an in-flight digest after a competing imported row causes a canonical ID collision", async () => {
+    const first = question("same", "First stem?", "First key");
+    const { updateQuestionSet } = prepare([first], ["same"]);
+    const finish = deferDigest();
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    mocked.store = { ...mocked.store, questions: [first, question("same", "Competing?", "Second key")] };
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    await finish();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+    expect(screen.queryByText("Outdated answer")).toBeNull();
+  });
+
+  it("discards an in-flight digest across account A to B to A even if the source IDs match", async () => {
+    setQuestionAttachmentAccount("account-A");
+    const { updateQuestionSet } = prepare([question("same", "Source?", "Answer")], ["same"]);
+    const finish = deferDigest();
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    setQuestionAttachmentAccount("account-B");
+    setQuestionAttachmentAccount("account-A");
+    await finish();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("preserves the one-record-per-ID generation and exact persisted digest", async () => {
+    const { updateQuestionSet } = prepare([question("valid", "Valid question?", "Verified answer")], ["valid"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const build = screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement;
+    expect(build.disabled).toBe(false);
+    await userEvent.setup().click(build);
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    expect(enhanceQuestionSet).toHaveBeenCalledWith(expect.anything(), {
+      title: "Synthetic identity test",
+      questions: [{ stem: "Valid question?", correct: "Verified answer", explanation: undefined }],
+    });
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledWith("set-digest", expect.objectContaining({
+      aiEnhanced: true,
+      digest: expect.objectContaining({ summary: "Teaching summary", generatedBy: "Synthetic provider" }),
+    })));
+  });
+  function applyGeneratedDigest(updateQuestionSet: ReturnType<typeof vi.fn>): Partial<QuestionSet> {
+    const [id, patch] = updateQuestionSet.mock.calls.at(-1) as [string, Partial<QuestionSet>];
+    const store = mocked.store as Record<string, unknown>;
+    const sets = store.questionSets as QuestionSet[];
+    mocked.store = { ...store, questionSets: sets.map((set) => set.id === id ? { ...set, ...patch } : set) };
+    return patch;
+  }
+
+  it("quarantines a legacy digest after reload but retains its original bytes when rebuilt", async () => {
+    const { updateQuestionSet } = prepare([question("legacy", "Legacy question?", "Reviewed A")], ["legacy"], true);
+    const original = (mocked.store!.questionSets as QuestionSet[])[0].digest;
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.queryByText("Untrusted prior digest")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(screen.getByText(/AI digest.*source (?:revision|verification)/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    const patch = applyGeneratedDigest(updateQuestionSet);
+    expect(patch.digestHistory).toEqual([original]);
+    expect(patch.digest).toEqual(expect.objectContaining({
+      summary: "Teaching summary",
+      sourceFingerprint: { version: 1, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    }));
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Add review to Tracker/i })).toBeTruthy();
+  });
+
+  it("holds a persisted digest after a valid source/key revision without deleting its record", async () => {
+    const first = question("same", "Initial stem?", "Reviewed A");
+    const { updateQuestionSet } = prepare([first], ["same"]);
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    applyGeneratedDigest(updateQuestionSet);
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    const current = mocked.store as Record<string, unknown>;
+    mocked.store = { ...current, questions: [{ ...first, stem: "Revised stem?", correctAnswerText: "Reviewed B",
+      options: [{ key: "A", text: "Reviewed B" }, { key: "B", text: "Distractor" }] }] };
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.queryByText("Teaching summary")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Rebuild digest/i })).toBeTruthy();
+    expect((mocked.store!.questionSets as QuestionSet[])[0].digest?.summary).toBe("Teaching summary");
+  });
+
+  it("rechecks live source data at Tracker click time even when the rendered card is stale", async () => {
+    const first = question("same", "Initial stem?", "Reviewed A");
+    const { updateQuestionSet } = prepare([first], ["same"]);
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    applyGeneratedDigest(updateQuestionSet);
+    view.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const oldButton = screen.getByRole("button", { name: /Add review to Tracker/i });
+    const store = mocked.store as Record<string, unknown>;
+    mocked.store = { ...store, questions: [{ ...first, stem: "Revised without rerender?" }] };
+    fireEvent.click(oldButton);
+    expect((mocked.store!.bulkAddTrackerItems as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ tone: "warn" }));
+  });
+
+  it("keeps a current digest across reload and mutable attempts while binding it to its account", async () => {
+    setQuestionAttachmentAccount("digest-owner-A");
+    const original = question("same", "Reviewed source?", "A");
+    const { updateQuestionSet } = prepare([original], ["same"]);
+    const view = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build digest/i }));
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledOnce());
+    applyGeneratedDigest(updateQuestionSet);
+    view.unmount();
+    const reloaded = render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    const state = mocked.store as Record<string, unknown>;
+    mocked.store = { ...state, questions: [{ ...original, status: "correct" as const,
+      updatedAt: "2026-11-22T00:00:00.000Z",
+      attempts: [{ status: "correct", at: "2026-11-22T00:00:00.000Z" }] }] };
+    reloaded.rerender(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+    act(() => setQuestionAttachmentAccount("digest-owner-B"));
+    expect(screen.queryByText("Teaching summary")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    act(() => setQuestionAttachmentAccount("digest-owner-A"));
+    expect(screen.getByText("Teaching summary")).toBeTruthy();
+  });
+
 });
