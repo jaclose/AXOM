@@ -900,6 +900,54 @@ describe("session review cannot assign retry identity to duplicated canonical qu
   });
 });
 
+describe("review-set membership is unique while historical attempts remain intact", () => {
+  it("includes a question only once when repeated attempts create multiple review candidates", () => {
+    const candidates = [
+      { questionId: "q-repeat", reasons: ["repeat-miss"], priority: 5, retry: ["today"] },
+      { questionId: "q-repeat", reasons: ["wrong"], priority: 2, retry: ["tomorrow"] },
+      { questionId: "q-other", reasons: ["wrong"], priority: 1, retry: ["tomorrow"] },
+    ] as const;
+    const original = JSON.stringify(candidates);
+    const result = buildReviewSet({
+      id: "review-unique", candidates, reasons: ["repeat-miss", "wrong"],
+      now: "2026-07-20T11:00:00.000Z",
+    });
+    expect(result.questionIds).toEqual(["q-repeat", "q-other"]);
+    expect(JSON.stringify(candidates)).toBe(original);
+  });
+
+  it("deduplicates after reason filtering so an unselected first occurrence cannot hide a selected retry", () => {
+    const result = buildReviewSet({
+      id: "review-filtered",
+      candidates: [
+        { questionId: "q-repeat", reasons: ["slow-right"], priority: 4, retry: ["this-week"] },
+        { questionId: "q-other", reasons: ["wrong"], priority: 3, retry: ["tomorrow"] },
+        { questionId: "q-repeat", reasons: ["wrong"], priority: 2, retry: ["tomorrow"] },
+      ],
+      reasons: ["wrong"], now: "2026-07-20T11:00:00.000Z",
+    });
+    expect(result.questionIds).toEqual(["q-other", "q-repeat"]);
+  });
+
+  it("does not change unique-member ordering or inherited course scope", () => {
+    const result = buildReviewSet({
+      id: "review-scoped",
+      candidates: [
+        { questionId: "q-a", reasons: ["wrong"], priority: 5, retry: ["tomorrow"] },
+        { questionId: "q-b", reasons: ["unsure-right"], priority: 4, retry: ["this-week"] },
+        { questionId: "q-c", reasons: ["wrong"], priority: 3, retry: ["tomorrow"] },
+      ],
+      reasons: ["wrong", "unsure-right"],
+      parent: { id: "original-set", title: "Module 3 Week 4", scope: { module: "DERS", week: 4 } },
+      now: "2026-07-20T11:00:00.000Z",
+    });
+    expect(result).toMatchObject({
+      questionIds: ["q-a", "q-b", "q-c"], parentSetId: "original-set",
+      scope: { module: "DERS", week: 4 }, kind: "review",
+    });
+  });
+});
+
 describe("confusion-pair text requires an unambiguous question identity", () => {
   const sourceOptions = [
     { key: "A", text: "Gastrin" },
