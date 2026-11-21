@@ -44,6 +44,9 @@ export interface QuestionSetDigest {
   suggestedReview: string[];
   generatedBy: string;
   generatedAt: string;
+  /** Absent on legacy AI output. A digest without this exact current source hash
+   * must never supply actionable teaching or Course Tracker suggestions. */
+  sourceFingerprint?: { version: 1; sha256: string };
 }
 
 export interface QuestionSet {
@@ -58,6 +61,9 @@ export interface QuestionSet {
   parserWarnings: string[];
   /** AI-generated digest (review-gated feature output, clearly labeled). */
   digest?: QuestionSetDigest;
+  /** Non-destructive audit trail for earlier or stale AI teaching replaced by a
+   * reviewed-source rebuild. Legacy records remain intact until explicitly resolved. */
+  digestHistory?: QuestionSetDigest[];
   // --- Q2b-3: sets built from a Bank filter capture how they were made so the
   // membership is reproducible and explainable (the snapshot itself never moves).
   /** The filter that produced this set, recorded for display/provenance. */
