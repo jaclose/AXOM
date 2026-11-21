@@ -791,6 +791,113 @@ describe("IndexedDB-first local vault", () => {
     },
   );
 
+
+  it.each([
+    ["before post-commit inspection", "postcheck"],
+    ["after the final marker read", "last-read"],
+  ] as const)(
+    "keeps account B's acknowledged recovery separate when B writes %s of A's delete",
+    async (_label, timing) => {
+      const key = STORAGE_KEYS.persistedState;
+      const markerKey = `${key}:fallback-newer`;
+      const pointerKey = `${key}:active-user`;
+      const scopedA = `${key}:user:account-A`;
+      const scopedB = `${key}:user:account-B`;
+      const snapshot = (userId: string, questionId: string) => JSON.stringify({
+        state: { profile: { userId }, questions: [{ id: questionId }], notes: [questionId] },
+        version: 34,
+      });
+      const savedA = snapshot("account-A", "A-original-private-question");
+      const incomingB = snapshot("account-B", "B-unique-offline-question");
+
+      await localVaultStorage.setItem(key, savedA);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(savedA);
+
+      // Create an authentic marked B fallback without touching A's live IDB.
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, incomingB);
+      await flushLocalVaultWrites();
+      const markerB = storage.getItem(markerKey);
+      expect(markerB).not.toBeNull();
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      for (const field of [key, markerKey, pointerKey, scopedB]) storage.removeItem(field);
+      resetLocalVaultRuntimeForTests();
+      expect(await localVaultStorage.getItem(key)).toBe(savedA);
+
+      let pointerReads = 0;
+      let markerReads = 0;
+      let injected = false;
+      const read = vi.spyOn(storage, "getItem").mockImplementation((field) => {
+        const observed = values.get(field) ?? null;
+        if (field === pointerKey) pointerReads += 1;
+        if (field === markerKey) markerReads += 1;
+        if (!injected && ((timing === "postcheck" && field === pointerKey && pointerReads === 2)
+          || (timing === "last-read" && field === markerKey && markerReads === 3))) {
+          injected = true;
+          values.set(key, incomingB);
+          values.set(markerKey, markerB!);
+          values.set(pointerKey, "account-B");
+          values.set(scopedB, incomingB);
+        }
+        return observed;
+      });
+      const deleteCheckpoint = getVaultWriteCheckpoint();
+      try {
+        await localVaultStorage.removeItem(key);
+        await flushLocalVaultWrites();
+      } finally {
+        read.mockRestore();
+      }
+      expect(injected).toBe(true);
+      if (timing === "postcheck") {
+        expect(() => assertVaultWritesSince(deleteCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      } else {
+        // A last-read arrival is invisible to the deleting tab; never claim
+        // that the successful receipt proves browser storage is globally empty.
+        expect(() => assertVaultWritesSince(deleteCheckpoint)).not.toThrow();
+      }
+
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBeUndefined();
+        expect(await getDirect(db, scopedA)).toBeUndefined();
+        expect(await getDirect(db, pointerKey)).toBeUndefined();
+        expect(db.version).toBe(DB_VERSION);
+      } finally {
+        db.close();
+      }
+      expect(storage.getItem(key)).toBe(incomingB);
+      expect(storage.getItem(markerKey)).toBe(markerB);
+      expect(storage.getItem(scopedB)).toBe(incomingB);
+      expect(storage.getItem(scopedA)).toBeNull();
+
+      // Recovery inspection applies a stable-ID privacy filter even when the
+      // generic fallback belongs to another signed-in account.
+      const inspectionA = await inspectLocalVaultRecoveryCopies("account-A");
+      expect(inspectionA.copies).toEqual([]);
+      expect(inspectionA.unverifiedOrOtherOwnerCopyPresent).toBe(true);
+      expect(JSON.stringify(inspectionA)).not.toContain("B-unique-offline-question");
+      const inspectionB = await inspectLocalVaultRecoveryCopies("account-B");
+      expect(inspectionB.copies).toEqual(expect.arrayContaining([
+        expect.objectContaining({ source: "local-fallback", value: incomingB }),
+      ]));
+
+      const staleCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("account-A", "A-stale-post-delete"));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(staleCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(storage.getItem(key)).toBe(incomingB);
+      expect(storage.getItem(markerKey)).toBe(markerB);
+
+      resetLocalVaultRuntimeForTests();
+      expect(await localVaultStorage.getItem(key)).toBe(incomingB);
+      expect(storage.getItem(scopedB)).toBe(incomingB);
+      const refreshedA = await inspectLocalVaultRecoveryCopies("account-A");
+      expect(JSON.stringify(refreshedA)).not.toContain("B-unique-offline-question");
+    },
+  );
+
   it("refuses a workspace delete when an unmarked fallback may hold recoverable bytes", async () => {
     const key = STORAGE_KEYS.persistedState;
     const scopedKey = `${key}:user:jd`;
