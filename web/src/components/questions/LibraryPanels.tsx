@@ -4,7 +4,8 @@
 // shows its current mastery and historical accuracy, digest (when AI-enhanced), and can launch blocks or
 // generate more questions from its source document (review-gated).
 // ===========================================================================
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { BookOpen, FileText, FolderInput, ListPlus, Search, Sparkles, Trash2 } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
@@ -13,7 +14,7 @@ import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from ".
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
 import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
-import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
@@ -74,15 +75,20 @@ function digestMembership(set: QuestionSet, questions: readonly QuestionRecord[]
   return { records, holdReason: null };
 }
 
-/** Compare the actual teaching inputs, source provenance and set membership.
- * Mutable attempt/progress overlays are deliberately excluded; a changed key,
- * figure, source binding, explanation or set filing invalidates a pending digest. */
-function digestSourceFingerprint(set: QuestionSet, records: readonly QuestionRecord[]): string {
-  return JSON.stringify({
+/** A versioned SHA-256 of *source* inputs only. Never persist the original
+ * question text in metadata; never include digest/history, attempts, status,
+ * activity timestamps, or mutable progress in a teaching revision hash.
+ * The stable account owner makes identical IDs from different accounts
+ * non-interchangeable without storing a raw account ID in the digest. */
+function digestSourceFingerprint(set: QuestionSet, records: readonly QuestionRecord[], owner: string): string {
+  const serialized = JSON.stringify({
+    version: 1, owner,
     set: {
       id: set.id, title: set.title, questionIds: set.questionIds,
       sourceDocumentIds: set.sourceDocumentIds, scope: set.scope, tags: set.tags,
-      parserWarnings: set.parserWarnings, digest: set.digest,
+      parserWarnings: set.parserWarnings, kind: set.kind, parentSetId: set.parentSetId,
+      filterSnapshot: set.filterSnapshot, ordering: set.ordering, seed: set.seed,
+      importProvenance: set.importProvenance,
     },
     records: records.map((q) => ({
       id: q.id, source: q.source, sourceFile: q.sourceFile, sourceDocumentId: q.sourceDocumentId,
@@ -90,9 +96,24 @@ function digestSourceFingerprint(set: QuestionSet, records: readonly QuestionRec
       options: q.options, correctKey: q.correctKey, correctAnswerText: q.correctAnswerText,
       explanation: q.explanation, choiceRationales: q.choiceRationales, needsReview: q.needsReview,
       extraction: q.extraction, content: q.content, attachments: q.attachments,
-      citation: q.citation, updatedAt: q.updatedAt,
+      citation: q.citation, objective: q.objective,
     })),
   });
+  return Array.from(sha256(new TextEncoder().encode(serialized)), (byte) =>
+    byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** Persisted AI output is advice, never primary source evidence. Unknown legacy
+ * signatures and changed reviewed source both fail closed until regenerated. */
+function digestHoldReason(set: QuestionSet, membership: DigestMembership, owner: string): string | null {
+  if (membership.holdReason) return membership.holdReason;
+  if (!set.digest) return null;
+  const saved = set.digest.sourceFingerprint;
+  if (saved?.version !== 1 || !/^[a-f0-9]{64}$/.test(saved.sha256)
+    || saved.sha256 !== digestSourceFingerprint(set, membership.records, owner)) {
+    return "AI digest source revision/verification required: this older teaching may not match the currently reviewed source. Its original content is preserved; rebuild the digest before using its advice or Tracker suggestions.";
+  }
+  return null;
 }
 
 export function SourceLibrary({
@@ -220,6 +241,7 @@ export function QuestionSetList({
   const sets = s.questionSets ?? NO_SETS;
   const questions = s.questions ?? NO_QUESTIONS;
   const provider = useMemo(() => resolveActiveProvider(), []);
+  const currentDigestOwner = useSyncExternalStore(subscribeQuestionAttachmentScope, () => getQuestionAttachmentScope().owner);
   const [enhancing, setEnhancing] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filingSet, setFilingSet] = useState<QuestionSet | null>(null);
@@ -257,7 +279,7 @@ export function QuestionSetList({
       return;
     }
     const accountScope = getQuestionAttachmentScope();
-    const fingerprint = digestSourceFingerprint(set, membership.records);
+    const fingerprint = digestSourceFingerprint(set, membership.records, accountScope.owner);
     setEnhancing(set.id);
     try {
       const forDigest = membership.records.map((q) => ({
@@ -273,7 +295,7 @@ export function QuestionSetList({
       const currentSet = (latest.questionSets ?? []).find((candidate) => candidate.id === set.id);
       const currentMembership = currentSet && digestMembership(currentSet, latest.questions ?? NO_QUESTIONS);
       if (!currentSet || !currentMembership || currentMembership.holdReason
-        || digestSourceFingerprint(currentSet, currentMembership.records) !== fingerprint) {
+        || digestSourceFingerprint(currentSet, currentMembership.records, getQuestionAttachmentScope().owner) !== fingerprint) {
         pushToast({
           title: "Digest source changed",
           body: "The questions, answer review, or set changed during analysis. No old AI advice was saved; review the current source and retry.",
@@ -283,7 +305,15 @@ export function QuestionSetList({
       }
       latest.updateQuestionSet(set.id, {
         aiEnhanced: true,
-        digest: { ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString() },
+        // Do not destroy a previously persisted digest, including legacy
+        // source-unbound advice: retain it for audit instead of silent overwrite.
+        digestHistory: currentSet.digest
+          ? [...(currentSet.digestHistory ?? []), currentSet.digest]
+          : currentSet.digestHistory,
+        digest: {
+          ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString(),
+          sourceFingerprint: { version: 1, sha256: fingerprint },
+        },
       });
     } catch (err) {
       pushToast({ title: "Enhancement failed", body: err instanceof Error ? err.message : "Unknown error.", tone: "warn" });
@@ -437,24 +467,39 @@ export function QuestionSetList({
   // silently associate a bank with the wrong term when module names repeat.
 
   function addDigestReview(set: QuestionSet) {
-    const suggestions = set.digest?.suggestedReview ?? [];
-    const course = (s.courses ?? []).find((item) => item.id === set.scope?.courseId);
-    const term = (s.terms ?? []).find((item) => item.id === course?.termId);
-    const destination = set.scope?.module
-      ? [term?.name ?? course?.code ?? "Question Bank", set.scope.module, set.scope.week ? `Week ${set.scope.week}` : "Review"].join("/")
+    // Re-read the authoritative current store at activation: a displayed
+    // button may be stale before React commits a source/account update.
+    const live = useStore.getState();
+    const currentSet = (live.questionSets ?? []).find((item) => item.id === set.id);
+    const membership = currentSet && digestMembership(currentSet, live.questions ?? NO_QUESTIONS);
+    if (!currentSet || !membership || digestHoldReason(currentSet, membership, getQuestionAttachmentScope().owner)) {
+      pushToast({
+        title: "Digest requires source review",
+        body: "The account or reviewed question source changed. Rebuild the digest before adding Tracker actions.",
+        tone: "warn",
+      });
+      return;
+    }
+    const suggestions = currentSet.digest?.suggestedReview ?? [];
+    if (!suggestions.length) return;
+    const course = (live.courses ?? []).find((item) => item.id === currentSet.scope?.courseId);
+    const term = (live.terms ?? []).find((item) => item.id === course?.termId);
+    const destination = currentSet.scope?.module
+      ? [term?.name ?? course?.code ?? "Question Bank", currentSet.scope.module, currentSet.scope.week ? `Week ${currentSet.scope.week}` : "Review"].join("/")
       : "Question Bank/Review";
-    const items = reviewTaskInputs(suggestions, destination, { source: "digest", sourceId: set.id }, s.tracker);
+    const items = reviewTaskInputs(suggestions, destination, { source: "digest", sourceId: currentSet.id }, live.tracker);
     if (!items.length) {
       pushToast({ title: "Review already tracked", body: "Those active digest topics are already in the Course Tracker.", tone: "warn" });
       return;
     }
-    s.bulkAddTrackerItems(items);
+    live.bulkAddTrackerItems(items);
     pushToast({ title: "Review work added", body: `${items.length} digest topic${items.length === 1 ? "" : "s"} added to the Course Tracker.`, tone: "success" });
   }
 
   function renderCard(set: QuestionSet) {
     const metrics = questionSetMetrics(set, questions, s.documents ?? []);
-    const { holdReason } = digestMembership(set, questions);
+    const membership = digestMembership(set, questions);
+    const holdReason = digestHoldReason(set, membership, currentDigestOwner);
     return (
       <QuestionSetCard
         key={set.id}
@@ -476,7 +521,7 @@ export function QuestionSetList({
       >
         {!compact && (provider || set.digest) && holdReason && (
           <p className="sub" role="status">
-            {holdReason}{set.digest ? " Earlier AI digest and its tracker suggestions are withheld until source identity is resolved." : ""}
+            {holdReason}{set.digest ? " Earlier AI digest and its tracker suggestions are withheld." : ""}
           </p>
         )}
         {!compact && set.digest && !holdReason && (
@@ -493,9 +538,9 @@ export function QuestionSetList({
           </div>
         )}
         {!compact && <div className="row wrap gap6">
-          {provider && !set.digest && (
-            <GhostButton disabled={enhancing === set.id || Boolean(holdReason)} onClick={() => void enhance(set)}>
-              <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : "Build digest"}
+          {provider && (!set.digest || (holdReason && !membership.holdReason)) && (
+            <GhostButton disabled={enhancing === set.id || Boolean(membership.holdReason)} onClick={() => void enhance(set)}>
+              <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : set.digest ? "Rebuild digest" : "Build digest"}
             </GhostButton>
           )}
           {!holdReason && set.digest?.suggestedReview.length ? (
