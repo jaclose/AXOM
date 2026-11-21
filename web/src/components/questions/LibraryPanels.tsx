@@ -378,7 +378,7 @@ export function QuestionSetList({
       }
       const snapshot = createQuestionSetShare(liveSet, live.questions ?? NO_QUESTIONS);
       if (!isLinkedShareWorkspace(scope) || useStore.getState() !== live) return;
-      const result = await publishShare(liveSet.id, snapshot);
+      const result = await publishShare(liveSet.id, snapshot, scope.accountId);
       if (!isCurrentShareScope(scope)) return;
       const link = `${location.origin}${location.pathname}#shared-set?token=${encodeURIComponent(result.token)}`;
       const managed = { ...result, link };
