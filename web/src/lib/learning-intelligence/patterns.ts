@@ -172,7 +172,12 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
 
   const missCounts = new Map<ID, number>();
   for (const event of scored) if (event.correct === false) missCounts.set(event.questionId, (missCounts.get(event.questionId) ?? 0) + 1);
-  const repeatMisses = [...missCounts.entries()].filter(([, count]) => count >= 2).sort((left, right) => right[1] - left[1]).map(([id]) => id);
+  // An imported ID collision cannot establish that a *single source question*
+  // was missed repeatedly: exposures were counted independently per record.
+  // Keep historical miss events/totals, but never recommend an ambiguous retry.
+  const repeatMisses = [...missCounts.entries()].filter(([id, count]) =>
+    count >= 2 && !duplicateIds.has(id)
+  ).sort((left, right) => right[1] - left[1]).map(([id]) => id);
 
   // Retain legacy status-only results in raw scored totals, but do not
   // infer an answer-speed diagnostic without an independently checkable saved
