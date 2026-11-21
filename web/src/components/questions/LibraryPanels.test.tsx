@@ -48,6 +48,10 @@ afterEach(() => {
   cleanup();
   mocked.store = null;
   vi.clearAllMocks();
+  // Do not leak unresolved per-test cloud responses into later disclosure cases.
+  vi.mocked(listQuestionSetShares).mockReset();
+  vi.mocked(publishShare).mockReset();
+  vi.mocked(revokeShare).mockReset();
   resetQuestionAttachmentScopeForTests();
 });
 
@@ -115,6 +119,102 @@ describe("QuestionSetList sharing disclosure", () => {
       bulkAddTrackerItems: vi.fn(),
     };
   }
+
+  it("hides resolved A bearer links on B and A return without unmounting", async () => {
+    useSyntheticSet();
+    setQuestionAttachmentAccount("account-A");
+    const fromA = ownedShare("00000000-0000-4000-8000-000000000061", "A".repeat(48));
+    vi.mocked(listQuestionSetShares).mockResolvedValueOnce([fromA]).mockResolvedValueOnce([]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const ownerLink = await screen.findByRole("textbox", { name: "Unlisted Question Set link" }) as HTMLInputElement;
+    expect(ownerLink.value).toContain("A".repeat(48));
+
+    act(() => setQuestionAttachmentAccount("account-B"));
+    expect(screen.queryByRole("textbox", { name: "Unlisted Question Set link" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Revoke link" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create unlisted link" })).toBeNull();
+
+    act(() => setQuestionAttachmentAccount("account-A"));
+    expect(screen.queryByRole("textbox", { name: "Unlisted Question Set link" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
+    expect(writeText).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(await screen.findByRole("button", { name: "Create unlisted link" })).toBeTruthy();
+    expect(listQuestionSetShares).toHaveBeenCalledTimes(2);
+  });
+
+  it("never populates B share management with a late A lookup", async () => {
+    useSyntheticSet();
+    setQuestionAttachmentAccount("account-A");
+    let resolveALookup!: (shares: Awaited<ReturnType<typeof listQuestionSetShares>>) => void;
+    const fromA = ownedShare("00000000-0000-4000-8000-000000000062", "A".repeat(48));
+    const fromB = ownedShare("00000000-0000-4000-8000-000000000063", "B".repeat(48));
+    vi.mocked(listQuestionSetShares)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveALookup = resolve; }))
+      .mockResolvedValueOnce([fromB]);
+
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(screen.getByText(/Checking this account for active links/)).toBeTruthy();
+    act(() => setQuestionAttachmentAccount("account-B"));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect((await screen.findByRole("textbox", { name: "Unlisted Question Set link" }) as HTMLInputElement).value)
+      .toContain("B".repeat(48));
+    await act(async () => resolveALookup([fromA]));
+    const visible = screen.getByRole("textbox", { name: "Unlisted Question Set link" }) as HTMLInputElement;
+    expect(visible.value).toContain("B".repeat(48));
+    expect(visible.value).not.toContain("A".repeat(48));
+  });
+
+  it("does not reveal or copy a late A publish result after switching to B", async () => {
+    useSyntheticSet();
+    setQuestionAttachmentAccount("account-A");
+    vi.mocked(listQuestionSetShares).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    let resolvePublish!: (value: Awaited<ReturnType<typeof publishShare>>) => void;
+    vi.mocked(publishShare).mockImplementationOnce(() => new Promise(resolve => { resolvePublish = resolve; }));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const create = await screen.findByRole("button", { name: "Create unlisted link" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed this set/ }));
+    fireEvent.click(create);
+    expect(publishShare).toHaveBeenCalledTimes(1);
+    act(() => setQuestionAttachmentAccount("account-B"));
+    await act(async () => resolvePublish(ownedShare(
+      "00000000-0000-4000-8000-000000000064", "A".repeat(48),
+    )));
+    expect(screen.queryByRole("textbox", { name: "Unlisted Question Set link" })).toBeNull();
+    expect(writeText).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(await screen.findByRole("button", { name: "Create unlisted link" })).toBeTruthy();
+    expect(listQuestionSetShares).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not run A recovery lookup after a failed publish under B", async () => {
+    useSyntheticSet();
+    setQuestionAttachmentAccount("account-A");
+    vi.mocked(listQuestionSetShares).mockResolvedValue([]);
+    let rejectPublish!: (reason: Error) => void;
+    vi.mocked(publishShare).mockImplementationOnce(() => new Promise((_, reject) => { rejectPublish = reject; }));
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const create = await screen.findByRole("button", { name: "Create unlisted link" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed this set/ }));
+    fireEvent.click(create);
+    expect(publishShare).toHaveBeenCalledTimes(1);
+    act(() => setQuestionAttachmentAccount("account-B"));
+    await act(async () => rejectPublish(new Error("A request interrupted")));
+    expect(listQuestionSetShares).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Retry owner link check" })).toBeNull();
+  });
 
   async function openAndConfirmShare() {
     render(<QuestionSetList recent onRunSet={vi.fn()} />);
