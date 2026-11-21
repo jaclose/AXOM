@@ -82,6 +82,34 @@ describe("Building preview", () => {
     expect(document.activeElement).toBe(systems);
   });
 
+  it("preserves browser shortcuts while retaining unmodified roving-tab arrows", () => {
+    render(<BuildingPage />);
+    const overview = screen.getByRole("tab", { name: "Overview" });
+    const systems = screen.getByRole("tab", { name: "Systems" });
+    overview.focus();
+
+    for (const modifiers of [
+      { key: "ArrowLeft", altKey: true },
+      { key: "ArrowRight", altKey: true },
+      { key: "Home", ctrlKey: true },
+      { key: "End", metaKey: true },
+      { key: "ArrowRight", shiftKey: true },
+    ]) {
+      const event = new KeyboardEvent("keydown", { ...modifiers, bubbles: true, cancelable: true });
+      fireEvent(overview, event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(overview);
+      expect(overview.getAttribute("aria-selected")).toBe("true");
+      expect(systems.getAttribute("aria-selected")).toBe("false");
+    }
+
+    const plainArrow = new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true });
+    fireEvent(overview, plainArrow);
+    expect(plainArrow.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(systems);
+    expect(systems.getAttribute("aria-selected")).toBe("true");
+  });
+
   it("moves focus to the Systems tab when a focused overview horizon is replaced", () => {
     render(<BuildingPage />);
     const nextCard = screen.getByRole("heading", { name: "Next" }).closest<HTMLElement>(".building-horizon")!;

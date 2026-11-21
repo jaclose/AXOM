@@ -42,6 +42,8 @@ export function BuildingPage() {
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: "overview" | "systems") {
+    // Modified arrows are reserved for browser and platform shortcuts.
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     let target: "overview" | "systems";
     switch (event.key) {
       case "ArrowLeft":
