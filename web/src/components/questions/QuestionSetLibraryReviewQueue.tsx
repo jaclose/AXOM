@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpenCheck, RefreshCw } from "lucide-react";
 import { isAcademicReviewer } from "../../lib/academicLibrary/client";
 import {
@@ -9,9 +9,11 @@ import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../ui/primiti
 import { Modal } from "../ui/Modal";
 import "../../styles/question-set-library.css";
 
-export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, onReviewed }: {
+export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, accessSuspended = false, onReviewed }: {
   accountId: string;
   refreshSignal?: number;
+  /** Host is rechecking its own privileges. Portaled preview content must close immediately. */
+  accessSuspended?: boolean;
   onReviewed?: () => void;
 }) {
   const [reviewer, setReviewer] = useState(false);
@@ -25,31 +27,43 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, on
   const [reason, setReason] = useState("");
   const [attested, setAttested] = useState(false);
   const [shown, setShown] = useState(20);
+  // An Inspect response that started before an account/Host/reviewer refresh
+  // must never reopen a privileged body-level modal after reauthorization.
+  const previewEpoch = useRef(0);
   useEffect(() => {
+    const epoch = ++previewEpoch.current;
     let alive = true;
+    setPreview(undefined); setReason(""); setAttested(false);
     setLoading(true); setError(""); setQueue([]); setReviewer(false);
+    if (accessSuspended) return () => { alive = false; };
+
     void isAcademicReviewer(accountId).then(async allowed => {
-      if (!alive) return;
+      if (!alive || previewEpoch.current !== epoch) return;
       setReviewer(allowed);
       if (!allowed) { setPreview(undefined); setReason(""); setAttested(false); }
       if (allowed) {
         const items = await listPendingQuestionSets(accountId);
         // Authorization or account may have changed while the queue was loading.
-        if (alive) setQueue(items);
+        if (alive && previewEpoch.current === epoch) setQueue(items);
       }
-    }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "Review queue unavailable."); })
-      .finally(() => { if (alive) setLoading(false); });
+    }).catch(cause => { if (alive && previewEpoch.current === epoch) setError(cause instanceof Error ? cause.message : "Review queue unavailable."); })
+      .finally(() => { if (alive && previewEpoch.current === epoch) setLoading(false); });
     return () => { alive = false; };
-  }, [accountId, refresh, refreshSignal]);
+  }, [accountId, refresh, refreshSignal, accessSuspended]);
 
   async function open(id: string) {
+    if (accessSuspended || loading || !reviewer || busy) return;
+    const epoch = previewEpoch.current;
     setBusy(true); setError(""); setMessage(""); setReason(""); setAttested(false); setShown(20);
-    try { setPreview(await loadPendingQuestionSetReviewPreview(accountId, id)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "This submission could not be opened."); }
-    finally { setBusy(false); }
+    try {
+      const next = await loadPendingQuestionSetReviewPreview(accountId, id);
+      if (previewEpoch.current === epoch) setPreview(next);
+    } catch (cause) {
+      if (previewEpoch.current === epoch) setError(cause instanceof Error ? cause.message : "This submission could not be opened.");
+    } finally { setBusy(false); }
   }
   async function decide(approved: boolean) {
-    if (!preview || !reviewer || loading || busy || reason.trim().length < 8 || !attested) return;
+    if (accessSuspended || !preview || !reviewer || loading || busy || reason.trim().length < 8 || !attested) return;
     setBusy(true); setError(""); setMessage("");
     try {
       await reviewQuestionSetSubmission(accountId, preview, approved, reason);
@@ -70,17 +84,17 @@ export function QuestionSetLibraryReviewQueue({ accountId, refreshSignal = 0, on
   }
   return <GlassCard pad className="qsl-review-queue">
     <PanelHeader headingLevel={2} title="Question Set Library review" sub="Learner submissions appear in search only after academic review."
-      action={<GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16} aria-hidden="true" /> Refresh</GButton>} />
+      action={<GButton size="sm" disabled={accessSuspended || loading || busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16} aria-hidden="true" /> Refresh</GButton>} />
     {loading && <p role="status">Checking academic review access…</p>}
     {!loading && !reviewer && !error && <p className="sub">This operator account has no academic reviewer permission. Host access alone cannot approve medical content.</p>}
     {reviewer && !loading && queue.length === 0 && <p className="sub">No learner Question Sets await review.</p>}
     {queue.map(item => <div className="qsl-review-row" key={item.id}>
       <div><b>{item.title}</b><small>{item.questionCount} questions · {item.credit || "No public credit"} · submitted {new Date(item.createdAt).toLocaleDateString()}</small></div>
-      <div><Tag tone="orange">Pending</Tag><GButton size="sm" disabled={busy} onClick={() => void open(item.id)}>Inspect</GButton></div>
+      <div><Tag tone="orange">Pending</Tag><GButton size="sm" disabled={accessSuspended || loading || !reviewer || busy} onClick={() => void open(item.id)}>Inspect</GButton></div>
     </div>)}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert" className="qsl-error">{error}</p>}
-    {preview && <Modal title={`Review ${preview.snapshot.title}`} onClose={busy ? () => {} : () => setPreview(undefined)}>
+    {!accessSuspended && !loading && reviewer && preview && <Modal title={`Review ${preview.snapshot.title}`} onClose={busy ? () => {} : () => setPreview(undefined)}>
       <div className="qsl-review-detail stack gap12">
         <p><BookOpenCheck size={17} aria-hidden="true" /> {preview.snapshot.questions.length} questions. The contributor attested to rights and answer review. Check that evidence yourself before approval.</p>
         <ol>{preview.snapshot.questions.slice(0, shown).map(question => <li key={question.id}>
