@@ -159,12 +159,25 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   for (const event of scored) if (event.correct === false) missCounts.set(event.questionId, (missCounts.get(event.questionId) ?? 0) + 1);
   const repeatMisses = [...missCounts.entries()].filter(([, count]) => count >= 2).sort((left, right) => right[1] - left[1]).map(([id]) => id);
 
+  // Attempt events retain their original record's ID, not an origin-row
+  // pointer. A duplicate-ID import may contain different offered choices,
+  // so the byId index cannot safely verify either row's timing evidence.
+  // Hold every such ID from diagnostics, regardless of input order; keep raw
+  // historical counts and the original question/attempt rows untouched.
+  const duplicateIds = new Set<ID>();
+  const seenIds = new Set<ID>();
+  for (const question of questions) {
+    if (seenIds.has(question.id)) duplicateIds.add(question.id);
+    else seenIds.add(question.id);
+  }
+
   // Retain legacy status-only results in raw scored totals, but do not
   // infer an answer-speed diagnostic without an independently checkable saved
   // choice from the currently offered options. Historical key revisions are
   // not reconstructed here; this verifies consistency with the *current* key.
   // Malformed durations likewise cannot support medians or quick-miss retries.
   const timedScored = scored.filter((event) => {
+    if (duplicateIds.has(event.questionId)) return false;
     if (typeof event.seconds !== "number" || !Number.isFinite(event.seconds) || event.seconds <= 0
       || typeof event.answerKey !== "string" || typeof event.correctKey !== "string") return false;
     const offered = byId.get(event.questionId)?.options.some((option) => option.key === event.answerKey);
