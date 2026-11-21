@@ -827,6 +827,71 @@ describe("what to look at again after a block", () => {
 });
 
 
+describe("confusion-pair text requires an unambiguous question identity", () => {
+  const sourceOptions = [
+    { key: "A", text: "Gastrin" },
+    { key: "B", text: "Secretin" },
+    { key: "C", text: "Somatostatin" },
+  ];
+  const aliasOptions = [
+    { key: "A", text: "Pepsin" },
+    { key: "B", text: "Trypsin" },
+    { key: "C", text: "Chymotrypsin" },
+  ];
+  const origin = () => question({
+    id: "source-confusion-duplicate",
+    options: sourceOptions,
+    correctKey: "B",
+    status: "incorrect",
+    attempts: [
+      attempt(1, "incorrect", { answerKey: "A" }),
+      attempt(2, "incorrect", { answerKey: "A" }),
+    ],
+  });
+
+  it("holds ambiguous duplicate-ID option text in both input orders, without rewriting scored history", () => {
+    const original = origin();
+    const alias = question({ id: original.id, options: aliasOptions, correctKey: "B", attempts: [] });
+    for (const records of [[original, alias], [alias, original]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+      expect(report.confusionPairs).toEqual([]);
+      expect(report.findings.filter((item) => item.kind === "confusion-pair")).toEqual([]);
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("does not let a duplicate alias with unchanged offered text restore ambiguous confidence", () => {
+    const original = origin();
+    const alias = question({ id: original.id, options: sourceOptions, correctKey: "B", attempts: [] });
+    expect(buildPatternReport([original, alias]).confusionPairs).toEqual([]);
+  });
+
+  it("retains precisely attributed text and retry IDs for a unique verified question", () => {
+    const original = origin();
+    const before = JSON.stringify(original);
+    const report = buildPatternReport([original]);
+    expect(report.confusionPairs).toEqual([
+      { picked: "Gastrin", correct: "Secretin", count: 2, questionIds: [original.id] },
+    ]);
+    expect(report.findings.find((item) => item.kind === "confusion-pair")).toMatchObject({
+      title: 'You chose "Gastrin" when the answer was "Secretin"',
+      sample: 2,
+      questionIds: [original.id],
+    });
+    expect(JSON.stringify(original)).toBe(before);
+  });
+
+  it("does not infer a confusion pair from withdrawn or unreviewed answer mappings", () => {
+    const record = question({
+      ...origin(),
+      needsReview: true,
+    });
+    expect(buildPatternReport([record]).confusionPairs).toEqual([]);
+  });
+});
+
 describe("fast-miss evidence rejects duplicate canonical question IDs", () => {
   const right = (count: number) => Array.from({ length: count }, () => question({
     attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })],
