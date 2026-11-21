@@ -198,6 +198,45 @@ describe("Question Set share boundary", () => {
     expect(value.questions[0]).toMatchObject({ id: "shared-question-1", correctKey: "B" });
   });
 
+  it("rejects repeated membership IDs before mapping them into distinct bearer-share IDs", () => {
+    const original = question("q1");
+    expect(() => createQuestionSetShare(questionSet(["q1", "q1"]), [original], NOW))
+      .toThrow(/duplicate.*membership|membership.*duplicate/i);
+    expect(original.correctKey).toBe("B");
+  });
+
+  it("refuses keyed but unresolved source mappings instead of exporting a trusted answer", () => {
+    const unresolved = question("q1", { needsReview: true });
+    expect(questionMappingStatus(unresolved)).toBe("unresolved");
+    expect(() => createQuestionSetShare(questionSet(), [unresolved], NOW))
+      .toThrow(/review|unresolved|not ready/i);
+    expect(unresolved.needsReview).toBe(true);
+  });
+
+  it("refuses keyed but unreviewed extraction that would otherwise become recipient-ready", () => {
+    const held = question("q1", { extraction: { confidence: "high", reviewed: false } });
+    expect(questionMappingStatus(held)).toBe("review-suggested");
+    expect(() => createQuestionSetShare(questionSet(), [held], NOW))
+      .toThrow(/review|unresolved|not ready/i);
+    expect(held.extraction?.reviewed).toBe(false);
+  });
+
+  it("imports historical keyed v1 payloads as unverified without erasing their answers", () => {
+    // v1 does not encode the sender's needsReview or extraction.reviewed states,
+    // so its keyed answer is never evidence of a reviewed original.
+    const oldV1 = snapshot();
+    const imported = importSharedQuestionSet({
+      snapshot: oldV1,
+      identity: { shareId: SHARE_ID, contentDigest: DIGEST },
+      existingQuestions: [],
+      now: NOW,
+    }).questions[0];
+    expect(imported.correctKey).toBe("B");
+    expect(imported.correctAnswerText).toBe("Two");
+    expect(imported.needsReview).toBe(true);
+    expect(questionMappingStatus(imported)).toBe("unresolved");
+  });
+
   it("keeps distinct source memberships distinct when two questions have identical content", () => {
     const value = createQuestionSetShare(
       questionSet(["q1", "q2"]),
