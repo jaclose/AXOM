@@ -1600,12 +1600,25 @@ describe("IndexedDB-first local vault", () => {
     expect(() => assertVaultWrite(failedSequence)).toThrow(/no local storage fallback/i);
   });
 
-  it("removes primary, profile pointer, and scoped IndexedDB records together", async () => {
+  it("deletes IndexedDB workspace records without erasing concurrent browser pointer metadata", async () => {
+    const key = STORAGE_KEYS.persistedState;
     const persisted = JSON.stringify({ state: { profile: { userId: "jd", name: "JD" } }, version: 32 });
-    await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
-    await localVaultStorage.removeItem(STORAGE_KEYS.persistedState);
-    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
-    expect(localStorage.getItem(`${STORAGE_KEYS.persistedState}:active-user`)).toBeNull();
+    await localVaultStorage.setItem(key, persisted);
+    await localVaultStorage.removeItem(key);
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    const db = await openCurrentVault();
+    try {
+      expect(await getDirect(db, key)).toBeUndefined();
+      expect(await getDirect(db, `${key}:active-user`)).toBeUndefined();
+      expect(await getDirect(db, `${key}:user:jd`)).toBeUndefined();
+    } finally {
+      db.close();
+    }
+    // An orphaned browser-only pointer has no workspace bytes. It is retained
+    // because a non-atomic removeItem could race a new offline recovery save.
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(`${key}:user:jd`)).toBeNull();
+    expect(localStorage.getItem(`${key}:active-user`)).toBe("jd");
   });
 
   it("requires the physical v5 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
