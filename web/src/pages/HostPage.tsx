@@ -275,10 +275,10 @@ function HostAccountPage() {
           </div>
           <dl className="host-platform-metrics" aria-label="Platform totals">
             {([
-              ["Registered accounts", dashboard.overview.registered_accounts, Users],
-              ["Community profiles", dashboard.overview.shared_profiles, Users],
-              ["AI requests, 7 days", dashboard.overview.ai_requests_7d, Zap],
-              ["Approved shared collections", dashboard.overview.academic_approved, BarChart3],
+              ["Registered accounts", authorizedDashboard.overview.registered_accounts, Users],
+              ["Community profiles", authorizedDashboard.overview.shared_profiles, Users],
+              ["AI requests, 7 days", authorizedDashboard.overview.ai_requests_7d, Zap],
+              ["Approved shared collections", authorizedDashboard.overview.academic_approved, BarChart3],
             ] as const).map(([label, value, Icon]) => <div key={label}>
               <dt><Icon size={15} aria-hidden="true" />{label}</dt>
               <dd data-restricted={value === null}>{value ?? "Restricted"}</dd>
@@ -327,7 +327,7 @@ function HostAccountPage() {
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Reported community posts" sub="Only reported posts enter this moderation queue." />
-          {authorizedDashboard.reports.length === 0 ? <p className="sub">No posts have been reported.</p> : dashboard.reports.map(report => <article key={report.post_id} className="host-report">
+          {authorizedDashboard.reports.length === 0 ? <p className="sub">No posts have been reported.</p> : authorizedDashboard.reports.map(report => <article key={report.post_id} className="host-report">
             <b>@{report.author_handle} · {report.post_kind}</b>
             <p>{report.reports} reports · {report.reason}</p>
             {report.note && <p className="sub">{report.note}</p>}
