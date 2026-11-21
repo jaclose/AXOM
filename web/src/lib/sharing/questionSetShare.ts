@@ -99,7 +99,18 @@ export function createQuestionSetShare(
   bank: readonly QuestionRecord[],
   now = new Date().toISOString(),
 ): SharedQuestionSetSnapshot {
-  const byId = new Map(bank.map((question) => [question.id, question]));
+  // Resolve only this set's members and fail closed on ambiguous original
+  // identities. A last-wins Map would silently export different reviewed
+  // answers when the same canonical ID appears twice in the local bank.
+  const selectedIds = new Set(set.questionIds);
+  const byId = new Map<string, QuestionRecord>();
+  for (const question of bank) {
+    if (!selectedIds.has(question.id)) continue;
+    if (byId.has(question.id)) {
+      throw new Error("Question Set contains duplicate original question IDs and cannot be shared safely.");
+    }
+    byId.set(question.id, question);
+  }
   const questions = set.questionIds
     .map((id) => byId.get(id))
     .filter((question): question is QuestionRecord => Boolean(question))
