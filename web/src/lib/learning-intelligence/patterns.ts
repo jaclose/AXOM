@@ -7,7 +7,7 @@
 // enough answers; otherwise the report says what it is waiting for.
 // ===========================================================================
 import type { ID } from "../types";
-import { ERROR_TYPE_LABEL, errorPatterns, type QuestionRecord } from "../questions";
+import { ERROR_TYPE_LABEL, type QuestionErrorType, type QuestionRecord } from "../questions";
 import { attemptEvents, median, tally, type AttemptEvent, type Tally } from "./attempts";
 import { QUESTION_TASK_LABEL, questionFeatures, type QuestionFeatures } from "./questionFeatures";
 
@@ -110,6 +110,16 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 
 export function buildPatternReport(questions: readonly QuestionRecord[]): PatternReport {
   const byId = new Map(questions.map((question) => [question.id, question]));
+  // Attempt events retain their canonical question ID, not an origin-row
+  // pointer. Aliases can disagree on both offered choices and their text.
+  // Hold collided IDs from any inference that resolves option text or timing
+  // via the last-write-wins byId index. Preserve raw attempt history/totals.
+  const duplicateIds = new Set<ID>();
+  const seenIds = new Set<ID>();
+  for (const question of questions) {
+    if (seenIds.has(question.id)) duplicateIds.add(question.id);
+    else seenIds.add(question.id);
+  }
   const features = new Map<ID, QuestionFeatures>();
   const featuresOf = (id: ID) => {
     let value = features.get(id);
@@ -118,18 +128,23 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   };
   const events = attemptEvents(questions);
   const scored = events.filter((event) => event.correct !== undefined);
+  // Attempt events only store a question ID, not the specific imported row.
+  // Never infer its topic, task, depth or figure cue through a collided ID:
+  // byId could resolve to an unrelated, last-written alias. Raw historical
+  // scores and direct attempt-based observations remain untouched.
+  const metadataScored = scored.filter((event) => !duplicateIds.has(event.questionId));
   const first = scored.filter((event) => event.exposure === 1);
   const repeat = scored.filter((event) => event.exposure > 1);
 
-  const byTask = group(scored, (event) => {
+  const byTask = group(metadataScored, (event) => {
     const task = featuresOf(event.questionId).task;
     return task === "other" ? undefined : { key: task, label: QUESTION_TASK_LABEL[task] };
   });
-  const byDepth = group(scored, (event) => {
+  const byDepth = group(metadataScored, (event) => {
     const depth = featuresOf(event.questionId).reasoningDepth;
     return { key: String(depth), label: depth === 1 ? "Answered directly" : depth === 2 ? "One step of reasoning" : "A hidden step in between" };
   });
-  const byConcept = group(scored, (event) => {
+  const byConcept = group(metadataScored, (event) => {
     const concept = conceptOf(byId.get(event.questionId)!);
     return concept ? { key: concept.toLowerCase(), label: concept } : undefined;
   });
@@ -142,7 +157,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
 
   const pairs = new Map<string, ConfusionPair>();
   for (const event of scored) {
-    if (event.correct !== false || !event.answerKey || !event.correctKey) continue;
+    if (duplicateIds.has(event.questionId) || event.correct !== false || !event.answerKey || !event.correctKey) continue;
     const question = byId.get(event.questionId)!;
     const picked = question.options.find((option) => option.key === event.answerKey)?.text.trim();
     const correct = question.options.find((option) => option.key === event.correctKey)?.text.trim();
@@ -157,10 +172,27 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
 
   const missCounts = new Map<ID, number>();
   for (const event of scored) if (event.correct === false) missCounts.set(event.questionId, (missCounts.get(event.questionId) ?? 0) + 1);
-  const repeatMisses = [...missCounts.entries()].filter(([, count]) => count >= 2).sort((left, right) => right[1] - left[1]).map(([id]) => id);
+  // An imported ID collision cannot establish that a *single source question*
+  // was missed repeatedly: exposures were counted independently per record.
+  // Keep historical miss events/totals, but never recommend an ambiguous retry.
+  const repeatMisses = [...missCounts.entries()].filter(([id, count]) =>
+    count >= 2 && !duplicateIds.has(id)
+  ).sort((left, right) => right[1] - left[1]).map(([id]) => id);
 
-  const correctTimes = scored.filter((event) => event.correct && event.seconds).map((event) => event.seconds!);
-  const incorrectTimes = scored.filter((event) => event.correct === false && event.seconds).map((event) => event.seconds!);
+  // Retain legacy status-only results in raw scored totals, but do not
+  // infer an answer-speed diagnostic without an independently checkable saved
+  // choice from the currently offered options. Historical key revisions are
+  // not reconstructed here; this verifies consistency with the *current* key.
+  // Malformed durations likewise cannot support medians or quick-miss retries.
+  const timedScored = scored.filter((event) => {
+    if (duplicateIds.has(event.questionId)) return false;
+    if (typeof event.seconds !== "number" || !Number.isFinite(event.seconds) || event.seconds <= 0
+      || typeof event.answerKey !== "string" || typeof event.correctKey !== "string") return false;
+    const offered = byId.get(event.questionId)?.options.some((option) => option.key === event.answerKey);
+    return offered === true && (event.answerKey === event.correctKey) === event.correct;
+  });
+  const correctTimes = timedScored.filter((event) => event.correct === true).map((event) => event.seconds!);
+  const incorrectTimes = timedScored.filter((event) => event.correct === false).map((event) => event.seconds!);
   const timing = { correctMedian: median(correctTimes), incorrectMedian: median(incorrectTimes) };
 
   const findings: Finding[] = [];
@@ -170,6 +202,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
     const ids = [...new Set(sureAndWrong.map((event) => event.questionId))];
     const concepts = new Map<string, number>();
     for (const id of ids) {
+      if (duplicateIds.has(id)) continue;
       const concept = conceptOf(byId.get(id)!);
       if (concept) concepts.set(concept, (concepts.get(concept) ?? 0) + 1);
     }
@@ -249,13 +282,25 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
       basis: "computed",
       sample: correctTimes.length + incorrectTimes.length,
       weight: 45,
-      questionIds: [...new Set(scored.filter((event) => event.correct === false && event.seconds && event.seconds <= timing.incorrectMedian!).map((event) => event.questionId))],
+      questionIds: [...new Set(timedScored.filter((event) => event.correct === false && event.seconds! <= timing.incorrectMedian!).map((event) => event.questionId))],
       actionLabel: "Retry the quick misses",
     });
   }
 
-  const classified = errorPatterns(questions as QuestionRecord[]);
-  const classifiedTotal = classified.reduce((total, pattern) => total + pattern.count, 0);
+  // Raw error classifications are useful as history, but only a currently
+  // scoreable miss can support a finding about the learner's current misses.
+  // In particular, held keys and repaired answer mappings must not silently
+  // restore unscored attempts to a current-performance recommendation.
+  const classifiedMisses = scored.filter((event) => event.correct === false && event.errorType);
+  const errorCounts = new Map<QuestionErrorType, number>();
+  for (const event of classifiedMisses) {
+    const errorType = event.errorType!;
+    errorCounts.set(errorType, (errorCounts.get(errorType) ?? 0) + 1);
+  }
+  const classifiedTotal = classifiedMisses.length;
+  const classified = [...errorCounts.entries()]
+    .map(([errorType, count]) => ({ errorType, count, share: count / classifiedTotal }))
+    .sort((left, right) => right.count - left.count);
   if (classified[0] && classifiedTotal >= 5 && classified[0].share >= 0.4) {
     const top = classified[0];
     findings.push({
@@ -266,7 +311,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
       basis: "observed",
       sample: classifiedTotal,
       weight: 40,
-      questionIds: questions.filter((question) => question.attempts.some((attempt) => attempt.errorType === top.errorType)).map((question) => question.id),
+      questionIds: [...new Set(classifiedMisses.filter((event) => event.errorType === top.errorType).map((event) => event.questionId))],
       actionLabel: "Retry these",
     });
   }
@@ -328,7 +373,8 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
     });
   }
 
-  const figureMissing = questions.filter((question) => featuresOf(question.id).cues.includes("figure-missing"));
+  const figureMissing = questions.filter((question) =>
+    !duplicateIds.has(question.id) && featuresOf(question.id).cues.includes("figure-missing"));
   if (figureMissing.length > 0) {
     findings.push({
       id: "figure-missing",

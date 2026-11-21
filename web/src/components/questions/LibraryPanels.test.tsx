@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
+import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { listQuestionSetShares, publishShare, revokeShare } from "../../lib/sharing/supabaseSharing";
 import { pushToast } from "../../lib/toast";
 import { QuestionSetList, SourceLibrary } from "./LibraryPanels";
@@ -235,5 +236,106 @@ describe("QuestionSetList sharing disclosure", () => {
     expect(screen.queryByRole("button", { name: "Create unlisted link" })).toBeNull();
     expect(screen.getByRole("button", { name: "Retry owner link check" })).toBeTruthy();
     expect(publishShare).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("QuestionSetList AI digest identity", () => {
+  const timestamp = "2026-11-21T00:00:00.000Z";
+  const question = (id: string, stem: string, correct: string): QuestionRecord => ({
+    id,
+    source: "manual",
+    stem,
+    options: [{ key: "A", text: correct }, { key: "B", text: "Distractor" }],
+    correctKey: "A",
+    correctAnswerText: correct,
+    status: "unseen",
+    tags: [],
+    attempts: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  function prepare(rows: QuestionRecord[], ids: string[], savedDigest = false) {
+    vi.mocked(resolveActiveProvider).mockReturnValue({ info: { label: "Synthetic provider" } } as
+      NonNullable<ReturnType<typeof resolveActiveProvider>>);
+    vi.mocked(enhanceQuestionSet).mockResolvedValue({
+      summary: "Teaching summary", pitfalls: [], suggestedReview: ["Review renal physiology"],
+    } as Awaited<ReturnType<typeof enhanceQuestionSet>>);
+    const set: QuestionSet = {
+      id: "set-digest",
+      title: "Synthetic identity test",
+      sourceDocumentIds: [],
+      createdAt: timestamp,
+      questionIds: ids,
+      tags: [],
+      aiEnhanced: savedDigest,
+      parserWarnings: [],
+      ...(savedDigest ? { digest: {
+        summary: "Untrusted prior digest",
+        pitfalls: ["Untrusted pitfall"],
+        suggestedReview: ["Untrusted tracker task"],
+        generatedBy: "Earlier model",
+        generatedAt: timestamp,
+      } } : {}),
+    };
+    const updateQuestionSet = vi.fn();
+    mocked.store = {
+      questionSets: [set], questions: rows, documents: [], tracker: [], courses: [], terms: [],
+      updateQuestionSet, removeQuestionSet: vi.fn(), bulkAddTrackerItems: vi.fn(),
+    };
+    return { updateQuestionSet };
+  }
+
+  it.each([false, true])("withholds AI generation for conflicting IDs in either record order (reverse=%s)", async (reverse) => {
+    const cardiac = question("shared", "Cardiac question?", "Gastrin");
+    const renal = question("shared", "Renal question?", "Secretin");
+    const { updateQuestionSet } = prepare(reverse ? [renal, cardiac] : [cardiac, renal], ["shared"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const build = screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement;
+    expect(build.disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*conflicting question records/i)).toBeTruthy();
+    await userEvent.setup().click(build);
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("holds partial digest construction when any saved member is missing", async () => {
+    const { updateQuestionSet } = prepare([question("only", "Available?", "Yes")], ["only", "missing"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const build = screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement;
+    expect(build.disabled).toBe(true);
+    expect(screen.getByText(/AI digest on hold:.*missing question records/i)).toBeTruthy();
+    await userEvent.setup().click(build);
+    expect(enhanceQuestionSet).not.toHaveBeenCalled();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("quarantines a previously saved digest and tracker suggestions while IDs conflict", () => {
+    const cardiac = question("shared", "Cardiac?", "Gastrin");
+    const renal = question("shared", "Renal?", "Secretin");
+    const { updateQuestionSet } = prepare([cardiac, renal], ["shared"], true);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    expect(screen.getByText(/AI digest on hold:.*conflicting question records/i)).toBeTruthy();
+    expect(screen.queryByText("Untrusted prior digest")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add review to Tracker/i })).toBeNull();
+    expect(updateQuestionSet).not.toHaveBeenCalled();
+  });
+
+  it("preserves the one-record-per-ID generation and exact persisted digest", async () => {
+    const { updateQuestionSet } = prepare([question("valid", "Valid question?", "Verified answer")], ["valid"]);
+    render(<QuestionSetList recent onRunSet={vi.fn()} />);
+    const build = screen.getByRole("button", { name: /Build digest/i }) as HTMLButtonElement;
+    expect(build.disabled).toBe(false);
+    await userEvent.setup().click(build);
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    expect(enhanceQuestionSet).toHaveBeenCalledWith(expect.anything(), {
+      title: "Synthetic identity test",
+      questions: [{ stem: "Valid question?", correct: "Verified answer", explanation: undefined }],
+    });
+    await waitFor(() => expect(updateQuestionSet).toHaveBeenCalledWith("set-digest", expect.objectContaining({
+      aiEnhanced: true,
+      digest: expect.objectContaining({ summary: "Teaching summary", generatedBy: "Synthetic provider" }),
+    })));
   });
 });
