@@ -1502,6 +1502,14 @@ const vaultStorage: StateStorage = {
       throw fail(error);
     }
     const fallback = localFallback();
+    // Browsers can deny access at the window.localStorage getter, which
+    // localFallback() deliberately converts to null for ordinary saves.
+    // An inaccessible recovery tier is not a verified empty recovery tier:
+    // destructive workspace deletion must stop before touching IndexedDB.
+    if (workspace && fallback === null && typeof window !== "undefined") {
+      conflictedWorkspaceKeys.add(name);
+      throw fail(new VaultConflictError());
+    }
     const markerKey = fallbackMarkerKey(name);
     const pointerKey = activeUserKey(name);
     // Capture optional recovery bytes. A concurrent fallback writer must not
