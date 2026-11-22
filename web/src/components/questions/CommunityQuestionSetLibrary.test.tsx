@@ -137,15 +137,17 @@ describe("Community Question Set Library", () => {
     const onPractice = vi.fn();
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
     fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Saved copy needs recovery");
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
     expect(onPractice).not.toHaveBeenCalled();
-    expect((await screen.findByRole("alert")).textContent).toContain("Multiple saved copies");
+    expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
     expect(mock.commit).not.toHaveBeenCalled();
     expect(mock.sets).toEqual([first, duplicate]);
   });
 
   it("keeps the preview recoverable if the saved copy was removed before practice", async () => {
     mock.sets = [savedSet];
+    mock.questions = [savedQuestion];
     const onPractice = vi.fn();
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
     fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
@@ -166,14 +168,13 @@ describe("Community Question Set Library", () => {
     const onPractice = vi.fn();
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
     fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
     expect(onPractice).not.toHaveBeenCalled();
-    expect((await screen.findByRole("alert")).textContent).toContain("Recover the original question IDs");
-    // Keep the original import receipt and ID-bound attempts; do not invite
-    // a replacement import that would manufacture unrelated question IDs.
+    expect((await screen.findByRole("alert")).textContent).toContain("Recover the original Question Bank records");
+    // A partial restore must be visible before Practice, not only afterward.
     expect(mock.sets).toEqual([savedSet]);
-    expect(screen.getByRole("button", { name: "Practice this set" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
+    expect(mock.commit).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -189,9 +190,9 @@ describe("Community Question Set Library", () => {
     const onPractice = vi.fn();
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
     fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Saved copy needs recovery");
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
     expect(onPractice).not.toHaveBeenCalled();
-    expect((await screen.findByRole("alert")).textContent).toContain("Multiple saved copies");
     expect(mock.sets).toEqual([savedSet, conflictingSet]);
     expect(mock.questions).toEqual([savedQuestion]);
     // Preserve original IDs, learner attempts and import receipts. A
@@ -208,11 +209,14 @@ describe("Community Question Set Library", () => {
     ["a changed source citation", { ...savedQuestion, citation: "Different unreviewed source" }],
   ])("refuses practice when restored content has %s despite the original question ID", async (_change, changedQuestion) => {
     mock.sets = [savedSet];
-    mock.questions = [changedQuestion];
+    mock.questions = [savedQuestion];
     const onPractice = vi.fn();
     render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
     fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Practice this set" }));
+    await screen.findByRole("button", { name: "Practice this set" });
+    // Still verify changes that occur between preview and the practice click.
+    mock.questions = [changedQuestion];
+    fireEvent.click(screen.getByRole("button", { name: "Practice this set" }));
     expect(onPractice).not.toHaveBeenCalled();
     expect((await screen.findByRole("alert")).textContent).toContain("no longer match the approved publication");
     expect(mock.sets).toEqual([savedSet]);
