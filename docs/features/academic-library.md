@@ -48,6 +48,13 @@ academic-reviewer queue. Host's Community submission counts remain explicitly
 separate from ordinary shared-course approvals. Owner access to Host never replaces
 the queue's independent server-side reviewer check.
 
+Ready question counts describe import eligibility, not academic approval or a
+completed source review. Connected previews show the current revision's approved,
+pending or returned status separately. Pending revisions explicitly say that
+ready counts do not verify answers or explanations; held questions remain excluded
+from practice. Downloaded counts also do not establish approval. These labels do
+not change owner access, reviewer permissions, question gates or server decisions.
+
 The queue shows appointed academic reviewers a paged list of
 ordinary shared, pending courses from all owners. The list contains bounded
 metadata and an owner display name, never email, owner ID, question bodies or
