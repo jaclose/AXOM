@@ -18,7 +18,7 @@ from `origin/main` `9f6b381f9a0a15dbc947a4f65a71f8ad1db002fa`.
 A fresh read of the live `www.axom.info/version.json` identifies
 `6cb4b1f5238c024373ba66d01e3b781cb96fff31`, built November 13, as production.
 That single child of main repairs bundled-image imports and immutable-image
-metadata. Preserve it in the combined candidate before deployment. A successful
+metadata. PR #1005 includes it as the candidate's parent. A successful
 historical main deployment is not proof of the current live revision.
 
 Yesterday's temporary release checkout did not survive. Its reconstructed
@@ -34,7 +34,7 @@ contracts. HOST mounts the ordinary submitted-course queue for the verified owne
 with the queue's separate academic-reviewer check intact. Existing operator totals
 and metadata rows are explicitly labelled Community submissions.
 
-Forward migration `20261120190000_academic_tracker_review.sql` adds an exact-revision
+Forward migration `20261122002007_academic_tracker_review.sql` adds an exact-revision
 tracker-only review. Its closed envelope accepts only an empty-source catalog and
 plain-text templates. Stored bytes, manifest, course filing and plan observations
 bind the reviewer confirmation to one current revision. Question/explanation and
@@ -76,22 +76,30 @@ reviewed 20,000-question public corpus.
 ## Validation and next action
 
 Fresh focused import, recovery, HOST, PDF and question-view tests have passed, with
-scoped lint and shared typecheck. Run the combined release gates only after the
-live image-import prerequisite is included. Linux Playwright's official browser
-download is blocked by this environment; an authorized existing browser or CI must
-supply real browser evidence. Do not weaken browser gates or alter a network path.
+scoped lint and shared typecheck. Independent native/recovery and UI audits found
+no remaining blockers after the explicit PDF-list correction. Linux Playwright's
+official browser download is blocked here; CI supplies browser evidence. The Mac
+command service timed out before any isolated checkout or test could run.
 
 Production Supabase is `jofkmfwkidubxcutkwzf`; use its prod connection, not the
-older project. The new tracker migration is not applied yet. Vercel connector
-access does not currently expose this project, and the latest FORGE record reports
-a daily deployment limit. Code push, CI, deployment, migration, content approval
+older project. The additive tracker migration was applied through the authorized
+connection at 00:20 UTC November 22 (November 21 in Grenada). Its filename matches
+the service-assigned migration version; its reviewed SQL bytes are unchanged.
+Readback confirms RLS, narrow grants and unchanged question-approval functions.
+No tracker content has been approved yet. Initial PR CI passed native compilation
+and tests, deployment-input privacy checks and one browser shard; preview deployed.
+The follow-up rebuilds the canonical communications artifact (89 release tests
+passed), declares the live image script's scoped globals, and aligns one old
+shared-image test with the preserved oldest-reference behavior. Browser failures
+identified premature PDF catalog reads and an omitted genuine SQL RPC in the
+synthetic Host fixture; both are corrected without relaxing their assertions.
+Run fresh CI on this follow-up. Code push, CI, deployment, migration, content approval
 and learner acceptance remain separate facts. No approval or production release
 may be claimed from the focused tests alone.
 
-Complete independent review, preserve the live prerequisite, commit the scoped
-candidate, push through the connected GitHub API, and verify its exact revision.
-Then apply the additive migration and perform genuine authenticated reviewer and
-learner journeys. New-account credentials, source rights and provider quota
+Push the reviewed follow-up through the connected GitHub API and verify its exact
+revision. Complete release gates, deploy and perform genuine authenticated reviewer
+and learner journeys. New-account credentials, source rights and provider quota
 cannot be invented or bypassed. Keep all private PDFs and source records outside
 this public repository.
 

@@ -68,6 +68,10 @@ describe("hosted question collection without a weekly plan", () => {
     render(<ConnectedCoursePlan course={course} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
     expect(await screen.findByRole("heading", { name: "GOER" })).toBeTruthy();
     expect(screen.getByText(/has no weekly plan/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show original PDFs" })).toBeTruthy();
+    expect(mocks.listPdfs).not.toHaveBeenCalled();
+    expect(mocks.downloadPdf).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Show original PDFs" }));
     expect(await screen.findByText("No original PDFs are available in this course revision.")).toBeTruthy();
     expect(mocks.listPdfs).toHaveBeenCalledWith(revision, expect.objectContaining({ key: "learner-1" }));
     expect(mocks.downloadPdf).not.toHaveBeenCalled();

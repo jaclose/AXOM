@@ -17,11 +17,12 @@ export function CourseSourcePdfs({ revisionId }: { revisionId: string }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
-  const [retry, setRetry] = useState(0);
+  const [expanded, setExpanded] = useState(false);
   const current = useRef<LibraryInstallScope>();
+  const listing = useRef<LibraryInstallScope>();
   const downloading = useRef<LibraryInstallScope>();
   useLayoutEffect(() => {
-    setPdfs(undefined); setError(""); setMessage(""); setBusy("");
+    setPdfs(undefined); setError(""); setMessage(""); setBusy(""); setExpanded(false);
     if (!accountId) return;
     const account = academicAccountScope(accountId);
     const scope: LibraryInstallScope = { key: account.key, assertCurrent: () => {
@@ -29,13 +30,24 @@ export function CourseSourcePdfs({ revisionId }: { revisionId: string }) {
       if (current.current !== scope) throw new Error("The course changed. Reopen its PDFs to continue.");
     } };
     current.current = scope;
-    void listAcademicSourcePdfs(revisionId, scope).then(files => {
-      scope.assertCurrent(); setPdfs(files);
-    }).catch(cause => {
-      if (current.current === scope) setError(cause instanceof Error ? cause.message : "The original PDFs could not be loaded.");
-    });
     return () => { current.current = undefined; account.dispose(); };
-  }, [accountId, revisionId, retry]);
+  }, [accountId, revisionId]);
+
+  async function loadPdfs() {
+    const scope = current.current;
+    if (!scope || listing.current === scope) return;
+    listing.current = scope;
+    setExpanded(true); setPdfs(undefined); setError(""); setMessage("");
+    try {
+      scope.assertCurrent();
+      const files = await listAcademicSourcePdfs(revisionId, scope);
+      scope.assertCurrent(); setPdfs(files);
+    } catch (cause) {
+      if (current.current === scope) setError(cause instanceof Error ? cause.message : "The original PDFs could not be loaded.");
+    } finally {
+      if (listing.current === scope) listing.current = undefined;
+    }
+  }
 
   async function download(pdf: AcademicSourcePdf) {
     const scope = current.current;
@@ -64,7 +76,8 @@ export function CourseSourcePdfs({ revisionId }: { revisionId: string }) {
   return <section className="course-source-pdfs" aria-labelledby={headingId}>
     <div className="course-section-heading"><h2 id={headingId}>Original PDFs</h2></div>
     <p className="course-source-pdfs-intro">Read or print the original documents alongside the questions.</p>
-    {pdfs === undefined && !error && <p role="status">Checking available PDFs…</p>}
+    {!expanded && <GButton type="button" onClick={() => void loadPdfs()}>Show original PDFs</GButton>}
+    {expanded && pdfs === undefined && !error && <p role="status">Checking available PDFs…</p>}
     {pdfs?.length === 0 && <p>No original PDFs are available in this course revision.</p>}
     {!!pdfs?.length && <ul className="course-source-pdf-list">{pdfs.map(pdf => <li key={pdf.id}>
       <FileText size={ICON_SIZE.control} aria-hidden="true" />
@@ -75,6 +88,6 @@ export function CourseSourcePdfs({ revisionId }: { revisionId: string }) {
       </GButton>}
     </li>)}</ul>}
     {message && <p role="status">{message}</p>}
-    {error && <div role="alert"><p>{error}</p>{pdfs === undefined && <GButton type="button" onClick={() => setRetry(value => value + 1)}>Retry PDFs</GButton>}</div>}
+    {error && <div role="alert"><p>{error}</p>{pdfs === undefined && <GButton type="button" onClick={() => void loadPdfs()}>Retry PDFs</GButton>}</div>}
   </section>;
 }

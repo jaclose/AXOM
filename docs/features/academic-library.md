@@ -78,7 +78,7 @@ calling the review flow live.
 
 ### Tracker-only approval
 
-Forward migration `20261120190000_academic_tracker_review.sql` adds a separate
+Forward migration `20261122002007_academic_tracker_review.sql` adds a separate
 review path for ordinary shared, pending tracker revisions with zero ready and
 zero held questions. It accepts only a catalog and one to 24 plain-text template
 files. The existing question and Community approval functions remain unchanged.
@@ -106,8 +106,9 @@ images, durable workspace saves and safety backups remain mandatory. A partial s
 cannot produce a complete download receipt. Private imports, reviewer copies and
 other full-course callers retain their original-file caching default.
 
-Original PDFs appear separately in the course preview. Discovery reads only the
-exact revision's verified catalog and manifest; each requested PDF passes the existing
+Original PDFs appear separately in the course preview. Opening the preview makes
+no catalog or PDF request. Show original PDFs explicitly reads the exact revision's
+verified catalog and manifest; each requested PDF passes the existing
 permission, byte-size and checksum checks before a browser download starts. Opening
 the list does not download PDFs, enroll weeks or write source binaries into the local
 cache. Missing originals remain explicitly unavailable. Account or revision changes

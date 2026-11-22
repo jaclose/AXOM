@@ -20,7 +20,7 @@
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
-    "web/src/lib/localVault.ts": "c11842008c5b695ca63701573f2637c69f544a42dca104ead13c46782c9fe7a4",
+    "web/src/lib/localVault.ts": "f14a4c44f72dbf3e21b6272893c33dc25853beef21f2a0c853403159cf05a000",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
     "web/src/lib/questionAttachments.ts": "dec3c1da59c016c55a5cb5db926814f0aaf22a6ebca7982920dab1de5e13f84f",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
@@ -32,6 +32,6 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "6d999326624830ffc30cc13023d330ded8e0c7baff41c5383f32b226041ca1ae"
+    "sha256": "35a573baca8c7129f04197d3c6d0f6d2d8a37d5808fd4b9470cefedab18d5396"
   }
 }

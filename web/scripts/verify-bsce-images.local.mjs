@@ -1,3 +1,5 @@
+/* global process, atob, Blob, createImageBitmap, URL, Image */
+// This Node script decodes images inside Playwright's browser callback.
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";

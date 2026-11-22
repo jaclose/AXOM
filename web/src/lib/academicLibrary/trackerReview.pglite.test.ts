@@ -23,7 +23,7 @@ beforeAll(async () => {
   db = await supabasePlatform();
   const directory = new URL("../../../../supabase/migrations/", import.meta.url);
   for (const file of readdirSync(directory).filter(name => name.endsWith(".sql")).sort()) {
-    if (file === "20261120190000_academic_tracker_review.sql") questionGateBefore = (await questionGate()).rows;
+    if (file === "20261122002007_academic_tracker_review.sql") questionGateBefore = (await questionGate()).rows;
     await db.exec(readFileSync(new URL(file, directory), "utf8"));
   }
   for (const id of [OWNER, REVIEWER, LEARNER, OTHER_REVIEWER]) {
