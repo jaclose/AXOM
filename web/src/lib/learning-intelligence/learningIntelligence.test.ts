@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { QuestionAttempt, QuestionRecord } from "../questions";
 import {
   attemptEvents, buildPatternReport, buildReviewSet, calibrateDifficulty, describeQuestionStyle, empiricalDifficulty,
-  questionFeatures, rankByReasons, reviewCandidates, reviewPriority, structuralDifficulty, styleObservations, tally,
+  questionFeatures, rankByReasons, reviewCandidates, reviewCandidatesForSession, reviewPriority, structuralDifficulty, styleObservations, tally,
   type ReviewSignals,
 } from "./index";
 
@@ -339,6 +339,64 @@ describe("what to look at again after a block", () => {
     // Without a ranker, the order is today's rule.
     const usual = reviewCandidates(events.filter((event) => event.quizSessionId === "run"), events);
     expect(usual.map((candidate) => candidate.priority)).toEqual(usual.map((candidate) => rankByReasons({ ...seen[0], reasons: candidate.reasons })));
+  });
+
+  it("does not turn a historical first miss into a repeat miss after a later session", () => {
+    const past = question({
+      attempts: [
+        attempt(3, "incorrect", { quizSessionId: "past" }),
+        attempt(9, "incorrect", { quizSessionId: "future" }),
+      ],
+    });
+    const pastReview = reviewCandidatesForSession("past", [past]);
+    expect(pastReview).toEqual([expect.objectContaining({
+      questionId: past.id, reasons: ["wrong"], retry: ["tomorrow"],
+    })]);
+    expect(reviewCandidatesForSession("future", [past])).toEqual([expect.objectContaining({
+      questionId: past.id, reasons: ["repeat-miss"], retry: ["today", "this-week"],
+    })]);
+  });
+
+  it("does not use future fast correct answers to retrospectively label a prior answer slow", () => {
+    const past = question({ attempts: [
+      attempt(5, "correct", { quizSessionId: "past", timeSpentSeconds: 60 }),
+    ] });
+    const future = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(10, "correct", { timeSpentSeconds: 10, quizSessionId: "future" })],
+    }));
+    expect(reviewCandidatesForSession("past", [past, ...future])).toEqual([]);
+    // Later sessions can use the newly observed pace; earlier sessions must not change.
+    const later = question({ attempts: [
+      attempt(11, "correct", { quizSessionId: "later", timeSpentSeconds: 60 }),
+    ] });
+    expect(reviewCandidatesForSession("later", [past, ...future, later])).toEqual([
+      expect.objectContaining({ questionId: later.id, reasons: ["slow-right"] }),
+    ]);
+  });
+
+  it("counts only actual earlier misses and exposes historical pace to a ranker", () => {
+    const repeated = question({ attempts: [
+      attempt(1, "incorrect"),
+      attempt(5, "incorrect", { quizSessionId: "past" }),
+      attempt(10, "incorrect", { quizSessionId: "future" }),
+    ] });
+    const previous = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })],
+    }));
+    const future = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(10, "correct", { timeSpentSeconds: 10 })],
+    }));
+    const events = attemptEvents([repeated, ...previous, ...future]);
+    const block = events.filter((event) => event.quizSessionId === "past");
+    const seen: ReviewSignals[] = [];
+    const candidate = reviewCandidates(block, events, (signals) => {
+      seen.push(signals);
+      return 1;
+    });
+    expect(candidate[0].reasons).toEqual(["repeat-miss"]);
+    expect(seen[0]).toMatchObject({
+      questionId: repeated.id, earlierMisses: 1, usualSeconds: 80, exposure: 2,
+    });
   });
 
   it("builds a review set that points at the same questions and keeps its place in the course", () => {
