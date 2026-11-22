@@ -218,14 +218,22 @@ describe("verified separate compressed workspace fallback", () => {
       vi.stubGlobal("indexedDB", fakeIndexedDb);
 
       let injected = false;
+      const acknowledgePeer = () => {
+        if (injected) return;
+        injected = true;
+        values.set(markerKey, newerMarker!);
+        values.set(key, newer);
+        values.set(scopedKey, newer);
+      };
+      // RED: the old multi-key deletion destroys Z. GREEN: an immutable
+      // retirement receipt never deletes peer bytes; inject Z as it is written.
       const remove = vi.spyOn(storage, "removeItem").mockImplementation((name) => {
-        if (name === key && !injected) {
-          injected = true;
-          values.set(markerKey, newerMarker!);
-          values.set(key, newer);
-          values.set(scopedKey, newer);
-        }
+        if (name === key) acknowledgePeer();
         values.delete(name);
+      });
+      const set = vi.spyOn(storage, "setItem").mockImplementation((name, value) => {
+        if (name === `${key}:fallback-retired`) acknowledgePeer();
+        values.set(name, String(value));
       });
       const checkpoint = getVaultWriteCheckpoint();
       try {
@@ -233,6 +241,7 @@ describe("verified separate compressed workspace fallback", () => {
         else await localVaultStorage.setItem(key, committed);
       } finally {
         remove.mockRestore();
+        set.mockRestore();
       }
 
       expect(injected).toBe(true);
