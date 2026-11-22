@@ -186,6 +186,75 @@ describe("verified separate compressed workspace fallback", () => {
     await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
+  it("keeps a newly acknowledged marked plain recovery copy when packed read-side promotion completes", async () => {
+    const base = snapshot("committed base");
+    const packedY = snapshot("packed promotion Y", true);
+    const peerZ = snapshot("peer's separately acknowledged plain Z");
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:synthetic-learner`;
+
+    // Capture a genuine plain marker through the storage API, not a guessed hash.
+    await localVaultStorage.setItem(key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, peerZ);
+    const peerMarker = values.get(markerKey);
+    expect(peerMarker).toBeTruthy();
+    expect(values.get(key)).toBe(peerZ);
+    expect(values.get(scopedKey)).toBe(peerZ);
+    values.delete(markerKey);
+    values.delete(key);
+    values.delete(scopedKey);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+
+    // Force a real compressed fallback with an IDB error and plain-store quota.
+    const put = IDBObjectStore.prototype.put;
+    const blockVault = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (this.name === STORE_NAME) throw new DOMException("Synthetic IDB quota", "QuotaExceededError");
+      return put.apply(this, args);
+    });
+    const blockRaw = vi.spyOn(storage, "setItem").mockImplementation((name, value) => {
+      if ((name === key || name.startsWith(`${key}:user:`)) && value.length > 4_096) {
+        throw new DOMException("Synthetic plain quota", "QuotaExceededError");
+      }
+      values.set(name, String(value));
+    });
+    await localVaultStorage.setItem(key, packedY);
+    expect(values.get(packedKey)).toBeTruthy();
+    blockVault.mockRestore();
+    blockRaw.mockRestore();
+    resetLocalVaultRuntimeForTests();
+
+    // Simulate a peer tab acknowledging Z after A's successful IDB promotion,
+    // exactly when A retires the captured packed key.
+    let injected = false;
+    const remove = vi.spyOn(storage, "removeItem").mockImplementation(name => {
+      values.delete(name);
+      if (name === packedKey && !injected) {
+        injected = true;
+        values.set(key, peerZ);
+        values.set(markerKey, peerMarker!);
+        values.set(scopedKey, peerZ);
+      }
+    });
+    try {
+      await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    } finally {
+      remove.mockRestore();
+    }
+
+    expect(injected).toBe(true);
+    expect(values.get(key)).toBe(peerZ);
+    expect(values.get(markerKey)).toBe(peerMarker);
+    expect(values.get(scopedKey)).toBe(peerZ);
+    resetLocalVaultRuntimeForTests();
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(values.get(key)).toBe(peerZ);
+    expect(values.get(markerKey)).toBe(peerMarker);
+  });
+
   it.each(["ordinary save", "verified restore"] as const)(
     "does not delete a newly acknowledged fallback in the middle of %s cleanup",
     async (operation) => {
