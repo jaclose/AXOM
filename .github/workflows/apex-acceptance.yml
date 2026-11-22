@@ -5,6 +5,8 @@ on:
     paths:
       - 'web/src/lib/course-engine/**'
       - 'web/src/lib/academicLibrary/**'
+      - 'web/src/lib/privateLibrary/**'
+      - 'web/src/lib/decode/sources*'
       - 'web/src/lib/learning-intelligence/**'
       - 'web/src/lib/exam/**'
       - 'web/src/lib/question-content/**'
@@ -19,6 +21,8 @@ on:
       - 'web/src/components/questions/**'
       - 'web/src/components/tracker/**'
       - 'web/src/components/exam/**'
+      - 'web/src/pages/CourseTrackerPage*'
+      - 'web/src/pages/QuestionWorkspacePage*'
       - '.github/workflows/apex-acceptance.yml'
   workflow_dispatch:
 
