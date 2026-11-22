@@ -361,13 +361,28 @@ export function resolveMarkedVaultSnapshotRecord(
   name: string,
 ): string | undefined {
   if (local[fallbackMarkerKey(name)] === undefined) return undefined;
-  const newer = newerFallbackCopy({ getItem: key => local[key] ?? null }, name);
+  const capturedStore = { getItem: (key: string) => local[key] ?? null };
+  const newer = newerFallbackCopy(capturedStore, name);
   if (!newer) throw new Error("The safety snapshot has an invalid newer-fallback marker.");
 
   let current = indexedDb ? resolveVaultSnapshotRecord(indexedDb, name) : undefined;
   if (!current && indexedDb) {
     const activeUser = indexedDb[activeUserKey(name)];
     if (activeUser) current = resolveVaultSnapshotRecord(indexedDb, scopedStateKey(name, activeUser));
+  }
+  // Successful saves and explicit restores retain the previous recovery bytes
+  // rather than risk a cross-tab multi-key delete. The retirement receipt must
+  // govern snapshot exports and update checkpoints as well as live hydration.
+  // An unreadable, competing, or differently owned vault cannot prove that
+  // these retained bytes were superseded; keep both copies and fail closed.
+  const retired = retiredFallbackReceipt(capturedStore, name, newer);
+  if (retired) {
+    if (
+      current !== undefined
+      && snapshotFingerprint(current) === retired.committedFingerprint
+      && persistedUserId(current) === retired.committedUserId
+    ) return current;
+    throw new VaultConflictError();
   }
   if (!current || current === newer.value || workspaceFingerprint(current) === newer.baseFingerprint) return newer.value;
   if (newer.baseFingerprint === undefined) {
@@ -867,7 +882,7 @@ interface RetiredFallbackReceipt {
   committedUserId: string;
 }
 function retiredFallbackReceipt(
-  fallbackStore: Storage | null, name: string, copy: NewerFallbackCopy,
+  fallbackStore: Pick<Storage, "getItem"> | null, name: string, copy: NewerFallbackCopy,
 ): RetiredFallbackReceipt | null {
   try {
     const raw = fallbackStore?.getItem(`${name}:fallback-retired`);
