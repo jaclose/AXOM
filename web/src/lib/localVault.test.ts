@@ -469,7 +469,7 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(`${STORAGE_KEYS.persistedState}:active-user`)).toBeNull();
   });
 
-  it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
+  it("retains a blocked-upgrade fallback until a subsequent verified save after promotion", async () => {
     const oldConnection = await openVersionThreeVault();
     const key = STORAGE_KEYS.persistedState;
     const base = JSON.stringify({ state: { profile: { userId: "jd" }, label: "v3 base" }, version: 34 });
@@ -506,13 +506,12 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(key)).toBe(latest);
     oldConnection.close();
 
-    // The next read promotes the fallback only after the v4 barrier can land.
+    // The next read promotes the fallback only after the current vault
+    // barrier can land. A read must NOT retire an acknowledged recovery copy:
+    // another tab may be writing its own marked fallback at the same time.
     expect(await localVaultStorage.getItem(key)).toBe(latest);
-    await waitFor(async () => {
-      await localVaultStorage.getItem(key);
-      return localStorage.getItem(key) === null;
-    });
-    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(key)).toBe(latest);
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     const upgraded = await openCurrentVault();
     expect(upgraded.version).toBe(DB_VERSION);
     expect(JSON.parse((await getDirect(upgraded, key))!)).toMatchObject({
@@ -521,6 +520,15 @@ describe("IndexedDB-first local vault", () => {
       length: latest.length,
     });
     upgraded.close();
+
+    // Only an independent, successful write of the same hydrated workspace
+    // can retire the unchanged legacy fallback. A read alone cannot.
+    const savedCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, latest);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(savedCheckpoint)).not.toThrow();
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
   });
 
   it("reports the blocked vault upgrade when the browser fallback also runs out of space", async () => {
