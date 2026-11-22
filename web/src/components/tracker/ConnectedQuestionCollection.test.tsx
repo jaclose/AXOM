@@ -85,7 +85,7 @@ describe("hosted question collection without a weekly plan", () => {
     expect(mocks.enroll).not.toHaveBeenCalled();
     // The durable receipt lets a reload reopen the same downloaded collection.
     await waitFor(() => expect(useStore.getState().documents.some(document => document.id === `academic-${revision}`)).toBe(true));
-    expect(screen.getByText("2 reviewed questions are on this device.")).toBeTruthy();
+    expect(screen.getByText("2 ready questions are on this device.")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Week 1" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Week 2" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Week 3" })).toBeTruthy();
@@ -102,6 +102,18 @@ describe("hosted question collection without a weekly plan", () => {
       module: "GOER", term: "Term 5", questionIds: ["q1", "q2"], setIds: ["set-1"],
     });
     expect(location.hash).toBe("#questions");
+  });
+
+  it.each([
+    ["pending", "Academic approval is pending for this revision. Ready counts do not verify its answers or explanations."],
+    ["rejected", "This revision was returned for changes. It is not approved for sharing."],
+    ["approved", "This revision has academic approval."],
+  ] as const)("distinguishes %s approval from the ready question count", async (review_status, notice) => {
+    render(<ConnectedCoursePlan course={{ ...course, owned: true, review_status }} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
+    expect(await screen.findByText(notice)).toBeTruthy();
+    expect(screen.getByText("ready questions").querySelector("b")?.textContent).toBe("2");
+    expect(screen.queryByText(/reviewed questions/)).toBeNull();
+    expect(mocks.download).not.toHaveBeenCalled();
   });
 
   it("keeps a source question without a week in an explicit unassigned group", async () => {
