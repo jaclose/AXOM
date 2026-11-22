@@ -585,6 +585,53 @@ describe("private library failure diagnostics", () => {
     expect(templateReads).toBe(1);
   });
 
+  it("rechecks a revoked joined caller when the original import fails integrity", async () => {
+    const b = await bundle();
+    // The catalog still contains the original template checksum. Fail only after both callers join.
+    b.files.set("templates/test.txt", encode("Damaged template bytes"));
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    let templateReads = 0;
+    const read = async (path: string) => {
+      if (path === "templates/test.txt") { templateReads += 1; await waiting; }
+      return b.read(path);
+    };
+    setQuestionAttachmentAccount("A");
+    const original = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: () => {} });
+    let joinedCurrent = true;
+    const joinedGuard = vi.fn(() => { if (!joinedCurrent) throw new Error("Joined caller was revoked"); });
+    const joined = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: joinedGuard });
+    const originalAssertion = expect(original).rejects.toThrow("Template integrity check failed");
+    const joinedAssertion = expect(joined).rejects.toThrow("Joined caller was revoked");
+    joinedCurrent = false;
+    release();
+    await Promise.all([originalAssertion, joinedAssertion]);
+    expect(joinedGuard).toHaveBeenCalledTimes(2);
+    expect(templateReads).toBe(1);
+  });
+
+  it("preserves the original import error for a still-valid joined caller", async () => {
+    const b = await bundle();
+    b.files.set("templates/test.txt", encode("Damaged template bytes"));
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    let templateReads = 0;
+    const read = async (path: string) => {
+      if (path === "templates/test.txt") { templateReads += 1; await waiting; }
+      return b.read(path);
+    };
+    setQuestionAttachmentAccount("A");
+    const original = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: () => {} });
+    const joinedGuard = vi.fn(() => {});
+    const joined = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: joinedGuard });
+    const originalAssertion = expect(original).rejects.toThrow("Template integrity check failed");
+    const joinedAssertion = expect(joined).rejects.toThrow("Template integrity check failed");
+    release();
+    await Promise.all([originalAssertion, joinedAssertion]);
+    expect(joinedGuard).toHaveBeenCalledTimes(2);
+    expect(templateReads).toBe(1);
+  });
+
   it("rejects an already-stale same-generation joining caller without failing the active installation", async () => {
     const b = await bundle();
     let release!: () => void;
