@@ -182,6 +182,105 @@ describe("IndexedDB-first local vault", () => {
     },
   );
 
+  it("keeps an acknowledged fallback written during an IndexedDB commit", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    const base = snapshot("shared base");
+    const offline = snapshot("acknowledged offline change");
+    const committed = snapshot("other tab committed change");
+
+    await localVaultStorage.setItem(key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+
+    // Capture a real acknowledged local fallback, then stage the interleaving
+    // without changing this adapter's hydrated IndexedDB base.
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, offline);
+    await flushLocalVaultWrites();
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    expect(storage.getItem(key)).toBe(offline);
+    values.delete(key);
+    values.delete(markerKey);
+    values.delete(scopedKey);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (!injected && storedKey === key && value === committed) {
+        injected = true;
+        // A peer completes its acknowledged fallback after the foreground tab's
+        // initial check but before its IndexedDB transaction is committed.
+        values.set(markerKey, marker!);
+        values.set(key, offline);
+        values.set(scopedKey, offline);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.setItem(key, committed);
+      await flushLocalVaultWrites();
+    } finally {
+      put.mockRestore();
+    }
+    expect(injected).toBe(true);
+    const db = await openCurrentVault();
+    try {
+      expect(await getDirect(db, key)).toBe(committed);
+    } finally {
+      db.close();
+    }
+    // Neither separately acknowledged edit may vanish or be declared resolved.
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+    expect(storage.getItem(scopedKey)).toBe(offline);
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+  });
+
+  it("refuses a disputed fallback if the competing vault becomes unreadable during conflict resolution", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    const base = snapshot("shared base");
+    const offline = snapshot("acknowledged offline change");
+    const committed = snapshot("other tab committed change");
+
+    await localVaultStorage.setItem(key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, offline);
+    await flushLocalVaultWrites();
+    const marker = storage.getItem(markerKey);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    const peer = await openCurrentVault();
+    try { await putDirect(peer, key, committed); } finally { peer.close(); }
+
+    const originalOpen = fakeIndexedDb.open.bind(fakeIndexedDb);
+    let opens = 0;
+    vi.stubGlobal("indexedDB", {
+      open: (name: string, version?: number) => {
+        opens += 1;
+        if (opens > 1) throw new Error("IndexedDB winner readback unavailable");
+        return version === undefined ? originalOpen(name) : originalOpen(name, version);
+      },
+    });
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(opens).toBeGreaterThan(1);
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const verified = await openCurrentVault();
+    try { expect(await getDirect(verified, key)).toBe(committed); } finally { verified.close(); }
+  });
+
   it("promotes and keeps saving an auxiliary-key fallback after IndexedDB recovers", async () => {
     const key = STORAGE_KEYS.aiGenerations;
     const older = JSON.stringify({ schemaVersion: 1, generations: [{ id: "older" }] });
