@@ -22,9 +22,15 @@ export function compareCourses(left: { term: string; module: string }, right: { 
     || left.module.localeCompare(right.module, undefined, { numeric: true, sensitivity: "base" });
 }
 
-/** Courses grouped by term in curriculum order, keeping every course once. */
+/** Courses grouped by term in curriculum order, keeping every course once.
+ * Accepted Term 1-5 aliases share a heading; the original course record and
+ * unrecognized term labels remain untouched. */
 export function coursesByTerm<T extends { term: string; module: string }>(courses: readonly T[]): Array<{ term: string; courses: T[] }> {
   const groups = new Map<string, T[]>();
-  for (const course of [...courses].sort(compareCourses)) groups.set(course.term, [...(groups.get(course.term) ?? []), course]);
+  for (const course of [...courses].sort(compareCourses)) {
+    const number = termNumber(course.term);
+    const heading = number >= 1 && number <= 5 ? `Term ${number}` : course.term;
+    groups.set(heading, [...(groups.get(heading) ?? []), course]);
+  }
   return [...groups].map(([term, entries]) => ({ term, courses: entries }));
 }
