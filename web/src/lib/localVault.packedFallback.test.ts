@@ -253,6 +253,51 @@ describe("verified separate compressed workspace fallback", () => {
     },
   );
 
+  it("refuses to treat a retired account-A fallback as account-B vault data after reload", async () => {
+    const oldOwner = snapshot("A local recovery", false, "synthetic-learner");
+    const savedA = snapshot("A confirmed vault", false, "synthetic-learner");
+    const committedB = snapshot("B independently committed vault", false, "second-learner");
+    const markerKey = `${key}:fallback-newer`;
+    const scopedA = `${key}:user:synthetic-learner`;
+
+    await localVaultStorage.setItem(key, snapshot("A base", false, "synthetic-learner"));
+    expect(await localVaultStorage.getItem(key)).toContain("A base");
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, oldOwner);
+    const originalMarker = values.get(markerKey);
+    expect(originalMarker).toBeTruthy();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    expect(await localVaultStorage.getItem(key)).toBe(oldOwner);
+    await localVaultStorage.setItem(key, savedA);
+    expect(values.get(key)).toBe(oldOwner);
+    expect(values.get(scopedA)).toBe(oldOwner);
+    expect(values.has(`${key}:fallback-retired`)).toBe(true);
+
+    await putCompetingVault(committedB);
+    resetLocalVaultRuntimeForTests();
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(values.get(key)).toBe(oldOwner);
+    expect(values.get(markerKey)).toBe(originalMarker);
+    expect(values.get(scopedA)).toBe(oldOwner);
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("B blind overwrite", false, "second-learner"));
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = fakeIndexedDb.open(DB_NAME);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const read = await new Promise<unknown>((resolve, reject) => {
+        const request = db.transaction(STORE_NAME).objectStore(STORE_NAME).get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      expect(read).toBe(committedB);
+    } finally { db.close(); }
+  });
+
   it.each(["absent", "older"])("preserves a new packed record arriving during restore when the prior record was %s", async prior => {
     const fixture = await quotaFixture();
     await localVaultStorage.setItem(key, snapshot("older packed", true));
