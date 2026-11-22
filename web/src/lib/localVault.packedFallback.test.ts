@@ -462,6 +462,8 @@ describe("verified separate compressed workspace fallback", () => {
     resume();
     await expect(reading).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
     expect(values.get(packedKey)).toBe(latestRaw);
+    // A conflict latches this tab. A fresh runtime must recover durable Z.
+    resetLocalVaultRuntimeForTests();
     expect(await localVaultStorage.getItem(key)).toBe(latest);
     expect(stale).not.toBe(latest);
   });
