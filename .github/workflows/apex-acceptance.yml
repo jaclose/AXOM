@@ -4,6 +4,21 @@ on:
   pull_request:
     paths:
       - 'web/src/lib/course-engine/**'
+      - 'web/src/lib/academicLibrary/**'
+      - 'web/src/lib/learning-intelligence/**'
+      - 'web/src/lib/exam/**'
+      - 'web/src/lib/question-content/**'
+      - 'web/src/lib/sharing/**'
+      - 'web/src/lib/question*'
+      - 'web/src/lib/quiz*'
+      - 'web/src/lib/pdfQuestionImport*'
+      - 'web/src/lib/courseWork*'
+      - 'web/src/lib/courseScheduleImport*'
+      - 'web/src/lib/studyProgress*'
+      - 'web/src/lib/saveProgress*'
+      - 'web/src/components/questions/**'
+      - 'web/src/components/tracker/**'
+      - 'web/src/components/exam/**'
       - '.github/workflows/apex-acceptance.yml'
   workflow_dispatch:
 
