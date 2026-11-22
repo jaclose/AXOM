@@ -859,13 +859,19 @@ describe("a save that could not reach IndexedDB", () => {
     const originalOpen = fakeIndexedDb.open.bind(fakeIndexedDb);
     let opens = 0;
     let peerCommit: Promise<void> | null = null;
+    const originalGet = IDBObjectStore.prototype.get;
+    const getSpy = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, recordKey) {
+      if (recordKey === `${key}:active-user` && peerCommit === null) {
+        // Queue the peer write during the last verified-empty read, before
+        // the migration can open its readwrite transaction. Injecting at
+        // open #3 instead was too late: that transaction already won.
+        peerCommit = putDirect(peer, key, winner);
+      }
+      return originalGet.call(this, recordKey);
+    });
     vi.stubGlobal("indexedDB", {
       open: (name: string, version?: number) => {
         opens += 1;
-        // The first two opens verify an empty primary and active profile.
-        // Just before the migration opens its compare-and-swap transaction,
-        // a separate tab commits a different authoritative record.
-        if (opens === 3) peerCommit = putDirect(peer, key, winner);
         if (opens >= 4) throw new Error("IndexedDB winner readback is unavailable");
         return version === undefined ? originalOpen(name) : originalOpen(name, version);
       },
@@ -889,7 +895,9 @@ describe("a save that could not reach IndexedDB", () => {
       expect(await getDirect(peer, key)).toBe(winner);
       expect(storage.getItem(key)).toBe(stale);
     } finally {
+      getSpy.mockRestore();
       vi.stubGlobal("indexedDB", fakeIndexedDb);
+      if (peerCommit) await peerCommit;
       peer.close();
     }
   });
