@@ -129,6 +129,19 @@ learner data and credentials. Account or current-revision changes discard a pend
 export. This is review evidence rather than a complete course package or an approval receipt; source images
 and PDFs still require their ordinary review, and all approval gates remain intact.
 
+Download full source package is a separate, explicit reviewer action. It retrieves
+every file in the exact current revision, including images, original files and any
+templates, using the same authenticated size and checksum checks. Files retain their
+relative paths under `stored-revision/`; the README and sanitized revision manifest
+sit outside that folder, so the existing ZIP reader selects only the stored package.
+The stored catalog identity is unchanged. Export does not install, cache or modify
+learner data, and does not approve the material. Account or revision changes discard
+the pending result. Only one review or source export runs at a time, with sequential
+file reads and the existing 1,500-file, 50 MiB-per-file and 512 MiB-total bounds.
+ZIP construction retains input and output in memory, so large packages require
+available browser memory; it is not a streaming download to disk. Later publication
+still requires the ordinary target-identity, source, image and approval checks.
+
 Downloading a newer hosted revision reconciles matching source questions only after
 the signed-in account can read the exact current collection revision and its verified
 files. Account-scoped download receipts locate prior immutable server banks; the
