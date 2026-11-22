@@ -1034,9 +1034,17 @@ const vaultStorage: StateStorage = {
               rememberVaultSnapshot(name, current);
               return current;
             }
-          } catch { /* Keep the legacy mirror if the winner is still unreadable. */ }
+          } catch {
+            // A rejected CAS proves another transaction won. If that winner
+            // cannot be read back, returning the old unmarked mirror would
+            // falsely hydrate it as authoritative. Keep both copies and stop
+            // subsequent writes until the conflict can be reconciled.
+          }
+          if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw promotionError;
         }
-        // Keep the mirror for recovery on any failed migration.
+        // Ordinary unavailable/quota failures do not prove a competing
+        // revision; keep the mirror readable but do not call it a saved vault.
       }
     }
     rememberVaultSnapshot(name, fallback);
