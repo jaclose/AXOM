@@ -255,6 +255,72 @@ describe("verified separate compressed workspace fallback", () => {
     expect(values.get(markerKey)).toBe(peerMarker);
   });
 
+  it("keeps a peer's packed Z if it arrives between packed retirement comparison and storage mutation", async () => {
+    const fixture = await quotaFixture();
+    const oldY = snapshot("old packed Y", true);
+    const newZ = snapshot("peer newly acknowledged packed Z", true);
+    await localVaultStorage.setItem(key, oldY);
+    const capturedRaw = values.get(packedKey)!;
+    await localVaultStorage.setItem(key, newZ);
+    const peerRaw = values.get(packedKey)!;
+    expect(capturedRaw).not.toBe(peerRaw);
+    values.set(packedKey, capturedRaw);
+    fixture.blockVault.mockRestore();
+    resetLocalVaultRuntimeForTests();
+
+    let injected = false;
+    const acknowledgePeer = () => {
+      if (injected) return;
+      injected = true;
+      values.set(packedKey, peerRaw);
+    };
+    // RED: a comparison followed by removeItem can erase Z.
+    // GREEN: write a bound retirement receipt without deleting any packed bytes;
+    // a peer's single-key acknowledgement during that write must survive.
+    const remove = vi.spyOn(storage, "removeItem").mockImplementation(name => {
+      if (name === packedKey) acknowledgePeer();
+      values.delete(name);
+    });
+    const set = vi.spyOn(storage, "setItem").mockImplementation((name, value) => {
+      if (name === `${key}:packed-retired`) acknowledgePeer();
+      values.set(name, String(value));
+    });
+    try {
+      await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    } finally {
+      remove.mockRestore();
+      set.mockRestore();
+    }
+    expect(injected).toBe(true);
+    expect(values.get(packedKey)).toBe(peerRaw);
+    resetLocalVaultRuntimeForTests();
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(values.get(packedKey)).toBe(peerRaw);
+  });
+
+  it("uses the committed IDB after receipt retirement of packed Y without deleting Y", async () => {
+    const fixture = await quotaFixture();
+    const oldY = snapshot("packed retained Y", true);
+    await localVaultStorage.setItem(key, oldY);
+    const packedRaw = values.get(packedKey)!;
+    fixture.blockVault.mockRestore();
+    const committed = snapshot("newer verified restore");
+    const checkpoint = getVaultWriteCheckpoint();
+    await replaceLocalVaultItem(key, committed);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(values.get(packedKey)).toBe(packedRaw);
+    expect(values.get(`${key}:packed-retired`)).toBeTruthy();
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(committed);
+    const backupKey = await createLocalBackup(34, 99);
+    const captured = (await readLocalBackup(backupKey!))!;
+    await expect(resolveWorkspaceSnapshotRecord(captured.indexedDb?.records, captured.localStorage, key)).resolves.toBe(committed);
+    await expect(resolveWorkspaceSnapshotRecord({ [key]: snapshot("wrong vault") }, captured.localStorage, key))
+      .rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    await expect(resolveWorkspaceSnapshotRecord({ [key]: snapshot("wrong account", false, "other-learner") }, captured.localStorage, key))
+      .rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+  });
+
   it.each(["ordinary save", "verified restore"] as const)(
     "does not delete a newly acknowledged fallback in the middle of %s cleanup",
     async (operation) => {
