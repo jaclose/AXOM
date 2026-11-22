@@ -113,6 +113,8 @@ images, durable workspace saves and safety backups remain mandatory. A partial s
 cannot produce a complete download receipt. Private imports, reviewer copies and
 other full-course callers retain their original-file caching default.
 
+Failed source receipts retain the source position, last preparation phase and a bounded error-type fallback when the message is empty; figure-write failures also identify the filename and write position without changing installation, integrity or durability gates.
+
 Original PDFs appear separately in the course preview. Opening the preview makes
 no catalog or PDF request. Show original PDFs explicitly reads the exact revision's
 verified catalog and manifest; each requested PDF passes the existing
