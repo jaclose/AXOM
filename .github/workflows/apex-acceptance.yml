@@ -9,6 +9,8 @@ on:
       - 'web/src/lib/course-engine/**'
       - 'web/src/lib/academicLibrary/**'
       - 'web/src/lib/bookshelf/**'
+      - 'web/src/lib/library*'
+      - 'web/src/lib/curricula*'
       - 'web/src/lib/privateLibrary/**'
       - 'web/src/lib/decode/sources*'
       - 'web/src/lib/learning-intelligence/**'
