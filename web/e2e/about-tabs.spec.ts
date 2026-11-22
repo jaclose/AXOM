@@ -109,3 +109,47 @@ test("external developer preview omits AXOM query referrer", async ({ page }) =>
   await expect.poll(() => previewReferrers.length, { timeout: 15_000 }).toBeGreaterThan(0);
   expect(previewReferrers.every(value => value === undefined)).toBe(true);
 });
+
+test("developer preview blocks a user-triggered popup while an unsandboxed cross-origin control permits it", async ({ page }) => {
+  // Intercept the real external iframe URL: no remote site, account or data access.
+  // A working unsandboxed positive control prevents a vacuous blocked-popup test.
+  const fixture = [
+    "<!doctype html><title>Popup containment fixture</title>",
+    '<button type="button" id="open-popup">Attempt popup</button>',
+    '<output id="popup-result">idle</output>',
+    "<script>",
+    'document.getElementById("open-popup").addEventListener("click", () => {',
+    "  let popup = null;",
+    '  try { popup = window.open("about:blank", "_blank"); } catch {}',
+    '  document.getElementById("popup-result").textContent = popup ? "allowed" : "blocked";',
+    "  if (popup) popup.close();",
+    "});",
+    "</script>",
+  ].join("\n");
+  await page.route("https://www.jafardabbagh.com/**", route => route.fulfill({
+    status: 200, contentType: "text/html", body: fixture,
+  }));
+
+  await page.goto("/", { waitUntil: "networkidle" });
+  await seedOnboarded(page);
+  await page.evaluate(() => { window.location.hash = "about"; });
+  await page.getByRole("tab", { name: "The developer" }).click();
+
+  await page.evaluate(() => {
+    const control = document.createElement("iframe");
+    control.title = "Unsandboxed external popup control";
+    control.src = "https://www.jafardabbagh.com/axom-popup-positive-control";
+    document.body.appendChild(control);
+  });
+  const control = page.frameLocator('iframe[title="Unsandboxed external popup control"]');
+  await control.getByRole("button", { name: "Attempt popup" }).click();
+  await expect(control.locator("#popup-result")).toHaveText("allowed");
+  await page.evaluate(() => {
+    document.querySelector('iframe[title="Unsandboxed external popup control"]')?.remove();
+  });
+
+  // Exercise the actual AboutPage iframe, not a standalone browser mock.
+  const preview = page.frameLocator('iframe[title="Live site preview"]');
+  await preview.getByRole("button", { name: "Attempt popup" }).click();
+  await expect(preview.locator("#popup-result")).toHaveText("blocked");
+});
