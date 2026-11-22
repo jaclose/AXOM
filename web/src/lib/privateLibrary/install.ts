@@ -9,6 +9,7 @@ import type { QuestionBlock, TableBlock } from "../question-content/blocks";
 import { readManifest, readQuestionsFile } from "../question-content/packageJson";
 import { sha256 } from "../question-content/assets";
 import { getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionAttachmentBlobRecord } from "../questionAttachments";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, type QuestionAttachmentScope } from "../questionAttachmentScope";
 import { assertInstallableAcademicImageBytes, type InstallableAcademicImage } from "../academicLibrary/gifIntegrity";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
 import { createLocalBackup, refreshLocalBackupSummaries } from "../localBackup";
@@ -261,6 +262,8 @@ interface BankFilePartition {
   requiredQuestionIds?: ReadonlySet<string>;
   /** Called only when an invalid image belongs exclusively to an already-held question. */
   onHeldMediaIssue?: (issue: PackageIssue) => void;
+  /** One immutable account generation for the complete media-write batch. */
+  attachmentScope?: QuestionAttachmentScope;
 }
 export async function bankFiles(
   bank: PreparedBank,
@@ -269,6 +272,12 @@ export async function bankFiles(
   assertCurrent: () => void = () => {},
   partition: BankFilePartition = {},
 ): Promise<File[]> {
+  const attachmentScope = partition.attachmentScope ?? getQuestionAttachmentScope();
+  const assertMediaCurrent = () => {
+    assertCurrent();
+    if (!isQuestionAttachmentScopeCurrent(attachmentScope))
+      throw new Error("The account changed during figure installation. Reopen the library and retry.");
+  };
   const files: File[] = [];
   const pendingRecords: Array<{ key: string; filename: string; record: QuestionAttachmentBlobRecord }> = [];
   // Several question assets can refer to the *same* source-page file while
@@ -298,7 +307,7 @@ export async function bankFiles(
       const key = reviewBlobKey(asset.checksum);
       // A selected prepared bundle supplies these bytes. Do not trigger an
       // unrelated cloud-media recovery before verifying the supplied original.
-      const stored = read && bankFile ? undefined : await getQuestionAttachmentBlob(key, { localOnly: true });
+      const stored = read && bankFile ? undefined : await getQuestionAttachmentBlob(key, { localOnly: true, scope: attachmentScope, accountId: attachmentScope.accountId });
       const bytes = read && bankFile
         ? await read(bankAssetPath(bankFile, asset.filename))
         : stored ? new Uint8Array(await stored.blob.arrayBuffer()) : undefined;
@@ -340,10 +349,12 @@ export async function bankFiles(
   }
   // Validate every referenced file before the first IndexedDB write so a
   // corrupt later sibling cannot leave a partially persisted image set.
-  assertCurrent();
+  assertMediaCurrent();
   for (const [index, pending] of pendingRecords.entries()) {
+    assertMediaCurrent();
     try {
-      await putQuestionAttachmentBlob(pending.key, pending.record);
+      await putQuestionAttachmentBlob(pending.key, pending.record, { scope: attachmentScope, accountId: attachmentScope.accountId });
+      assertMediaCurrent();
     } catch (cause) {
       const reason = installationFailureReason(cause, "Image storage failed without an error message.");
       throw new Error(`Could not save figure ${index + 1} of ${pendingRecords.length}: ${pending.filename}. ${reason}`, { cause });
@@ -382,26 +393,34 @@ export function installPrivateLibrary(read: LibraryReader, progress: (message: s
   if (installing) return installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals
     && installing.options.reconcileSource === options.reconcileSource ? installing.promise
     : Promise.reject(new Error("Another library download is being saved. Wait for it to finish, then retry."));
-  const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals, options.reconcileSource).finally(() => { installing = undefined; });
+  // Capture before any awaited catalog/read/backups: an A import must never
+  // resolve a new B generation from a lower-level binary storage API.
+  const attachmentScope = getQuestionAttachmentScope();
+  const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals, options.reconcileSource, attachmentScope).finally(() => { installing = undefined; });
   installing = { read, key: scope?.key, options, cacheOriginals, promise };
   return promise;
 }
 async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void, cacheOriginals: boolean,
-  reconcileSource?: LibraryInstallOptions["reconcileSource"]): Promise<LibraryInstallation> {
-  const currentStore = () => {
+  reconcileSource: LibraryInstallOptions["reconcileSource"], attachmentScope: QuestionAttachmentScope): Promise<LibraryInstallation> {
+  const assertImportCurrent = () => {
     assertCurrent();
+    if (!isQuestionAttachmentScopeCurrent(attachmentScope))
+      throw new Error("The account changed during library installation. Reopen the library and retry.");
+  };
+  const currentStore = () => {
+    assertImportCurrent();
     // Keep the original action identities: the canonical importer uses them to
     // serialize transactions shared with other import entry points.
-    return { ...useStore.getState(), assertCurrent };
+    return { ...useStore.getState(), assertCurrent: assertImportCurrent };
   };
   const catalog = readCatalog(JSON.parse(text(await read("catalog.json"))));
   const refreshEquivalentSource = auditedRhpsSourceRefresh(catalog);
   const installedIds: LibraryInstallation = { status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: [], setIds: [] };
   progress("Protecting your current workspace…");
   await flushLocalVaultWrites();
-  assertCurrent();
+  assertImportCurrent();
   const localBackups = await refreshLocalBackupSummaries();
-  assertCurrent();
+  assertImportCurrent();
   await createLocalBackup(BUILD_INFO.schemaVersion, localBackups.length + 2);
   const checkpoint = getVaultWriteCheckpoint();
   for (const entry of catalog.templates) {
@@ -416,7 +435,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
   const pendingDocuments = new Map<string, SourceDocument>();
   const flushDocuments = async () => {
-    assertCurrent();
+    assertImportCurrent();
     if (pendingDocuments.size) {
       const batch = new Map(pendingDocuments);
       useStore.setState(s => ({ documents: [...batch.values(), ...s.documents.filter(d => !batch.has(d.id))] }));
@@ -442,13 +461,17 @@ async function install(read: LibraryReader, progress: (message: string) => void,
           fileType: source.originalFile.split(".").pop() ?? "file", uploadedAt: new Date().toISOString(), rawText: "", sizeBytes: 0,
           checksum: `sha256:${source.checksum}`, tags: [source.module ?? "Unfiled"], linkedQuestionSetIds: [], libraryOnly: true };
         installedIds.documentIds.push(doc.id);
-        if (!await readSourceOriginal(doc.id, doc.checksum)) {
+        if (!await readSourceOriginal(doc.id, doc.checksum, { scope: attachmentScope, accountId: attachmentScope.accountId })) {
           report("reading original file");
           const bytes = await read(source.originalFile);
-          assertCurrent();
+          assertImportCurrent();
           report("saving original file");
-          await saveSourceOriginal(doc, new Blob([bytes as BlobPart]));
-          assertCurrent();
+          // Progress callbacks are external and can synchronously change account.
+          assertImportCurrent();
+          await saveSourceOriginal(doc, new Blob([bytes as BlobPart]), {
+            scope: attachmentScope, accountId: attachmentScope.accountId,
+          });
+          assertImportCurrent();
           if (!existing) pendingDocuments.set(doc.id, { ...doc, sizeBytes: bytes.length });
         } else if (!existing) pendingDocuments.set(doc.id, doc);
       }
@@ -471,7 +494,8 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       )));
       const heldMediaIssues: PackageIssue[] = [];
       report("preparing figure assets");
-      const files = await bankFiles(bank, read, source.bankFile, assertCurrent, {
+      const files = await bankFiles(bank, read, source.bankFile, assertImportCurrent, {
+        attachmentScope,
         requiredQuestionIds: readyQuestionIds,
         onHeldMediaIssue: issue => heldMediaIssues.push(issue),
       });
@@ -548,7 +572,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       }
       }
     } catch (cause) {
-      assertCurrent();
+      assertImportCurrent();
       source.status = "failed";
       const retained = currentStore().questions.filter(question => (
         question.content?.provenance.sourceChecksum?.replace(/^sha256:/, "") === source.checksum
@@ -579,7 +603,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   currentStore().addDocument({ id: `private-library-${catalog.id}`, title: "Prepared academic library", fileName: "catalog.json", fileType: PRIVATE_LIBRARY_DOCUMENT,
     uploadedAt: new Date().toISOString(), rawText, sizeBytes: rawText.length, tags: [catalog.version], libraryOnly: true, linkedQuestionSetIds: [] });
   await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
-  assertCurrent();
+  assertImportCurrent();
   if (warnings.length) progress(`${warnings.length} source${warnings.length === 1 ? " needs" : "s need"} another installation attempt. Saved study progress and completed sources remain available.`);
   else progress("Library installed. Choose a course or create a quiz.");
   return {
