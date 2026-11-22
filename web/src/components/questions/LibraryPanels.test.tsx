@@ -158,6 +158,47 @@ describe("QuestionSetList sharing disclosure", () => {
     expect(publishShare).not.toHaveBeenCalled();
   });
 
+  it.each(["question edit", "question deletion", "set deletion"] as const)(
+    "blocks %s during deferred authentication without an extra owner-recovery lookup", async mutation => {
+      useSyntheticSet();
+      vi.mocked(listQuestionSetShares).mockResolvedValue([]);
+      vi.mocked(publishShare).mockImplementationOnce(async (_id, _snapshot, _owner, sourceCurrent) => {
+        const previous = mocked.store!;
+        if (mutation === "set deletion") mocked.store = { ...previous, questionSets: [] };
+        else if (mutation === "question deletion") mocked.store = { ...previous, questions: [] };
+        else {
+          const question = (previous.questions as QuestionRecord[])[0];
+          mocked.store = { ...previous, questions: [{ ...question, stem: "Edited during sign-in?" }] };
+        }
+        // Mimics the service callback after ownerClient's asynchronous account read.
+        if (sourceCurrent?.() !== true) {
+          const stale = new Error("Question Set source changed before share upload.");
+          stale.name = "QuestionSetShareSourceChanged";
+          throw stale;
+        }
+        return ownedShare("00000000-0000-4000-8000-000000000071", "s".repeat(48));
+      });
+      await openAndConfirmShare();
+      await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({
+        title: "Share source changed", tone: "warn",
+      })));
+      expect(screen.queryByRole("textbox", { name: "Unlisted Question Set link" })).toBeNull();
+      expect(listQuestionSetShares).toHaveBeenCalledOnce();
+      expect(publishShare).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("allows unchanged source through deferred pre-RPC validation", async () => {
+    useSyntheticSet();
+    vi.mocked(listQuestionSetShares).mockResolvedValue([]);
+    vi.mocked(publishShare).mockImplementationOnce(async (_id, _snapshot, _owner, sourceCurrent) => {
+      expect(sourceCurrent?.()).toBe(true);
+      return ownedShare("00000000-0000-4000-8000-000000000072", "t".repeat(48));
+    });
+    await openAndConfirmShare();
+    expect(await screen.findByRole("textbox", { name: "Unlisted Question Set link" })).toBeTruthy();
+  });
+
   it("does not publish a deleted local set from a stale open share dialog", async () => {
     useSyntheticSet();
     vi.mocked(listQuestionSetShares).mockResolvedValueOnce([]);

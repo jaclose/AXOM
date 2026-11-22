@@ -42,6 +42,7 @@ export async function publishShare(
   sourceId: string,
   snapshot: SharedQuestionSetSnapshot,
   expectedOwnerId?: string,
+  assertSourceCurrent?: () => boolean,
 ): Promise<OwnedQuestionSetShare> {
   if (!sourceId.trim() || sourceId !== sourceId.trim() || [...sourceId].length > 200) {
     throw new Error("Question Set identity is invalid.");
@@ -52,6 +53,17 @@ export async function publishShare(
   // dispatch an A snapshot under a newly authenticated B RPC credential.
   if (expectedOwnerId !== undefined && operation.userId !== expectedOwnerId) {
     throw new Error("The linked workspace account changed before share upload. Nothing was published.");
+  }
+  // A source can be edited/deleted while authenticated account acquisition awaits.
+  // Revalidate synchronously immediately before RPC. Promise guards fail closed.
+  if (assertSourceCurrent) {
+    let current = false;
+    try { current = assertSourceCurrent() === true; } catch { /* invalid source */ }
+    if (!current) {
+      const stale = new Error("Question Set source changed before share upload. Nothing was published.");
+      stale.name = "QuestionSetShareSourceChanged";
+      throw stale;
+    }
   }
   const { data, error } = await operation.client.rpc("create_question_set_share", {
     p_source_id: sourceId,
