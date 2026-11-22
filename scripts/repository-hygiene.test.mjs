@@ -529,6 +529,11 @@ test('APEX academic acceptance path filter covers source recovery, QBank and tra
     'supabase/migrations/20991231235959_future_academic_rls.sql',
     // Cloud sharing, source originals, tracker progress, and permissioned bookshelf UI are academic entrypoints.
     // QBank book counts, prepared cloud courses and durable activation are academic sources.
+    // Immutable QBank filter membership/metrics and course-module curriculum shells.
+    'web/src/lib/library.ts',
+    'web/src/lib/library.test.ts',
+    'web/src/lib/curricula.ts',
+    'web/src/lib/curricula.test.ts',
     'web/src/lib/bookshelf/questionBankBooks.ts',
     'web/src/lib/bookshelf/preparedCourses.ts',
     'web/src/lib/bookshelf/loadCourse.ts',
