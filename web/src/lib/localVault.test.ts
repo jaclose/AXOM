@@ -859,21 +859,34 @@ describe("a save that could not reach IndexedDB", () => {
     const originalOpen = fakeIndexedDb.open.bind(fakeIndexedDb);
     let opens = 0;
     let peerCommit: Promise<void> | null = null;
-    const originalGet = IDBObjectStore.prototype.get;
-    const getSpy = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, recordKey) {
-      if (recordKey === `${key}:active-user` && peerCommit === null) {
-        // Queue the peer write during the last verified-empty read, before
-        // the migration can open its readwrite transaction. Injecting at
-        // open #3 instead was too late: that transaction already won.
+    const storageGet = vi.spyOn(storage, "getItem").mockImplementation((recordKey) => {
+      if (recordKey === key && peerCommit === null) {
+        // The sole unmarked mirror read occurs after the empty-vault reads
+        // completed, and just before the migration tries its CAS.
         peerCommit = putDirect(peer, key, winner);
       }
-      return originalGet.call(this, recordKey);
+      return values.get(recordKey) ?? null;
     });
     vi.stubGlobal("indexedDB", {
       open: (name: string, version?: number) => {
         opens += 1;
         if (opens >= 4) throw new Error("IndexedDB winner readback is unavailable");
-        return version === undefined ? originalOpen(name) : originalOpen(name, version);
+        const request = version === undefined ? originalOpen(name) : originalOpen(name, version);
+        if (opens === 3) {
+          // Hold delivery of the migration connection until the competing
+          // transaction commits, regardless of fake-IDB event scheduling.
+          let onSuccess: ((event: Event) => void) | null = null;
+          Object.defineProperty(request, "onsuccess", {
+            configurable: true,
+            get: () => onSuccess,
+            set: (handler: ((event: Event) => void) | null) => {
+              onSuccess = handler === null ? null : (event: Event) => {
+                void Promise.resolve(peerCommit).then(() => handler.call(request, event));
+              };
+            },
+          });
+        }
+        return request;
       },
     });
 
@@ -895,7 +908,7 @@ describe("a save that could not reach IndexedDB", () => {
       expect(await getDirect(peer, key)).toBe(winner);
       expect(storage.getItem(key)).toBe(stale);
     } finally {
-      getSpy.mockRestore();
+      storageGet.mockRestore();
       vi.stubGlobal("indexedDB", fakeIndexedDb);
       if (peerCommit) await peerCommit;
       peer.close();
