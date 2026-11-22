@@ -522,6 +522,11 @@ test('APEX academic acceptance path filter covers source recovery, QBank and tra
   };
   const triggered = (pathName) => globs.some((glob) => matches(pathName, glob));
   for (const pathName of [
+    // Academic database contracts must not bypass dedicated acceptance because their names lack a TS entrypoint.
+    'supabase/migrations/20261122002007_academic_tracker_review.sql',
+    'supabase/migrations/20261010233000_shared_academic_catalog.sql',
+    'supabase/migrations/20261010234000_catalog_storage_policy_boundary.sql',
+    'supabase/migrations/20991231235959_future_academic_rls.sql',
     'web/src/lib/course-engine/academicQuizPlanner.ts',
     'web/src/lib/academicLibrary/reviewExport.ts',
     'web/src/lib/privateLibrary/install.ts',
@@ -550,5 +555,7 @@ test('APEX academic acceptance path filter covers source recovery, QBank and tra
     'web/src/pages/AboutPage.tsx',
     'web/src/pages/SettingsPage.tsx',
     'web/src/lib/decode/unrelatedUtility.ts',
+    'supabase/functions/communications/index.ts',
+    'supabase/seed.sql',
   ]) assert.equal(triggered(pathName), false, `unrelated edit must not trigger APEX: ${pathName}`);
 });
