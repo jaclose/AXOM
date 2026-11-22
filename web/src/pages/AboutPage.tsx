@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   Brain, CheckCircle2, ExternalLink, LineChart, Loader, ShieldCheck, Sparkles, CircleDashed,
 } from "lucide-react";
@@ -54,13 +54,42 @@ const STATUS_META: Record<FeatureStatus, { label: string; sub: string; icon: typ
 
 export function AboutPage() {
   const [tab, setTab] = useState<"axom" | "developer">("axom");
+  const axomTabRef = useRef<HTMLButtonElement>(null);
+  const developerTabRef = useRef<HTMLButtonElement>(null);
+
+  function selectTab(next: "axom" | "developer") {
+    setTab(next);
+    (next === "axom" ? axomTabRef : developerTabRef).current?.focus();
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: "axom" | "developer") {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    let next: "axom" | "developer";
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowRight":
+        next = current === "axom" ? "developer" : "axom";
+        break;
+      case "Home":
+        next = "axom";
+        break;
+      case "End":
+        next = "developer";
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    selectTab(next);
+  }
+
   return (
     <>
       <div className="about-tabs" role="tablist" aria-label="About">
-        <button role="tab" id="about-tab-axom" aria-controls="about-panel" aria-selected={tab === "axom"} onClick={() => setTab("axom")}>About AXOM</button>
-        <button role="tab" id="about-tab-developer" aria-controls="about-panel" aria-selected={tab === "developer"} onClick={() => setTab("developer")}>The developer</button>
+        <button ref={axomTabRef} type="button" role="tab" id="about-tab-axom" aria-controls="about-panel" aria-selected={tab === "axom"} tabIndex={tab === "axom" ? 0 : -1} onClick={() => selectTab("axom")} onKeyDown={(event) => handleTabKeyDown(event, "axom")}>About AXOM</button>
+        <button ref={developerTabRef} type="button" role="tab" id="about-tab-developer" aria-controls="about-panel" aria-selected={tab === "developer"} tabIndex={tab === "developer" ? 0 : -1} onClick={() => selectTab("developer")} onKeyDown={(event) => handleTabKeyDown(event, "developer")}>The developer</button>
       </div>
-      <div id="about-panel" role="tabpanel" aria-labelledby={`about-tab-${tab}`} className="about-panel">
+      <div id="about-panel" role="tabpanel" tabIndex={0} aria-labelledby={`about-tab-${tab}`} className="about-panel">
         {tab === "axom" ? <AboutAxom /> : <WebsitePreview />}
       </div>
     </>
