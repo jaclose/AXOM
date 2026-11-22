@@ -151,6 +151,42 @@ describe("question-share Supabase boundary", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it("blocks stale local Question Set content after deferred account acquisition and before the RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
+    const operation = configured(rpc);
+    let releaseAuth!: (value: Awaited<ReturnType<typeof accountOperationClient>>) => void;
+    vi.mocked(accountOperationClient).mockImplementationOnce(() => new Promise(resolve => {
+      releaseAuth = resolve;
+    }));
+    let sourceVersion = "original";
+    const assertSourceCurrent = vi.fn(() => {
+      if (sourceVersion !== "original") throw new Error("Question Set source changed before share upload.");
+    });
+    const pending = publishShare("source-set", snapshot(), "owner", assertSourceCurrent);
+    sourceVersion = "edited during account lookup";
+    releaseAuth({
+      client: operation.service,
+      userId: "owner",
+      assertCurrent: operation.assertCurrent,
+      resumable: { endpoint: "https://example.invalid/upload", headers: {} },
+    } as never);
+
+    await expect(pending).rejects.toThrow(/source changed/i);
+    expect(assertSourceCurrent).toHaveBeenCalledOnce();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("permits a stable selected source through the same pre-RPC dispatch checkpoint", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
+    configured(rpc);
+    const assertSourceCurrent = vi.fn();
+
+    await expect(publishShare("source-set", snapshot(), "owner", assertSourceCurrent))
+      .resolves.toMatchObject({ id: SHARE_ID, sourceId: "source-set" });
+    expect(assertSourceCurrent).toHaveBeenCalledOnce();
+    expect(rpc).toHaveBeenCalledOnce();
+  });
+
   it("returns bounded server metadata for a published owner link", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
     const operation = configured(rpc);
