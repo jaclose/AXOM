@@ -902,13 +902,32 @@ const vaultStorage: StateStorage = {
     const newer = newerFallbackCopy(fallbackStore, name);
     if (newer !== null) {
       const userId = persistedUserId(newer.value);
+      let promoted = false;
       try {
         // The marker records the IndexedDB snapshot on which this fallback was
         // based. Comparing that base and the fallback itself in one transaction
         // prevents a late promotion from replacing a newer tab's commit.
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
-        clearFallbackCopy(fallbackStore, name, userId);
+        promoted = true;
+        if (observesWorkspace(name)) {
+          // A second tab may have acknowledged a newer fallback while this
+          // IndexedDB transaction was pending. There is no atomic compare-
+          // and-delete across localStorage keys, so a read must NEVER retire
+          // an acknowledged workspace copy. The next verified save may do so.
+          if (
+            fallbackStore?.getItem(fallbackMarkerKey(name)) !== newer.marker
+            || fallbackStore?.getItem(name) !== newer.value
+          ) throw new VaultConflictError();
+        } else {
+          clearFallbackCopyIfUnchanged(fallbackStore, name, newer, userId);
+        }
       } catch (promotionError) {
+        if (promoted && observesWorkspace(name)) {
+          // The vault now holds the captured bytes, but a later fallback or an
+          // unreadable marker may contain independent edits. Keep both copies.
+          conflictedWorkspaceKeys.add(name);
+          throw isVaultConflictError(promotionError) ? promotionError : new VaultConflictError();
+        }
         if (isVaultConflictError(promotionError)) {
           try {
             const current = await readVaultSnapshot(name);
@@ -928,7 +947,7 @@ const vaultStorage: StateStorage = {
               }
               // Idempotent promotion is safe: the vault already holds these
               // exact bytes. Legacy bare markers also use this equality path.
-              if (newer.baseFingerprint !== undefined) {
+              if (newer.baseFingerprint !== undefined && !observesWorkspace(name)) {
                 clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
               }
               rememberVaultSnapshot(name, current);
