@@ -116,8 +116,10 @@ describe("verified separate compressed workspace fallback", () => {
     expectLegacyUnchanged(fixture.legacyRecords);
     expect(await localVaultStorage.getItem(key)).toBe(latest);
     fixture.blockVault.mockRestore();
+    const capturedRaw = values.get(packedKey);
     expect(await localVaultStorage.getItem(key)).toBe(latest);
-    expect(values.has(packedKey)).toBe(false);
+    expect(values.get(packedKey)).toBe(capturedRaw); // Retained, never compare/delete.
+    expect(values.get(`${key}:packed-retired`)).toBeTruthy();
     resetLocalVaultRuntimeForTests();
     expect(await localVaultStorage.getItem(key)).toBe(latest);
   });
@@ -131,7 +133,8 @@ describe("verified separate compressed workspace fallback", () => {
     const checkpoint = getVaultWriteCheckpoint();
     await replaceLocalVaultItem(key, restored);
     expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
-    expect(values.has(packedKey)).toBe(false);
+    expect(values.get(packedKey)).toBeTruthy();
+    expect(values.get(`${key}:packed-retired`)).toBeTruthy();
     expect(values.get(`${STORAGE_KEYS.localBackupPrefix}existing`)).toBe("historical backup bytes");
     resetLocalVaultRuntimeForTests();
     expect(await localVaultStorage.getItem(key)).toBe(restored);
@@ -319,6 +322,23 @@ describe("verified separate compressed workspace fallback", () => {
       .rejects.toThrow(VAULT_CONFLICT_MESSAGE);
     await expect(resolveWorkspaceSnapshotRecord({ [key]: snapshot("wrong account", false, "other-learner") }, captured.localStorage, key))
       .rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+  });
+
+  it("accepts subsequent ordinary saves after a retired packed record is preserved", async () => {
+    const fixture = await quotaFixture();
+    await localVaultStorage.setItem(key, snapshot("original packed", true));
+    const packedY = values.get(packedKey)!;
+    fixture.blockVault.mockRestore();
+    await replaceLocalVaultItem(key, snapshot("verified restore"));
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toContain("verified restore");
+    const latest = snapshot("new normal save");
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, latest);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(values.get(packedKey)).toBe(packedY);
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(latest);
   });
 
   it.each(["ordinary save", "verified restore"] as const)(
