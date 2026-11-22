@@ -161,6 +161,7 @@ describe("question-share Supabase boundary", () => {
     let sourceVersion = "original";
     const assertSourceCurrent = vi.fn(() => {
       if (sourceVersion !== "original") throw new Error("Question Set source changed before share upload.");
+      return true;
     });
     const pending = publishShare("source-set", snapshot(), "owner", assertSourceCurrent);
     sourceVersion = "edited during account lookup";
@@ -179,12 +180,23 @@ describe("question-share Supabase boundary", () => {
   it("permits a stable selected source through the same pre-RPC dispatch checkpoint", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
     configured(rpc);
-    const assertSourceCurrent = vi.fn();
+    const assertSourceCurrent = vi.fn(() => true);
 
     await expect(publishShare("source-set", snapshot(), "owner", assertSourceCurrent))
       .resolves.toMatchObject({ id: SHARE_ID, sourceId: "source-set" });
     expect(assertSourceCurrent).toHaveBeenCalledOnce();
     expect(rpc).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed for false or inadvertently asynchronous source assertions", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
+    configured(rpc);
+    await expect(publishShare("source-set", snapshot(), "owner", () => false))
+      .rejects.toThrow(/source changed before share upload/i);
+    await expect(publishShare("source-set", snapshot(), "owner",
+      (() => Promise.resolve(true)) as unknown as () => boolean))
+      .rejects.toThrow(/source changed before share upload/i);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("returns bounded server metadata for a published owner link", async () => {

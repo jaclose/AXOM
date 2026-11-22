@@ -378,7 +378,17 @@ export function QuestionSetList({
       }
       const snapshot = createQuestionSetShare(liveSet, live.questions ?? NO_QUESTIONS);
       if (!isLinkedShareWorkspace(scope) || useStore.getState() !== live) return;
-      const result = await publishShare(liveSet.id, snapshot, scope.accountId);
+      const assertSourceCurrent = () => {
+        if (!isLinkedShareWorkspace(scope)) return false;
+        const current = useStore.getState();
+        const currentSet = (current.questionSets ?? []).find(item => item.id === selected.id);
+        if (currentSet !== liveSet || current.questions !== live.questions) return false;
+        try {
+          const fresh = createQuestionSetShare(currentSet, current.questions ?? NO_QUESTIONS, snapshot.createdAt);
+          return JSON.stringify(fresh) === JSON.stringify(snapshot);
+        } catch { return false; }
+      };
+      const result = await publishShare(liveSet.id, snapshot, scope.accountId, assertSourceCurrent);
       if (!isCurrentShareScope(scope)) return;
       const link = `${location.origin}${location.pathname}#shared-set?token=${encodeURIComponent(result.token)}`;
       const managed = { ...result, link };
@@ -406,6 +416,14 @@ export function QuestionSetList({
       }
     } catch (error) {
       if (!isCurrentShareScope(scope)) return;
+      if (error instanceof Error && error.name === "QuestionSetShareSourceChanged") {
+        pushToast({
+          title: "Share source changed",
+          body: "The question set or source changed during sign-in. Nothing was published. Reopen sharing to review the current questions.",
+          tone: "warn",
+        });
+        return;
+      }
       const detail = error instanceof Error ? error.message : "Sign in and try again.";
       try {
         const recoveredShares = await listQuestionSetShares();
