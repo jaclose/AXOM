@@ -506,20 +506,36 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(key)).toBe(latest);
     oldConnection.close();
 
-    // The next read promotes the fallback only after the current vault
-    // barrier can land. A read must NOT retire an acknowledged recovery copy:
-    // another tab may be writing its own marked fallback at the same time.
-    expect(await localVaultStorage.getItem(key)).toBe(latest);
+    // The blocked versionchange request can settle after the old tab closes.
+    // A read may return the intact fallback before its large IDB promotion
+    // succeeds; retry until the physical chunk manifest is verified on disk.
+    await waitFor(async () => {
+      expect(await localVaultStorage.getItem(key)).toBe(latest);
+      const current = await openCurrentVault();
+      try {
+        const raw = await getDirect(current, key);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw) as { format?: string; length?: number };
+        return parsed.format === "axom-local-vault-chunks" && parsed.length === latest.length;
+      } finally {
+        current.close();
+      }
+    });
+    // A read must NOT retire an acknowledged fallback. Another tab might
+    // acknowledge a different copy during localStorage's multi-key cleanup.
     expect(localStorage.getItem(key)).toBe(latest);
     expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     const upgraded = await openCurrentVault();
-    expect(upgraded.version).toBe(DB_VERSION);
-    expect(JSON.parse((await getDirect(upgraded, key))!)).toMatchObject({
-      format: "axom-local-vault-chunks",
-      version: 1,
-      length: latest.length,
-    });
-    upgraded.close();
+    try {
+      expect(upgraded.version).toBe(DB_VERSION);
+      expect(JSON.parse((await getDirect(upgraded, key))!)).toMatchObject({
+        format: "axom-local-vault-chunks",
+        version: 1,
+        length: latest.length,
+      });
+    } finally {
+      upgraded.close();
+    }
 
     // Only an independent, successful write of the same hydrated workspace
     // can retire the unchanged legacy fallback. A read alone cannot.
