@@ -62,3 +62,27 @@ for (const width of [1440, 390, 320]) {
     expect(errors).toEqual([]);
   });
 }
+
+test("external developer preview omits AXOM query referrer", async ({ page }) => {
+  const referrers: Array<string | undefined> = [];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("https://www.jafardabbagh.com/**", async route => {
+    referrers.push(route.request().headers()["referer"]);
+    await route.fulfill({
+      status: 200, contentType: "text/html", body: "<!doctype html><title>Preview fixture</title>",
+    });
+  });
+
+  await page.goto("/", { waitUntil: "networkidle" });
+  await seedOnboarded(page);
+  await page.evaluate(() => {
+    window.location.hash = "about";
+    const url = new URL(window.location.href);
+    url.searchParams.set("axom-referrer-canary", "synthetic-test-only");
+    window.history.replaceState(window.history.state, "", url.toString());
+  });
+  await page.getByRole("tab", { name: "The developer" }).click();
+  await page.getByTitle("Live site preview").scrollIntoViewIfNeeded();
+  await expect.poll(() => referrers.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  expect(referrers.every(value => value === undefined)).toBe(true);
+});

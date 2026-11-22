@@ -65,6 +65,8 @@ describe("About page accessible tabs", () => {
       expect(about.getAttribute("aria-selected")).toBe("true");
     }
     fireEvent.click(developer);
+    // External preview must not transmit AXOM route or query details.
+    expect(screen.getByTitle("Live site preview").getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(document.activeElement).toBe(developer);
     expect(developer.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(developer.id);
