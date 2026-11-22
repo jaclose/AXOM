@@ -524,6 +524,10 @@ test('APEX academic acceptance path filter covers source recovery, QBank and tra
   for (const pathName of [
     'web/src/lib/course-engine/academicQuizPlanner.ts',
     'web/src/lib/academicLibrary/reviewExport.ts',
+    'web/src/lib/privateLibrary/install.ts',
+    'web/src/lib/privateLibrary/install.test.ts',
+    'web/src/lib/decode/sources.ts',
+    'web/src/lib/decode/sources.test.ts',
     'web/src/lib/questionAttachments.ts',
     'web/src/lib/questionBank.test.ts',
     'web/src/lib/sharing/supabaseSharing.ts',
@@ -533,11 +537,18 @@ test('APEX academic acceptance path filter covers source recovery, QBank and tra
     'web/src/components/questions/LibraryPanels.tsx',
     'web/src/components/tracker/AcademicReviewFiles.tsx',
     'web/src/components/exam/ExamRunner.tsx',
+    'web/src/pages/CourseTrackerPage.tsx',
+    'web/src/pages/CourseTrackerPage.cloudBatch.tsx',
+    'web/src/pages/QuestionWorkspacePage.tsx',
+    'web/src/pages/QuestionWorkspacePage.practice.tsx',
   ]) assert.equal(triggered(pathName), true, `academic edit must trigger APEX: ${pathName}`);
   for (const pathName of [
     'docs/AI_STATE.md',
     'web/src/components/productivity/Timer.tsx',
     'web/src/lib/localVault.ts',
     'web/src/lib/operator/hostClient.ts',
+    'web/src/pages/AboutPage.tsx',
+    'web/src/pages/SettingsPage.tsx',
+    'web/src/lib/decode/unrelatedUtility.ts',
   ]) assert.equal(triggered(pathName), false, `unrelated edit must not trigger APEX: ${pathName}`);
 });
