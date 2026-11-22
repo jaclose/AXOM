@@ -406,10 +406,18 @@ export function installPrivateLibrary(read: LibraryReader, progress: (message: s
     };
     try { assertJoinedCallerCurrent(); }
     catch (cause) { return Promise.reject(cause); }
-    return installing.promise.then(result => {
-      assertJoinedCallerCurrent();
-      return result;
-    });
+    return installing.promise.then(
+      result => {
+        assertJoinedCallerCurrent();
+        return result;
+      },
+      cause => {
+        // An upstream failure is not a license to disclose its diagnostic to a
+        // joining caller whose independent academic scope has since expired.
+        assertJoinedCallerCurrent();
+        throw cause;
+      },
+    );
   }
   // Capture before any awaited catalog/read/backups: an A import must never
   // resolve a new B generation from a lower-level binary storage API.
