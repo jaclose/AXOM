@@ -29,7 +29,7 @@ const READY: Feature[] = [
 ];
 
 const IN_PROGRESS: Feature[] = [
-  { name: "Accounts & cloud protection", detail: "Sign-in (password or one-time email code), background protection on every page, versioned restore, conflict resolution, device list, and cloud deletion are built. Activation needs the deployment’s account service configured and a live two-account security test." },
+  { name: "Accounts & cloud protection", detail: "Hosted sign-in and owner-side publication to authenticated accounts are active. Account isolation, cloud save/reload/restore, conflict resolution, device management, and cloud deletion still need independent two-account acceptance before reliability can be claimed." },
   { name: "Application Checker", detail: "292 US medical schools with sourced, dated requirement captures you can review and save. Residency programs and undergraduate/pre-med datasets are not gathered yet." },
   { name: "USMLE / MCAT / Pre-Med blueprints", detail: "Being deepened: macro vs. detailed depth, better-anchored content categories, and a dedicated tracker container per exam lane." },
   { name: "Anki integration", detail: "AnkiConnect bridge with card-count sync. Works on the local build; a hosted HTTPS page can't reach local Anki. That's a browser limit, not a bug." },
@@ -110,7 +110,7 @@ function AboutAxom() {
               backup file you can export when you choose.
             </p>
             <p className="sub">
-              Pre-beta honesty: account protection is built but stays off until this deployment configures and verifies its account service. Supported PDFs use local text
+              Pre-beta honesty: hosted sign-in and owner-side academic publication are enabled, but ordinary-account access and cross-device save/restore have not passed independent live acceptance. Supported PDFs use local text
               extraction; image-only OCR is not promised. Optional provider tools require explicit setup, and
               local AnkiConnect access still depends on your browser and desktop Anki configuration.
             </p>
