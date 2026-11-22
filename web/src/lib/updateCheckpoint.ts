@@ -1,6 +1,6 @@
 import { STORAGE_KEYS } from "./brand";
 import { createLocalBackup, readLocalBackup } from "./localBackup";
-import { flushLocalVaultWrites, localVaultStorage, resolveVaultSnapshotRecord } from "./localVault";
+import { flushLocalVaultWrites, localVaultStorage, resolveWorkspaceSnapshotRecord } from "./localVault";
 import { useStore } from "./store";
 import { saveNativeSnapshot } from "../services/nativeSqlite";
 
@@ -62,10 +62,9 @@ export async function createUpdateCheckpoint(desktop: boolean, checkpointOptions
       const snapshot = key ? await readLocalBackup(key) : null;
       let snapshotState: string | undefined;
       try {
-        snapshotState = snapshot?.indexedDb
-          ? resolveVaultSnapshotRecord(snapshot.indexedDb.records, STORAGE_KEYS.persistedState)
-            ?? snapshot.localStorage[STORAGE_KEYS.persistedState]
-          : snapshot?.localStorage[STORAGE_KEYS.persistedState];
+        snapshotState = snapshot ? await resolveWorkspaceSnapshotRecord(
+          snapshot.indexedDb?.records, snapshot.localStorage, STORAGE_KEYS.persistedState,
+        ) : undefined;
       } catch {
         // Missing or damaged chunks make the checkpoint unverifiable below.
       }

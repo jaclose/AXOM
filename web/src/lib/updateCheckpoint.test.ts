@@ -1,10 +1,11 @@
-import { IDBFactory } from "fake-indexeddb";
+import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "./brand";
-import { localVaultStorage, resolveVaultSnapshotRecord } from "./localVault";
+import { localVaultStorage, resolveVaultSnapshotRecord, resolveWorkspaceSnapshotRecord, STORE_NAME } from "./localVault";
 import { readLocalBackup } from "./localBackup";
 import { createUpdateCheckpoint } from "./updateCheckpoint";
 import { saveNativeSnapshot } from "../services/nativeSqlite";
+import { packedFallbackKey } from "./packedVaultFallback";
 
 const runtime = vi.hoisted(() => ({
   hydrated: true,
@@ -58,6 +59,31 @@ describe("pre-update workspace checkpoint", () => {
     expect(saved.state.tasks).toEqual([{ id: "unsaved-latest" }]);
     expect(saved.state.libraryText).toBe(runtime.state.libraryText);
     expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(JSON.stringify({ state: runtime.state, version: 32 }));
+  });
+
+  it("verifies the latest packed workspace in a safety snapshot while the old IDB base cannot be replaced", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    await localVaultStorage.getItem(key);
+    const base = JSON.stringify({ state: runtime.state, version: 32 });
+    await localVaultStorage.setItem(key, base);
+    const originalPut = IDBObjectStore.prototype.put;
+    vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (this.name === STORE_NAME) throw new DOMException("State quota", "QuotaExceededError");
+      return originalPut.apply(this, args);
+    });
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, "setItem").mockImplementation((name, value) => {
+      if (name === key && value.length > 4_096) throw new DOMException("Raw fallback quota", "QuotaExceededError");
+      originalSetItem(name, value);
+    });
+    runtime.state.libraryText = "Retain this synthetic source text. ".repeat(6_000);
+    const latest = JSON.stringify({ state: runtime.state, version: 32 });
+    const backupKey = await createUpdateCheckpoint(false);
+    const snapshot = await readLocalBackup(backupKey);
+    expect(snapshot?.localStorage[packedFallbackKey(key)]).toBeTruthy();
+    expect(resolveVaultSnapshotRecord(snapshot!.indexedDb!.records, key)).toBe(base);
+    expect(await resolveWorkspaceSnapshotRecord(snapshot!.indexedDb!.records, snapshot!.localStorage, key)).toBe(latest);
+    expect(await localVaultStorage.getItem(key)).toBe(latest);
   });
 
   it("also awaits a native recovery snapshot for desktop updates", async () => {

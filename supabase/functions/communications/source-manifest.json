@@ -20,7 +20,7 @@
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
-    "web/src/lib/localVault.ts": "f14a4c44f72dbf3e21b6272893c33dc25853beef21f2a0c853403159cf05a000",
+    "web/src/lib/localVault.ts": "0ba028c037c40c8ab0f18665cfe0332803e8ebc47d06c141361bb5d0f46cbac1",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
     "web/src/lib/questionAttachments.ts": "dec3c1da59c016c55a5cb5db926814f0aaf22a6ebca7982920dab1de5e13f84f",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
@@ -28,10 +28,19 @@
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
     "web/src/lib/targetContributions.ts": "301704eb40288568396fd10702ca7d30ab47d3a4628e5b61508b53285a6009e7",
     "web/src/lib/tracker.ts": "ffc762dc996085a485a95bcef0ac00b54b16a70e0f8822513b184f836c972922",
-    "web/src/lib/vaultActivity.ts": "f9bb47fd0accb27db1b1413444c31a666a48d44e2f2aa0f3900bdce43f66fa47"
+    "web/src/lib/vaultActivity.ts": "bf125da168002f8b0c6a0769d19bbe33fc298ed61abb9fc9344c9fd336ffc479"
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "35a573baca8c7129f04197d3c6d0f6d2d8a37d5808fd4b9470cefedab18d5396"
+    "sha256": "962bbc6d0848fd10eeb51d976d28c7b682bded41b0651c18a6a8c6346a9b67e5"
+  },
+  "authTemplates": {
+    "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",
+    "supabase/templates/communications/magic_link.html": "f8e4801fe3f939c7e188a137b777d28d8b2c2abb1c563c024e8c219dd4fee03d",
+    "supabase/templates/communications/recovery.html": "732df891c1e28f118c3183fc4106c93cc096fd767cd21087ebb5b5a1e556ed27",
+    "supabase/templates/communications/invite.html": "f41a9467a1051e9615cf13a6c3e897c4f8dec8952b849dc5b9cad7f74be67553",
+    "supabase/templates/communications/email_change.html": "96aad919eee5d7017603d5a89ecd354c5c8148b710250dc477768b9150903fe9",
+    "supabase/templates/communications/reauthentication.html": "1fdc5c8f1ffd9f449b06600f491c6baee4717ea9f6a15da9adffc5b28499a54c",
+    "supabase/templates/communications/security.html": "a208ba03fb9bbd712a2f6f798127ed9db478f0ebe891f9fbd0f93c3ad6f16560"
   }
 }

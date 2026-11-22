@@ -34,6 +34,27 @@ portable workspace data. Legacy cloud snapshots protect attachment metadata only
 owner-scoped source objects and question/review images without changing schema 34.
 Other generated-media bytes retain their existing local-only behavior.
 
+If both the vault write and the plain localStorage fallback fail, the active
+workspace can use a separate `noctyrium-state:packed-fallback:v1` record. This
+self-contained envelope binds the local profile, logical workspace fingerprint,
+previous vault base and unchanged legacy fallback records. It uses bounded gzip
+decoding, an expanded-byte count, SHA-256 and exact write/readback verification.
+It leaves existing raw records and safety backups in place; it does not free
+space by pruning them. Missing codec support, corrupt bytes, account mismatch or
+a competing commit fails visibly. Compression and readback recheck concurrent
+changes before acknowledging a save. Only the same captured packed record can
+be retired after a successful vault promotion or explicit verified restore.
+Older clients cannot read this additional record, so conflicting older-client
+writes are held for recovery rather than silently selecting a stale workspace.
+
+Captured-backup inspection and update checkpoints use the same read-only
+workspace selector, including the packed record's identity and base checks.
+The active-workspace envelope is independent from compressed safety snapshots;
+neither changes backup retention or the required-image persistence gate. Browser
+usage/quota estimates and an open IndexedDB connection do not prove a write will
+fit. The visible local-save receipt and latest failure describe the actual
+outcome; compression can still fail for lack of room.
+
 The optional `deferredContent` field keeps account-bound source metadata and immutable
 references outside canonical questions/documents until an explicit verified download.
 It is persisted and preserved in safety snapshots, cleared by deliberate replacement,
@@ -79,7 +100,8 @@ Preserve Noctyrium keys/type compatibility. Coordinate schema changes first, mig
 additively, and test old imports/defaults. Do not infer an atomic cross-store guarantee
 from an action name; follow write/flush/error behavior in the relevant boundary.
 
-Focused tests: `localVault.test.ts`, `storeMigrations.test.ts`, `storageRecovery.test.ts`,
+Focused tests: `localVault.test.ts`, `localVault.packedFallback.test.ts`,
+`storeMigrations.test.ts`, `storageRecovery.test.ts`,
 `backup.test.ts` and affected sync snapshot/migration tests under `web/src/lib/`.
 `web/scripts/verify-app-updates.mjs` checks checkpoint/update behavior. The 2,857-line
 baseline `store.ts` is a future incremental refactor candidate, not a reason to read

@@ -69,4 +69,22 @@ describe("Data health trust surface", () => {
     expect(screen.getByRole("heading", { name: "Saved on this device" })).toBeTruthy();
     expect(useToasts.getState().toasts.some(({ title }) => title === "Keep this window open")).toBe(false);
   });
+
+  it("labels a small browser estimate separately from a failed save and displays its concrete cause", async () => {
+    vi.stubGlobal("navigator", { storage: { estimate: vi.fn(async () => ({ usage: 407, quota: 10 * 1024 * 1024 })) } });
+    markVaultWriteFailure(new Date("2026-11-01T12:01:00.000Z"), new DOMException("Synthetic state quota", "QuotaExceededError"));
+    render(<DataHealthPanel />);
+    await waitFor(() => expect(screen.getByText("Browser-reported origin use: 407 B")).toBeTruthy());
+    expect(screen.getByText("Browser-reported quota: 10.0 MB")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Your latest changes need saving" })).toBeTruthy();
+    expect(screen.getByText(/Latest save failure: QuotaExceededError: Synthetic state quota/)).toBeTruthy();
+    expect(screen.getByText(/Only a verified save confirms/)).toBeTruthy();
+  });
+
+  it("does not turn missing or invalid browser estimates into zero capacity", async () => {
+    vi.stubGlobal("navigator", { storage: { estimate: vi.fn(async () => ({ quota: Number.POSITIVE_INFINITY })) } });
+    render(<DataHealthPanel />);
+    await waitFor(() => expect(screen.getByText("Browser-reported origin use: Unavailable")).toBeTruthy());
+    expect(screen.getByText("Browser-reported quota: Unavailable")).toBeTruthy();
+  });
 });

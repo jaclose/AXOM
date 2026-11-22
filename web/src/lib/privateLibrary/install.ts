@@ -338,22 +338,33 @@ export interface LibraryInstallation {
   setIds: string[];
 }
 export interface LibraryInstallScope { key: string; assertCurrent: () => void }
+/** Only the authenticated academic reader supplies this reconciliation. A
+ * local ZIP still uses the conservative, learner-owned review merge. */
+export interface LibrarySourceUpdate {
+  bank: PreparedBank;
+  apply(issues: readonly PackageIssue[]): Promise<void>;
+  assertReviewUnchanged(): void;
+}
 export interface LibraryInstallOptions {
   /** Full private imports retain originals by default. Hosted question
    * downloads leave original PDFs available through their verified links. */
   cacheOriginals?: boolean;
+  reconcileSource?: (bank: PreparedBank, catalog: PrivateLibraryCatalog,
+    source: PrivateLibraryCatalog["sources"][number], storedReview?: SourceDocument) => Promise<LibrarySourceUpdate | undefined>;
 }
-let installing: { read: LibraryReader; key?: string; cacheOriginals: boolean; promise: Promise<LibraryInstallation> } | undefined;
+let installing: { read: LibraryReader; key?: string; options: LibraryInstallOptions; cacheOriginals: boolean; promise: Promise<LibraryInstallation> } | undefined;
 /** Same canonical import as file review. Each completed source is durable; retry repairs missing media. */
 export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}, scope?: LibraryInstallScope, options: LibraryInstallOptions = {}): Promise<LibraryInstallation> {
   const cacheOriginals = options.cacheOriginals !== false;
-  if (installing) return installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals ? installing.promise
+  if (installing) return installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals
+    && installing.options.reconcileSource === options.reconcileSource ? installing.promise
     : Promise.reject(new Error("Another library download is being saved. Wait for it to finish, then retry."));
-  const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals).finally(() => { installing = undefined; });
-  installing = { read, key: scope?.key, cacheOriginals, promise };
+  const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals, options.reconcileSource).finally(() => { installing = undefined; });
+  installing = { read, key: scope?.key, options, cacheOriginals, promise };
   return promise;
 }
-async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void, cacheOriginals: boolean): Promise<LibraryInstallation> {
+async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void, cacheOriginals: boolean,
+  reconcileSource?: LibraryInstallOptions["reconcileSource"]): Promise<LibraryInstallation> {
   const currentStore = () => {
     assertCurrent();
     // Keep the original action identities: the canonical importer uses them to
@@ -418,9 +429,10 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       const incomingBank = readPreparedBank(JSON.parse(text(await read(source.bankFile))));
       if (incomingBank.pkg.questions.some(question => question.provenance.sourceChecksum !== `sha256:${source.checksum}`))
         throw new Error("The question package does not match its recorded source checksum. Rebuild its source bindings before installing; no questions from this bank were saved.");
-      const bank = storedReview
+      const sourceUpdate = await reconcileSource?.(incomingBank, catalog, source, storedReview);
+      const bank = sourceUpdate?.bank ?? (storedReview
         ? mergeStoredReview(incomingBank, JSON.parse(storedReview.rawText), `sha256:${source.checksum}`)
-        : incomingBank;
+        : incomingBank);
       const declaredAssetFiles = bank.pkg.questions.flatMap(question => question.assets.map(asset => ({ name: asset.filename })));
       const preliminary = assessBank(bank.pkg, bank.issues, declaredAssetFiles);
       if (preliminary.issues.some(issue => issue.severity === "error" && !issue.questionId)) throw new Error("Bank validation failed.");
@@ -443,15 +455,19 @@ async function install(read: LibraryReader, progress: (message: string) => void,
         await flushDocuments();
       }
       report("saving reviewed questions");
+      await sourceUpdate?.apply(assessed.issues);
       const result = await saveBank(bank.pkg, assessed.issues, files, {
         library: currentStore, store: currentStore,
-      }, { ...preparedBankImportOptions(bank), ...(refreshEquivalentSource ? { refreshEquivalentSource: true } : {}) });
+      }, { ...preparedBankImportOptions(bank), ...(sourceUpdate ? { preserveExistingFiling: true } : {}),
+        ...(refreshEquivalentSource ? { refreshEquivalentSource: true } : {}) });
       const durableSections = [
         ...result.sections,
         ...result.incompleteSections.filter(section => section.savedIds.length > 0),
       ];
       const localQuestions = currentStore().questions.filter(question => (
         question.content?.provenance.sourceChecksum?.replace(/^sha256:/, "") === source.checksum
+        && (!sourceUpdate || incomingBank.pkg.questions.some(sourceQuestion => sourceQuestion.id === question.content?.id
+          && sourceQuestion.bankId === question.content.bankId))
         && questionPracticeReadiness(question) === "ready"
       ));
       if (result.status === "failed" && localQuestions.length === 0) throw new Error(result.errors.join(" "));
@@ -486,6 +502,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       const id = `private-review-${source.checksum}`;
       const existingReview = state.documents.find(d => d.id === id);
       if (source.review || bank.reviewedFiling || existingReview) {
+        sourceUpdate?.assertReviewUnchanged();
         installedIds.documentIds.push(id);
         const linkedQuestionSetIds = [...new Set([
           ...(existingReview?.linkedQuestionSetIds ?? []),

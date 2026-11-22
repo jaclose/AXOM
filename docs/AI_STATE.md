@@ -5,113 +5,114 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Academic publication completion · 2026-11-21
+## Academic publication follow-up · 2026-11-22
 
 JD explicitly requested completion of public account access, HOST approvals,
-course trackers, CPR question sets and the wider prepared question library.
-That instruction authorizes the scoped code release and already requested
-content actions. It does not turn unresolved keys, source conflicts or missing
-distribution evidence into reviewed content.
+all submitted course trackers, CPR question sets and the wider prepared question
+library. That instruction authorizes this scoped code release and the requested
+content actions. It does not establish unresolved keys, clinical review or
+distribution evidence that has not actually been checked.
 
-The isolated checkout is `feat/academic-publication-completion-20261121`, started
-from `origin/main` `9f6b381f9a0a15dbc947a4f65a71f8ad1db002fa`.
-A fresh read of the live `www.axom.info/version.json` identifies
-`6cb4b1f5238c024373ba66d01e3b781cb96fff31`, built November 13, as production.
-That single child of main repairs bundled-image imports and immutable-image
-metadata. PR #1005 includes it as the candidate's parent. A successful
-historical main deployment is not proof of the current live revision.
+This isolated branch is `fix/academic-publication-followup-20261122`, based on
+`b9fe78be41b6c470b72a5a9af74e3b1d17641c33`. PR #1005 merged that revision into
+main and production deployed it. The live `www.axom.info/version.json` returned
+that commit and build `b9fe78be41b6-20261122010410532`. All six AXOM Quality CI
+jobs passed the corresponding candidate; the merge tree matches the tested tree.
+Original Mac worktrees, private source folders, exports and recovery snapshots
+remain preserved. Do not reset or clean independent worktrees.
 
-Yesterday's temporary release checkout did not survive. Its reconstructed
-changes require fresh tests; earlier hashes and test totals are historical.
-Original Mac worktrees, source folders, private exports and recovery snapshots
-remain untouched. Git history at the base SHA retains the prior full AI_STATE;
-[CONVERGENCE manifest](release/2026-11-09-CONVERGENCE.md) owns its dated decisions.
+## Completed live content actions
 
-## Current implementation
+All **18 tracker-only courses** were checked and approved through the genuine
+signed-in HOST queue. Production readback confirms 18 shared, current, ready,
+approved collections with exact-revision tracker review receipts. Their 938
+activities retain 102 source-stated week assignments and 836 unstated weeks.
+The queue displays no shared courses waiting for review. No activity week or
+official calendar claim was invented.
 
-[Academic library](features/academic-library.md) owns the publication and reviewer
-contracts. HOST mounts the ordinary submitted-course queue for the verified owner,
-with the queue's separate academic-reviewer check intact. Existing operator totals
-and metadata rows are explicitly labelled Community submissions.
+The source-restored FTCM collection is shared and approved with **35 questions**,
+76 images and two original PDFs. Both PDFs were downloaded through the live UI
+and matched the preserved source bytes. One ordinary tutor answer was submitted;
+choices, correction notes, rationale, printed key crop, image zoom and source-PDF
+page rendering worked. The two superseded text-only Question Set Library entries
+were returned for revision with a replacement reference; they were not deleted.
+The one-question NB Block 2 Community submission was also genuinely checked and
+approved. These are owner-session checks, not a new-learner acceptance claim.
 
-Forward migration `20261122002007_academic_tracker_review.sql` adds an exact-revision
-tracker-only review. Its closed envelope accepts only an empty-source catalog and
-plain-text templates. Stored bytes, manifest, course filing and plan observations
-bind the reviewer confirmation to one current revision. Question/explanation and
-Community approval gates are not replaced. Source uncertainty and unstated weeks
-remain visible.
+CPR2 remains shared and approved with **186 ready questions**, 382 manifest files
+and five original PDFs. The full live download failed during local persistence.
+The later export still contains only the prior 32 Week 3 questions. Do not claim
+all 186 were installed on this device or that a fresh account was tested.
 
-Ordinary question downloads preserve required images and durable import gates
-without automatically caching original PDFs. PDFs are individually available
-through the same authenticated, hash-checked revision reader. Genuine uniform
-source-declared weeks survive source-metadata filing; conflicting learner filing
-blocks a retry repair. Human-reviewed unassigned sources remain unassigned.
+## Follow-up implementation and preservation
 
-[Question content](features/question-content.md) defines supplied byline display,
-source-slide visibility, shared zoom/pan behavior and separate-rationale counts.
-[Persistence](architecture/data-model.md) defines the compressed backup fallback
-and read-only recovery selection that respects a captured newer-fallback marker.
-Neither change guarantees unlimited storage or authorizes deleting learner data.
+[Academic library](features/academic-library.md) owns publication, account access
+and reviewer contracts. Exact-current, immutable source revisions must update
+already installed canonical questions without restoring obsolete explanations or
+leaving newly held source questions graded. Preserve record identity, attempts,
+notes, annotations, bookmarks, learner filing and set membership. Conflicting
+local source edits require an explicit hold. Local ZIP review behavior and all
+source/key/media approval gates remain conservative.
 
-## Live content and limits
+[Persistence](architecture/data-model.md) owns active workspace durability and
+recovery. A full CPR2 download hit IndexedDB quota; its multi-megabyte plaintext
+localStorage fallback also failed. The current in-memory workspace was exported
+through the normal Saved Work route, checksum/ZIP integrity checked and saved
+durably. That export includes 141 readable image attachments and two original
+files; unavailable files remain references. It is not a complete or restore-tested
+backup. Every older backup is preserved. Do not clear storage, sign out, prune
+snapshots or silently discard required media to make a retry succeed.
 
-Fresh production readback confirms the CPR2 original practice collection remains
-shared and approved: 186 ready questions, no held questions, 382 manifest files and
-five original PDFs. This is catalog/storage approval, not a completed new-learner
-acceptance claim. Eighteen tracker-only courses remain shared and pending while
-the new migration and reviewer flow are being validated.
+The integrated follow-up adds bounded compressed active-state fallback and
+explicit source revision reconciliation, with durability, account-isolation and
+rollback tests. Both changes passed independent code review. The actual prior
+77-question NCRS owner fixture retains every ID and learner history while applying
+66 ready / 11 held source status. Reviewers can explicitly export exact stored
+catalog/bank JSON and a full manifest without installing learner content; binary
+sources are omitted and the export creates no approval evidence. Course cards
+distinguish a tracker from a question collection. Full integration checks and
+exact production release verification remain separate gates.
 
-The existing owner's session remains signed in and displays Protected. Yesterday's
-question download was partial after a safety-backup quota failure. Preserve the
-current workspace and every existing backup; do not clear storage, sign out, adopt
-a stale snapshot or prune before a new durable copy succeeds. No real-account
-restore has been performed to validate the new fallback.
+## Content still awaiting publication
 
-The larger source archive is readable on the authorized external drive, but its
-saved decision ledger remains pending. Technical answer-ready counts are not
-clinical review or distribution clearance. Conflicting revisions, ambiguous or
-missing keys and unknown filing remain held. This release does not establish a
-reviewed 20,000-question public corpus.
+Private, preserved candidates now contain NCRS **66 ready / 11 held**, RHPS IEA
+**112 ready / 29 held**, and ER **one clarified question**. They retain original
+source identities and visibly separate AXOM corrections from supplied text.
+The actual application pipeline was exercised; RHPS still needs ordinary browser
+image preflight. Do not publish these as corrected installed copies until the
+source-update path is live and verified. No human-review evidence was fabricated.
+
+A separate RHPS collection remains shared and pending with 393 technically ready
+and 122 held questions. Recovery matched all 23 original PDFs and 58 images to
+the current manifest. Its 24 current JSON files and 450 images remain unrecovered;
+historical 514/524-question variants are not equivalent. Use the explicit stored
+review export to obtain current banks after release. A withdrawn Community
+submission is not proof that the academic collection itself is withdrawn.
+
+The larger external-drive corpus has 17,559 declared question records, with only
+782 technically ready and 16,777 held in the saved inventory. Its decision ledger
+does not establish clinical/distribution clearance. Other candidate inventories
+overlap and must not be summed into a reviewed 20,000-question public library.
+The authorized Mac command service currently times out; no destructive storage or
+device action was taken. Bounded archive recovery has not found the complete v7
+payload. Preserve the source-only evidence and exact-source recovery artifacts.
 
 ## Validation and next action
 
-Fresh focused import, recovery, HOST, PDF and question-view tests have passed, with
-scoped lint and shared typecheck. Independent native/recovery and UI audits found
-no remaining blockers after the explicit PDF-list correction. Full local quality
-passed: 5,523 unit tests, typecheck, lint and production build. Local browser checks
-are blocked: the official download failed and installed Chromium cannot create its
-required socket. CI supplies browser evidence. The Mac command service timed out
-before any isolated checkout or test could run.
+Run the affected source-update, persistence and UI tests, typecheck/lint, build,
+repository gates and the required integration release checks. Preserve original
+test assertions and exact-file/hash verification. Local Chromium previously could
+not create its required socket and the official download failed; use real CI
+browser results rather than bypassing the environment restriction.
 
-Production Supabase is `jofkmfwkidubxcutkwzf`; use its prod connection, not the
-older project. The additive tracker migration was applied through the authorized
-connection at 00:20 UTC November 22 (November 21 in Grenada). Its filename matches
-the service-assigned migration version; its reviewed SQL bytes are unchanged.
-Readback confirms RLS, narrow grants and unchanged question-approval functions.
-No tracker content has been approved yet. Initial PR CI passed native compilation
-and tests, deployment-input privacy checks and one browser shard; preview deployed.
-The follow-up rebuilds the canonical communications artifact (89 release tests
-passed), declares the live image script's scoped globals, and aligns one old
-shared-image test with the preserved oldest-reference behavior. Browser failures
-identified premature PDF catalog reads and an omitted genuine SQL RPC in the
-synthetic Host fixture; both are corrected without relaxing their assertions.
-All three browser shards passed on `7bbe096`. Its only remaining web failure was a
-pre-existing Journal fixture using the legacy shifted study day before 04:00.
-The fixture now uses the saved workspace's active calendar day; all six hydration
-and account-isolation cases pass in UTC and America/Grenada without changing their
-assertions or application behavior. Run fresh CI on that correction.
-Code push, CI, deployment, migration, content approval
-and learner acceptance remain separate facts. No approval or production release
-may be claimed from the focused tests alone.
+Production Supabase is `jofkmfwkidubxcutkwzf`. The additive tracker migration
+`20261122002007_academic_tracker_review.sql` is applied with narrow grants and RLS;
+question/explanation approval contracts remain intact. No unrelated migration was
+applied. Code release, content approval, installed-copy correction and genuine
+new-account acceptance are separate facts. No new-account credentials, provider
+quota or source-review evidence may be invented or bypassed.
 
-Push the reviewed follow-up through the connected GitHub API and verify its exact
-revision. Complete release gates, deploy and perform genuine authenticated reviewer
-and learner journeys. New-account credentials, source rights and provider quota
-cannot be invented or bypassed. Keep all private PDFs and source records outside
-this public repository.
-
-[FORGE #140](https://github.com/jaclose/AXOM/issues/140) remains the current
-cross-workstream release record. Do not merge unrelated held branches.
-[Maintenance registry](operations/repository-audit.md#maintenance-registry) and the
-available coordination board retain ownership boundaries. Preserve independent
-dirty worktrees; never reset, stash or clean them to complete this release.
+[FORGE #140](https://github.com/jaclose/AXOM/issues/140) remains the cross-workstream
+release record. The [maintenance registry](operations/repository-audit.md#maintenance-registry)
+and available coordination board retain ownership boundaries. Keep private PDFs,
+question source records and learner backups outside this public repository.
