@@ -172,4 +172,19 @@ describe("Question Bank hosted course discovery", () => {
     expect(screen.queryByRole("region", { name: "FTM 1 question sets" })).toBeNull();
     expect(screen.getByRole("alert").textContent).toBe("Catalog unavailable");
   });
+  it("gives same-module course aliases distinct accessible preview names without changing their IDs", () => {
+    mocks.courses = [
+      { ...course, id: "course-a", term: "T2", module: "ER", title: "ER" },
+      { ...course, id: "course-b", term: "Term 2", module: "ER", title: "ER" },
+    ];
+    render(<AcademicBankDiscovery />);
+    expect(screen.getAllByRole("heading", { level: 3 }).map(node => node.textContent)).toEqual(["Term 2"]);
+    const buttons = screen.getAllByRole("button", { name: /Preview ER course and weekly question sets/ });
+    expect(buttons.map(button => button.getAttribute("data-course-id"))).toEqual(["course-a", "course-b"]);
+    expect(buttons.map(button => button.getAttribute("aria-label"))).toEqual([
+      "Preview ER course and weekly question sets (T2 · ID course-a)",
+      "Preview ER course and weekly question sets (Term 2 · ID course-b)",
+    ]);
+  });
+
 });

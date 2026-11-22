@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareCourses, coursesByTerm, curriculumModuleRank } from "./catalogOrder";
+import { compareCourses, coursesByTerm, curriculumModuleRank, courseCollisionIdentity } from "./catalogOrder";
 
 describe("academic course order", () => {
   it("orders terms numerically and modules by the curriculum outline, then by name", () => {
@@ -41,4 +41,19 @@ describe("academic course order", () => {
     }
     expect(records.map(({ term }) => term)).toEqual(["T2", "Term 2", "T6", "Boards"]);
   });
+  it("keeps collision identities unique when alias grouping contains duplicate module names", () => {
+    const first = { id: "course-a", term: "T2", module: "ER", title: "ER" };
+    const second = { id: "course-b", term: "Term 2", module: "ER", title: "ER" };
+    for (const input of [[first, second], [second, first]]) {
+      const group = coursesByTerm(input)[0];
+      expect(group.term).toBe("Term 2");
+      expect(group.courses).toHaveLength(2);
+      expect(courseCollisionIdentity(first, group.courses)).toBe("T2 · ID course-a");
+      expect(courseCollisionIdentity(second, group.courses)).toBe("Term 2 · ID course-b");
+    }
+    expect(courseCollisionIdentity(first, [first])).toBeNull();
+    expect(first.term).toBe("T2");
+    expect(second.term).toBe("Term 2");
+  });
+
 });
