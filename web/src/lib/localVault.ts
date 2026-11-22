@@ -643,17 +643,58 @@ async function writeVault(
 // IndexedDB owns the large serialized workspace. localStorage keeps only the
 // tiny active-profile pointer and device preferences; remove the mirrored
 // state, and the marker that called it newer, after a confirmed vault write.
-function clearFallbackCopy(fallbackStore: Storage | null, name: string, userId: string): void {
-  // These optional mirrors must not turn a confirmed IndexedDB write into a
-  // failed save when localStorage is full or unavailable.
+type FallbackCleanupObservation = {
+  value: string | null;
+  marker: string | null;
+  activeUser: string | null;
+  scopedValue: string | null;
+};
+
+/** Capture the exact optional mirror before starting an asynchronous IDB write.
+ * A different tab may acknowledge a NEW fallback while this write is pending. */
+function observeFallbackForCleanup(
+  fallbackStore: Storage | null,
+  name: string,
+  userId: string,
+): FallbackCleanupObservation | null {
   try {
-    fallbackStore?.removeItem(name);
-    fallbackStore?.removeItem(fallbackMarkerKey(name));
+    if (!fallbackStore) return null;
+    return {
+      value: fallbackStore.getItem(name),
+      marker: fallbackStore.getItem(fallbackMarkerKey(name)),
+      activeUser: fallbackStore.getItem(activeUserKey(name)),
+      scopedValue: userId ? fallbackStore.getItem(scopedStateKey(name, userId)) : null,
+    };
+  } catch {
+    // No safe observation means no permission to delete a recovery copy.
+    return null;
+  }
+}
+
+function clearFallbackCopy(
+  fallbackStore: Storage | null,
+  name: string,
+  userId: string,
+  observed: FallbackCleanupObservation | null,
+): void {
+  // Only the precise mirror seen BEFORE this write can be retired. Even a
+  // successful IDB commit does not incorporate a different tab's fallback.
+  // Optional cleanup must never turn a confirmed IDB save into a failure.
+  try {
+    if (!fallbackStore || !observed) return;
+    if (
+      fallbackStore.getItem(name) !== observed.value
+      || fallbackStore.getItem(fallbackMarkerKey(name)) !== observed.marker
+      || fallbackStore.getItem(activeUserKey(name)) !== observed.activeUser
+      || (userId && fallbackStore.getItem(scopedStateKey(name, userId)) !== observed.scopedValue)
+    ) return;
+    fallbackStore.removeItem(name);
+    fallbackStore.removeItem(fallbackMarkerKey(name));
     if (userId) {
-      fallbackStore?.setItem(activeUserKey(name), userId);
-      fallbackStore?.removeItem(scopedStateKey(name, userId));
+      fallbackStore.setItem(activeUserKey(name), userId);
+      fallbackStore.removeItem(scopedStateKey(name, userId));
     }
-  } catch { /* IndexedDB already holds the durable workspace. */ }
+  } catch { /* The confirmed IndexedDB snapshot remains durable. */ }
 }
 
 async function readVaultSnapshot(name: string): Promise<string | null> {
@@ -723,12 +764,15 @@ const vaultStorage: StateStorage = {
     const newer = newerFallbackCopy(fallbackStore, name);
     if (newer !== null) {
       const userId = persistedUserId(newer.value);
+      const cleanupObservation = observeFallbackForCleanup(fallbackStore, name, userId);
+      const cleanupAllowed = cleanupObservation?.value === newer.value
+        && cleanupObservation.marker === newer.marker;
       try {
         // The marker records the IndexedDB snapshot on which this fallback was
         // based. Comparing that base and the fallback itself in one transaction
         // prevents a late promotion from replacing a newer tab's commit.
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
-        clearFallbackCopy(fallbackStore, name, userId);
+        clearFallbackCopy(fallbackStore, name, userId, cleanupAllowed ? cleanupObservation : null);
       } catch (promotionError) {
         if (isVaultConflictError(promotionError) && newer.baseFingerprint !== undefined) {
           try {
@@ -834,8 +878,15 @@ const vaultStorage: StateStorage = {
     let fallbackBaseFingerprint: string | null | undefined;
     try {
       const expected = workspaceExpectation(name);
+      const cleanupObservation = observeFallbackForCleanup(fallbackStore, name, userId);
       const currentFallback = newerFallbackCopy(fallbackStore, name);
       assertFallbackStillCurrent(name, currentFallback, expected);
+      // The cleanup observation must describe the same fallback used to
+      // authorize this write, not one acknowledged after the observation.
+      const cleanupAllowed = currentFallback === null
+        ? cleanupObservation?.marker === null
+        : cleanupObservation?.marker === currentFallback.marker
+          && cleanupObservation?.value === currentFallback.value;
       fallbackBaseFingerprint = currentFallback !== null
         ? currentFallback.baseFingerprint
         : observedVaultFingerprint(name);
@@ -856,7 +907,7 @@ const vaultStorage: StateStorage = {
         ? fallbackExpectation(currentFallback)
         : expected;
       await writeVault(name, value, userId, vaultExpectation);
-      clearFallbackCopy(fallbackStore, name, userId);
+      clearFallbackCopy(fallbackStore, name, userId, cleanupAllowed ? cleanupObservation : null);
       rememberVaultSnapshot(name, value);
       if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
     } catch (indexedDbError) {
@@ -956,9 +1007,13 @@ const vaultStorage: StateStorage = {
 async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
+  const fallbackStore = localFallback();
+  const cleanupObservation = observeFallbackForCleanup(fallbackStore, name, userId);
   try {
     await writeVault(name, value, userId);
-    clearFallbackCopy(localFallback(), name, userId);
+    // Explicit restore selects the replacement snapshot, but an unrelated
+    // in-flight tab's newly acknowledged fallback must remain recoverable.
+    clearFallbackCopy(fallbackStore, name, userId, cleanupObservation);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
     if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");

@@ -7,6 +7,7 @@ import {
   getVaultWriteCheckpoint,
   flushLocalVaultWrites,
   localVaultStorage,
+  replaceLocalVaultItem,
   resetLocalVaultRuntimeForTests,
   VAULT_CONFLICT_MESSAGE,
   writeLocalFallback,
@@ -23,6 +24,16 @@ const storage = {
   removeItem: (key: string) => { values.delete(key); },
   setItem: (key: string, value: string) => { values.set(key, String(value)); },
 };
+
+/** Reproduce the marker a second tab writes when IndexedDB is unavailable. */
+function testFallbackFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16)}`;
+}
 
 beforeEach(async () => {
   values.clear();
@@ -123,6 +134,141 @@ describe("IndexedDB-first local vault", () => {
 
     expect(hydrated).toBe(snapshot("newer tab edit"));
     expect(saved).toBe(snapshot("newer tab edit"));
+  });
+
+  it("does not erase a fallback acknowledged by another tab while an IndexedDB save is committing", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    const base = snapshot("shared base");
+    const winner = snapshot("online tab edit");
+    const offline = snapshot("offline tab unique edit");
+    await localVaultStorage.setItem(key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+
+    const db = await openCurrentVault();
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (storedKey === key && value === winner && !injected) {
+        injected = true;
+        // The other tab's acknowledged localStorage fallback lands after this
+        // writer's preflight but before its IndexedDB transaction completes.
+        storage.setItem(markerKey, JSON.stringify({
+          version: 1, valueFingerprint: testFallbackFingerprint(offline),
+          baseFingerprint: testFallbackFingerprint(base),
+        }));
+        storage.setItem(key, offline);
+        storage.setItem(scopedKey, offline);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, winner);
+      await flushLocalVaultWrites();
+      expect(injected).toBe(true);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      expect(await getDirect(db, key)).toBe(winner);
+      expect(storage.getItem(key)).toBe(offline);
+      expect(storage.getItem(markerKey)).not.toBeNull();
+      expect(storage.getItem(scopedKey)).toBe(offline);
+
+      vi.stubGlobal("indexedDB", undefined);
+      expect(await localVaultStorage.getItem(key)).toBe(offline);
+    } finally {
+      put.mockRestore();
+      db.close();
+    }
+  });
+
+  it("keeps another tab's fallback during an explicitly approved restore commit", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    const base = snapshot("prior workspace");
+    const restored = snapshot("selected verified restore");
+    const competing = snapshot("other tab's offline work");
+    await localVaultStorage.setItem(key, base);
+    const db = await openCurrentVault();
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (storedKey === key && value === restored && !injected) {
+        injected = true;
+        storage.setItem(markerKey, JSON.stringify({
+          version: 1, valueFingerprint: testFallbackFingerprint(competing),
+          baseFingerprint: testFallbackFingerprint(base),
+        }));
+        storage.setItem(key, competing);
+        storage.setItem(scopedKey, competing);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      await replaceLocalVaultItem(key, restored);
+      await flushLocalVaultWrites();
+      expect(injected).toBe(true);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      expect(await getDirect(db, key)).toBe(restored);
+      expect(storage.getItem(key)).toBe(competing);
+      expect(storage.getItem(markerKey)).not.toBeNull();
+      expect(storage.getItem(scopedKey)).toBe(competing);
+      vi.stubGlobal("indexedDB", undefined);
+      expect(await localVaultStorage.getItem(key)).toBe(competing);
+    } finally {
+      put.mockRestore();
+      db.close();
+    }
+  });
+
+  it("does not erase a newer fallback during an older fallback's successful promotion", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    const base = snapshot("shared base");
+    const originalFallback = snapshot("first offline edit");
+    const laterFallback = snapshot("second offline edit");
+    await localVaultStorage.setItem(key, base);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, originalFallback);
+    expect(storage.getItem(key)).toBe(originalFallback);
+    const originalMarker = JSON.parse(storage.getItem(markerKey)!) as {
+      version: number; valueFingerprint: string; baseFingerprint: string | null;
+    };
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    const db = await openCurrentVault();
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (storedKey === key && value === originalFallback && !injected) {
+        injected = true;
+        storage.setItem(markerKey, JSON.stringify({
+          ...originalMarker, valueFingerprint: testFallbackFingerprint(laterFallback),
+        }));
+        storage.setItem(key, laterFallback);
+        storage.setItem(scopedKey, laterFallback);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    try {
+      await localVaultStorage.getItem(key);
+      expect(injected).toBe(true);
+      expect(await getDirect(db, key)).toBe(originalFallback);
+      expect(storage.getItem(key)).toBe(laterFallback);
+      expect(storage.getItem(markerKey)).not.toBeNull();
+      expect(storage.getItem(scopedKey)).toBe(laterFallback);
+      vi.stubGlobal("indexedDB", undefined);
+      expect(await localVaultStorage.getItem(key)).toBe(laterFallback);
+    } finally {
+      put.mockRestore();
+      db.close();
+    }
   });
 
   it("preserves both byte-distinct saved copies when a fallback promotion loses a two-tab vault race", async () => {
