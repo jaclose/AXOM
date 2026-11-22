@@ -392,10 +392,25 @@ export function installPrivateLibrary(read: LibraryReader, progress: (message: s
   const cacheOriginals = options.cacheOriginals !== false;
   // Do not join an A-origin import after B has become the active account.
   const attachmentScope = getQuestionAttachmentScope();
-  if (installing) return isQuestionAttachmentScopeCurrent(installing.attachmentScope)
-    && installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals
-    && installing.options.reconcileSource === options.reconcileSource ? installing.promise
-    : Promise.reject(new Error("Another library download is being saved. Wait for it to finish, then retry."));
+  if (installing) {
+    const matching = isQuestionAttachmentScopeCurrent(installing.attachmentScope)
+      && installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals
+      && installing.options.reconcileSource === options.reconcileSource;
+    if (!matching) return Promise.reject(new Error("Another library download is being saved. Wait for it to finish, then retry."));
+    // Work is shared only within one generation. Its result is not authorization
+    // for another caller: each caller may become stale while the first is saving.
+    const assertJoinedCallerCurrent = () => {
+      scope?.assertCurrent();
+      if (!isQuestionAttachmentScopeCurrent(attachmentScope))
+        throw new Error("The account changed during library installation. Reopen the library and retry.");
+    };
+    try { assertJoinedCallerCurrent(); }
+    catch (cause) { return Promise.reject(cause); }
+    return installing.promise.then(result => {
+      assertJoinedCallerCurrent();
+      return result;
+    });
+  }
   // Capture before any awaited catalog/read/backups: an A import must never
   // resolve a new B generation from a lower-level binary storage API.
   const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals, options.reconcileSource, attachmentScope).finally(() => { installing = undefined; });

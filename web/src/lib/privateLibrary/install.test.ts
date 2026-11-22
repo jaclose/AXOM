@@ -558,6 +558,73 @@ describe("private library failure diagnostics", () => {
     expect(getQuestionAttachmentScope().accountId).toBe("B");
   });
 
+  it("rejects a revoked same-generation join without cancelling the original caller", async () => {
+    const b = await bundle();
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    let templateReads = 0;
+    const read = async (path: string) => {
+      if (path === "templates/test.txt") { templateReads += 1; await waiting; }
+      return b.read(path);
+    };
+    setQuestionAttachmentAccount("A");
+    const originalScope = getQuestionAttachmentScope();
+    const original = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: () => {
+      if (!isQuestionAttachmentScopeCurrent(originalScope)) throw new Error("Original account changed");
+    } });
+    let joinedCurrent = true;
+    const joinedGuard = vi.fn(() => {
+      if (!joinedCurrent) throw new Error("Joined caller was revoked");
+    });
+    const joined = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: joinedGuard });
+    joinedCurrent = false;
+    release();
+    await expect(original).resolves.toMatchObject({ status: "complete" });
+    await expect(joined).rejects.toThrow("Joined caller was revoked");
+    expect(joinedGuard).toHaveBeenCalled();
+    expect(templateReads).toBe(1);
+  });
+
+  it("rejects an already-stale same-generation joining caller without failing the active installation", async () => {
+    const b = await bundle();
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const read = async (path: string) => {
+      if (path === "templates/test.txt") await waiting;
+      return b.read(path);
+    };
+    setQuestionAttachmentAccount("A");
+    const original = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: () => {} });
+    const staleGuard = vi.fn(() => { throw new Error("Joined download no longer selected"); });
+    const joined = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: staleGuard });
+    const rejection = expect(joined).rejects.toThrow("Joined download no longer selected");
+    release();
+    await rejection;
+    await expect(original).resolves.toMatchObject({ status: "complete" });
+    expect(staleGuard).toHaveBeenCalled();
+  });
+
+  it("keeps valid same-generation joined callers idempotent", async () => {
+    const b = await bundle();
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    let templateReads = 0;
+    const read = async (path: string) => {
+      if (path === "templates/test.txt") { templateReads += 1; await waiting; }
+      return b.read(path);
+    };
+    setQuestionAttachmentAccount("A");
+    const original = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: () => {} });
+    const guard = vi.fn(() => {});
+    const joined = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: guard });
+    release();
+    const [a, bResult] = await Promise.all([original, joined]);
+    expect(a).toMatchObject({ status: "complete" });
+    expect(bResult).toEqual(a);
+    expect(templateReads).toBe(1);
+    expect(guard).toHaveBeenCalled();
+  });
+
   it("never joins an in-flight import from a different account generation even with the same reader and key", async () => {
     const b = await bundle();
     let release!: () => void;
