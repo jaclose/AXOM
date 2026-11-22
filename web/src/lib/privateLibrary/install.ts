@@ -20,6 +20,22 @@ import type { SourceDocument } from "../library";
 
 export type LibraryReader = (path: string) => Promise<Uint8Array>;
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+function installationFailureReason(cause: unknown, fallback: string): string {
+  try {
+    const message = cause instanceof Error ? cause.message : undefined;
+    if (typeof message === "string" && message.trim()) return message;
+    // Browser storage errors may have an empty message or come from another
+    // realm. Keep a bounded error name, never stringify arbitrary thrown data.
+    const name = cause && typeof cause === "object" && "name" in cause ? cause.name : undefined;
+    return typeof name === "string" && name.length <= 64 && name !== "Error"
+      && /^[A-Za-z][A-Za-z0-9]*(?:Error|Exception)$/.test(name)
+      ? `${fallback} Error type: ${name}.`
+      : fallback;
+  } catch {
+    // A thrown value can itself have throwing accessors or proxy traps.
+    return fallback;
+  }
+}
 export function safeLibraryPath(path: string): string {
   if (typeof path !== "string" || !path || path.startsWith("/") || path.includes("\\") || path.includes("\0") || path.split("/").some(part => part === ".." || part === "." || !part)) throw new Error("Unsafe library path.");
   return path;
@@ -254,7 +270,7 @@ export async function bankFiles(
   partition: BankFilePartition = {},
 ): Promise<File[]> {
   const files: File[] = [];
-  const pendingRecords: Array<{ key: string; record: QuestionAttachmentBlobRecord }> = [];
+  const pendingRecords: Array<{ key: string; filename: string; record: QuestionAttachmentBlobRecord }> = [];
   // Several question assets can refer to the *same* source-page file while
   // having distinct question-local asset IDs. The image matcher intentionally
   // refuses ambiguous duplicate filenames. Supply each verified file once,
@@ -291,7 +307,7 @@ export async function bankFiles(
       try {
         image = await assertInstallableAcademicImageBytes(bytes, asset.mimeType);
       } catch (cause) {
-        const reason = cause instanceof Error ? cause.message : "The image could not be verified.";
+        const reason = installationFailureReason(cause, "The image could not be verified.");
         throw new Error(`Image integrity check failed: ${asset.filename}. ${reason}`, { cause });
       }
       if (await sha256(bytes) !== asset.checksum
@@ -306,10 +322,10 @@ export async function bankFiles(
         questionId: asset.questionId,
         updatedAt: new Date().toISOString(),
       };
-      if (read && bankFile) pendingRecords.push({ key, record });
+      if (read && bankFile) pendingRecords.push({ key, filename: asset.filename, record });
       files.push(new File([record.blob], asset.filename, { type: record.mimeType }));
     } catch (cause) {
-      const reason = cause instanceof Error ? cause.message : "The image could not be verified.";
+      const reason = installationFailureReason(cause, "The image could not be verified.");
       const failure = reason.includes(asset.filename)
         ? cause instanceof Error ? cause : new Error(reason)
         : new Error(`Image integrity check failed: ${asset.filename}. ${reason}`, { cause });
@@ -325,7 +341,14 @@ export async function bankFiles(
   // Validate every referenced file before the first IndexedDB write so a
   // corrupt later sibling cannot leave a partially persisted image set.
   assertCurrent();
-  for (const pending of pendingRecords) await putQuestionAttachmentBlob(pending.key, pending.record);
+  for (const [index, pending] of pendingRecords.entries()) {
+    try {
+      await putQuestionAttachmentBlob(pending.key, pending.record);
+    } catch (cause) {
+      const reason = installationFailureReason(cause, "Image storage failed without an error message.");
+      throw new Error(`Could not save figure ${index + 1} of ${pendingRecords.length}: ${pending.filename}. ${reason}`, { cause });
+    }
+  }
   return files;
 }
 
@@ -405,7 +428,11 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   const installed = catalog.sources.map(s => ({ ...s }));
   for (const [index, source] of installed.entries()) {
     if (!source.bankFile && !(cacheOriginals && source.originalFile)) continue;
-    const report = (phase: string) => progress(`Preparing your library · ${index + 1} of ${installed.length} sources · ${phase}`);
+    let phase = "opening source";
+    const report = (nextPhase: string) => {
+      phase = nextPhase;
+      progress(`Preparing your library · ${index + 1} of ${installed.length} sources · ${phase}`);
+    };
     report(cacheOriginals ? "checking original" : "opening question source");
     try {
       if (cacheOriginals && source.originalFile) {
@@ -416,8 +443,10 @@ async function install(read: LibraryReader, progress: (message: string) => void,
           checksum: `sha256:${source.checksum}`, tags: [source.module ?? "Unfiled"], linkedQuestionSetIds: [], libraryOnly: true };
         installedIds.documentIds.push(doc.id);
         if (!await readSourceOriginal(doc.id, doc.checksum)) {
+          report("reading original file");
           const bytes = await read(source.originalFile);
           assertCurrent();
+          report("saving original file");
           await saveSourceOriginal(doc, new Blob([bytes as BlobPart]));
           assertCurrent();
           if (!existing) pendingDocuments.set(doc.id, { ...doc, sizeBytes: bytes.length });
@@ -429,6 +458,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       const incomingBank = readPreparedBank(JSON.parse(text(await read(source.bankFile))));
       if (incomingBank.pkg.questions.some(question => question.provenance.sourceChecksum !== `sha256:${source.checksum}`))
         throw new Error("The question package does not match its recorded source checksum. Rebuild its source bindings before installing; no questions from this bank were saved.");
+      report("checking saved source review");
       const sourceUpdate = await reconcileSource?.(incomingBank, catalog, source, storedReview);
       const bank = sourceUpdate?.bank ?? (storedReview
         ? mergeStoredReview(incomingBank, JSON.parse(storedReview.rawText), `sha256:${source.checksum}`)
@@ -440,7 +470,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
         verdict.readiness === "ready" ? [questionId] : []
       )));
       const heldMediaIssues: PackageIssue[] = [];
-      report("verifying figure assets");
+      report("preparing figure assets");
       const files = await bankFiles(bank, read, source.bankFile, assertCurrent, {
         requiredQuestionIds: readyQuestionIds,
         onHeldMediaIssue: issue => heldMediaIssues.push(issue),
@@ -528,7 +558,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       installedIds.questionIds.push(...retained.map(question => question.id));
       installedIds.setIds.push(...retained.flatMap(question => question.setId ? [question.setId] : []));
       installedIds.documentIds.push(...retained.flatMap(question => question.sourceDocumentId ? [question.sourceDocumentId] : []));
-      const failure = cause instanceof Error ? cause.message : "Installation failed.";
+      const failure = `Source ${index + 1} of ${installed.length}, ${phase}: ${installationFailureReason(cause, "Installation failed without an error message.")}`;
       source.reason = retained.length
         ? `${failure} ${retained.length} previously saved answer-ready question${retained.length === 1 ? " remains" : "s remain"} on this device.`
         : failure;
