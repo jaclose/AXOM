@@ -945,6 +945,15 @@ const vaultStorage: StateStorage = {
                 if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
                 throw promotionError;
               }
+              // An equal vault record is not proof that a second tab has not
+              // acknowledged a different fallback during the winner readback.
+              if (observesWorkspace(name) && (
+                fallbackStore?.getItem(fallbackMarkerKey(name)) !== newer.marker
+                || fallbackStore?.getItem(name) !== newer.value
+              )) {
+                conflictedWorkspaceKeys.add(name);
+                throw promotionError;
+              }
               // Idempotent promotion is safe: the vault already holds these
               // exact bytes. Legacy bare markers also use this equality path.
               if (newer.baseFingerprint !== undefined && !observesWorkspace(name)) {
