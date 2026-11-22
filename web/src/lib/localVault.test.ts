@@ -843,7 +843,7 @@ describe("a save that could not reach IndexedDB", () => {
     }
   });
 
-  it("fails closed when an empty-vault migration loses its CAS and the winning read becomes unavailable", async () => {
+  it("fails closed when stale empty reads lose CAS and the winning record cannot be read", async () => {
     const key = STORAGE_KEYS.persistedState;
     const snapshot = (label: string) => JSON.stringify({
       state: { profile: { userId: "jd" }, label }, version: 34,
@@ -851,53 +851,43 @@ describe("a save that could not reach IndexedDB", () => {
     const stale = snapshot("old unmarked local mirror");
     const winner = snapshot("peer's newly committed workspace");
     const markerKey = `${key}:fallback-newer`;
-    const peer = await openCurrentVault();
+    const shadowName = `${STORAGE_KEYS.vaultDb}-stale-read-race`;
+
+    // Seed two real fake-IDB databases. The shadow provides the stale empty
+    // observations that another tab saw before Z committed. The real vault
+    // contains Z when the migration CAS transaction executes.
+    const openWithStore = async (name: string): Promise<IDBDatabase> => new Promise((resolve, reject) => {
+      const request = fakeIndexedDb.open(name, DB_VERSION);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains("state")) request.result.createObjectStore("state");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const real = await openWithStore(STORAGE_KEYS.vaultDb);
+    const shadow = await openWithStore(shadowName);
+    await putDirect(real, key, winner);
     storage.setItem(key, stale);
     expect(storage.getItem(markerKey)).toBeNull();
     resetLocalVaultRuntimeForTests();
 
     const originalOpen = fakeIndexedDb.open.bind(fakeIndexedDb);
     let opens = 0;
-    let peerCommit: Promise<void> | null = null;
-    const storageGet = vi.spyOn(storage, "getItem").mockImplementation((recordKey) => {
-      if (recordKey === key && peerCommit === null) {
-        // The sole unmarked mirror read occurs after the empty-vault reads
-        // completed, and just before the migration tries its CAS.
-        peerCommit = putDirect(peer, key, winner);
-      }
-      return values.get(recordKey) ?? null;
-    });
     vi.stubGlobal("indexedDB", {
       open: (name: string, version?: number) => {
         opens += 1;
+        // Simulate two successful but stale empty reads, then a real CAS
+        // against Z. The subsequent authoritative reread is unavailable.
         if (opens >= 4) throw new Error("IndexedDB winner readback is unavailable");
-        const request = version === undefined ? originalOpen(name) : originalOpen(name, version);
-        if (opens === 3) {
-          // Hold delivery of the migration connection until the competing
-          // transaction commits, regardless of fake-IDB event scheduling.
-          let onSuccess: ((event: Event) => void) | null = null;
-          Object.defineProperty(request, "onsuccess", {
-            configurable: true,
-            get: () => onSuccess,
-            set: (handler: ((event: Event) => void) | null) => {
-              onSuccess = handler === null ? null : (event: Event) => {
-                void Promise.resolve(peerCommit).then(() => handler.call(request, event));
-              };
-            },
-          });
-        }
-        return request;
+        const target = opens <= 2 ? shadowName : name;
+        return version === undefined ? originalOpen(target) : originalOpen(target, version);
       },
     });
 
     try {
-      // On the old code, failed winner readback was swallowed and the stale
-      // mirror silently hydrated as if its migration were successful.
       await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
-      expect(peerCommit).not.toBeNull();
-      await peerCommit;
       expect(opens).toBeGreaterThanOrEqual(4);
-      expect(await getDirect(peer, key)).toBe(winner);
+      expect(await getDirect(real, key)).toBe(winner);
       expect(storage.getItem(key)).toBe(stale);
       expect(storage.getItem(markerKey)).toBeNull();
 
@@ -905,13 +895,13 @@ describe("a save that could not reach IndexedDB", () => {
       await localVaultStorage.setItem(key, snapshot("blind follow-up overwrite"));
       await flushLocalVaultWrites();
       expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
-      expect(await getDirect(peer, key)).toBe(winner);
+      expect(await getDirect(real, key)).toBe(winner);
       expect(storage.getItem(key)).toBe(stale);
     } finally {
-      storageGet.mockRestore();
       vi.stubGlobal("indexedDB", fakeIndexedDb);
-      if (peerCommit) await peerCommit;
-      peer.close();
+      real.close();
+      shadow.close();
+      await deleteDatabase(shadowName);
     }
   });
 
