@@ -455,11 +455,19 @@ async function retiredPackedReceipt(
     if (parsed.version === 1) {
       if (parsed.raw !== copy.raw) return null;
     } else if (parsed.version === 2) {
-      if (typeof parsed.rawSha256 !== "string" || !/^[a-f0-9]{64}$/.test(parsed.rawSha256)
-        || await sha256(new TextEncoder().encode(copy.raw)) !== parsed.rawSha256) return null;
+      if (typeof parsed.rawSha256 !== "string" || !/^[a-f0-9]{64}$/.test(parsed.rawSha256)) return null;
+      // A transient digest failure cannot prove that this retirement receipt
+      // is absent. Re-promoting the retained copy could undo a restore.
+      let actualDigest: string;
+      try { actualDigest = await sha256(new TextEncoder().encode(copy.raw)); }
+      catch { throw new VaultConflictError(); }
+      if (actualDigest !== parsed.rawSha256) return null;
     } else return null;
     return parsed as RetiredPackedReceipt;
-  } catch { return null; }
+  } catch (error) {
+    if (isVaultConflictError(error)) throw error;
+    return null;
+  }
 }
 
 function verifiedRetiredPackedValue(receipt: RetiredPackedReceipt, value: string | null | undefined): value is string {
@@ -1003,7 +1011,12 @@ const vaultStorage: StateStorage = {
     }
     if (packed) {
       assertPackedLegacyCurrent(fallbackStore, packed);
-      const retired = await retiredPackedReceipt(fallbackStore, name, packed);
+      let retired: RetiredPackedReceipt | null;
+      try { retired = await retiredPackedReceipt(fallbackStore, name, packed); }
+      catch (error) {
+        if (isVaultConflictError(error) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        throw error;
+      }
       if (retired) {
         let current: string | null = null;
         try { current = await readVaultSnapshot(name); } catch { /* preserve both copies */ }

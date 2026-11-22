@@ -158,6 +158,56 @@ describe("verified separate compressed workspace fallback", () => {
     },
   );
 
+  it("fails closed if v2 receipt hashing fails after a verified packed decode", async () => {
+    const fixture = await quotaFixture();
+    const packedY = snapshot("offline packed Y with distinct notes", true);
+    await localVaultStorage.setItem(key, packedY);
+    const preservedPacked = values.get(packedKey)!;
+    fixture.blockVault.mockRestore();
+
+    const restoredX = snapshot("explicit restored X with distinct notes");
+    await replaceLocalVaultItem(key, restoredX);
+    const receiptKey = `${key}:packed-retired`;
+    const originalReceipt = values.get(receiptKey)!;
+    expect(JSON.parse(originalReceipt)).toMatchObject({ version: 2 });
+    resetLocalVaultRuntimeForTests();
+
+    // Packed Y must decode successfully. Only its second SHA-256, used
+    // to verify the separate retirement receipt, is transiently unavailable.
+    const originalSha256 = compression.sha256;
+    let receiptFailures = 0;
+    const hashSpy = vi.spyOn(compression, "sha256").mockImplementation(async bytes => {
+      if (new TextDecoder().decode(bytes) === preservedPacked) {
+        receiptFailures += 1;
+        throw new Error("Synthetic v2 receipt digest interruption");
+      }
+      return originalSha256(bytes);
+    });
+    try {
+      await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      // An immutable physical backup selector must also refuse uncertain data.
+      await expect(resolveWorkspaceSnapshotRecord(
+        { [key]: restoredX }, Object.fromEntries(values), key,
+      )).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(receiptFailures).toBe(2);
+      expect(values.get(packedKey)).toBe(preservedPacked);
+      expect(values.get(receiptKey)).toBe(originalReceipt);
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("blind write after uncertain receipt"));
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(values.get(packedKey)).toBe(preservedPacked);
+      expect(values.get(receiptKey)).toBe(originalReceipt);
+    } finally {
+      hashSpy.mockRestore();
+    }
+    // When verification is available, fresh hydration selects the restored
+    // IndexedDB data rather than an older, still-preserved packed copy.
+    resetLocalVaultRuntimeForTests();
+    await expect(localVaultStorage.getItem(key)).resolves.toBe(restoredX);
+    expect(values.get(packedKey)).toBe(preservedPacked);
+  });
+
   it("reads existing version-1 full-raw receipts without rewriting or discarding historical packed bytes", async () => {
     const fixture = await quotaFixture();
     await localVaultStorage.setItem(key, snapshot("legacy version-one packed", true));
