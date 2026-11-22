@@ -1236,23 +1236,35 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
   try {
     const fallback = localFallback();
     const previousPacked = observesWorkspace(name) ? fallback?.getItem(packedFallbackKey(name)) ?? null : null;
+    const previousPlain = observesWorkspace(name) ? newerFallbackCopy(fallback, name) : null;
+    const previousMarker = observesWorkspace(name) ? fallback?.getItem(fallbackMarkerKey(name)) ?? null : null;
+    const previousPlainValue = observesWorkspace(name) ? fallback?.getItem(name) ?? null : null;
     await writeVault(name, value, userId);
     // Explicit verified restore already authorizes replacing the live workspace;
     // retire only the fallback captured before that write. A concurrent save
     // remains available and makes this replacement fail explicitly.
     retirePackedFallback(fallback, name, previousPacked);
     if (observesWorkspace(name)) {
-      // A peer can acknowledge a plain marked recovery copy while writeVault
-      // is pending. localStorage has no atomic multi-key compare-and-delete:
-      // even a prewrite marker comparison would not make removing its value,
-      // marker and scoped mirror safe. Keep all plain workspace recovery bytes.
-      // A marked copy requires explicit reconciliation, not a success receipt
-      // for a restore that may have overridden independent edits.
-      if (fallback?.getItem(fallbackMarkerKey(name)) !== null && fallback?.getItem(fallbackMarkerKey(name)) !== undefined) {
+      // A peer can acknowledge a new marked fallback while writeVault is
+      // pending. Never retire a different marker, value or malformed record
+      // merely because this explicit restore reached IndexedDB.
+      const markerNow = fallback?.getItem(fallbackMarkerKey(name)) ?? null;
+      const valueNow = fallback?.getItem(name) ?? null;
+      if (markerNow !== previousMarker || valueNow !== previousPlainValue) {
         throw new VaultConflictError();
       }
-      if (userId) {
-        try { fallback?.setItem(activeUserKey(name), userId); } catch { /* The vault write is durable. */ }
+      if (markerNow !== null) {
+        if (previousPlain?.marker !== markerNow || previousPlain.value !== valueNow) {
+          throw new VaultConflictError();
+        }
+        // The caller authorized replacing its pre-existing known fallback.
+        // This check avoids the demonstrated in-flight peer write, but
+        // localStorage has no atomic multi-key compare-and-delete; a peer
+        // racing individual removes still requires separate reconciliation.
+        clearFallbackCopyIfUnchanged(fallback, name, previousPlain, userId);
+      } else if (userId) {
+        // Do not remove unmarked legacy mirrors during restore.
+        try { fallback?.setItem(activeUserKey(name), userId); } catch { /* IndexedDB is durable. */ }
       }
     } else {
       clearFallbackCopy(fallback, name, userId);
