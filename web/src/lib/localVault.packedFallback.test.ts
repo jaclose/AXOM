@@ -233,19 +233,29 @@ describe("verified separate compressed workspace fallback", () => {
     // Simulate a peer tab acknowledging Z after A's successful IDB promotion,
     // exactly when A retires the captured packed key.
     let injected = false;
+    const acknowledgePlainPeer = () => {
+      if (injected) return;
+      injected = true;
+      values.set(key, peerZ);
+      values.set(markerKey, peerMarker!);
+      values.set(scopedKey, peerZ);
+    };
+    // Exercise both the old destructive retirement (RED) and the new
+    // non-destructive receipt write. A packed-key remove must never erase the
+    // plain peer, and a receipt write must not silently select stale Y.
     const remove = vi.spyOn(storage, "removeItem").mockImplementation(name => {
       values.delete(name);
-      if (name === packedKey && !injected) {
-        injected = true;
-        values.set(key, peerZ);
-        values.set(markerKey, peerMarker!);
-        values.set(scopedKey, peerZ);
-      }
+      if (name === packedKey) acknowledgePlainPeer();
+    });
+    const set = vi.spyOn(storage, "setItem").mockImplementation((name, value) => {
+      if (name === `${key}:packed-retired`) acknowledgePlainPeer();
+      values.set(name, String(value));
     });
     try {
       await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
     } finally {
       remove.mockRestore();
+      set.mockRestore();
     }
 
     expect(injected).toBe(true);
