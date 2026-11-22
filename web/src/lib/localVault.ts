@@ -948,11 +948,24 @@ const vaultStorage: StateStorage = {
     }
     if (packed) {
       assertPackedLegacyCurrent(fallbackStore, packed);
+      // The pre-promotion plain marker is part of the captured packed chain.
+      // A separately acknowledged marker arriving later must not be retired
+      // as if it were the old, already-committed recovery copy.
+      const plainBeforePromotion = newerFallbackCopy(fallbackStore, name);
       try {
         await writeVault(name, packed.value, packed.userId, packedExpectation(packed));
         assertPackedLegacyCurrent(fallbackStore, packed);
         retirePackedFallback(fallbackStore, name, packed.raw);
-        clearFallbackCopy(fallbackStore, name, packed.userId);
+        // Packed retirement is a single localStorage removal, but a peer may
+        // acknowledge a *plain* fallback during that call. Recheck the full
+        // plain/scoped binding and never delete any of its independent keys.
+        assertPackedLegacyCurrent(fallbackStore, packed);
+        if (plainBeforePromotion) {
+          // An existing, unchanged plain fallback may be retired by one
+          // revision-bound receipt. A new peer marker cannot match this
+          // receipt and is never erased or silently accepted.
+          retireFallbackCopyIfUnchanged(fallbackStore, name, plainBeforePromotion, packed.userId, packed.value);
+        }
       } catch (error) {
         // Keep both competing records. Choosing either would conceal work from
         // a newer/older tab that cannot understand the other's storage format.
