@@ -3,7 +3,7 @@ import { BadgeCheck, LibraryBig, RefreshCw, Share2, Square } from "lucide-react"
 import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { isAcademicReviewer, shareAcademicCourses, type AcademicCourse } from "../../lib/academicLibrary/client";
-import { coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
+import { courseCollisionIdentity, coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
 import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
 import { listCommunityUploads, type CommunityCursor } from "../../lib/academicLibrary/community";
 import {
@@ -255,8 +255,9 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
           <h4>{group.term}</h4>
           <ul>{group.courses.map(course => {
             const status = STATUS[ownedCourseStatus(course)];
+            const identity = courseCollisionIdentity(course, group.courses);
             return <li key={course.id}>
-              <span><b>{course.module}</b>{course.title !== course.module && <small>{course.title}</small>}</span>
+              <span><b>{course.module}</b>{course.title !== course.module && <small>{course.title}</small>}{identity && <small style={{ overflowWrap: "anywhere" }}>{identity}</small>}</span>
               <span className="academic-manager-facts">{plural(course.ready_questions, "ready question")}</span>
               {audits[course.id]?.receipt && <span className="academic-manager-facts">{plural(audits[course.id].receipt!.missingExplanations, "ready question")} without an explanation</span>}
               {audits[course.id]?.error && <span className="academic-manager-facts" role="alert">{audits[course.id].error}</span>}

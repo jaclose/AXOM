@@ -4,7 +4,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog";
 import { openAcademicCourse } from "../../lib/academicLibrary/navigation";
-import { coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
+import { courseCollisionIdentity, coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
 import { ConnectedCoursePlan } from "../tracker/ConnectedCoursePlan";
 import { GButton, GlassCard, PanelHeader } from "../ui/primitives";
 import "../../styles/course-library.css";
@@ -45,11 +45,14 @@ export function AcademicBankDiscovery() {
         {coursesByTerm(catalog.courses).map(({ term, courses }, index) => <section key={term} className="course-term-section" aria-labelledby={`bank-term-${index}`}>
           <header className="course-term-heading"><h3 id={`bank-term-${index}`}>{term}</h3><span>{courses.length} {courses.length === 1 ? "course" : "courses"}</span></header>
           <div className="course-collection">
-            {courses.map(course => <button type="button" key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected({ accountId, course })} aria-label={`Preview ${course.module} course and weekly question sets`}>
+            {courses.map(course => {
+              const identity = courseCollisionIdentity(course, courses);
+              return <button type="button" key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected({ accountId, course })} aria-label={`Preview ${course.module} course and weekly question sets${identity ? ` (${identity})` : ""}`}>
               <div className="course-card-cover"><span>{course.term}</span><strong>{course.module}</strong><BookOpen size={28} strokeWidth={1} /></div>
-              <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}</span><h4>{course.module}</h4><p>{course.title}</p><span className="course-card-facts">{course.ready_questions} ready {course.ready_questions === 1 ? "question" : "questions"}{course.review_questions > 0 && ` · ${course.review_questions} awaiting review`}</span><span className="course-card-state">Preview weeks and question sets</span></div>
+              <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}</span><h4>{course.module}</h4><p>{course.title}</p>{identity && <small className="course-card-identity">{identity}</small>}<span className="course-card-facts">{course.ready_questions} ready {course.ready_questions === 1 ? "question" : "questions"}{course.review_questions > 0 && ` · ${course.review_questions} awaiting review`}</span><span className="course-card-state">Preview weeks and question sets</span></div>
               <ArrowUpRight size={20} aria-hidden="true" />
-            </button>)}
+              </button>;
+            })}
           </div>
         </section>)}
         {catalog.more && <GButton disabled={catalog.loading} onClick={() => void catalog.loadMore()}>Load more banks</GButton>}

@@ -34,3 +34,12 @@ export function coursesByTerm<T extends { term: string; module: string }>(course
   }
   return [...groups].map(([term, entries]) => ({ term, courses: entries }));
 }
+
+/** Stable, non-secret catalog identity shown only when module names collide inside one heading.
+ * Do not merge records or rewrite the source term; use the complete immutable ID. */
+export function courseCollisionIdentity<T extends { id: string; term: string; module: string }>(course: T, peers: readonly T[]): string | null {
+  const moduleKey = course.module.trim().normalize("NFC").toLocaleLowerCase();
+  const collides = peers.some(peer => peer.id !== course.id
+    && peer.module.trim().normalize("NFC").toLocaleLowerCase() === moduleKey);
+  return collides ? `${course.term} · ID ${course.id}` : null;
+}
