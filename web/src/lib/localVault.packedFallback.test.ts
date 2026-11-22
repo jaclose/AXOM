@@ -2,7 +2,7 @@ import { indexedDB as fakeIndexedDb, IDBKeyRange, IDBObjectStore } from "fake-in
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertVaultWritesSince, DB_NAME, getVaultWriteCheckpoint, localVaultStorage,
-  replaceLocalVaultItem, resetLocalVaultRuntimeForTests, resolveWorkspaceSnapshotRecord, STORE_NAME, VAULT_CONFLICT_MESSAGE,
+  replaceLocalVaultItem, resetLocalVaultRuntimeForTests, resolveMarkedVaultSnapshotRecord, resolveWorkspaceSnapshotRecord, STORE_NAME, VAULT_CONFLICT_MESSAGE,
 } from "./localVault";
 import { packedFallbackKey } from "./packedVaultFallback";
 import { STORAGE_KEYS } from "./brand";
