@@ -843,6 +843,57 @@ describe("a save that could not reach IndexedDB", () => {
     }
   });
 
+  it("fails closed when an empty-vault migration loses its CAS and the winning read becomes unavailable", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label }, version: 34,
+    });
+    const stale = snapshot("old unmarked local mirror");
+    const winner = snapshot("peer's newly committed workspace");
+    const markerKey = `${key}:fallback-newer`;
+    const peer = await openCurrentVault();
+    storage.setItem(key, stale);
+    expect(storage.getItem(markerKey)).toBeNull();
+    resetLocalVaultRuntimeForTests();
+
+    const originalOpen = fakeIndexedDb.open.bind(fakeIndexedDb);
+    let opens = 0;
+    let peerCommit: Promise<void> | null = null;
+    vi.stubGlobal("indexedDB", {
+      open: (name: string, version?: number) => {
+        opens += 1;
+        // The first two opens verify an empty primary and active profile.
+        // Just before the migration opens its compare-and-swap transaction,
+        // a separate tab commits a different authoritative record.
+        if (opens === 3) peerCommit = putDirect(peer, key, winner);
+        if (opens >= 4) throw new Error("IndexedDB winner readback is unavailable");
+        return version === undefined ? originalOpen(name) : originalOpen(name, version);
+      },
+    });
+
+    try {
+      // On the old code, failed winner readback was swallowed and the stale
+      // mirror silently hydrated as if its migration were successful.
+      await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(peerCommit).not.toBeNull();
+      await peerCommit;
+      expect(opens).toBeGreaterThanOrEqual(4);
+      expect(await getDirect(peer, key)).toBe(winner);
+      expect(storage.getItem(key)).toBe(stale);
+      expect(storage.getItem(markerKey)).toBeNull();
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("blind follow-up overwrite"));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(await getDirect(peer, key)).toBe(winner);
+      expect(storage.getItem(key)).toBe(stale);
+    } finally {
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      peer.close();
+    }
+  });
+
   it("never lets an unmarked localStorage copy override the vault", async () => {
     // A copy mirrored by an older build carries no marker and may be stale.
     await localVaultStorage.setItem(key, snapshot("newer"));
