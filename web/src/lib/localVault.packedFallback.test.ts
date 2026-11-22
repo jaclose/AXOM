@@ -106,6 +106,78 @@ describe("verified separate compressed workspace fallback", () => {
     expectLegacyUnchanged(fixture.legacyRecords);
   });
 
+  it.each(["ordinary save", "verified restore"] as const)(
+    "retires an acknowledged packed workspace within a whole-origin quota during %s",
+    async operation => {
+      const fixture = await quotaFixture();
+      const older = snapshot("quota-packed original with notes and attempts", true);
+      await localVaultStorage.setItem(key, older);
+      const originalRaw = values.get(packedKey)!;
+      expect(originalRaw).toBeTruthy();
+      fixture.blockVault.mockRestore();
+
+      // Count every origin key, including retained legacy copies. This is not a
+      // named-key-only quota stub: a full second packed envelope cannot fit.
+      const used = () => [...values.entries()].reduce((total, [name, stored]) => total + name.length + stored.length, 0);
+      const headroom = Math.max(320, Math.floor(originalRaw.length / 2));
+      expect(headroom).toBeLessThan(originalRaw.length);
+      const capacity = used() + headroom;
+      fixture.blockRaw.mockImplementation((name, stored) => {
+        const value = String(stored);
+        const previous = values.get(name);
+        const projected = used() - (previous === undefined ? 0 : name.length + previous.length) + name.length + value.length;
+        if (projected > capacity) throw new DOMException("Whole-origin recovery quota exceeded", "QuotaExceededError");
+        values.set(name, value);
+      });
+
+      const committed = snapshot(`newer verified IDB ${operation} after quota`);
+      const checkpoint = getVaultWriteCheckpoint();
+      if (operation === "verified restore") await replaceLocalVaultItem(key, committed);
+      else await localVaultStorage.setItem(key, committed);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      expect(readVaultWriteFailure()).toBeNull();
+      expect(values.get(packedKey)).toBe(originalRaw); // Preserve old bytes.
+      const receipt = values.get(`${key}:packed-retired`);
+      expect(receipt).toBeTruthy();
+      expect(receipt!.length).toBeLessThan(headroom);
+      expect(JSON.parse(receipt!)).toMatchObject({
+        version: 2, rawSha256: await compression.sha256(new TextEncoder().encode(originalRaw)),
+        committedUserId: "synthetic-learner",
+      });
+      expect(JSON.parse(receipt!).raw).toBeUndefined();
+      expect(used()).toBeLessThanOrEqual(capacity);
+
+      // The same selector is used by recovery exports and app-update snapshots.
+      const captured = Object.fromEntries(values);
+      await expect(resolveWorkspaceSnapshotRecord({ [key]: committed }, captured, key)).resolves.toBe(committed);
+      await expect(resolveWorkspaceSnapshotRecord(
+        { [key]: snapshot("another account", false, "other-learner") }, captured, key,
+      )).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      resetLocalVaultRuntimeForTests();
+      expect(await localVaultStorage.getItem(key)).toBe(committed);
+    },
+  );
+
+  it("reads existing version-1 full-raw receipts without rewriting or discarding historical packed bytes", async () => {
+    const fixture = await quotaFixture();
+    await localVaultStorage.setItem(key, snapshot("legacy version-one packed", true));
+    const previousRaw = values.get(packedKey)!;
+    fixture.blockVault.mockRestore();
+    const committed = snapshot("newer durable committed revision");
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, committed);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    const v2 = JSON.parse(values.get(`${key}:packed-retired`)!);
+    values.set(`${key}:packed-retired`, JSON.stringify({
+      version: 1, raw: previousRaw, committedFingerprint: v2.committedFingerprint,
+      committedUserId: v2.committedUserId,
+    }));
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(committed);
+    await expect(resolveWorkspaceSnapshotRecord({ [key]: committed }, Object.fromEntries(values), key)).resolves.toBe(committed);
+    expect(values.get(packedKey)).toBe(previousRaw);
+  });
+
   it("continues saving over the current packed record and promotes only after IDB recovers", async () => {
     const fixture = await quotaFixture();
     await localVaultStorage.setItem(key, snapshot("first packed", true));
