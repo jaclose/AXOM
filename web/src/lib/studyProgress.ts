@@ -12,10 +12,15 @@ interface StudyProgressOptions {
 export function trackerStudyProgress(item: TrackerItem, options: StudyProgressOptions = {}) {
   const course = studyPlanCourse(options.courses ?? [], item);
   const plan = resolveStudyPlan(options.preferences, course, item);
-  const target = isReviewTask(item) ? 1 : isQuestionKind(item.kind) || isCompletionKind(item.kind)
+  const review = isReviewTask(item);
+  const target = review ? 1 : isQuestionKind(item.kind) || isCompletionKind(item.kind)
     ? targetPassesForItem(item)
     : plan.lecturePasses;
-  return { plan, target, fraction: Math.min(item.passes, target) / target, complete: item.passes >= target };
+  // A generated QBank review is one completed activity whether confirmed by
+  // a study pass or an Anki pass. Do not credit Anki against unrelated lecture
+  // or practice targets, and never rewrite either recorded pass counter.
+  const completedPasses = review && item.ankiPasses > 0 ? Math.max(item.passes, 1) : item.passes;
+  return { plan, target, fraction: Math.min(completedPasses, target) / target, complete: completedPasses >= target };
 }
 
 /** Each item contributes equally; extra passes cannot finish another item's work. */
