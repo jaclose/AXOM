@@ -324,6 +324,27 @@ describe("verified separate compressed workspace fallback", () => {
       .rejects.toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
+  it("retains a packed snapshot's legacy account binding across promotion and later saves", async () => {
+    const fixture = await quotaFixture();
+    // Old clients can have no plain active-user pointer even though their
+    // packed recovery is account-bound. A new receipt must not rewrite this
+    // captured binding and create a spurious conflict on reload.
+    values.delete(`${key}:active-user`);
+    const packed = snapshot("packed with absent legacy user", true);
+    await localVaultStorage.setItem(key, packed);
+    expect(values.get(`${key}:active-user`)).toBeUndefined();
+    fixture.blockVault.mockRestore();
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(packed);
+    const latest = snapshot("later committed update");
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, latest);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(values.get(`${key}:active-user`)).toBeUndefined();
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(latest);
+  });
+
   it("accepts subsequent ordinary saves after a retired packed record is preserved", async () => {
     const fixture = await quotaFixture();
     await localVaultStorage.setItem(key, snapshot("original packed", true));
