@@ -188,4 +188,17 @@ describe("your published courses", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Community uploads could not be loaded.");
     expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
   });
+  it("shows unique original-term and ID labels for separate courses with the same module after alias grouping", async () => {
+    mocks.list.mockResolvedValueOnce([
+      course(1, { term: "T2", module: "ER", title: "ER" }),
+      course(2, { term: "Term 2", module: "ER", title: "ER" }),
+    ]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect(await screen.findByText("2 courses")).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 4 }).map(node => node.textContent)).toEqual(["Term 2"]);
+    expect(screen.getByText(`T2 · ID ${id(1)}`)).toBeTruthy();
+    expect(screen.getByText(`Term 2 · ID ${id(2)}`)).toBeTruthy();
+  });
+
 });
