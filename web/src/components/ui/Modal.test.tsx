@@ -53,4 +53,18 @@ describe("Modal keyboard accessibility", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).not.toBe(opener);
   });
+
+  it("keeps the body portal as the default and accepts an explicit fullscreen container", () => {
+    const defaultView = render(<Modal title="Default modal" onClose={() => {}}>Default body</Modal>);
+    const defaultDialog = screen.getByRole("dialog", { name: "Default modal" });
+    expect(defaultDialog.parentElement?.parentElement).toBe(document.body);
+    expect(defaultView.container.contains(defaultDialog)).toBe(false);
+    defaultView.unmount();
+    const fullscreen = document.createElement("div"); document.body.appendChild(fullscreen);
+    try {
+      const view = render(<Modal title="Fullscreen modal" portalContainer={fullscreen} onClose={() => {}}>Fullscreen body</Modal>);
+      expect(screen.getByRole("dialog", { name: "Fullscreen modal" }).parentElement?.parentElement).toBe(fullscreen);
+      view.unmount();
+    } finally { fullscreen.remove(); }
+  });
 });

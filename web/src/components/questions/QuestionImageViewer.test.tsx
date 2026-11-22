@@ -77,6 +77,63 @@ it("keeps answer, flag, submit, and confidence shortcuts from reaching the quiz 
   }
 });
 
+it("contains shortcuts from the initially focused Close button and dismisses only the viewer", () => {
+  const shortcut = vi.fn(); const onClose = vi.fn();
+  window.addEventListener("keydown", shortcut);
+  try {
+    render(<QuestionImageViewer src="blob:source" alt="Source figure" onClose={onClose} />);
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(document.activeElement).toBe(close);
+    for (const key of ["A", "J", "1", "Enter", "ArrowRight"]) fireEvent.keyDown(close, { key });
+    expect(shortcut).not.toHaveBeenCalled();
+    fireEvent.keyDown(close, { key: "+" });
+    expect(screen.getByLabelText("Image zoom").textContent).toBe("150%");
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce(); expect(shortcut).not.toHaveBeenCalled();
+  } finally { window.removeEventListener("keydown", shortcut); }
+});
+
+it("retains its portal, focus trap and resizing after leaving fullscreen", () => {
+  const fullscreen = document.createElement("div"); document.body.appendChild(fullscreen);
+  let activeFullscreen: Element | null = fullscreen;
+  Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => activeFullscreen });
+  const onClose = vi.fn();
+  try {
+    const view = render(<QuestionImageViewer src="blob:source" alt="Source figure" width={1662} height={201} onClose={onClose} />);
+    const dialog = screen.getByRole("dialog");
+    const viewport = screen.getByRole("region", { name: "Image detail" });
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(fullscreen.contains(dialog)).toBe(true);
+    activeFullscreen = null; fireEvent(document, new Event("fullscreenchange"));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(screen.getByRole("dialog")).toBe(dialog); expect(fullscreen.contains(dialog)).toBe(true);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("question-image-viewer__viewport") ? 480 : 0;
+    });
+    fireEvent(window, new Event("resize"));
+    expect(screen.getByRole("img").style.width).toBe("720px");
+    viewport.focus(); fireEvent.keyDown(viewport, { key: "Tab" }); expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true }); expect(document.activeElement).toBe(viewport);
+    fireEvent.keyDown(close, { key: "Escape" }); expect(onClose).toHaveBeenCalledOnce();
+    view.unmount();
+  } finally { Reflect.deleteProperty(document, "fullscreenElement"); fullscreen.remove(); }
+});
+
+it("keeps the authored crop masked at every zoom level", () => {
+  render(<QuestionImageViewer src="blob:cropped-source" alt="Cropped source figure" width={1000} height={600}
+    crop={{ left: .25, right: .25, top: .1, bottom: .4 }} onClose={vi.fn()} />);
+  const image = screen.getByRole("img");
+  const crop = image.parentElement!;
+  expect(crop.classList.contains("question-image-viewer__crop")).toBe(true);
+  expect(crop.style.width).toBe("320px"); expect(crop.style.height).toBe("192px");
+  expect(image.style.width).toBe("640px"); expect(image.style.left).toBe("-160px"); expect(parseFloat(image.style.top)).toBeCloseTo(-38.4);
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  expect(crop.style.width).toBe("480px"); expect(image.style.width).toBe("960px"); expect(image.style.left).toBe("-240px");
+  expect(image.style.position).toBe("absolute");
+  fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+  expect(crop.style.width).toBe("320px"); expect(image.style.left).toBe("-160px");
+});
+
 function pointer(element: HTMLElement, type: string, pointerType: string, x: number) {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 100 });
   Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: pointerType } });

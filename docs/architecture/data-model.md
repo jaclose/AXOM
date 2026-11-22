@@ -62,6 +62,19 @@ otherwise a reload could prefer an older vault record. Reviewed imports wait for
 image bytes and the workspace's image associations before counting an image as attached.
 A failed association is reported without discarding the questions already saved.
 
+Automatic safety backups use a self-contained, versioned compressed localStorage
+envelope when IndexedDB cannot accept the snapshot and compression reduces its size.
+Restoration checks the bounded expanded size, SHA-256, wrapper identity and exact
+saved readback; legacy plain snapshots remain readable. Retention and migration run
+only after a new durable copy succeeds. Compression does not guarantee available
+quota and never substitutes for a successful save.
+
+Recovery from a captured backup compares its two storage tiers using the saved
+newer-fallback marker. A valid marker can supersede its recorded vault base; a
+different committed vault record keeps precedence. Unmarked mirrors retain the
+existing vault-first behavior, while corrupt or ambiguous marked copies are refused.
+Inspection is read-only and does not change the live vault's conflict policy.
+
 Preserve Noctyrium keys/type compatibility. Coordinate schema changes first, migrate
 additively, and test old imports/defaults. Do not infer an atomic cross-store guarantee
 from an action name; follow write/flush/error behavior in the relevant boundary.

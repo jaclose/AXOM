@@ -1,9 +1,13 @@
 .qcontent-blocks { min-width: 0; line-height: 1.65; }
+.question-source-identity { display: grid; gap: 4px; margin: 12px 0 18px; min-width: 0; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; }
+.question-source-identity strong { font-weight: 600; }
+.question-source-identity > span { opacity: .72; font-size: 12px; }
 .qcontent-blocks p { white-space: pre-wrap; margin: 0 0 1em; }
 .qcontent-blocks p:last-child { margin-bottom: 0; }
 .qcontent-blocks figure { margin: 18px 0; }
 .qcontent-blocks figcaption { font-size: 12px; color: var(--text60); margin-top: 8px; }
-.qcontent-table-scroll { max-width: 100%; overflow: auto; overscroll-behavior: contain; margin: 16px 0; }
+.qcontent-table-scroll { min-width: 0; max-width: 100%; overflow: auto; overscroll-behavior: contain; margin: 16px 0; }
+.qcontent-table-scroll:focus-visible, button.qcontent-image:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 3px; }
 .qcontent-table-scroll table { border-collapse: collapse; width: max-content; min-width: 70%; max-width: 100%; font-size: .95em; }
 .qcontent-table-scroll td, .qcontent-table-scroll th { padding: 9px 14px; border: 1px solid var(--hairline, #aaa); text-align: left; white-space: pre-wrap; }
 .qcontent-table-scroll th { font-weight: 600; background: var(--gold-soft, #eee); }
@@ -11,11 +15,11 @@
 button.qcontent-image { cursor: zoom-in; }
 .qcontent-crop { display: block; position: relative; overflow: hidden; }
 .qcontent-crop img { display: block; width: 100%; max-width: 100%; height: auto; }
-.qcontent-enlarged { width: min(1100px, 95vw); max-width: none; }
 .qcontent-missing { display: block; border-left: 2px solid var(--gold); padding: 12px; }
 .qcontent-equation { font-family: var(--font-mono, monospace); overflow-x: auto; }
 .qcontent-callout { border-left: 2px solid var(--gold); padding-left: 16px; }
 .question-teaching-visuals { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-1); }
+.question-supporting-content { display: grid; gap: 16px; min-width: 0; margin-block: 16px; }
 .question-teaching-visuals .qcontent-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 14px; }
 .question-teaching-visuals .qcontent-blocks figure { margin: 0; }
 .question-teaching-visuals .qcontent-image { border-radius: var(--radius-sm); overflow: hidden; }

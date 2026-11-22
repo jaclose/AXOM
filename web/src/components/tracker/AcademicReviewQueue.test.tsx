@@ -8,6 +8,7 @@ import { AcademicReviewQueue } from "./AcademicReviewQueue";
 const mocks = vi.hoisted(() => ({
   account: { user: { id: "reviewer" } as { id: string } | null },
   canReview: vi.fn(), list: vi.fn(), preview: vi.fn(), decide: vi.fn(), inspect: vi.fn(), download: vi.fn(),
+  inspectTracker: vi.fn(), approveTracker: vi.fn(),
 }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (selector: (account: typeof mocks.account) => unknown) => selector(mocks.account),
@@ -17,6 +18,9 @@ vi.mock("../../lib/academicLibrary/reviewQueue", () => ({
   previewAcademicReview: mocks.preview, decideAcademicReview: mocks.decide,
 }));
 vi.mock("../../lib/academicLibrary/explanationReview", () => ({ inspectStoredRevisionExplanations: mocks.inspect }));
+vi.mock("../../lib/academicLibrary/trackerReview", () => ({
+  inspectStoredTrackerRevision: mocks.inspectTracker, approveStoredTrackerRevision: mocks.approveTracker,
+}));
 vi.mock("../../lib/academicLibrary/client", () => ({ downloadAcademicCourse: mocks.download }));
 vi.mock("../../lib/academicLibrary/accountScope", () => ({ academicAccountScope: () => ({ assertCurrent: () => {}, dispose: () => {} }) }));
 
@@ -51,6 +55,7 @@ beforeEach(() => {
   mocks.inspect.mockReset().mockImplementation(async (id: string) => receiptFor(id === first.id ? first : submission(2)));
   mocks.download.mockReset().mockResolvedValue({ questionIds: ["saved-question"], bindings: { originals: [] } });
   mocks.decide.mockReset().mockResolvedValue(undefined);
+  mocks.inspectTracker.mockReset(); mocks.approveTracker.mockReset().mockResolvedValue(undefined);
 });
 afterEach(cleanup);
 
@@ -269,5 +274,99 @@ describe("shared academic review queue", () => {
     fireEvent.click(within(await screen.findByRole("article", { name: "Course 1" })).getByRole("button", { name: "Open preview" }));
     await screen.findByText("This submission changed. Refresh the review queue before deciding.");
     expect(screen.queryByRole("button", { name: "Approve this revision" })).toBeNull();
+  });
+});
+
+const tracker = { ...first, ready_questions: 0, review_questions: 0 };
+const trackerText = "T5 - GOER - Course plan:\n@week-policy: explicit\n@source: Week placement unverified\nUnscheduled:\nExample [Lecture]";
+const trackerProof = () => ({ collectionId: tracker.id, revisionId: tracker.current_revision_id, reviewerId: "reviewer",
+  module: tracker.module, term: tracker.term, contentHash: "a".repeat(64), templateHash: "b".repeat(64), manifestHash: "c".repeat(64),
+  templateText: trackerText, activities: 1, statedWeekActivities: 0, unstatedWeekActivities: 1, sections: 1,
+  warnings: ["The submitted source flags uncertainty. This approval preserves those notes and does not certify week placement."] });
+function trackerMocks() {
+  mocks.list.mockResolvedValue([tracker]);
+  mocks.preview.mockResolvedValue({ ...previewFor(tracker), template_text: trackerText });
+  mocks.inspectTracker.mockResolvedValue(trackerProof());
+}
+async function openTracker() {
+  fireEvent.click(within(await screen.findByRole("article", { name: "Course 1" })).getByRole("button", { name: "Open preview" }));
+  await screen.findByRole("button", { name: "Check stored tracker plan" });
+}
+async function checkTracker() {
+  fireEvent.click(screen.getByRole("button", { name: "Check stored tracker plan" }));
+  await screen.findByText(/Stored catalog and plan match this exact revision/);
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed this exact stored plan/ }));
+}
+
+describe("tracker-only queue review", () => {
+  it("requires exact stored inspection and plan review while preserving uncertain scheduling", async () => {
+    trackerMocks(); render(<AcademicReviewQueue />); await openTracker();
+    expect(screen.getByText("Tracker only")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Download review copy" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check stored explanations" })).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Approve this revision" }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: /I reviewed this exact stored plan/ }).disabled).toBe(true);
+    await checkTracker();
+    expect(screen.getByLabelText("Submitted course plan").textContent).toBe(trackerText);
+    expect(screen.getByText(/does not certify week placement/)).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Approve this revision" }).disabled).toBe(false);
+  });
+
+  it("saves one atomic tracker decision and never borrows the question attestation path", async () => {
+    trackerMocks(); const saved = deferred<void>(); mocks.approveTracker.mockReturnValueOnce(saved.promise);
+    render(<AcademicReviewQueue />); await openTracker(); await checkTracker();
+    const button = screen.getByRole("button", { name: "Approve this revision" });
+    fireEvent.click(button); fireEvent.click(button);
+    expect(mocks.approveTracker).toHaveBeenCalledTimes(1);
+    expect(mocks.approveTracker).toHaveBeenCalledWith(trackerProof(), "reviewer", true);
+    expect(mocks.decide).not.toHaveBeenCalled(); expect(mocks.inspect).not.toHaveBeenCalled(); expect(mocks.download).not.toHaveBeenCalled();
+    await act(async () => saved.resolve());
+    await screen.findByText("Approved: Course 1.");
+    expect(screen.queryByRole("article", { name: "Course 1" })).toBeNull();
+  });
+
+  it("keeps a held-only question collection out of tracker approval", async () => {
+    const held = { ...first, ready_questions: 0, review_questions: 3 };
+    mocks.list.mockResolvedValue([held]); mocks.preview.mockResolvedValue(previewFor(held));
+    render(<AcademicReviewQueue />);
+    fireEvent.click(within(await screen.findByRole("article", { name: "Course 1" })).getByRole("button", { name: "Open preview" }));
+    await screen.findByRole("button", { name: "Download review copy" });
+    expect(screen.queryByRole("button", { name: "Check stored tracker plan" })).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Approve this revision" }).disabled).toBe(true);
+  });
+
+  it("rejects an inspection whose exact text or collection filing differs from the opened preview", async () => {
+    trackerMocks(); mocks.inspectTracker.mockResolvedValueOnce({ ...trackerProof(), templateText: `${trackerText}\nChanged [Review]` });
+    render(<AcademicReviewQueue />); await openTracker();
+    fireEvent.click(screen.getByRole("button", { name: "Check stored tracker plan" }));
+    await screen.findByText("This submission changed. Refresh the queue and inspect its latest plan.");
+    expect(screen.queryByRole("button", { name: "Approve this revision" })).toBeNull();
+    expect(mocks.approveTracker).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry preview" }));
+    await screen.findByRole("button", { name: "Check stored tracker plan" });
+    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: /I reviewed this exact stored plan/ }).checked).toBe(false);
+  });
+
+  it("clears proof and attestation when refreshing or reopening a tracker", async () => {
+    trackerMocks(); render(<AcademicReviewQueue />); await openTracker(); await checkTracker();
+    fireEvent.click(screen.getByRole("button", { name: "Close preview" })); await openTracker();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Approve this revision" }).disabled).toBe(true);
+    expect(screen.queryByText(/Stored catalog and plan match this exact revision/)).toBeNull();
+    await checkTracker(); fireEvent.click(screen.getByRole("button", { name: "Refresh review queue" })); await openTracker();
+    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: /I reviewed this exact stored plan/ }).checked).toBe(false);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Approve this revision" }).disabled).toBe(true);
+  });
+
+  it("discards a late tracker proof after an account switch", async () => {
+    trackerMocks(); const pending = deferred<ReturnType<typeof trackerProof>>(); mocks.inspectTracker.mockReturnValueOnce(pending.promise);
+    const view = render(<AcademicReviewQueue />); await openTracker();
+    fireEvent.click(screen.getByRole("button", { name: "Check stored tracker plan" }));
+    mocks.account.user = { id: "other-reviewer" };
+    view.rerender(<AcademicReviewQueue />);
+    await act(async () => pending.resolve(trackerProof()));
+    await openTracker();
+    expect(screen.queryByText(/Stored catalog and plan match this exact revision/)).toBeNull();
+    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: /I reviewed this exact stored plan/ }).disabled).toBe(true);
+    expect(mocks.approveTracker).not.toHaveBeenCalled();
   });
 });

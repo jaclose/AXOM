@@ -85,6 +85,16 @@
 .course-practice-action { border-top: 1px solid var(--hairline); padding-top: 16px; margin-top: 22px; }
 .course-practice-action h3 { font-size: 14px; }
 .course-plan-actions [role="alert"] { color: var(--text); border-left: 2px solid var(--gold); padding-left: 12px; }
+.course-source-pdfs { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--hairline); min-width: 0; }
+.course-source-pdfs-intro, .course-source-pdfs > p { color: var(--text-70); line-height: 1.6; }
+.course-source-pdf-list { display: grid; gap: 10px; padding: 0; margin: 16px 0; list-style: none; }
+.course-source-pdf-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--hairline); border-radius: var(--radius-lg); min-width: 0; }
+.course-source-pdf-list > li > svg { flex: 0 0 auto; color: var(--gold); }
+.course-source-pdf-info { display: grid; gap: 4px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.course-source-pdf-info strong { font-weight: 500; }
+.course-source-pdf-info span { font-size: 12px; color: var(--text-70); }
+.course-source-pdf-list .gbtn { min-height: 44px; white-space: normal; }
+.course-source-pdfs [role="alert"] { border-left: 2px solid var(--gold); padding-left: 12px; overflow-wrap: anywhere; }
 .course-version { overflow-wrap: anywhere; font-family: var(--font-mono); }
 @container (max-width: 880px) { .course-plan-layout { grid-template-columns: minmax(0, 1fr); } .course-plan-actions { position: static; grid-row: 1; grid-column: 1; min-width: 0; } .course-week-list { grid-row: 2; grid-column: 1; min-width: 0; } .course-collection { grid-template-columns: minmax(0, 1fr); } }
 @container (max-width: 880px) { .academic-bank-discovery .course-week-list { grid-row: 1; } .academic-bank-discovery .course-plan-actions { grid-row: 2; } }

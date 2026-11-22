@@ -17,9 +17,12 @@ vi.mock("../lib/operator/hostClient", () => ({
   setOperatorRole: vi.fn(),
 }));
 vi.mock("../components/questions/QuestionSetLibraryReviewQueue", () => ({ QuestionSetLibraryReviewQueue: () => null }));
+vi.mock("../components/tracker/AcademicReviewQueue", () => ({
+  AcademicReviewQueue: () => <section aria-label="Academic course approval">Academic reviewer controls</section>,
+}));
 vi.mock("../components/dashboard/JournalFeedbackReview", () => ({ JournalFeedbackReview: () => null }));
 
-const dashboard = (role: "owner" | "moderator"): OperatorDashboard => ({
+const dashboard = (role: "owner" | "admin" | "moderator"): OperatorDashboard => ({
   role,
   overview: {
     role, registered_accounts: role === "owner" ? 3 : null, shared_profiles: 0,
@@ -110,9 +113,19 @@ describe("Host page authorization and moderation", () => {
     const banner = document.querySelector(".host-banner");
     expect(banner).not.toBeNull();
     expect(within(banner as HTMLElement).queryByText("Project CEO")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Academic course approval" })).toBeNull();
     await act(async () => { respond(dashboard("owner")); });
     await waitFor(() => expect(within(banner as HTMLElement).getByText("Project CEO")).toBeTruthy());
-    expect(screen.getByText("1 item in review and moderation queues.")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Academic course approval" })).toBeTruthy();
+    expect(screen.getByText("1 item in Community submission and moderation queues.")).toBeTruthy();
+  });
+
+  it.each(["admin", "moderator"] as const)("does not mount the CEO course review surface for %s", async role => {
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard(role));
+    render(<HostPage />);
+    await screen.findByRole("heading", { name: "Attention queue" });
+    expect(screen.queryByRole("region", { name: "Academic course approval" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Community QBank submissions" })).toBeTruthy();
   });
 
   it("keeps every overview count visible while separating the attention queue", async () => {
@@ -123,10 +136,10 @@ describe("Host page authorization and moderation", () => {
     });
     render(<HostPage />);
     expect(await screen.findByRole("heading", { name: "Attention queue", level: 2 })).toBeTruthy();
-    expect(screen.getByText("3 items in review and moderation queues.")).toBeTruthy();
+    expect(screen.getByText("3 items in Community submission and moderation queues.")).toBeTruthy();
     const overview = document.querySelector(".host-overview");
     expect(overview).not.toBeNull();
-    for (const label of ["Review submissions", "Moderation reports", "Registered accounts", "Community profiles", "AI requests, 7 days", "Approved shared collections"]) {
+    for (const label of ["Community submissions", "Moderation reports", "Registered accounts", "Community profiles", "AI requests, 7 days", "Approved Community collections"]) {
       expect(within(overview as HTMLElement).getByText(label)).toBeTruthy();
     }
     expect(within(overview as HTMLElement).getAllByText("Restricted")).toHaveLength(2);

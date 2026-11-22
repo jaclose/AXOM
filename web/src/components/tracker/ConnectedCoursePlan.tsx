@@ -21,6 +21,7 @@ import { parseWeek, questionScope } from "../../lib/course-engine/scope";
 import { splitAcademicPlanSections } from "../../lib/academicLibrary/coursePlan";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { AcademicSharing } from "./AcademicSharing";
+import { CourseSourcePdfs } from "./CourseSourcePdfs";
 import { downloadCourseQuestions, isAcademicCourseDownloaded, readDownloadReference, saveDownloadReference, type DownloadReference } from "../../lib/academicLibrary/downloadReference";
 
 const termIdentity = (value: string): string => {
@@ -248,6 +249,7 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
       {downloaded?.pendingWeeks && <p role="status">Enrollment is saved on this device and needs an account retry. Load Course again when connected.</p>}
       <CoursePlan book={book} bank={bank} availableQuestions={course.ready_questions} onBack={onBack} onOpen={onOpen} onCustomize={onCustomize} onLoad={load} />
     </>}
+    {templates !== undefined && <CourseSourcePdfs key={`${accountId}:${course.current_revision_id}`} revisionId={course.current_revision_id} />}
   </>;
 }
 

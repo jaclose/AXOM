@@ -1,4 +1,5 @@
 import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
+import { QuestionSourceIdentity } from "./QuestionSourceIdentity";
 import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./QuestionView";
 // ===========================================================================
 // Question block runner (pre-beta §7): Tutor mode (immediate feedback, AI
@@ -1689,8 +1690,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         )}
         {question.category && <Tag tone="neutral">{question.category}</Tag>}
         {question.examType && <Tag tone="neutral">{EXAM_TYPE_LABEL[question.examType]}</Tag>}
-        {question.sourcePage && <Tag tone="neutral">p.{question.sourcePage}</Tag>}
-        {question.bank && <span className="sub truncate" style={{ maxWidth: 200 }}>{question.bank}</span>}
         {item.struck.length > 0 && !revealed && (
           <GhostButton disabled={finalizing} className="quiz-tool" onClick={() => item.struck.forEach((key) => act({ type: "strike", key }))} aria-label="Reset eliminations">
             <RotateCcw size={ICON_SIZE.microInline} /> Reset eliminations
@@ -1698,6 +1697,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         )}
       </div>
 
+      <QuestionSourceIdentity question={question} />
       <div className="quiz-reading" style={{ "--quiz-reading-scale": readingScale } as CSSProperties}>
         <QuestionViewFrame view={presentation.view}>
         <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined}

@@ -12,7 +12,7 @@ for (const width of [1440, 390]) test(`reviewers preview and decide shared submi
   const submissions = Array.from({ length: 26 }, (_, index) => backend.seedSubmission(index, index !== 1));
   await seedOnboarded(page);
   await page.goto("/?app=1&course-library=1#tracker");
-  const queue = page.getByRole("region", { name: "Submitted QBank review", exact: true });
+  const queue = page.getByRole("region", { name: "Submitted course review", exact: true });
   await expect(queue).toBeVisible();
   await expect(queue.getByRole("article")).toHaveCount(24);
   await expect(queue).toContainText("Synthetic owner Taylor");
@@ -96,7 +96,7 @@ for (const width of [1440, 390]) test(`reviewers preview and decide shared submi
   await expect(queue.getByRole("article")).toHaveCount(24);
   await expect(first).toHaveCount(0);
   await expect(second).toHaveCount(0);
-  await queue.getByRole("heading", { name: "Submitted QBank review", exact: true }).scrollIntoViewIfNeeded();
+  await queue.getByRole("heading", { name: "Submitted course review", exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: `/tmp/axom-review-result-${width}.png` });
   expect(backend.calls.filter(call => /\/storage\/|\/academic_files/.test(call)).length).toBeGreaterThan(0);
 
@@ -120,7 +120,7 @@ test("non-reviewers never see or request the submission queue", async ({ page })
   await page.goto("/?app=1&course-library=1#tracker");
   await expect(page.getByRole("heading", { name: "Course Library", exact: true })).toBeVisible();
   await expect.poll(() => backend.calls.filter(call => call.endsWith("/rpc/academic_is_reviewer")).length).toBeGreaterThan(0);
-  await expect(page.getByRole("region", { name: "Submitted QBank review", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Submitted course review", exact: true })).toHaveCount(0);
   expect(backend.queueRequests).toEqual([]);
   expect(backend.previewRequests).toEqual([]);
   expect(backend.decisionRequests).toEqual([]);
@@ -136,7 +136,7 @@ test("signing out while a preview is pending never exposes its late response", a
   const release = backend.holdPreview(submission.id);
   await seedOnboarded(page);
   await page.goto("/?app=1&course-library=1#tracker");
-  const queue = page.getByRole("region", { name: "Submitted QBank review", exact: true });
+  const queue = page.getByRole("region", { name: "Submitted course review", exact: true });
   try {
     await queue.getByRole("button", { name: "Open preview", exact: true }).click();
     await expect.poll(() => backend.previewRequests.length).toBe(1);

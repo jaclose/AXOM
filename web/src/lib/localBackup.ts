@@ -1,4 +1,4 @@
-import { compressText, decompressText } from "./compressedText";
+import { compressText, decompressText, MAX_EXPANDED_TEXT_BYTES, sha256 } from "./compressedText";
 import { BUILD_INFO, type BuildInfo } from "./buildInfo";
 import { STORAGE_KEYS } from "./brand";
 import {
@@ -19,6 +19,16 @@ const COMPACT_BACKUP_MARKER = "idb";
 const BACKUP_SUMMARY_FORMAT = "axom-local-backup-summary";
 const BACKUP_SUMMARY_VERSION = 1;
 const BACKUP_SUMMARY_KEY_PREFIX = "axom.backups.summary.";
+const PACKED_LOCAL_BACKUP_FORMAT = "axom-local-backup-packed";
+const PACKED_LOCAL_BACKUP_VERSION = 1;
+
+interface PackedLocalBackup extends LocalBackupSummary {
+  format: typeof PACKED_LOCAL_BACKUP_FORMAT;
+  version: typeof PACKED_LOCAL_BACKUP_VERSION;
+  expandedBytes: number;
+  sha256: string;
+  payload: string;
+}
 
 interface ChunkedBackupManifest {
   format: typeof CHUNKED_BACKUP_FORMAT;
@@ -136,7 +146,13 @@ export async function createLocalBackup(
       throw backupStorageError(indexedDbError, new Error("Browser fallback storage is unavailable."));
     }
     try {
-      storage.setItem(key, serialized);
+      const localPayload = await packLocalSnapshot(key, snapshot, serialized);
+      storage.setItem(key, localPayload);
+      const readback = storage.getItem(key);
+      if (readback !== localPayload
+        || JSON.stringify(await readLocalSnapshot(readback, key)) !== serialized) {
+        throw new Error("The safety backup could not be verified after saving. Keep this tab open and export a backup.", { cause: indexedDbError });
+      }
     } catch (fallbackError) {
       throw backupStorageError(indexedDbError, fallbackError);
     }
@@ -144,8 +160,8 @@ export async function createLocalBackup(
     // Do not immediately retry IndexedDB from pruning. A blocked upgrade stays
     // queued until the older tab closes, so another open here could hang after
     // the full localStorage fallback already succeeded. Retention can still be
-    // enforced synchronously over self-contained local snapshots.
-    pruneLocalStorageFallbackSnapshots(storage, backupLimit);
+    // enforced using only self-contained local snapshots.
+    await pruneLocalStorageFallbackSnapshots(storage, backupLimit);
     return key;
   }
   // Migrating older snapshots is opportunistic and runs only after the new
@@ -199,8 +215,8 @@ export async function readLocalBackup(key: string): Promise<LocalBackupSnapshot 
   const local = storage?.getItem(key);
   if (local) {
     try {
-      const parsed = JSON.parse(local) as unknown;
-      if (isBackupSnapshot(parsed)) {
+      const parsed = await readLocalSnapshot(local, key);
+      if (parsed) {
         runtimeBackupSummaries.set(key, toSummary(key, parsed));
         return parsed;
       }
@@ -215,6 +231,59 @@ export async function readLocalBackup(key: string): Promise<LocalBackupSnapshot 
     if (!isBackupSnapshot(parsed)) return null;
     runtimeBackupSummaries.set(key, toSummary(key, parsed));
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** The fallback is self-contained. Its summary remains synchronously readable,
+ * while restoration verifies the bounded, lossless payload before adoption. */
+async function packLocalSnapshot(key: string, snapshot: LocalBackupSnapshot, serialized: string): Promise<string> {
+  if (typeof DecompressionStream === "undefined") return serialized;
+  let payload: string;
+  try { payload = await compressText(serialized); }
+  catch { return serialized; }
+  if (payload === serialized) return serialized;
+  const bytes = new TextEncoder().encode(serialized);
+  if (bytes.byteLength > MAX_EXPANDED_TEXT_BYTES) throw new Error("This safety backup exceeds the supported restore size.");
+  let checksum: string;
+  try { checksum = await sha256(bytes); }
+  catch { return serialized; }
+  const packed: PackedLocalBackup = {
+    ...toSummary(key, snapshot), format: PACKED_LOCAL_BACKUP_FORMAT, version: PACKED_LOCAL_BACKUP_VERSION,
+    expandedBytes: bytes.byteLength, sha256: checksum, payload,
+  };
+  const encoded = JSON.stringify(packed);
+  return encoded.length < serialized.length ? encoded : serialized;
+}
+
+function packedLocalSnapshot(value: unknown, key: string): PackedLocalBackup | undefined {
+  if (!isRecord(value) || value.format !== PACKED_LOCAL_BACKUP_FORMAT || value.version !== PACKED_LOCAL_BACKUP_VERSION
+    || value.key !== key || typeof value.savedAt !== "string" || typeof value.oldSchemaVersion !== "number"
+    || typeof value.appVersion !== "string" || typeof value.commitSha !== "string"
+    || typeof value.expandedBytes !== "number" || !Number.isSafeInteger(value.expandedBytes)
+    || value.expandedBytes < 1 || value.expandedBytes > MAX_EXPANDED_TEXT_BYTES
+    || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)
+    || typeof value.payload !== "string") return undefined;
+  return value as unknown as PackedLocalBackup;
+}
+
+async function readLocalSnapshot(raw: string | null, key: string): Promise<LocalBackupSnapshot | null> {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!isRecord(value) || value.format !== PACKED_LOCAL_BACKUP_FORMAT) return isBackupSnapshot(value) ? value : null;
+    const packed = packedLocalSnapshot(value, key);
+    if (!packed) return null;
+    const serialized = await decompressText(packed.payload, packed.expandedBytes);
+    const bytes = new TextEncoder().encode(serialized);
+    if (bytes.byteLength !== packed.expandedBytes || await sha256(bytes) !== packed.sha256) return null;
+    const snapshot: unknown = JSON.parse(serialized);
+    if (!isBackupSnapshot(snapshot)) return null;
+    const summary = toSummary(key, snapshot);
+    if (summary.savedAt !== packed.savedAt || summary.oldSchemaVersion !== packed.oldSchemaVersion
+      || summary.appVersion !== packed.appVersion || summary.commitSha !== packed.commitSha) return null;
+    return snapshot;
   } catch {
     return null;
   }
@@ -276,19 +345,15 @@ function localStorageKeys(storage: Storage): string[] {
 
 /** Prune only full, independently recoverable localStorage snapshots. This is
  * deliberately IndexedDB-free so a blocked upgrade cannot stall retention. */
-function pruneLocalStorageFallbackSnapshots(storage: Storage, keep: number): void {
-  const snapshots = localStorageKeys(storage)
-    .filter(key => key.startsWith(STORAGE_KEYS.localBackupPrefix))
-    .filter(key => {
-      try {
-        const raw = storage.getItem(key);
-        return raw !== null && isBackupSnapshot(JSON.parse(raw));
-      } catch {
-        return false;
-      }
-    })
-    .sort((left, right) => right.localeCompare(left));
-  for (const key of snapshots.slice(Math.max(0, keep))) {
+async function pruneLocalStorageFallbackSnapshots(storage: Storage, keep: number): Promise<void> {
+  const snapshots: Array<{ key: string; raw: string }> = [];
+  for (const key of localStorageKeys(storage).filter(key => key.startsWith(STORAGE_KEYS.localBackupPrefix))) {
+    const raw = storage.getItem(key);
+    if (raw !== null && await readLocalSnapshot(raw, key)) snapshots.push({ key, raw });
+  }
+  snapshots.sort((left, right) => right.key.localeCompare(left.key));
+  for (const { key, raw } of snapshots.slice(Math.max(0, keep))) {
+    if (storage.getItem(key) !== raw) continue;
     storage.removeItem(key);
     runtimeBackupSummaries.delete(key);
   }
@@ -624,6 +689,11 @@ function summaryForKey(key: string, storage: Storage | null): LocalBackupSummary
     const raw = storage?.getItem(key);
     const parsed = raw ? JSON.parse(raw) as unknown : null;
     if (isBackupSnapshot(parsed)) return toSummary(key, parsed);
+    const packed = packedLocalSnapshot(parsed, key);
+    if (packed) return {
+      key, savedAt: packed.savedAt, oldSchemaVersion: packed.oldSchemaVersion,
+      appVersion: packed.appVersion, commitSha: packed.commitSha,
+    };
     if (isBackupMarker(parsed)) {
       return {
         key,
@@ -734,10 +804,12 @@ async function migrateLegacyBackupsToIndexedDb(storage: Storage | null): Promise
     const raw = storage.getItem(key);
     if (!raw) continue;
     try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!isBackupSnapshot(parsed)) continue;
+      const parsed = await readLocalSnapshot(raw, key);
+      if (!parsed) continue;
       const summary = toSummary(key, parsed);
-      await writeBackupRecord(key, raw, summary);
+      const serialized = JSON.stringify(parsed);
+      await writeBackupRecord(key, serialized, summary);
+      if (await readBackupRecord(key) !== serialized) continue;
       runtimeBackupSummaries.set(key, summary);
       storeBackupMarker(storage, key, parsed, raw.length);
     } catch {

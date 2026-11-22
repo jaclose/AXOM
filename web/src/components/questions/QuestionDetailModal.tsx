@@ -1,4 +1,5 @@
 import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
+import { QuestionSourceIdentity } from "./QuestionSourceIdentity";
 // ===========================================================================
 // Answer + review flow for a single question. Answer → reveal → capture WHY
 // (confidence, guessed?, error type on a miss, note) → optionally turn the
@@ -230,7 +231,6 @@ export function QuestionDetailModal({ question, onClose, notice }: {
         <Tag tone="neutral">{question.status}</Tag>
         {question.category && <Tag tone="neutral">{question.category}</Tag>}
         {question.system && <Tag tone="neutral">{question.system}</Tag>}
-        {question.bank && <Tag tone="neutral">{question.bank}</Tag>}
         {question.ai?.generated && <Tag tone="purple">AI-generated</Tag>}
         {mappingStatus !== "ready" && (
           <Tag tone={mappingStatus === "unresolved" ? "red" : "orange"}>{QUESTION_MAPPING_STATUS_LABEL[mappingStatus]}</Tag>
@@ -241,6 +241,7 @@ export function QuestionDetailModal({ question, onClose, notice }: {
         </button>
       </div>
 
+      <QuestionSourceIdentity question={question} />
       <QuestionAnnotationToolbar
         activeMode={{ kind: "highlight", tone: annotationTone }}
         hasSelection={Boolean(annotationSelection)}
@@ -372,7 +373,7 @@ export function QuestionDetailModal({ question, onClose, notice }: {
             onMarkExplanationWrong={() => s.updateQuestion(question.id, { needsReview: true, status: "needs-review" })}
             onMarkAnswerWrong={() => s.updateQuestion(question.id, { needsReview: true, status: "needs-review" })}
             showProvenance={false}
-            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered" fallback={
+            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="review" fallback={
               <AnnotatedQuestionText
                 text={question.explanation.trim()}
                 annotations={annotations.filter((annotation) => annotation.target === "explanation")}
@@ -384,7 +385,7 @@ export function QuestionDetailModal({ question, onClose, notice }: {
               />
             } />) : undefined}
           />
-          <QuestionSupportingContent question={question} mode="answered" />
+          <QuestionSupportingContent question={question} mode="review" />
           <div className="stack gap6">
             <span className="field-label">Confidence</span>
             <div className="row">
