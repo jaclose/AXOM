@@ -5,136 +5,138 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Academic publication and approval status · 2026-11-22
+## Academic source recovery and publication · 2026-11-22
 
-JD explicitly requested completion of shared account access, HOST approvals,
-all submitted course trackers, CPR question sets and the wider prepared library.
-This authorizes the scoped code release and content actions. It does not supply
-unresolved answer keys, source evidence or a completed clinical review.
+JD explicitly requested shared access for any account, working HOST approval,
+all submitted course trackers, CPR sets and the wider prepared question corpus.
+This authorizes scoped code release and content publication. It does not supply
+missing source evidence or establish the accuracy of unreviewed questions.
 
-This isolated branch, `fix/publication-review-status-20261122`, starts at
-`fd4ca6d1cb4071c6a9f91d8c5ad00261886523df`, the merge of PR #1008.
-All six quality CI jobs passed its exact candidate tree. Local integration had
-541 passing suites / 5,585 tests and 23 intentionally skipped suites / 37 tests;
-the initial PDF-worker dependency-layout failures were resolved and rerun with
-unchanged test assertions. Typecheck, lint, build, repository and release-tool
-checks passed. PR #1008 adds source revision reconciliation, compressed active
-state fallback and explicit stored review-file export.
+This isolated branch, `fix/academic-source-recovery-20261122`, starts from
+`f5b6a061ba19f2897b966cde04843898725d1adb`. PR #1011 passed all six quality jobs
+on exact candidate `8e44c458b5adb85746750c90bc5e82c46f4ee75b`; its merge tree
+matched the tested tree. Vercel's normal main deployment then succeeded.
+Production `version.json` returned `f5b6a061ba19-20261122031757094` at 03:19 UTC.
+The earlier rate-limit failures are historical, not the current release state.
 
-**Production is still PR #1005, `b9fe78be41b6`.** Vercel rejected the next
-production deployment with a 24-hour deployment rate limit. A successful preview
-is not proof of a production release; preview promotion requires a production
-rebuild. Do not bypass the provider limit, change billing, widen access, or claim
-the new persistence/source-update behavior is live. The Vercel connector also
-returned not found for the known preview under the correct team.
+The live build includes PR #1008 source-revision reconciliation, bounded compressed
+active-state fallback and stored review-file export, plus #1011's separate
+approval notices and ready-question counts. A fresh owner tab verified those
+notices and downloaded the exact current RHPS515 catalog and all 23 bank JSONs.
+Existing-copy updates and a genuine ordinary-account learner journey remain
+unverified. An owner tab is not evidence of another account's acceptance.
 
-## Verified live publication
+## Verified production content
 
-Production readback at approximately 02:56 UTC shows **25 of 26 current
-collections approved and shared**, with **403 ready questions** across seven
-question collections. All collections have no cohort restriction.
+Production readback at 03:02–03:04 UTC showed **25 of 26 current collections
+approved and shared**, containing **403 ready questions** in seven question
+collections. Every collection has null group/cohort restrictions. The deployed
+read policy permits authenticated accounts to read shared, approved, unwithdrawn
+current revisions; anonymous access is not granted.
 
-- All **18 tracker-only courses** were checked and approved through the genuine
-  signed-in HOST workflow. Their 938 activities preserve 102 source-stated weeks
-  and 836 unstated week assignments. No official week/date mapping was invented.
-- CPR2: **186 ready / 0 held**, 372 images and five original PDFs. Shared and
-  approved. All five normal PDF downloads matched the current manifest exactly,
-  but full installation still fails in this browser's local vault.
-- FTCM: **35 ready / 0 held**, 76 images and two original PDFs. Both PDFs downloaded
-  byte-exact. One normal tutor answer verified choices, explanation, printed key
-  crop, zoom and rendered source PDF. That QA answer remains in owner history.
-- NCRS: **66 ready / 11 held**, newly approved at 02:29 UTC. The compiled practice
-  PDF downloaded byte-exact. Original source identities and visible correction
-  notes remain; the compiled PDF is not presented as a recovered original.
-- RHPS IEA: **112 ready / 29 held**, newly approved at 02:31 UTC. Live image
-  preflight and the compiled PDF download passed. The unavailable original IEA
-  PDF remains explicitly marked unavailable.
-- ER: **1 ready / 0 held**, newly approved at 02:33 UTC. The clarified endocrine
-  pathway question preserves its original broader wording as provenance. Its PDF
-  contains practice, explanation and unchanged original credit/question slides;
-  the normal download matched the reviewed bytes.
-- NB Block 2: **1 ready / 0 held**, source question/key/rationale inspected.
-- BPM502 pre-midterm: **2 ready / 0 held**, existing approved collection.
+- All **18 tracker-only courses** were approved through the genuine HOST workflow.
+  Their 938 activities retain 102 source-stated and 836 unstated week assignments.
+- CPR2: **186 ready / 0 held**, 372 images, five original PDFs. All five normal
+  PDF downloads were byte-exact. Full installation failed on b9 with quota errors;
+  only 64 questions materialized. It has not been retried on f5b.
+- FTCM: **35 / 0**, 76 figures, two original PDFs. Both PDFs matched; a normal
+  tutor answer verified choices, rationale, key crop, zoom and source PDF. That
+  QA answer remains in owner history. Two superseded text-only submissions were
+  returned for revision; none remain pending in Question Set Library.
+- NCRS: **66 / 11**, revised and approved at 02:29 UTC. Its compiled PDF matched.
+- RHPS IEA: **112 / 29**, revised and approved at 02:31 UTC. Browser image
+  preflight and compiled PDF download passed.
+- ER: **1 / 0**, source wording clarified with original provenance preserved,
+  approved at 02:33 UTC; the PDF with unchanged source slides matched.
+- NB Block 2: **1 / 0**, source/key/rationale checked and approved.
+- BPM502 pre-midterm: **2 / 0**, previously approved.
 
-The NCRS, RHPS IEA and ER revisions were published, checked and approved through
-normal owner/HOST controls, then independently read back from production. No SQL
-approval write was used. Existing downloaded copies still require the source
-update release; do not describe those copies as corrected. The two superseded
-text-only FTCM Question Set Library submissions were returned for revision, not
-deleted. Owner-session verification is not a new-learner acceptance test.
+Approval uses genuine signed-in reviewer membership, exact current revision and
+hashes, and matching ready/explained counts. No SQL approval writes or reviewer
+bypasses were used. Compiled PDFs are labelled as compilations when original
+source files are unavailable. Other authors' questions retain their own credit.
 
-## Remaining content and recovery
+## RHPS515 recovery and controlled revision
 
-The separate RHPS515 collection remains pending with 393 technically ready and
-122 held questions. Its live stored-source check found only 19 of the 393 ready questions explained,
-with 374 explanations missing; approval stayed disabled. A ready count does not
-establish source accuracy.
-Recovery matched all 23 original PDFs, 59 images and four current bank JSON files
-(56 questions) to its current manifest. The remaining 20 JSON files and 449
-images have not been recovered. Historical 514/524-question copies are not the
-current publication.
+The remaining collection is shared/pending: **515 questions, 393 technically
+ready and 122 held**. The current source check and actual app assessment agree:
+only 19 of the 393 ready questions have explanation prose, leaving 374 missing.
+Its community submission is withdrawn; an empty tracker queue does not establish
+that this academic collection is approved.
 
-Two independent reviews and the actual import pipeline support a **50-ready /
-6-held RHPS candidate** from those four banks. It preserves original identities,
-keys and source credit, corrects source spans and figure assignments, and keeps
-four clinically reworded variants held with explanation evidence. Browser image
-preflight passed at 02:53 UTC. The save then failed atomically because those
-original source checksums already belong to the pending RHPS515 collection.
-Readback confirmed no new collection and no change to the full pending revision.
-Do not rehash originals or relabel their identity to evade that reservation.
-The supported route is a full new revision of the same original collection,
-retaining all 515 questions and explicitly holding unreviewed items: 50 ready /
-465 held if only these 50 have completed review. Its complete current files must
-be recovered first; the candidate remains an unpublished reviewed patch set.
+The live review export recovered all 24 current JSON files exactly by path,
+SHA-256 and size: 23 banks, 515 unique question IDs with order preserved, no parse
+drops. Together with previously recovered 23 PDFs and 59 images, 106 of 555
+current files are local. The remaining 449 images still need exact recovery.
 
-The wider external-drive inventory contains 17,559 declared records, with 782
-technically ready and 16,777 held. Other saved inventories overlap. They are not
-20,000 reviewed public questions. Bounded archive recovery did not locate the
-complete payload. The authorized Mac remains offline, confirmed at 02:58 UTC.
-Do not invent its contents, delete material, or retry commands against an offline
-device. No genuine non-owner/non-reviewer sign-in has been available for live
-acceptance; authenticated RLS contracts and tests are separate evidence.
+A frozen 56-question review patch preserves the current IDs and source keys,
+with 50 ready and six held. Independent assembly, source/image/PDF checks and
+normal browser preflight passed. A separate-collection save was correctly
+rejected because the original source identities belong to RHPS515. It created
+no collection and changed no current revision. Do not rename/rehash originals
+or change source checksums to evade that reservation.
 
-## Workspace protection and UI correction
+The supported release is a complete new revision of the same collection. If
+only the frozen 50 have completed review, retain all 515 and explicitly hold the
+other 465. Preserve the exact final catalog identity; the multi-course planner
+adds a course suffix and must not receive an already suffixed ID accidentally.
+Retain removed incorrect/duplicate renditions in the old immutable revision and
+recovery archive; do not attach them again merely to preserve a file count.
+No revised RHPS515 package is publishable until its real binary preflight passes.
 
-A normal save retry succeeded at 02:20 UTC, but the full CPR2 download failed
-again after additional sources. CRC/SHA-checked Saved Work snapshots preserve
-the current records and all older recoverable files. Two small saved-source
-downloads then completed with a fresh durable save at 02:42 UTC. The later export
-could read their 29 new images but none of the prior 128 readable images, although
-all prior references and metadata remain. No deletion was established. The live
-exporter collapses missing rows, ownership/IndexedDB errors and unreadable Blob
-bytes into one missing-media result. Independent code audits and five synthetic
-cases reproduce possible read failures, not the live cause. Both actual snapshots
-contain deferred content, so ordinary Merge is blocked; Replace is not a media-only
-repair. Pause learner installs, retain all snapshots, and do not reload the live
-workspace, clear storage, sign out or prune records to force a save. These exports
-are neither complete backups nor successful restore tests.
+The current code task adds a separate exact full-source package export using the
+existing authenticated reader. It must include the stored catalog, banks, images
+and PDFs without installation or learner-store writes, with existing limits,
+revision/account pinning and byte integrity intact. The light review export stays
+available. A full export is recovery evidence, not a clinical approval.
 
-The current patch replaces misleading “reviewed” count labels with ready counts
-and shows revision approval separately in connected previews. Pending or rejected
-owner-visible content must never gain an approval claim from a positive ready
-count. Controls, practice gates, data and server permissions are unchanged.
-[Academic library](features/academic-library.md) owns this distinction;
-[persistence](architecture/data-model.md) owns recovery and verified saves.
+## Workspace protection and narrow read fix
 
-## Next gates
+All original backups and the original live RAM tab remain protected. No storage
+was cleared, records pruned, account signed out or backup restored. After two
+normal small source downloads, a saved-work export had 344 questions, 52 documents,
+29 readable images and 230 metadata-only image references. The old 128 readable
+keys remained referenced with identical metadata. No deletion was established.
 
-The 15 focused preview tests, typecheck, scoped lint, production build, repository
-checks and repository tests pass. Independent source review of the four UI files
-passes. The first CI attempt passed web, native, deployment inputs and two browser
-shards; the remaining shard found stale text expectations in three browser tests.
-Six exact labels were updated to the intended ready/held wording without changing
-the download, quiz, reload, isolation or progress assertions. Complete all required
-CI on the corrected head before merge; the new UI is not deployed. Once the
-provider allows production deployment, verify the exact live commit, source-copy
-updates, protected recovery and full CPR2 download. A fresh ordinary-account
-journey still requires genuine sign-in. Preserve these separate outcomes.
+A fresh f5b saved-work export at 03:30 UTC was identical to that snapshot except
+its export timestamp, including all question/document/history/deferred content
+and all 29 readable image bytes. The fresh runtime did not restore earlier reads.
+Forensic preservation recovered 256 of 259 referenced image keys with exact hashes
+and decoding. Its explicitly NOT_RESTORE archive contains no workspace or importer
+marker; it must not be fed to the normal restore controls. Three image payloads remain
+unrecovered. Both real snapshots contain deferred content, so Merge is blocked;
+Replace is not a media-only repair. Full learner installs remain paused.
 
-Production Supabase is `jofkmfwkidubxcutkwzf`; tracker migration
-`20261122002007_academic_tracker_review.sql` is applied. Existing source/key/media
-and reviewer gates remain intact. Keep private question files, PDFs and learner
-backups outside this public repository. Original Mac and other worktrees are
-untouched. [FORGE #140](https://github.com/jaclose/AXOM/issues/140) remains the
-cross-workstream record; the [maintenance registry](operations/repository-audit.md#maintenance-registry)
-retains ownership boundaries.
+A proven synthetic availability defect used a readwrite transaction merely to
+read an existing permanent legacy ownership receipt. The scoped fix now reads
+that receipt read-only; only absence uses an atomic readwrite recheck/add. Existing
+owner/null receipts win, failed reads/writes grant nothing, and account/hash/durable
+save gates stay intact. Five suites/77 focused image/export/original-file tests,
+typecheck and scoped lint passed. This is not a diagnosis or claimed repair of
+the live 230 missing reads. No blind unreadable-Blob cloud fallback or replacement
+was added. [Data model](architecture/data-model.md) owns this contract.
+
+## Wider corpus and release gates
+
+The separate external-drive inventory declares 17,559 records: 782 technically
+ready and 16,777 held. MASTER v2 has 2,673 IDs with unresolved overlap; do not sum
+them into 20k reviewed unique questions. The source Mac was still offline at 03:39 UTC.
+Bounded archive/Drive searches and the current source registry did not supply the
+complete prepared folder. Access to the Mac/SSD or an uploaded complete package
+is required. Do not retry inaccessible device commands or invent missing files.
+
+The full-source export passes 42 focused tests, typecheck, scoped lint, production
+build and actual ZIP-reader round-trip; independent frozen-code review passed.
+Combined integration and all required CI remain gates before the authorized merge
+and exact normal production build readback. Once deployed, recover and validate all RHPS files, assemble the complete
+same-collection revision and use normal owner/HOST controls. Keep any unresolved
+question held. Compare a fresh normal saved-work export before claiming restored
+media reads; successful CI or code deployment is not live recovery. Genuine
+nonowner sign-in remains necessary for learner acceptance.
+
+Supabase project: `jofkmfwkidubxcutkwzf`. Private question files, PDFs and learner
+backups stay outside this public repository. Original Mac and other worktrees
+remain untouched. The unavailable Mac BOARD limits ownership visibility; changes
+are confined to this explicit assignment. The
+[maintenance registry](operations/repository-audit.md#maintenance-registry)
+retains all unrelated ownership boundaries.

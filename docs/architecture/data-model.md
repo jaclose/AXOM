@@ -70,6 +70,14 @@ Saved-work exports keep deferred source metadata outside the scoring engine and 
 only local binary caches. Restoring such a copy reuses exact source-digest retention;
 the imported personal overlay wins without fetching or discarding matching local bytes.
 
+Existing legacy binary ownership receipts are read with a read-only IndexedDB
+transaction, so access does not depend on the store accepting writes. Only an
+absent receipt enters a readwrite transaction, which rechecks before creating
+the permanent owner or null receipt. Concurrent receipts keep precedence; a
+failed read or uncommitted write never grants access from the boot-time hint.
+This applies to the shared image/original-file ownership check without changing
+account scope, blob hashes, cloud fallback, binary rows or required-image saves.
+
 Daily challenge delivery keeps only a versioned, account/challenge-scoped launch
 reference in the existing Local Vault. Its session ID resolves canonical `quizSessions`;
 no parallel answer or progress engine exists. Web Locks serialize creation/retirement.
