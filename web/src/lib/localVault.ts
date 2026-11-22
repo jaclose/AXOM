@@ -917,6 +917,12 @@ const vaultStorage: StateStorage = {
               // Never erase the marked fallback or silently select the vault
               // when a different tab committed a byte-distinct workspace.
               if (current !== newer.value) {
+                // A peer that explicitly retired the marker already resolved
+                // this fallback; its unmarked mirror cannot supersede IDB.
+                if (fallbackStore?.getItem(fallbackMarkerKey(name)) === null) {
+                  rememberVaultSnapshot(name, current);
+                  return current;
+                }
                 if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
                 throw promotionError;
               }
