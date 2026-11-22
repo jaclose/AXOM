@@ -66,6 +66,28 @@ describe("personalized study progress", () => {
     });
   });
 
+  it("treats an Anki-completed QBank review as finished without crediting an ordinary lecture", () => {
+    const review: TrackerItem = {
+      ...item, id: "review-anki", kind: "Review Loop",
+      passes: 0, ankiPasses: 1,
+      reviewTask: { source: "digest", sourceId: "set-1" },
+    };
+    const original = structuredClone(review);
+    // Review tasks archive after either real study or Anki completion, so
+    // completion and next-action suggestions must use the same evidence.
+    expect(trackerStudyProgress(review)).toMatchObject({ target: 1, fraction: 1, complete: true });
+    expect(rankTrackerItems([review])).toEqual([]);
+    expect(scopeStudyProgress([review])).toEqual({ percent: 0, complete: 0, inProgress: 0, notStarted: 0 });
+    expect(review).toEqual(original);
+
+    const unfinished = { ...review, ankiPasses: 0 };
+    expect(trackerStudyProgress(unfinished)).toMatchObject({ target: 1, fraction: 0, complete: false });
+    expect(rankTrackerItems([unfinished])).toHaveLength(1);
+    expect(trackerStudyProgress({ ...item, passes: 0, ankiPasses: 1 })).toMatchObject({
+      fraction: 0, complete: false,
+    });
+  });
+
   it("reports an empty scope as zero without inventing completed items", () => {
     expect(scopeStudyProgress([])).toEqual({ percent: 0, complete: 0, inProgress: 0, notStarted: 0 });
   });
