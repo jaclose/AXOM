@@ -138,6 +138,10 @@ test("developer preview blocks a user-triggered popup while an unsandboxed cross
   await page.evaluate(() => {
     const control = document.createElement("iframe");
     control.title = "Unsandboxed external popup control";
+    // Keep the synthetic control in the viewport above the app shell and
+    // sidebar/backdrop so Playwright can deliver a genuine pointer gesture.
+    // Do not force-click: the positive control must prove normal hit-testing.
+    control.style.cssText = "position:fixed;top:12px;left:12px;width:340px;height:140px;z-index:2147483647;border:0;background:white";
     control.src = "https://www.jafardabbagh.com/axom-popup-positive-control";
     document.body.appendChild(control);
   });
