@@ -936,8 +936,12 @@ const vaultStorage: StateStorage = {
             }
           } catch (readError) {
             if (isVaultConflictError(readError)) throw readError;
-            // Preserve the marked copy if the winning vault cannot be reread.
+            // Once IndexedDB rejected the promotion for a competing revision,
+            // a failed winner readback cannot prove that the fallback is safe.
+            // Preserve both copies and require explicit reconciliation.
           }
+          if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw promotionError;
         }
         // Still not writable: the copy stays in localStorage for the next start.
       }
@@ -1016,7 +1020,26 @@ const vaultStorage: StateStorage = {
       await writeVault(name, value, userId, vaultExpectation);
       if (currentPacked) assertPackedLegacyCurrent(fallbackStore, currentPacked);
       retirePackedFallback(fallbackStore, name, currentPacked?.raw ?? null);
-      clearFallbackCopy(fallbackStore, name, userId);
+      if (observesWorkspace(name)) {
+        const latestFallback = newerFallbackCopy(fallbackStore, name);
+        // A different tab can acknowledge its own offline copy while the
+        // IndexedDB transaction is in flight. A successful vault commit must
+        // never clear that subsequently written recovery copy or claim that
+        // the two independent edits were reconciled.
+        if (
+          currentFallback?.marker !== latestFallback?.marker
+          || currentFallback?.value !== latestFallback?.value
+        ) throw new VaultConflictError();
+        if (currentFallback) {
+          clearFallbackCopyIfUnchanged(fallbackStore, name, currentFallback, userId);
+        } else if (userId) {
+          // Do not remove unmarked legacy mirrors here: multi-key localStorage
+          // cleanup has no atomic compare-and-delete across concurrent tabs.
+          try { fallbackStore?.setItem(activeUserKey(name), userId); } catch { /* IDB is durable. */ }
+        }
+      } else {
+        clearFallbackCopy(fallbackStore, name, userId);
+      }
       rememberVaultSnapshot(name, value);
       markVaultWrite("indexeddb");
     } catch (indexedDbError) {
