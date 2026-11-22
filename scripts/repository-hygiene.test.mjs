@@ -505,3 +505,39 @@ test('repository gate catches the observed conflict and missing-route failure, p
     assert.equal(result.errors.length, 4);
   });
 });
+
+// Keep the expensive APEX gate attached to academic changes, including recovery and review.
+// This checks the intentionally simple literal, trailing-* and trailing-/** path forms
+// supported by this workflow; it is not a general GitHub glob evaluator.
+test('APEX academic acceptance path filter covers source recovery, QBank and tracker changes only', () => {
+  const yaml = readFileSync(new URL('../.github/workflows/apex-acceptance.yml', import.meta.url), 'utf8');
+  const section = yaml.match(/^    paths:\\s*\\n((?:      - [^\\n]+\\n)+)/m);
+  assert.ok(section, 'APEX pull_request.paths must be present');
+  const globs = section[1].trim().split('\\n').map((line) => line.trim().replace(/^-[ ]+/, '').replace(/^['\"]|['\"]$/g, ''));
+  const matches = (pathName, glob) => {
+    if (glob.endsWith('/**')) return pathName.startsWith(glob.slice(0, -2));
+    if (glob.endsWith('*')) return pathName.startsWith(glob.slice(0, -1));
+    assert.ok(!glob.includes('*'), `Unhandled path-glob form: ${glob}`);
+    return pathName === glob;
+  };
+  const triggered = (pathName) => globs.some((glob) => matches(pathName, glob));
+  for (const pathName of [
+    'web/src/lib/course-engine/academicQuizPlanner.ts',
+    'web/src/lib/academicLibrary/reviewExport.ts',
+    'web/src/lib/questionAttachments.ts',
+    'web/src/lib/questionBank.test.ts',
+    'web/src/lib/sharing/supabaseSharing.ts',
+    'web/src/lib/learning-intelligence/review.ts',
+    'web/src/lib/exam/examSession.ts',
+    'web/src/lib/quizRunCommit.test.ts',
+    'web/src/components/questions/LibraryPanels.tsx',
+    'web/src/components/tracker/AcademicReviewFiles.tsx',
+    'web/src/components/exam/ExamRunner.tsx',
+  ]) assert.equal(triggered(pathName), true, `academic edit must trigger APEX: ${pathName}`);
+  for (const pathName of [
+    'docs/AI_STATE.md',
+    'web/src/components/productivity/Timer.tsx',
+    'web/src/lib/localVault.ts',
+    'web/src/lib/operator/hostClient.ts',
+  ]) assert.equal(triggered(pathName), false, `unrelated edit must not trigger APEX: ${pathName}`);
+});
