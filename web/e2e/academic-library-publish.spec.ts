@@ -102,7 +102,7 @@ for (const width of [1440, 390]) test(`publishes a prepared library as one cours
     const collection = page.getByRole("region", { name: "NCRS question collection" });
     await expect(collection).toContainText("This collection has no weekly plan.");
     await collection.getByRole("button", { name: "Download questions" }).click();
-    await expect(collection).toContainText("1 reviewed question is on this device.", { timeout: 30_000 });
+    await expect(collection).toContainText("1 ready question is on this device.", { timeout: 30_000 });
     await page.screenshot({ path: `/tmp/axom-publish-collection-${width}.png`, fullPage: true });
     await collection.getByRole("button", { name: "Create Quiz" }).click();
     await expect(page).toHaveURL(/#questions/);

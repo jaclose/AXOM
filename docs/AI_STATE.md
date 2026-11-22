@@ -30,7 +30,7 @@ returned not found for the known preview under the correct team.
 
 ## Verified live publication
 
-Production readback at approximately 02:34 UTC shows **25 of 26 current
+Production readback at approximately 02:56 UTC shows **25 of 26 current
 collections approved and shared**, with **403 ready questions** across seven
 question collections. All collections have no cohort restriction.
 
@@ -38,7 +38,8 @@ question collections. All collections have no cohort restriction.
   signed-in HOST workflow. Their 938 activities preserve 102 source-stated weeks
   and 836 unstated week assignments. No official week/date mapping was invented.
 - CPR2: **186 ready / 0 held**, 372 images and five original PDFs. Shared and
-  approved, but full installation still fails in this browser's local vault.
+  approved. All five normal PDF downloads matched the current manifest exactly,
+  but full installation still fails in this browser's local vault.
 - FTCM: **35 ready / 0 held**, 76 images and two original PDFs. Both PDFs downloaded
   byte-exact. One normal tutor answer verified choices, explanation, printed key
   crop, zoom and rendered source PDF. That QA answer remains in owner history.
@@ -73,19 +74,23 @@ Recovery matched all 23 original PDFs, 59 images and four current bank JSON file
 images have not been recovered. Historical 514/524-question copies are not the
 current publication.
 
-Two independent reviews support a separate **50-ready / 6-held RHPS candidate**
-from those four banks. Assembly must preserve original identities, keys and
-source credit; correct respiratory question 16's source span to pages 5–6; keep
-seven neighboring-figure bookkeeping sentences out of automatic feedback; retain
-the original WBC question 8 prompt with its clinical caveat. Four clinically
-reworded respiratory variants stay held with explanation evidence. This candidate
-is being assembled; it has not yet been published at this checkpoint. It must not
-replace the full pending RHPS515 collection.
+Two independent reviews and the actual import pipeline support a **50-ready /
+6-held RHPS candidate** from those four banks. It preserves original identities,
+keys and source credit, corrects source spans and figure assignments, and keeps
+four clinically reworded variants held with explanation evidence. Browser image
+preflight passed at 02:53 UTC. The save then failed atomically because those
+original source checksums already belong to the pending RHPS515 collection.
+Readback confirmed no new collection and no change to the full pending revision.
+Do not rehash originals or relabel their identity to evade that reservation.
+The supported route is a full new revision of the same original collection,
+retaining all 515 questions and explicitly holding unreviewed items: 50 ready /
+465 held if only these 50 have completed review. Its complete current files must
+be recovered first; the candidate remains an unpublished reviewed patch set.
 
 The wider external-drive inventory contains 17,559 declared records, with 782
 technically ready and 16,777 held. Other saved inventories overlap. They are not
 20,000 reviewed public questions. Bounded archive recovery did not locate the
-complete payload. The authorized Mac remains offline, confirmed at 02:36 UTC.
+complete payload. The authorized Mac remains offline, confirmed at 02:58 UTC.
 Do not invent its contents, delete material, or retry commands against an offline
 device. No genuine non-owner/non-reviewer sign-in has been available for live
 acceptance; authenticated RLS contracts and tests are separate evidence.
@@ -93,13 +98,18 @@ acceptance; authenticated RLS contracts and tests are separate evidence.
 ## Workspace protection and UI correction
 
 A normal save retry succeeded at 02:20 UTC, but the full CPR2 download failed
-again after additional sources. A second normal Saved Work export was preserved
-and CRC/SHA checked: 344 materialized questions, 95 sets, 50 documents and 80 quiz
-sessions. It includes 128 readable image attachments; 102 images and 88 original
-files are references/metadata only. There are also 1,191 deferred questions and
-77 deferred documents. Every older backup remains preserved. This is neither a
-complete backup nor a successful restore test. Do not reload the original live
-workspace, clear storage, sign out or prune records to force a save.
+again after additional sources. CRC/SHA-checked Saved Work snapshots preserve
+the current records and all older recoverable files. Two small saved-source
+downloads then completed with a fresh durable save at 02:42 UTC. The later export
+could read their 29 new images but none of the prior 128 readable images, although
+all prior references and metadata remain. No deletion was established. The live
+exporter collapses missing rows, ownership/IndexedDB errors and unreadable Blob
+bytes into one missing-media result. Independent code audits and five synthetic
+cases reproduce possible read failures, not the live cause. Both actual snapshots
+contain deferred content, so ordinary Merge is blocked; Replace is not a media-only
+repair. Pause learner installs, retain all snapshots, and do not reload the live
+workspace, clear storage, sign out or prune records to force a save. These exports
+are neither complete backups nor successful restore tests.
 
 The current patch replaces misleading “reviewed” count labels with ready counts
 and shows revision approval separately in connected previews. Pending or rejected
@@ -112,8 +122,11 @@ count. Controls, practice gates, data and server permissions are unchanged.
 
 The 15 focused preview tests, typecheck, scoped lint, production build, repository
 checks and repository tests pass. Independent source review of the four UI files
-passes. Complete required CI before merge; the new UI is not deployed. Check the remaining RHPS
-candidate with the actual pipeline and live browser before approval. Once the
+passes. The first CI attempt passed web, native, deployment inputs and two browser
+shards; the remaining shard found stale text expectations in three browser tests.
+Six exact labels were updated to the intended ready/held wording without changing
+the download, quiz, reload, isolation or progress assertions. Complete all required
+CI on the corrected head before merge; the new UI is not deployed. Once the
 provider allows production deployment, verify the exact live commit, source-copy
 updates, protected recovery and full CPR2 download. A fresh ordinary-account
 journey still requires genuine sign-in. Preserve these separate outcomes.
