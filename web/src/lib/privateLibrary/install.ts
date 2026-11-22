@@ -386,18 +386,20 @@ export interface LibraryInstallOptions {
   reconcileSource?: (bank: PreparedBank, catalog: PrivateLibraryCatalog,
     source: PrivateLibraryCatalog["sources"][number], storedReview?: SourceDocument) => Promise<LibrarySourceUpdate | undefined>;
 }
-let installing: { read: LibraryReader; key?: string; options: LibraryInstallOptions; cacheOriginals: boolean; promise: Promise<LibraryInstallation> } | undefined;
+let installing: { read: LibraryReader; key?: string; options: LibraryInstallOptions; cacheOriginals: boolean; attachmentScope: QuestionAttachmentScope; promise: Promise<LibraryInstallation> } | undefined;
 /** Same canonical import as file review. Each completed source is durable; retry repairs missing media. */
 export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}, scope?: LibraryInstallScope, options: LibraryInstallOptions = {}): Promise<LibraryInstallation> {
   const cacheOriginals = options.cacheOriginals !== false;
-  if (installing) return installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals
+  // Do not join an A-origin import after B has become the active account.
+  const attachmentScope = getQuestionAttachmentScope();
+  if (installing) return isQuestionAttachmentScopeCurrent(installing.attachmentScope)
+    && installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals
     && installing.options.reconcileSource === options.reconcileSource ? installing.promise
     : Promise.reject(new Error("Another library download is being saved. Wait for it to finish, then retry."));
   // Capture before any awaited catalog/read/backups: an A import must never
   // resolve a new B generation from a lower-level binary storage API.
-  const attachmentScope = getQuestionAttachmentScope();
   const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals, options.reconcileSource, attachmentScope).finally(() => { installing = undefined; });
-  installing = { read, key: scope?.key, options, cacheOriginals, promise };
+  installing = { read, key: scope?.key, options, cacheOriginals, attachmentScope, promise };
   return promise;
 }
 async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void, cacheOriginals: boolean,
@@ -606,6 +608,8 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   assertImportCurrent();
   if (warnings.length) progress(`${warnings.length} source${warnings.length === 1 ? " needs" : "s need"} another installation attempt. Saved study progress and completed sources remain available.`);
   else progress("Library installed. Choose a course or create a quiz.");
+  // Progress handlers can switch accounts synchronously after the prior guard.
+  assertImportCurrent();
   return {
     status: warnings.length ? "partial" : "complete",
     warnings,
