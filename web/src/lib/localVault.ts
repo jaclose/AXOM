@@ -1007,9 +1007,13 @@ const vaultStorage: StateStorage = {
 async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
+  const fallbackStore = localFallback();
+  const cleanupObservation = observeFallbackForCleanup(fallbackStore, name, userId);
   try {
     await writeVault(name, value, userId);
-    clearFallbackCopy(localFallback(), name, userId);
+    // Explicit restore selects the replacement snapshot, but an unrelated
+    // in-flight tab's newly acknowledged fallback must remain recoverable.
+    clearFallbackCopy(fallbackStore, name, userId, cleanupObservation);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
     if (name === STORAGE_KEYS.persistedState) markVaultWrite("indexeddb");
