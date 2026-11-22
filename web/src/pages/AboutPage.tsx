@@ -42,7 +42,7 @@ const PLANNED: Feature[] = [
   { name: "Residency program research", detail: "A separate, sourced residency dataset for the Application Checker once reliable program data is collected." },
   { name: "Casper & DAT lanes", detail: "Separate pre-health lanes alongside MCAT and Pre-Med, each with their own outline." },
   { name: "Connected calendars & drives", detail: "Read-only Google Calendar overlays and Drive folder links, opt-in and revocable." },
-  { name: "Attachment sync", detail: "Question images are device-only today; syncing them needs its own storage and quota design." },
+  { name: "Attachment sync", detail: "Approved shared-course figures use a separate authenticated download path. Personal cross-device image recovery still needs independent live account acceptance." },
   { name: "Performance intelligence", detail: "Sharper, day-aware recommendations as enough real days accumulate." },
 ];
 

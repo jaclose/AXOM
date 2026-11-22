@@ -46,6 +46,13 @@ describe("About page accessible tabs", () => {
     expect(developer.getAttribute("aria-selected")).toBe("true");
   });
 
+  it("distinguishes hosted shared media from unverified personal attachment recovery", () => {
+    render(<AboutPage />);
+    expect(screen.getByText(/Approved shared-course figures use a separate authenticated download path/)).toBeTruthy();
+    expect(screen.getByText(/Personal cross-device image recovery still needs independent live account acceptance/)).toBeTruthy();
+    expect(screen.queryByText(/Question images are device-only today/)).toBeNull();
+  });
+
   it("leaves modified shortcuts untouched and still supports pointer clicks", () => {
     render(<AboutPage />);
     const about = screen.getByRole("tab", { name: "About AXOM" });
