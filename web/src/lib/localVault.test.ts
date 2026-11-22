@@ -126,6 +126,62 @@ describe("IndexedDB-first local vault", () => {
     expect(saved).toBe(snapshot("newer tab edit"));
   });
 
+  it.each(["v1", "legacy"] as const)(
+    "keeps both acknowledged copies when a marked fallback conflicts with a newer tab (%s)",
+    async (markerFormat) => {
+      const key = STORAGE_KEYS.persistedState;
+      const markerKey = key + ":fallback-newer";
+      const scopedKey = key + ":user:jd";
+      const snapshot = (label: string) => JSON.stringify({
+        state: { profile: { userId: "jd" }, label },
+        version: 34,
+      });
+      const base = snapshot("original vault");
+      const offline = snapshot("acknowledged offline edit");
+      const other = snapshot("other tab committed edit");
+
+      await localVaultStorage.setItem(key, base);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(base);
+
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      await flushLocalVaultWrites();
+      const modernMarker = localStorage.getItem(markerKey);
+      expect(modernMarker).not.toBeNull();
+      if (markerFormat === "legacy") {
+        const parsed = JSON.parse(modernMarker!) as { valueFingerprint: string };
+        localStorage.setItem(markerKey, parsed.valueFingerprint);
+      }
+      const observedMarker = localStorage.getItem(markerKey);
+      expect(localStorage.getItem(key)).toBe(offline);
+      expect(localStorage.getItem(scopedKey)).toBe(offline);
+
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      const secondTab = await openCurrentVault();
+      try {
+        await putDirect(secondTab, key, other);
+        // A CAS conflict must not decide which set of unique edits to discard.
+        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+
+        expect(await getDirect(secondTab, key)).toBe(other);
+        expect(localStorage.getItem(key)).toBe(offline);
+        expect(localStorage.getItem(markerKey)).toBe(observedMarker);
+        expect(localStorage.getItem(scopedKey)).toBe(offline);
+
+        const checkpoint = getVaultWriteCheckpoint();
+        await localVaultStorage.setItem(key, snapshot("blind overwrite"));
+        await flushLocalVaultWrites();
+        expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+        expect(await getDirect(secondTab, key)).toBe(other);
+        expect(localStorage.getItem(key)).toBe(offline);
+      } finally {
+        secondTab.close();
+      }
+    },
+  );
+
   it("promotes and keeps saving an auxiliary-key fallback after IndexedDB recovers", async () => {
     const key = STORAGE_KEYS.aiGenerations;
     const older = JSON.stringify({ schemaVersion: 1, generations: [{ id: "older" }] });
