@@ -1,0 +1,72 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { AboutPage } from "./AboutPage";
+
+afterEach(cleanup);
+
+describe("About page accessible tabs", () => {
+  it("has one roving tab stop and a labelled, keyboard-focusable panel", () => {
+    render(<AboutPage />);
+    const about = screen.getByRole("tab", { name: "About AXOM" });
+    const developer = screen.getByRole("tab", { name: "The developer" });
+    const panel = screen.getByRole("tabpanel");
+    expect(about.tabIndex).toBe(0);
+    expect(developer.tabIndex).toBe(-1);
+    expect(about.getAttribute("aria-selected")).toBe("true");
+    expect(developer.getAttribute("aria-selected")).toBe("false");
+    expect(about.getAttribute("aria-controls")).toBe(panel.id);
+    expect(developer.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.getAttribute("aria-labelledby")).toBe(about.id);
+    expect(panel.tabIndex).toBe(0);
+  });
+
+  it("moves selection and focus with arrows, Home, and End", () => {
+    render(<AboutPage />);
+    const about = screen.getByRole("tab", { name: "About AXOM" });
+    const developer = screen.getByRole("tab", { name: "The developer" });
+    const panel = screen.getByRole("tabpanel");
+    about.focus();
+    fireEvent.keyDown(about, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(developer);
+    expect(developer.tabIndex).toBe(0);
+    expect(about.tabIndex).toBe(-1);
+    expect(panel.getAttribute("aria-labelledby")).toBe(developer.id);
+    expect(screen.getByTitle("Live site preview")).toBeTruthy();
+
+    fireEvent.keyDown(developer, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(about);
+    expect(about.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(about, { key: "End" });
+    expect(document.activeElement).toBe(developer);
+    fireEvent.keyDown(developer, { key: "Home" });
+    expect(document.activeElement).toBe(about);
+    fireEvent.keyDown(about, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(developer);
+    expect(developer.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("leaves modified shortcuts untouched and still supports pointer clicks", () => {
+    render(<AboutPage />);
+    const about = screen.getByRole("tab", { name: "About AXOM" });
+    const developer = screen.getByRole("tab", { name: "The developer" });
+    about.focus();
+    for (const init of [
+      { key: "ArrowLeft", altKey: true },
+      { key: "ArrowRight", altKey: true },
+      { key: "Home", ctrlKey: true },
+      { key: "End", metaKey: true },
+      { key: "ArrowRight", shiftKey: true },
+    ]) {
+      const event = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
+      fireEvent(about, event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(about);
+      expect(about.getAttribute("aria-selected")).toBe("true");
+    }
+    fireEvent.click(developer);
+    expect(document.activeElement).toBe(developer);
+    expect(developer.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(developer.id);
+  });
+});
