@@ -506,4 +506,56 @@ describe("verified separate compressed workspace fallback", () => {
       .rejects.toThrow(VAULT_CONFLICT_MESSAGE);
     expect(values).toEqual(savedRecords);
   });
+  it("uses the committed IDB workspace in physical recovery snapshots when a known fallback is retired", async () => {
+    const restored = snapshot("explicitly restored original workspace");
+    const retired = snapshot("older independently recoverable offline notes");
+    const receiptKey = `${key}:fallback-retired`;
+    const markerKey = `${key}:fallback-newer`;
+
+    await localVaultStorage.setItem(key, restored);
+    expect(await localVaultStorage.getItem(key)).toBe(restored);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, retired);
+    const originalMarker = values.get(markerKey);
+    expect(originalMarker).toBeTruthy();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await replaceLocalVaultItem(key, restored);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(await localVaultStorage.getItem(key)).toBe(restored);
+    expect(values.get(key)).toBe(retired); // Never delete recoverable bytes.
+    expect(values.get(markerKey)).toBe(originalMarker);
+    expect(values.get(receiptKey)).toBeTruthy();
+
+    const backupKey = await createLocalBackup(34, 99);
+    expect(backupKey).toBeTruthy();
+    const captured = (await readLocalBackup(backupKey!))!;
+    const indexedDb = captured.indexedDb?.records;
+    const local = captured.localStorage;
+    expect(indexedDb).toBeDefined();
+    expect(indexedDb?.[key]).toBe(restored);
+    expect(local[key]).toBe(retired);
+    expect(local[receiptKey]).toBeTruthy();
+
+    // Recovery inspection and app-update checkpoints share this selector.
+    // A retained retired marker must not resurrect the older workspace.
+    expect(resolveMarkedVaultSnapshotRecord(indexedDb, local, key)).toBe(restored);
+    await expect(resolveWorkspaceSnapshotRecord(indexedDb, local, key)).resolves.toBe(restored);
+
+    // The receipt is valid only for its exact IDB bytes and same account.
+    const different = snapshot("competing different committed workspace");
+    const otherAccount = snapshot("other account workspace", false, "other-learner");
+    expect(() => resolveMarkedVaultSnapshotRecord({ [key]: different }, local, key)).toThrow(VAULT_CONFLICT_MESSAGE);
+    await expect(resolveWorkspaceSnapshotRecord({ [key]: otherAccount }, local, key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    await expect(resolveWorkspaceSnapshotRecord(undefined, local, key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+
+    // A receipt for a previous marker must not retire a new acknowledged copy.
+    const wrongReceipt = { ...local, [receiptKey]: JSON.stringify({ ...JSON.parse(local[receiptKey]), marker: "previous-marker" }) };
+    expect(resolveMarkedVaultSnapshotRecord(indexedDb, wrongReceipt, key)).toBe(retired);
+    await expect(resolveWorkspaceSnapshotRecord(indexedDb, wrongReceipt, key)).resolves.toBe(retired);
+    expect(values.get(key)).toBe(retired);
+    expect(values.get(markerKey)).toBe(originalMarker);
+  });
+
 });
