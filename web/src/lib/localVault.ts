@@ -692,8 +692,14 @@ function clearFallbackCopyIfUnchanged(
   fallbackStore: Storage | null,
   name: string,
   copy: NewerFallbackCopy,
+  currentVaultSnapshot: string,
   currentUserId: string,
 ): void {
+  // A winning concurrent IndexedDB commit does not prove that a distinct,
+  // already-acknowledged localStorage recovery copy was incorporated.
+  // Preserve both bytes for an explicit recovery decision rather than
+  // silently deleting one tab's edits after a failed promotion CAS.
+  if (currentVaultSnapshot !== copy.value) return;
   try {
     if (
       fallbackStore?.getItem(fallbackMarkerKey(name)) !== copy.marker
@@ -728,7 +734,7 @@ const vaultStorage: StateStorage = {
           try {
             const current = await readVaultSnapshot(name);
             if (current !== null) {
-              clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              clearFallbackCopyIfUnchanged(fallbackStore, name, newer, current, persistedUserId(current));
               rememberVaultSnapshot(name, current);
               return current;
             }

@@ -125,6 +125,68 @@ describe("IndexedDB-first local vault", () => {
     expect(saved).toBe(snapshot("newer tab edit"));
   });
 
+  it("preserves both byte-distinct saved copies when a fallback promotion loses a two-tab vault race", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = key + ":fallback-newer";
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, documents: [{ id: label, rawText: label }] },
+      version: 34,
+    });
+    const base = snapshot("common base");
+    const fallback = snapshot("offline tab unique edit");
+    const winningVault = snapshot("other tab unique edit");
+    await localVaultStorage.setItem(key, base);
+    await flushLocalVaultWrites();
+
+    // An acknowledged recovery save on tab A cannot reach IndexedDB.
+    vi.stubGlobal("indexedDB", undefined);
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, fallback);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    const marker = storage.getItem(markerKey);
+    expect(marker).toBeTruthy();
+    expect(storage.getItem(key)).toBe(fallback);
+    const scopedCopy = [...values.entries()].find(([name, value]) =>
+      name !== key && name !== markerKey && value === fallback
+    );
+    expect(scopedCopy).toBeDefined();
+
+    // Tab B commits a different workspace while A is offline.
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    try {
+      await putDirect(db, key, winningVault);
+      expect(await localVaultStorage.getItem(key)).toBe(winningVault);
+      // The winning vault is authoritative for reading, but may NOT be
+      // evidence that the different acknowledged local fallback was recovered.
+      expect(storage.getItem(key)).toBe(fallback);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(values.get(scopedCopy![0])).toBe(fallback);
+      expect(await getDirect(db, key)).toBe(winningVault);
+      expect(await localVaultStorage.getItem(key)).toBe(winningVault);
+      expect(storage.getItem(key)).toBe(fallback);
+
+      // A subsequent ordinary write must not auto-reconcile the conflict.
+      const conflictCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("unreviewed overwrite"));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(conflictCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(await getDirect(db, key)).toBe(winningVault);
+      expect(storage.getItem(key)).toBe(fallback);
+      expect(storage.getItem(markerKey)).toBe(marker);
+
+      // An IndexedDB outage must still expose the preserved recovery copy,
+      // without rewriting the independently committed vault snapshot.
+      vi.stubGlobal("indexedDB", undefined);
+      expect(await localVaultStorage.getItem(key)).toBe(fallback);
+      expect(storage.getItem(key)).toBe(fallback);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      expect(await getDirect(db, key)).toBe(winningVault);
+    } finally {
+      db.close();
+    }
+  });
+
   it("promotes and keeps saving an auxiliary-key fallback after IndexedDB recovers", async () => {
     const key = STORAGE_KEYS.aiGenerations;
     const older = JSON.stringify({ schemaVersion: 1, generations: [{ id: "older" }] });
