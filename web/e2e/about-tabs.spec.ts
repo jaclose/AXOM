@@ -6,6 +6,11 @@ for (const width of [1440, 390, 320]) {
   test(`About tabs keep keyboard focus and panel identity at ${width}px`, async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
+    // Isolate the developer\'s separately deployed iframe from AXOM keyboard and error checks.
+    // Keep uncaught errors from AXOM itself observable rather than muting pageerror.
+    await page.route("https://www.jafardabbagh.com/**", route => route.fulfill({
+      status: 200, contentType: "text/html", body: "<!doctype html><title>Preview fixture</title>",
+    }));
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     await page.goto("/", { waitUntil: "networkidle" });
     await seedOnboarded(page);
