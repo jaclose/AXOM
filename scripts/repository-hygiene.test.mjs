@@ -511,9 +511,9 @@ test('repository gate catches the observed conflict and missing-route failure, p
 // supported by this workflow; it is not a general GitHub glob evaluator.
 test('APEX academic acceptance path filter covers source recovery, QBank and tracker changes only', () => {
   const yaml = readFileSync(new URL('../.github/workflows/apex-acceptance.yml', import.meta.url), 'utf8');
-  const section = yaml.match(/^    paths:\\s*\\n((?:      - [^\\n]+\\n)+)/m);
+  const section = yaml.match(/^    paths:\s*\n((?:      - [^\n]+\n)+)/m);
   assert.ok(section, 'APEX pull_request.paths must be present');
-  const globs = section[1].trim().split('\\n').map((line) => line.trim().replace(/^-[ ]+/, '').replace(/^['\"]|['\"]$/g, ''));
+  const globs = section[1].trim().split('\n').map((line) => line.trim().replace(/^-[ ]+/, '').replace(/^['\"]|['\"]$/g, ''));
   const matches = (pathName, glob) => {
     if (glob.endsWith('/**')) return pathName.startsWith(glob.slice(0, -2));
     if (glob.endsWith('*')) return pathName.startsWith(glob.slice(0, -1));
