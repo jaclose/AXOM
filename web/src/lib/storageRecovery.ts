@@ -7,6 +7,7 @@ import {
   getVaultWriteCheckpoint,
   localVaultStorage,
   replaceLocalVaultItem,
+  resolveMarkedVaultSnapshotRecord,
   resolveVaultSnapshotRecord,
 } from "./localVault";
 import { SCHEMA_VERSION } from "./seed";
@@ -77,6 +78,8 @@ function findWorkspaceRecord(
   indexedDb: Record<string, string> | undefined,
   local: Record<string, string>,
 ): string | null {
+  const marked = resolveMarkedVaultSnapshotRecord(indexedDb, local, STORAGE_KEYS.persistedState);
+  if (marked !== undefined) return marked;
   for (const records of [indexedDb, local]) {
     if (!records) continue;
     const primary = resolveVaultSnapshotRecord(records, STORAGE_KEYS.persistedState);

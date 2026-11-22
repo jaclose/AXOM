@@ -90,7 +90,7 @@ export async function downloadCourseQuestions(course: AcademicCourse, accountId:
       scope.assertCurrent();
     }
     if (!isAcademicCourseDownloaded(course, accountId, useStore.getState())) {
-      const ids = await downloadAcademicCourse(course.current_revision_id, progress, scope);
+      const ids = await downloadAcademicCourse(course.current_revision_id, progress, scope, { cacheOriginals: false });
       scope.assertCurrent();
       saved = { ...ids, collectionId: course.id, revisionId: course.current_revision_id, accountId,
         ...(saved?.pendingWeeks ? { pendingWeeks: saved.pendingWeeks } : {}) };

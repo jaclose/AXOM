@@ -77,7 +77,7 @@ describe("shared questions-only download", () => {
   it("reinstalls when a receipt member is missing and preserves pending enrollment intent", async () => {
     mocks.state.documents = [receipt({ pendingWeeks: [3] }), doc("source")];
     const result = await downloadCourseQuestions(course, "account");
-    expect(mocks.download).toHaveBeenCalledWith("revision", expect.any(Function), expect.objectContaining({ key: "account" }));
+    expect(mocks.download).toHaveBeenCalledWith("revision", expect.any(Function), expect.objectContaining({ key: "account" }), { cacheOriginals: false });
     expect(result.pendingWeeks).toEqual([3]); expect(mocks.enroll).not.toHaveBeenCalled();
   });
   it("hydrates account references, including templates, before checking the local copy", async () => {

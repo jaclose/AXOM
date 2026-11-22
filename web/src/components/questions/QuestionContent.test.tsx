@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionAsset, PackageQuestion } from "../../lib/question-content/package";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
 import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
-import { QuestionBlocks, QuestionContent } from "./QuestionContent";
+import { QuestionBlocks, QuestionContent, QuestionSupportingContent } from "./QuestionContent";
 
 vi.mock("../../lib/questionAttachments", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/questionAttachments")>(),
@@ -27,6 +27,23 @@ afterEach(() => {
 });
 
 describe("source figure lifecycle and rapid question navigation", () => {
+  it("enlarges a source figure with zoom controls while retaining its authored crop", async () => {
+    const file = new File(["synthetic"], "source-figure.png", { type: "image/png" });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:cropped") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const asset = { ...source("a"), width: 1000, height: 600, crop: { left: .25, right: .25, top: .1, bottom: .4 } };
+    render(<QuestionBlocks blocks={blocks} content={content(asset)} files={[file]} mode="question" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Enlarge Clinical source figure" }));
+    const dialog = screen.getByRole("dialog", { name: "Clinical source figure" });
+    const image = within(dialog).getByRole("img");
+    expect(image.getAttribute("src")).toBe("blob:cropped");
+    expect(image.style.position).toBe("absolute"); expect(image.style.left).toBe("-250px");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+    expect(image.style.left).toBe("-375px"); expect(image.parentElement?.style.width).toBe("750px");
+    fireEvent.keyDown(within(dialog).getByRole("button", { name: "Close" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("img", { name: "Clinical source figure" })).toBeTruthy();
+  });
   it("never renders the previous question's image while the next asset loads", async () => {
     const oldFile = new File(["a"], "source-figure.png", { type: "image/png", lastModified: 1 });
     const nextFile = new File(["b"], "source-figure.png", { type: "image/png", lastModified: 2 });
@@ -105,4 +122,24 @@ describe("source figure lifecycle and rapid question navigation", () => {
     await waitFor(() => expect(screen.getByRole("img", { name: "Essential diagnostic figure" }).getAttribute("src"))
       .toBe("blob:edited-stem"));
   });
+});
+
+it("separates explanation figures from source references without revealing them while solving", () => {
+  const roles = ["question", "explanation", "answer_reveal", "reference", "source_page"] as const;
+  const question: QuestionRecord = { id: "synthetic", source: "imported", stem: "A synthetic source question.",
+    options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }], correctKey: "B", status: "unseen", tags: [], attempts: [],
+    createdAt: "2026-11-21", updatedAt: "2026-11-21", content: {
+      id: "synthetic", source: { filename: "Synthetic.pdf" }, stem: [], choices: [], provenance: { method: "authored" },
+      assets: roles.map(role => ({ id: role, questionId: "synthetic", filename: `${role}.png`, mimeType: "image/png", role })),
+    } };
+  const view = render(<QuestionSupportingContent question={question} mode="question" />);
+  const displayed = () => [...view.container.querySelectorAll("[data-asset-role]")].map(element => element.getAttribute("data-asset-role"));
+  expect(displayed()).toEqual(["question"]);
+  expect(screen.queryByRole("region", { name: "Explanation figures" })).toBeNull();
+  view.rerender(<QuestionSupportingContent question={question} mode="answered" />);
+  expect(displayed()).toEqual(["explanation", "answer_reveal", "reference"]);
+  expect(screen.getByRole("region", { name: "Explanation figures" }).querySelectorAll('[data-asset-role="explanation"]')).toHaveLength(1);
+  expect(screen.getByRole("region", { name: "Source slides and references" }).querySelectorAll("figure")).toHaveLength(2);
+  view.rerender(<QuestionSupportingContent question={question} mode="review" />);
+  expect(displayed()).toEqual(["explanation", "answer_reveal", "reference", "source_page"]);
 });

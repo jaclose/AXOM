@@ -4,6 +4,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import { downloadAcademicCourse, type AcademicPreview } from "../../lib/academicLibrary/client";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
+import { approveStoredTrackerRevision, inspectStoredTrackerRevision, type TrackerReviewReceipt } from "../../lib/academicLibrary/trackerReview";
 import { canReviewAcademicCourses, decideAcademicReview, listAcademicReviewQueue, previewAcademicReview,
   type ReviewCursor, type ReviewSubmission } from "../../lib/academicLibrary/reviewQueue";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -41,6 +42,8 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
   const [downloadError, setDownloadError] = useState("");
   const [receipt, setReceipt] = useState<ExplanationReviewReceipt>();
   const [rationaleReviewed, setRationaleReviewed] = useState(false);
+  const [trackerReceipt, setTrackerReceipt] = useState<TrackerReviewReceipt>();
+  const [planReviewed, setPlanReviewed] = useState(false);
   const [notice, setNotice] = useState("");
   const mounted = useRef(true);
   const listGeneration = useRef(0);
@@ -59,6 +62,7 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
       receivedIds.current.clear();
       setReviewer(undefined); setSubmissions([]); setCursor(undefined); setMore(false);
       setPreview(undefined); setReceipt(undefined); setRationaleReviewed(false);
+      setTrackerReceipt(undefined); setPlanReviewed(false);
       setDownloadedRevision(undefined); setDownloadMessage(""); setDownloadError("");
       setNotice(""); previewGeneration.current += 1;
     }
@@ -68,6 +72,7 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
       if (!current()) return;
       setReviewer(permitted);
       if (!permitted) { setSubmissions([]); setPreview(undefined); setReceipt(undefined);
+        setTrackerReceipt(undefined); setPlanReviewed(false);
         setDownloadedRevision(undefined); setDownloadMessage(""); setDownloadError("");
         setRationaleReviewed(false); setMore(false); previewGeneration.current += 1; return; }
       const page = await listAcademicReviewQueue(accountId, after);
@@ -113,12 +118,14 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
     if (decision.current || inspecting || downloading) return;
     const generation = ++previewGeneration.current;
     setReceipt(undefined); setRationaleReviewed(false);
+    setTrackerReceipt(undefined); setPlanReviewed(false);
     setDownloadedRevision(undefined); setDownloadMessage(""); setDownloadError("");
     setPreview({ submission, loading: true }); setNotice("");
     try {
       const value = await previewAcademicReview(submission, accountId);
       if (!mounted.current || generation !== previewGeneration.current) return;
-      if (value.id !== submission.current_revision_id || value.collection_id !== submission.id)
+      if (value.id !== submission.current_revision_id || value.collection_id !== submission.id
+        || value.ready_questions !== submission.ready_questions || value.review_questions !== submission.review_questions)
         throw new Error("This submission changed. Refresh the review queue before deciding.");
       setPreview({ submission, loading: false, value });
     } catch (cause) {
@@ -131,6 +138,7 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
     if (decision.current || inspecting || downloading) return;
     previewGeneration.current += 1;
     setPreview(undefined); setReceipt(undefined); setRationaleReviewed(false);
+    setTrackerReceipt(undefined); setPlanReviewed(false);
     setDownloadedRevision(undefined); setDownloadMessage(""); setDownloadError("");
   }
 
@@ -182,19 +190,46 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
     }
   }
 
+  async function checkTracker(submission: ReviewSubmission) {
+    if (decision.current || inspecting || downloading || !preview?.value
+      || preview.submission.id !== submission.id || submission.ready_questions !== 0 || submission.review_questions !== 0) return;
+    const generation = previewGeneration.current;
+    const expected = preview.value;
+    setInspecting(true); setTrackerReceipt(undefined); setPlanReviewed(false);
+    try {
+      const result = await inspectStoredTrackerRevision(submission.id, submission.current_revision_id, accountId);
+      if (!mounted.current || generation !== previewGeneration.current) return;
+      if (result.collectionId !== submission.id || result.revisionId !== submission.current_revision_id
+        || result.templateText !== expected.template_text || result.module !== submission.module || result.term !== submission.term)
+        throw new Error("This submission changed. Refresh the queue and inspect its latest plan.");
+      setTrackerReceipt(result);
+    } catch (cause) {
+      if (mounted.current && generation === previewGeneration.current)
+        setPreview({ submission, loading: false, error: messageFor(cause, "The stored tracker plan could not be checked.") });
+    } finally {
+      if (mounted.current) setInspecting(false);
+    }
+  }
+
   async function decide(approved: boolean) {
-    if (decision.current || inspecting || downloading || listing.current || !preview?.value || preview.loading || preview.error
-      || (approved && (!receipt || !rationaleReviewed || receipt.missingExplanations !== 0
-        || receipt.readyQuestions === 0 || downloadedRevision !== preview.submission.current_revision_id))) return;
+    if (decision.current || inspecting || downloading || listing.current || !preview?.value || preview.loading || preview.error) return;
+    const trackerOnly = preview.submission.ready_questions === 0 && preview.submission.review_questions === 0;
+    if (approved && (trackerOnly ? !trackerReceipt || !planReviewed
+      || trackerReceipt.collectionId !== preview.submission.id || trackerReceipt.revisionId !== preview.submission.current_revision_id
+      || trackerReceipt.templateText !== preview.value.template_text
+      : !receipt || !rationaleReviewed || receipt.missingExplanations !== 0
+        || receipt.readyQuestions === 0 || downloadedRevision !== preview.submission.current_revision_id)) return;
     decision.current = true; setDeciding(true); setNotice("");
     const { submission } = preview;
     const nextId = submissions[submissions.findIndex(item => item.id === submission.id) + 1]?.id;
     const generation = previewGeneration.current;
     try {
-      await decideAcademicReview(submission, approved, accountId, receipt, rationaleReviewed);
+      if (approved && trackerOnly && trackerReceipt) await approveStoredTrackerRevision(trackerReceipt, accountId, planReviewed);
+      else await decideAcademicReview(submission, approved, accountId, receipt, rationaleReviewed);
       if (!mounted.current || generation !== previewGeneration.current) return;
       setSubmissions(existing => existing.filter(item => item.id !== submission.id));
       setPreview(undefined); setReceipt(undefined); setRationaleReviewed(false);
+      setTrackerReceipt(undefined); setPlanReviewed(false);
       setDownloadedRevision(undefined); setDownloadMessage(""); setDownloadError(""); previewGeneration.current += 1;
       setNotice(`${approved ? "Approved" : "Rejected"}: ${submission.title}.`);
       window.setTimeout(() => {
@@ -214,8 +249,8 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
   }
 
   if (!reviewer && !error) return null;
-  return <GlassCard id={queueId} className="academic-review-queue" role="region" aria-label="Submitted QBank review">
-    <PanelHeader title="Submitted QBank review" headingLevel={2} sub="Shared courses waiting for academic review."
+  return <GlassCard id={queueId} className="academic-review-queue" role="region" aria-label="Submitted course review">
+    <PanelHeader title="Submitted course review" headingLevel={2} sub="Shared question collections and course trackers waiting for review."
       action={<GButton size="sm" data-review-refresh disabled={loading || deciding || downloading || inspecting} onClick={() => void loadPage(true)}><RefreshCw size={ICON_SIZE.body} /> Refresh review queue</GButton>} />
     {notice && <p role="status">{notice}</p>}
     {loading && <p role="status">{submissions.length ? "Loading more submissions…" : "Loading submissions…"}</p>}
@@ -223,6 +258,7 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
     {!loading && !error && !submissions.length && <p role="status">No shared courses are waiting for review.</p>}
     <div className="academic-review-list">
       {submissions.map(submission => {
+        const trackerOnly = submission.ready_questions === 0 && submission.review_questions === 0;
         const active = preview?.submission.id === submission.id && preview.submission.current_revision_id === submission.current_revision_id ? preview : undefined;
         const previewId = `academic-review-preview-${submission.id}`;
         return <article className="academic-review-row" key={`${submission.id}:${submission.current_revision_id}`} aria-label={submission.title}>
@@ -230,7 +266,7 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
             <div className="academic-review-description"><h3>{submission.title}</h3><p>{submission.term} · {submission.module}</p>
               <p>Submitted by {submission.owner_display_name}</p><p>Review status updated <time dateTime={submission.submitted_at}>{new Date(submission.submitted_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</time></p>
             </div>
-            <div className="academic-review-row-actions"><Tag tone="gold">Pending</Tag><p>{submission.ready_questions} ready · {submission.review_questions} awaiting review</p>
+            <div className="academic-review-row-actions"><Tag tone="gold">Pending</Tag><p>{trackerOnly ? "Tracker only" : `${submission.ready_questions} ready · ${submission.review_questions} awaiting review`}</p>
               <GButton size="sm" data-review-preview={submission.id} aria-expanded={Boolean(active)} aria-controls={active ? previewId : undefined} disabled={deciding || downloading || inspecting} onClick={() => active ? closePreview() : void openPreview(submission)}><Eye size={ICON_SIZE.body} /> {active ? "Close preview" : "Open preview"}</GButton>
             </div>
           </div>
@@ -240,6 +276,19 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
             {active.value && <>
               <h4>Submitted plan</h4>
               {active.value.template_text.trim() ? <pre tabIndex={0} aria-label="Submitted course plan">{active.value.template_text}</pre> : <p>No weekly plan was submitted for this question collection.</p>}
+              {trackerOnly ? <>
+                <p className="academic-review-preview-note">Check the stored plan, its course filing and source notes. Named weeks describe the submitted text; approval does not certify the schedule. Activities without a stated week remain Unscheduled.</p>
+                <GButton size="sm" disabled={inspecting || deciding || loading} onClick={() => void checkTracker(submission)}>
+                  {inspecting ? "Checking stored tracker plan…" : "Check stored tracker plan"}
+                </GButton>
+                {trackerReceipt && <>
+                  <p role="status" className="academic-review-coverage">{trackerReceipt.activities} activities in {trackerReceipt.sections} plan sections. {trackerReceipt.statedWeekActivities} name a week; {trackerReceipt.unstatedWeekActivities} have no stated week. Stored catalog and plan match this exact revision.</p>
+                  {trackerReceipt.warnings.map(warning => <p key={warning} className="academic-review-preview-note">{warning}</p>)}
+                </>}
+                <label className="academic-review-attestation"><input type="checkbox" checked={planReviewed} disabled={inspecting || deciding || !trackerReceipt}
+                  onChange={event => setPlanReviewed(event.target.checked)} />
+                  <span>I reviewed this exact stored plan, its course filing and source notes, preserving any stated schedule uncertainty.</span></label>
+              </> : <>
               <p className="academic-review-preview-note">This plan and its counts are a starting point. Approval requires inspecting the exact stored copy and checking answers, images and explanations against their sources.</p>
               <GButton size="sm" disabled={downloading || deciding} onClick={() => void downloadReviewCopy(submission)}>
                 {downloading ? "Downloading review copy…" : downloadedRevision === submission.current_revision_id ? "Download review copy again" : "Download review copy"}
@@ -253,9 +302,12 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
               <label className="academic-review-attestation"><input type="checkbox" checked={rationaleReviewed} disabled={inspecting || deciding || !receipt}
                 onChange={event => setRationaleReviewed(event.target.checked)} />
                 <span>I reviewed every ready answer, image and explanation against its source for this exact revision.</span></label>
+              </>}
               <div className="academic-review-decisions"><GButton size="sm" variant="primary"
-                disabled={deciding || inspecting || downloading || loading || downloadedRevision !== submission.current_revision_id
-                  || !receipt || !rationaleReviewed || receipt.missingExplanations !== 0 || receipt.readyQuestions === 0}
+                disabled={deciding || inspecting || downloading || loading || (trackerOnly
+                  ? !trackerReceipt || !planReviewed
+                  : downloadedRevision !== submission.current_revision_id
+                    || !receipt || !rationaleReviewed || receipt.missingExplanations !== 0 || receipt.readyQuestions === 0)}
                 onClick={() => void decide(true)}><Check size={ICON_SIZE.body} /> {deciding ? "Saving review…" : "Approve this revision"}</GButton>
                 <GButton size="sm" disabled={deciding || inspecting || loading} onClick={() => void decide(false)}><X size={ICON_SIZE.body} /> Reject</GButton></div>
             </>}

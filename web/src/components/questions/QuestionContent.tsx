@@ -6,7 +6,7 @@ import type { PackageQuestion, QuestionAsset } from "../../lib/question-content/
 import { effectiveRole, isAssetVisible, visibleBlocks, type ContentViewMode } from "../../lib/question-content/visibility";
 import { reconcileTextAnnotation, type QuestionTextAnnotation } from "../../lib/questionAnnotations";
 import type { QuestionRecord } from "../../lib/questions";
-import { Modal } from "../ui/Modal";
+import { QuestionImageViewer } from "./QuestionImageViewer";
 import type { QuestionTextSelection } from "./AnnotatedQuestionText";
 import { blockMarks, escapeHtml, paintBlock, stemSelection, stemTextStarts, type BlockMark } from "./stemMarks";
 import "../../styles/question-content.css";
@@ -153,7 +153,7 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
   if (!url) return <span role="status">Loading figure…</span>;
   return <>
     {enlarge ? <button type="button" className="qcontent-image" onClick={() => setOpen(true)} aria-label={`Enlarge ${alt}`}>{picture}</button> : <span className="qcontent-image">{picture}</span>}
-    {open && <Modal title={alt} onClose={() => setOpen(false)} className="qcontent-enlarged">{picture}</Modal>}
+    {open && <QuestionImageViewer src={url} alt={alt} width={asset.width} height={asset.height} crop={crop} onClose={() => setOpen(false)} />}
   </>;
 }
 
@@ -361,13 +361,22 @@ export function QuestionSupportingContent({ question, mode }: { question: Questi
   const placed = new Set([content.stem, content.explanation ?? [], ...content.choices.map((choice) => choice.blocks)].flat().flatMap((block) => block.type === "image" ? [block.assetId] : []));
   const blocks: QuestionBlock[] = [
     ...(content.choiceTable && mode === "question" ? [content.choiceTable] : []),
-    ...content.assets.filter((asset) => !placed.has(asset.id) && isAssetVisible(asset.role, mode) && (mode !== "answered" || !isAssetVisible(asset.role, "question"))).map((asset): QuestionBlock => ({ type: "image", assetId: asset.id, role: asset.role, alt: asset.role === "answer_reveal" ? "Source answer slide" : "Source figure" })),
+    ...content.assets.filter((asset) => !placed.has(asset.id) && isAssetVisible(asset.role, mode) && (mode === "question" || !isAssetVisible(asset.role, "question"))).map((asset): QuestionBlock => ({ type: "image", assetId: asset.id, role: asset.role, alt: asset.role === "answer_reveal" ? "Source answer slide" : asset.role === "source_page" ? "Original source page" : "Source figure" })),
   ];
   if (!blocks.length) return null;
-  const teachingVisual = mode !== "question" && blocks.some((block) => block.type === "image");
-  if (teachingVisual) return <section className="question-teaching-visuals" aria-label="Teaching visuals" data-study-media="answer-support">
-    <span className="field-label">Visual explanation</span>
-    <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} />
-  </section>;
+  if (mode !== "question") {
+    const figures = blocks.filter(block => block.type === "image" && block.role === "explanation");
+    const sources = blocks.filter(block => !figures.includes(block));
+    return <div className="question-supporting-content" data-study-media="answer-support">
+      {figures.length > 0 && <section className="question-teaching-visuals" aria-label="Explanation figures">
+        <span className="field-label">Explanation figures</span>
+        <QuestionBlocks blocks={figures} content={content} attachments={question.attachments} mode={mode} />
+      </section>}
+      {sources.length > 0 && <section className="question-teaching-visuals" aria-label="Source slides and references">
+        <span className="field-label">Source slides and references</span>
+        <QuestionBlocks blocks={sources} content={content} attachments={question.attachments} mode={mode} />
+      </section>}
+    </div>;
+  }
   return <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} />;
 }

@@ -308,7 +308,7 @@ function encodeFallbackMarker(valueFingerprint: string, baseFingerprint: string 
  * IndexedDB. A copy mirrored by an older build carries no marker and can be
  * stale, so it never overrides the vault.
  */
-function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFallbackCopy | null {
+function newerFallbackCopy(fallbackStore: Pick<Storage, "getItem"> | null, name: string): NewerFallbackCopy | null {
   try {
     const marker = fallbackStore?.getItem(fallbackMarkerKey(name));
     if (!marker) return null;
@@ -340,6 +340,31 @@ function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFa
   } catch {
     return null;
   }
+}
+
+/** Resolve a marked fallback from an immutable safety snapshot without writing
+ * either storage tier. A modern marker identifies the vault base it supersedes;
+ * a competing vault commit keeps precedence just as it does during hydration.
+ * Unmarked mirrors remain subject to the caller's existing vault-first lookup. */
+export function resolveMarkedVaultSnapshotRecord(
+  indexedDb: Readonly<Record<string, string>> | undefined,
+  local: Readonly<Record<string, string>>,
+  name: string,
+): string | undefined {
+  if (local[fallbackMarkerKey(name)] === undefined) return undefined;
+  const newer = newerFallbackCopy({ getItem: key => local[key] ?? null }, name);
+  if (!newer) throw new Error("The safety snapshot has an invalid newer-fallback marker.");
+
+  let current = indexedDb ? resolveVaultSnapshotRecord(indexedDb, name) : undefined;
+  if (!current && indexedDb) {
+    const activeUser = indexedDb[activeUserKey(name)];
+    if (activeUser) current = resolveVaultSnapshotRecord(indexedDb, scopedStateKey(name, activeUser));
+  }
+  if (!current || current === newer.value || workspaceFingerprint(current) === newer.baseFingerprint) return newer.value;
+  if (newer.baseFingerprint === undefined) {
+    throw new Error("The safety snapshot cannot establish which workspace copy is newer.");
+  }
+  return current;
 }
 
 /**

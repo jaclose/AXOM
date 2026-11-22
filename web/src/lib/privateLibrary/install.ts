@@ -3,7 +3,7 @@ import { prepareCourseTemplate } from "../course-engine/templateLibrary";
 import { canonicalModuleKey } from "../course-engine/vocabulary";
 import { saveBank } from "../question-content/bankImport";
 import { assessBank } from "../question-content/assessBank";
-import type { PackageImportOptions } from "../question-content/toReviewedImport";
+import { uniformSourceDeclaredWeek, type PackageImportOptions } from "../question-content/toReviewedImport";
 import { questionScope, type PackageIssue, type PackageQuestion } from "../question-content/package";
 import type { QuestionBlock, TableBlock } from "../question-content/blocks";
 import { readManifest, readQuestionsFile } from "../question-content/packageJson";
@@ -117,14 +117,18 @@ export function readPreparedBank(value: unknown): PreparedBank {
  * filing changes where imported records live without rewriting source evidence. */
 export function preparedBankImportOptions(bank: PreparedBank): PackageImportOptions {
   const filing = bank.reviewedFiling;
+  const reviewedFiling = filing ? {
+    module: filing.module,
+    term: Number(filing.term.slice(-1)) as 1 | 2 | 3 | 4 | 5,
+  } : undefined;
   return {
     sourceText: bank.sourceText,
     sourceBytes: bank.sourceBytes,
     notes: bank.notes,
-    ...(filing ? { reviewedFiling: {
-      module: filing.module,
-      term: Number(filing.term.slice(-1)) as 1 | 2 | 3 | 4 | 5,
-    } } : {}),
+    ...(reviewedFiling ? { reviewedFiling } : {}),
+    ...(filing?.evidence === "source-metadata" && reviewedFiling
+      && uniformSourceDeclaredWeek(bank.pkg, reviewedFiling) !== undefined
+      ? { preserveSourceDeclaredWeek: true } : {}),
   };
 }
 /** This audited edition is the only prepared library authorized to refresh
@@ -334,16 +338,22 @@ export interface LibraryInstallation {
   setIds: string[];
 }
 export interface LibraryInstallScope { key: string; assertCurrent: () => void }
-let installing: { read: LibraryReader; key?: string; promise: Promise<LibraryInstallation> } | undefined;
+export interface LibraryInstallOptions {
+  /** Full private imports retain originals by default. Hosted question
+   * downloads leave original PDFs available through their verified links. */
+  cacheOriginals?: boolean;
+}
+let installing: { read: LibraryReader; key?: string; cacheOriginals: boolean; promise: Promise<LibraryInstallation> } | undefined;
 /** Same canonical import as file review. Each completed source is durable; retry repairs missing media. */
-export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}, scope?: LibraryInstallScope): Promise<LibraryInstallation> {
-  if (installing) return installing.read === read && installing.key === scope?.key ? installing.promise
+export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}, scope?: LibraryInstallScope, options: LibraryInstallOptions = {}): Promise<LibraryInstallation> {
+  const cacheOriginals = options.cacheOriginals !== false;
+  if (installing) return installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals ? installing.promise
     : Promise.reject(new Error("Another library download is being saved. Wait for it to finish, then retry."));
-  const promise = install(read, progress, scope?.assertCurrent ?? (() => {})).finally(() => { installing = undefined; });
-  installing = { read, key: scope?.key, promise };
+  const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals).finally(() => { installing = undefined; });
+  installing = { read, key: scope?.key, cacheOriginals, promise };
   return promise;
 }
-async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void): Promise<LibraryInstallation> {
+async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void, cacheOriginals: boolean): Promise<LibraryInstallation> {
   const currentStore = () => {
     assertCurrent();
     // Keep the original action identities: the canonical importer uses them to
@@ -383,11 +393,11 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   const warnings: string[] = [];
   const installed = catalog.sources.map(s => ({ ...s }));
   for (const [index, source] of installed.entries()) {
-    if (!source.bankFile && !source.originalFile) continue;
+    if (!source.bankFile && !(cacheOriginals && source.originalFile)) continue;
     const report = (phase: string) => progress(`Preparing your library · ${index + 1} of ${installed.length} sources · ${phase}`);
-    report("checking original");
+    report(cacheOriginals ? "checking original" : "opening question source");
     try {
-      if (source.originalFile) {
+      if (cacheOriginals && source.originalFile) {
         const s = currentStore();
         const existing = [...pendingDocuments.values(), ...s.documents].find(d => d.checksum?.replace(/^sha256:/, "") === source.checksum && d.fileType !== PRIVATE_REVIEW_DOCUMENT);
         const doc = existing ?? { id: `private-source-${source.checksum}`, title: source.name.replace(/\.[^.]+$/, ""), fileName: source.name,
