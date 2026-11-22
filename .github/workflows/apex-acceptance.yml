@@ -3,6 +3,9 @@ name: APEX Academic Acceptance
 on:
   pull_request:
     paths:
+      # A change to academic reviewer/catalog/storage RLS must trigger acceptance even without a web edit.
+      # Use all migrations: new filenames are not reliably classifiable before source review.
+      - 'supabase/migrations/**'
       - 'web/src/lib/course-engine/**'
       - 'web/src/lib/academicLibrary/**'
       - 'web/src/lib/privateLibrary/**'
