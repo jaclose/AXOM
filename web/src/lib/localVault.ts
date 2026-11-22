@@ -909,16 +909,28 @@ const vaultStorage: StateStorage = {
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
         clearFallbackCopy(fallbackStore, name, userId);
       } catch (promotionError) {
-        if (isVaultConflictError(promotionError) && newer.baseFingerprint !== undefined) {
+        if (isVaultConflictError(promotionError)) {
           try {
             const current = await readVaultSnapshot(name);
             if (current !== null) {
-              clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              // Both copies may contain edits that the other never received.
+              // Never erase the marked fallback or silently select the vault
+              // when a different tab committed a byte-distinct workspace.
+              if (current !== newer.value) {
+                if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+                throw promotionError;
+              }
+              // Idempotent promotion is safe: the vault already holds these
+              // exact bytes. Legacy bare markers also use this equality path.
+              if (newer.baseFingerprint !== undefined) {
+                clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              }
               rememberVaultSnapshot(name, current);
               return current;
             }
-          } catch {
-            // Keep the fallback below when the winning vault cannot be reread.
+          } catch (readError) {
+            if (isVaultConflictError(readError)) throw readError;
+            // Preserve the marked copy if the winning vault cannot be reread.
           }
         }
         // Still not writable: the copy stays in localStorage for the next start.
