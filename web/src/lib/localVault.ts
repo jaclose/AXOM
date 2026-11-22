@@ -410,6 +410,10 @@ async function readPackedFallback(storage: Pick<Storage, "getItem"> | null, name
   const raw = storage.getItem(packedFallbackKey(name));
   if (raw === null) return null;
   const copy = await unpackVaultFallback(raw, name);
+  // Decoding and SHA-256 are asynchronous. A peer can atomically replace the
+  // packed record while this tab verifies the captured bytes. Never hydrate Y
+  // once a distinct, acknowledged packed Z has arrived.
+  if (storage.getItem(packedFallbackKey(name)) !== raw) throw new VaultConflictError();
   if (persistedUserId(copy.value) !== copy.userId || snapshotFingerprint(copy.value) !== copy.valueFingerprint
     || (copy.legacy.activeUser !== null && copy.legacy.activeUser !== copy.userId)) throw new PackedFallbackError();
   return copy;
@@ -935,7 +939,13 @@ const vaultStorage: StateStorage = {
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
     const fallbackStore = localFallback();
-    const packed = await readPackedFallback(fallbackStore, name);
+    let packed: PackedFallbackCopy | null;
+    try {
+      packed = await readPackedFallback(fallbackStore, name);
+    } catch (error) {
+      if (isVaultConflictError(error) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+      throw error;
+    }
     if (packed) {
       assertPackedLegacyCurrent(fallbackStore, packed);
       try {
@@ -949,6 +959,19 @@ const vaultStorage: StateStorage = {
         if (isVaultConflictError(error)) {
           conflictedWorkspaceKeys.add(name);
           throw error;
+        }
+        // A failed promotion can await IndexedDB after successful decoding.
+        // Recheck the raw atomic packed key and plain binding before allowing
+        // the captured bytes to hydrate the UI. A peer's newer copy survives.
+        if (fallbackStore?.getItem(packedFallbackKey(name)) !== packed.raw) {
+          if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw new VaultConflictError();
+        }
+        try {
+          assertPackedLegacyCurrent(fallbackStore, packed);
+        } catch (bindingError) {
+          if (isVaultConflictError(bindingError) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw bindingError;
         }
         // A verified packed copy remains durable while IDB is unavailable/full.
       }
