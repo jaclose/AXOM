@@ -7,6 +7,7 @@ import {
   getVaultWriteCheckpoint,
   flushLocalVaultWrites,
   localVaultStorage,
+  replaceLocalVaultItem,
   resetLocalVaultRuntimeForTests,
   VAULT_CONFLICT_MESSAGE,
   writeLocalFallback,
@@ -176,6 +177,48 @@ describe("IndexedDB-first local vault", () => {
 
       vi.stubGlobal("indexedDB", undefined);
       expect(await localVaultStorage.getItem(key)).toBe(offline);
+    } finally {
+      put.mockRestore();
+      db.close();
+    }
+  });
+
+  it("keeps another tab's fallback during an explicitly approved restore commit", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    const base = snapshot("prior workspace");
+    const restored = snapshot("selected verified restore");
+    const competing = snapshot("other tab's offline work");
+    await localVaultStorage.setItem(key, base);
+    const db = await openCurrentVault();
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (storedKey === key && value === restored && !injected) {
+        injected = true;
+        storage.setItem(markerKey, JSON.stringify({
+          version: 1, valueFingerprint: testFallbackFingerprint(competing),
+          baseFingerprint: testFallbackFingerprint(base),
+        }));
+        storage.setItem(key, competing);
+        storage.setItem(scopedKey, competing);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      await replaceLocalVaultItem(key, restored);
+      await flushLocalVaultWrites();
+      expect(injected).toBe(true);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      expect(await getDirect(db, key)).toBe(restored);
+      expect(storage.getItem(key)).toBe(competing);
+      expect(storage.getItem(markerKey)).not.toBeNull();
+      expect(storage.getItem(scopedKey)).toBe(competing);
+      vi.stubGlobal("indexedDB", undefined);
+      expect(await localVaultStorage.getItem(key)).toBe(competing);
     } finally {
       put.mockRestore();
       db.close();
