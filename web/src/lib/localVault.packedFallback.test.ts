@@ -137,6 +137,55 @@ describe("verified separate compressed workspace fallback", () => {
     expect(await localVaultStorage.getItem(key)).toBe(restored);
   });
 
+  it("preserves a peer's newly acknowledged plain fallback during verified restore", async () => {
+    const base = snapshot("persisted base");
+    const restored = snapshot("verified restored snapshot");
+    const peer = snapshot("peer offline edit");
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:synthetic-learner`;
+
+    await localVaultStorage.setItem(key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+    // Obtain the marker and all associated bytes through the real fallback path.
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, peer);
+    const marker = values.get(markerKey);
+    expect(marker).toBeTruthy();
+    expect(values.get(key)).toBe(peer);
+    expect(values.get(scopedKey)).toBe(peer);
+    values.delete(markerKey);
+    values.delete(key);
+    values.delete(scopedKey);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (!injected && this.name === STORE_NAME && args[1] === key && args[0] === restored) {
+        injected = true;
+        // A second tab acknowledges a byte-distinct plain recovery copy
+        // after restore's initial read, but before its IDB commit completes.
+        values.set(markerKey, marker!);
+        values.set(key, peer);
+        values.set(scopedKey, peer);
+      }
+      return originalPut.apply(this, args);
+    });
+
+    const backupKey = `${STORAGE_KEYS.localBackupPrefix}preserved`;
+    values.set(backupKey, "historical backup bytes");
+    const checkpoint = getVaultWriteCheckpoint();
+    await replaceLocalVaultItem(key, restored);
+    expect(injected).toBe(true);
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(readVaultWriteFailure()).not.toBeNull();
+    expect(values.get(markerKey)).toBe(marker);
+    expect(values.get(key)).toBe(peer);
+    expect(values.get(scopedKey)).toBe(peer);
+    expect(values.get(backupKey)).toBe("historical backup bytes");
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+  });
+
   it.each(["absent", "older"])("preserves a new packed record arriving during restore when the prior record was %s", async prior => {
     const fixture = await quotaFixture();
     await localVaultStorage.setItem(key, snapshot("older packed", true));
