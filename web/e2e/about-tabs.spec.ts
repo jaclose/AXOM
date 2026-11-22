@@ -64,10 +64,17 @@ for (const width of [1440, 390, 320]) {
 }
 
 test("external developer preview omits AXOM query referrer", async ({ page }) => {
-  const referrers: Array<string | undefined> = [];
+  const controlReferrers: string[] = [];
+  const previewReferrers: Array<string | undefined> = [];
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route("https://www.jafardabbagh.com/**", async route => {
-    referrers.push(route.request().headers()["referer"]);
+    // allHeaders includes browser-controlled headers that headers() may omit.
+    const referer = (await route.request().allHeaders())["referer"];
+    if (new URL(route.request().url()).pathname === "/axom-referrer-visibility-control") {
+      controlReferrers.push(referer ?? "");
+    } else {
+      previewReferrers.push(referer);
+    }
     await route.fulfill({
       status: 200, contentType: "text/html", body: "<!doctype html><title>Preview fixture</title>",
     });
@@ -80,9 +87,25 @@ test("external developer preview omits AXOM query referrer", async ({ page }) =>
     const url = new URL(window.location.href);
     url.searchParams.set("axom-referrer-canary", "synthetic-test-only");
     window.history.replaceState(window.history.state, "", url.toString());
+
+    // Positive control: prove this intercepted request path can observe Referer
+    // when permitted, so an absent header on the real preview is meaningful.
+    const probe = document.createElement("iframe");
+    probe.title = "Synthetic referrer visibility control";
+    probe.referrerPolicy = "unsafe-url";
+    probe.src = "https://www.jafardabbagh.com/axom-referrer-visibility-control";
+    document.body.appendChild(probe);
   });
+  await expect.poll(
+    () => controlReferrers.some(value => value.includes("axom-referrer-canary=synthetic-test-only")),
+    { timeout: 15_000 },
+  ).toBe(true);
+  await page.evaluate(() => {
+    document.querySelector('iframe[title="Synthetic referrer visibility control"]')?.remove();
+  });
+
   await page.getByRole("tab", { name: "The developer" }).click();
   await page.getByTitle("Live site preview").scrollIntoViewIfNeeded();
-  await expect.poll(() => referrers.length, { timeout: 15_000 }).toBeGreaterThan(0);
-  expect(referrers.every(value => value === undefined)).toBe(true);
+  await expect.poll(() => previewReferrers.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  expect(previewReferrers.every(value => value === undefined)).toBe(true);
 });
