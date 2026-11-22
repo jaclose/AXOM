@@ -50,6 +50,22 @@ describe("personalized study progress", () => {
     expect(scopeStudyProgress([{ ...item, passes: 2 }])).toMatchObject({ percent: 100, complete: 1 });
   });
 
+  it("never rounds unfinished large scopes to 100% while preserving exact completion counts", () => {
+    const items: TrackerItem[] = Array.from({ length: 200 }, (_, index) => ({
+      ...item,
+      id: `activity-${index}`,
+      kind: "Requirement",
+      passes: index === 199 ? 0 : 1,
+    }));
+    // 199 / 200 is 99.5%; Math.round alone incorrectly displays 100%.
+    expect(scopeStudyProgress(items)).toEqual({
+      percent: 99, complete: 199, inProgress: 0, notStarted: 1,
+    });
+    expect(scopeStudyProgress(items.map(entry => ({ ...entry, passes: 1 })))).toEqual({
+      percent: 100, complete: 200, inProgress: 0, notStarted: 0,
+    });
+  });
+
   it("reports an empty scope as zero without inventing completed items", () => {
     expect(scopeStudyProgress([])).toEqual({ percent: 0, complete: 0, inProgress: 0, notStarted: 0 });
   });

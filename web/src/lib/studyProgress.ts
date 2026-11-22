@@ -30,8 +30,12 @@ export function scopeStudyProgress(items: TrackerItem[], options: StudyProgressO
     if (progress.complete) complete++;
     else if (item.passes > 0) inProgress++;
   }
+  const roundedPercent = items.length ? Math.round(total / items.length * 100) : 0;
+  // With many items, 99.5% rounds to 100% despite unfinished work.
+  // Keep a truthful 100% exclusively for scopes where every item is complete.
+  const percent = complete === items.length ? roundedPercent : Math.min(roundedPercent, 99);
   return {
-    percent: items.length ? Math.round(total / items.length * 100) : 0,
+    percent,
     complete,
     inProgress,
     notStarted: items.length - complete - inProgress,
