@@ -432,6 +432,70 @@ describe("verified separate compressed workspace fallback", () => {
     expect(values.get(packedKey)).toBe(packed);
   });
 
+  it("does not hydrate packed Y when another tab saves packed Z during asynchronous verification", async () => {
+    await quotaFixture();
+    const stale = snapshot("packed stale Y", true);
+    await localVaultStorage.setItem(key, stale);
+    const staleRaw = values.get(packedKey)!;
+    const latest = snapshot("peer packed Z", true);
+    await localVaultStorage.setItem(key, latest);
+    const latestRaw = values.get(packedKey)!;
+    expect(latestRaw).not.toBe(staleRaw);
+    values.set(packedKey, staleRaw);
+    resetLocalVaultRuntimeForTests();
+
+    let entered!: () => void;
+    let resume!: () => void;
+    const verifying = new Promise<void>(resolve => { entered = resolve; });
+    const paused = new Promise<void>(resolve => { resume = resolve; });
+    const digest = compression.sha256;
+    vi.spyOn(compression, "sha256").mockImplementationOnce(async bytes => {
+      entered();
+      await paused;
+      return digest(bytes);
+    });
+
+    const reading = localVaultStorage.getItem(key);
+    await verifying;
+    // This single-key acknowledgement is atomic; the plain mirrors do not move.
+    values.set(packedKey, latestRaw);
+    resume();
+    await expect(reading).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(values.get(packedKey)).toBe(latestRaw);
+    expect(await localVaultStorage.getItem(key)).toBe(latest);
+    expect(stale).not.toBe(latest);
+  });
+
+  it("does not return stale packed Y if packed Z arrives before a failed IndexedDB promotion", async () => {
+    const fixture = await quotaFixture();
+    const stale = snapshot("failed promotion Y", true);
+    await localVaultStorage.setItem(key, stale);
+    const staleRaw = values.get(packedKey)!;
+    const latest = snapshot("newer peer Z", true);
+    await localVaultStorage.setItem(key, latest);
+    const latestRaw = values.get(packedKey)!;
+    values.set(packedKey, staleRaw);
+    resetLocalVaultRuntimeForTests();
+
+    fixture.blockVault.mockRestore();
+    const put = IDBObjectStore.prototype.put;
+    let switched = false;
+    vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (!switched && this.name === STORE_NAME && args[1] === key) {
+        switched = true;
+        values.set(packedKey, latestRaw);
+        throw new DOMException("Synthetic promotion quota failure", "QuotaExceededError");
+      }
+      return put.apply(this, args);
+    });
+
+    const reading = localVaultStorage.getItem(key);
+    await expect(reading).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(switched).toBe(true);
+    expect(values.get(packedKey)).toBe(latestRaw);
+    expect(stale).not.toBe(latest);
+  });
+
   it.each(["legacy", "IDB"])("rechecks a competing %s commit made during asynchronous compression", async tier => {
     const fixture = await quotaFixture();
     let started!: () => void;
