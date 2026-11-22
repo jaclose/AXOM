@@ -494,7 +494,7 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
         }
         refreshed = refresh.updated;
       }
-      const requiresRefiling = Boolean(saved.reused && saved.setId && options.reviewedFiling);
+      const requiresRefiling = Boolean(saved.reused && saved.setId && options.reviewedFiling && !options.preserveExistingFiling);
       if (requiresRefiling) refileRequests.push({
         setId: saved.setId!, target: section.request.scope!,
         ...(options.preserveSourceDeclaredWeek && section.request.scope?.week !== undefined

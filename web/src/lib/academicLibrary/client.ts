@@ -6,6 +6,7 @@ import { sha256 } from "../question-content/assets";
 import { installPrivateLibrary, safeLibraryPath, type LibraryReader, type LibraryInstallation } from "../privateLibrary/install";
 import type { LibraryInstallOptions, LibraryInstallScope } from "../privateLibrary/install";
 import { attestAcademicExplanations, type ExplanationReviewReceipt } from "./explanationReview";
+import { academicSourceReconciler } from "./sourceUpdate";
 
 export interface AcademicCourse {
   id: string;
@@ -115,7 +116,12 @@ export async function downloadAcademicCourse(revision: string, progress: (messag
     scope.assertCurrent(); const bytes = await read(path); scope.assertCurrent();
     if (path.endsWith(".json")) captured.set(path, bytes);
     return bytes;
-  }, progress, scope, options);
+  }, progress, scope, { ...options, reconcileSource: academicSourceReconciler(client, revision, scope, async previous => {
+    scope.assertCurrent();
+    const reader = await academicLibraryReader(client, previous);
+    scope.assertCurrent();
+    return async path => { scope.assertCurrent(); const bytes = await reader(path); scope.assertCurrent(); return bytes; };
+  }) });
   if (installation.status === "partial") {
     throw new Error(`${installation.questionIds.length} course question${installation.questionIds.length === 1 ? " remains" : "s remain"} saved on this device, but the download is incomplete. ${installation.warnings.slice(0, 3).join(" ")} Retry this course before enrollment.`);
   }

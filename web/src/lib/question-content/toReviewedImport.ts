@@ -45,6 +45,8 @@ export interface PackageImportOptions {
   preserveSourceDeclaredWeek?: boolean;
   /** Exact-catalog, one-time refresh of untouched source-owned fields on reuse. */
   refreshEquivalentSource?: boolean;
+  /** A verified hosted revision changes source content, never learner filing. */
+  preserveExistingFiling?: boolean;
 }
 
 export interface HeldQuestion {

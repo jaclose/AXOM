@@ -114,6 +114,33 @@ the list does not download PDFs, enroll weeks or write source binaries into the 
 cache. Missing originals remain explicitly unavailable. Account or revision changes
 invalidate pending reads and downloads.
 
+Academic reviewers can explicitly export stored review files without installing a
+collection. The evidence ZIP contains the exact hash-checked catalog and its declared
+question-bank JSONs under `stored-revision/`, plus the complete revision file manifest
+and an omission notice. It excludes binary images, original PDFs, tracker templates,
+learner data and credentials. Account or current-revision changes discard a pending
+export. This is review evidence rather than a complete course package or an approval receipt; source images
+and PDFs still require their ordinary review, and all approval gates remain intact.
+
+Downloading a newer hosted revision reconciles matching source questions only after
+the signed-in account can read the exact current collection revision and its verified
+files. Account-scoped download receipts locate prior immutable server banks; the
+editable local review document is never treated as an untouched source baseline.
+Unchanged source-owned text receives the new explanations and source holds. Existing
+question IDs, attempts, notes, annotations, bookmarks, filing and set membership remain.
+The saved answer key is not automatically changed. A proposed different key, a changed
+exhibit, a local source edit or an unavailable baseline preserves the saved work and
+adds a visible review hold; those records are excluded from graded practice. Existing
+learner review holds also remain. Removed questions without an explicit bank ID are
+retracted only when the prior verified bank and account receipt identify the exact
+local record; unrelated records sharing a source checksum stay untouched.
+Unchanged images retain the canonical integrity and
+repair path. A durable compare-and-swap protects concurrent edits; failed writes restore
+each whole source projection, or preserve and hold a concurrently changed projection.
+A partial update cannot create a complete download receipt. Local ZIP imports retain
+their existing conservative review merge. This reconciliation runs when the learner
+downloads the current revision; it is not a background rewrite of offline copies.
+
 For a source-only publication, a uniform week explicitly declared by the source can
 survive its reviewed course filing only when the filing evidence is `source-metadata`
 and every question agrees on module, term and week. Cumulative, undeclared, mixed and
