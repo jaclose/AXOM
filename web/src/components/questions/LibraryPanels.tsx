@@ -356,10 +356,13 @@ export function QuestionSetList({
     const scope = shareScope;
     if (!shareSet || !shareConsent || shareLookup !== "ready"
       || shareOperation.current === scope || (managedShares[shareSet.id]?.length ?? 0) > 0) return;
-    if (!isLinkedShareWorkspace(scope)) {
+    if (!isLinkedShareWorkspace(scope) || !scope.accountId) {
       shareWorkspaceHold();
       return;
     }
+    // Pin the already-verified linked owner across asynchronous session lookup.
+    // The service independently rechecks that account and current source at dispatch.
+    const expectedOwnerId = scope.accountId;
     const selected = shareSet;
     shareOperation.current = scope;
     setShareBusy(true);
@@ -388,7 +391,7 @@ export function QuestionSetList({
           return JSON.stringify(fresh) === JSON.stringify(snapshot);
         } catch { return false; }
       };
-      const result = await publishShare(liveSet.id, snapshot, scope.accountId, assertSourceCurrent);
+      const result = await publishShare(liveSet.id, snapshot, expectedOwnerId, assertSourceCurrent);
       if (!isCurrentShareScope(scope)) return;
       const link = `${location.origin}${location.pathname}#shared-set?token=${encodeURIComponent(result.token)}`;
       const managed = { ...result, link };

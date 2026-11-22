@@ -41,29 +41,35 @@ async function ownerClient(action: string) {
 export async function publishShare(
   sourceId: string,
   snapshot: SharedQuestionSetSnapshot,
-  expectedOwnerId?: string,
-  assertSourceCurrent?: () => boolean,
+  expectedOwnerId: string,
+  assertSourceCurrent: () => boolean,
 ): Promise<OwnedQuestionSetShare> {
   if (!sourceId.trim() || sourceId !== sourceId.trim() || [...sourceId].length > 200) {
     throw new Error("Question Set identity is invalid.");
   }
   validateShare(snapshot);
   const operation = await ownerClient("Sign in to create an unlisted share link.");
-  // The UI may have validated A before an async session acquisition. Never
-  // dispatch an A snapshot under a newly authenticated B RPC credential.
-  if (expectedOwnerId !== undefined && operation.userId !== expectedOwnerId) {
+  // This exported service boundary must not permit a second UI/JS caller to
+  // bypass the workspace binding or live-source check by omitting arguments.
+  // The linked local workspace and authenticated RPC account are distinct.
+  if (typeof expectedOwnerId !== "string" || !expectedOwnerId.trim()
+    || expectedOwnerId !== expectedOwnerId.trim()) {
+    throw new Error("A linked workspace account binding is required before share upload. Nothing was published.");
+  }
+  if (operation.userId !== expectedOwnerId) {
     throw new Error("The linked workspace account changed before share upload. Nothing was published.");
+  }
+  if (typeof assertSourceCurrent !== "function") {
+    throw new Error("Live Question Set source validation is required before share upload. Nothing was published.");
   }
   // A source can be edited/deleted while authenticated account acquisition awaits.
   // Revalidate synchronously immediately before RPC. Promise guards fail closed.
-  if (assertSourceCurrent) {
-    let current = false;
-    try { current = assertSourceCurrent() === true; } catch { /* invalid source */ }
-    if (!current) {
-      const stale = new Error("Question Set source changed before share upload. Nothing was published.");
-      stale.name = "QuestionSetShareSourceChanged";
-      throw stale;
-    }
+  let current = false;
+  try { current = assertSourceCurrent() === true; } catch { /* invalid source */ }
+  if (!current) {
+    const stale = new Error("Question Set source changed before share upload. Nothing was published.");
+    stale.name = "QuestionSetShareSourceChanged";
+    throw stale;
   }
   const { data, error } = await operation.client.rpc("create_question_set_share", {
     p_source_id: sourceId,
