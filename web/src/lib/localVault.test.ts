@@ -359,7 +359,11 @@ describe("IndexedDB-first local vault", () => {
 
       vi.stubGlobal("indexedDB", fakeIndexedDb);
       expect(await localVaultStorage.getItem(key)).toBe(fallback);
-      expect(localStorage.getItem(key)).toBeNull();
+      // Read-side promotion preserves the older copy without destructive
+      // multi-key cleanup; a single-key retirement receipt identifies it.
+      expect(localStorage.getItem(key)).toBe(fallback);
+      expect(JSON.parse(localStorage.getItem(`${key}:fallback-retired`) ?? "null"))
+        .toMatchObject({ version: 1, committedFingerprint: expect.any(String) });
       expect(await getDirect(db, key)).toBe(fallback);
 
       await localVaultStorage.setItem(key, next);
@@ -537,14 +541,18 @@ describe("IndexedDB-first local vault", () => {
       upgraded.close();
     }
 
-    // Only an independent, successful write of the same hydrated workspace
-    // can retire the unchanged legacy fallback. A read alone cannot.
+    // A verified save may record retirement but cannot safely delete the
+    // acknowledged multi-key recovery copy while another tab is still open.
     const savedCheckpoint = getVaultWriteCheckpoint();
     await localVaultStorage.setItem(key, latest);
     await flushLocalVaultWrites();
     expect(() => assertVaultWritesSince(savedCheckpoint)).not.toThrow();
-    expect(localStorage.getItem(key)).toBeNull();
-    expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+    expect(localStorage.getItem(key)).toBe(latest);
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem(`${key}:fallback-retired`) ?? "null"))
+      .toMatchObject({ version: 1, committedFingerprint: expect.any(String) });
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(latest);
   });
 
   it("reports the blocked vault upgrade when the browser fallback also runs out of space", async () => {
@@ -761,14 +769,17 @@ describe("a save that could not reach IndexedDB", () => {
     vi.stubGlobal("indexedDB", fakeIndexedDb);
 
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
-    // Reading can promote the bytes, but cannot atomically retire another
-    // tab's recovery marker. Retain it until a later successful write.
+    // Reading can promote the bytes and retain the older marked copy; its
+    // single-key retirement receipt makes rereads unambiguous without deletes.
     expect(localStorage.getItem(key)).toBe(snapshot("newer"));
     expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
     await localVaultStorage.setItem(key, snapshot("after recovery"));
     await flushLocalVaultWrites();
-    expect(localStorage.getItem(key)).toBeNull();
-    expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+    expect(localStorage.getItem(key)).toBe(snapshot("newer"));
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem(`${key}:fallback-retired`) ?? "null"))
+      .toMatchObject({ version: 1, committedFingerprint: expect.any(String) });
+    resetLocalVaultRuntimeForTests();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("after recovery"));
   });
 
@@ -789,8 +800,9 @@ describe("a save that could not reach IndexedDB", () => {
     // Once IndexedDB is available the vault takes over again.
     await waitFor(async () => {
       await localVaultStorage.setItem(key, snapshot("fourth"));
-      return localStorage.getItem(key) === null;
+      return localStorage.getItem(`${key}:fallback-retired`) !== null;
     });
+    resetLocalVaultRuntimeForTests();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("fourth"));
   });
 
