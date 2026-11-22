@@ -186,6 +186,64 @@ describe("verified separate compressed workspace fallback", () => {
     await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
+  it.each(["ordinary save", "verified restore"] as const)(
+    "does not delete a newly acknowledged fallback in the middle of %s cleanup",
+    async (operation) => {
+      const base = snapshot("committed base");
+      const older = snapshot("first offline fallback");
+      const newer = snapshot("other tab newly acknowledged fallback");
+      const committed = snapshot(operation === "ordinary save" ? "new IndexedDB save" : "explicit restored backup");
+      const markerKey = `${key}:fallback-newer`;
+      const scopedKey = `${key}:user:synthetic-learner`;
+
+      await localVaultStorage.setItem(key, base);
+      expect(await localVaultStorage.getItem(key)).toBe(base);
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, older);
+      const olderMarker = values.get(markerKey);
+      expect(olderMarker).toBeTruthy();
+      await localVaultStorage.setItem(key, newer);
+      const newerMarker = values.get(markerKey);
+      expect(newerMarker).toBeTruthy();
+      expect(newerMarker).not.toBe(olderMarker);
+
+      // A tab captured Y. A peer Z remains in a separately acknowledged local
+      // recovery chain, then finishes writing Z during the first cleanup remove.
+      values.set(markerKey, olderMarker!);
+      values.set(key, older);
+      values.set(scopedKey, older);
+      resetLocalVaultRuntimeForTests();
+      // Hydrate Y's original fallback revision before restoring the IDB connection.
+      expect(await localVaultStorage.getItem(key)).toBe(older);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+      let injected = false;
+      const remove = vi.spyOn(storage, "removeItem").mockImplementation((name) => {
+        if (name === key && !injected) {
+          injected = true;
+          values.set(markerKey, newerMarker!);
+          values.set(key, newer);
+          values.set(scopedKey, newer);
+        }
+        values.delete(name);
+      });
+      const checkpoint = getVaultWriteCheckpoint();
+      try {
+        if (operation === "verified restore") await replaceLocalVaultItem(key, committed);
+        else await localVaultStorage.setItem(key, committed);
+      } finally {
+        remove.mockRestore();
+      }
+
+      expect(injected).toBe(true);
+      expect(values.get(key)).toBe(newer);
+      expect(values.get(markerKey)).toBe(newerMarker);
+      expect(values.get(scopedKey)).toBe(newer);
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    },
+  );
+
   it.each(["absent", "older"])("preserves a new packed record arriving during restore when the prior record was %s", async prior => {
     const fixture = await quotaFixture();
     await localVaultStorage.setItem(key, snapshot("older packed", true));
