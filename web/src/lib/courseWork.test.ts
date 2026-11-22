@@ -55,4 +55,39 @@ describe("course work lifecycle", () => {
       reviewTask: { source: "digest", sourceId: "set-1" },
     })]);
   });
+  it("preserves separate review work for distinct source IDs even when topic and destination match", () => {
+    const existing = item({
+      path: "Question Bank/Review",
+      label: "Review renal clearance",
+      kind: "Review Loop",
+      reviewTask: { source: "digest", sourceId: "set-A" },
+    });
+    const newSet = reviewTaskInputs(["Renal clearance"], "Question Bank/Review",
+      { source: "digest", sourceId: "set-B" }, [existing]);
+    expect(newSet).toEqual([expect.objectContaining({
+      label: "Review Renal clearance", reviewTask: { source: "digest", sourceId: "set-B" },
+    })]);
+    const newSession = reviewTaskInputs(["Renal clearance"], "Question Bank/Review",
+      { source: "question-results", sourceId: "session-1" }, [existing]);
+    expect(newSession).toHaveLength(1);
+    expect(newSession[0].reviewTask).toEqual({ source: "question-results", sourceId: "session-1" });
+    expect(reviewTaskInputs(["Renal clearance"], "Question Bank/Review",
+      { source: "digest", sourceId: "set-A" }, [existing])).toEqual([]);
+  });
+
+  it("remains idempotent within each source and preserves conservative legacy deduplication", () => {
+    const existing = item({
+      path: "Question Bank/Review",
+      label: "Review renal clearance",
+      kind: "Review Loop",
+      reviewTask: { source: "question-results" },
+    });
+    expect(reviewTaskInputs(["renal clearance"], "Question Bank/Review",
+      { source: "digest", sourceId: "set-B" }, [existing])).toEqual([]);
+    const created = reviewTaskInputs(["Renal clearance", "renal clearance", " Review renal clearance "],
+      "Question Bank/Review", { source: "digest", sourceId: "set-B" }, []);
+    expect(created).toHaveLength(1);
+    expect(created[0].reviewTask).toEqual({ source: "digest", sourceId: "set-B" });
+  });
+
 });
