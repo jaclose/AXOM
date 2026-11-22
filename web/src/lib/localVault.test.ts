@@ -805,6 +805,44 @@ describe("a save that could not reach IndexedDB", () => {
     vi.stubGlobal("indexedDB", fakeIndexedDb);
   });
 
+  it("does not overwrite a newer vault if the first IndexedDB read fails with an unmarked mirror", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const newer = snapshot("newer confirmed IndexedDB workspace");
+    const stale = snapshot("old unmarked browser mirror");
+    await localVaultStorage.setItem(key, newer);
+    await flushLocalVaultWrites();
+
+    // Old AXOM versions left an unmarked mirror. A transient error on the
+    // first vault read must not promote it over an independently saved value.
+    localStorage.setItem(key, stale);
+    expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+    resetLocalVaultRuntimeForTests();
+
+    const realOpen = fakeIndexedDb.open.bind(fakeIndexedDb);
+    let opens = 0;
+    vi.stubGlobal("indexedDB", {
+      open: (name: string, version?: number) => {
+        opens += 1;
+        if (opens === 1) throw new Error("transient first IndexedDB read fails");
+        return version === undefined ? realOpen(name) : realOpen(name, version);
+      },
+    });
+
+    try {
+      expect(await localVaultStorage.getItem(key)).toBe(newer);
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBe(newer);
+      } finally {
+        db.close();
+      }
+      expect(localStorage.getItem(key)).toBe(stale);
+      expect(opens).toBeGreaterThan(1);
+    } finally {
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+    }
+  });
+
   it("never lets an unmarked localStorage copy override the vault", async () => {
     // A copy mirrored by an older build carries no marker and may be stale.
     await localVaultStorage.setItem(key, snapshot("newer"));
