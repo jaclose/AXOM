@@ -145,6 +145,42 @@ describe("Community Question Set Library", () => {
     expect(mock.sets).toEqual([first, duplicate]);
   });
 
+  it.each([
+    ["unsupported receipt version", { version: 2, shareId: summary.id, contentDigest: "a".repeat(64) }],
+    ["invalid receipt digest", { version: 1, shareId: summary.id, contentDigest: "corrupt" }],
+    ["case-variant unsupported receipt", { version: 2, shareId: summary.id.toUpperCase(), contentDigest: "a".repeat(64) }],
+  ])("shows recovery before import for %s", async (_case, receipt) => {
+    const malformed = { ...savedSet, importProvenance: receipt } as unknown as QuestionSet;
+    mock.sets = [malformed];
+    mock.questions = [savedQuestion];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Saved copy needs recovery");
+    expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
+    expect(onPractice).not.toHaveBeenCalled();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([malformed]);
+    expect(mock.questions).toEqual([savedQuestion]);
+  });
+
+  it("holds a valid imported copy if a malformed receipt also claims the publication", async () => {
+    const malformed = { ...savedSet, id: "damaged-copy",
+      importProvenance: { version: 2, shareId: summary.id, contentDigest: "a".repeat(64) },
+    } as unknown as QuestionSet;
+    mock.sets = [savedSet, malformed];
+    mock.questions = [savedQuestion];
+    render(<CommunityQuestionSetLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Saved copy needs recovery");
+    expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([savedSet, malformed]);
+  });
+
   it("keeps the preview recoverable if the saved copy was removed before practice", async () => {
     mock.sets = [savedSet];
     mock.questions = [savedQuestion];

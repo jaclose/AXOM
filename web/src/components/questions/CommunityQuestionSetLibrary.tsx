@@ -270,8 +270,15 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       // Use the read-only canonical check before offering Practice; a damaged
       // receipt remains reserved rather than creating replacement question IDs.
       const store = useStore.getState();
-      const savedCopies = store.questionSets.filter(set =>
-        readSharedQuestionImportProvenance(set)?.shareId.toLowerCase() === result.id.toLowerCase());
+      // Treat malformed/old receipts as reserved too. The canonical importer
+      // rejects them by raw share ID; filtering only validated receipts here
+      // would misleadingly offer a fresh import that can never be committed.
+      const savedCopies = store.questionSets.filter(set => {
+        const raw = (set as QuestionSet & { importProvenance?: unknown }).importProvenance;
+        return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+          && "shareId" in raw && typeof raw.shareId === "string"
+          && raw.shareId.trim().toLowerCase() === result.id.toLowerCase();
+      });
       if (savedCopies.length) {
         let complete = false;
         try {
