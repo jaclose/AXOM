@@ -1289,9 +1289,11 @@ const vaultStorage: StateStorage = {
         ) throw new VaultConflictError();
         if (currentFallback) {
           retireFallbackCopyIfUnchanged(fallbackStore, name, currentFallback, userId, value);
-        } else if (userId) {
-          // Do not remove unmarked legacy mirrors here: multi-key localStorage
-          // cleanup has no atomic compare-and-delete across concurrent tabs.
+        } else if (userId && !currentPacked && previousRetiredRaw === null) {
+          // A retained packed receipt binds the original legacy active-user
+          // pointer. Changing it would make a valid receipt unrecoverable on
+          // the next tab start; the committed IDB already records this user.
+          // Unmarked mirrors are not deleted across tabs.
           try { fallbackStore?.setItem(activeUserKey(name), userId); } catch { /* IDB is durable. */ }
         }
       } else {
@@ -1457,8 +1459,9 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
         // localStorage has no atomic multi-key compare-and-delete; a peer
         // racing individual removes still requires separate reconciliation.
         retireFallbackCopyIfUnchanged(fallback, name, previousPlain, userId, value);
-      } else if (userId) {
-        // Do not remove unmarked legacy mirrors during restore.
+      } else if (userId && previousPacked === null) {
+        // The retained packed receipt keeps its captured legacy user binding.
+        // IndexedDB already holds the restored user's authoritative pointer.
         try { fallback?.setItem(activeUserKey(name), userId); } catch { /* IndexedDB is durable. */ }
       }
     } else {
