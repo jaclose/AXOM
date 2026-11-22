@@ -243,6 +243,63 @@ describe("IndexedDB-first local vault", () => {
     await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
+  it("does not retire a second tab's acknowledged fallback during read-side promotion", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label }, version: 34,
+    });
+    const base = snapshot("committed base");
+    const first = snapshot("first offline edit");
+    const second = snapshot("later acknowledged offline edit");
+
+    await localVaultStorage.setItem(key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, first);
+    await flushLocalVaultWrites();
+    const firstMarker = storage.getItem(markerKey);
+    expect(firstMarker).not.toBeNull();
+    await localVaultStorage.setItem(key, second);
+    await flushLocalVaultWrites();
+    const secondMarker = storage.getItem(markerKey);
+    expect(secondMarker).not.toBeNull();
+    expect(secondMarker).not.toBe(firstMarker);
+    expect(storage.getItem(scopedKey)).toBe(second);
+
+    // First tab captured Y; a peer subsequently acknowledges Z while Y's
+    // IndexedDB promotion is still in flight. Use real fake-IDB put scheduling.
+    values.set(key, first);
+    values.set(markerKey, firstMarker!);
+    values.set(scopedKey, first);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (!injected && storedKey === key && value === first) {
+        injected = true;
+        values.set(key, second);
+        values.set(markerKey, secondMarker!);
+        values.set(scopedKey, second);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    try {
+      await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    } finally {
+      put.mockRestore();
+    }
+    expect(injected).toBe(true);
+    const db = await openCurrentVault();
+    try { expect(await getDirect(db, key)).toBe(first); } finally { db.close(); }
+    expect(storage.getItem(key)).toBe(second);
+    expect(storage.getItem(markerKey)).toBe(secondMarker);
+    expect(storage.getItem(scopedKey)).toBe(second);
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+  });
+
   it("refuses a disputed fallback if the competing vault becomes unreadable during conflict resolution", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
@@ -680,13 +737,15 @@ describe("a save that could not reach IndexedDB", () => {
     vi.stubGlobal("indexedDB", fakeIndexedDb);
 
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
-    // Once the vault is writable the copy moves across and the fallback goes.
-    await waitFor(async () => {
-      await localVaultStorage.getItem(key);
-      return localStorage.getItem(key) === null;
-    });
+    // Reading can promote the bytes, but cannot atomically retire another
+    // tab's recovery marker. Retain it until a later successful write.
+    expect(localStorage.getItem(key)).toBe(snapshot("newer"));
+    expect(localStorage.getItem(`${key}:fallback-newer`)).not.toBeNull();
+    await localVaultStorage.setItem(key, snapshot("after recovery"));
+    await flushLocalVaultWrites();
+    expect(localStorage.getItem(key)).toBeNull();
     expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
-    expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("after recovery"));
   });
 
   it("keeps saving to the fallback while IndexedDB stays unavailable", async () => {
