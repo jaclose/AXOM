@@ -77,9 +77,11 @@ reviewed 20,000-question public corpus.
 
 Fresh focused import, recovery, HOST, PDF and question-view tests have passed, with
 scoped lint and shared typecheck. Independent native/recovery and UI audits found
-no remaining blockers after the explicit PDF-list correction. Linux Playwright's
-official browser download is blocked here; CI supplies browser evidence. The Mac
-command service timed out before any isolated checkout or test could run.
+no remaining blockers after the explicit PDF-list correction. Full local quality
+passed: 5,523 unit tests, typecheck, lint and production build. Local browser checks
+are blocked: the official download failed and installed Chromium cannot create its
+required socket. CI supplies browser evidence. The Mac command service timed out
+before any isolated checkout or test could run.
 
 Production Supabase is `jofkmfwkidubxcutkwzf`; use its prod connection, not the
 older project. The additive tracker migration was applied through the authorized
@@ -93,7 +95,12 @@ passed), declares the live image script's scoped globals, and aligns one old
 shared-image test with the preserved oldest-reference behavior. Browser failures
 identified premature PDF catalog reads and an omitted genuine SQL RPC in the
 synthetic Host fixture; both are corrected without relaxing their assertions.
-Run fresh CI on this follow-up. Code push, CI, deployment, migration, content approval
+All three browser shards passed on `7bbe096`. Its only remaining web failure was a
+pre-existing Journal fixture using the legacy shifted study day before 04:00.
+The fixture now uses the saved workspace's active calendar day; all six hydration
+and account-isolation cases pass in UTC and America/Grenada without changing their
+assertions or application behavior. Run fresh CI on that correction.
+Code push, CI, deployment, migration, content approval
 and learner acceptance remain separate facts. No approval or production release
 may be claimed from the focused tests alone.
 
