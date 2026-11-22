@@ -594,7 +594,7 @@ describe("private library failure diagnostics", () => {
       return b.read(path);
     };
     setQuestionAttachmentAccount("A");
-    const original = installPrivateLibrary(read, undefined, { key: "shared-source" });
+    const original = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: () => {} });
     const staleGuard = vi.fn(() => { throw new Error("Joined download no longer selected"); });
     const joined = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: staleGuard });
     const rejection = expect(joined).rejects.toThrow("Joined download no longer selected");
@@ -614,7 +614,7 @@ describe("private library failure diagnostics", () => {
       return b.read(path);
     };
     setQuestionAttachmentAccount("A");
-    const original = installPrivateLibrary(read, undefined, { key: "shared-source" });
+    const original = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: () => {} });
     const guard = vi.fn(() => {});
     const joined = installPrivateLibrary(read, undefined, { key: "shared-source", assertCurrent: guard });
     release();
