@@ -155,14 +155,14 @@ describe("question-share Supabase boundary", () => {
     const rpc = vi.fn();
     configured(rpc);
 
-    await expect(publishShare("source-set", value as never)).rejects.toThrow(/unsupported field/i);
+    await expect(publishShare("source-set", value as never, "owner", () => true)).rejects.toThrow(/unsupported field/i);
     expect(rpc).not.toHaveBeenCalled();
   });
 
   it("never uploads a linked A workspace under a B owner after async session acquisition", async () => {
     const rpc = vi.fn();
     configured(rpc, { id: "account-B" });
-    await expect(publishShare("source-set", snapshot(), "account-A"))
+    await expect(publishShare("source-set", snapshot(), "account-A", () => true))
       .rejects.toThrow(/linked workspace account changed/i);
     expect(rpc).not.toHaveBeenCalled();
   });
@@ -219,7 +219,7 @@ describe("question-share Supabase boundary", () => {
     const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
     const operation = configured(rpc);
 
-    await expect(publishShare("source-set", snapshot(), "owner")).resolves.toEqual({
+    await expect(publishShare("source-set", snapshot(), "owner", () => true)).resolves.toEqual({
       id: SHARE_ID,
       sourceId: "source-set",
       token: TOKEN,
@@ -242,7 +242,7 @@ describe("question-share Supabase boundary", () => {
     operation.assertCurrent.mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("The signed-in account changed. This operation was stopped."));
 
-    await expect(publishShare("source-set", snapshot())).rejects.toThrow(/account changed/i);
+    await expect(publishShare("source-set", snapshot(), "owner", () => true)).rejects.toThrow(/account changed/i);
     expect(rpc).toHaveBeenCalledOnce();
   });
 
@@ -253,7 +253,7 @@ describe("question-share Supabase boundary", () => {
     });
     configured(rpc);
 
-    await expect(publishShare("source-set", snapshot())).rejects.toThrow(/identity or summary/i);
+    await expect(publishShare("source-set", snapshot(), "owner", () => true)).rejects.toThrow(/identity or summary/i);
   });
 
   it("lists only the bounded management fields requested for the signed-in owner", async () => {
@@ -338,7 +338,7 @@ describe("question-share Supabase boundary", () => {
     const rpc = vi.fn();
     configured(rpc, null);
 
-    await expect(publishShare("source-set", snapshot())).rejects.toThrow(/unlisted share link/i);
+    await expect(publishShare("source-set", snapshot(), "owner", () => true)).rejects.toThrow(/unlisted share link/i);
     expect(rpc).not.toHaveBeenCalled();
   });
 
