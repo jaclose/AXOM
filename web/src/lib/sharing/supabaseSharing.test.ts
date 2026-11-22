@@ -77,6 +77,22 @@ function configured(
 beforeEach(() => vi.clearAllMocks());
 
 describe("question-share Supabase boundary", () => {
+  it("fails closed when a direct caller omits the account binding or live-source preflight", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
+    configured(rpc);
+    // Runtime boundary matters as well as TypeScript: old JS callers and
+    // alternate UI integrations can omit optional arguments.
+    const directCall = publishShare as (...args: unknown[]) => ReturnType<typeof publishShare>;
+
+    await expect(directCall("source-set", snapshot()))
+      .rejects.toThrow(/account|owner|linked workspace/i);
+    await expect(directCall("source-set", snapshot(), "owner"))
+      .rejects.toThrow(/source|preflight|validation/i);
+    await expect(directCall("source-set", snapshot(), "", () => true))
+      .rejects.toThrow(/account|owner|linked workspace/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("returns the server share UUID plus a validated content digest", async () => {
     const value = snapshot();
     const rpc = vi.fn().mockResolvedValue({
