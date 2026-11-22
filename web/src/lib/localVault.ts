@@ -1241,7 +1241,22 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
     // retire only the fallback captured before that write. A concurrent save
     // remains available and makes this replacement fail explicitly.
     retirePackedFallback(fallback, name, previousPacked);
-    clearFallbackCopy(fallback, name, userId);
+    if (observesWorkspace(name)) {
+      // A peer can acknowledge a plain marked recovery copy while writeVault
+      // is pending. localStorage has no atomic multi-key compare-and-delete:
+      // even a prewrite marker comparison would not make removing its value,
+      // marker and scoped mirror safe. Keep all plain workspace recovery bytes.
+      // A marked copy requires explicit reconciliation, not a success receipt
+      // for a restore that may have overridden independent edits.
+      if (fallback?.getItem(fallbackMarkerKey(name)) !== null && fallback?.getItem(fallbackMarkerKey(name)) !== undefined) {
+        throw new VaultConflictError();
+      }
+      if (userId) {
+        try { fallback?.setItem(activeUserKey(name), userId); } catch { /* The vault write is durable. */ }
+      }
+    } else {
+      clearFallbackCopy(fallback, name, userId);
+    }
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
     markVaultWrite("indexeddb");
