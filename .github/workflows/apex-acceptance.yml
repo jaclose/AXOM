@@ -20,12 +20,16 @@ on:
       - 'web/src/lib/courseWork*'
       - 'web/src/lib/courseScheduleImport*'
       - 'web/src/lib/studyProgress*'
+      - 'web/src/lib/tracker*'
+      - 'web/src/lib/sourceOriginal*'
       - 'web/src/lib/saveProgress*'
       - 'web/src/components/questions/**'
+      - 'web/src/components/bookshelf/**'
       - 'web/src/components/tracker/**'
       - 'web/src/components/exam/**'
       - 'web/src/pages/CourseTrackerPage*'
       - 'web/src/pages/QuestionWorkspacePage*'
+      - 'web/src/pages/SharedQuestionSetPage*'
       - '.github/workflows/apex-acceptance.yml'
   workflow_dispatch:
 
