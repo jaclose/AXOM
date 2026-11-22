@@ -541,6 +541,44 @@ describe("private library failure diagnostics", () => {
     expect(await getQuestionAttachmentBlob(`private-library:${checksum}`, { localOnly: true })).toBeUndefined();
   });
 
+  it("rejects an apparently successful import if final progress switches to another account", async () => {
+    const b = await bundle();
+    setQuestionAttachmentAccount("A");
+    const originalScope = getQuestionAttachmentScope();
+    let reportedComplete = false;
+    await expect(installPrivateLibrary(b.read, message => {
+      if (message.startsWith("Library installed.")) {
+        reportedComplete = true;
+        setQuestionAttachmentAccount("B");
+      }
+    }, { key: "account-A", assertCurrent: () => {
+      if (!isQuestionAttachmentScopeCurrent(originalScope)) throw new Error("Account changed");
+    } })).rejects.toThrow("Account changed");
+    expect(reportedComplete).toBe(true);
+    expect(getQuestionAttachmentScope().accountId).toBe("B");
+  });
+
+  it("never joins an in-flight import from a different account generation even with the same reader and key", async () => {
+    const b = await bundle();
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const read = async (path: string) => {
+      if (path === "templates/test.txt") await waiting;
+      return b.read(path);
+    };
+    setQuestionAttachmentAccount("A");
+    const originalScope = getQuestionAttachmentScope();
+    const pendingA = installPrivateLibrary(read, undefined, { key: "same-download", assertCurrent: () => {
+      if (!isQuestionAttachmentScopeCurrent(originalScope)) throw new Error("Account changed");
+    } });
+    setQuestionAttachmentAccount("B");
+    const pendingB = installPrivateLibrary(read, undefined, { key: "same-download", assertCurrent: () => {} });
+    const bAssertion = expect(pendingB).rejects.toThrow("Another library download");
+    release();
+    await bAssertion;
+    await expect(pendingA).rejects.toThrow("Account changed");
+  });
+
   it("never writes A-origin source originals to B when a progress callback switches accounts", async () => {
     const b = await bundle();
     const original = encode("Account A verified original, not for the next signed-in account.");
