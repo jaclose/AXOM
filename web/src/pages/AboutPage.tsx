@@ -62,7 +62,6 @@ export function AboutPage() {
   function selectTab(next: "axom" | "developer") {
     if (next === "developer" && !developerVisited) {
       setDeveloperVisited(true);
-      setPreviewOpen(true);
     }
     setTab(next);
     (next === "axom" ? axomTabRef : developerTabRef).current?.focus();
@@ -205,7 +204,7 @@ function WebsitePreview({ previewOpen, onToggle }: { previewOpen: boolean; onTog
       <div className="sub" style={{ marginTop: 8 }}>
         {previewOpen
           ? "Closing the preview discards unsent form input. If it stays blank, use Open site."
-          : "Preview stopped. It will load again only when you choose Open preview."}
+          : "Preview is off. Choose Open preview to load the external developer website."}
       </div>
     </GlassCard>
   );
