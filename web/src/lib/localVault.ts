@@ -281,6 +281,7 @@ type NewerFallbackCopy = {
   marker: string;
   fingerprint: string;
   baseFingerprint?: string | null;
+  deletionGeneration?: string | null;
 };
 
 function observesWorkspace(name: string): boolean {
@@ -335,12 +336,17 @@ function fallbackExpectation(copy: NewerFallbackCopy, latchConflict = true): Vau
   const fingerprints = copy.baseFingerprint === undefined
     ? [copy.fingerprint]
     : [copy.baseFingerprint, copy.fingerprint];
-  return { fingerprints, latchConflict };
+  return { fingerprints, latchConflict,
+    deletionGeneration: copy.baseFingerprint === null ? copy.deletionGeneration ?? null : undefined };
 }
 
-function encodeFallbackMarker(valueFingerprint: string, baseFingerprint: string | null | undefined): string {
+function encodeFallbackMarker(
+  valueFingerprint: string, baseFingerprint: string | null | undefined,
+  deletionGeneration?: string | null,
+): string {
   if (baseFingerprint === undefined) return valueFingerprint;
-  return JSON.stringify({ version: 1, valueFingerprint, baseFingerprint });
+  return JSON.stringify({ version: 1, valueFingerprint, baseFingerprint,
+    ...(baseFingerprint === null ? { deletionGeneration: deletionGeneration ?? null } : {}) });
 }
 
 /**
@@ -357,12 +363,18 @@ function newerFallbackCopy(fallbackStore: Pick<Storage, "getItem"> | null, name:
 
     let valueFingerprint = marker;
     let baseFingerprint: string | null | undefined;
+    let deletionGeneration: string | null | undefined;
     try {
       const parsed = JSON.parse(marker) as {
         version?: unknown;
         valueFingerprint?: unknown;
         baseFingerprint?: unknown;
+        deletionGeneration?: unknown;
       };
+      if (parsed.version === 1 && parsed.deletionGeneration !== undefined && (
+        (parsed.deletionGeneration !== null && typeof parsed.deletionGeneration !== "string")
+        || parsed.deletionGeneration === ""
+      )) throw new VaultConflictError();
       if (
         parsed.version === 1
         && typeof parsed.valueFingerprint === "string"
@@ -370,12 +382,14 @@ function newerFallbackCopy(fallbackStore: Pick<Storage, "getItem"> | null, name:
       ) {
         valueFingerprint = parsed.valueFingerprint;
         baseFingerprint = parsed.baseFingerprint;
+        deletionGeneration = parsed.deletionGeneration as string | null | undefined;
       }
-    } catch {
+    } catch (error) {
+      if (isVaultConflictError(error)) throw error;
       // Legacy markers contain only the fallback snapshot fingerprint.
     }
     return snapshotFingerprint(value) === valueFingerprint
-      ? { value, marker, fingerprint: valueFingerprint, baseFingerprint }
+      ? { value, marker, fingerprint: valueFingerprint, baseFingerprint, deletionGeneration }
       : null;
   } catch (error) {
     // A marked recovery copy may still exist when the marker or payload read
@@ -492,7 +506,8 @@ function assertPackedLegacyCurrent(storage: Pick<Storage, "getItem"> | null, cop
 }
 
 function packedExpectation(copy: PackedFallbackCopy): VaultExpectation {
-  return { fingerprints: [copy.baseFingerprint, copy.valueFingerprint] };
+  return { fingerprints: [copy.baseFingerprint, copy.valueFingerprint],
+    deletionGeneration: copy.baseFingerprint === null ? copy.deletionGeneration ?? null : undefined };
 }
 
 // Deleting a packed record after a separate comparison is unsafe across tabs.
@@ -593,7 +608,13 @@ async function writePackedFallback(
   if (legacy.activeUser !== null && legacy.activeUser !== userId) throw new PackedFallbackError("The browser fallback belongs to a different local profile. Keep both copies and export saved work.");
   const base = previous ? previous.baseFingerprint : baseFingerprint;
   if (base === undefined) throw new PackedFallbackError("AXOM cannot establish the saved base for this fallback. Keep this tab open and export saved work.");
-  const encoded = await packVaultFallback(value, { name, userId, valueFingerprint: snapshotFingerprint(value), baseFingerprint: base, legacy });
+  const packedDeletionGeneration = base === null
+    ? (previous ? previous.deletionGeneration ?? null : observedDeletionGenerations.get(name) ?? null)
+    : undefined;
+  const encoded = await packVaultFallback(value, {
+    name, userId, valueFingerprint: snapshotFingerprint(value), baseFingerprint: base,
+    deletionGeneration: packedDeletionGeneration, legacy,
+  });
   if (!encoded) throw new PackedFallbackError("This browser could not create a smaller, restorable workspace fallback.");
 
   // A competing IDB commit during compression is authoritative conflict evidence.
@@ -902,11 +923,6 @@ async function writeVault(
         expected
         && (!expected.fingerprints.includes(currentFingerprint) || staleEmptyGeneration)
       ) {
-        if (import.meta.env.MODE === "test") {
-          console.warn("R222-TEST-ONLY-CAS-TRACE", JSON.stringify({
-            expected, currentFingerprint, storedDeletionGeneration, staleEmptyGeneration,
-          }));
-        }
         conflict = new VaultConflictError();
         if (expected.latchConflict !== false && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         tx.abort();
@@ -1545,7 +1561,8 @@ const vaultStorage: StateStorage = {
         assertNoPendingVaultRemoval(fallbackStore, name);
         fallbackStore?.setItem(
           fallbackMarkerKey(name),
-          encodeFallbackMarker(snapshotFingerprint(value), baseFingerprint),
+          encodeFallbackMarker(snapshotFingerprint(value), baseFingerprint,
+            previousFallback ? previousFallback.deletionGeneration : observedDeletionGenerations.get(name) ?? null),
         );
         writeLocalFallback(fallbackStore, name, value, userId, indexedDbError);
         saved = true;
