@@ -7,6 +7,7 @@ import {
   flushLocalVaultWrites,
   getVaultWriteCheckpoint,
   localVaultStorage,
+  resetLocalVaultRuntimeForTests,
 } from "../localVault";
 import type { QuestionRecord } from "../questions";
 import { useStore } from "../store";
@@ -69,14 +70,20 @@ async function input() {
 }
 
 beforeEach(async () => {
-  values.clear();
+  // Drain the prior synthetic browser lifetime before replacing its storage.
+  await flushLocalVaultWrites();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", storage);
   await deleteDatabase(DB_NAME);
+  resetLocalVaultRuntimeForTests();
+  values.clear();
   await useStore.persist.rehydrate();
   await useStore.setState({ questions: [], questionSets: [], documents: [] });
   await flushLocalVaultWrites();
+  const raw = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+  expect(raw).not.toBeNull();
+  expect(JSON.parse(raw!).state).toMatchObject({ questions: [], questionSets: [], documents: [] });
 });
 
 afterEach(async () => {
@@ -87,6 +94,7 @@ afterEach(async () => {
   await useStore.setState(original);
   await flushLocalVaultWrites();
   await deleteDatabase(DB_NAME);
+  resetLocalVaultRuntimeForTests();
   vi.unstubAllGlobals();
 });
 
