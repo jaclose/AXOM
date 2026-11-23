@@ -344,7 +344,7 @@ describe("Community Question Set Library", () => {
     expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
     expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
-    expect((await screen.findByRole("alert")).textContent).toContain("no longer match the approved publication");
+    expect(screen.getByText(/This saved set\'s reviewed question text/).textContent).toContain("no longer match the approved publication");
     expect(mock.sets).toEqual([savedSet]);
     expect(mock.questions).toEqual([changedQuestion]);
     expect(mock.commit).not.toHaveBeenCalled();
