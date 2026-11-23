@@ -739,7 +739,19 @@ describe("verified separate compressed workspace fallback", () => {
     const backupKey = `${STORAGE_KEYS.localBackupPrefix}existing`;
     values.set(backupKey, "historical backup bytes");
     if (lifecycle === "explicit removal") {
+      // Deletion now atomically writes a durable generation token. A quota
+      // fixture blocking ALL IndexedDB puts cannot represent a successful
+      // deletion; permit this explicit operation, then restore the original
+      // quota-failure scenario before testing the next packed fallback.
+      fixture.blockVault.mockRestore();
+      const put = IDBObjectStore.prototype.put;
+      const deletionCheckpoint = getVaultWriteCheckpoint();
       await localVaultStorage.removeItem(key);
+      expect(() => assertVaultWritesSince(deletionCheckpoint)).not.toThrow();
+      vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+        if (this.name === STORE_NAME) throw new DOMException("Synthetic state quota", "QuotaExceededError");
+        return put.apply(this, args);
+      });
     } else {
       for (const name of [...values.keys()]) if (name.startsWith(key)) values.delete(name);
       await new Promise<void>((resolve, reject) => {
