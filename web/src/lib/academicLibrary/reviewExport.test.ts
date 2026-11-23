@@ -248,6 +248,12 @@ it("accepts a valid canonical nested manifest and reads its exact bytes", async 
 it.each([
   ["Windows device name", "originals/CON.pdf"],
   ["Windows reserved device with extension", "originals/com1.txt"],
+  ["Windows superscript COM one", "originals/COM¹.pdf"],
+  ["Windows superscript COM two", "originals/com².txt"],
+  ["Windows superscript COM three", "originals/COM³"],
+  ["Windows superscript LPT one", "originals/LPT¹.pdf"],
+  ["Windows superscript LPT two", "originals/lpt².txt"],
+  ["Windows superscript LPT three", "originals/LPT³"],
   ["alternate data stream delimiter", "originals/lecture:notes.pdf"],
   ["Windows wildcard", "originals/scan?.png"],
   ["Windows terminal dot", "originals/notes."],
