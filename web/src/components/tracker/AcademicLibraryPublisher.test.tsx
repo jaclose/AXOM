@@ -158,6 +158,25 @@ describe("publishing a prepared library", () => {
     expect(within(goer).getByText("Sharing outcome unconfirmed")).toBeTruthy();
   });
 
+  it("preserves verified uploads and flags sharing as unconfirmed when its RPC rejects", async () => {
+    mocks.batch.mockImplementation(simulatedBatch([]));
+    // A rejected client request does not establish whether the server committed it.
+    mocks.share.mockRejectedValueOnce(new Error("The connection was interrupted after the request started."));
+    const onPublished = vi.fn();
+    const { container } = render(<AcademicLibraryPublisher onPublished={onPublished} />);
+    await chooseLibrary(container);
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
+    await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+    expect(await screen.findAllByText("Sharing outcome unconfirmed")).toHaveLength(2);
+    expect(screen.getByRole("status").textContent).toMatch(
+      /2 courses published and verified.*Sharing outcome is unconfirmed.*Refresh My courses/i);
+    expect(screen.queryByText(/Nothing was uploaded/)).toBeNull();
+    expect(onPublished).toHaveBeenCalledOnce();
+    expect(screen.getByText(/0 courses selected to publish/)).toBeTruthy();
+    expect(mocks.share).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps courses private when sharing is off, and explains a course that fails validation", async () => {
     mocks.batch.mockImplementation(simulatedBatch([]));
     const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
