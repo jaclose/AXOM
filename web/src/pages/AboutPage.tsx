@@ -96,7 +96,12 @@ export function AboutPage() {
         {developerVisited && (
           // Keep explicitly opened remote content alive on tab round-trips.
           // Hidden + inert excludes it from keyboard, pointer and AT navigation.
-          <div hidden={tab !== "developer"} inert={tab !== "developer"}>
+          <div
+            hidden={tab !== "developer"}
+            ref={(node) => {
+              if (node) node.toggleAttribute("inert", tab !== "developer");
+            }}
+          >
             <WebsitePreview />
           </div>
         )}
