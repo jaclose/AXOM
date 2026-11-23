@@ -271,7 +271,7 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
         id: "first-vs-repeat",
         kind: "first-vs-repeat",
         title: `${firstTally.accuracy}% on new questions, ${repeatTally.accuracy}% on ones you have seen`,
-        detail: "These percentages compare different groups of answers and do not prove that repetition improved recall. Repeated questions may be an easier mix. Prioritize genuinely unfamiliar questions when available, or review first-time misses.",
+        detail: "The observed gap compares different groups of answers and does not prove that repetition improved recall. Repeated questions may be an easier mix. Prioritize genuinely unfamiliar questions when available, or review first-time misses.",
         basis: "computed",
         sample: firstTally.attempts + repeatTally.attempts,
         weight: 60,
