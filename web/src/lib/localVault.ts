@@ -447,27 +447,37 @@ const packedRetiredKey = (name: string) => `${name}:packed-retired`;
 async function retiredPackedReceipt(
   storage: Pick<Storage, "getItem"> | null, name: string, copy: PackedFallbackCopy,
 ): Promise<RetiredPackedReceipt | null> {
-  try {
-    const raw = storage?.getItem(packedRetiredKey(name));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<RetiredPackedReceipt>;
-    if (typeof parsed.committedFingerprint !== "string" || typeof parsed.committedUserId !== "string") return null;
-    if (parsed.version === 1) {
-      if (parsed.raw !== copy.raw) return null;
-    } else if (parsed.version === 2) {
-      if (typeof parsed.rawSha256 !== "string" || !/^[a-f0-9]{64}$/.test(parsed.rawSha256)) return null;
-      // A transient digest failure cannot prove that this retirement receipt
-      // is absent. Re-promoting the retained copy could undo a restore.
-      let actualDigest: string;
-      try { actualDigest = await sha256(new TextEncoder().encode(copy.raw)); }
-      catch { throw new VaultConflictError(); }
-      if (actualDigest !== parsed.rawSha256) return null;
-    } else return null;
-    return parsed as RetiredPackedReceipt;
-  } catch (error) {
-    if (isVaultConflictError(error)) throw error;
-    return null;
-  }
+  if (!storage) return null;
+  // Only a confirmed missing key is an absent retirement receipt. Security
+  // errors, malformed JSON or a damaged receipt cannot authorize repromotion
+  // of potentially older packed bytes over a separately restored workspace.
+  let raw: string | null;
+  try { raw = storage.getItem(packedRetiredKey(name)); }
+  catch { throw new VaultConflictError(); }
+  if (raw === null) return null;
+
+  let parsed: Partial<RetiredPackedReceipt>;
+  try { parsed = JSON.parse(raw) as Partial<RetiredPackedReceipt>; }
+  catch { throw new VaultConflictError(); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+    || typeof parsed.committedFingerprint !== "string"
+    || typeof parsed.committedUserId !== "string") throw new VaultConflictError();
+
+  if (parsed.version === 1) {
+    if (parsed.raw !== copy.raw) return null;
+  } else if (parsed.version === 2) {
+    if (typeof parsed.rawSha256 !== "string" || !/^[a-f0-9]{64}$/.test(parsed.rawSha256)) {
+      throw new VaultConflictError();
+    }
+    let actualDigest: string;
+    try { actualDigest = await sha256(new TextEncoder().encode(copy.raw)); }
+    catch { throw new VaultConflictError(); }
+    // A structurally valid receipt for another newly acknowledged packed
+    // record is not a retirement of this one. Let normal CAS/identity gates
+    // decide whether the new record can be promoted.
+    if (actualDigest !== parsed.rawSha256) return null;
+  } else throw new VaultConflictError();
+  return parsed as RetiredPackedReceipt;
 }
 
 function verifiedRetiredPackedValue(receipt: RetiredPackedReceipt, value: string | null | undefined): value is string {
