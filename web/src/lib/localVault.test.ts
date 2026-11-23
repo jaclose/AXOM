@@ -584,6 +584,137 @@ describe("IndexedDB-first local vault", () => {
     },
   );
 
+  it("preserves an acknowledged offline workspace when the later IndexedDB deletion aborts", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const pendingKey = `${key}:removal-pending`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label }, version: 34,
+    });
+    const committed = snapshot("original IndexedDB X");
+    const offline = snapshot("acknowledged offline Y");
+    await localVaultStorage.setItem(key, committed);
+    await flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, offline);
+    await flushLocalVaultWrites();
+    const marker = storage.getItem(markerKey);
+    expect(marker).toBeTruthy();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+
+    // Fault the actual fake-IDB readwrite delete transaction, not the
+    // localStorage adapter. Old X should roll back; offline Y must survive.
+    const originalDelete = IDBObjectStore.prototype.delete;
+    let aborted = false;
+    const fault = vi.spyOn(IDBObjectStore.prototype, "delete").mockImplementation(function (
+      this: IDBObjectStore, recordKey,
+    ) {
+      const request = originalDelete.call(this, recordKey);
+      if (!aborted && recordKey === key) {
+        aborted = true;
+        this.transaction.abort();
+      }
+      return request;
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+    } finally {
+      fault.mockRestore();
+    }
+    expect(aborted).toBe(true);
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    const db = await openCurrentVault();
+    try { expect(await getDirect(db, key)).toBe(committed); } finally { db.close(); }
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+    expect(storage.getItem(scopedKey)).toBe(offline);
+    expect(storage.getItem(pendingKey)).toBeTruthy();
+
+    // New tabs must not lose the deletion intent and hydrate old X.
+    resetLocalVaultRuntimeForTests();
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    const blocked = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("blind X to Z save"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(blocked)).toThrow(VAULT_CONFLICT_MESSAGE);
+
+    // An explicitly authorized, verifiable restore can reconcile the
+    // incomplete deletion without dropping the original recovery bytes.
+    await replaceLocalVaultItem(key, offline);
+    await flushLocalVaultWrites();
+    expect(storage.getItem(pendingKey)).toBeNull();
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBe(offline);
+  });
+
+  it("keeps a durable removal intent after a later localStorage key deletion fails", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const pendingKey = `${key}:removal-pending`;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label }, version: 34,
+    });
+    const committed = snapshot("old IDB X");
+    const offline = snapshot("offline Y");
+    await localVaultStorage.setItem(key, committed);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, offline);
+    await flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    resetLocalVaultRuntimeForTests();
+    const originalRemove = storage.removeItem.bind(storage);
+    const fault = vi.spyOn(storage, "removeItem").mockImplementation(name => {
+      if (name === markerKey) throw new DOMException("Denied later marker deletion", "SecurityError");
+      return originalRemove(name);
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+    } finally {
+      fault.mockRestore();
+    }
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(storage.getItem(key)).toBeNull();
+    expect(storage.getItem(markerKey)).not.toBeNull();
+    expect(storage.getItem(scopedKey)).toBe(offline);
+    expect(storage.getItem(pendingKey)).toBeTruthy();
+    resetLocalVaultRuntimeForTests();
+    await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    await expect(resolveWorkspaceSnapshotRecord({ [key]: committed }, Object.fromEntries(values), key))
+      .rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+    const blocked = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("blind follow-on write"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(blocked)).toThrow(VAULT_CONFLICT_MESSAGE);
+  });
+
+  it("finishes an explicit workspace deletion without retaining a stale removal intent", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label }, version: 34,
+    });
+    await localVaultStorage.setItem(key, snapshot("before deletion"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot("newer offline edit"));
+    await flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.removeItem(key);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(storage.getItem(`${key}:removal-pending`)).toBeNull();
+    expect(storage.getItem(`${key}:fallback-newer`)).toBeNull();
+    expect(storage.getItem(key)).toBeNull();
+    resetLocalVaultRuntimeForTests();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+  });
+
   it("removes primary, profile pointer, and scoped IndexedDB records together", async () => {
     const persisted = JSON.stringify({ state: { profile: { userId: "jd", name: "JD" } }, version: 32 });
     await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
