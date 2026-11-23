@@ -43,6 +43,30 @@ afterEach(async () => {
 });
 
 describe("automatic local migration backups", () => {
+  it("rejects blocked fake IndexedDB deletion rather than claiming a clean test database", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, questions: [{ id: "preserved" }] }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    // An open reader can block deleteDatabase even if the test suite cleared
+    // its in-memory revision observation. A blocked delete is not a clean DB.
+    const reader = await openDatabase(DB_NAME);
+    try {
+      await expect(deleteDatabase(DB_NAME)).rejects.toThrow(/blocked/i);
+      expect(await getStoredValue(reader, STORE_NAME, key)).toBe(saved);
+    } finally {
+      reader.close();
+    }
+    // Once the reader is closed, the outstanding delete and a fresh cleanup
+    // can complete. A new test is permitted to reset CAS state only then.
+    await deleteDatabase(DB_NAME);
+    const empty = await openDatabase(DB_NAME);
+    try {
+      expect(await getStoredValue(empty, STORE_NAME, key)).toBeUndefined();
+    } finally {
+      empty.close();
+    }
+  });
+
   it("uses the canonical vault version and object stores shared with primary persistence", async () => {
     const persisted = JSON.stringify({ state: { profile: { userId: "jd" }, questions: [{ id: "q1" }] }, version: 32 });
     await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
