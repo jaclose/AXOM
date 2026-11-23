@@ -1,7 +1,7 @@
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "./brand";
-import { localVaultStorage, resolveVaultSnapshotRecord, resolveWorkspaceSnapshotRecord, STORE_NAME } from "./localVault";
+import { flushLocalVaultWrites, localVaultStorage, resetLocalVaultRuntimeForTests, resolveVaultSnapshotRecord, resolveWorkspaceSnapshotRecord, STORE_NAME } from "./localVault";
 import { readLocalBackup } from "./localBackup";
 import { createUpdateCheckpoint } from "./updateCheckpoint";
 import { saveNativeSnapshot } from "../services/nativeSqlite";
@@ -22,7 +22,12 @@ vi.mock("./store", () => ({ useStore: {
 } }));
 vi.mock("../services/nativeSqlite", () => ({ saveNativeSnapshot: vi.fn(async () => ({ ok: true })) }));
 
-beforeEach(() => {
+beforeEach(async () => {
+  // The previous synthetic IndexedDB lifetime can still have queued writes.
+  // Drain it before replacing the database, then discard only test-only CAS
+  // observations; production conflict guards remain unchanged.
+  await flushLocalVaultWrites();
+  resetLocalVaultRuntimeForTests();
   runtime.hydrated = true;
   runtime.state = {
     profile: { name: "Test", userId: "test" },
@@ -41,9 +46,60 @@ beforeEach(() => {
     removeItem: (key: string) => { values.delete(key); },
   });
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  await flushLocalVaultWrites();
+  resetLocalVaultRuntimeForTests();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+async function primeVerifiedWorkspaceBeforeDatabaseOutage(): Promise<void> {
+  // Begin from a genuinely hydrated empty vault, then create an acknowledged
+  // fallback using the real adapter while IndexedDB writes are unavailable.
+  // This differs from allowing an unhydrated tab to make a blind first save.
+  const key = STORAGE_KEYS.persistedState;
+  expect(await localVaultStorage.getItem(key)).toBeNull();
+  const saved = JSON.stringify({ state: runtime.state, version: 32 });
+  const originalPut = IDBObjectStore.prototype.put;
+  const unavailable = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+    if (this.name === STORE_NAME) throw new DOMException("Synthetic quota", "QuotaExceededError");
+    return originalPut.apply(this, args);
+  });
+  try {
+    await localVaultStorage.setItem(key, saved);
+    await flushLocalVaultWrites();
+    // Check both the acknowledged recovery bytes and the public read path.
+    expect(localStorage.getItem(key)).toBe(saved);
+    expect(await localVaultStorage.getItem(key)).toBe(saved);
+  } finally {
+    unavailable.mockRestore();
+  }
+}
 
 describe("pre-update workspace checkpoint", () => {
+  it("does not reuse an earlier synthetic IDB snapshot lineage after a verified test-only database replacement", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const oldState = JSON.stringify({ state: { ...runtime.state, tasks: [{ id: "synthetic-old" }] }, version: 32 });
+    await localVaultStorage.setItem(key, oldState);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(oldState);
+
+    // This models the isolation boundary between tests, not a real browser
+    // account switch. A production tab never resets CAS without verification.
+    await flushLocalVaultWrites();
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    resetLocalVaultRuntimeForTests();
+
+    runtime.state = { ...runtime.state, tasks: [{ id: "synthetic-new" }] };
+    const checkpoint = await createUpdateCheckpoint(false);
+    const snapshot = await readLocalBackup(checkpoint);
+    const persisted = JSON.parse(resolveVaultSnapshotRecord(
+      snapshot!.indexedDb!.records, key,
+    )!);
+    expect(persisted.state.tasks).toEqual([{ id: "synthetic-new" }]);
+    expect(await localVaultStorage.getItem(key)).toBe(JSON.stringify({ state: runtime.state, version: 32 }));
+  });
+
   it("flushes earlier writes and verifies the latest in-memory workspace in a readable snapshot", async () => {
     runtime.state.libraryText = "private source review ".repeat(60_000);
     const earlier = localVaultStorage.setItem(STORAGE_KEYS.persistedState, JSON.stringify({ state: { tasks: [] }, version: 32 }));
@@ -119,6 +175,14 @@ describe("pre-update workspace checkpoint", () => {
     await expect(createUpdateCheckpoint(false)).rejects.toThrow("Could not verify");
   });
 
+  it("fails closed when IndexedDB is absent before any verified local snapshot", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    await expect(createUpdateCheckpoint(false)).rejects.toThrow(
+      "Could not verify the saved workspace",
+    );
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
+  });
+
   it("allows a web refresh after quota blocks only the extra snapshot and saved data verifies", async () => {
     const originalSetItem = localStorage.setItem.bind(localStorage);
     vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
@@ -127,6 +191,7 @@ describe("pre-update workspace checkpoint", () => {
       }
       originalSetItem(key, value);
     });
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
 
     await expect(createUpdateCheckpoint(false)).rejects.toMatchObject({
@@ -147,6 +212,7 @@ describe("pre-update workspace checkpoint", () => {
       }
       originalSetItem(key, value);
     });
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
 
     await expect(createUpdateCheckpoint(false)).rejects.toMatchObject({
@@ -168,6 +234,7 @@ describe("pre-update workspace checkpoint", () => {
       }
       originalSetItem(key, value);
     });
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
 
     await expect(createUpdateCheckpoint(false)).rejects.toThrow("workspace changed while saving");
@@ -177,6 +244,7 @@ describe("pre-update workspace checkpoint", () => {
   });
 
   it("keeps a full verified fallback snapshot when IndexedDB is unavailable", async () => {
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
     const key = await createUpdateCheckpoint(false);
     const snapshot = await readLocalBackup(key);
