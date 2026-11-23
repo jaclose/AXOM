@@ -7,6 +7,7 @@ import { sha256 } from "../question-content/assets";
 import { PRIVATE_LIBRARY_FORMAT } from "../privateLibrary/types";
 import { zipLibraryReader } from "../privateLibrary/fileInput";
 import { createStoredReviewArchive, createStoredSourceArchive } from "./reviewExport";
+import { academicLibraryReader } from "./client";
 
 const mocked = vi.hoisted(() => ({ client: vi.fn() }));
 vi.mock("./client", async original => ({ ...await original<typeof import("./client")>(), academicClient: (...args: unknown[]) => mocked.client(...args) }));
@@ -215,4 +216,28 @@ it("rechecks account scope after archive construction before returning any downl
   await expect(createStoredSourceArchive(course, { key: account, assertCurrent: () => {
     if (invalid) throw new Error("The account changed");
   } }, message => { if (message === "Building the source package…") invalid = true; })).rejects.toThrow("account changed");
+});
+
+
+// R206: the shared download reader must reject manifest paths that cannot round-trip
+// through a portable source package, before fetching any original learner media.
+it.each([
+  ["case-insensitive duplicate", "CATALOG.JSON", "append"],
+  ["NFC alias", "originals/cafe\u0301.pdf", "replace"],
+  ["file-directory conflict", "banks", "append"],
+  ["Windows drive path", "C:/course.pdf", "replace"],
+] as const)("rejects a %s at the shared academic reader boundary", async (_name, path, mode) => {
+  const f = await fixture();
+  if (mode === "append") f.manifest.push({ ...f.manifest[2], path });
+  else f.manifest[2].path = path;
+  await expect(academicLibraryReader(await mocked.client(), revision)).rejects.toThrow(/Invalid course file manifest/);
+  expect(f.download).not.toHaveBeenCalled();
+});
+
+it("accepts a valid canonical nested manifest and reads its exact bytes", async () => {
+  const f = await fixture();
+  const reader = await academicLibraryReader(await mocked.client(), revision);
+  expect(reader.files.map(file => file.path)).toEqual(f.manifest.map(file => file.path));
+  expect([...await reader("banks/one.json")]).toEqual([...f.files.get("banks/one.json")!]);
+  expect(f.download).toHaveBeenCalledTimes(1);
 });
