@@ -902,6 +902,11 @@ async function writeVault(
         expected
         && (!expected.fingerprints.includes(currentFingerprint) || staleEmptyGeneration)
       ) {
+        if (import.meta.env.MODE === "test") {
+          console.warn("R222-TEST-ONLY-CAS-TRACE", JSON.stringify({
+            expected, currentFingerprint, storedDeletionGeneration, staleEmptyGeneration,
+          }));
+        }
         conflict = new VaultConflictError();
         if (expected.latchConflict !== false && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         tx.abort();
