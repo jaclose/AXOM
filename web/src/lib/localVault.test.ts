@@ -521,6 +521,69 @@ describe("IndexedDB-first local vault", () => {
     expect(() => assertVaultWrite(failedSequence)).toThrow(/no local storage fallback/i);
   });
 
+  it.each(["active-user read", "primary removal"] as const)(
+    "records denied Storage methods during workspace removal: %s",
+    async deniedStep => {
+      const key = STORAGE_KEYS.persistedState;
+      const markerKey = `${key}:fallback-newer`;
+      const scopedKey = `${key}:user:jd`;
+      const activeKey = `${key}:active-user`;
+      const snapshot = (label: string) => JSON.stringify({
+        state: { profile: { userId: "jd" }, label }, version: 34,
+      });
+      const committed = snapshot("original IndexedDB workspace");
+      const offline = snapshot("independently acknowledged offline edits");
+      await localVaultStorage.setItem(key, committed);
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      await flushLocalVaultWrites();
+      const marker = storage.getItem(markerKey);
+      expect(marker).toBeTruthy();
+      expect(storage.getItem(scopedKey)).toBe(offline);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      resetLocalVaultRuntimeForTests();
+
+      // Unlike a denied Window.localStorage getter, this failure happens
+      // inside the returned Storage object's own getItem/removeItem method.
+      const originalGet = storage.getItem.bind(storage);
+      const originalRemove = storage.removeItem.bind(storage);
+      const denied = deniedStep === "active-user read"
+        ? vi.spyOn(storage, "getItem").mockImplementation(name => {
+          if (name === activeKey) throw new DOMException("Denied active-user read", "SecurityError");
+          return originalGet(name);
+        })
+        : vi.spyOn(storage, "removeItem").mockImplementation(name => {
+          if (name === key) throw new DOMException("Denied workspace removal", "SecurityError");
+          return originalRemove(name);
+        });
+      const checkpoint = getVaultWriteCheckpoint();
+      try {
+        await localVaultStorage.removeItem(key);
+        await flushLocalVaultWrites();
+        expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      } finally {
+        denied.mockRestore();
+      }
+
+      // The acknowledged fallback and original IndexedDB copy both survive.
+      expect(storage.getItem(key)).toBe(offline);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(scopedKey)).toBe(offline);
+      const db = await openCurrentVault();
+      try { expect(await getDirect(db, key)).toBe(committed); } finally { db.close(); }
+
+      // Access recovery alone must not turn a failed removal into implicit
+      // permission for the same tab to overwrite an unhydrated workspace.
+      const nextCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("blind follow-up save"));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(nextCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(storage.getItem(key)).toBe(offline);
+      resetLocalVaultRuntimeForTests();
+      await expect(localVaultStorage.getItem(key)).resolves.toBe(offline);
+    },
+  );
+
   it("removes primary, profile pointer, and scoped IndexedDB records together", async () => {
     const persisted = JSON.stringify({ state: { profile: { userId: "jd", name: "JD" } }, version: 32 });
     await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
