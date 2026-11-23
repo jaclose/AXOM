@@ -21,7 +21,6 @@ const READY: Feature[] = [
   { name: "Dashboard", detail: "A focused daily surface with a one-line Up next suggestion, customizable widgets with their own icons, and a subtle pointer luster." },
   { name: "Productivity & Reports", detail: "Fast activity logging, optional targets (habits can count too), focus timer, and weekly/monthly trends that follow real calendar days, with plain-language explanations on demand." },
   { name: "Course Tracker", detail: "Course/module structure with a breadcrumb and subsection picker, collapsible sections, imports, pass and yield tracking, and next-move suggestions." },
-  { name: "Leaderboards", detail: "Race your past self: this week vs your typical and best weeks, with what it takes to set a new record. No invented competitors." },
   { name: "Journal", detail: "Private pages for free writing, optional prompts, and a local-first record of the day." },
   { name: "Local data & recovery", detail: "Device-local workspace, exact last-saved time, automatic snapshots, portable backups, and a restore history of every restore, merge, and reset." },
   { name: "Integrations that work today", detail: "Anki card export, calendar (.ics) export of tasks/exams/intentions, and portable JSON backups. No accounts required." },
@@ -29,6 +28,7 @@ const READY: Feature[] = [
 ];
 
 const IN_PROGRESS: Feature[] = [
+  { name: "Leaderboards", detail: "Not available in the released navigation yet. Personal-best and weekly comparisons remain in development and require verified end-to-end acceptance." },
   { name: "Accounts & cloud protection", detail: "Hosted sign-in and owner-side publication to authenticated accounts are active. Account isolation, cloud save/reload/restore, conflict resolution, device management, and cloud deletion still need independent two-account acceptance before reliability can be claimed." },
   { name: "Application Checker", detail: "292 US medical schools with sourced, dated requirement captures you can review and save. Residency programs and undergraduate/pre-med datasets are not gathered yet." },
   { name: "USMLE / MCAT / Pre-Med blueprints", detail: "Being deepened: macro vs. detailed depth, better-anchored content categories, and a dedicated tracker container per exam lane." },
@@ -48,7 +48,7 @@ const PLANNED: Feature[] = [
 
 const STATUS_META: Record<FeatureStatus, { label: string; sub: string; icon: typeof CheckCircle2; tone: "green" | "cyan" | "neutral" }> = {
   ready: { label: "Ready to use", sub: "Works as intended today", icon: CheckCircle2, tone: "green" },
-  progress: { label: "Being worked on", sub: "Usable, actively improving", icon: Loader, tone: "cyan" },
+  progress: { label: "Being worked on", sub: "In development; availability varies", icon: Loader, tone: "cyan" },
   planned: { label: "Planned", sub: "Designed, not built yet", icon: CircleDashed, tone: "neutral" },
 };
 

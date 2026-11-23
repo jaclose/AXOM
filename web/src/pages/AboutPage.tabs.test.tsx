@@ -127,6 +127,17 @@ describe("About page accessible tabs", () => {
     expect(screen.queryByText(/Question images are device-only today/)).toBeNull();
   });
 
+  it("does not advertise a blocked Leaderboards route as ready to use", () => {
+    render(<AboutPage />);
+    const feature = screen.getByText("Leaderboards");
+    const column = feature.closest(".about-status-col");
+    expect(column?.classList.contains("status-progress")).toBe(true);
+    expect(column?.classList.contains("status-ready")).toBe(false);
+    expect(screen.getByText(/Not available in the released navigation yet/)).toBeTruthy();
+    expect(screen.getByText(/In development; availability varies/)).toBeTruthy();
+    expect(screen.queryByText(/Usable, actively improving/)).toBeNull();
+  });
+
   it("leaves modified shortcuts untouched and still supports pointer clicks", () => {
     render(<AboutPage />);
     const about = screen.getByRole("tab", { name: "About AXOM" });
