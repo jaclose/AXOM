@@ -94,7 +94,7 @@ export function assertVaultWritesSince(checkpoint: number): void {
   if (failed) throw failed[1];
 }
 
-function localFallback(): Storage | null {
+function localFallback(name?: string): Storage | null {
   try {
     // Node 25 exposes an unusable experimental global `localStorage` unless a
     // file flag is supplied. In browsers/jsdom, the Window-owned storage is the
@@ -102,6 +102,12 @@ function localFallback(): Storage | null {
     if (typeof window !== "undefined") return window.localStorage;
     return typeof localStorage === "undefined" ? null : localStorage;
   } catch {
+    // A denied Window.localStorage getter is not evidence that this browser
+    // lacks an acknowledged recovery copy. Never fall through to older IDB.
+    if (name && observesWorkspace(name)) {
+      conflictedWorkspaceKeys.add(name);
+      throw new VaultConflictError();
+    }
     return null;
   }
 }
@@ -417,13 +423,18 @@ function sameLegacyBinding(left: LegacyFallbackBinding, right: LegacyFallbackBin
 
 async function readPackedFallback(storage: Pick<Storage, "getItem"> | null, name: string): Promise<PackedFallbackCopy | null> {
   if (!storage || !observesWorkspace(name)) return null;
-  const raw = storage.getItem(packedFallbackKey(name));
+  let raw: string | null;
+  try { raw = storage.getItem(packedFallbackKey(name)); }
+  catch { throw new VaultConflictError(); }
   if (raw === null) return null;
   const copy = await unpackVaultFallback(raw, name);
   // Decoding and SHA-256 are asynchronous. A peer can atomically replace the
   // packed record while this tab verifies the captured bytes. Never hydrate Y
   // once a distinct, acknowledged packed Z has arrived.
-  if (storage.getItem(packedFallbackKey(name)) !== raw) throw new VaultConflictError();
+  let rawAfterDecode: string | null;
+  try { rawAfterDecode = storage.getItem(packedFallbackKey(name)); }
+  catch { throw new VaultConflictError(); }
+  if (rawAfterDecode !== raw) throw new VaultConflictError();
   if (persistedUserId(copy.value) !== copy.userId || snapshotFingerprint(copy.value) !== copy.valueFingerprint
     || (copy.legacy.activeUser !== null && copy.legacy.activeUser !== copy.userId)) throw new PackedFallbackError();
   return copy;
@@ -1038,7 +1049,7 @@ const vaultStorage: StateStorage = {
     // A save that could not reach IndexedDB leaves its snapshot here, ahead of
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
-    const fallbackStore = localFallback();
+    const fallbackStore = localFallback(name);
     let packed: PackedFallbackCopy | null;
     try {
       packed = await readPackedFallback(fallbackStore, name);
@@ -1289,11 +1300,12 @@ const vaultStorage: StateStorage = {
   async setItem(name, value) {
     const writeSequence = ++vaultWriteSequence;
     const userId = persistedUserId(value);
-    const fallbackStore = localFallback();
+    let fallbackStore: Storage | null = null;
     let fallbackBaseFingerprint: string | null | undefined;
     let currentPacked: PackedFallbackCopy | null = null;
     let previousRetiredRaw: string | null = null;
     try {
+      fallbackStore = localFallback(name);
       const expected = workspaceExpectation(name);
       currentPacked = await readPackedFallback(fallbackStore, name);
       if (currentPacked) {
@@ -1510,7 +1522,7 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
   try {
-    const fallback = localFallback();
+    const fallback = localFallback(name);
     const previousPacked = observesWorkspace(name) ? fallback?.getItem(packedFallbackKey(name)) ?? null : null;
     const previousPlain = observesWorkspace(name) ? newerFallbackCopy(fallback, name) : null;
     const previousMarker = observesWorkspace(name) ? fallback?.getItem(fallbackMarkerKey(name)) ?? null : null;

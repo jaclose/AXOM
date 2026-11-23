@@ -158,6 +158,42 @@ describe("verified separate compressed workspace fallback", () => {
     },
   );
 
+  it.each(["initial key read", "post-decode key read"] as const)(
+    "latches a packed-recovery conflict on %s SecurityError rather than adopting stale IDB",
+    async stage => {
+      const fixture = await quotaFixture();
+      const latest = snapshot("acknowledged packed edit with notes", true);
+      await localVaultStorage.setItem(key, latest);
+      const retained = values.get(packedKey)!;
+      expect(retained).toBeTruthy();
+      fixture.blockVault.mockRestore();
+      fixture.blockRaw.mockRestore();
+      resetLocalVaultRuntimeForTests();
+
+      const originalGet = storage.getItem;
+      let reads = 0;
+      const get = vi.spyOn(storage, "getItem").mockImplementation(name => {
+        if (name === packedKey && ++reads === (stage === "initial key read" ? 1 : 2)) {
+          throw new DOMException("Intermittent packed-key read denied", "SecurityError");
+        }
+        return originalGet(name);
+      });
+      try {
+        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      } finally {
+        get.mockRestore();
+      }
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("blind edit after packed access recovered"));
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(values.get(packedKey)).toBe(retained);
+      expectLegacyUnchanged(fixture.legacyRecords);
+      resetLocalVaultRuntimeForTests();
+      await expect(localVaultStorage.getItem(key)).resolves.toBe(latest);
+    },
+  );
+
   it("fails closed if v2 receipt hashing fails after a verified packed decode", async () => {
     const fixture = await quotaFixture();
     const packedY = snapshot("offline packed Y with distinct notes", true);

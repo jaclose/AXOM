@@ -302,6 +302,59 @@ describe("IndexedDB-first local vault", () => {
     await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
+  it.each(["read", "write", "verified restore"] as const)(
+    "refuses a hidden acknowledged fallback when the localStorage getter is denied during %s",
+    async operation => {
+      const key = STORAGE_KEYS.persistedState;
+      const markerKey = `${key}:fallback-newer`;
+      const scopedKey = `${key}:user:jd`;
+      const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+      const base = snapshot("committed original");
+      const offline = snapshot("acknowledged offline with source notes");
+      await localVaultStorage.setItem(key, base);
+      expect(await localVaultStorage.getItem(key)).toBe(base);
+
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      const marker = storage.getItem(markerKey);
+      expect(marker).toBeTruthy();
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      resetLocalVaultRuntimeForTests();
+
+      const descriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
+      expect(descriptor?.configurable).toBe(true);
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        get: () => { throw new DOMException("Denied workspace fallback getter", "SecurityError"); },
+      });
+      const checkpoint = getVaultWriteCheckpoint();
+      try {
+        if (operation === "read") {
+          await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        } else {
+          const attempted = snapshot(operation === "write" ? "unsafe blind edit" : "verified restore under denied access");
+          if (operation === "verified restore") await replaceLocalVaultItem(key, attempted);
+          else await localVaultStorage.setItem(key, attempted);
+          expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+        }
+      } finally {
+        Object.defineProperty(window, "localStorage", descriptor!);
+      }
+
+      const laterCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("edit after getter restored"));
+      expect(() => assertVaultWritesSince(laterCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(values.get(markerKey)).toBe(marker);
+      expect(values.get(key)).toBe(offline);
+      expect(values.get(scopedKey)).toBe(offline);
+      const db = await openCurrentVault();
+      try { expect(await getDirect(db, key)).toBe(base); } finally { db.close(); }
+
+      resetLocalVaultRuntimeForTests();
+      await expect(localVaultStorage.getItem(key)).resolves.toBe(offline);
+    },
+  );
+
   it("refuses a disputed fallback if the competing vault becomes unreadable during conflict resolution", async () => {
     const key = STORAGE_KEYS.persistedState;
     const markerKey = `${key}:fallback-newer`;
