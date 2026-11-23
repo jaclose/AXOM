@@ -222,3 +222,55 @@ test("developer preview blocks a user-triggered popup while an unsandboxed cross
   await expect(preview.locator("#popup-result")).toHaveText("blocked");
   expect(await preview.locator("body").evaluate(() => window.origin)).toBe("null");
 });
+
+test("explicitly closing the developer iframe stops embedded background activity", async ({ page }) => {
+  // Deterministic synthetic cross-origin page. No third-party site or private account is contacted.
+  await page.route("https://www.jafardabbagh.com/**", route => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: '<!doctype html><title>Activity fixture</title><script>setInterval(() => parent.postMessage("axom-preview-tick", "*"), 40)</script>',
+  }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/", { waitUntil: "networkidle" });
+  await seedOnboarded(page);
+  await page.evaluate(() => { window.location.hash = "about"; });
+  await page.evaluate(() => {
+    const state = window as Window & { __axomPreviewTicks?: number };
+    state.__axomPreviewTicks = 0;
+    window.addEventListener("message", event => {
+      if (event.data === "axom-preview-tick") {
+        state.__axomPreviewTicks = (state.__axomPreviewTicks ?? 0) + 1;
+      }
+    });
+  });
+  const pings = () => page.evaluate(() =>
+    (window as Window & { __axomPreviewTicks?: number }).__axomPreviewTicks ?? 0);
+  const about = page.getByRole("tab", { name: "About AXOM" });
+  const developer = page.getByRole("tab", { name: "The developer" });
+  const iframe = page.locator('iframe[title="Live site preview"]');
+
+  await expect(iframe).toHaveCount(0);
+  await developer.click();
+  await iframe.scrollIntoViewIfNeeded();
+  await expect.poll(pings, { timeout: 10_000 }).toBeGreaterThan(2);
+  await about.click();
+  await expect(iframe).toBeHidden();
+  const beforeHidden = await pings();
+  // Hidden + inert removes interaction but does not suspend third-party scripts.
+  await expect.poll(pings, { timeout: 10_000 }).toBeGreaterThan(beforeHidden);
+  await developer.click();
+  await page.getByRole("button", { name: "Close preview" }).click();
+  await expect(iframe).toHaveCount(0);
+  // Drain already queued messages before checking that execution has stopped.
+  await page.waitForTimeout(250);
+  const stopped = await pings();
+  await page.waitForTimeout(550);
+  expect(await pings()).toBe(stopped);
+  await about.click();
+  await developer.click();
+  await expect(iframe).toHaveCount(0);
+  await page.getByRole("button", { name: "Open preview" }).click();
+  await iframe.scrollIntoViewIfNeeded();
+  const beforeRestart = await pings();
+  await expect.poll(pings, { timeout: 10_000 }).toBeGreaterThan(beforeRestart);
+});
