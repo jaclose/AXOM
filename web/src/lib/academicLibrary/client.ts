@@ -176,6 +176,9 @@ export async function shareAcademicCourses(collectionIds: readonly string[], acc
     options.assertCurrent?.();
     const outcome: AcademicSharingOutcome = { collectionId, shared: false };
     const shared = await client.rpc("academic_set_visibility", { collection: collectionId, visibility: "shared", group_id: null });
+    // The RPC may have completed for the previous account while the UI switched.
+    // Never attribute its result to a newer session or issue another RPC.
+    options.assertCurrent?.();
     if (shared.error) outcome.error = "Sharing could not be requested for this course.";
     else outcome.shared = true;
     outcomes.push(outcome);
