@@ -91,6 +91,13 @@ export function readDailyStandings(data: unknown): DailyStandings {
   // a personal rank exists; a truncated page may omit a tied participant.
   if ((standings.participants as number) <= 100
     && ownRows !== (standings.yourRank === null ? 0 : 1)) return invalidStandings();
+  // An omitted visible caller cannot outrank the cutoff. Each further dense
+  // rank requires another omitted row and a distinct lower nonnegative score.
+  if (ownRows === 0 && standings.yourRank !== null) {
+    const omitted = (standings.participants as number) - standings.rows.length;
+    if (lastPoints === null || standings.yourRank < lastRank
+      || standings.yourRank > lastRank + Math.min(omitted, lastPoints)) return invalidStandings();
+  }
   return data as DailyStandings;
 }
 
