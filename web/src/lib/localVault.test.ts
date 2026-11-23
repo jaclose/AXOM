@@ -103,6 +103,55 @@ describe("IndexedDB-first local vault", () => {
     },
   );
 
+  it("rejects null-to-created-to-deleted ABA from a tab that hydrated an empty workspace", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const otherAccount = `${key}:user:other`;
+    const otherSaved = JSON.stringify({ state: { profile: { userId: "other" }, label: "preserve other account" } });
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label }, version: 34,
+    });
+    storage.setItem(otherAccount, otherSaved);
+
+    // Tab A is genuinely initialized against an empty vault and stays mounted.
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+
+    // In another tab, a workspace is created and fully deleted. The current
+    // state is null again, but A's original null observation is now stale.
+    vi.resetModules();
+    const tabB = await import("./localVault");
+    await tabB.localVaultStorage.setItem(key, snapshot("created after A loaded"));
+    await tabB.flushLocalVaultWrites();
+    expect(await tabB.localVaultStorage.getItem(key)).toBe(snapshot("created after A loaded"));
+    const removalCheckpoint = tabB.getVaultWriteCheckpoint();
+    await tabB.localVaultStorage.removeItem(key);
+    await tabB.flushLocalVaultWrites();
+    expect(() => tabB.assertVaultWritesSince(removalCheckpoint)).not.toThrow();
+    expect(storage.getItem(`${key}:removal-pending`)).toBeNull();
+
+    const staleCheckpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("stale A's unsaved workspace"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(staleCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    const checked = await openCurrentVault();
+    try {
+      expect(await getDirect(checked, key)).toBeUndefined();
+    } finally {
+      checked.close();
+    }
+    expect(storage.getItem(otherAccount)).toBe(otherSaved);
+
+    // A new tab can explicitly initialize after inspecting the deleted vault.
+    vi.resetModules();
+    const tabC = await import("./localVault");
+    expect(await tabC.localVaultStorage.getItem(key)).toBeNull();
+    const newCheckpoint = tabC.getVaultWriteCheckpoint();
+    await tabC.localVaultStorage.setItem(key, snapshot("new session intentionally created"));
+    await tabC.flushLocalVaultWrites();
+    expect(() => tabC.assertVaultWritesSince(newCheckpoint)).not.toThrow();
+    expect(await tabC.localVaultStorage.getItem(key)).toBe(snapshot("new session intentionally created"));
+    expect(storage.getItem(otherAccount)).toBe(otherSaved);
+  });
+
   it("prevents a stale second runtime from replacing a newer workspace", async () => {
     const key = STORAGE_KEYS.persistedState;
     const largeLibraryState = "source review ".repeat(90_000);
