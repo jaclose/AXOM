@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { STORAGE_KEYS } from "../brand";
+import { DB_NAME, STORE_NAME, assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint, localVaultStorage, resetLocalVaultRuntimeForTests } from "../localVault";
+import { packedFallbackKey } from "../packedVaultFallback";
 import { hasWorkspaceHydrationReceipt, recordWorkspaceHydration } from "../workspaceHydrationReceipt";
 
 const rpc = vi.fn();
@@ -94,11 +97,60 @@ async function watchUploadCacheClears() {
   ];
 }
 
-beforeEach(() => {
+// Only the in-memory fake IndexedDB factory is ever deleted here. Do not
+// treat a blocked delete or a swallowed adapter error as a fresh lifetime.
+function deleteSyntheticVault(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Synthetic vault deletion failed"));
+    request.onblocked = () => reject(new Error("Synthetic vault deletion blocked"));
+  });
+}
+
+// Read the physical primary record without consulting a localStorage mirror,
+// the adapter's promotion logic, or the Zustand in-memory state.
+async function readSyntheticVaultPrimary(): Promise<string> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME);
+    request.onupgradeneeded = () => request.transaction?.abort();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Synthetic vault open failed"));
+    request.onblocked = () => reject(new Error("Synthetic vault open blocked"));
+  });
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const request = tx.objectStore(STORE_NAME).get(STORAGE_KEYS.persistedState);
+      tx.oncomplete = () => {
+        if (typeof request.result !== "string") reject(new Error("Synthetic vault primary missing"));
+        else resolve(request.result);
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("Synthetic vault read failed"));
+      tx.onabort = tx.onerror;
+    });
+  } finally { db.close(); }
+}
+
+async function expectDurableWorkspaceTasks(...ids: string[]): Promise<void> {
+  await flushLocalVaultWrites();
+  const primary = await readSyntheticVaultPrimary();
+  // These small synthetic fixtures should use a physical unchunked snapshot.
+  const state = JSON.parse(primary).state;
+  expect(state).toBeDefined();
+  expect(state.tasks.map((task: { id: string }) => task.id)).toEqual(expect.arrayContaining(ids));
+  expect(window.localStorage.getItem(`${STORAGE_KEYS.persistedState}:fallback-newer`)).toBeNull();
+  expect(window.localStorage.getItem(packedFallbackKey(STORAGE_KEYS.persistedState))).toBeNull();
+}
+
+beforeEach(async () => {
+  await flushLocalVaultWrites();
   recordWorkspaceHydration(undefined, []);
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
-  localStorage.clear();
+  await deleteSyntheticVault();
+  resetLocalVaultRuntimeForTests();
+  window.localStorage.clear();
   for (const key of Object.keys(tables)) tables[key] = [];
   useAccount.setState({ busy: false, applyingRemote: false });
   storedSession = null;
@@ -107,8 +159,21 @@ beforeEach(() => {
   rpc.mockReset();
   Object.values(auth).forEach((fn) => fn.mockClear());
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
-  useStore.setState(makeSeed());
-  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined, syncFailure: undefined, nextAttemptAt: undefined, snapshotBytes: undefined, pendingCodeEmail: undefined, pendingCodeKind: undefined });
+  // Establish the verified empty deletion generation before the ordinary
+  // seed save. The write queue drains even on failure, so require its receipt
+  // and read back the physical IDB record, not merely the adapter fallback.
+  await useStore.persist.rehydrate();
+  const checkpoint = getVaultWriteCheckpoint();
+  const seed = makeSeed();
+  await useStore.setState(seed);
+  await flushLocalVaultWrites();
+  expect(getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  assertVaultWritesSince(checkpoint);
+  const primary = await readSyntheticVaultPrimary();
+  expect(JSON.parse(primary).state).toMatchObject({ tasks: seed.tasks, logs: seed.logs });
+  await expectDurableWorkspaceTasks(...seed.tasks.map(task => task.id));
+  expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(primary);
+  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined, syncFailure: undefined, nextAttemptAt: undefined, snapshotBytes: undefined, pendingCodeEmail: undefined, pendingCodeKind: undefined, restoreOffer: undefined });
 });
 
 describe("account validation", () => {
@@ -199,6 +264,7 @@ describe("account lifecycle", () => {
     await useAccount.getState().mergeWithAccount();
     const ids = useStore.getState().tasks.map((task) => task.id);
     expect(ids).toEqual(expect.arrayContaining(["server-only-task", "device-only-task"]));
+    await expectDurableWorkspaceTasks("server-only-task", "device-only-task");
     const lastPush = rpc.mock.calls.filter(([name]) => name === "push_workspace_revision_v2").at(-1)!;
     expect(lastPush[1]).toMatchObject({ p_base_revision: 7, p_reason: "manual" });
     expect(useAccount.getState()).toMatchObject({ protection: "protected", conflictServerRevision: undefined });
@@ -516,6 +582,7 @@ describe("signing in brings your AXOM back (Priority 4), never over your own wor
     expect(useStore.getState().tasks.map((task) => task.id)).toContain("laptop-task");
     expect(useAccount.getState()).toMatchObject({ link: "linked", restoreOffer: undefined });
     expect(useAccount.getState().message).toMatch(/^Welcome back\. Your AXOM from/);
+    await expectDurableWorkspaceTasks("laptop-task");
     tables.workspace_revisions = [];
   });
 
@@ -531,6 +598,7 @@ describe("signing in brings your AXOM back (Priority 4), never over your own wor
     await useAccount.getState().adoptAccountVersion();
     expect(useStore.getState().tasks.map((task) => task.id)).toContain("laptop-task");
     expect(useAccount.getState().restoreOffer).toBeUndefined();
+    await expectDurableWorkspaceTasks("laptop-task");
     tables.workspace_revisions = [];
   });
 
@@ -576,6 +644,7 @@ describe("background account downloads", () => {
     expect(useStore.getState().tasks.some((task) => task.id === "from-second-device")).toBe(true);
     expect(read()).toMatchObject({ baseRevision: 2, pending: false });
     expect(useAccount.getState().error).toBe("");
+    await expectDurableWorkspaceTasks("from-second-device");
   });
   it("never replaces unsynced local edits with the account version", async () => {
     const { read, write } = await linked();
