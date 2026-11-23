@@ -35,8 +35,23 @@ describe("community visual intent publication", () => {
     expect(result.questions[0].tags).toContain("visual:keyword:brachial plexus");
     expect(result.questions[1].tags).toContain("visual:intent:gross-pathology-specimen");
     expect(result.tags).toContain("visual:intent:anatomical-schematic");
+    // list_question_set_library searches snapshot.tags projected to entry tags.
+    expect(result.tags).toContain("visual:keyword:brachial plexus");
     expect(result.tags).toContain("visual:intent:gross-pathology-specimen");
     expect(JSON.stringify(result)).not.toMatch(/assetId|sourceDocumentId|rightsReviewed/);
+    expect(() => validateShare(result)).not.toThrow();
+  });
+
+  it("indexes a repeated stem-derived keyword once at the set level without touching original questions", () => {
+    const recurring: SharedQuestionSetSnapshot = {
+      ...original,
+      questions: [original.questions[0], { ...original.questions[0], id: "shared-question-2" }],
+    };
+    const result = enrichPublicQuestionSetVisualTags(recurring);
+    expect(result.tags.filter(tag => tag === "visual:keyword:brachial plexus")).toHaveLength(1);
+    expect(result.questions[0].tags).toContain("visual:keyword:brachial plexus");
+    expect(result.questions[1].tags).toContain("visual:keyword:brachial plexus");
+    expect(recurring.tags).toEqual(["reviewed"]);
     expect(() => validateShare(result)).not.toThrow();
   });
 

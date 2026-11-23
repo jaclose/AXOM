@@ -78,6 +78,39 @@ async function approve(who: string, id: string, inspected: Snapshot = snapshot()
 }
 
 describe("reviewed Question Set Library SQL and RLS", () => {
+  it("rejects an absent or self reviewer at the SQL independent-review boundary", async () => {
+    // Isolate the actual installed trigger function from the other publication
+    // gates so an earlier provenance check cannot mask a NULL reviewer defect.
+    await db.exec(`
+      create temporary table reviewer_gate_probe (
+        id integer primary key, owner_id uuid not null, reviewed_by uuid, status text not null
+      );
+      create trigger reviewer_gate_probe_check before update of status on reviewer_gate_probe
+        for each row execute function private.question_set_library_require_independent_reviewer();
+    `);
+    try {
+      await db.query(
+        "insert into pg_temp.reviewer_gate_probe values (1,$1,null,'pending'),(2,$1,$1,'pending'),(3,$1,$2,'pending')",
+        [OWNER, REVIEWER],
+      );
+      await expect(db.query("update pg_temp.reviewer_gate_probe set status='approved' where id=1"))
+        .rejects.toThrow(/independent academic reviewer/i);
+      await expect(db.query("update pg_temp.reviewer_gate_probe set status='approved' where id=2"))
+        .rejects.toThrow(/independent academic reviewer/i);
+      await db.query("update pg_temp.reviewer_gate_probe set status='approved' where id=3");
+      const rows = (await db.query<{ id: number; status: string }>(
+        "select id,status from pg_temp.reviewer_gate_probe order by id",
+      )).rows;
+      expect(rows).toEqual([
+        { id: 1, status: "pending" },
+        { id: 2, status: "pending" },
+        { id: 3, status: "approved" },
+      ]);
+    } finally {
+      await db.exec("drop table if exists pg_temp.reviewer_gate_probe;");
+    }
+  });
+
   it("hides pending content from learners and anonymous clients", async () => {
     const id = await submit(OWNER, "private-pending");
     expect(await as<{ status: string; id: string }>(OWNER, "select id,status from public.my_question_set_library()"))
@@ -112,6 +145,37 @@ describe("reviewed Question Set Library SQL and RLS", () => {
     }
     await expect(as(LEARNER, "select public.review_question_set_library($1,false,'A reason for rejection',$2::jsonb,$3::bigint)", [id, JSON.stringify(snapshot()), 1]))
       .rejects.toThrow(/reviewer access required/i);
+  });
+
+  it("blocks self-approval through the installed publication trigger and real reviewer RPC", async () => {
+    // The isolated trigger probe is insufficient: this checks the trigger is
+    // installed on the actual table after all ordered migrations, and that the
+    // authenticated review RPC cannot approve a publisher's own submission.
+    const id = await submit(OWNER, "self-review-installed-trigger");
+    await db.query("insert into public.academic_reviewers(user_id) values($1) on conflict do nothing", [OWNER]);
+    try {
+      const [trigger] = (await db.query<{ installed: boolean }>(
+        `select exists (select 1 from pg_trigger
+          where tgrelid = 'public.question_set_library_entries'::regclass
+            and tgname = 'zzzz_question_set_library_independent_reviewer'
+            and tgenabled in ('O', 'A')) installed`,
+      )).rows;
+      expect(trigger.installed).toBe(true);
+
+      await expect(approve(OWNER, id)).rejects.toThrow(/independent academic reviewer/i);
+      const [held] = (await db.query<{ status: string; reviewed_by: string | null; review_revision: number }>(
+        "select status,reviewed_by,review_revision from public.question_set_library_entries where id=$1", [id],
+      )).rows;
+      expect(held).toEqual({ status: "pending", reviewed_by: null, review_revision: 1 });
+      expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+
+      // Rejecting the author's review must not poison the exact revision or
+      // prevent a genuinely independent academic reviewer from approving it.
+      await approve(REVIEWER, id);
+      expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+    } finally {
+      await db.query("delete from public.academic_reviewers where user_id=$1", [OWNER]);
+    }
   });
 
   it("rejects a replaced answer under the SQL row lock and keeps the submission pending", async () => {

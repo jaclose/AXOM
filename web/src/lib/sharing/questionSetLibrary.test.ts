@@ -1009,4 +1009,101 @@ describe("searchable Question Set client boundary", () => {
     }));
   });
 
+
+  it.each([
+    ["HTML entity whitespace stem", "stem", "&#x200B;&nbsp;"],
+    ["nested percent whitespace stem", "stem", "%2520%2520"],
+    ["HTML invisible blank choice", "choice", "&#x200B;"],
+    ["fullwidth duplicate answer text", "choice", "Ｆｉｒｓｔ"],
+    ["entity-encoded duplicate answer text", "choice", "F&#105;rst"],
+    ["fullwidth duplicate choice label", "label", "Ａ"],
+    ["nested encoded duplicate label", "label", "%2541"],
+    ["combining grapheme joiner only stem", "stem", "\u034F"],
+    ["variation selector only stem", "stem", "\uFE0F"],
+    ["combining grapheme joiner duplicate text", "choice", "Fir\u034Fst"],
+    ["soft hyphen only stem", "stem", "\u00AD"],
+    ["encoded soft hyphen only stem", "stem", "%C2%AD"],
+    ["soft hyphen duplicate answer text", "choice", "Fi\u00ADrst"],
+    ["encoded soft hyphen duplicate answer text", "choice", "Fi%C2%ADrst"],
+    ["deprecated bidi control only stem", "stem", "\u206A"],
+    ["Arabic letter mark only stem", "stem", "\u061C"],
+    ["deprecated bidi control duplicate answer", "choice", "Fi\u206Arst"],
+    ["Arabic letter mark duplicate answer", "choice", "Fi\u061Crst"],
+    ["percent-encoded deprecated bidi duplicate answer", "choice", "Fi%E2%81%AArst"],
+  ] as const)("blocks %s in a schema-valid direct submission before account RPC", async (_label, field, replacement) => {
+    const original = snapshot();
+    if (field === "stem") original.questions[0].stem = replacement;
+    else if (field === "choice") original.questions[0].options[1].text = replacement;
+    else original.questions[0].options[1].key = replacement;
+    const before = JSON.stringify(original);
+    const rpc = vi.fn();
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", original, "", confirmed))
+      .rejects.toThrow(/unreadable stem or indistinguishable answer choices/);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(JSON.stringify(original)).toBe(before);
+  });
+
+  it.each([
+    ["legacy encoded blank stem", "stem", "&#x200B;&nbsp;"],
+    ["legacy duplicate answer text", "choice", "Ｆｉｒｓｔ"],
+    ["legacy duplicate choice label", "label", "Ａ"],
+    ["legacy combining grapheme joiner only stem", "stem", "\u034F"],
+    ["legacy variation selector only stem", "stem", "\uFE0F"],
+    ["legacy combining grapheme joiner duplicate answer", "choice", "Fir\u034Fst"],
+    ["legacy soft hyphen only stem", "stem", "\u00AD"],
+    ["legacy encoded soft hyphen only stem", "stem", "%C2%AD"],
+    ["legacy soft hyphen duplicate answer", "choice", "Fi\u00ADrst"],
+    ["legacy encoded soft hyphen duplicate answer", "choice", "Fi%C2%ADrst"],
+    ["legacy deprecated bidi control only stem", "stem", "\u206A"],
+    ["legacy Arabic letter mark only stem", "stem", "\u061C"],
+    ["legacy deprecated bidi duplicate answer", "choice", "Fi\u206Arst"],
+    ["legacy Arabic letter mark duplicate answer", "choice", "Fi\u061Crst"],
+  ] as const)("holds %s at pending academic approval, while preserving rejection", async (_label, field, replacement) => {
+    const original = snapshot();
+    if (field === "stem") original.questions[0].stem = replacement;
+    else if (field === "choice") original.questions[0].options[1].text = replacement;
+    else original.questions[0].options[1].key = replacement;
+    const before = JSON.stringify(original);
+    const reviewed = { id: entryId, snapshot: original,
+      contentDigest: await sharedQuestionSetDigest(original), status: "pending" as const, reviewRevision: 1 };
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: {
+        id: entryId, title: original.title, question_count: 1, status: "pending",
+        snapshot_payload: original, review_revision: 1,
+      }, error: null })
+      .mockResolvedValueOnce({ data: {
+        id: entryId, title: original.title, question_count: 1, status: "pending",
+        snapshot_payload: original, review_revision: 1,
+      }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+    service(rpc);
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, true, "Checked source and rights"))
+      .rejects.toThrow(/indistinguishable answer choices.*Return it for revision|unreadable stem.*Return it for revision/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("review_question_set_library", expect.anything());
+    await expect(reviewQuestionSetSubmission(accountId, reviewed, false, "Return ambiguous source for correction"))
+      .resolves.toBeUndefined();
+    expect(rpc).toHaveBeenNthCalledWith(3, "review_question_set_library", {
+      p_id: entryId, p_approved: false, p_reason: "Return ambiguous source for correction",
+      p_expected_snapshot: original, p_expected_revision: 1,
+    });
+    expect(JSON.stringify(original)).toBe(before);
+  });
+
+  it("accepts distinct medically meaningful options and unchanged reviewed source", async () => {
+    const value = snapshot();
+    value.questions[0].stem = "Which phenotype is described in the synthetic observation?";
+    value.questions[0].options[0].text = "CD4+";
+    value.questions[0].options[1].text = "CD4-";
+    value.questions[0].correctAnswerText = "CD4+";
+    const rpc = vi.fn().mockResolvedValue({ data: entryId, error: null });
+    service(rpc);
+    await expect(submitQuestionSetToLibrary(accountId, "set-1", value, "", confirmed))
+      .resolves.toBe(entryId);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_question_set_library", expect.objectContaining({
+      p_snapshot: value,
+    }));
+  });
+
 });

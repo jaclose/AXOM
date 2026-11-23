@@ -104,6 +104,24 @@ function containsPrivatePublicText(snapshot: SharedQuestionSetSnapshot, credit?:
   return visible.some(value => containsPrivateCommunityEmail(value) || containsPrivateCommunityPhone(value));
 }
 
+/** The publisher dialog filters unreadable stems and equivalent choices, but
+ * service callers and historical pending sets can bypass that dialog.
+ * Validate the exact public snapshot again at submission and pending approval.
+ * Comparison-only decoding must not silently "repair" source keys or mutate
+ * previously approved historical snapshots.
+ */
+function containsAmbiguousPublicQuestionText(snapshot: SharedQuestionSetSnapshot): boolean {
+  const comparable = (value: string): string =>
+    communityEvidenceSafetyText(value).replace(/\s+/g, " ").trim().toLowerCase();
+  return snapshot.questions.some(question => {
+    if (!comparable(question.stem)) return true;
+    const labels = question.options.map(option => comparable(option.key));
+    const texts = question.options.map(option => comparable(option.text));
+    return labels.some(label => !label) || new Set(labels).size !== labels.length
+      || texts.some(text => !text) || new Set(texts).size !== texts.length;
+  });
+}
+
 // Obvious answer labels and unresolved-draft notices do not teach the learner
 // why a choice is correct. This is a bounded presence heuristic, NOT a check
 // of medical accuracy or evidence: author and academic review still apply.
@@ -275,6 +293,10 @@ export async function submitQuestionSetToLibrary(accountId: string, sourceId: st
     throw new Error("The Question Set could not be prepared for safe publication.");
   }
   validateShare(submittedSnapshot);
+  // Defense in depth: final RPC callers must not bypass the publishing dialog's
+  // source-text ambiguity gate using an otherwise schema-valid snapshot.
+  if (containsAmbiguousPublicQuestionText(submittedSnapshot))
+    throw new Error("This Question Set has an unreadable stem or indistinguishable answer choices. Review the original source before publishing.");
   // Preconstructed snapshots can bypass createQuestionSetShare's outbound
   // privacy check. Enforce it at the final new-submission RPC boundary.
   // Historical approved sets remain readable/importable unchanged.
@@ -368,6 +390,12 @@ export async function reviewQuestionSetSubmission(
     || data.review_revision !== reviewed.reviewRevision
     || await sharedQuestionSetDigest(data.snapshot_payload) !== reviewed.contentDigest)
     throw new Error("The pending Question Set changed since inspection. Reopen and review the current answers.");
+  // Historical pending submissions can also predate the publishing dialog's
+  // source-text ambiguity check. Never approve an unreadable or ambiguous
+  // question even if its old explanation and reviewed key are present.
+  // Keep rejection available and preserve existing approved publications.
+  if (approved && containsAmbiguousPublicQuestionText(data.snapshot_payload))
+    throw new Error("This Question Set has an unreadable stem or indistinguishable answer choices and cannot be approved. Return it for revision.");
   // Older pending submissions can predate the publisher-side explanation
   // admission gate. A moderator may return these for revision, but must not
   // promote keyless or placeholder-only records into learner discovery.

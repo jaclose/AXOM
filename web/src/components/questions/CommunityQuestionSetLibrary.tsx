@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BookOpen, Download, Heart, Play, RefreshCw, Search } from "lucide-react";
 import type { QuestionSet } from "../../lib/library";
 import { useAccount } from "../../lib/account/accountStore";
-import { readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
+import { importSharedQuestionSet, readSharedQuestionImportProvenance } from "../../lib/sharing/questionSetShare";
 import {
   authorizeQuestionSetLibraryImport, loadQuestionSetLibraryPreview, searchQuestionSetLibrary, setQuestionSetLibraryLike,
   type LibraryQuestionSet, type LibraryQuestionSetPreview,
@@ -67,6 +67,18 @@ function observeAccountSession(accountId: string, onRevoked: () => void) {
   };
 }
 
+// Both Preview and Practice must reserve malformed import receipts by raw
+// case-insensitive share ID; a broken receipt is not permission to reimport.
+function savedCopiesForPublication(sets: readonly QuestionSet[], publicationId: string): QuestionSet[] {
+  const canonicalId = publicationId.toLowerCase();
+  return sets.filter(set => {
+    const raw = (set as QuestionSet & { importProvenance?: unknown }).importProvenance;
+    return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+      && "shareId" in raw && typeof raw.shareId === "string"
+      && raw.shareId.trim().toLowerCase() === canonicalId;
+  });
+}
+
 export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set: QuestionSet) => void }) {
   const accountId = useAccount(state => state.user?.id);
   // Search text is private account activity. Switching A → B must hide A's
@@ -116,6 +128,9 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
   }
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
+  // A receipt can survive a partial restore without its original question
+  // records. Do not imply practice is possible or offer replacement imports.
+  const [importRecovery, setImportRecovery] = useState(false);
   // Learners can inspect every approved question without rendering a large
   // Question Set at once or revealing answer-bearing notes by default.
   const [previewVisibleCount, setPreviewVisibleCount] = useState(3);
@@ -147,7 +162,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     setListingFormEpoch(epoch => epoch + 1);
     setQuery({ owner: accountId, input: "", search: "" });
     setSets([]); setListingAccountId(undefined); setPreview(undefined); setPreviewAccountId(undefined);
-    setPreviewError(""); setImported(false); setOpening(false); setImporting(false);
+    setPreviewError(""); setImported(false); setImportRecovery(false); setOpening(false); setImporting(false);
     setPreviewVisibleCount(3);
     setLiking(undefined); setOffset(0);
   }, [accountId]);
@@ -254,7 +269,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     previewRequest.current = { token: operation, stop: session.stop };
     const isCurrent = () => previewRequest.current?.token === operation && session.current();
     setPreview(undefined); setPreviewAccountId(undefined);
-    setPreviewError(""); setOpening(true); setImported(false);
+    setPreviewError(""); setOpening(true); setImported(false); setImportRecovery(false);
     let keepSessionObserver = false;
     try {
       const result = await loadQuestionSetLibraryPreview(openedBy, id);
@@ -263,10 +278,34 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       if (!isCurrent()) return;
       setPreviewAccountId(openedBy);
       setPreview(result);
-      setImported(useStore.getState().questionSets.some(set => {
-        const provenance = readSharedQuestionImportProvenance(set);
-        return provenance?.shareId === result.id && provenance.contentDigest === result.contentDigest;
-      }));
+      // A receipt alone is not proof the original imported questions survived.
+      // Use the read-only canonical check before offering Practice; a damaged
+      // receipt remains reserved rather than creating replacement question IDs.
+      const store = useStore.getState();
+      // Treat malformed/old receipts as reserved too. The canonical importer
+      // rejects them by raw share ID; filtering only validated receipts here
+      // would misleadingly offer a fresh import that can never be committed.
+      const savedCopies = savedCopiesForPublication(store.questionSets, result.id);
+      if (savedCopies.length) {
+        let complete = false;
+        try {
+          const plan = importSharedQuestionSet({
+            snapshot: result.snapshot,
+            identity: { shareId: result.id, contentDigest: result.contentDigest },
+            existingQuestions: store.questions,
+            existingSets: store.questionSets,
+          });
+          complete = savedCopies.length === 1 && plan.alreadyImported
+            && plan.set.id === savedCopies[0].id;
+        } catch {
+          // Fail closed without mutating the original receipt, IDs or attempts.
+        }
+        setImported(true);
+        setImportRecovery(!complete);
+      } else {
+        setImported(false);
+        setImportRecovery(false);
+      }
       // Keep the observer until the accepted preview is closed, replaced,
       // revoked, or unmounted. Account-ID equality is not session authority.
       keepSessionObserver = true;
@@ -332,6 +371,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       if (!isAuthorized()) return;
       if (!result.ok) throw new Error(result.message);
       setImported(true);
+      setImportRecovery(false);
     } catch (cause) {
       if (isAuthorized()) {
         // Failed publication revalidation invalidates the old reviewed copy.
@@ -438,13 +478,71 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       || useAccount.getState().user?.id !== previewAccountId || !previewRequest.current) return;
     // Resolve the saved copy again at click time, so deletion or a replaced
     // local set cannot launch a stale imported membership.
-    const set = useStore.getState().questionSets.find(candidate => {
-      const receipt = readSharedQuestionImportProvenance(candidate);
-      return receipt?.shareId === activePreview.id && receipt.contentDigest === activePreview.contentDigest;
-    });
+    const store = useStore.getState();
+    // The canonical importer rejects multiple saved receipts for one public
+    // share ID, even when their digests match. A partial restore can violate
+    // that invariant after import: choosing the first receipt would silently
+    // launch practice against arbitrary membership and learner attempts.
+    // The importer treats UUIDs as case-insensitive. Restored receipts must
+    // follow the same identity rule so learners can reopen their original copy.
+    const copies = savedCopiesForPublication(store.questionSets, activePreview.id);
+    if (copies.length > 1) {
+      setImportRecovery(true);
+      setPreviewError("Multiple saved copies reference this publication. Resolve the original import receipts in Question Bank before practicing. Your original question IDs and attempts are unchanged.");
+      return;
+    }
+    const set = copies[0];
+    // A late corrupted receipt still reserves this publication. Never invite
+    // a replacement import that could split existing learner attempts.
+    if (set && !readSharedQuestionImportProvenance(set)) {
+      setImportRecovery(true);
+      setPreviewError("This saved set has an invalid import receipt. Recover its original receipt in Question Bank before practicing. Original question IDs and attempts are unchanged.");
+      return;
+    }
     if (!set) {
       setImported(false);
+      setImportRecovery(false);
       setPreviewError("This saved set is no longer in your library. Add it again to practice.");
+      return;
+    }
+    if (readSharedQuestionImportProvenance(set)?.contentDigest !== activePreview.contentDigest) {
+      setImportRecovery(true);
+      setPreviewError("This saved publication revision no longer matches the preview. Close the preview and inspect your original saved set before practicing.");
+      return;
+    }
+    // A persisted import receipt does not prove that its question records
+    // survived a partial restore. Never launch practice with missing or
+    // ambiguous member IDs, or silently generate replacements that would
+    // detach learner attempts from their original questions.
+    const bank = store.questions;
+    const memberIds = new Set(set.questionIds);
+    const found = new Map<string, number>();
+    for (const question of bank) {
+      if (memberIds.has(question.id)) found.set(question.id, (found.get(question.id) ?? 0) + 1);
+    }
+    if (set.questionIds.length !== activePreview.snapshot.questions.length
+      || memberIds.size !== set.questionIds.length
+      || set.questionIds.some(id => found.get(id) !== 1)) {
+      setImportRecovery(true);
+      setPreviewError("This saved set has missing or duplicate question records. Recover the original question IDs in Question Bank before practicing. Reimport will not replace your attempts.");
+      return;
+    }
+    // Reuse the side-effect-free canonical import identity check. The receipt
+    // and original ID alone do not prove the reviewed answer/source survives
+    // a partial restore. Learner notes, flags and attempts are ignored.
+    try {
+      const plan = importSharedQuestionSet({
+        snapshot: activePreview.snapshot,
+        identity: { shareId: activePreview.id, contentDigest: activePreview.contentDigest },
+        existingQuestions: bank,
+        existingSets: store.questionSets,
+      });
+      if (!plan.alreadyImported || plan.set.id !== set.id) {
+        throw new Error("The saved receipt no longer identifies the reviewed import.");
+      }
+    } catch {
+      setImportRecovery(true);
+      setPreviewError("This saved set's reviewed question text, options, answer keys, explanations, sources or order no longer match the approved publication. Restore the original records in Question Bank before practicing; attempts are unchanged.");
       return;
     }
     cancelPendingPreview();
@@ -505,6 +603,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       cancelPendingPreview(); pendingRevealFocus.current = null;
       setOpening(false); setPreview(undefined); setPreviewAccountId(undefined); setPreviewError("");
       setPreviewVisibleCount(3);
+      setImportRecovery(false);
     }}>
       <div className="qsl-preview stack gap12" aria-busy={opening || importing}>
         {opening && <p role="status">Opening this Question Set…</p>}
@@ -576,10 +675,13 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
             onClick={revealNextQuestions}>
             Show next {Math.min(3, previewCitationTotal - visiblePreviewQuestions)} questions
           </GhostButton>}
+          {importRecovery && <p role="alert" className="qsl-preview-source-warning">
+            Saved copy needs recovery. Its import receipt exists, but the original question records or reviewed content are missing, duplicated or changed. Recover the original Question Bank records before practicing; importing again will not replace IDs or attempts.
+          </p>}
           <GButton variant="primary" disabled={importing || imported} onClick={() => void add()}>
-            <Download size={16} aria-hidden="true" /> {imported ? "Already in my AXOM" : importing ? "Saving…" : "Add to my AXOM"}
+            <Download size={16} aria-hidden="true" /> {importRecovery ? "Saved copy needs recovery" : imported ? "Already in my AXOM" : importing ? "Saving…" : "Add to my AXOM"}
           </GButton>
-          {imported && onPractice && <>
+          {imported && !importRecovery && onPractice && <>
             <p role="status">Saved in your library. Your answers and progress stay in your private workspace.</p>
             <GButton variant="primary" onClick={practiceImportedSet}>
               <Play size={16} aria-hidden="true" /> Practice this set
