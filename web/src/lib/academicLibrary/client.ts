@@ -96,9 +96,9 @@ export async function academicLibraryReader(client: SupabaseClient, revision: st
   for (const file of manifest) {
     let path: string;
     try { path = safeInputPath(safeLibraryPath(file?.path)); }
-    catch { throw new Error("Invalid course file manifest."); }
+    catch { throw new Error("Invalid course file manifest: conflicting or unsafe path."); }
     const portable = path.toLowerCase();
-    if (path !== file.path || portablePaths.has(portable)) throw new Error("Invalid course file manifest.");
+    if (path !== file.path || portablePaths.has(portable)) throw new Error("Invalid course file manifest: conflicting or unsafe path.");
     portablePaths.add(portable);
     files.set(path, file);
   }
@@ -106,7 +106,7 @@ export async function academicLibraryReader(client: SupabaseClient, revision: st
   for (const path of portablePaths) {
     const parts = path.split("/");
     for (let depth = 1; depth < parts.length; depth++) {
-      if (portablePaths.has(parts.slice(0, depth).join("/"))) throw new Error("Invalid course file manifest.");
+      if (portablePaths.has(parts.slice(0, depth).join("/"))) throw new Error("Invalid course file manifest: conflicting or unsafe path.");
     }
   }
   let bytes = 0;
