@@ -8,9 +8,13 @@ for (const width of [1440, 390, 320]) {
     page.on("pageerror", error => errors.push(error.message));
     // Isolate the developer\'s separately deployed iframe from AXOM keyboard and error checks.
     // Keep uncaught errors from AXOM itself observable rather than muting pageerror.
-    await page.route("https://www.jafardabbagh.com/**", route => route.fulfill({
-      status: 200, contentType: "text/html", body: "<!doctype html><title>Preview fixture</title>",
-    }));
+    let previewRequests = 0;
+    await page.route("https://www.jafardabbagh.com/**", route => {
+      previewRequests += 1;
+      return route.fulfill({
+        status: 200, contentType: "text/html", body: "<!doctype html><title>Preview fixture</title>",
+      });
+    });
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     await page.goto("/", { waitUntil: "networkidle" });
     await seedOnboarded(page);
@@ -37,7 +41,9 @@ for (const width of [1440, 390, 320]) {
     await expect(developer).toHaveAttribute("tabindex", "0");
     await expect(about).toHaveAttribute("tabindex", "-1");
     await expect(panel).toHaveAttribute("aria-labelledby", "about-tab-developer");
-    await expect(page.getByTitle("Live site preview")).toHaveCount(1);
+    await expect(page.getByTitle("Live site preview")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Open preview" })).toBeVisible();
+    expect(previewRequests).toBe(0);
 
     // An OS/browser-modified key must not switch the selected tab.
     await developer.press("Shift+ArrowRight");
@@ -84,11 +90,14 @@ for (const width of [1440, 390]) {
     const frame = page.locator('iframe[title="Live site preview"]');
     const draft = page.frameLocator('iframe[title="Live site preview"]').locator("#draft");
 
-    // Before first explicit visit, no third-party request or iframe is created.
+    // Merely visiting the tab or navigating with arrow keys must not contact the external site.
     await expect(frame).toHaveCount(0);
     expect(previewRequests).toBe(0);
 
     await developer.click();
+    await expect(frame).toHaveCount(0);
+    expect(previewRequests).toBe(0);
+    await page.getByRole("button", { name: "Open preview" }).click();
     await frame.scrollIntoViewIfNeeded();
     await draft.fill("draft never submitted");
     await expect(draft).toHaveValue("draft never submitted");
@@ -167,6 +176,7 @@ test("external developer preview omits AXOM query referrer", async ({ page }) =>
   });
 
   await page.getByRole("tab", { name: "The developer" }).click();
+  await page.getByRole("button", { name: "Open preview" }).click();
   await page.getByTitle("Live site preview").scrollIntoViewIfNeeded();
   await expect.poll(() => previewReferrers.length, { timeout: 15_000 }).toBeGreaterThan(0);
   expect(previewReferrers.every(value => value === undefined)).toBe(true);
@@ -196,6 +206,7 @@ test("developer preview blocks a user-triggered popup while an unsandboxed cross
   await seedOnboarded(page);
   await page.evaluate(() => { window.location.hash = "about"; });
   await page.getByRole("tab", { name: "The developer" }).click();
+  await page.getByRole("button", { name: "Open preview" }).click();
 
   await page.evaluate(() => {
     const control = document.createElement("iframe");
@@ -251,6 +262,7 @@ test("explicitly closing the developer iframe stops embedded background activity
 
   await expect(iframe).toHaveCount(0);
   await developer.click();
+  await page.getByRole("button", { name: "Open preview" }).click();
   await iframe.scrollIntoViewIfNeeded();
   await expect.poll(pings, { timeout: 10_000 }).toBeGreaterThan(2);
   await about.click();

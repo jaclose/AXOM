@@ -32,7 +32,8 @@ describe("About page accessible tabs", () => {
     expect(developer.tabIndex).toBe(0);
     expect(about.tabIndex).toBe(-1);
     expect(panel.getAttribute("aria-labelledby")).toBe(developer.id);
-    expect(screen.getByTitle("Live site preview")).toBeTruthy();
+    expect(screen.queryByTitle("Live site preview")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open preview" })).toBeTruthy();
 
     fireEvent.keyDown(developer, { key: "ArrowRight" });
     expect(document.activeElement).toBe(about);
@@ -53,6 +54,8 @@ describe("About page accessible tabs", () => {
     expect(screen.queryByTitle("Live site preview")).toBeNull();
 
     fireEvent.click(developer);
+    expect(screen.queryByTitle("Live site preview")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
     const frame = screen.getByTitle("Live site preview");
     frame.setAttribute("data-unsubmitted-draft", "in-progress");
     expect(frame.closest("[hidden]")).toBeNull();
@@ -76,6 +79,7 @@ describe("About page accessible tabs", () => {
     const about = screen.getByRole("tab", { name: "About AXOM" });
     const developer = screen.getByRole("tab", { name: "The developer" });
     fireEvent.click(developer);
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
     const first = screen.getByTitle("Live site preview");
     const close = screen.getByRole("button", { name: "Close preview" });
     close.focus();
@@ -83,7 +87,7 @@ describe("About page accessible tabs", () => {
     expect(screen.queryByTitle("Live site preview")).toBeNull();
     const open = screen.getByRole("button", { name: "Open preview" });
     expect(document.activeElement).toBe(open);
-    expect(screen.getByText(/Preview stopped/)).toBeTruthy();
+    expect(screen.getByText(/Preview is off/)).toBeTruthy();
 
     fireEvent.click(about);
     fireEvent.click(developer);
@@ -105,6 +109,7 @@ describe("About page accessible tabs", () => {
     try {
       render(<AboutPage />);
       fireEvent.click(screen.getByRole("tab", { name: "The developer" }));
+      fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
       const frame = screen.getByTitle("Live site preview");
       frame.setAttribute("data-unsubmitted-interaction", "in-progress");
       act(() => { vi.advanceTimersByTime(30 * 60 * 1000 + 1000); });
@@ -141,6 +146,8 @@ describe("About page accessible tabs", () => {
       expect(about.getAttribute("aria-selected")).toBe("true");
     }
     fireEvent.click(developer);
+    expect(screen.queryByTitle("Live site preview")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
     // External preview must not transmit AXOM route or query details.
     expect(screen.getByTitle("Live site preview").getAttribute("referrerpolicy")).toBe("no-referrer");
     // Keep the preview in an opaque origin even after self-navigation; scripts and
