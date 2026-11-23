@@ -868,12 +868,13 @@ async function writeVault(
     let settled = false;
 
     const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
-      // A missing record is a fresh/recreated vault, not a competing revision.
-      // Conflicts only exist when another concrete workspace replaced the one
-      // this runtime hydrated.
+      // A missing record can also mean another tab intentionally deleted the
+      // hydrated workspace. Only an expectation that explicitly includes null
+      // may initialize an empty vault; accepting every missing record would
+      // let a stale tab resurrect deleted learner data. Keep this comparison
+      // inside the same readwrite transaction as the actual write.
       if (
         expected
-        && typeof current === "string"
         && !expected.fingerprints.includes(workspaceFingerprint(current))
       ) {
         conflict = new VaultConflictError();
