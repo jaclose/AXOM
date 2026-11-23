@@ -34,6 +34,52 @@ const input = (sets: QuestionSet[], questions: QuestionRecord[], curriculum = SG
   ({ terms, courses, sets, questions, curriculum });
 
 describe("course tracker source-versus-question availability", () => {
+  it("holds both raw source-set ID collisions before source attribution regardless of scan order", () => {
+    const a = set("same", ["ambiguous"], {
+      scope: { module: "GOER", week: 2, courseId: "ppm-501" },
+      sourceDocumentIds: ["original-a"],
+    });
+    const b = set("same", ["ambiguous"], {
+      scope: { module: "NCRS", week: 6, courseId: "ppm-500" },
+      sourceDocumentIds: ["original-b"],
+    });
+    const clean = set("clean", ["clean-q"], { scope: goerScope });
+    const original = JSON.stringify([a, b, clean]);
+    for (const originals of [[a, b, clean], [b, a, clean]]) {
+      const result = buildQuestionAvailabilityIndex(input(originals, [
+        question("ambiguous", { setId: "same" }),
+        question("clean-q", { setId: "clean" }),
+      ]));
+      expect(result.unassignedCollections).toBe(2);
+      expect(result.unassignedQuestions).toBe(1);
+      expect(result.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        collections: 1, storedQuestions: 1, readyQuestions: 1, indexedWeeks: [2],
+      });
+      expect(result.byModule.get(questionAvailabilityModuleKey("Term 4", "NCRS"))?.readyQuestions ?? 0).toBe(0);
+    }
+    expect(JSON.stringify([a, b, clean])).toBe(original);
+  });
+
+  it("does not certify a secondary review set using a collided primary source", () => {
+    const result = buildQuestionAvailabilityIndex(input([
+      set("primary", ["q"], { scope: { module: "NCRS", week: 4, courseId: "ppm-500" } }),
+      set("primary", ["q"], { scope: goerScope }),
+      set("review", ["q"], { scope: goerScope, kind: "review" }),
+    ], [question("q", { setId: "primary" })]));
+    expect(result.unassignedCollections).toBe(3);
+    expect(result.unassignedQuestions).toBe(1);
+    expect(result.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.collections ?? 0).toBe(0);
+  });
+
+  it("does not double-credit repeated identical source-set IDs as two collections", () => {
+    const a = set("same", ["only"], { scope: goerScope });
+    const result = buildQuestionAvailabilityIndex(input([a, structuredClone(a)], [
+      question("only", { setId: "same" }),
+    ]));
+    expect(result.unassignedCollections).toBe(2);
+    expect(result.unassignedQuestions).toBe(1);
+    expect(result.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.readyQuestions ?? 0).toBe(0);
+  });
   it("counts unique locally stored, runnable and review questions, never a source-original receipt", () => {
     const questions = [
       question("ready", { setId: "main" }),
