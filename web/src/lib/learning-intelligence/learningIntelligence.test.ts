@@ -478,6 +478,47 @@ describe("pattern findings", () => {
     expect(finding).toMatchObject({ basis: "computed", title: "38% on new questions, 100% on ones you have seen" });
   });
 
+  it("does not mistake an unmatched first-versus-repeat gap for learning caused by repetition", () => {
+    // The only repeated questions were right on BOTH exposures; the one-time
+    // wrong questions were never repeated. The 50% -> 100% gap is selection,
+    // not evidence that repetition improved any question's performance.
+    const firstMisses = Array.from({ length: 8 }, () => question({
+      status: "incorrect", attempts: [attempt(1, "incorrect")],
+    }));
+    const alwaysRight = Array.from({ length: 8 }, () => question({
+      status: "correct", attempts: [attempt(1, "correct"), attempt(2, "correct")],
+    }));
+    const report = buildPatternReport([...firstMisses, ...alwaysRight]);
+    expect(report.totals.first).toEqual({ attempts: 16, correct: 8, accuracy: 50 });
+    expect(report.totals.repeat).toEqual({ attempts: 8, correct: 8, accuracy: 100 });
+    const finding = report.findings.find((item) => item.kind === "first-vs-repeat");
+    expect(finding).toMatchObject({
+      basis: "computed",
+      title: "50% on new questions, 100% on ones you have seen",
+      questionIds: firstMisses.map((item) => item.id),
+      actionLabel: "Review first-time misses",
+    });
+    expect(finding?.detail).toMatch(/does not prove|doesn't prove/i);
+    expect(finding?.detail).not.toContain("what remembering the question adds");
+    expect(alwaysRight.every((item) => item.attempts.every((entry) => entry.status === "correct"))).toBe(true);
+  });
+
+  it("prefers truly unseen questions over fallback review targets when both are present", () => {
+    const firstMisses = Array.from({ length: 8 }, () => question({
+      status: "incorrect", attempts: [attempt(1, "incorrect")],
+    }));
+    const alwaysRight = Array.from({ length: 8 }, () => question({
+      status: "correct", attempts: [attempt(1, "correct"), attempt(2, "correct")],
+    }));
+    const untouched = question();
+    const finding = buildPatternReport([...firstMisses, ...alwaysRight, untouched])
+      .findings.find((item) => item.kind === "first-vs-repeat");
+    expect(finding).toMatchObject({
+      questionIds: [untouched.id],
+      actionLabel: "Practise unseen questions",
+    });
+  });
+
   it("contrasts question types on first-time answers and labels the reading as inferred", () => {
     const recall = Array.from({ length: 8 }, () => question({ status: "correct", attempts: [attempt(1, "correct")] }));
     const treatment = Array.from({ length: 8 }, (_, index) => question({

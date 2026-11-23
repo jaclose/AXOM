@@ -256,16 +256,27 @@ export function buildPatternReport(questions: readonly QuestionRecord[]): Patter
   const repeatTally = tally(repeat);
   if (firstTally.attempts >= MIN_GROUP_ANSWERS && repeatTally.attempts >= MIN_GROUP_ANSWERS) {
     if (repeatTally.accuracy! - firstTally.accuracy! >= 15) {
+      // The first/repeat groups are not matched by question. An easier mix of
+      // repeated items can create this gap with no improvement on any item.
+      // Keep the observed percentages, never claim a causal memory benefit.
+      const unseenIds = [...new Set(questions
+        .filter((question) => question.attempts.length === 0 && !duplicateIds.has(question.id))
+        .map((question) => question.id))];
+      // Without unseen items, link to real first-time misses instead of
+      // offering an "unseen questions" button with zero actionable targets.
+      const firstMissIds = [...new Set(first
+        .filter((event) => event.correct === false && !duplicateIds.has(event.questionId))
+        .map((event) => event.questionId))];
       findings.push({
         id: "first-vs-repeat",
         kind: "first-vs-repeat",
         title: `${firstTally.accuracy}% on new questions, ${repeatTally.accuracy}% on ones you have seen`,
-        detail: "The gap is what remembering the question adds. Your score on questions you have not seen is the one an exam will measure, so weight new questions over repeats.",
+        detail: "The observed gap compares different groups of answers and does not prove that repetition improved recall. Repeated questions may be an easier mix. Prioritize genuinely unfamiliar questions when available, or review first-time misses.",
         basis: "computed",
         sample: firstTally.attempts + repeatTally.attempts,
         weight: 60,
-        questionIds: questions.filter((question) => question.attempts.length === 0).map((question) => question.id),
-        actionLabel: "Practise unseen questions",
+        questionIds: unseenIds.length ? unseenIds : firstMissIds,
+        actionLabel: unseenIds.length ? "Practise unseen questions" : "Review first-time misses",
       });
     }
   } else if (scored.length > 0) {
