@@ -93,12 +93,19 @@ export async function academicLibraryReader(client: SupabaseClient, revision: st
   // names. Reject the entire manifest rather than silently choosing a file.
   const files = new Map<string, AcademicFile>();
   const portablePaths = new Set<string>();
+  // These names cannot be extracted faithfully on common filesystems even
+  // when they are safe URL-free library paths. Do not rename source files.
+  const reservedDevice = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+  const textEncoder = new TextEncoder();
   for (const file of manifest) {
     let path: string;
     try { path = safeInputPath(safeLibraryPath(file?.path)); }
     catch { throw new Error("Invalid course file manifest: conflicting or unsafe path."); }
+    const nonportable = path.split("/").some(part => /[<>:"|?*]/.test(part)
+      || /[. ]$/.test(part) || reservedDevice.test(part)
+      || textEncoder.encode(part).length > 255);
     const portable = path.toLowerCase();
-    if (path !== file.path || portablePaths.has(portable)) throw new Error("Invalid course file manifest: conflicting or unsafe path.");
+    if (path !== file.path || nonportable || portablePaths.has(portable)) throw new Error("Invalid course file manifest: conflicting or unsafe path.");
     portablePaths.add(portable);
     files.set(path, file);
   }
