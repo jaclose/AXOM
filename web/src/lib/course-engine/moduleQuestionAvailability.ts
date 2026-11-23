@@ -148,10 +148,24 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       for (const id of set.questionIds) ambiguousMembers.add(id);
     }
   }
-  const setsById = new Map(input.sets.map((set) => [set.id, set]));
+  // A collection held for identity ambiguity cannot certify either its own
+  // coverage or inherited question scope. Keep one eligibility decision for
+  // primary lookups, legacy memberships and collection indexing.
+  const heldSetIds = new Set<string>();
+  for (const set of input.sets) {
+    const ambiguousPrimary = set.questionIds.some((id) => {
+      if (duplicateQuestionIds.has(id)) return true;
+      const member = byId.get(id);
+      return Boolean(member && (member.setId != null
+        ? duplicateSetIds.has(member.setId)
+        : ambiguousMembers.has(id)));
+    });
+    if (duplicateSetIds.has(set.id) || ambiguousPrimary) heldSetIds.add(set.id);
+  }
+  const setsById = new Map(input.sets.filter((set) => !heldSetIds.has(set.id)).map((set) => [set.id, set]));
   const memberships = new Map<string, CourseScope[]>();
   for (const set of input.sets) {
-    if (duplicateSetIds.has(set.id)) continue;
+    if (heldSetIds.has(set.id)) continue;
     for (const id of new Set(set.questionIds)) {
       if (!set.scope) continue;
       memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
@@ -203,16 +217,8 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   let unassignedCollections = 0;
   for (const set of input.sets) {
-    // A distinct review set cannot launder an ambiguous primary association
-    // into a source-indexed course/week collection.
-    const ambiguousPrimary = set.questionIds.some((id) => {
-      if (duplicateQuestionIds.has(id)) return true;
-      const member = byId.get(id);
-      return Boolean(member && (member.setId != null
-        ? duplicateSetIds.has(member.setId)
-        : ambiguousMembers.has(id)));
-    });
-    if (duplicateSetIds.has(set.id) || ambiguousPrimary) {
+    // Use the same identity gate that excluded unsafe scope inheritance.
+    if (heldSetIds.has(set.id)) {
       unassignedCollections += 1;
       continue;
     }
