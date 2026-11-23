@@ -73,7 +73,14 @@ describe("shared question-content persistence harness lifecycle", () => {
       // The shared helper destroys this synthetic DB intentionally. A newly
       // hydrated test tab must not inherit a stale expected fingerprint.
       await openEmptyWorkspace();
-      expect(await localVaultStorage.getItem(key)).toBeNull();
+      // The normal Zustand fixture persists an empty workspace during setup.
+      // Fresh lineage means no stale learner bytes, not a physically absent row.
+      const freshRaw = await localVaultStorage.getItem(key);
+      const freshState = freshRaw ? JSON.parse(freshRaw).state : {};
+      expect(freshState.questions ?? []).toEqual([]);
+      expect(freshState.questionSets ?? []).toEqual([]);
+      expect(freshState.documents ?? []).toEqual([]);
+      expect(freshRaw).not.toContain("first-synthetic");
       await localVaultStorage.setItem(key, second);
       await flushLocalVaultWrites();
       expect(await localVaultStorage.getItem(key)).toBe(second);
