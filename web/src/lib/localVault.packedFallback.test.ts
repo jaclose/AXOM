@@ -239,6 +239,10 @@ describe("verified separate compressed workspace fallback", () => {
       }
       const uncertainReceipt = values.get(receiptKey);
       resetLocalVaultRuntimeForTests();
+      // Force the critical conditional path: the committed X remains durable,
+      // but its IndexedDB is temporarily unavailable. Without receipt failure
+      // protection the retired Y could hydrate after promotion fails ordinarily.
+      vi.stubGlobal("indexedDB", undefined);
       try {
         await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
         expect(values.get(packedKey)).toBe(originalPacked);
@@ -257,6 +261,7 @@ describe("verified separate compressed workspace fallback", () => {
         }
       } finally {
         inaccessible?.mockRestore();
+        vi.stubGlobal("indexedDB", fakeIndexedDb);
       }
       values.set(receiptKey, originalReceipt);
       resetLocalVaultRuntimeForTests();
