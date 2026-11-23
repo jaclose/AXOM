@@ -53,6 +53,17 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+async function primeVerifiedWorkspaceBeforeDatabaseOutage(): Promise<void> {
+  // A fallback update must originate from a genuinely verified saved workspace.
+  // An unhydrated tab with neither readable IndexedDB nor a marked recovery
+  // copy is intentionally not allowed to make a blind first write.
+  const key = STORAGE_KEYS.persistedState;
+  const saved = JSON.stringify({ state: runtime.state, version: 32 });
+  await localVaultStorage.setItem(key, saved);
+  await flushLocalVaultWrites();
+  expect(await localVaultStorage.getItem(key)).toBe(saved);
+}
+
 describe("pre-update workspace checkpoint", () => {
   it("does not reuse an earlier synthetic IDB snapshot lineage after a verified test-only database replacement", async () => {
     const key = STORAGE_KEYS.persistedState;
@@ -152,6 +163,14 @@ describe("pre-update workspace checkpoint", () => {
     await expect(createUpdateCheckpoint(false)).rejects.toThrow("Could not verify");
   });
 
+  it("fails closed when IndexedDB is absent before any verified local snapshot", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    await expect(createUpdateCheckpoint(false)).rejects.toThrow(
+      "Could not verify the saved workspace",
+    );
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
+  });
+
   it("allows a web refresh after quota blocks only the extra snapshot and saved data verifies", async () => {
     const originalSetItem = localStorage.setItem.bind(localStorage);
     vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
@@ -160,6 +179,7 @@ describe("pre-update workspace checkpoint", () => {
       }
       originalSetItem(key, value);
     });
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
 
     await expect(createUpdateCheckpoint(false)).rejects.toMatchObject({
@@ -180,6 +200,7 @@ describe("pre-update workspace checkpoint", () => {
       }
       originalSetItem(key, value);
     });
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
 
     await expect(createUpdateCheckpoint(false)).rejects.toMatchObject({
@@ -201,6 +222,7 @@ describe("pre-update workspace checkpoint", () => {
       }
       originalSetItem(key, value);
     });
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
 
     await expect(createUpdateCheckpoint(false)).rejects.toThrow("workspace changed while saving");
@@ -210,6 +232,7 @@ describe("pre-update workspace checkpoint", () => {
   });
 
   it("keeps a full verified fallback snapshot when IndexedDB is unavailable", async () => {
+    await primeVerifiedWorkspaceBeforeDatabaseOutage();
     vi.stubGlobal("indexedDB", undefined);
     const key = await createUpdateCheckpoint(false);
     const snapshot = await readLocalBackup(key);
