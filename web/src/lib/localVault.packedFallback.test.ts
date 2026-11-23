@@ -208,6 +208,54 @@ describe("verified separate compressed workspace fallback", () => {
     expect(values.get(packedKey)).toBe(preservedPacked);
   });
 
+  it.each(["receipt read error", "malformed receipt", "invalid receipt schema"] as const)(
+    "fails closed on %s after a verified restore without losing either workspace",
+    async fault => {
+      const fixture = await quotaFixture();
+      const packedY = snapshot("original packed Y with unique notes", true);
+      await localVaultStorage.setItem(key, packedY);
+      const originalPacked = values.get(packedKey)!;
+      fixture.blockVault.mockRestore();
+      const restoredX = snapshot("verified restoration X with unique notes");
+      const checkpoint = getVaultWriteCheckpoint();
+      await replaceLocalVaultItem(key, restoredX);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      const receiptKey = `${key}:packed-retired`;
+      const originalReceipt = values.get(receiptKey)!;
+      expect(JSON.parse(originalReceipt)).toMatchObject({ version: 2 });
+      const getItem = storage.getItem;
+      const inaccessible = fault === "receipt read error"
+        ? vi.spyOn(storage, "getItem").mockImplementation(name => {
+          if (name === receiptKey) throw new DOMException("Synthetic receipt blocked", "SecurityError");
+          return getItem(name);
+        })
+        : null;
+      if (fault === "malformed receipt") values.set(receiptKey, "{incomplete");
+      if (fault === "invalid receipt schema") values.set(receiptKey, JSON.stringify({ version: 2, rawSha256: "invalid" }));
+      const uncertainReceipt = values.get(receiptKey);
+      resetLocalVaultRuntimeForTests();
+      try {
+        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        expect(values.get(packedKey)).toBe(originalPacked);
+        expect(values.get(receiptKey)).toBe(uncertainReceipt);
+        const writeCheckpoint = getVaultWriteCheckpoint();
+        await localVaultStorage.setItem(key, snapshot("blind write must be rejected"));
+        expect(() => assertVaultWritesSince(writeCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+        expect(values.get(packedKey)).toBe(originalPacked);
+        // A newly captured recovery export cannot select retired Y as current X.
+        await expect(resolveWorkspaceSnapshotRecord(
+          { [key]: restoredX }, Object.fromEntries(values), key,
+        )).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      } finally {
+        inaccessible?.mockRestore();
+      }
+      values.set(receiptKey, originalReceipt);
+      resetLocalVaultRuntimeForTests();
+      await expect(localVaultStorage.getItem(key)).resolves.toBe(restoredX);
+      expect(values.get(packedKey)).toBe(originalPacked);
+    },
+  );
+
   it("reads existing version-1 full-raw receipts without rewriting or discarding historical packed bytes", async () => {
     const fixture = await quotaFixture();
     await localVaultStorage.setItem(key, snapshot("legacy version-one packed", true));
