@@ -95,7 +95,7 @@ export async function academicLibraryReader(client: SupabaseClient, revision: st
   const portablePaths = new Set<string>();
   // These names cannot be extracted faithfully on common filesystems even
   // when they are safe URL-free library paths. Do not rename source files.
-  const reservedDevice = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+  const reservedDevice = /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
   const textEncoder = new TextEncoder();
   for (const file of manifest) {
     let path: string;
