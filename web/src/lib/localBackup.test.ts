@@ -47,25 +47,34 @@ describe("automatic local migration backups", () => {
   it("rejects blocked fake IndexedDB deletion rather than claiming a clean test database", async () => {
     const key = STORAGE_KEYS.persistedState;
     const saved = JSON.stringify({ state: { profile: { userId: "jd" }, questions: [{ id: "preserved" }] }, version: 34 });
-    await localVaultStorage.setItem(key, saved);
-    // An open reader can block deleteDatabase even if the test suite cleared
-    // its in-memory revision observation. A blocked delete is not a clean DB.
-    const reader = await openDatabase(DB_NAME);
+    // A dedicated database gives this regression a known, verified object-store
+    // precondition independently of the workspace adapter's fallback behavior.
+    const name = `${DB_NAME}-blocked-fixture-r223`;
+    await deleteDatabase(name);
+    const reader = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = fakeIndexedDb.open(name, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await putState(reader, key, saved);
     try {
-      await expect(deleteDatabase(DB_NAME)).rejects.toThrow(/blocked/i);
+      await expect(deleteDatabase(name)).rejects.toThrow(/blocked/i);
+      // The failed cleanup has not removed acknowledged synthetic data.
       expect(await getStoredValue(reader, STORE_NAME, key)).toBe(saved);
     } finally {
       reader.close();
     }
-    // Once the reader is closed, the outstanding delete and a fresh cleanup
-    // can complete. A new test is permitted to reset CAS state only then.
-    await deleteDatabase(DB_NAME);
-    const empty = await openDatabase(DB_NAME);
+    // A delete that was merely blocked may continue after the reader closes.
+    // Confirm the resulting database is really gone, not just a cleared CAS map.
+    await deleteDatabase(name);
+    const empty = await openDatabase(name);
     try {
-      expect(await getStoredValue(empty, STORE_NAME, key)).toBeUndefined();
+      expect(empty.objectStoreNames.contains(STORE_NAME)).toBe(false);
     } finally {
       empty.close();
     }
+    await deleteDatabase(name);
   });
 
   it("uses the canonical vault version and object stores shared with primary persistence", async () => {
