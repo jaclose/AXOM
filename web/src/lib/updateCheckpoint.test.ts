@@ -54,14 +54,26 @@ afterEach(async () => {
 });
 
 async function primeVerifiedWorkspaceBeforeDatabaseOutage(): Promise<void> {
-  // A fallback update must originate from a genuinely verified saved workspace.
-  // An unhydrated tab with neither readable IndexedDB nor a marked recovery
-  // copy is intentionally not allowed to make a blind first write.
+  // Begin from a genuinely hydrated empty vault, then create an acknowledged
+  // fallback using the real adapter while IndexedDB writes are unavailable.
+  // This differs from allowing an unhydrated tab to make a blind first save.
   const key = STORAGE_KEYS.persistedState;
+  expect(await localVaultStorage.getItem(key)).toBeNull();
   const saved = JSON.stringify({ state: runtime.state, version: 32 });
-  await localVaultStorage.setItem(key, saved);
-  await flushLocalVaultWrites();
-  expect(await localVaultStorage.getItem(key)).toBe(saved);
+  const originalPut = IDBObjectStore.prototype.put;
+  const unavailable = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+    if (this.name === STORE_NAME) throw new DOMException("Synthetic quota", "QuotaExceededError");
+    return originalPut.apply(this, args);
+  });
+  try {
+    await localVaultStorage.setItem(key, saved);
+    await flushLocalVaultWrites();
+    // Check both the acknowledged recovery bytes and the public read path.
+    expect(localStorage.getItem(key)).toBe(saved);
+    expect(await localVaultStorage.getItem(key)).toBe(saved);
+  } finally {
+    unavailable.mockRestore();
+  }
 }
 
 describe("pre-update workspace checkpoint", () => {
