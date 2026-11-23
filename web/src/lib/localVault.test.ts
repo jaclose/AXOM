@@ -832,6 +832,44 @@ describe("a save that could not reach IndexedDB", () => {
     },
   );
 
+  it("records a late malformed retirement receipt as a failed save, not a silent retry success", async () => {
+    const receiptKey = `${key}:fallback-retired`;
+    const markerKey = `${key}:fallback-newer`;
+    const scopedKey = `${key}:user:jd`;
+    const base = snapshot("durable IDB base");
+    const offline = snapshot("retained offline edits");
+    await localVaultStorage.setItem(key, base);
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, offline);
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    expect(storage.getItem(receiptKey)).toBeNull();
+
+    // A different tab writes a malformed receipt only after the first
+    // receipt check and before the failed IndexedDB write's retry.
+    let injected = false;
+    vi.stubGlobal("indexedDB", {
+      open: () => {
+        injected = true;
+        values.set(receiptKey, "{broken-late-receipt");
+        throw new DOMException("Synthetic IDB failure", "SecurityError");
+      },
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("unsaved attempted edit"));
+    await flushLocalVaultWrites();
+    expect(injected).toBe(true);
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(storage.getItem(key)).toBe(offline);
+    expect(storage.getItem(markerKey)).toBe(marker);
+    expect(storage.getItem(scopedKey)).toBe(offline);
+    expect(storage.getItem(receiptKey)).toBe("{broken-late-receipt");
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const db = await openCurrentVault();
+    try { expect(await getDirect(db, key)).toBe(base); } finally { db.close(); }
+  });
+
   it("is read back at the next start instead of the older copy still in IndexedDB", async () => {
     // When IndexedDB is unavailable, the next start must not read its older
     // workspace ahead of the marked fallback and then delete the newer copy.
