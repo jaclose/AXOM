@@ -16,6 +16,9 @@ export interface PackedFallbackBinding {
   userId: string;
   valueFingerprint: string;
   baseFingerprint: string | null;
+  /** Generation observed before an offline save from an empty workspace.
+   * Optional to retain legacy v1 envelope compatibility. */
+  deletionGeneration?: string | null;
   legacy: LegacyFallbackBinding;
 }
 
@@ -67,7 +70,11 @@ export async function unpackVaultFallback(raw: string, name: string): Promise<Pa
     const value: unknown = JSON.parse(raw);
     if (!isRecord(value) || value.format !== FORMAT || value.version !== VERSION || value.name !== name
       || typeof value.userId !== "string" || typeof value.valueFingerprint !== "string"
-      || !nullableString(value.baseFingerprint) || !isRecord(value.legacy)
+      || !nullableString(value.baseFingerprint)
+      || (value.deletionGeneration !== undefined && (
+        !nullableString(value.deletionGeneration)
+        || (typeof value.deletionGeneration === "string" && value.deletionGeneration.length === 0)
+      )) || !isRecord(value.legacy)
       || !nullableString(value.legacy.primaryFingerprint) || !nullableString(value.legacy.scopedFingerprint)
       || !nullableString(value.legacy.activeUser) || !nullableString(value.legacy.marker)
       || typeof value.expandedBytes !== "number" || !Number.isSafeInteger(value.expandedBytes)
@@ -81,7 +88,8 @@ export async function unpackVaultFallback(raw: string, name: string): Promise<Pa
     const workspace: unknown = JSON.parse(decoded);
     if (!isRecord(workspace) || !isRecord(workspace.state)) throw new PackedFallbackError();
     return { name: envelope.name, userId: envelope.userId, valueFingerprint: envelope.valueFingerprint,
-      baseFingerprint: envelope.baseFingerprint, legacy: envelope.legacy, raw, value: decoded };
+      baseFingerprint: envelope.baseFingerprint, deletionGeneration: envelope.deletionGeneration,
+      legacy: envelope.legacy, raw, value: decoded };
   } catch (cause) {
     if (isPackedFallbackError(cause)) throw cause;
     throw new PackedFallbackError(undefined, { cause });
