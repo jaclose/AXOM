@@ -76,3 +76,30 @@ it("rejects standings that would crash rendering or misstate rank and progress",
   ];
   for(const bad of invalid) expect(()=>readDailyStandings(bad)).toThrow(/Standings/);
 });
+
+
+it("rejects rank sequences inconsistent with SQL dense_rank(points DESC)",()=>{
+  const invalid=[
+    {rows:[{alias:"Alpha",points:0,answered:1,rank:1,you:true},{alias:"Beta",points:1,answered:1,rank:2,you:false}],yourRank:1,participants:2},
+    {rows:[{alias:"Alpha",points:1,answered:1,rank:1,you:true},{alias:"Beta",points:1,answered:1,rank:2,you:false}],yourRank:1,participants:2},
+    {rows:[{alias:"Alpha",points:2,answered:2,rank:1,you:true},{alias:"Beta",points:1,answered:1,rank:3,you:false},{alias:"Gamma",points:1,answered:1,rank:3,you:false}],yourRank:1,participants:3},
+    {rows:[{alias:"Alpha",points:1,answered:1,rank:2,you:true}],yourRank:2,participants:1},
+  ];
+  for(const bad of invalid) expect(()=>readDailyStandings(bad)).toThrow(/Standings/);
+});
+it("requires a complete SQL standings page and its own row when participants fit",()=>{
+  const noSelf={rows:[{alias:"Alpha",points:1,answered:1,rank:1,you:false},{alias:"Beta",points:0,answered:0,rank:2,you:false}],yourRank:1,participants:2};
+  expect(()=>readDailyStandings(noSelf)).toThrow(/Standings/);
+  expect(()=>readDailyStandings({...standing,rows:standing.rows.slice(0,1)})).toThrow(/Standings/);
+  expect(()=>readDailyStandings({rows:[],yourRank:null,participants:1})).toThrow(/Standings/);
+  expect(readDailyStandings({...noSelf,yourRank:null})).toEqual({...noSelf,yourRank:null});
+});
+it("retains valid ties and a truncated 100-row page without falsely requiring visible own row",()=>{
+  const firstHundred=Array.from({length:100},(_,i)=>({
+    alias:"Learner "+String(i).padStart(3,"0"),points:1,answered:1,rank:1,you:false,
+  }));
+  const tiedCutoff={rows:firstHundred,yourRank:1,participants:101};
+  expect(readDailyStandings(tiedCutoff)).toEqual(tiedCutoff);
+  const secondGroup={rows:firstHundred.map((row,i)=>i===99?{...row,points:0,answered:0,rank:2}:row),yourRank:2,participants:101};
+  expect(readDailyStandings(secondGroup)).toEqual(secondGroup);
+});
