@@ -1853,8 +1853,12 @@ export const localVaultStorage: StateStorage = {
         assertNoPendingVaultRemoval(localFallback(name), name);
         if (!conflictedWorkspaceKeys.has(name)) observedDeletionGenerations.set(name, generation);
       } catch {
+        // A previous chunk read may have failed while the primary manifest
+        // remains present. The recovery UI needs a null result so that an
+        // explicitly authorized verified-backup replacement can repair it.
+        // This is NOT a verified empty read and never grants ordinary writes.
         conflictedWorkspaceKeys.add(name);
-        throw new VaultConflictError();
+        return null;
       }
     }
     return value;
