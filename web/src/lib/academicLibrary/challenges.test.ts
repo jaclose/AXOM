@@ -54,7 +54,7 @@ const standing={rows:[
 ],yourRank:1,participants:2};
 it("accepts valid ranked, tied, bounded standings and empty standings",()=>{
   expect(readDailyStandings(standing)).toEqual(standing);
-  const unicode={...standing,rows:[{...standing.rows[0],alias:"🙂".repeat(32)}]};
+  const unicode={...standing,rows:[{...standing.rows[0],alias:"🙂".repeat(32)},standing.rows[1]]};
   expect(readDailyStandings(unicode)).toEqual(unicode);
   expect(readDailyStandings({rows:[],yourRank:null,participants:0})).toEqual({rows:[],yourRank:null,participants:0});
 });
