@@ -396,12 +396,32 @@ export function resolveMarkedVaultSnapshotRecord(
   if (local[fallbackMarkerKey(name)] === undefined) return undefined;
   const capturedStore = { getItem: (key: string) => local[key] ?? null };
   const newer = newerFallbackCopy(capturedStore, name);
-  if (!newer) throw new Error("The safety snapshot has an invalid newer-fallback marker.");
-
   let current = indexedDb ? resolveVaultSnapshotRecord(indexedDb, name) : undefined;
   if (!current && indexedDb) {
     const activeUser = indexedDb[activeUserKey(name)];
     if (activeUser) current = resolveVaultSnapshotRecord(indexedDb, scopedStateKey(name, activeUser));
+  }
+  if (!newer) {
+    // A user-authorized restore may follow an interrupted delete that already
+    // removed the plain primary but left the marker and an account-scoped copy.
+    // A matching retirement receipt distinguishes it from an invalid orphan.
+    // The original bytes remain present and are never deleted by inspection.
+    let receipt: { fallbackUserId?: unknown } | null = null;
+    try { receipt = JSON.parse(local[`${name}:fallback-retired`] ?? "null") as { fallbackUserId?: unknown } | null; }
+    catch { /* An invalid receipt is not an authorized recovery. */ }
+    if (local[name] === undefined && typeof receipt?.fallbackUserId === "string") {
+      const scoped = local[scopedStateKey(name, receipt.fallbackUserId)];
+      if (typeof scoped === "string") {
+        const scopedCopy = newerFallbackCopy({
+          getItem: key => key === name ? scoped : capturedStore.getItem(key),
+        }, name);
+        const retired = scopedCopy && retiredFallbackReceipt(capturedStore, name, scopedCopy);
+        if (retired && current && persistedUserId(current) === retired.committedUserId) {
+          return current;
+        }
+      }
+    }
+    throw new Error("The safety snapshot has an invalid newer-fallback marker.");
   }
   // Successful saves and explicit restores retain the previous recovery bytes
   // rather than risk a cross-tab multi-key delete. The retirement receipt must
@@ -1671,6 +1691,24 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
             || fallback?.getItem(scopedStateKey(name, orphanedMarkerEvidence.activeUser))
               !== orphanedMarkerEvidence.scopedValue
             || fallback?.getItem(activeUserKey(name)) !== orphanedMarkerEvidence.activeUser
+          ) throw new VaultConflictError();
+          // One atomic retirement receipt makes a later immutable backup
+          // distinguish this captured orphan from an arbitrary corrupt marker.
+          // Retain the marker and original account-scoped bytes for recovery;
+          // deleting the marker across tabs would be an unsafe compare/remove.
+          fallback?.setItem(`${name}:fallback-retired`, JSON.stringify({
+            version: 1,
+            marker: markerNow,
+            valueFingerprint: snapshotFingerprint(orphanedMarkerEvidence.scopedValue),
+            fallbackUserId: orphanedMarkerEvidence.activeUser,
+            committedFingerprint: snapshotFingerprint(value),
+            committedUserId: userId,
+          } satisfies RetiredFallbackReceipt));
+          if (
+            fallback?.getItem(fallbackMarkerKey(name)) !== markerNow
+            || fallback?.getItem(name) !== null
+            || fallback?.getItem(scopedStateKey(name, orphanedMarkerEvidence.activeUser))
+              !== orphanedMarkerEvidence.scopedValue
           ) throw new VaultConflictError();
         }
       } else if (userId && previousPacked === null) {
