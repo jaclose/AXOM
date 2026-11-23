@@ -29,6 +29,8 @@ it("accepts a complete source-identifiable shared challenge and an empty server 
   expect(readDailyChallenges([validChallenge])).toEqual([validChallenge]);
   expect(readDailyChallenges([])).toEqual([]);
   expect(readDailyChallenges([{...validChallenge,participation:null}])).toHaveLength(1);
+  // PostgreSQL length() counts Unicode characters, not UTF-16 code units.
+  expect(readDailyChallenges([{...validChallenge,participation:{alias:"🙂".repeat(32),visible:true}}])).toHaveLength(1);
 });
 it("rejects malformed challenge identity, placement, participation and repeated canonical keys",()=>{
   const invalid=[
@@ -52,6 +54,8 @@ const standing={rows:[
 ],yourRank:1,participants:2};
 it("accepts valid ranked, tied, bounded standings and empty standings",()=>{
   expect(readDailyStandings(standing)).toEqual(standing);
+  const unicode={...standing,rows:[{...standing.rows[0],alias:"🙂".repeat(32)}]};
+  expect(readDailyStandings(unicode)).toEqual(unicode);
   expect(readDailyStandings({rows:[],yourRank:null,participants:0})).toEqual({rows:[],yourRank:null,participants:0});
 });
 it("rejects standings that would crash rendering or misstate rank and progress",()=>{
