@@ -707,6 +707,77 @@ describe("IndexedDB-first local vault", () => {
     expect(() => assertVaultWritesSince(blocked)).toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
+  it.each(["intact", "tampered"] as const)(
+    "recovers an orphaned marker after partial deletion only with matching scoped evidence (%s)",
+    async markerState => {
+      const key = STORAGE_KEYS.persistedState;
+      const markerKey = `${key}:fallback-newer`;
+      const scopedKey = `${key}:user:jd`;
+      const unrelatedAccountKey = `${key}:user:other-learner`;
+      const pendingKey = `${key}:removal-pending`;
+      const snapshot = (label: string, account = "jd") => JSON.stringify({
+        state: { profile: { userId: account }, label }, version: 34,
+      });
+      const old = snapshot("old committed");
+      const offline = snapshot("last acknowledged offline edit");
+      const unrelated = snapshot("other user's preserved backup", "other-learner");
+      await localVaultStorage.setItem(key, old);
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      await flushLocalVaultWrites();
+      const originalMarker = storage.getItem(markerKey);
+      expect(originalMarker).not.toBeNull();
+      storage.setItem(unrelatedAccountKey, unrelated);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      resetLocalVaultRuntimeForTests();
+
+      const originalRemove = storage.removeItem.bind(storage);
+      const denied = vi.spyOn(storage, "removeItem").mockImplementation(name => {
+        if (name === markerKey) throw new DOMException("Partial deletion marker failure", "SecurityError");
+        return originalRemove(name);
+      });
+      const removeCheckpoint = getVaultWriteCheckpoint();
+      try {
+        await localVaultStorage.removeItem(key);
+        await flushLocalVaultWrites();
+      } finally { denied.mockRestore(); }
+      expect(() => assertVaultWritesSince(removeCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(storage.getItem(key)).toBeNull();
+      expect(storage.getItem(markerKey)).toBe(originalMarker);
+      expect(storage.getItem(scopedKey)).toBe(offline);
+      expect(storage.getItem(unrelatedAccountKey)).toBe(unrelated);
+      expect(storage.getItem(pendingKey)).not.toBeNull();
+      resetLocalVaultRuntimeForTests();
+      await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+
+      if (markerState === "tampered") storage.setItem(markerKey, "a peer's unmatched marker");
+      const restorationCheckpoint = getVaultWriteCheckpoint();
+      await replaceLocalVaultItem(key, offline);
+      await flushLocalVaultWrites();
+      if (markerState === "tampered") {
+        expect(() => assertVaultWritesSince(restorationCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+        expect(storage.getItem(pendingKey)).not.toBeNull();
+        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        expect(storage.getItem(scopedKey)).toBe(offline);
+        expect(storage.getItem(unrelatedAccountKey)).toBe(unrelated);
+        return;
+      }
+      expect(() => assertVaultWritesSince(restorationCheckpoint)).not.toThrow();
+      expect(storage.getItem(pendingKey)).toBeNull();
+      expect(storage.getItem(markerKey)).toBe(originalMarker);
+      expect(storage.getItem(scopedKey)).toBe(offline);
+      expect(storage.getItem(unrelatedAccountKey)).toBe(unrelated);
+      resetLocalVaultRuntimeForTests();
+      expect(await localVaultStorage.getItem(key)).toBe(offline);
+      const savedCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, snapshot("new ordinary save after recovery"));
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(savedCheckpoint)).not.toThrow();
+      expect(await localVaultStorage.getItem(key)).toBe(snapshot("new ordinary save after recovery"));
+      expect(storage.getItem(unrelatedAccountKey)).toBe(unrelated);
+    },
+  );
+
   it("finishes an explicit workspace deletion without retaining a stale removal intent", async () => {
     const key = STORAGE_KEYS.persistedState;
     const snapshot = (label: string) => JSON.stringify({
