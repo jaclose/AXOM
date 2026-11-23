@@ -227,19 +227,23 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     setBusy("publishing"); setError(""); setResults({});
     const published = new Map<string, string>();
     let sharingInFlight = false;
+    let uploadAttempted = false;
     try {
       const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
       let sharingUnconfirmed = false;
       let blocked = false;
       for (let start = 0; start < jobs.length && !blocked && !abort.signal.aborted; start += BATCH_SIZE) {
+        uploadAttempted = true;
         const report = await uploadAcademicBatch(jobs.slice(start, start + BATCH_SIZE), {
           signal: abort.signal,
           progress: message => {
+            scope.assertCurrent();
             const split = message.indexOf(": ");
             const course = byKey.get(message.slice(0, split));
             setProgress(course ? `${label(course)}: ${message.slice(split + 2)}` : message);
           },
           onOutcome: outcome => {
+            scope.assertCurrent();
             const course = byKey.get(outcome.key);
             if (!course) return;
             let next: CourseState;
@@ -257,6 +261,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
             setResults(states => ({ ...states, [outcome.key]: next }));
           },
         });
+        scope.assertCurrent();
         blocked = report.authBlocked > 0;
       }
       if (share && published.size && !abort.signal.aborted) {
@@ -297,11 +302,12 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         : `${plural(verified.size, "course")} published and verified.${missed ? ` ${plural(missed, "course")} not published. See each course for the reason.` : ""}`);
       if (verified.size) onPublished();
     } catch (cause) {
+      // Preserve account isolation even when a delayed batch/report fails.
+      // Switching A→B→A cannot authorize an old operation to update the UI.
+      try { scope.assertCurrent(); } catch { return; }
       if (sharingInFlight && published.size) {
         // A network rejection cannot prove an already-dispatched visibility RPC
         // failed or was rolled back. The verified private uploads still exist.
-        // Do not write stale account A results into a switched account B.
-        try { scope.assertCurrent(); } catch { return; }
         const verified = new Set(published.values());
         setResults(states => {
           const next = { ...states };
@@ -314,6 +320,16 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
         setProgress(`${plural(verified.size, "course")} published and verified. Sharing outcome is unconfirmed because the request failed or its connection ended. An in-flight request may have completed. Refresh My courses to verify visibility before retrying or withdrawing.`);
         onPublished();
+      } else if (uploadAttempted) {
+        // A later batch can reject after an earlier batch has already delivered
+        // immutable, owner-verified receipts. Neither those receipts nor an
+        // in-flight server write can be disproved by a rejected client promise.
+        const verified = new Set(published.values());
+        setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
+        setProgress(verified.size
+          ? `${plural(verified.size, "course")} published and verified before publishing was interrupted. Other uploads have no confirmed readback; a remote request may have completed. Refresh My courses to verify what was saved before retrying. Sharing was not requested for these verified courses.`
+          : "Publishing was interrupted. No verified upload receipts were returned. A remote write may have completed. Refresh My courses to verify what was saved before retrying.");
+        if (verified.size) onPublished();
       } else {
         setProgress("");
         setError(cause instanceof Error ? cause.message : "Publishing could not start. Nothing was uploaded.");
