@@ -352,6 +352,9 @@ function newerFallbackCopy(fallbackStore: Pick<Storage, "getItem"> | null, name:
     // raises SecurityError. Treating that ambiguity as no fallback can hydrate
     // an older IndexedDB workspace or acknowledge a blind competing save.
     if (observesWorkspace(name)) {
+      // Do not let a later apparently healthy read authorize this unhydrated
+      // tab to save blindly. A fresh verified hydration must reconcile it.
+      conflictedWorkspaceKeys.add(name);
       throw isVaultConflictError(error) ? error : new VaultConflictError();
     }
     return null;

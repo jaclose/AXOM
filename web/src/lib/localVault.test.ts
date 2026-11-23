@@ -875,6 +875,16 @@ describe("a save that could not reach IndexedDB", () => {
       } finally {
         denied.mockRestore();
       }
+      // Storage access recovering is not itself proof that this tab ever
+      // hydrated the acknowledged offline bytes. A same-runtime blind save
+      // must remain blocked until a fresh verified hydration/reload.
+      const staleCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, attempted);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(staleCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+      expect(values.get(key)).toBe(offline);
+      expect(values.get(markerKey)).toBe(marker);
+      expect(values.get(scopedKey)).toBe(offline);
       resetLocalVaultRuntimeForTests();
       await expect(localVaultStorage.getItem(key)).resolves.toBe(offline);
       expect(values.get(key)).toBe(offline);
