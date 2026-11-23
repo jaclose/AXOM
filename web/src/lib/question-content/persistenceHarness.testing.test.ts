@@ -7,7 +7,7 @@ import { closeWorkspace, openEmptyWorkspace } from "./persistenceHarness.testing
 
 function openSeededReader(key: string, value: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = fakeIndexedDb.open(DB_NAME, 1);
+    const request = fakeIndexedDb.open(DB_NAME);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME);
     };
@@ -43,6 +43,7 @@ describe("shared question-content persistence harness lifecycle", () => {
   it("refuses a blocked fake-IDB deletion and keeps the existing workspace bytes while the reader is open", async () => {
     const key = STORAGE_KEYS.persistedState;
     const previous = JSON.stringify({ state: { questions: [{ id: "synthetic-keep" }] }, version: 34 });
+    await deleteSeededDatabase();
     const reader = await openSeededReader(key, previous);
     try {
       await expect(openEmptyWorkspace()).rejects.toThrow(/blocked deleting synthetic indexeddb/i);
