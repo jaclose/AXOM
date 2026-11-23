@@ -3,6 +3,8 @@ import { SGU_CURRICULUM, type CurriculumTemplate } from "../curricula";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { buildQuestionAvailabilityIndex, questionAvailabilityModuleKey } from "./moduleQuestionAvailability";
+import { buildCourseQuestionBank } from "./questionBank";
+import { scopeProgress } from "./scope";
 
 const stamp = "2026-10-14T12:00:00.000Z";
 const terms = [
@@ -427,5 +429,59 @@ describe("source-week availability proof", () => {
     });
     expect(report.unassignedCollections).toBe(0);
     expect(JSON.stringify([source, record])).toBe(before);
+  });
+});
+
+describe("current practice eligibility versus recorded scope progress", () => {
+  it("counts a clean attempted original once across source and review membership", () => {
+    const rows = [question("answered", { setId: "source", status: "correct",
+      attempts: [{ at: stamp, answerKey: "A", status: "correct" }] })];
+    const collections = [
+      set("source", ["answered"], { scope: goerScope }),
+      set("review", ["answered"], { scope: goerScope, kind: "review" }),
+    ];
+    const report = buildQuestionAvailabilityIndex(input(collections, rows));
+    const progress = scopeProgress(rows, goerScope, new Map(collections.map((item) => [item.id, item])));
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 1,
+    });
+    expect(progress).toMatchObject({ total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0,
+      questionIds: ["answered"] });
+    const bank = buildCourseQuestionBank(collections, rows, courses, terms);
+    const week = bank.find((item) => item.courseId === "ppm-501")?.weeks.find((item) => item.week === 2);
+    expect(week).toMatchObject({ questionIds: ["answered"], ready: 1, attempted: 1, missed: 0 });
+  });
+
+  it("holds identical raw copies out of fresh availability without doubling or deleting recorded history", () => {
+    const row = question("answered", { setId: "source", status: "correct",
+      attempts: [{ at: stamp, answerKey: "A", status: "correct" }] });
+    const collections = [set("source", ["answered"], { scope: goerScope })];
+    const rows = [row, structuredClone(row)];
+    const before = JSON.stringify([collections, rows]);
+    const report = buildQuestionAvailabilityIndex(input(collections, rows));
+    const progress = scopeProgress(rows, goerScope, new Map(collections.map((item) => [item.id, item])));
+    expect(report.unassignedQuestions).toBe(2);
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.readyQuestions ?? 0).toBe(0);
+    expect(progress).toMatchObject({ total: 1, attempted: 1, firstTimeCorrect: 1, missed: 0,
+      questionIds: ["answered"] });
+    expect(JSON.stringify([collections, rows])).toBe(before);
+  });
+
+  it("withholds contradictory recorded outcomes from both projections in either record order", () => {
+    const correct = question("conflict", { setId: "source", status: "correct",
+      attempts: [{ at: stamp, answerKey: "A", status: "correct" }] });
+    const incorrect = question("conflict", { setId: "source", status: "incorrect",
+      attempts: [{ at: stamp, answerKey: "B", status: "incorrect" }] });
+    const collections = [set("source", ["conflict"], { scope: goerScope })];
+    for (const rows of [[correct, incorrect], [incorrect, correct]]) {
+      const before = JSON.stringify([collections, rows]);
+      const report = buildQuestionAvailabilityIndex(input(collections, rows));
+      const progress = scopeProgress(rows, goerScope, new Map(collections.map((item) => [item.id, item])));
+      expect(report.unassignedQuestions).toBe(2);
+      expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.readyQuestions ?? 0).toBe(0);
+      expect(progress).toMatchObject({ total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0,
+        sourceReviewHeld: 1, questionIds: [] });
+      expect(JSON.stringify([collections, rows])).toBe(before);
+    }
   });
 });
