@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import {
   Brain, CheckCircle2, ExternalLink, LineChart, Loader, ShieldCheck, Sparkles, CircleDashed,
 } from "lucide-react";
@@ -167,11 +167,6 @@ function StatusColumn({ status, features }: { status: FeatureStatus; features: F
 }
 
 function WebsitePreview() {
-  const [refreshKey, setRefreshKey] = useState(0);
-  useEffect(() => {
-    const timer = window.setInterval(() => setRefreshKey((key) => key + 1), 30 * 60 * 1000);
-    return () => window.clearInterval(timer);
-  }, []);
   return (
     <GlassCard pad className="website-preview-card">
       <PanelHeader title="Jafar Dabbagh" sub="The person building AXOM. More here soon; for now, the site."
@@ -179,7 +174,7 @@ function WebsitePreview() {
           Open site <ExternalLink size={ICON_SIZE.body} />
         </a>} />
       <div className="website-frame-shell">
-        <iframe key={refreshKey} title="Live site preview" src={WEBSITE_URL} loading="lazy"
+        <iframe title="Live site preview" src={WEBSITE_URL} loading="lazy"
           referrerPolicy="no-referrer" sandbox="allow-scripts allow-forms" />
       </div>
       <div className="sub" style={{ marginTop: 8 }}>If the preview stays blank, use Open site.</div>
