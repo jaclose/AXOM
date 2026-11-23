@@ -748,6 +748,9 @@ describe("verified separate compressed workspace fallback", () => {
       const deletionCheckpoint = getVaultWriteCheckpoint();
       await localVaultStorage.removeItem(key);
       expect(() => assertVaultWritesSince(deletionCheckpoint)).not.toThrow();
+      // Confirm the empty vault and its durable deletion generation before
+      // starting the distinct synthetic profile in the same mounted tab.
+      expect(await localVaultStorage.getItem(key)).toBeNull();
       vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
         if (this.name === STORE_NAME) throw new DOMException("Synthetic state quota", "QuotaExceededError");
         return put.apply(this, args);
