@@ -464,6 +464,7 @@ async function retiredPackedReceipt(
     || typeof parsed.committedUserId !== "string") throw new VaultConflictError();
 
   if (parsed.version === 1) {
+    if (typeof parsed.raw !== "string") throw new VaultConflictError();
     if (parsed.raw !== copy.raw) return null;
   } else if (parsed.version === 2) {
     if (typeof parsed.rawSha256 !== "string" || !/^[a-f0-9]{64}$/.test(parsed.rawSha256)) {
