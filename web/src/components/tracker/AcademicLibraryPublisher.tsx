@@ -225,9 +225,10 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     const courses = chosen;
     const byKey = new Map(courses.map(course => [course.catalogId, course]));
     setBusy("publishing"); setError(""); setResults({});
+    const published = new Map<string, string>();
+    let sharingInFlight = false;
     try {
       const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
-      const published = new Map<string, string>();
       let sharingUnconfirmed = false;
       let blocked = false;
       for (let start = 0; start < jobs.length && !blocked && !abort.signal.aborted; start += BATCH_SIZE) {
@@ -259,6 +260,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         blocked = report.authBlocked > 0;
       }
       if (share && published.size && !abort.signal.aborted) {
+        sharingInFlight = true;
         setProgress("Sharing the published courses…");
         const outcomes = await shareAcademicCourses([...published.keys()], accountId,
           { assertCurrent: scope.assertCurrent, signal: abort.signal });
@@ -283,6 +285,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           }
           return next;
         });
+        sharingInFlight = false;
       }
       const verified = new Set(published.values());
       setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
@@ -294,8 +297,27 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         : `${plural(verified.size, "course")} published and verified.${missed ? ` ${plural(missed, "course")} not published. See each course for the reason.` : ""}`);
       if (verified.size) onPublished();
     } catch (cause) {
-      setProgress("");
-      setError(cause instanceof Error ? cause.message : "Publishing could not start. Nothing was uploaded.");
+      if (sharingInFlight && published.size) {
+        // A network rejection cannot prove an already-dispatched visibility RPC
+        // failed or was rolled back. The verified private uploads still exist.
+        // Do not write stale account A results into a switched account B.
+        try { scope.assertCurrent(); } catch { return; }
+        const verified = new Set(published.values());
+        setResults(states => {
+          const next = { ...states };
+          for (const key of verified) {
+            const state = next[key];
+            if (state?.state === "published") next[key] = { ...state, sharingUnconfirmed: true };
+          }
+          return next;
+        });
+        setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
+        setProgress(`${plural(verified.size, "course")} published and verified. Sharing outcome is unconfirmed because the request failed or its connection ended. An in-flight request may have completed. Refresh My courses to verify visibility before retrying or withdrawing.`);
+        onPublished();
+      } else {
+        setProgress("");
+        setError(cause instanceof Error ? cause.message : "Publishing could not start. Nothing was uploaded.");
+      }
     } finally { scope.dispose(); setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
   }
 
