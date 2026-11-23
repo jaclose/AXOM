@@ -123,6 +123,16 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     drafts.set(resolution.key, next);
     return next;
   };
+  // Raw duplicate question IDs cannot be resolved by Map insertion order, even
+  // when both records happen to contain identical source or answer metadata.
+  // Keep both stored originals for repair, but neither can certify readiness
+  // or source-week coverage in this read model.
+  const seenQuestionIds = new Set<string>();
+  const duplicateQuestionIds = new Set<string>();
+  for (const question of input.questions) {
+    if (seenQuestionIds.has(question.id)) duplicateQuestionIds.add(question.id);
+    seenQuestionIds.add(question.id);
+  }
   const byId = new Map(input.questions.map((question) => [question.id, question]));
   // A Map silently drops the first source set when raw originals share an
   // identity. Hold every collided original before scope or week attribution.
@@ -151,7 +161,8 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   for (const question of input.questions) {
     // Neither a last-write-wins primary nor a legacy secondary membership may
     // certify a question whose original source-set identity is ambiguous.
-    if ((question.setId != null && duplicateSetIds.has(question.setId))
+    if (duplicateQuestionIds.has(question.id)
+      || (question.setId != null && duplicateSetIds.has(question.setId))
       || (question.setId == null && ambiguousMembers.has(question.id))) {
       unassignedQuestions += 1;
       continue;
@@ -195,6 +206,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     // A distinct review set cannot launder an ambiguous primary association
     // into a source-indexed course/week collection.
     const ambiguousPrimary = set.questionIds.some((id) => {
+      if (duplicateQuestionIds.has(id)) return true;
       const member = byId.get(id);
       return Boolean(member && (member.setId != null
         ? duplicateSetIds.has(member.setId)
