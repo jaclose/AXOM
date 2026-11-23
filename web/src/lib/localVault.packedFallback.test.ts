@@ -735,6 +735,7 @@ describe("verified separate compressed workspace fallback", () => {
 
   it.each(["explicit removal", "confirmed empty read"])("forgets the previous profile after %s while keeping backups", async lifecycle => {
     const fixture = await quotaFixture();
+    let quotaSpy = fixture.blockVault;
     await localVaultStorage.setItem(key, snapshot("old profile", true));
     const backupKey = `${STORAGE_KEYS.localBackupPrefix}existing`;
     values.set(backupKey, "historical backup bytes");
@@ -751,7 +752,7 @@ describe("verified separate compressed workspace fallback", () => {
       // Confirm the empty vault and its durable deletion generation before
       // starting the distinct synthetic profile in the same mounted tab.
       expect(await localVaultStorage.getItem(key)).toBeNull();
-      vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
+      quotaSpy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args) {
         if (this.name === STORE_NAME) throw new DOMException("Synthetic state quota", "QuotaExceededError");
         return put.apply(this, args);
       });
@@ -771,7 +772,9 @@ describe("verified separate compressed workspace fallback", () => {
     expect(JSON.parse(values.get(packedKey)!)).toMatchObject({ userId: "new-synthetic-owner" });
     expect(await localVaultStorage.getItem(key)).toBe(fresh);
     expect(values.get(backupKey)).toBe("historical backup bytes");
-    expect(fixture.blockVault).toHaveBeenCalled();
+    // The explicit-removal path replaced the original quota spy after deletion.
+    // Assert the active quota injection, not the already-restored spy.
+    expect(quotaSpy).toHaveBeenCalled();
   });
 
   it.each(["version", "name", "account", "length", "oversized", "hash", "payload", "fingerprint"])("refuses a corrupt %s without adopting the stale vault or replacing the packed bytes", async field => {
