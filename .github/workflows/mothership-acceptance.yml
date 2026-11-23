@@ -11,6 +11,7 @@ on:
       - 'web/src/lib/localVault.packedFallback.test.ts'
       - 'web/src/lib/storageRecovery.test.ts'
       - 'web/src/lib/localBackup.test.ts'
+      - 'web/src/lib/updateCheckpoint.test.ts'
       - 'web/src/lib/question-content/persistenceHarness.testing.ts'
       - 'web/src/lib/question-content/persistenceHarness.testing.test.ts'
       - 'web/src/components/questions/MassImport.accept.test.tsx'
@@ -76,6 +77,20 @@ jobs:
         with:
           name: mothership-import-fixtures-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/mothership-import-fixtures.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Update checkpoint synthetic IDB and recovery regressions
+        run: |
+          result=0
+          npm --prefix web run test -- src/lib/updateCheckpoint.test.ts --reporter=verbose > "$RUNNER_TEMP/mothership-update-checkpoint.log" 2>&1 || result=$?
+          tail -n 120 "$RUNNER_TEMP/mothership-update-checkpoint.log"
+          exit "$result"
+      - name: Preserve checkpoint recovery test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mothership-update-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mothership-update-checkpoint.log
           if-no-files-found: warn
           retention-days: 7
       - name: Repository regression tests and hygiene
