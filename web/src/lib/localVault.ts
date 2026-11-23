@@ -1381,8 +1381,23 @@ const vaultStorage: StateStorage = {
       // the storage implementation itself is the authority on available room.
       let saved: boolean;
       let failure: unknown;
-      const fallbackBeforeRetry = newerFallbackCopy(fallbackStore, name);
-      const retiredBeforeRetry = fallbackBeforeRetry && retiredFallbackReceipt(fallbackStore, name, fallbackBeforeRetry);
+      let fallbackBeforeRetry: NewerFallbackCopy | null;
+      let retiredBeforeRetry: RetiredFallbackReceipt | null;
+      try {
+        fallbackBeforeRetry = newerFallbackCopy(fallbackStore, name);
+        retiredBeforeRetry = fallbackBeforeRetry && retiredFallbackReceipt(fallbackStore, name, fallbackBeforeRetry);
+      } catch (recoveryReadError) {
+        // A peer may update the receipt while the IndexedDB write is pending.
+        // A failed/malformed retry read is a rejected save, not a swallowed
+        // exception from the background write drain or permission to overwrite
+        // an independently acknowledged recovery copy.
+        const conflict = isVaultConflictError(recoveryReadError)
+          ? recoveryReadError : new VaultConflictError();
+        if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        vaultWriteFailures.set(writeSequence, conflict);
+        markVaultWriteFailure(new Date(), conflict);
+        return;
+      }
       const retryExpected = workspaceExpectation(name);
       const previousFallback = retiredBeforeRetry && retryExpected?.fingerprints.includes(retiredBeforeRetry.committedFingerprint)
         ? null : fallbackBeforeRetry;
