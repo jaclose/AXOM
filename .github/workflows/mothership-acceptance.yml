@@ -10,6 +10,9 @@ on:
       - 'web/src/lib/localVault.test.ts'
       - 'web/src/lib/localVault.packedFallback.test.ts'
       - 'web/src/lib/storageRecovery.test.ts'
+      - 'web/src/lib/localBackup.test.ts'
+      - 'web/src/components/questions/MassImport.accept.test.tsx'
+      - 'web/src/components/questions/ImportPanel.persistence.test.tsx'
       - '.github/workflows/mothership-acceptance.yml'
   workflow_dispatch:
 

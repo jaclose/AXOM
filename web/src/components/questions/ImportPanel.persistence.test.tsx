@@ -9,7 +9,7 @@ import { ImportPanel } from "./ImportPanel";
 import { importFromCsv } from "../../lib/questionImport";
 import { questionMappingStatus } from "../../lib/questions";
 import { parseImport, toPortableState } from "../../lib/backup";
-import { DB_NAME } from "../../lib/localVault";
+import { DB_NAME, flushLocalVaultWrites, resetLocalVaultRuntimeForTests } from "../../lib/localVault";
 import { hasReviewedImportInFlight, persistReviewedImportOnce, settledReviewedImportSnapshot, type ReviewedImportPersistenceResult } from "../../lib/questionImportFinalization";
 import type { SourceDocument } from "../../lib/library";
 
@@ -41,6 +41,10 @@ const localStorageStub: Storage = {
 };
 
 beforeEach(async () => {
+  // This fixture intentionally destroys fake IndexedDB between tests: the
+  // simulated tab must not retain a prior database's observed CAS revision.
+  await flushLocalVaultWrites();
+  resetLocalVaultRuntimeForTests();
   localValues.clear();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
@@ -51,6 +55,7 @@ beforeEach(async () => {
 afterEach(async () => {
   cleanup();
   await useStore.setState(original);
+  await flushLocalVaultWrites();
   vi.unstubAllGlobals();
 });
 
