@@ -5,6 +5,9 @@ import { STORAGE_KEYS } from "./brand";
 import type { QuestionSet, SourceDocument } from "./library";
 import {
   DB_NAME,
+  STORE_NAME,
+  assertVaultWritesSince,
+  resetLocalVaultRuntimeForTests,
   flushLocalVaultWrites,
   getVaultWriteCheckpoint,
   localVaultStorage,
@@ -114,13 +117,24 @@ function planWithoutDocument(
 }
 
 beforeEach(async () => {
-  values.clear();
+  await flushLocalVaultWrites();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", storage);
   await deleteDatabase(DB_NAME);
+  // A confirmed synthetic deletion starts a new lifetime, not an external
+  // deletion of a workspace that this tab has already observed.
+  resetLocalVaultRuntimeForTests();
+  values.clear();
   await useStore.persist.rehydrate();
+  const checkpoint = getVaultWriteCheckpoint();
   await useStore.setState({ questions: [], questionSets: [], documents: [] });
+  await flushLocalVaultWrites();
+  expect(getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  assertVaultWritesSince(checkpoint);
+  const primary = await readPrimary();
+  expect(JSON.parse(primary).state).toMatchObject({ questions: [], questionSets: [], documents: [] });
+  expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(primary);
 });
 
 afterEach(async () => {
@@ -130,12 +144,36 @@ afterEach(async () => {
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", storage);
   vi.restoreAllMocks();
-  await useStore.setState(original);
-  await deleteDatabase(DB_NAME);
-  vi.unstubAllGlobals();
+  try {
+    await flushLocalVaultWrites();
+    await useStore.setState(original);
+    await flushLocalVaultWrites();
+    await deleteDatabase(DB_NAME);
+    resetLocalVaultRuntimeForTests();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe("atomic reviewed-import store transaction", () => {
+  it("does not report a blocked synthetic database deletion as completed", async () => {
+    const name = `${DB_NAME}-atomic-blocked-test`;
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = fakeIndexedDb.open(name, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("probe");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      await expect(deleteDatabase(name)).rejects.toThrow(/blocked/i);
+      expect(db.objectStoreNames.contains("probe")).toBe(true);
+    } finally {
+      db.close();
+      // Wait for the queued deletion to complete before leaving this test.
+      await deleteDatabase(name);
+    }
+  });
+
   it("persists all reviewed records in one vault write", async () => {
     const checkpoint = getVaultWriteCheckpoint();
 
@@ -161,6 +199,7 @@ describe("atomic reviewed-import store transaction", () => {
     });
 
     const raw = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+    expect(raw).toBe(await readPrimary());
     const persisted = JSON.parse(raw!).state;
     expect(persisted.questions.map((item: { id: string }) => item.id)).toEqual(["q-2", "q-1"]);
     expect(persisted.questionSets[0].questionIds).toEqual(["q-1", "q-2"]);
@@ -259,6 +298,7 @@ describe("atomic reviewed-import store transaction", () => {
   });
 
   it("restores all three in-memory slices and reports unconfirmed rollback durability", async () => {
+    const durableBefore = await readPrimary();
     vi.stubGlobal("indexedDB", undefined);
     vi.stubGlobal("localStorage", undefined);
     const checkpoint = getVaultWriteCheckpoint();
@@ -272,6 +312,8 @@ describe("atomic reviewed-import store transaction", () => {
     });
     expect(getVaultWriteCheckpoint() - checkpoint).toBe(2);
     expect(useStore.getState()).toMatchObject({ questions: [], questionSets: [], documents: [] });
+    await flushLocalVaultWrites();
+    expect(await readPrimary()).toBe(durableBefore);
   });
 
   it("restores prepared-review metadata in memory and leaves the durable baseline intact after a real vault outage", async () => {
@@ -354,6 +396,7 @@ describe("atomic reviewed-import store transaction", () => {
     useStore.setState({ questions: [], questionSets: [], documents: [catalogDocument, reviewDocument] });
     await flushLocalVaultWrites();
     const durableBefore = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+    expect(durableBefore).toBe(await readPrimary());
 
     vi.stubGlobal("indexedDB", undefined);
     vi.stubGlobal("localStorage", undefined);
@@ -365,6 +408,7 @@ describe("atomic reviewed-import store transaction", () => {
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);
     vi.stubGlobal("localStorage", storage);
     const durableAfter = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
+    expect(durableAfter).toBe(await readPrimary());
     expect(JSON.parse(durableAfter!).state.documents).toEqual(JSON.parse(durableBefore!).state.documents);
   });
 
@@ -909,10 +953,36 @@ describe("atomic reviewed-import store transaction", () => {
 });
 
 function deleteDatabase(name: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const request = fakeIndexedDb.deleteDatabase(name);
     request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Synthetic database deletion failed"));
+    request.onblocked = () => reject(new Error("Synthetic database deletion blocked"));
   });
+}
+
+// Independent physical read of this small unchunked synthetic workspace.
+// Directly uses the fake factory even during an intentional browser outage.
+async function readPrimary(): Promise<string> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = fakeIndexedDb.open(DB_NAME);
+    request.onupgradeneeded = () => request.transaction?.abort();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Synthetic database open failed"));
+    request.onblocked = () => reject(new Error("Synthetic database open blocked"));
+  });
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const request = tx.objectStore(STORE_NAME).get(STORAGE_KEYS.persistedState);
+      tx.oncomplete = () => {
+        if (typeof request.result === "string") resolve(request.result);
+        else reject(new Error("Synthetic primary workspace missing"));
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("Synthetic read failed"));
+      tx.onabort = tx.onerror;
+    });
+  } finally {
+    db.close();
+  }
 }
