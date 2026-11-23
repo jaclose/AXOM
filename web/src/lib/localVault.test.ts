@@ -767,6 +767,12 @@ describe("IndexedDB-first local vault", () => {
       expect(storage.getItem(markerKey)).toBe(originalMarker);
       expect(storage.getItem(scopedKey)).toBe(offline);
       expect(storage.getItem(unrelatedAccountKey)).toBe(unrelated);
+      // An immutable backup taken after reconciliation must remain inspectable.
+      // The original marker and account-scoped recovery bytes are retained.
+      expect(await resolveWorkspaceSnapshotRecord(
+        { [key]: offline, [`${key}:active-user`]: "jd" },
+        Object.fromEntries(values), key,
+      )).toBe(offline);
       resetLocalVaultRuntimeForTests();
       expect(await localVaultStorage.getItem(key)).toBe(offline);
       const savedCheckpoint = getVaultWriteCheckpoint();
@@ -774,6 +780,10 @@ describe("IndexedDB-first local vault", () => {
       await flushLocalVaultWrites();
       expect(() => assertVaultWritesSince(savedCheckpoint)).not.toThrow();
       expect(await localVaultStorage.getItem(key)).toBe(snapshot("new ordinary save after recovery"));
+      expect(await resolveWorkspaceSnapshotRecord(
+        { [key]: snapshot("new ordinary save after recovery"), [`${key}:active-user`]: "jd" },
+        Object.fromEntries(values), key,
+      )).toBe(snapshot("new ordinary save after recovery"));
       expect(storage.getItem(unrelatedAccountKey)).toBe(unrelated);
     },
   );
