@@ -253,6 +253,51 @@ describe("course tracker source-versus-question availability", () => {
   });
 });
 
+describe("raw QuestionRecord identity integrity in availability", () => {
+  it("holds both conflicting originals rather than crediting either course or indexing their source set", () => {
+    const conflicted = [
+      question("same", { setId: "source", module: "GOER", courseId: "ppm-501", week: 2 }),
+      question("same", { setId: "source", module: "NCRS", courseId: "ppm-500", week: 1 }),
+    ];
+    const safe = question("safe", { setId: "source", module: "GOER", courseId: "ppm-501", week: 2 });
+    const source = set("source", ["same", "safe"], { scope: goerScope });
+    for (const originals of [conflicted, [...conflicted].reverse()]) {
+      const before = JSON.stringify([source, originals, safe]);
+      const report = buildQuestionAvailabilityIndex(input([source], [...originals, safe]));
+      expect(report.unassignedQuestions).toBe(2);
+      expect(report.unassignedCollections).toBe(1);
+      expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        storedQuestions: 1, readyQuestions: 1, collections: 0,
+      });
+      expect(report.byModule.get(questionAvailabilityModuleKey("Term 4", "NCRS"))?.readyQuestions ?? 0).toBe(0);
+      expect(JSON.stringify([source, originals, safe])).toBe(before);
+    }
+  });
+
+  it("holds even byte-identical duplicate originals, never counting a single arbitrary winner as ready", () => {
+    const record = question("repeated", { module: "GOER", courseId: "ppm-501", week: 2 });
+    const report = buildQuestionAvailabilityIndex(input([], [record, structuredClone(record)]));
+    expect(report.unassignedQuestions).toBe(2);
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.readyQuestions ?? 0).toBe(0);
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))?.storedQuestions ?? 0).toBe(0);
+  });
+
+  it("does not let a distinct review set certify a duplicated original while unrelated sources remain usable", () => {
+    const duplicate = question("same", { setId: "primary" });
+    const valid = question("valid", { setId: "clean", module: "GOER", courseId: "ppm-501", week: 3 });
+    const report = buildQuestionAvailabilityIndex(input([
+      set("primary", ["same"], { scope: goerScope }),
+      set("review", ["same"], { kind: "review", scope: goerScope }),
+      set("clean", ["valid"], { scope: { ...goerScope, week: 3 } }),
+    ], [duplicate, structuredClone(duplicate), valid]));
+    expect(report.unassignedQuestions).toBe(2);
+    expect(report.unassignedCollections).toBe(2);
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      collections: 1, readyQuestions: 1, storedQuestions: 1, indexedWeeks: [3],
+    });
+  });
+});
+
 describe("source-week availability proof", () => {
   it("does not infer a week from a set when the question declares an invalid one", () => {
     for (const raw of [0, 100, -1, "2026-11-05", "Week 2-3"]) {
