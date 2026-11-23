@@ -34,10 +34,14 @@ const scopedStateKey = (name: string, userId: string) => `${name}:user:${userId}
 const fallbackMarkerKey = (name: string) => `${name}:fallback-newer`;
 /** Persisted before cross-store workspace deletion; cleared only after every tier confirms cleanup. */
 const removalIntentKey = (name: string) => `${name}:removal-pending`;
+/** Durable deletion lineage. Unlike the plain workspace bytes, this survives
+ * successful deletion, so null -> saved -> deleted cannot fool an old tab. */
+const deletionGenerationKey = (name: string) => `${name}:deletion-generation`;
 let vaultWriteSequence = 0;
 const vaultWriteFailures = new Map<number, Error>();
 const observedVaultSnapshots = new Map<string, string | null>();
 const observedVaultUsers = new Map<string, string>();
+const observedDeletionGenerations = new Map<string, string | null>();
 const conflictedWorkspaceKeys = new Set<string>();
 /** A blocked versionchange request cannot be cancelled. Fail later upgrade
  * attempts promptly until that queued request either succeeds or errors. */
@@ -65,6 +69,7 @@ export function isVaultConflictError(error: unknown): error is Error & { code?: 
 export function resetLocalVaultRuntimeForTests(): void {
   observedVaultSnapshots.clear();
   observedVaultUsers.clear();
+  observedDeletionGenerations.clear();
   conflictedWorkspaceKeys.clear();
   vaultUpgradeBlocked = false;
 }
@@ -267,6 +272,8 @@ function workspaceFingerprint(value: string | null | undefined): string | null {
 type VaultExpectation = {
   fingerprints: readonly (string | null)[];
   latchConflict?: boolean;
+  /** Atomic empty-workspace lineage, read on a verified empty hydration. */
+  deletionGeneration?: string | null;
 };
 
 type NewerFallbackCopy = {
@@ -312,6 +319,7 @@ function workspaceExpectation(name: string): VaultExpectation | undefined {
     // A runtime that has not hydrated cannot safely replace an existing vault.
     // Zustand hydrates before normal writes; null only permits a genuinely new vault.
     fingerprints: [observedVaultFingerprint(name) ?? null],
+    deletionGeneration: observedDeletionGenerations.get(name) ?? null,
   };
 }
 
@@ -866,6 +874,10 @@ async function writeVault(
     let conflict: VaultConflictError | null = null;
     let chunkWriteFailure: Error | null = null;
     let settled = false;
+    // Request before the primary read so its result is available when the
+    // primary CAS runs, in this very same readwrite transaction.
+    const deletionGenerationRead = expected?.fingerprints.includes(null)
+      ? store.get(deletionGenerationKey(name)) : undefined;
 
     const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
       // A missing record can also mean another tab intentionally deleted the
@@ -873,9 +885,22 @@ async function writeVault(
       // may initialize an empty vault; accepting every missing record would
       // let a stale tab resurrect deleted learner data. Keep this comparison
       // inside the same readwrite transaction as the actual write.
+      const currentFingerprint = workspaceFingerprint(current);
+      const storedDeletionGeneration = deletionGenerationRead?.result;
+      const invalidDeletionGeneration = deletionGenerationRead !== undefined
+        && storedDeletionGeneration !== undefined && (
+          typeof storedDeletionGeneration !== "string" || storedDeletionGeneration.length === 0
+        );
+      // A tab that observed an empty vault before another tab created and
+      // deleted a workspace must not treat the final null as the same revision.
+      // The tombstone is compared atomically with the primary write.
+      const staleEmptyGeneration = currentFingerprint === null
+        && deletionGenerationRead !== undefined
+        && (invalidDeletionGeneration
+          || (storedDeletionGeneration ?? null) !== (expected?.deletionGeneration ?? null));
       if (
         expected
-        && !expected.fingerprints.includes(workspaceFingerprint(current))
+        && (!expected.fingerprints.includes(currentFingerprint) || staleEmptyGeneration)
       ) {
         conflict = new VaultConflictError();
         if (expected.latchConflict !== false && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
@@ -975,6 +1000,39 @@ function clearFallbackCopy(fallbackStore: Storage | null, name: string, userId: 
   } catch { /* IndexedDB already holds the durable workspace. */ }
 }
 
+/** Verify *both* workspace locations absent and read the deletion generation
+ * in one transaction. Do not certify an empty hydration by a later epoch-only
+ * read: another tab could have created and deleted data between those reads. */
+async function readVerifiedEmptyDeletionGeneration(name: string): Promise<string | null> {
+  const db = await openExistingVault();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const primary = store.get(name);
+    const active = store.get(activeUserKey(name));
+    const generation = store.get(deletionGenerationKey(name));
+    let scoped: IDBRequest | null = null;
+    active.onsuccess = () => {
+      if (typeof active.result === "string" && active.result) {
+        scoped = store.get(scopedStateKey(name, active.result));
+      }
+    };
+    tx.oncomplete = () => {
+      db.close();
+      if (primary.result !== undefined
+        || (scoped !== null && scoped.result !== undefined)
+        || (generation.result !== undefined
+          && (typeof generation.result !== "string" || generation.result.length === 0))) {
+        reject(new VaultConflictError());
+        return;
+      }
+      resolve(typeof generation.result === "string" ? generation.result : null);
+    };
+    tx.onerror = () => { db.close(); reject(tx.error ?? new VaultConflictError()); };
+    tx.onabort = tx.onerror;
+  });
+}
+
 async function readVaultSnapshot(name: string): Promise<string | null> {
   const primary = await readVaultRecord(name, openExistingVault);
   if (primary) return primary;
@@ -983,7 +1041,10 @@ async function readVaultSnapshot(name: string): Promise<string | null> {
   return await readVaultRecord(scopedStateKey(name, activeUser), openExistingVault) ?? null;
 }
 
-async function removeVaultRecords(name: string, active?: string): Promise<void> {
+async function removeVaultRecords(name: string, active?: string): Promise<string | null> {
+  // The UUID never grants account permission; it only makes deletion history
+  // distinguishable even after the primary returns to null.
+  const deletionGeneration = observesWorkspace(name) ? globalThis.crypto.randomUUID() : null;
   const db = await openExistingVault();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -1001,7 +1062,8 @@ async function removeVaultRecords(name: string, active?: string): Promise<void> 
       store.delete(key);
     }
     store.delete(activeUserKey(name));
-    tx.oncomplete = () => { db.close(); resolve(); };
+    if (deletionGeneration !== null) store.put(deletionGeneration, deletionGenerationKey(name));
+    tx.oncomplete = () => { db.close(); resolve(deletionGeneration); };
     tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Unable to remove the local workspace.")); };
     tx.onabort = tx.onerror;
   });
@@ -1564,7 +1626,7 @@ const vaultStorage: StateStorage = {
         fallback.setItem(removalIntentKey(name), deletionIntent);
         if (fallback.getItem(removalIntentKey(name)) !== deletionIntent) throw new VaultConflictError();
       }
-      await removeVaultRecords(name, active);
+      const completedDeletionGeneration = await removeVaultRecords(name, active);
       if (recoveryBefore && fallback) {
         if (fallback.getItem(removalIntentKey(name)) !== deletionIntent
           || fallback.getItem(name) !== recoveryBefore[0]
@@ -1591,6 +1653,7 @@ const vaultStorage: StateStorage = {
       }
       conflictedWorkspaceKeys.delete(name);
       rememberVaultSnapshot(name, null);
+      if (completedDeletionGeneration !== null) observedDeletionGenerations.set(name, completedDeletionGeneration);
     } catch (error) {
       // A partial localStorage cleanup is not proof that the IndexedDB or
       // recovery copy was fully deleted. The next write must rehydrate and
@@ -1782,6 +1845,18 @@ export const localVaultStorage: StateStorage = {
     assertNoPendingVaultRemoval(localFallback(name), name);
     const value = await vaultStorage.getItem(name);
     assertNoPendingVaultRemoval(localFallback(name), name);
+    if (observesWorkspace(name) && value === null) {
+      try {
+        // A successful empty read is a new baseline only when the *same*
+        // transaction also confirms its deletion lineage.
+        const generation = await readVerifiedEmptyDeletionGeneration(name);
+        assertNoPendingVaultRemoval(localFallback(name), name);
+        if (!conflictedWorkspaceKeys.has(name)) observedDeletionGenerations.set(name, generation);
+      } catch {
+        conflictedWorkspaceKeys.add(name);
+        throw new VaultConflictError();
+      }
+    }
     return value;
   },
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
