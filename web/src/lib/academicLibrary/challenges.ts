@@ -23,33 +23,33 @@ const invalidStandings = (): never => { throw new Error("Standings could not be 
 
 /** Validate the complete server contract before an RPC result reaches the shared QBank UI. */
 export function readDailyChallenges(data: unknown): DailyChallenge[] {
-  if (!Array.isArray(data) || data.length > 24) invalidPage();
+  if (!Array.isArray(data) || data.length > 24) return invalidPage();
   const seenChallenges = new Set<string>();
   for (const item of data) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) invalidPage();
+    if (!item || typeof item !== "object" || Array.isArray(item)) return invalidPage();
     const challenge = item as Record<string, unknown>;
     if (!uuid(challenge.id) || seenChallenges.has(challenge.id)
       || !uuid(challenge.collectionId) || !uuid(challenge.revisionId)
       || !text(challenge.module, 1, 180) || !day(challenge.day)
       || !count(challenge.questionCount) || challenge.questionCount < 1 || challenge.questionCount > 100
-      || !Array.isArray(challenge.questions) || challenge.questions.length !== challenge.questionCount) invalidPage();
+      || !Array.isArray(challenge.questions) || challenge.questions.length !== challenge.questionCount) return invalidPage();
     seenChallenges.add(challenge.id);
     const participation = challenge.participation;
     if (participation !== null) {
-      if (!participation || typeof participation !== "object" || Array.isArray(participation)) invalidPage();
+      if (!participation || typeof participation !== "object" || Array.isArray(participation)) return invalidPage();
       const entry = participation as Record<string, unknown>;
-      if (!text(entry.alias, 2, 32) || typeof entry.visible !== "boolean") invalidPage();
+      if (!text(entry.alias, 2, 32) || typeof entry.visible !== "boolean") return invalidPage();
     }
     const seenKeys = new Set<string>();
     for (const item of challenge.questions) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) invalidPage();
+      if (!item || typeof item !== "object" || Array.isArray(item)) return invalidPage();
       const question = item as Record<string, unknown>;
       if (!text(question.key, 3, 400) || !text(question.bankId, 1, 160)
         || !text(question.questionId, 1, 160)
         || question.key !== question.bankId + ":" + question.questionId
         || typeof question.sourceChecksum !== "string"
         || !/^sha256:[a-f0-9]{64}$/.test(question.sourceChecksum)
-        || seenKeys.has(question.key)) invalidPage();
+        || seenKeys.has(question.key)) return invalidPage();
       seenKeys.add(question.key);
     }
   }
@@ -58,22 +58,22 @@ export function readDailyChallenges(data: unknown): DailyChallenge[] {
 
 /** Unverified ranks or counts must not be presented as learner achievements. */
 export function readDailyStandings(data: unknown): DailyStandings {
-  if (!data || typeof data !== "object" || Array.isArray(data)) invalidStandings();
+  if (!data || typeof data !== "object" || Array.isArray(data)) return invalidStandings();
   const standings = data as Record<string, unknown>;
   if (!Array.isArray(standings.rows) || standings.rows.length > 100
     || !count(standings.participants) || standings.rows.length > standings.participants
     || (standings.yourRank !== null && (!count(standings.yourRank)
-      || standings.yourRank < 1 || standings.yourRank > standings.participants))) invalidStandings();
+      || standings.yourRank < 1 || standings.yourRank > standings.participants))) return invalidStandings();
   let ownRows = 0;
   for (const item of standings.rows) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) invalidStandings();
+    if (!item || typeof item !== "object" || Array.isArray(item)) return invalidStandings();
     const row = item as Record<string, unknown>;
     if (!text(row.alias, 2, 32) || !count(row.points) || !count(row.answered) || row.answered > 100
       || row.points > row.answered || !count(row.rank) || row.rank < 1 || row.rank > standings.participants
-      || typeof row.you !== "boolean") invalidStandings();
+      || typeof row.you !== "boolean") return invalidStandings();
     if (row.you) {
       ownRows += 1;
-      if (ownRows > 1 || row.rank !== standings.yourRank) invalidStandings();
+      if (ownRows > 1 || row.rank !== standings.yourRank) return invalidStandings();
     }
   }
   return data as DailyStandings;
