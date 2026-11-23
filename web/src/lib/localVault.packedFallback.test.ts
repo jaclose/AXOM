@@ -158,7 +158,7 @@ describe("verified separate compressed workspace fallback", () => {
     },
   );
 
-  it.each(["initial key read", "post-decode key read"] as const)(
+  it.each(["initial key read", "post-decode key read", "save key read"] as const)(
     "latches a packed-recovery conflict on %s SecurityError rather than adopting stale IDB",
     async stage => {
       const fixture = await quotaFixture();
@@ -179,7 +179,13 @@ describe("verified separate compressed workspace fallback", () => {
         return originalGet(name);
       });
       try {
-        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        if (stage === "save key read") {
+          const deniedCheckpoint = getVaultWriteCheckpoint();
+          await localVaultStorage.setItem(key, snapshot("unverified save under packed read denial"));
+          expect(() => assertVaultWritesSince(deniedCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+        } else {
+          await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        }
       } finally {
         get.mockRestore();
       }
