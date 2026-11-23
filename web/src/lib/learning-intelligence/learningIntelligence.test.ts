@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { QuestionAttempt, QuestionRecord } from "../questions";
 import {
   attemptEvents, buildPatternReport, buildReviewSet, calibrateDifficulty, describeQuestionStyle, empiricalDifficulty,
-  questionFeatures, rankByReasons, reviewCandidates, reviewPriority, structuralDifficulty, styleObservations, tally,
+  questionFeatures, rankByReasons, reviewCandidates, reviewCandidatesForSession, reviewPriority, structuralDifficulty, styleObservations, tally,
   type ReviewSignals,
 } from "./index";
 
@@ -339,6 +339,47 @@ describe("what to look at again after a block", () => {
     // Without a ranker, the order is today's rule.
     const usual = reviewCandidates(events.filter((event) => event.quizSessionId === "run"), events);
     expect(usual.map((candidate) => candidate.priority)).toEqual(usual.map((candidate) => rankByReasons({ ...seen[0], reasons: candidate.reasons })));
+  });
+
+  it("keeps an older block's miss reason and retry stable after a later block", () => {
+    const recorded = question({ attempts: [
+      attempt(16, "incorrect", { quizSessionId: "older" }),
+      attempt(18, "incorrect", { quizSessionId: "later" }),
+    ] });
+    expect(reviewCandidatesForSession("older", [recorded])).toEqual([
+      expect.objectContaining({ questionId: recorded.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
+    expect(reviewCandidatesForSession("later", [recorded])).toEqual([
+      expect.objectContaining({ questionId: recorded.id, reasons: ["repeat-miss"], retry: ["today", "this-week"] }),
+    ]);
+  });
+
+  it("never turns an older right answer into slow-right using future timed answers", () => {
+    const older = question({ attempts: [attempt(16, "correct", { quizSessionId: "older", timeSpentSeconds: 60 })] });
+    const later = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(18, "correct", { quizSessionId: "later", timeSpentSeconds: 10 })],
+    }));
+    expect(reviewCandidatesForSession("older", [older])).toEqual([]);
+    expect(reviewCandidatesForSession("older", [older, ...later])).toEqual([]);
+  });
+
+  it("ignores another session's equal timestamp rather than counting it as earlier pace", () => {
+    const at = "2026-07-16T09:00:00.000Z";
+    const older = question({ attempts: [attempt(16, "correct", { quizSessionId: "older", timeSpentSeconds: 60 })] });
+    const sameTime = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(16, "correct", { at, quizSessionId: "simultaneous", timeSpentSeconds: 10 })],
+    }));
+    expect(reviewCandidatesForSession("older", [older, ...sameTime])).toEqual([]);
+  });
+
+  it("fails closed on invalid session times instead of trusting incomparable history", () => {
+    const recorded = question({ attempts: [
+      attempt(10, "incorrect", { quizSessionId: "prior" }),
+      attempt(16, "incorrect", { at: "not-a-timestamp", quizSessionId: "invalid" }),
+    ] });
+    expect(reviewCandidatesForSession("invalid", [recorded])).toEqual([
+      expect.objectContaining({ questionId: recorded.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
   });
 
   it("builds a review set that points at the same questions and keeps its place in the course", () => {
