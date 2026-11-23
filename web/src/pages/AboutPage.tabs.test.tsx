@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AboutPage } from "./AboutPage";
+import { getNavModuleStatus, isReleasedRoute } from "../components/shell/nav";
 
 afterEach(cleanup);
 
@@ -131,6 +132,9 @@ describe("About page accessible tabs", () => {
     render(<AboutPage />);
     const feature = screen.getByText("Leaderboards");
     const column = feature.closest(".about-status-col");
+    // The visible status and canonical route guard must agree until release.
+    expect(getNavModuleStatus("leaderboards")).toBe("wip");
+    expect(isReleasedRoute("leaderboards")).toBe(false);
     expect(column?.classList.contains("status-progress")).toBe(true);
     expect(column?.classList.contains("status-ready")).toBe(false);
     expect(screen.getByText(/Not available in the released navigation yet/)).toBeTruthy();
