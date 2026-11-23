@@ -242,6 +242,46 @@ describe("Community Question Set Library", () => {
     expect(screen.getByRole("button", { name: "Add to my AXOM" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it.each(["missing", "duplicate"] as const)("retires Practice when %s saved member records appear after preview", async (failure) => {
+    mock.sets = [savedSet];
+    mock.questions = [savedQuestion];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByRole("button", { name: "Practice this set" });
+    mock.questions = failure === "missing" ? [] : [savedQuestion, savedQuestion];
+    fireEvent.click(screen.getByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
+    expect(screen.getByText(/This saved set has missing or duplicate question records/)).toBeTruthy();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([savedSet]);
+    expect(mock.questions).toEqual(failure === "missing" ? [] : [savedQuestion, savedQuestion]);
+  });
+
+  it("retires Practice when the saved import digest changes after preview", async () => {
+    mock.sets = [savedSet];
+    mock.questions = [savedQuestion];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByRole("button", { name: "Practice this set" });
+    const changedSet: QuestionSet = {
+      ...savedSet, importProvenance: { version: 1, shareId: summary.id, contentDigest: "b".repeat(64) },
+    };
+    mock.sets = [changedSet];
+    fireEvent.click(screen.getByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
+    expect(screen.getByText(/no longer matches the preview/)).toBeTruthy();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([changedSet]);
+    expect(mock.questions).toEqual([savedQuestion]);
+  });
+
   it.each([
     ["missing", []],
     ["duplicate", [savedQuestion, savedQuestion]],
@@ -301,6 +341,9 @@ describe("Community Question Set Library", () => {
     mock.questions = [changedQuestion];
     fireEvent.click(screen.getByRole("button", { name: "Practice this set" }));
     expect(onPractice).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Saved copy needs recovery" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Already in my AXOM" })).toBeNull();
     expect((await screen.findByRole("alert")).textContent).toContain("no longer match the approved publication");
     expect(mock.sets).toEqual([savedSet]);
     expect(mock.questions).toEqual([changedQuestion]);

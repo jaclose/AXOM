@@ -506,6 +506,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       return;
     }
     if (readSharedQuestionImportProvenance(set)?.contentDigest !== activePreview.contentDigest) {
+      setImportRecovery(true);
       setPreviewError("This saved publication revision no longer matches the preview. Close the preview and inspect your original saved set before practicing.");
       return;
     }
@@ -522,6 +523,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     if (set.questionIds.length !== activePreview.snapshot.questions.length
       || memberIds.size !== set.questionIds.length
       || set.questionIds.some(id => found.get(id) !== 1)) {
+      setImportRecovery(true);
       setPreviewError("This saved set has missing or duplicate question records. Recover the original question IDs in Question Bank before practicing. Reimport will not replace your attempts.");
       return;
     }
@@ -539,6 +541,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
         throw new Error("The saved receipt no longer identifies the reviewed import.");
       }
     } catch {
+      setImportRecovery(true);
       setPreviewError("This saved set's reviewed question text, options, answer keys, explanations, sources or order no longer match the approved publication. Restore the original records in Question Bank before practicing; attempts are unchanged.");
       return;
     }
