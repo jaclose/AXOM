@@ -8,7 +8,7 @@ import {
   readLocalBackup,
   resetLocalBackupRuntimeForTests,
 } from "./localBackup";
-import { BACKUP_STORE_NAME, DB_NAME, DB_VERSION, localVaultStorage, STORE_NAME } from "./localVault";
+import { BACKUP_STORE_NAME, DB_NAME, DB_VERSION, flushLocalVaultWrites, localVaultStorage, resetLocalVaultRuntimeForTests, STORE_NAME } from "./localVault";
 import { makeSeed } from "./seed";
 import { inspectLocalWorkspaceBackup } from "./storageRecovery";
 
@@ -23,6 +23,10 @@ const storage = {
 };
 
 beforeEach(async () => {
+  // Each test destroys fake IndexedDB: also reset this tab's observed Vault revision.
+  // Drain prior writes first so no queued save races the next synthetic database.
+  await flushLocalVaultWrites();
+  resetLocalVaultRuntimeForTests();
   values.clear();
   resetLocalBackupRuntimeForTests();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
@@ -31,7 +35,8 @@ beforeEach(async () => {
   await deleteDatabase(STORAGE_KEYS.vaultDb);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await flushLocalVaultWrites();
   vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
