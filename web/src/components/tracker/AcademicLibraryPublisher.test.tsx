@@ -60,6 +60,25 @@ async function chooseLibrary(container: HTMLElement) {
   return screen.findByText(/courses? found/);
 }
 
+
+/** Source-equivalent synthetic private library for real multi-batch UI regressions. */
+async function largePreparedLibraryReader(count: number) {
+  const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+  const files = new Map<string, Uint8Array>();
+  const sources = [];
+  for (let index = 1; index <= count; index++) {
+    const module = `Synthetic ${String(index).padStart(3, "0")}`;
+    const original = new TextEncoder().encode(`%PDF-1.4 synthetic ${index}`);
+    const checksum = (await sha256(original)).slice(7);
+    files.set(`sources/${checksum}.pdf`, original);
+    files.set(`banks/${checksum}/bank.json`, encode(bank(`set-${index}`, module, 1, checksum)));
+    sources.push({ id: `source-${checksum}`, name: `set-${index}.pdf`, sourcePath: `${module}/set-${index}.pdf`, checksum, module,
+      status: "prepared", reason: "Validated package", bankFile: `banks/${checksum}/bank.json`, originalFile: `sources/${checksum}.pdf`, ready: 1, review: 0 });
+  }
+  files.set("catalog.json", encode({ format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1", templates: [], sources }));
+  return async (path: string) => files.get(path)!;
+}
+
 describe("publishing a prepared library", () => {
   let fixture: Awaited<ReturnType<typeof library>>;
   beforeEach(async () => {
@@ -263,20 +282,7 @@ describe("publishing a prepared library", () => {
   });
 
   it("publishes a library of more than 100 courses in runs of 100", async () => {
-    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
-    const files = new Map<string, Uint8Array>();
-    const sources = [];
-    for (let index = 1; index <= 101; index++) {
-      const module = `Synthetic ${String(index).padStart(3, "0")}`;
-      const original = new TextEncoder().encode(`%PDF-1.4 synthetic ${index}`);
-      const checksum = (await sha256(original)).slice(7);
-      files.set(`sources/${checksum}.pdf`, original);
-      files.set(`banks/${checksum}/bank.json`, encode(bank(`set-${index}`, module, 1, checksum)));
-      sources.push({ id: `source-${checksum}`, name: `set-${index}.pdf`, sourcePath: `${module}/set-${index}.pdf`, checksum, module,
-        status: "prepared", reason: "Validated package", bankFile: `banks/${checksum}/bank.json`, originalFile: `sources/${checksum}.pdf`, ready: 1, review: 0 });
-    }
-    files.set("catalog.json", encode({ format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1", templates: [], sources }));
-    mocks.folder.mockReturnValue(async (path: string) => files.get(path)!);
+    mocks.folder.mockReturnValue(await largePreparedLibraryReader(101));
     // Only the run boundaries matter here; preparation is covered above.
     mocks.batch.mockImplementation(async (jobs: AcademicBatchJob[], options: { onOutcome?: (outcome: AcademicBatchOutcome) => void }) => {
       for (const job of jobs) options.onOutcome?.({ key: job.key, state: "verified", receipt: { collectionId: `collection-${job.key}`,
@@ -292,4 +298,48 @@ describe("publishing a prepared library", () => {
     expect(await screen.findByText("101 courses published and verified.")).toBeTruthy();
     expect(mocks.batch.mock.calls.map(([jobs]) => (jobs as AcademicBatchJob[]).length)).toEqual([100, 1]);
   });
+  it("keeps verified first-batch cloud receipts after a later batch fails before sharing", async () => {
+    mocks.folder.mockReturnValue(await largePreparedLibraryReader(101));
+    let batches = 0;
+    mocks.batch.mockImplementation(async (jobs: AcademicBatchJob[], options: { onOutcome?: (outcome: AcademicBatchOutcome) => void }) => {
+      if (++batches === 2) throw new Error("The connection ended before the second batch response.");
+      for (const job of jobs) options.onOutcome?.({ key: job.key, state: "verified", receipt: {
+        collectionId: `collection-${job.key}`, revisionId: `revision-${job.key}`,
+        contentHash: "a".repeat(64), readyQuestions: 1, explainedReadyQuestions: 1,
+        missingExplanations: 0, reviewQuestions: 0, sourceReceipts: [],
+        verifiedFiles: 3, localOnlyOriginals: [],
+      } });
+      return { expected: jobs.length, verified: jobs.length, authBlocked: 0 };
+    });
+    const onPublished = vi.fn();
+    const { container } = render(<AcademicLibraryPublisher onPublished={onPublished} />);
+    await chooseLibrary(container);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Submit for academic review to share/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Publish 101 courses/ }));
+
+    await waitFor(() => expect(screen.getByRole("status").textContent)
+      .toMatch(/100 courses published and verified.*interrupted.*Refresh My courses/i));
+    expect(screen.queryByText(/Nothing was uploaded/)).toBeNull();
+    expect(screen.getByText(/1 course selected to publish/)).toBeTruthy();
+    expect(onPublished).toHaveBeenCalledOnce();
+    expect(mocks.batch.mock.calls.map(([jobs]) => (jobs as AcademicBatchJob[]).length)).toEqual([100, 1]);
+    expect(mocks.share).not.toHaveBeenCalled();
+  });
+
+  it("does not claim zero remote writes after an upload batch loses its response", async () => {
+    mocks.batch.mockRejectedValueOnce(new Error("Connection lost before upload response."));
+    const onPublished = vi.fn();
+    const { container } = render(<AcademicLibraryPublisher onPublished={onPublished} />);
+    await chooseLibrary(container);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Submit for academic review to share/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
+
+    await waitFor(() => expect(screen.getByRole("status").textContent)
+      .toMatch(/No verified upload receipts.*may have completed.*Refresh My courses/i));
+    expect(screen.queryByText(/Nothing was uploaded/)).toBeNull();
+    expect(screen.getByText(/2 courses selected to publish/)).toBeTruthy();
+    expect(onPublished).not.toHaveBeenCalled();
+    expect(mocks.share).not.toHaveBeenCalled();
+  });
+
 });
