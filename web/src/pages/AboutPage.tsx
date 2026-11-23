@@ -55,11 +55,15 @@ const STATUS_META: Record<FeatureStatus, { label: string; sub: string; icon: typ
 export function AboutPage() {
   const [tab, setTab] = useState<"axom" | "developer">("axom");
   const [developerVisited, setDeveloperVisited] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const axomTabRef = useRef<HTMLButtonElement>(null);
   const developerTabRef = useRef<HTMLButtonElement>(null);
 
   function selectTab(next: "axom" | "developer") {
-    if (next === "developer") setDeveloperVisited(true);
+    if (next === "developer" && !developerVisited) {
+      setDeveloperVisited(true);
+      setPreviewOpen(true);
+    }
     setTab(next);
     (next === "axom" ? axomTabRef : developerTabRef).current?.focus();
   }
@@ -102,7 +106,7 @@ export function AboutPage() {
               if (node) node.toggleAttribute("inert", tab !== "developer");
             }}
           >
-            <WebsitePreview />
+            <WebsitePreview previewOpen={previewOpen} onToggle={() => setPreviewOpen((open) => !open)} />
           </div>
         )}
       </div>
@@ -180,18 +184,29 @@ function StatusColumn({ status, features }: { status: FeatureStatus; features: F
   );
 }
 
-function WebsitePreview() {
+function WebsitePreview({ previewOpen, onToggle }: { previewOpen: boolean; onToggle: () => void }) {
   return (
     <GlassCard pad className="website-preview-card">
       <PanelHeader title="Jafar Dabbagh" sub="The person building AXOM. More here soon; for now, the site."
-        action={<a className="gbtn sm" href={WEBSITE_URL} target="_blank" rel="noreferrer noopener">
-          Open site <ExternalLink size={ICON_SIZE.body} />
-        </a>} />
-      <div className="website-frame-shell">
-        <iframe title="Live site preview" src={WEBSITE_URL} loading="lazy"
-          referrerPolicy="no-referrer" sandbox="allow-scripts allow-forms" />
+        action={<div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button className="gbtn sm" type="button" onClick={onToggle}>
+            {previewOpen ? "Close preview" : "Open preview"}
+          </button>
+          <a className="gbtn sm" href={WEBSITE_URL} target="_blank" rel="noreferrer noopener">
+            Open site <ExternalLink size={ICON_SIZE.body} />
+          </a>
+        </div>} />
+      {previewOpen && (
+        <div className="website-frame-shell">
+          <iframe title="Live site preview" src={WEBSITE_URL} loading="lazy"
+            referrerPolicy="no-referrer" sandbox="allow-scripts allow-forms" />
+        </div>
+      )}
+      <div className="sub" style={{ marginTop: 8 }}>
+        {previewOpen
+          ? "Closing the preview discards unsent form input. If it stays blank, use Open site."
+          : "Preview stopped. It will load again only when you choose Open preview."}
       </div>
-      <div className="sub" style={{ marginTop: 8 }}>If the preview stays blank, use Open site.</div>
     </GlassCard>
   );
 }

@@ -105,6 +105,23 @@ for (const width of [1440, 390]) {
     await expect(frame).toBeVisible();
     await expect(draft).toHaveValue("draft never submitted");
     expect(previewRequests).toBe(1);
+
+    // Closing explicitly unloads third-party scripts; tab changes cannot reopen it.
+    const close = page.getByRole("button", { name: "Close preview" });
+    await close.focus();
+    await close.click();
+    await expect(frame).toHaveCount(0);
+    const reopen = page.getByRole("button", { name: "Open preview" });
+    await expect(reopen).toBeFocused();
+    await about.click();
+    await developer.click();
+    await expect(frame).toHaveCount(0);
+    expect(previewRequests).toBe(1);
+
+    await reopen.click();
+    await frame.scrollIntoViewIfNeeded();
+    await expect(draft).toHaveValue("initial");
+    expect(previewRequests).toBe(2);
   });
 }
 

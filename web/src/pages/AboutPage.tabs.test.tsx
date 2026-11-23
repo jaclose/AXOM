@@ -71,6 +71,33 @@ describe("About page accessible tabs", () => {
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(developer.id);
   });
 
+  it("stops the external iframe on explicit close and remains closed across tabs", () => {
+    render(<AboutPage />);
+    const about = screen.getByRole("tab", { name: "About AXOM" });
+    const developer = screen.getByRole("tab", { name: "The developer" });
+    fireEvent.click(developer);
+    const first = screen.getByTitle("Live site preview");
+    const close = screen.getByRole("button", { name: "Close preview" });
+    close.focus();
+    fireEvent.click(close);
+    expect(screen.queryByTitle("Live site preview")).toBeNull();
+    const open = screen.getByRole("button", { name: "Open preview" });
+    expect(document.activeElement).toBe(open);
+    expect(screen.getByText(/Preview stopped/)).toBeTruthy();
+
+    fireEvent.click(about);
+    fireEvent.click(developer);
+    expect(screen.queryByTitle("Live site preview")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open preview" })).toBe(open);
+
+    fireEvent.click(open);
+    const second = screen.getByTitle("Live site preview");
+    expect(second).not.toBe(first);
+    expect(second.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(second.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(screen.getByRole("button", { name: "Close preview" })).toBe(open);
+  });
+
   it("does not destroy a live developer preview after thirty minutes", () => {
     // An unseen iframe key change destroys remote scroll, navigation and unsent forms.
     // Use identity rather than mocking the remote site, which is a separate origin.
