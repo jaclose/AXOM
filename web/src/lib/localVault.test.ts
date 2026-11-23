@@ -39,6 +39,70 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("IndexedDB-first local vault", () => {
+  it.each(["plain", "chunked"] as const)(
+    "refuses a stale tab resurrection after completed %s workspace deletion, while allowing a genuinely new session",
+    async (format) => {
+      const key = STORAGE_KEYS.persistedState;
+      const unrelatedScopedKey = `${key}:user:other`;
+      const unrelatedScopedValue = JSON.stringify({ state: { profile: { userId: "other" }, label: "unrelated saved work" } });
+      const large = format === "chunked" ? "source review ".repeat(90_000) : "";
+      const snapshot = (label: string, payload = large) => JSON.stringify({
+        state: { profile: { userId: "jd" }, label, payload }, version: 34,
+      });
+      const originallySaved = snapshot("old account workspace");
+      const newSession = snapshot("new session after intentional deletion", "");
+      storage.setItem(unrelatedScopedKey, unrelatedScopedValue);
+      await localVaultStorage.setItem(key, originallySaved);
+      await flushLocalVaultWrites();
+      expect(await localVaultStorage.getItem(key)).toBe(originallySaved);
+
+      // The other module instance models a tab that stays mounted throughout
+      // the successful deletion and still remembers the old workspace fingerprint.
+      vi.resetModules();
+      const staleTab = await import("./localVault");
+      expect(await staleTab.localVaultStorage.getItem(key)).toBe(originallySaved);
+
+      const removalCheckpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.removeItem(key);
+      await flushLocalVaultWrites();
+      expect(() => assertVaultWritesSince(removalCheckpoint)).not.toThrow();
+      expect(storage.getItem(`${key}:removal-pending`)).toBeNull();
+      expect(storage.getItem(unrelatedScopedKey)).toBe(unrelatedScopedValue);
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBeUndefined();
+      } finally {
+        db.close();
+      }
+
+      const staleCheckpoint = staleTab.getVaultWriteCheckpoint();
+      await staleTab.localVaultStorage.setItem(key, snapshot("stale unsaved edit", ""));
+      await staleTab.flushLocalVaultWrites();
+      expect(() => staleTab.assertVaultWritesSince(staleCheckpoint))
+        .toThrow(staleTab.VAULT_CONFLICT_MESSAGE);
+
+      const checked = await openCurrentVault();
+      try {
+        expect(await getDirect(checked, key)).toBeUndefined();
+      } finally {
+        checked.close();
+      }
+      expect(storage.getItem(unrelatedScopedKey)).toBe(unrelatedScopedValue);
+
+      // A new tab with a verified empty vault must still be able to begin an
+      // intentional new workspace. The stale tab's conflict is never reset.
+      vi.resetModules();
+      const freshTab = await import("./localVault");
+      expect(await freshTab.localVaultStorage.getItem(key)).toBeNull();
+      const freshCheckpoint = freshTab.getVaultWriteCheckpoint();
+      await freshTab.localVaultStorage.setItem(key, newSession);
+      await freshTab.flushLocalVaultWrites();
+      expect(() => freshTab.assertVaultWritesSince(freshCheckpoint)).not.toThrow();
+      expect(await freshTab.localVaultStorage.getItem(key)).toBe(newSession);
+      expect(storage.getItem(unrelatedScopedKey)).toBe(unrelatedScopedValue);
+    },
+  );
+
   it("prevents a stale second runtime from replacing a newer workspace", async () => {
     const key = STORAGE_KEYS.persistedState;
     const largeLibraryState = "source review ".repeat(90_000);
