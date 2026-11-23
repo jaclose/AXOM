@@ -179,6 +179,9 @@ export async function shareAcademicCourses(collectionIds: readonly string[], acc
     // The RPC may have completed for the previous account while the UI switched.
     // Never attribute its result to a newer session or issue another RPC.
     options.assertCurrent?.();
+    // Stopping the batch cannot undo a dispatched server request. Its settled
+    // result is not a confirmed client-side outcome; refresh before retrying.
+    if (options.signal?.aborted) break;
     if (shared.error) outcome.error = "Sharing could not be requested for this course.";
     else outcome.shared = true;
     outcomes.push(outcome);
