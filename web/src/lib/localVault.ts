@@ -1602,6 +1602,45 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
     const previousPlain = observesWorkspace(name) ? newerFallbackCopy(fallback, name) : null;
     const previousMarker = observesWorkspace(name) ? fallback?.getItem(fallbackMarkerKey(name)) ?? null : null;
     const previousPlainValue = observesWorkspace(name) ? fallback?.getItem(name) ?? null : null;
+    // An interrupted removal can leave the marker behind after deleting the
+    // primary plain fallback. An explicit verified restore must be able to
+    // reconcile that exact orphan without treating arbitrary marker bytes as
+    // recovery authorization or deleting the account-scoped recovery copy.
+    let orphanedMarkerEvidence: { activeUser: string; scopedValue: string } | null = null;
+    if (previousMarker !== null && previousPlain === null && observesWorkspace(name)) {
+      let receipt: unknown = null;
+      try { receipt = removalIntentAtStart === null ? null : JSON.parse(removalIntentAtStart); }
+      catch { /* Invalid removal receipts do not authorize reconciliation. */ }
+      if (receipt !== null && typeof receipt === "object" && !Array.isArray(receipt)) {
+        const intent = receipt as { version?: unknown; activeUser?: unknown; primaryFingerprint?: unknown };
+        if (
+          intent.version === 1
+          && typeof intent.activeUser === "string"
+          && intent.activeUser.length > 0
+          && intent.activeUser === userId
+          && typeof intent.primaryFingerprint === "string"
+          && fallback?.getItem(activeUserKey(name)) === intent.activeUser
+        ) {
+          const scopedValue = fallback.getItem(scopedStateKey(name, intent.activeUser));
+          if (
+            scopedValue !== null
+            && snapshotFingerprint(scopedValue) === intent.primaryFingerprint
+            && persistedUserId(scopedValue) === intent.activeUser
+          ) {
+            // Validate the orphan against the retained scoped bytes using the
+            // same marker decoder as ordinary recovery, without writing keys.
+            const copy = newerFallbackCopy({
+              getItem: key => key === name ? scopedValue
+                : key === fallbackMarkerKey(name) ? previousMarker : null,
+            }, name);
+            if (copy?.value === scopedValue && copy.marker === previousMarker) {
+              orphanedMarkerEvidence = { activeUser: intent.activeUser, scopedValue };
+            }
+          }
+        }
+      }
+      if (orphanedMarkerEvidence === null) throw new VaultConflictError();
+    }
     await writeVault(name, value, userId);
     // Explicit verified restore already authorizes replacing the live workspace;
     // retire only the fallback captured before that write. A concurrent save
@@ -1617,14 +1656,23 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
         throw new VaultConflictError();
       }
       if (markerNow !== null) {
-        if (previousPlain?.marker !== markerNow || previousPlain.value !== valueNow) {
-          throw new VaultConflictError();
+        if (previousPlain) {
+          if (previousPlain.marker !== markerNow || previousPlain.value !== valueNow) {
+            throw new VaultConflictError();
+          }
+          // A fully intact, captured fallback can be revision-bound as retired.
+          retireFallbackCopyIfUnchanged(fallback, name, previousPlain, userId, value);
+        } else {
+          // The unchanged orphan marker is not sufficient on its own. Recheck
+          // the matching account-scoped payload after the asynchronous IDB
+          // write, then leave both original recovery keys untouched.
+          if (
+            !orphanedMarkerEvidence
+            || fallback?.getItem(scopedStateKey(name, orphanedMarkerEvidence.activeUser))
+              !== orphanedMarkerEvidence.scopedValue
+            || fallback.getItem(activeUserKey(name)) !== orphanedMarkerEvidence.activeUser
+          ) throw new VaultConflictError();
         }
-        // The caller authorized replacing its pre-existing known fallback.
-        // This check avoids the demonstrated in-flight peer write, but
-        // localStorage has no atomic multi-key compare-and-delete; a peer
-        // racing individual removes still requires separate reconciliation.
-        retireFallbackCopyIfUnchanged(fallback, name, previousPlain, userId, value);
       } else if (userId && previousPacked === null) {
         // The retained packed receipt keeps its captured legacy user binding.
         // IndexedDB already holds the restored user's authoritative pointer.
