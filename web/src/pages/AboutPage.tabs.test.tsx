@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AboutPage } from "./AboutPage";
 
 afterEach(cleanup);
@@ -44,6 +44,23 @@ describe("About page accessible tabs", () => {
     fireEvent.keyDown(about, { key: "ArrowLeft" });
     expect(document.activeElement).toBe(developer);
     expect(developer.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("does not destroy a live developer preview after thirty minutes", () => {
+    // An unseen iframe key change destroys remote scroll, navigation and unsent forms.
+    // Use identity rather than mocking the remote site, which is a separate origin.
+    vi.useFakeTimers();
+    try {
+      render(<AboutPage />);
+      fireEvent.click(screen.getByRole("tab", { name: "The developer" }));
+      const frame = screen.getByTitle("Live site preview");
+      frame.setAttribute("data-unsubmitted-interaction", "in-progress");
+      act(() => { vi.advanceTimersByTime(30 * 60 * 1000 + 1000); });
+      expect(screen.getByTitle("Live site preview")).toBe(frame);
+      expect(frame.getAttribute("data-unsubmitted-interaction")).toBe("in-progress");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("distinguishes hosted shared media from unverified personal attachment recovery", () => {
