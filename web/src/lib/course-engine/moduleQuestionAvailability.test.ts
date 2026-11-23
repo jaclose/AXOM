@@ -298,6 +298,57 @@ describe("raw QuestionRecord identity integrity in availability", () => {
   });
 });
 
+describe("identity-held collections cannot certify inherited scope", () => {
+  it("withholds a legacy sibling whose only source evidence is a held mixed collection in either record order", () => {
+    const held = set("held", ["dup", "legacy"], { scope: goerScope });
+    const rows = [
+      question("dup", { module: "NCRS", week: 1, courseId: "ppm-500" }),
+      question("dup", { module: "GOER", week: 2, courseId: "ppm-501" }),
+      question("legacy"),
+    ];
+    for (const originals of [rows, [...rows].reverse()]) {
+      const before = JSON.stringify([held, originals]);
+      const report = buildQuestionAvailabilityIndex(input([held], originals));
+      expect(report.unassignedCollections).toBe(1);
+      expect(report.unassignedQuestions).toBe(3);
+      expect(report.byModule.has(questionAvailabilityModuleKey("Term 5", "GOER"))).toBe(false);
+      expect(JSON.stringify([held, originals])).toBe(before);
+    }
+  });
+
+  it("uses a clean independent membership instead of borrowing or conflicting with a held collection's week", () => {
+    const held = set("held", ["dup", "legacy"], { scope: goerScope });
+    const clean = set("clean", ["legacy"], { scope: { ...goerScope, week: 4 } });
+    const rows = [question("dup"), question("dup"), question("legacy")];
+    for (const collections of [[held, clean], [clean, held]]) {
+      const report = buildQuestionAvailabilityIndex(input(collections, rows));
+      expect(report.unassignedCollections).toBe(1);
+      expect(report.unassignedQuestions).toBe(2);
+      expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        collections: 1, storedQuestions: 1, readyQuestions: 1, indexedWeeks: [4], unresolvedWeekQuestions: 0,
+      });
+    }
+  });
+
+  it("preserves explicit own scope but does not inherit a held primary's module or week", () => {
+    const held = set("held", ["dup", "primary-only", "own-module", "own-week"], { scope: goerScope });
+    const rows = [
+      question("dup"), question("dup"),
+      question("primary-only", { setId: "held" }),
+      question("own-module", { setId: "held", module: "GOER", courseId: "ppm-501" }),
+      question("own-week", { module: "GOER", courseId: "ppm-501", week: 3 }),
+    ];
+    const before = JSON.stringify([held, rows]);
+    const report = buildQuestionAvailabilityIndex(input([held], rows));
+    expect(report.unassignedCollections).toBe(1);
+    expect(report.unassignedQuestions).toBe(3);
+    expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      collections: 0, storedQuestions: 2, readyQuestions: 2, indexedWeeks: [3], unresolvedWeekQuestions: 1,
+    });
+    expect(JSON.stringify([held, rows])).toBe(before);
+  });
+});
+
 describe("source-week availability proof", () => {
   it("does not infer a week from a set when the question declares an invalid one", () => {
     for (const raw of [0, 100, -1, "2026-11-05", "Week 2-3"]) {
