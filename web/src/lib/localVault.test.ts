@@ -302,7 +302,7 @@ describe("IndexedDB-first local vault", () => {
     await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
   });
 
-  it.each(["read", "write", "verified restore"] as const)(
+  it.each(["read", "write", "verified restore", "remove"] as const)(
     "refuses a hidden acknowledged fallback when the localStorage getter is denied during %s",
     async operation => {
       const key = STORAGE_KEYS.persistedState;
@@ -334,6 +334,7 @@ describe("IndexedDB-first local vault", () => {
         } else {
           const attempted = snapshot(operation === "write" ? "unsafe blind edit" : "verified restore under denied access");
           if (operation === "verified restore") await replaceLocalVaultItem(key, attempted);
+          else if (operation === "remove") await localVaultStorage.removeItem(key);
           else await localVaultStorage.setItem(key, attempted);
           expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
         }
