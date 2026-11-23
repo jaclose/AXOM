@@ -257,6 +257,9 @@ it.each([
   const f = await fixture();
   f.manifest[2].path = path;
   await expect(academicLibraryReader(await mocked.client(), revision)).rejects.toThrow(/Invalid course file manifest.*path/);
+  // The existing source ZIP exporter must inherit the same guard: no partial
+  // ZIP should be built from an unrecoverable cloud filename.
+  await expect(createStoredSourceArchive(course, scope())).rejects.toThrow(/Invalid course file manifest.*path/);
   expect(f.download).not.toHaveBeenCalled();
 });
 
@@ -268,4 +271,9 @@ it("keeps ordinary source filenames with spaces, # and canonical Unicode intact"
   expect(reader.files.some(file => file.path === named)).toBe(true);
   expect([...await reader(named)]).toEqual([...bytes]);
   expect(f.download).toHaveBeenCalledTimes(1);
+  const archive = await createStoredSourceArchive(course, scope());
+  const packaged = new Uint8Array(await archive.blob.arrayBuffer());
+  const file = new NativeFile([packaged], archive.fileName, { type: "application/zip" });
+  const restored = await zipLibraryReader(file as unknown as File);
+  expect([...await restored(named)]).toEqual([...bytes]);
 });
