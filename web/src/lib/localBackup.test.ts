@@ -26,13 +26,14 @@ beforeEach(async () => {
   // Each test destroys fake IndexedDB: also reset this tab's observed Vault revision.
   // Drain prior writes first so no queued save races the next synthetic database.
   await flushLocalVaultWrites();
-  resetLocalVaultRuntimeForTests();
   values.clear();
-  resetLocalBackupRuntimeForTests();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", storage);
   await deleteDatabase(STORAGE_KEYS.vaultDb);
+  // Never discard observed CAS state until the old test database is truly gone.
+  resetLocalVaultRuntimeForTests();
+  resetLocalBackupRuntimeForTests();
 });
 
 afterEach(async () => {
@@ -494,11 +495,11 @@ describe("automatic local migration backups", () => {
 });
 
 function deleteDatabase(name: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const request = fakeIndexedDb.deleteDatabase(name);
     request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error(`Failed to delete fake IndexedDB ${name}`));
+    request.onblocked = () => reject(new Error(`Blocked deleting fake IndexedDB ${name}: an open connection remains`));
   });
 }
 

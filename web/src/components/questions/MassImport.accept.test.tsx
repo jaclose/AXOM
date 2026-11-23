@@ -43,11 +43,11 @@ const localStorageStub: Storage = {
 };
 
 function deleteDatabase(name: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const request = fakeIndexedDb.deleteDatabase(name);
     request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error(`Failed to delete fake IndexedDB ${name}`));
+    request.onblocked = () => reject(new Error(`Blocked deleting fake IndexedDB ${name}: an open connection remains`));
   });
 }
 
@@ -55,13 +55,14 @@ beforeEach(async () => {
   // A discarded fake database is a fresh tab lifetime, not a competing delete.
   // Do not carry the previous test's hydrated CAS expectation into empty IDB.
   await flushLocalVaultWrites();
-  resetLocalVaultRuntimeForTests();
   vi.clearAllMocks();
   localValues.clear();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", localStorageStub);
   await deleteDatabase(DB_NAME);
+  // A blocked/failed reset must never forge a fresh observed vault revision.
+  resetLocalVaultRuntimeForTests();
   await useStore.setState({ questions: [], questionSets: [], documents: [], courses: [], terms: [] });
 });
 afterEach(async () => {
