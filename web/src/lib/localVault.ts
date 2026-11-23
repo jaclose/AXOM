@@ -32,6 +32,8 @@ const activeUserKey = (name: string) => `${name}:active-user`;
 const scopedStateKey = (name: string, userId: string) => `${name}:user:${userId}`;
 /** Present only while the localStorage copy is ahead of IndexedDB. */
 const fallbackMarkerKey = (name: string) => `${name}:fallback-newer`;
+/** Persisted before cross-store workspace deletion; cleared only after every tier confirms cleanup. */
+const removalIntentKey = (name: string) => `${name}:removal-pending`;
 let vaultWriteSequence = 0;
 const vaultWriteFailures = new Map<number, Error>();
 const observedVaultSnapshots = new Map<string, string | null>();
@@ -133,6 +135,7 @@ export function writeLocalFallback(
   userId: string,
   indexedDbError?: unknown,
 ): void {
+  assertNoPendingVaultRemoval(fallbackStore, name);
   if (!fallbackStore) {
     throw new Error("AXOM could not write to IndexedDB and no local storage fallback is available.", {
       cause: indexedDbError,
@@ -277,6 +280,19 @@ function observesWorkspace(name: string): boolean {
   return name === STORAGE_KEYS.persistedState;
 }
 
+/** A partial or interrupted removal must not silently hydrate stale IDB data
+ * or allow a new save. Presence is sufficient: malformed receipts fail closed. */
+function assertNoPendingVaultRemoval(storage: Pick<Storage, "getItem"> | null, name: string): void {
+  if (!observesWorkspace(name) || !storage) return;
+  try {
+    if (storage.getItem(removalIntentKey(name)) === null) return;
+  } catch {
+    // An unreadable deletion receipt is not proof that deletion completed.
+  }
+  conflictedWorkspaceKeys.add(name);
+  throw new VaultConflictError();
+}
+
 function rememberVaultSnapshot(name: string, value: string | null): void {
   if (!observesWorkspace(name) || !conflictedWorkspaceKeys.has(name)) {
     observedVaultSnapshots.set(name, workspaceFingerprint(value));
@@ -376,6 +392,7 @@ export function resolveMarkedVaultSnapshotRecord(
   local: Readonly<Record<string, string>>,
   name: string,
 ): string | undefined {
+  if (local[removalIntentKey(name)] !== undefined) throw new VaultConflictError();
   if (local[fallbackMarkerKey(name)] === undefined) return undefined;
   const capturedStore = { getItem: (key: string) => local[key] ?? null };
   const newer = newerFallbackCopy(capturedStore, name);
@@ -535,6 +552,7 @@ async function writePackedFallback(
   previousRetiredRaw: string | null = null,
 ): Promise<void> {
   if (!storage || !observesWorkspace(name)) throw new PackedFallbackError("A compressed workspace fallback is unavailable.");
+  assertNoPendingVaultRemoval(storage, name);
   const previousRaw = previous?.raw ?? previousRetiredRaw;
   if (storage.getItem(packedFallbackKey(name)) !== previousRaw) throw new VaultConflictError();
   if (previous) assertPackedLegacyCurrent(storage, previous);
@@ -590,6 +608,7 @@ export async function resolveWorkspaceSnapshotRecord(
   local: Readonly<Record<string, string>>,
   name: string,
 ): Promise<string | undefined> {
+  if (local[removalIntentKey(name)] !== undefined) throw new VaultConflictError();
   const storage = { getItem: (key: string) => local[key] ?? null };
   const packed = await readPackedFallback(storage, name);
   if (packed) {
@@ -1306,6 +1325,7 @@ const vaultStorage: StateStorage = {
     let previousRetiredRaw: string | null = null;
     try {
       fallbackStore = localFallback(name);
+      assertNoPendingVaultRemoval(fallbackStore, name);
       const expected = workspaceExpectation(name);
       currentPacked = await readPackedFallback(fallbackStore, name);
       if (currentPacked) {
@@ -1351,6 +1371,7 @@ const vaultStorage: StateStorage = {
         ? fallbackExpectation(activeFallback)
         : expected;
       await writeVault(name, value, userId, vaultExpectation);
+      assertNoPendingVaultRemoval(fallbackStore, name);
       if (currentPacked) assertPackedLegacyCurrent(fallbackStore, currentPacked);
       await retirePackedFallback(fallbackStore, name, currentPacked?.raw ?? previousRetiredRaw, userId, value);
       if (observesWorkspace(name)) {
@@ -1433,6 +1454,7 @@ const vaultStorage: StateStorage = {
           : fallbackBaseFingerprint === undefined
             ? expected?.fingerprints[0]
             : fallbackBaseFingerprint;
+        assertNoPendingVaultRemoval(fallbackStore, name);
         fallbackStore?.setItem(
           fallbackMarkerKey(name),
           encodeFallbackMarker(snapshotFingerprint(value), baseFingerprint),
@@ -1487,9 +1509,6 @@ const vaultStorage: StateStorage = {
   async removeItem(name) {
     const writeSequence = ++vaultWriteSequence;
     try {
-      // A Storage method can throw even after its Window getter succeeds.
-      // Do not remove IDB data if its acknowledged offline recovery state
-      // cannot be inspected or removed, and never swallow the failure.
       const fallback = localFallback(name);
       let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
       if (!active) {
@@ -1497,6 +1516,42 @@ const vaultStorage: StateStorage = {
           active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
         } catch {
           // The fallback may be the only readable account pointer.
+        }
+      }
+      let deletionIntent: string | null = null;
+      let recoveryBefore: readonly (string | null)[] | null = null;
+      if (observesWorkspace(name)) {
+        // A failed IDB readwrite transaction must not strand an older X after
+        // erasing a newer acknowledged local fallback Y. Reserve the removal
+        // durably first, then delete IDB atomically, THEN clean localStorage.
+        // If either phase fails the receipt survives a cold reload and blocks
+        // stale hydration or a blind competing write.
+        if (!fallback) throw new VaultConflictError();
+        assertNoPendingVaultRemoval(fallback, name);
+        recoveryBefore = [
+          fallback.getItem(name),
+          fallback.getItem(fallbackMarkerKey(name)),
+          fallback.getItem(packedFallbackKey(name)),
+          fallback.getItem(activeUserKey(name)),
+          active ? fallback.getItem(scopedStateKey(name, active)) : null,
+        ];
+        deletionIntent = JSON.stringify({
+          version: 1,
+          activeUser: active ?? null,
+          primaryFingerprint: workspaceFingerprint(recoveryBefore[0]),
+        });
+        fallback.setItem(removalIntentKey(name), deletionIntent);
+        if (fallback.getItem(removalIntentKey(name)) !== deletionIntent) throw new VaultConflictError();
+      }
+      await removeVaultRecords(name, active);
+      if (recoveryBefore && fallback) {
+        if (fallback.getItem(removalIntentKey(name)) !== deletionIntent
+          || fallback.getItem(name) !== recoveryBefore[0]
+          || fallback.getItem(fallbackMarkerKey(name)) !== recoveryBefore[1]
+          || fallback.getItem(packedFallbackKey(name)) !== recoveryBefore[2]
+          || fallback.getItem(activeUserKey(name)) !== recoveryBefore[3]
+          || (active && fallback.getItem(scopedStateKey(name, active)) !== recoveryBefore[4])) {
+          throw new VaultConflictError();
         }
       }
       fallback?.removeItem(name);
@@ -1507,7 +1562,12 @@ const vaultStorage: StateStorage = {
       }
       fallback?.removeItem(activeUserKey(name));
       if (active) fallback?.removeItem(scopedStateKey(name, active));
-      await removeVaultRecords(name, active);
+      // Removal is complete only when all prior cleanup succeeded and this
+      // specific receipt still owns the operation. Clear it strictly last.
+      if (deletionIntent !== null) {
+        if (fallback?.getItem(removalIntentKey(name)) !== deletionIntent) throw new VaultConflictError();
+        fallback.removeItem(removalIntentKey(name));
+      }
       conflictedWorkspaceKeys.delete(name);
       rememberVaultSnapshot(name, null);
     } catch (error) {
@@ -1535,6 +1595,9 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
   const userId = persistedUserId(value);
   try {
     const fallback = localFallback(name);
+    // An explicitly authorized backup replacement may reconcile an aborted
+    // removal; ordinary reads and writes must continue to refuse its receipt.
+    const removalIntentAtStart = observesWorkspace(name) ? fallback?.getItem(removalIntentKey(name)) ?? null : null;
     const previousPacked = observesWorkspace(name) ? fallback?.getItem(packedFallbackKey(name)) ?? null : null;
     const previousPlain = observesWorkspace(name) ? newerFallbackCopy(fallback, name) : null;
     const previousMarker = observesWorkspace(name) ? fallback?.getItem(fallbackMarkerKey(name)) ?? null : null;
@@ -1569,6 +1632,10 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
       }
     } else {
       clearFallbackCopy(fallback, name, userId);
+    }
+    if (observesWorkspace(name)) {
+      if (fallback?.getItem(removalIntentKey(name)) !== removalIntentAtStart) throw new VaultConflictError();
+      if (removalIntentAtStart !== null) fallback?.removeItem(removalIntentKey(name));
     }
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
@@ -1622,7 +1689,14 @@ export function flushLocalVaultWrites(): Promise<void> {
 }
 
 export const localVaultStorage: StateStorage = {
-  getItem: (name) => vaultStorage.getItem(name),
+  getItem: async (name) => {
+    // Check before the asynchronous read and again before returning to the
+    // hydrated application; another tab may begin a removal during that read.
+    assertNoPendingVaultRemoval(localFallback(name), name);
+    const value = await vaultStorage.getItem(name);
+    assertNoPendingVaultRemoval(localFallback(name), name);
+    return value;
+  },
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };
