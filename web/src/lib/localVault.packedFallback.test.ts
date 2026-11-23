@@ -242,10 +242,14 @@ describe("verified separate compressed workspace fallback", () => {
         await localVaultStorage.setItem(key, snapshot("blind write must be rejected"));
         expect(() => assertVaultWritesSince(writeCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
         expect(values.get(packedKey)).toBe(originalPacked);
-        // A newly captured recovery export cannot select retired Y as current X.
-        await expect(resolveWorkspaceSnapshotRecord(
-          { [key]: restoredX }, Object.fromEntries(values), key,
-        )).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        // A captured backup cannot represent a transient live Storage exception.
+        // When its saved receipt bytes themselves are damaged, the immutable
+        // backup selector must also fail closed rather than selecting packed Y.
+        if (fault !== "receipt read error") {
+          await expect(resolveWorkspaceSnapshotRecord(
+            { [key]: restoredX }, Object.fromEntries(values), key,
+          )).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        }
       } finally {
         inaccessible?.mockRestore();
       }
