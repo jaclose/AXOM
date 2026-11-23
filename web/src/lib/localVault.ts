@@ -1485,39 +1485,41 @@ const vaultStorage: StateStorage = {
   },
 
   async removeItem(name) {
-    // A denied recovery-store getter must not authorize deleting the vault
-    // while a newer acknowledged offline workspace might still be hidden.
-    let fallback: Storage | null;
-    try { fallback = localFallback(name); }
-    catch (error) {
-      const failure = isVaultConflictError(error) ? error : new VaultConflictError();
-      const writeSequence = ++vaultWriteSequence;
-      vaultWriteFailures.set(writeSequence, failure);
-      markVaultWriteFailure(new Date(), failure);
-      return;
-    }
-    let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
-    if (!active) {
-      try {
-        active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
-      } catch {
-        // Continue with the localStorage cleanup path below.
-      }
-    }
-    fallback?.removeItem(name);
-    fallback?.removeItem(fallbackMarkerKey(name));
-    if (observesWorkspace(name)) {
-      fallback?.removeItem(packedFallbackKey(name));
-      fallback?.removeItem(packedRetiredKey(name));
-    }
-    fallback?.removeItem(activeUserKey(name));
-    if (active) fallback?.removeItem(scopedStateKey(name, active));
+    const writeSequence = ++vaultWriteSequence;
     try {
+      // A Storage method can throw even after its Window getter succeeds.
+      // Do not remove IDB data if its acknowledged offline recovery state
+      // cannot be inspected or removed, and never swallow the failure.
+      const fallback = localFallback(name);
+      let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
+      if (!active) {
+        try {
+          active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
+        } catch {
+          // The fallback may be the only readable account pointer.
+        }
+      }
+      fallback?.removeItem(name);
+      fallback?.removeItem(fallbackMarkerKey(name));
+      if (observesWorkspace(name)) {
+        fallback?.removeItem(packedFallbackKey(name));
+        fallback?.removeItem(packedRetiredKey(name));
+      }
+      fallback?.removeItem(activeUserKey(name));
+      if (active) fallback?.removeItem(scopedStateKey(name, active));
       await removeVaultRecords(name, active);
       conflictedWorkspaceKeys.delete(name);
       rememberVaultSnapshot(name, null);
-    } catch {
-      // No-op; best effort cleanup.
+    } catch (error) {
+      // A partial localStorage cleanup is not proof that the IndexedDB or
+      // recovery copy was fully deleted. The next write must rehydrate and
+      // reconcile this account instead of reporting a successful removal.
+      const failure = isVaultConflictError(error) ? error
+        : observesWorkspace(name) ? new VaultConflictError()
+          : error instanceof Error ? error : new Error("AXOM could not remove local vault data.");
+      if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+      vaultWriteFailures.set(writeSequence, failure);
+      markVaultWriteFailure(new Date(), failure);
     }
   },
 };
