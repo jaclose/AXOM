@@ -8,6 +8,8 @@ import {
   flushLocalVaultWrites,
   localVaultStorage,
   resetLocalVaultRuntimeForTests,
+  replaceLocalVaultItem,
+  resolveWorkspaceSnapshotRecord,
   VAULT_CONFLICT_MESSAGE,
   writeLocalFallback,
 } from "./localVault";
@@ -758,6 +760,77 @@ describe("IndexedDB-first local vault", () => {
 describe("a save that could not reach IndexedDB", () => {
   const key = STORAGE_KEYS.persistedState;
   const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+
+  it.each(["receipt read blocked", "malformed receipt", "invalid receipt schema", "empty receipt"] as const)(
+    "fails closed on %s after explicit recovery without losing either workspace",
+    async (fault) => {
+      const markerKey = `${key}:fallback-newer`;
+      const receiptKey = `${key}:fallback-retired`;
+      const scopedKey = `${key}:user:jd`;
+      const base = snapshot("original committed workspace");
+      const offlineY = snapshot("older offline edits");
+      const restoredX = snapshot("explicitly restored newer notes and attempts");
+
+      await localVaultStorage.setItem(key, base);
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offlineY);
+      expect(storage.getItem(key)).toBe(offlineY);
+      const marker = storage.getItem(markerKey);
+      expect(marker).not.toBeNull();
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+      const checkpoint = getVaultWriteCheckpoint();
+      await replaceLocalVaultItem(key, restoredX);
+      expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+      const receipt = storage.getItem(receiptKey);
+      expect(receipt).not.toBeNull();
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(scopedKey)).toBe(offlineY);
+      const db = await openCurrentVault();
+      try {
+        expect(await getDirect(db, key)).toBe(restoredX);
+        resetLocalVaultRuntimeForTests();
+        if (fault === "malformed receipt") values.set(receiptKey, "{bad-json");
+        if (fault === "invalid receipt schema") values.set(receiptKey, JSON.stringify({ version: 1, marker }));
+        if (fault === "empty receipt") values.set(receiptKey, "");
+        const uncertain = values.get(receiptKey);
+        const originalGet = storage.getItem.bind(storage);
+        const blocked = fault === "receipt read blocked"
+          ? vi.spyOn(storage, "getItem").mockImplementation(name => {
+            if (name === receiptKey) throw new DOMException("Temporary receipt access denied", "SecurityError");
+            return originalGet(name);
+          })
+          : null;
+        try {
+          vi.stubGlobal("indexedDB", undefined);
+          await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+          const writeCheckpoint = getVaultWriteCheckpoint();
+          await localVaultStorage.setItem(key, snapshot("blind edit must be rejected"));
+          await flushLocalVaultWrites();
+          expect(() => assertVaultWritesSince(writeCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+          expect(values.get(key)).toBe(offlineY);
+          expect(values.get(markerKey)).toBe(marker);
+          expect(values.get(scopedKey)).toBe(offlineY);
+          expect(values.get(receiptKey)).toBe(uncertain);
+          expect(await getDirect(db, key)).toBe(restoredX);
+          if (fault !== "receipt read blocked") {
+            await expect(resolveWorkspaceSnapshotRecord(
+              { [key]: restoredX }, Object.fromEntries(values), key,
+            )).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+          }
+        } finally {
+          blocked?.mockRestore();
+          vi.stubGlobal("indexedDB", fakeIndexedDb);
+          values.set(receiptKey, receipt!);
+        }
+        resetLocalVaultRuntimeForTests();
+        expect(await localVaultStorage.getItem(key)).toBe(restoredX);
+        expect(await resolveWorkspaceSnapshotRecord(
+          { [key]: restoredX }, Object.fromEntries(values), key,
+        )).toBe(restoredX);
+      } finally { db.close(); }
+    },
+  );
 
   it("is read back at the next start instead of the older copy still in IndexedDB", async () => {
     // When IndexedDB is unavailable, the next start must not read its older
