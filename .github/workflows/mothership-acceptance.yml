@@ -13,6 +13,7 @@ on:
       - 'web/src/lib/localBackup.test.ts'
       - 'web/src/lib/updateCheckpoint.test.ts'
       - 'web/src/lib/account/accountStore.test.ts'
+      - 'web/src/lib/questionImportAtomic.test.ts'
       - 'web/src/lib/question-content/persistenceHarness.testing.ts'
       - 'web/src/lib/question-content/persistenceHarness.testing.test.ts'
       - 'web/src/lib/sharing/questionSetImport.persistence.test.ts'
@@ -107,6 +108,20 @@ jobs:
         with:
           name: mothership-account-recovery-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/mothership-account-recovery.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Atomic reviewed import and rollback fixture regressions
+        run: |
+          result=0
+          npm --prefix web run test -- src/lib/questionImportAtomic.test.ts --reporter=verbose > "$RUNNER_TEMP/mothership-atomic-import.log" 2>&1 || result=$?
+          tail -n 160 "$RUNNER_TEMP/mothership-atomic-import.log"
+          exit "$result"
+      - name: Preserve atomic import fixture evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mothership-atomic-import-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mothership-atomic-import.log
           if-no-files-found: warn
           retention-days: 7
       - name: Repository regression tests and hygiene
