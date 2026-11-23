@@ -570,7 +570,13 @@ describe("IndexedDB-first local vault", () => {
       expect(storage.getItem(markerKey)).toBe(marker);
       expect(storage.getItem(scopedKey)).toBe(offline);
       const db = await openCurrentVault();
-      try { expect(await getDirect(db, key)).toBe(committed); } finally { db.close(); }
+      try {
+        // A denied read leaves both tiers untouched; a denied deletion now
+        // follows a completed IDB transaction but retains the local recovery.
+        expect(await getDirect(db, key)).toBe(
+          deniedStep === "active-user read" ? committed : undefined,
+        );
+      } finally { db.close(); }
 
       // Access recovery alone must not turn a failed removal into implicit
       // permission for the same tab to overwrite an unhydrated workspace.
@@ -580,7 +586,14 @@ describe("IndexedDB-first local vault", () => {
       expect(() => assertVaultWritesSince(nextCheckpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
       expect(storage.getItem(key)).toBe(offline);
       resetLocalVaultRuntimeForTests();
-      await expect(localVaultStorage.getItem(key)).resolves.toBe(offline);
+      if (deniedStep === "active-user read") {
+        // No removal-intent record was written before the denied preflight.
+        await expect(localVaultStorage.getItem(key)).resolves.toBe(offline);
+      } else {
+        // Incomplete deletion persists across reload; no stale IDB hydration.
+        expect(storage.getItem(`${key}:removal-pending`)).toBeTruthy();
+        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+      }
     },
   );
 
