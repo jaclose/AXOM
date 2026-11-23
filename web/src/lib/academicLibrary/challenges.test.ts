@@ -103,3 +103,26 @@ it("retains valid ties and a truncated 100-row page without falsely requiring vi
   const secondGroup={rows:firstHundred.map((row,i)=>i===99?{...row,points:0,answered:0,rank:2}:row),yourRank:2,participants:101};
   expect(readDailyStandings(secondGroup)).toEqual(secondGroup);
 });
+
+const cutoffRows = (cutoffPoints: number) => Array.from({length:100},(_,i)=>({
+  alias:"Learner "+String(i).padStart(3,"0"),points:i===99?cutoffPoints:3,
+  answered:3,rank:i===99?2:1,you:false,
+}));
+it("rejects an omitted caller outranking a truncated standings cutoff",()=>{
+  expect(()=>readDailyStandings({rows:cutoffRows(0),yourRank:1,participants:101})).toThrow(/Standings/);
+});
+it("rejects omitted ranks requiring negative scores or more participants",()=>{
+  expect(()=>readDailyStandings({rows:cutoffRows(0),yourRank:3,participants:101})).toThrow(/Standings/);
+  expect(()=>readDailyStandings({rows:cutoffRows(2),yourRank:4,participants:101})).toThrow(/Standings/);
+  expect(()=>readDailyStandings({rows:cutoffRows(1),yourRank:4,participants:110})).toThrow(/Standings/);
+});
+it("accepts feasible omitted ranks, null nonparticipant and a visible caller",()=>{
+  const valid=[
+    {rows:cutoffRows(0),yourRank:2,participants:101},
+    {rows:cutoffRows(2),yourRank:3,participants:101},
+    {rows:cutoffRows(2),yourRank:4,participants:102},
+    {rows:cutoffRows(0),yourRank:null,participants:101},
+    {rows:cutoffRows(0).map((row,i)=>i===0?{...row,you:true}:row),yourRank:1,participants:101},
+  ];
+  for(const value of valid) expect(readDailyStandings(value)).toEqual(value);
+});
