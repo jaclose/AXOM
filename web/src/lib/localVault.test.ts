@@ -832,6 +832,56 @@ describe("a save that could not reach IndexedDB", () => {
     },
   );
 
+  it.each(["marker access blocked", "payload access blocked"] as const)(
+    "fails closed when the acknowledged workspace fallback has %s",
+    async (fault) => {
+      const markerKey = `${key}:fallback-newer`;
+      const scopedKey = `${key}:user:jd`;
+      const base = snapshot("original durable workspace");
+      const offline = snapshot("different tab's acknowledged offline notes");
+      const attempted = snapshot("blind write must not be accepted");
+
+      await localVaultStorage.setItem(key, base);
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, offline);
+      await flushLocalVaultWrites();
+      const marker = storage.getItem(markerKey);
+      expect(marker).not.toBeNull();
+      expect(storage.getItem(scopedKey)).toBe(offline);
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      resetLocalVaultRuntimeForTests();
+
+      const originalGet = storage.getItem.bind(storage);
+      const denied = vi.spyOn(storage, "getItem").mockImplementation(name => {
+        if (name === (fault === "marker access blocked" ? markerKey : key)) {
+          throw new DOMException("Synthetic intermittent localStorage denial", "SecurityError");
+        }
+        return originalGet(name);
+      });
+      try {
+        // A fresh tab has not yet hydrated. Even a valid IDB base does not
+        // prove that the independently marked offline copy was absent.
+        await expect(localVaultStorage.getItem(key)).rejects.toThrow(VAULT_CONFLICT_MESSAGE);
+        resetLocalVaultRuntimeForTests();
+        const checkpoint = getVaultWriteCheckpoint();
+        await localVaultStorage.setItem(key, attempted);
+        await flushLocalVaultWrites();
+        expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+        expect(values.get(key)).toBe(offline);
+        expect(values.get(markerKey)).toBe(marker);
+        expect(values.get(scopedKey)).toBe(offline);
+        const db = await openCurrentVault();
+        try { expect(await getDirect(db, key)).toBe(base); } finally { db.close(); }
+      } finally {
+        denied.mockRestore();
+      }
+      resetLocalVaultRuntimeForTests();
+      await expect(localVaultStorage.getItem(key)).resolves.toBe(offline);
+      expect(values.get(key)).toBe(offline);
+      expect(values.get(markerKey)).toBe(marker);
+    },
+  );
+
   it("records a late malformed retirement receipt as a failed save, not a silent retry success", async () => {
     const receiptKey = `${key}:fallback-retired`;
     const markerKey = `${key}:fallback-newer`;

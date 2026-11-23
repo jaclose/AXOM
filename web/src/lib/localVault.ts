@@ -347,7 +347,13 @@ function newerFallbackCopy(fallbackStore: Pick<Storage, "getItem"> | null, name:
     return snapshotFingerprint(value) === valueFingerprint
       ? { value, marker, fingerprint: valueFingerprint, baseFingerprint }
       : null;
-  } catch {
+  } catch (error) {
+    // A marked recovery copy may still exist when the marker or payload read
+    // raises SecurityError. Treating that ambiguity as no fallback can hydrate
+    // an older IndexedDB workspace or acknowledge a blind competing save.
+    if (observesWorkspace(name)) {
+      throw isVaultConflictError(error) ? error : new VaultConflictError();
+    }
     return null;
   }
 }
