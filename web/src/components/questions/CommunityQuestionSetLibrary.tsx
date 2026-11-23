@@ -67,6 +67,18 @@ function observeAccountSession(accountId: string, onRevoked: () => void) {
   };
 }
 
+// Both Preview and Practice must reserve malformed import receipts by raw
+// case-insensitive share ID; a broken receipt is not permission to reimport.
+function savedCopiesForPublication(sets: readonly QuestionSet[], publicationId: string): QuestionSet[] {
+  const canonicalId = publicationId.toLowerCase();
+  return sets.filter(set => {
+    const raw = (set as QuestionSet & { importProvenance?: unknown }).importProvenance;
+    return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+      && "shareId" in raw && typeof raw.shareId === "string"
+      && raw.shareId.trim().toLowerCase() === canonicalId;
+  });
+}
+
 export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set: QuestionSet) => void }) {
   const accountId = useAccount(state => state.user?.id);
   // Search text is private account activity. Switching A → B must hide A's
@@ -273,12 +285,7 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
       // Treat malformed/old receipts as reserved too. The canonical importer
       // rejects them by raw share ID; filtering only validated receipts here
       // would misleadingly offer a fresh import that can never be committed.
-      const savedCopies = store.questionSets.filter(set => {
-        const raw = (set as QuestionSet & { importProvenance?: unknown }).importProvenance;
-        return raw !== null && typeof raw === "object" && !Array.isArray(raw)
-          && "shareId" in raw && typeof raw.shareId === "string"
-          && raw.shareId.trim().toLowerCase() === result.id.toLowerCase();
-      });
+      const savedCopies = savedCopiesForPublication(store.questionSets, result.id);
       if (savedCopies.length) {
         let complete = false;
         try {
@@ -478,14 +485,20 @@ export function CommunityQuestionSetLibrary({ onPractice }: { onPractice?: (set:
     // launch practice against arbitrary membership and learner attempts.
     // The importer treats UUIDs as case-insensitive. Restored receipts must
     // follow the same identity rule so learners can reopen their original copy.
-    const publicationId = activePreview.id.toLowerCase();
-    const copies = store.questionSets.filter(candidate =>
-      readSharedQuestionImportProvenance(candidate)?.shareId.toLowerCase() === publicationId);
+    const copies = savedCopiesForPublication(store.questionSets, activePreview.id);
     if (copies.length > 1) {
+      setImportRecovery(true);
       setPreviewError("Multiple saved copies reference this publication. Resolve the original import receipts in Question Bank before practicing. Your original question IDs and attempts are unchanged.");
       return;
     }
     const set = copies[0];
+    // A late corrupted receipt still reserves this publication. Never invite
+    // a replacement import that could split existing learner attempts.
+    if (set && !readSharedQuestionImportProvenance(set)) {
+      setImportRecovery(true);
+      setPreviewError("This saved set has an invalid import receipt. Recover its original receipt in Question Bank before practicing. Original question IDs and attempts are unchanged.");
+      return;
+    }
     if (!set) {
       setImported(false);
       setImportRecovery(false);

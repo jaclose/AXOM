@@ -181,6 +181,53 @@ describe("Community Question Set Library", () => {
     expect(mock.sets).toEqual([savedSet, malformed]);
   });
 
+  it.each([
+    ["unsupported version", { version: 2, shareId: summary.id, contentDigest: "a".repeat(64) }],
+    ["invalid digest", { version: 1, shareId: summary.id.toUpperCase(), contentDigest: "corrupt" }],
+  ])("holds a saved set when its receipt becomes %s between preview and Practice", async (_case, receipt) => {
+    mock.sets = [savedSet];
+    mock.questions = [savedQuestion];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByRole("button", { name: "Practice this set" });
+    const damaged = { ...savedSet, importProvenance: receipt } as unknown as QuestionSet;
+    mock.sets = [damaged];
+    fireEvent.click(screen.getByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect((await screen.findByRole("button", { name: "Saved copy needs recovery" })).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(screen.getByText(/This saved set has an invalid import receipt/)).toBeTruthy();
+    expect(mock.authorize).not.toHaveBeenCalled();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([damaged]);
+    expect(mock.questions).toEqual([savedQuestion]);
+  });
+
+  it("holds a saved set when a conflicting receipt appears after preview", async () => {
+    mock.sets = [savedSet];
+    mock.questions = [savedQuestion];
+    const onPractice = vi.fn();
+    render(<CommunityQuestionSetLibrary onPractice={onPractice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview set" }));
+    await screen.findByRole("button", { name: "Practice this set" });
+    const duplicate = { ...savedSet, id: "late-duplicate",
+      importProvenance: { version: 2, shareId: summary.id, contentDigest: "a".repeat(64) },
+    } as unknown as QuestionSet;
+    mock.sets = [savedSet, duplicate];
+    fireEvent.click(screen.getByRole("button", { name: "Practice this set" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect((await screen.findByRole("button", { name: "Saved copy needs recovery" })).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Practice this set" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add to my AXOM" })).toBeNull();
+    expect(screen.getByText(/Multiple saved copies reference this publication/)).toBeTruthy();
+    expect(mock.authorize).not.toHaveBeenCalled();
+    expect(mock.commit).not.toHaveBeenCalled();
+    expect(mock.sets).toEqual([savedSet, duplicate]);
+    expect(mock.questions).toEqual([savedQuestion]);
+  });
+
   it("keeps the preview recoverable if the saved copy was removed before practice", async () => {
     mock.sets = [savedSet];
     mock.questions = [savedQuestion];
