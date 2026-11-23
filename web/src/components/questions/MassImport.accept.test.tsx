@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DB_NAME } from "../../lib/localVault";
+import { DB_NAME, flushLocalVaultWrites, resetLocalVaultRuntimeForTests } from "../../lib/localVault";
 import { skippedImports } from "../../lib/importSkips";
 import { saveReviewedImport } from "../../lib/questionImportSave";
 import { useStore } from "../../lib/store";
@@ -52,6 +52,10 @@ function deleteDatabase(name: string): Promise<void> {
 }
 
 beforeEach(async () => {
+  // A discarded fake database is a fresh tab lifetime, not a competing delete.
+  // Do not carry the previous test's hydrated CAS expectation into empty IDB.
+  await flushLocalVaultWrites();
+  resetLocalVaultRuntimeForTests();
   vi.clearAllMocks();
   localValues.clear();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
@@ -63,6 +67,7 @@ beforeEach(async () => {
 afterEach(async () => {
   cleanup();
   await useStore.setState(original);
+  await flushLocalVaultWrites();
   vi.unstubAllGlobals();
 });
 
