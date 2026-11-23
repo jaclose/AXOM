@@ -208,7 +208,7 @@ describe("verified separate compressed workspace fallback", () => {
     expect(values.get(packedKey)).toBe(preservedPacked);
   });
 
-  it.each(["receipt read error", "malformed receipt", "invalid receipt schema"] as const)(
+  it.each(["receipt read error", "malformed receipt", "invalid receipt schema", "invalid v1 receipt"] as const)(
     "fails closed on %s after a verified restore without losing either workspace",
     async fault => {
       const fixture = await quotaFixture();
@@ -232,6 +232,11 @@ describe("verified separate compressed workspace fallback", () => {
         : null;
       if (fault === "malformed receipt") values.set(receiptKey, "{incomplete");
       if (fault === "invalid receipt schema") values.set(receiptKey, JSON.stringify({ version: 2, rawSha256: "invalid" }));
+      if (fault === "invalid v1 receipt") {
+        const malformed = { ...JSON.parse(originalReceipt), version: 1 };
+        delete malformed.rawSha256;
+        values.set(receiptKey, JSON.stringify(malformed)); // Missing required original bytes.
+      }
       const uncertainReceipt = values.get(receiptKey);
       resetLocalVaultRuntimeForTests();
       try {
