@@ -26,13 +26,14 @@ beforeEach(async () => {
   // Each test destroys fake IndexedDB: also reset this tab's observed Vault revision.
   // Drain prior writes first so no queued save races the next synthetic database.
   await flushLocalVaultWrites();
-  resetLocalVaultRuntimeForTests();
   values.clear();
-  resetLocalBackupRuntimeForTests();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", storage);
   await deleteDatabase(STORAGE_KEYS.vaultDb);
+  // Never discard observed CAS state until the old test database is truly gone.
+  resetLocalVaultRuntimeForTests();
+  resetLocalBackupRuntimeForTests();
 });
 
 afterEach(async () => {
@@ -43,6 +44,39 @@ afterEach(async () => {
 });
 
 describe("automatic local migration backups", () => {
+  it("rejects blocked fake IndexedDB deletion rather than claiming a clean test database", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, questions: [{ id: "preserved" }] }, version: 34 });
+    // A dedicated database gives this regression a known, verified object-store
+    // precondition independently of the workspace adapter's fallback behavior.
+    const name = `${DB_NAME}-blocked-fixture-r223`;
+    await deleteDatabase(name);
+    const reader = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = fakeIndexedDb.open(name, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await putState(reader, key, saved);
+    try {
+      await expect(deleteDatabase(name)).rejects.toThrow(/blocked/i);
+      // The failed cleanup has not removed acknowledged synthetic data.
+      expect(await getStoredValue(reader, STORE_NAME, key)).toBe(saved);
+    } finally {
+      reader.close();
+    }
+    // A delete that was merely blocked may continue after the reader closes.
+    // Confirm the resulting database is really gone, not just a cleared CAS map.
+    await deleteDatabase(name);
+    const empty = await openDatabase(name);
+    try {
+      expect(empty.objectStoreNames.contains(STORE_NAME)).toBe(false);
+    } finally {
+      empty.close();
+    }
+    await deleteDatabase(name);
+  });
+
   it("uses the canonical vault version and object stores shared with primary persistence", async () => {
     const persisted = JSON.stringify({ state: { profile: { userId: "jd" }, questions: [{ id: "q1" }] }, version: 32 });
     await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
@@ -470,11 +504,11 @@ describe("automatic local migration backups", () => {
 });
 
 function deleteDatabase(name: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const request = fakeIndexedDb.deleteDatabase(name);
     request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error(`Failed to delete fake IndexedDB ${name}`));
+    request.onblocked = () => reject(new Error(`Blocked deleting fake IndexedDB ${name}: an open connection remains`));
   });
 }
 

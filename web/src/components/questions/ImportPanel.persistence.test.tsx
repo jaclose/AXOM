@@ -44,12 +44,13 @@ beforeEach(async () => {
   // This fixture intentionally destroys fake IndexedDB between tests: the
   // simulated tab must not retain a prior database's observed CAS revision.
   await flushLocalVaultWrites();
-  resetLocalVaultRuntimeForTests();
   localValues.clear();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", localStorageStub);
   await deleteDatabase(DB_NAME);
+  // Reset the CAS observation only after confirmed fake-IDB deletion.
+  resetLocalVaultRuntimeForTests();
   await useStore.setState({ questions: [], questionSets: [], documents: [] });
 });
 afterEach(async () => {
@@ -60,11 +61,11 @@ afterEach(async () => {
 });
 
 function deleteDatabase(name: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const request = fakeIndexedDb.deleteDatabase(name);
     request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error(`Failed to delete fake IndexedDB ${name}`));
+    request.onblocked = () => reject(new Error(`Blocked deleting fake IndexedDB ${name}: an open connection remains`));
   });
 }
 
