@@ -241,3 +241,39 @@ it("accepts a valid canonical nested manifest and reads its exact bytes", async 
   expect([...await reader("banks/one.json")]).toEqual([...f.files.get("banks/one.json")!]);
   expect(f.download).toHaveBeenCalledTimes(1);
 });
+
+
+// R207: cloud academic manifests must be usable as portable source-package paths.
+// Reject unsafe metadata before any source/original binary is downloaded.
+it.each([
+  ["Windows device name", "originals/CON.pdf"],
+  ["Windows reserved device with extension", "originals/com1.txt"],
+  ["alternate data stream delimiter", "originals/lecture:notes.pdf"],
+  ["Windows wildcard", "originals/scan?.png"],
+  ["Windows terminal dot", "originals/notes."],
+  ["Windows terminal space", "originals/notes "],
+  ["overlong UTF-8 component", `originals/${"é".repeat(128)}.pdf`],
+] as const)("refuses a %s in a cloud source manifest before any binary read", async (_kind, path) => {
+  const f = await fixture();
+  f.manifest[2].path = path;
+  await expect(academicLibraryReader(await mocked.client(), revision)).rejects.toThrow(/Invalid course file manifest.*path/);
+  // The existing source ZIP exporter must inherit the same guard: no partial
+  // ZIP should be built from an unrecoverable cloud filename.
+  await expect(createStoredSourceArchive(course, scope())).rejects.toThrow(/Invalid course file manifest.*path/);
+  expect(f.download).not.toHaveBeenCalled();
+});
+
+it("keeps ordinary source filenames with spaces, # and canonical Unicode intact", async () => {
+  const named = "originals/Café #3 study notes.pdf";
+  const bytes = new TextEncoder().encode("Unmodified stored source bytes");
+  const f = await fixture({ [named]: bytes });
+  const reader = await academicLibraryReader(await mocked.client(), revision);
+  expect(reader.files.some(file => file.path === named)).toBe(true);
+  expect([...await reader(named)]).toEqual([...bytes]);
+  expect(f.download).toHaveBeenCalledTimes(1);
+  const archive = await createStoredSourceArchive(course, scope());
+  const packaged = new Uint8Array(await archive.blob.arrayBuffer());
+  const file = new NativeFile([packaged], archive.fileName, { type: "application/zip" });
+  const restored = await zipLibraryReader(file as unknown as File);
+  expect([...await restored(named)]).toEqual([...bytes]);
+});
