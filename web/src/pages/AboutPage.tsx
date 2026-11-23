@@ -54,10 +54,12 @@ const STATUS_META: Record<FeatureStatus, { label: string; sub: string; icon: typ
 
 export function AboutPage() {
   const [tab, setTab] = useState<"axom" | "developer">("axom");
+  const [developerVisited, setDeveloperVisited] = useState(false);
   const axomTabRef = useRef<HTMLButtonElement>(null);
   const developerTabRef = useRef<HTMLButtonElement>(null);
 
   function selectTab(next: "axom" | "developer") {
+    if (next === "developer") setDeveloperVisited(true);
     setTab(next);
     (next === "axom" ? axomTabRef : developerTabRef).current?.focus();
   }
@@ -90,7 +92,14 @@ export function AboutPage() {
         <button ref={developerTabRef} type="button" role="tab" id="about-tab-developer" aria-controls="about-panel" aria-selected={tab === "developer"} tabIndex={tab === "developer" ? 0 : -1} onClick={() => selectTab("developer")} onKeyDown={(event) => handleTabKeyDown(event, "developer")}>The developer</button>
       </div>
       <div id="about-panel" role="tabpanel" tabIndex={0} aria-labelledby={`about-tab-${tab}`} className="about-panel">
-        {tab === "axom" ? <AboutAxom /> : <WebsitePreview />}
+        {tab === "axom" && <AboutAxom />}
+        {developerVisited && (
+          // Keep explicitly opened remote content alive on tab round-trips.
+          // Hidden + inert excludes it from keyboard, pointer and AT navigation.
+          <div hidden={tab !== "developer"} inert={tab !== "developer"}>
+            <WebsitePreview />
+          </div>
+        )}
       </div>
     </>
   );
