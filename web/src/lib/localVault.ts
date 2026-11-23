@@ -962,20 +962,37 @@ interface RetiredFallbackReceipt {
 function retiredFallbackReceipt(
   fallbackStore: Pick<Storage, "getItem"> | null, name: string, copy: NewerFallbackCopy,
 ): RetiredFallbackReceipt | null {
-  try {
-    const raw = fallbackStore?.getItem(`${name}:fallback-retired`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<RetiredFallbackReceipt>;
-    if (
-      parsed.version !== 1
-      || parsed.marker !== copy.marker
-      || parsed.valueFingerprint !== copy.fingerprint
-      || parsed.fallbackUserId !== persistedUserId(copy.value)
-      || typeof parsed.committedFingerprint !== "string"
-      || typeof parsed.committedUserId !== "string"
-    ) return null;
-    return parsed as RetiredFallbackReceipt;
-  } catch { return null; }
+  // Only a genuinely absent receipt permits unretired fallback promotion.
+  // A storage read failure or malformed receipt is ambiguous: choosing the
+  // older marked copy could undo an explicit restore in another tab.
+  let raw: string | null | undefined;
+  try { raw = fallbackStore?.getItem(`${name}:fallback-retired`); }
+  catch { throw new VaultConflictError(); }
+  if (raw == null) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); }
+  catch { throw new VaultConflictError(); }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new VaultConflictError();
+  }
+  const receipt = parsed as Partial<RetiredFallbackReceipt>;
+  if (
+    receipt.version !== 1
+    || typeof receipt.marker !== "string"
+    || typeof receipt.valueFingerprint !== "string"
+    || typeof receipt.fallbackUserId !== "string"
+    || typeof receipt.committedFingerprint !== "string"
+    || typeof receipt.committedUserId !== "string"
+  ) throw new VaultConflictError();
+  // A fully valid receipt for an earlier marker does not retire a new,
+  // separately acknowledged fallback. A malformed same-marker binding must
+  // never be treated as proof that no retirement occurred.
+  if (receipt.marker !== copy.marker) return null;
+  if (
+    receipt.valueFingerprint !== copy.fingerprint
+    || receipt.fallbackUserId !== persistedUserId(copy.value)
+  ) throw new VaultConflictError();
+  return receipt as RetiredFallbackReceipt;
 }
 
 function retireFallbackCopyIfUnchanged(
@@ -1085,7 +1102,12 @@ const vaultStorage: StateStorage = {
     }
     const newer = newerFallbackCopy(fallbackStore, name);
     if (newer !== null) {
-      const retired = retiredFallbackReceipt(fallbackStore, name, newer);
+      let retired: RetiredFallbackReceipt | null;
+      try { retired = retiredFallbackReceipt(fallbackStore, name, newer); }
+      catch (error) {
+        if (isVaultConflictError(error) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        throw error;
+      }
       if (retired) {
         // A previous successful write committed newer bytes to IndexedDB and
         // retired this exact earlier marker. Never remove the old recovery
