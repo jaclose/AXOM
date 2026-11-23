@@ -74,9 +74,9 @@ describe("About page accessible tabs", () => {
     fireEvent.click(developer);
     // External preview must not transmit AXOM route or query details.
     expect(screen.getByTitle("Live site preview").getAttribute("referrerpolicy")).toBe("no-referrer");
-    // Cross-origin preview scripts and forms may run, but cannot navigate AXOM,
-    // open new windows or download. Full browsing uses the explicit Open site link.
-    expect(screen.getByTitle("Live site preview").getAttribute("sandbox")).toBe("allow-scripts allow-same-origin allow-forms");
+    // Keep the preview in an opaque origin even after self-navigation; scripts and
+    // forms can run, but popup/top-level navigation still require Open site.
+    expect(screen.getByTitle("Live site preview").getAttribute("sandbox")).toBe("allow-scripts allow-forms");
     const openSite = screen.getByRole("link", { name: /Open site/ });
     expect(openSite.getAttribute("href")).toBe("https://www.jafardabbagh.com/");
     expect(openSite.getAttribute("target")).toBe("_blank");

@@ -148,6 +148,8 @@ test("developer preview blocks a user-triggered popup while an unsandboxed cross
   const control = page.frameLocator('iframe[title="Unsandboxed external popup control"]');
   await control.getByRole("button", { name: "Attempt popup" }).click();
   await expect(control.locator("#popup-result")).toHaveText("allowed");
+  // Positive control retains its real origin; the sandboxed preview must not.
+  expect(await control.locator("body").evaluate(() => window.origin)).toBe("https://www.jafardabbagh.com");
   await page.evaluate(() => {
     document.querySelector('iframe[title="Unsandboxed external popup control"]')?.remove();
   });
@@ -156,4 +158,5 @@ test("developer preview blocks a user-triggered popup while an unsandboxed cross
   const preview = page.frameLocator('iframe[title="Live site preview"]');
   await preview.getByRole("button", { name: "Attempt popup" }).click();
   await expect(preview.locator("#popup-result")).toHaveText("blocked");
+  expect(await preview.locator("body").evaluate(() => window.origin)).toBe("null");
 });

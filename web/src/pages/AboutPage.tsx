@@ -180,7 +180,7 @@ function WebsitePreview() {
         </a>} />
       <div className="website-frame-shell">
         <iframe key={refreshKey} title="Live site preview" src={WEBSITE_URL} loading="lazy"
-          referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms" />
+          referrerPolicy="no-referrer" sandbox="allow-scripts allow-forms" />
       </div>
       <div className="sub" style={{ marginTop: 8 }}>If the preview stays blank, use Open site.</div>
     </GlassCard>
