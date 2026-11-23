@@ -64,18 +64,33 @@ export function readDailyStandings(data: unknown): DailyStandings {
     || !count(standings.participants) || standings.rows.length > standings.participants
     || (standings.yourRank !== null && (!count(standings.yourRank)
       || standings.yourRank < 1 || standings.yourRank > standings.participants))) return invalidStandings();
+  // The RPC limits rows to the first 100 participants after assigning
+  // dense_rank() by points DESC. Even a truncated page begins at rank one;
+  // a tie crossing the cutoff may hide the caller while preserving their rank.
+  if (standings.rows.length !== Math.min(standings.participants as number, 100)) return invalidStandings();
   let ownRows = 0;
+  let lastPoints: number | null = null;
+  let lastRank = 0;
   for (const item of standings.rows) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return invalidStandings();
     const row = item as Record<string, unknown>;
     if (!text(row.alias, 2, 32) || !count(row.points) || !count(row.answered) || row.answered > 100
       || row.points > row.answered || !count(row.rank) || row.rank < 1 || row.rank > standings.participants
       || typeof row.you !== "boolean") return invalidStandings();
+    if (lastPoints !== null && row.points > lastPoints) return invalidStandings();
+    const expectedRank = lastPoints === null ? 1 : lastRank + (row.points < lastPoints ? 1 : 0);
+    if (row.rank !== expectedRank) return invalidStandings();
+    lastPoints = row.points;
+    lastRank = row.rank;
     if (row.you) {
       ownRows += 1;
       if (ownRows > 1 || row.rank !== standings.yourRank) return invalidStandings();
     }
   }
+  // At most 100 returned rows. A full page must contain the caller when
+  // a personal rank exists; a truncated page may omit a tied participant.
+  if ((standings.participants as number) <= 100
+    && ownRows !== (standings.yourRank === null ? 0 : 1)) return invalidStandings();
   return data as DailyStandings;
 }
 
