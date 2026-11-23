@@ -1485,7 +1485,17 @@ const vaultStorage: StateStorage = {
   },
 
   async removeItem(name) {
-    const fallback = localFallback();
+    // A denied recovery-store getter must not authorize deleting the vault
+    // while a newer acknowledged offline workspace might still be hidden.
+    let fallback: Storage | null;
+    try { fallback = localFallback(name); }
+    catch (error) {
+      const failure = isVaultConflictError(error) ? error : new VaultConflictError();
+      const writeSequence = ++vaultWriteSequence;
+      vaultWriteFailures.set(writeSequence, failure);
+      markVaultWriteFailure(new Date(), failure);
+      return;
+    }
     let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
     if (!active) {
       try {
