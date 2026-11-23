@@ -63,6 +63,51 @@ for (const width of [1440, 390, 320]) {
   });
 }
 
+for (const width of [1440, 390]) {
+  test(`developer preview retains in-progress input across tab round-trips at ${width}px`, async ({ page }) => {
+    let previewRequests = 0;
+    await page.route("https://www.jafardabbagh.com/**", route => {
+      previewRequests += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: '<!doctype html><title>Preview fixture</title><label>Unsent draft<input id="draft" value="initial"></label>',
+      });
+    });
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    await page.goto("/", { waitUntil: "networkidle" });
+    await seedOnboarded(page);
+    await page.evaluate(() => { window.location.hash = "about"; });
+
+    const about = page.getByRole("tab", { name: "About AXOM" });
+    const developer = page.getByRole("tab", { name: "The developer" });
+    const frame = page.locator('iframe[title="Live site preview"]');
+    const draft = page.frameLocator('iframe[title="Live site preview"]').locator("#draft");
+
+    // Before first explicit visit, no third-party request or iframe is created.
+    await expect(frame).toHaveCount(0);
+    expect(previewRequests).toBe(0);
+
+    await developer.click();
+    await frame.scrollIntoViewIfNeeded();
+    await draft.fill("draft never submitted");
+    await expect(draft).toHaveValue("draft never submitted");
+
+    await about.click();
+    await expect(about).toBeFocused();
+    await expect(frame).toHaveCount(1);
+    await expect(frame).toBeHidden();
+    await expect(page.locator('[inert] iframe[title="Live site preview"]')).toHaveCount(1);
+    await expect(page.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "about-tab-axom");
+
+    await developer.click();
+    await expect(developer).toBeFocused();
+    await expect(frame).toBeVisible();
+    await expect(draft).toHaveValue("draft never submitted");
+    expect(previewRequests).toBe(1);
+  });
+}
+
 test("external developer preview omits AXOM query referrer", async ({ page }) => {
   const controlReferrers: string[] = [];
   const previewReferrers: Array<string | undefined> = [];

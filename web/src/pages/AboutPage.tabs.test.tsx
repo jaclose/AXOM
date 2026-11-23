@@ -46,6 +46,31 @@ describe("About page accessible tabs", () => {
     expect(developer.getAttribute("aria-selected")).toBe("true");
   });
 
+  it("lazily loads and preserves the developer iframe across tab round-trips", () => {
+    render(<AboutPage />);
+    const about = screen.getByRole("tab", { name: "About AXOM" });
+    const developer = screen.getByRole("tab", { name: "The developer" });
+    expect(screen.queryByTitle("Live site preview")).toBeNull();
+
+    fireEvent.click(developer);
+    const frame = screen.getByTitle("Live site preview");
+    frame.setAttribute("data-unsubmitted-draft", "in-progress");
+    expect(frame.closest("[hidden]")).toBeNull();
+
+    fireEvent.click(about);
+    expect(screen.getByTitle("Live site preview")).toBe(frame);
+    expect(frame.closest("[hidden]")).not.toBeNull();
+    expect(frame.closest("[inert]")).not.toBeNull();
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(about.id);
+
+    fireEvent.click(developer);
+    expect(screen.getByTitle("Live site preview")).toBe(frame);
+    expect(frame.closest("[hidden]")).toBeNull();
+    expect(frame.closest("[inert]")).toBeNull();
+    expect(frame.getAttribute("data-unsubmitted-draft")).toBe("in-progress");
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(developer.id);
+  });
+
   it("does not destroy a live developer preview after thirty minutes", () => {
     // An unseen iframe key change destroys remote scroll, navigation and unsent forms.
     // Use identity rather than mocking the remote site, which is a separate origin.
