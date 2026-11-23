@@ -5,7 +5,7 @@ import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { vi } from "vitest";
 import { STORAGE_KEYS } from "../brand";
 import type { QuestionSet, SourceDocument } from "../library";
-import { DB_NAME, flushLocalVaultWrites, localVaultStorage } from "../localVault";
+import { DB_NAME, flushLocalVaultWrites, localVaultStorage, resetLocalVaultRuntimeForTests } from "../localVault";
 import { listQuestionAttachmentBlobKeys } from "../questionAttachments";
 import type { QuestionRecord } from "../questions";
 import { useStore } from "../store";
@@ -30,11 +30,11 @@ const storage: Storage = {
 };
 
 function deleteDatabase(name: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const request = fakeIndexedDb.deleteDatabase(name);
     request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error(`Could not delete synthetic IndexedDB ${name}.`));
+    request.onblocked = () => reject(new Error(`Blocked deleting synthetic IndexedDB ${name}: an open connection remains.`));
   });
 }
 
@@ -44,11 +44,15 @@ let original: Workspace | undefined;
 export async function openEmptyWorkspace(): Promise<void> {
   const state = useStore.getState();
   original ??= { questions: state.questions, questionSets: state.questionSets, documents: state.documents };
-  values.clear();
+  // A queued save belongs to the old synthetic lifetime, not the next one.
+  await flushLocalVaultWrites();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", storage);
   await deleteDatabase(DB_NAME);
+  // Only a confirmed deletion licenses a fresh tab-local CAS/deletion lineage.
+  resetLocalVaultRuntimeForTests();
+  values.clear();
   await useStore.persist.rehydrate();
   await useStore.setState({ questions: [], questionSets: [], documents: [] });
   await flushLocalVaultWrites();
@@ -58,6 +62,7 @@ export async function closeWorkspace(): Promise<void> {
   if (original) await useStore.setState(original);
   await flushLocalVaultWrites();
   await deleteDatabase(DB_NAME);
+  resetLocalVaultRuntimeForTests();
   vi.unstubAllGlobals();
 }
 
