@@ -147,6 +147,37 @@ describe("reviewed Question Set Library SQL and RLS", () => {
       .rejects.toThrow(/reviewer access required/i);
   });
 
+  it("blocks self-approval through the installed publication trigger and real reviewer RPC", async () => {
+    // The isolated trigger probe is insufficient: this checks the trigger is
+    // installed on the actual table after all ordered migrations, and that the
+    // authenticated review RPC cannot approve a publisher's own submission.
+    const id = await submit(OWNER, "self-review-installed-trigger");
+    await db.query("insert into public.academic_reviewers(user_id) values($1) on conflict do nothing", [OWNER]);
+    try {
+      const [trigger] = (await db.query<{ installed: boolean }>(
+        `select exists (select 1 from pg_trigger
+          where tgrelid = 'public.question_set_library_entries'::regclass
+            and tgname = 'zzzz_question_set_library_independent_reviewer'
+            and tgenabled in ('O', 'A')) installed`,
+      )).rows;
+      expect(trigger.installed).toBe(true);
+
+      await expect(approve(OWNER, id)).rejects.toThrow(/independent academic reviewer/i);
+      const [held] = (await db.query<{ status: string; reviewed_by: string | null; review_revision: number }>(
+        "select status,reviewed_by,review_revision from public.question_set_library_entries where id=$1", [id],
+      )).rows;
+      expect(held).toEqual({ status: "pending", reviewed_by: null, review_revision: 1 });
+      expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(false);
+
+      // Rejecting the author's review must not poison the exact revision or
+      // prevent a genuinely independent academic reviewer from approving it.
+      await approve(REVIEWER, id);
+      expect((await search(LEARNER, "Synthetic reviewed")).some(row => row.id === id)).toBe(true);
+    } finally {
+      await db.query("delete from public.academic_reviewers where user_id=$1", [OWNER]);
+    }
+  });
+
   it("rejects a replaced answer under the SQL row lock and keeps the submission pending", async () => {
     const inspected = snapshot();
     const id = await submit(OWNER, "atomic-answer-revision", inspected);
