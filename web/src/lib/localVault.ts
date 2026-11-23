@@ -1621,7 +1621,7 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
           && typeof intent.primaryFingerprint === "string"
           && fallback?.getItem(activeUserKey(name)) === intent.activeUser
         ) {
-          const scopedValue = fallback.getItem(scopedStateKey(name, intent.activeUser));
+          const scopedValue = fallback?.getItem(scopedStateKey(name, intent.activeUser)) ?? null;
           if (
             scopedValue !== null
             && snapshotFingerprint(scopedValue) === intent.primaryFingerprint
@@ -1670,7 +1670,7 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
             !orphanedMarkerEvidence
             || fallback?.getItem(scopedStateKey(name, orphanedMarkerEvidence.activeUser))
               !== orphanedMarkerEvidence.scopedValue
-            || fallback.getItem(activeUserKey(name)) !== orphanedMarkerEvidence.activeUser
+            || fallback?.getItem(activeUserKey(name)) !== orphanedMarkerEvidence.activeUser
           ) throw new VaultConflictError();
         }
       } else if (userId && previousPacked === null) {
