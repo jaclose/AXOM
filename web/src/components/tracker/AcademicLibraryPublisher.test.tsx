@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { AcademicBatchJob, AcademicBatchOutcome } from "../../lib/academicLibrary/batch";
 import type { AcademicUpload } from "../../lib/academicLibrary/upload";
 import { bank, library } from "../../lib/academicLibrary/publicationFixture.testing";
@@ -117,6 +117,45 @@ describe("publishing a prepared library", () => {
     await waitFor(() => expect(screen.getAllByText("Sharing awaits review")).toHaveLength(2));
     expect(screen.queryAllByText("Shared with everyone")).toHaveLength(0);
     expect(mocks.share.mock.calls[0][2]).not.toHaveProperty("approve");
+  });
+
+  it("marks Stop during sharing as unconfirmed when the remote request may have completed", async () => {
+    mocks.batch.mockImplementation(simulatedBatch([]));
+    let finish!: (outcomes: { collectionId: string; shared: boolean }[]) => void;
+    mocks.share.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const onPublished = vi.fn();
+    const { container } = render(<AcademicLibraryPublisher onPublished={onPublished} />);
+    await chooseLibrary(container);
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
+    await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(mocks.share.mock.calls[0][2].signal.aborted).toBe(true);
+    // A dispatched server operation may have committed; the client has no receipt.
+    await act(async () => { finish([]); });
+    expect(screen.getAllByText("Sharing outcome unconfirmed")).toHaveLength(2);
+    expect(screen.getByRole("status").textContent).toMatch(/in-flight request may have completed.*Refresh My courses/i);
+    expect(screen.queryByText("Sharing awaits review")).toBeNull();
+    expect(onPublished).toHaveBeenCalledOnce();
+  });
+
+  it("preserves earlier confirmed sharing while marking only unconfirmed courses after Stop", async () => {
+    mocks.batch.mockImplementation(simulatedBatch([]));
+    let finish!: (outcomes: { collectionId: string; shared: boolean }[]) => void;
+    mocks.share.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
+    await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await act(async () => { finish([{ collectionId: "collection-academic-library-t4-ncrs", shared: true }]); });
+    expect(screen.getAllByText("Sharing awaits review")).toHaveLength(1);
+    expect(screen.getAllByText("Sharing outcome unconfirmed")).toHaveLength(1);
+    const ncrs = screen.getByText("NCRS").closest("article")!;
+    const goer = screen.getByText("GOER").closest("article")!;
+    expect(within(ncrs).getByText("Sharing awaits review")).toBeTruthy();
+    expect(within(goer).getByText("Sharing outcome unconfirmed")).toBeTruthy();
   });
 
   it("keeps courses private when sharing is off, and explains a course that fails validation", async () => {
