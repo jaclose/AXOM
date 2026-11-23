@@ -321,11 +321,11 @@ describe("IndexedDB-first local vault", () => {
       vi.stubGlobal("indexedDB", fakeIndexedDb);
       resetLocalVaultRuntimeForTests();
 
-      const descriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
-      expect(descriptor?.configurable).toBe(true);
-      Object.defineProperty(window, "localStorage", {
-        configurable: true,
-        get: () => { throw new DOMException("Denied workspace fallback getter", "SecurityError"); },
+      // The repository's focused Vitest suite runs in Node, not jsdom. Stub
+      // the Window binding itself to exercise the real adapter's getter path.
+      const previousWindow = typeof window === "undefined" ? undefined : window;
+      vi.stubGlobal("window", {
+        get localStorage() { throw new DOMException("Denied workspace fallback getter", "SecurityError"); },
       });
       const checkpoint = getVaultWriteCheckpoint();
       try {
@@ -339,7 +339,7 @@ describe("IndexedDB-first local vault", () => {
           expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
         }
       } finally {
-        Object.defineProperty(window, "localStorage", descriptor!);
+        vi.stubGlobal("window", previousWindow);
       }
 
       const laterCheckpoint = getVaultWriteCheckpoint();
