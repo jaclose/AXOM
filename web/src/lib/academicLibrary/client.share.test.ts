@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shareAcademicCourses } from "./client";
 
 const mocks = vi.hoisted(() => ({ accountOperationClient: vi.fn() }));
-vi.mock("../account/supabase", () => ({ accountOperationClient: mocks.accountOperationClient }));
+// Retain the real module contract: transitive accountStore imports cloudConfigured.
+// Replace only the authenticated operation seam used by the sharing tests.
+vi.mock("../account/supabase", async importOriginal => ({
+  ...(await importOriginal<typeof import("../account/supabase")>()),
+  accountOperationClient: mocks.accountOperationClient,
+}));
 
 describe("academic batch sharing account generation", () => {
   beforeEach(() => { mocks.accountOperationClient.mockReset(); });
