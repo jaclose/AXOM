@@ -416,6 +416,85 @@ describe("ProductivityPage daily console", () => {
     expect(await readPrimary()).toBe(before);
   });
 
+  it("quarantines unsaved fields across A to B to A and restores only by explicit owner action", async () => {
+    const initial = getQuestionAttachmentScope();
+    const profileId = "synthetic-draft-workspace";
+    await checkedSeed(() => useStore.setState({ profile: { ...useStore.getState().profile, userId: profileId } }));
+    const before = await readPrimary();
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const value = (label: string) => (screen.getByLabelText(label) as HTMLInputElement | HTMLSelectElement).value;
+    const fill = (label: string, note: string) => {
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: label } });
+      fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: note } });
+    };
+    try {
+      act(() => setQuestionAttachmentAccount("synthetic-draft-A"));
+      render(<ProductivityPage />);
+      fill("Private A activity", "Private A note");
+      fireEvent.change(screen.getByLabelText("How long in minutes?"), { target: { value: "25" } });
+      fireEvent.change(screen.getByLabelText("Quantity type"), { target: { value: "questions" } });
+      fireEvent.change(screen.getByLabelText("Questions"), { target: { value: "30" } });
+
+      // Keep the same mounted component and workspace profile across the account
+      // transition. A new auth generation alone must invalidate the draft.
+      act(() => setQuestionAttachmentAccount("synthetic-draft-B"));
+      expect(value("What did you do?")).toBe("");
+      expect(value("Note (optional)")).toBe("");
+      expect(value("How long in minutes?")).toBe("");
+      expect(value("Quantity type")).toBe("count");
+      expect(value("Count")).toBe("");
+      expect(value("Productivity category")).toBe("");
+      expect(screen.queryByRole("button", { name: "Use earlier draft for today" })).toBeNull();
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      fill("Private B activity", "Private B note");
+
+      act(() => setQuestionAttachmentAccount("synthetic-draft-A"));
+      expect(value("What did you do?")).toBe("");
+      expect(value("Note (optional)")).toBe("");
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(await readPrimary()).toBe(before);
+      fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+      expect(value("What did you do?")).toBe("Private A activity");
+      expect(value("Note (optional)")).toBe("Private A note");
+      expect(value("How long in minutes?")).toBe("25");
+      expect(value("Quantity type")).toBe("questions");
+      expect(value("Questions")).toBe("30");
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      localVault.assertVaultWritesSince(checkpoint);
+      expect(useStore.getState().logs).toHaveLength(1);
+      expect(useStore.getState().logs[0]).toMatchObject({ type: "Private A activity", note: "Private A note", minutes: 25, quantity: 30 });
+      expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(useStore.getState().logs)));
+    } finally {
+      setQuestionAttachmentAccount(initial.accountId);
+    }
+  });
+
+  it("never implicitly carries an unsaved activity to a new day", async () => {
+    const beforeDay = useStore.getState().activeDayKey;
+    const tomorrow = new Date(`${beforeDay}T12:00:00Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const nextDay = tomorrow.toISOString().slice(0, 10);
+    render(<ProductivityPage />);
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Previous day draft" } });
+    fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "Previous day note" } });
+    await act(async () => { await checkedSeed(() => useStore.setState({ activeDayKey: nextDay })); });
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Note (optional)") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Previous day draft");
+    expect((screen.getByLabelText("Note (optional)") as HTMLInputElement).value).toBe("Previous day note");
+    expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+
   it("keeps earlier activity visible after selecting a new target and shows only the picked day's history", () => {
     const state = makeSeed();
     state.activeDayKey = "2026-07-13";
