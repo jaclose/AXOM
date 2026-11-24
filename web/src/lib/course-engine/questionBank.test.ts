@@ -132,6 +132,47 @@ describe("course bank read model", () => {
     expect(indexed([emptyPrimary, secondary], [question])
       .flatMap((module) => module.weeks.flatMap((week) => week.questionIds))).toEqual([]);
   });
+  it("holds conflicting duplicate original IDs instead of selecting the last record", () => {
+    const variants: QuestionRecord[] = [
+      { ...question, stem: "A different source question" },
+      { ...question, options: [{ key: "A", text: "Changed source" }, { key: "B", text: "Two" }] },
+      { ...question, correctKey: "B" },
+      { ...question, sourceDocumentId: "other-original" },
+      { ...question, sourceFile: { name: "other.pdf", type: "application/pdf", size: 100, addedAt: "2026-10-08" } },
+      { ...question, sourcePage: 43 },
+      { ...question, questionNumber: 19 },
+      { ...question, week: 3 },
+      { ...question, setId: "other-primary" },
+      { ...question, status: "incorrect", attempts: [{ at: "2026-10-08", status: "incorrect", answerKey: "B" }] },
+    ];
+    for (const variant of variants) {
+      for (const rows of [[question, variant], [variant, question]]) {
+        expect(indexed([set], rows)).toEqual([]);
+      }
+    }
+  });
+
+  it("holds the whole launch collection if one original has conflicting duplicates", () => {
+    const second: QuestionRecord = { ...question, id: "q2", stem: "A separate original", attempts: [] };
+    const collection = { ...set, questionIds: ["q1", "q2"] };
+    const changed = { ...question, stem: "Conflicting duplicate body" };
+    for (const rows of [[question, second, changed], [changed, second, question]]) {
+      expect(indexed([collection], rows)).toEqual([]);
+    }
+  });
+
+  it("counts identical originals once despite different learner-only notes or flags", () => {
+    const learnerCopy: QuestionRecord = { ...question, notes: "My own mnemonic", marked: true, tags: ["revisit"],
+      attempts: question.attempts.map((attempt) => ({ ...attempt, note: "Personal review", confidence: 5 })) };
+    for (const rows of [[question, learnerCopy], [learnerCopy, question]]) {
+      const [module] = indexed([set], rows);
+      expect(module.weeks[0]).toMatchObject({
+        questionIds: ["q1"], ready: 1, attempted: 1, missed: 0,
+      });
+      expect(module.weeks[0].sets).toHaveLength(1);
+    }
+  });
+
   it("does not mutate saved question IDs, progress or the original source-set membership", () => {
     const original = structuredClone(set);
     const row = structuredClone(question);

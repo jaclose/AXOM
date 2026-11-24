@@ -51,7 +51,31 @@ export function buildCourseQuestionBank(
   sets: readonly QuestionSet[], questions: readonly QuestionRecord[],
   courses: readonly Course[], terms: readonly Term[],
 ): BankModule[] {
-  const questionsById = new Map(questions.map((question) => [question.id, question]));
+  // Never let a duplicate original ID pick the last saved row. Conflicting
+  // source identity or practice history must be repaired before any collection
+  // carrying that ID appears as a runnable week; the saved rows stay untouched.
+  const questionsById = new Map<string, QuestionRecord>();
+  const conflictingQuestionIds = new Set<string>();
+  const identity = (question: QuestionRecord): string => JSON.stringify([
+    question.source, question.sourceFile
+      ? [question.sourceFile.name, question.sourceFile.type, question.sourceFile.size] : null,
+    question.setId ?? null, question.sourceDocumentId ?? null,
+    question.sourcePage ?? null, question.questionNumber ?? null,
+    question.courseId ?? null, canonicalModuleKey(question.module ?? ""),
+    hasDeclaredWeek(question.week) ? parseWeek(question.week) ?? "invalid" : null,
+    question.stem, question.options.map((option) => [option.key, option.text]),
+    question.content ?? null, question.correctKey ?? null,
+    questionMappingStatus(question), question.status,
+    // Attempt notes, confidence and timing are learner annotations, not score
+    // identity. Different actual outcomes or session membership remain held.
+    question.attempts.map(({ at, status, answerKey, quizSessionId }) =>
+      [at, status, answerKey ?? null, quizSessionId ?? null]),
+  ]);
+  for (const question of questions) {
+    const first = questionsById.get(question.id);
+    if (!first) questionsById.set(question.id, question);
+    else if (identity(first) !== identity(question)) conflictingQuestionIds.add(question.id);
+  }
   const setsById = new Map(sets.map((set) => [set.id, set]));
   const memberships = new Map<string, QuestionSet[]>();
   for (const set of sets) {
@@ -65,7 +89,8 @@ export function buildCourseQuestionBank(
   // membership. A review collection must not turn an unknown week into a
   // scheduled week or borrow the course of a different primary source.
   const scopesById = new Map<string, CourseScope>();
-  for (const question of questions) {
+  for (const question of questionsById.values()) {
+    if (conflictingQuestionIds.has(question.id)) continue;
     const related = memberships.get(question.id) ?? [];
     // Bind legacy inference to a source collection, never to the first review
     // collection encountered in an arbitrary array ordering.
@@ -85,6 +110,9 @@ export function buildCourseQuestionBank(
   const modules = new Map<string, BankModule>();
   const eligibleBySet = new Map<string, string[]>();
   for (const set of sets) {
+    // A partially conflicting original would make the entire launch set unsafe.
+    // Keep it in the library for repair rather than dropping just that member.
+    if (set.questionIds.some((id) => conflictingQuestionIds.has(id))) continue;
     const rawWeek = set.scope?.week;
     // Invalid explicit source weeks are review work, not a usable week label.
     if (hasDeclaredWeek(rawWeek) && parseWeek(rawWeek) === undefined) continue;
