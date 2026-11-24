@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import { STORAGE_KEYS } from "../../lib/brand";
 import { makeDailyRequirement } from "../../lib/dailySuccess";
 import type { QuestionRecord } from "../../lib/questions";
 import { makeSeed } from "../../lib/seed";
@@ -12,17 +14,95 @@ import { CloseoutModal } from "./CloseoutModal";
 
 const DAY = "2035-04-13";
 
+const storageValues = new Map<string, string>();
+const storage = {
+  get length() { return storageValues.size; },
+  clear: () => storageValues.clear(),
+  getItem: (key: string) => storageValues.get(key) ?? null,
+  key: (index: number) => [...storageValues.keys()][index] ?? null,
+  removeItem: (key: string) => { storageValues.delete(key); },
+  setItem: (key: string, value: string) => { storageValues.set(key, String(value)); },
+};
+
+const fakeIndexedDb = new IDBFactory();
+
+function deleteTestDatabase(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = fakeIndexedDb.deleteDatabase(localVault.DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Closeout test database deletion failed"));
+    request.onblocked = () => reject(new Error("Closeout test database deletion blocked"));
+  });
+}
+
+async function readPrimary(): Promise<string> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = fakeIndexedDb.open(localVault.DB_NAME);
+    request.onupgradeneeded = () => request.transaction?.abort();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Closeout test database open failed"));
+    request.onblocked = () => reject(new Error("Closeout test database open blocked"));
+  });
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(localVault.STORE_NAME, "readonly");
+      const request = tx.objectStore(localVault.STORE_NAME).get(STORAGE_KEYS.persistedState);
+      tx.oncomplete = () => {
+        if (typeof request.result === "string") resolve(request.result);
+        else reject(new Error("Closeout test primary workspace missing"));
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("Closeout test primary read failed"));
+      tx.onabort = tx.onerror;
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function checkedSeed(write: () => unknown): Promise<void> {
+  const checkpoint = localVault.getVaultWriteCheckpoint();
+  await write();
+  await localVault.flushLocalVaultWrites();
+  expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  localVault.assertVaultWritesSince(checkpoint);
+  await expectPersistedCloseout();
+}
+
+async function expectPersistedCloseout(): Promise<void> {
+  const raw = await readPrimary();
+  const persisted = JSON.parse(raw).state;
+  const { closeouts, journal, tasks, questions, logs, activeDayKey } = useStore.getState();
+  // JSON round-trip strips optional undefined fields exactly as the storage adapter does.
+  expect(persisted).toMatchObject(JSON.parse(JSON.stringify({ closeouts, journal, tasks, questions, logs, activeDayKey })));
+  expect(persisted.closeouts).toEqual(JSON.parse(JSON.stringify(closeouts)));
+  expect(persisted.journal).toEqual(JSON.parse(JSON.stringify(journal)));
+  expect(await localVault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(raw);
+}
+
 beforeEach(async () => {
+  await localVault.flushLocalVaultWrites();
+  vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  vi.stubGlobal("localStorage", storage);
+  await deleteTestDatabase();
+  localVault.resetLocalVaultRuntimeForTests();
   localStorage.clear();
-  setCloseoutState();
+  await useStore.persist.rehydrate();
+  await checkedSeed(setCloseoutState);
   useUi.setState({ journalDay: null });
   window.location.hash = "#dashboard";
-  await localVault.flushLocalVaultWrites();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
+  try {
+    await localVault.flushLocalVaultWrites();
+    await deleteTestDatabase();
+    localVault.resetLocalVaultRuntimeForTests();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe("CloseoutModal daily loop", () => {
@@ -64,6 +144,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     expect(useStore.getState().closeouts).toHaveLength(1);
     expect(useStore.getState().closeouts[0]).toMatchObject({
       dayKey: DAY,
@@ -89,7 +170,7 @@ describe("CloseoutModal daily loop", () => {
       energy: "Medium",
       rating: "Useful",
     };
-    useStore.setState({ journal: [existing] });
+    await checkedSeed(() => useStore.setState({ journal: [existing] }));
     const onClose = vi.fn();
     render(<CloseoutModal onClose={onClose} />);
 
@@ -98,6 +179,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     expect(useStore.getState().journal).toEqual([existing]);
     expect(useStore.getState().closeouts[0].completedSummary).toBe("New closeout reflection");
   });
@@ -112,7 +194,7 @@ describe("CloseoutModal daily loop", () => {
       energy: "Medium",
       rating: "Useful",
     };
-    useStore.setState({ journal: [existing] });
+    await checkedSeed(() => useStore.setState({ journal: [existing] }));
     const onClose = vi.fn();
     render(<CloseoutModal onClose={onClose} />);
 
@@ -125,6 +207,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     const [page] = useStore.getState().journal;
     expect(useStore.getState().journal).toHaveLength(1);
     expect(page).toMatchObject({
@@ -153,6 +236,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     unsubscribe();
     expect(stateChanges).toBe(1);
     expect(useStore.getState().journal).toHaveLength(1);
@@ -175,11 +259,37 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     expect(useStore.getState().closeouts).toHaveLength(1);
     expect(useStore.getState().closeouts[0].tomorrowFirstTask).toBe("Start cardiology");
     expect(useStore.getState().journal).toHaveLength(0);
     expect(useUi.getState().journalDay).toBe(DAY);
     expect(window.location.hash).toBe("#journal");
+  });
+
+  it("keeps the combined closeout and journal unsaved when both physical stores reject the write", async () => {
+    const before = await readPrimary();
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Keep this unsaved win" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Create today’s journal page from this closeout/i }));
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open/i);
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue("Keep this unsaved win")).toBeTruthy();
+      expect(window.location.hash).toBe("#dashboard");
+      expect(useUi.getState().journalDay).toBeNull();
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
   });
 
   it("keeps an opt-out closeout open with its form data when durability cannot be confirmed", async () => {
@@ -230,7 +340,7 @@ function setCloseoutState() {
     unit: "minutes",
     trackingStartsAt: DAY,
   }, DAY);
-  useStore.setState({
+  return useStore.setState({
     ...seed,
     activeDayKey: DAY,
     profile: {
