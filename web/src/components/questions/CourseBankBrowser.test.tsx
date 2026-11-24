@@ -56,6 +56,30 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("CourseBankBrowser academic navigation", () => {
+  it.each([false, true])("uses a neutral term filter for duplicate term IDs and preserves local practice (reversed=%s)", async (reversed) => {
+    const user = userEvent.setup();
+    const term = state.terms.find((entry) => entry.id === "t4")!;
+    const duplicate = { ...term, name: "Conflicting term" };
+    state.terms = reversed ? [duplicate, ...state.terms] : [...state.terms, duplicate];
+    const snapshot = structuredClone([state.terms, state.courses, state.questionSets, state.questions]);
+    const onPractice = vi.fn();
+    render(<CourseBankBrowser onPractice={onPractice} />);
+    const filter = screen.getByRole("combobox", { name: "Filter by term" });
+    expect(within(filter).queryByRole("option", { name: "Term 4" })).toBeNull();
+    expect(within(filter).queryByRole("option", { name: "Conflicting term" })).toBeNull();
+    await user.selectOptions(filter, "Term assignment needs review");
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    expect(screen.getByRole("button", { name: "Practice week" }).textContent).toContain("1 ready");
+    await user.click(screen.getByRole("button", { name: "Practice week" }));
+    expect(onPractice).toHaveBeenLastCalledWith([state.questionSets[0]]);
+    await user.selectOptions(filter, "Term 2");
+    expect(screen.queryByText("IMCQ 1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Practice week" }));
+    expect(onPractice).toHaveBeenLastCalledWith([state.questionSets[3]]);
+    expect(onPractice).toHaveBeenCalledTimes(2);
+    expect([state.terms, state.courses, state.questionSets, state.questions]).toEqual(snapshot);
+  });
+
   it("identifies image-linked questions without previewing source or answer images", () => {
     state.questions[0] = question("ready", { attachments: [{
       id: "answer-slide", blobKey: "answer-slide", fileName: "review-slide.png", mimeType: "image/png",

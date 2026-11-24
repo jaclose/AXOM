@@ -236,7 +236,12 @@ export function buildCourseQuestionBank(
   for (const { set, members, scope, catalogCourse } of candidates) {
     if (filingHeldIds.has(set.id)) continue;
     const course = catalogCourse;
-    const term = terms.find((item) => item.id === course?.termId)?.name ?? "Not yet assigned";
+    // A duplicate installed term ID cannot establish an academic label, even
+    // if the duplicate names agree. Keep locally valid practice available,
+    // but never choose one conflicting term by catalog order.
+    const termMatches = course ? terms.filter((item) => item.id === course.termId) : [];
+    const term = termMatches.length > 1 ? "Term assignment needs review"
+      : termMatches[0]?.name ?? "Not yet assigned";
     const key = JSON.stringify([course?.id ?? scope.courseId ?? "unassigned", canonicalModuleKey(scope.module ?? "")]);
     const branch = modules.get(key) ?? {
       key, term, course: course?.name || course?.code || "Choose a course when filing",

@@ -461,3 +461,42 @@ describe("local catalog identity and curriculum evidence", () => {
     }
   });
 });
+
+describe("installed term label integrity", () => {
+  it("withholds ambiguous term labels in every order without removing local practice or history", () => {
+    const second = { ...course, id: "c2", termId: "t2", name: "Second course",
+      modules: [{ id: "m2", name: "DERS" }] };
+    const otherTerm = { id: "t2", name: "Term 2" };
+    const primary = { ...set, scope: { module: "FTM 1", week: 2, courseId: "c1" } };
+    const control = { ...set, id: "control", questionIds: ["q2"],
+      scope: { module: "DERS", week: 3, courseId: "c2" } };
+    const records = [question, { ...question, id: "q2", setId: "control" }];
+    for (const variant of [
+      { terms: [term, otherTerm], label: "Term 1" },
+      { terms: [otherTerm], label: "Not yet assigned" },
+      ...["Other term", term.name, ""].map((name) => ({
+        terms: [term, { ...term, name }, otherTerm], label: "Term assignment needs review",
+      })),
+      { terms: [term, { ...term, name: "Other term" }, { ...term, name: "Third term" }, otherTerm],
+        label: "Term assignment needs review" },
+    ]) {
+      for (const terms of [variant.terms, [...variant.terms].reverse()]) {
+        for (const reversed of [false, true]) {
+          const collections = reversed ? [control, primary] : [primary, control];
+          const catalog = reversed ? [second, course] : [course, second];
+          const questions = reversed ? [...records].reverse() : records;
+          const snapshot = structuredClone([collections, questions, catalog, terms]);
+          const bank = buildCourseQuestionBank(collections, questions, catalog, terms);
+          expect(bank).toHaveLength(2);
+          const first = bank.find((entry) => entry.courseId === "c1");
+          const independent = bank.find((entry) => entry.courseId === "c2");
+          expect(first?.term).toBe(variant.label);
+          expect(first?.weeks[0]).toMatchObject({ week: 2, questionIds: ["q1"], ready: 1, attempted: 1 });
+          expect(independent?.term).toBe("Term 2");
+          expect(independent?.weeks[0]).toMatchObject({ week: 3, questionIds: ["q2"], ready: 1, attempted: 1 });
+          expect([collections, questions, catalog, terms]).toEqual(snapshot);
+        }
+      }
+    }
+  });
+});
