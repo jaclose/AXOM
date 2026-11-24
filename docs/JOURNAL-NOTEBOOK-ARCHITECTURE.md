@@ -127,7 +127,7 @@ gates every app-owned page turn, requested-day change, Library exit, and editor
 close on the same vault flush and exact-write assertion. If that durability
 check fails, the transition is canceled, the current in-memory draft remains
 open, and the page offers export and Save retry actions. Leaving the Journal for
-another screen is the exception: it waits at most 8 seconds
+another screen or for Run setup again is the exception: it waits at most 8 seconds
 (`LEAVE_SAVE_WAIT_MS`) and goes ahead once the latest page is in the open
 workspace, even when this device did not confirm the write. The app-wide save
 notice then reports the failure and offers a backup that includes the page. A
