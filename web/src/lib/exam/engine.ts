@@ -25,6 +25,8 @@ export type ExamPhase = "testing" | "review";
 
 export interface ItemState {
   readonly answerKey?: string;
+  /** Immutable saved grading, present only in finished review blocks. */
+  readonly savedCorrect?: boolean;
   readonly marked: boolean;
   readonly struck: readonly string[];
   readonly visited: boolean;
@@ -148,7 +150,7 @@ export function reviewBlock(input: { ids: readonly string[]; answers: readonly Q
   const seconds: Record<string, number | undefined> = {};
   for (const id of input.ids) {
     const answer = byId.get(id);
-    items[id] = { answerKey: answer?.answerKey, marked: Boolean(answer?.flagged), struck: [], visited: true, revealed: true };
+    items[id] = { answerKey: answer?.answerKey, savedCorrect: answer?.correct, marked: Boolean(answer?.flagged), struck: [], visited: true, revealed: true };
     seconds[id] = answer?.seconds;
   }
   return {
@@ -257,8 +259,17 @@ export function shownResult(block: ExamBlock, id: string, correctKey: string | u
   const shown = block.phase === "review" || (block.mode === "tutor" && item.revealed);
   if (!shown) return undefined;
   if (!item.answerKey) return "omitted";
+  if (block.phase === "review") return item.savedCorrect === true ? "correct" : item.savedCorrect === false ? "incorrect" : "unscored";
   if (!correctKey) return "unscored";
   return item.answerKey === correctKey ? "correct" : "incorrect";
+}
+
+/** Current teaching key may be shown only if compatible with the saved grade. */
+export function reviewCorrectKey(block: ExamBlock, id: string, correctKey: string | undefined): string | undefined {
+  if (block.phase !== "review" || !correctKey) return correctKey;
+  const item = itemOf(block, id);
+  if (typeof item.savedCorrect !== "boolean") return undefined;
+  return (item.answerKey === correctKey) === item.savedCorrect ? correctKey : undefined;
 }
 
 export type NavigatorFilter = "all" | "flagged" | "unanswered" | "answered" | "incorrect" | "correct";
