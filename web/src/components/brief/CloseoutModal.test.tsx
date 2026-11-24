@@ -651,12 +651,16 @@ describe("CloseoutModal daily loop", () => {
     const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
       if (storedKey === STORAGE_KEYS.persistedState && typeof value === "string" && value.includes("Concurrent independent task")) {
         refused = true;
-        throw new DOMException("Unavailable", "SecurityError");
+        const request = originalPut.call(this, value, storedKey);
+        // Abort asynchronously after the adapter queues its scoped writes, so
+        // no synchronous exception escapes its IndexedDB event handler.
+        request.onsuccess = () => this.transaction.abort();
+        return request;
       }
       return originalPut.call(this, value, storedKey);
     });
     const denyFallback = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
-      if (String(value).includes("Concurrent independent task")) throw new DOMException("Full", "QuotaExceededError");
+      if (refused) throw new DOMException("Full", "QuotaExceededError");
       storageValues.set(key, String(value));
     });
     try {
