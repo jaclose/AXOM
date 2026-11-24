@@ -26,7 +26,12 @@ the authoritative saved workspace and unchanged live state again immediately
 before that refresh. A failed primary save or changed workspace still blocks
 the verified-save shortcut. The web app offers a separately confirmed **Refresh
 anyway** action after a failed primary checkpoint, warning that unverified edits
-may be lost; desktop never skips the primary save check. The downloaded update
+may be lost; desktop never skips the primary save check. Beside it, and on a
+screen that failed to load, the safer **Download backup** then **Refresh now**
+path refreshes only while a complete backup downloaded in that tab still holds
+exactly the open workspace (`lib/refreshRecovery.ts`), then explains the
+refresh once afterwards. A browser refusing all storage (a nearly full disk)
+otherwise left a tab with no way into the current build. The downloaded update
 must pass the Tauri cryptographic signature check. Failed network checks do not
 disable the current app.
 
@@ -34,8 +39,10 @@ The service worker stages a new build without skipWaiting during installation.
 Activation occurs after the user approves refresh. Prior hashed assets are
 retained for old tabs; API responses and version.json are not cached. Offline
 navigation uses the active build's own shell. Failed lazy loads offer recovery
-rather than an automatic reload. Startup failures show a retry screen without
-clearing storage.
+rather than an automatic reload. A screen's stylesheet failing from an older
+build ("Unable to preload CSS") counts as a failed lazy load: retrying in place
+cannot work, because the failed import stays cached for the life of the page.
+Startup failures show a retry screen without clearing storage.
 
 The Local Vault remains the source of truth: IndexedDB with a localStorage
 fallback, isolated by browser, device and origin. Native SQLite is an additional
