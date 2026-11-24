@@ -14,7 +14,7 @@ import { useStore } from "../../lib/store";
 import { readExamSimPrefs, writeExamSimPrefs, type ExamSimPrefs, type ExamSkin, type ReviewFilter, type SuspendedBlock } from "../../lib/examSim";
 import {
   blockAnswers, countBlock, elapsedSeconds as blockElapsedSeconds, examReducer, itemSeconds, itemState, navigatorEntries, resumeBlock,
-  reviewBlock, shownResult, startBlock, suspendBlock, type BlockCounts, type ExamBlock, type ItemResult, type ItemState, type NavigatorEntry,
+  reviewBlock, reviewCorrectKey, shownResult, startBlock, suspendBlock, type BlockCounts, type ExamBlock, type ItemResult, type ItemState, type NavigatorEntry,
 } from "../../lib/exam/engine";
 import { EXAM_PROFILES, matchesAnyChord, type ExamProfile } from "../../lib/exam/profiles";
 import { createTextAnnotationWithIntegrity, removeTextAnnotationById, type QuestionTextAnnotation } from "../../lib/questionAnnotations";
@@ -157,7 +157,7 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
   const item = itemState(block, question?.id);
   const counts = countBlock(block);
   const entries = useMemo(() => navigatorEntries(block, correctKeyFor), [block, correctKeyFor]);
-  const correctKey = trustedKey(question);
+  const correctKey = question ? reviewCorrectKey(block, question.id, trustedKey(question)) : undefined;
   const result = question ? shownResult(block, question.id, correctKey) : undefined;
   const revealed = result !== undefined;
   const elapsed = blockElapsedSeconds(block, now);
