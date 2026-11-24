@@ -286,6 +286,18 @@ function trustedSessionKey(original: QuestionRecord | undefined, current: Questi
   return trustedCorrectKey(current);
 }
 
+/** One evidence gate for live tutor feedback and the final persisted score. */
+function simulationScoringKey(
+  original: QuestionRecord | undefined,
+  candidates: readonly QuestionRecord[] | undefined,
+  evidence: SuspendedBlock["sourceEvidenceV1"],
+): string | undefined {
+  const current = candidates?.length === 1 ? candidates[0] : undefined;
+  return current && Object.prototype.hasOwnProperty.call(evidence ?? {}, current.id)
+    && evidence?.[current.id] === simulationSourceFingerprint(current)
+    ? trustedSessionKey(original, current) : undefined;
+}
+
 /** The attempt a run has already saved for a question, read from the live workspace. */
 function savedRunAttempt(
   questions: readonly QuestionRecord[],
@@ -367,6 +379,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
   const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
   const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; sourceEvidenceV1: Record<string, string>; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
+
+  const simulationScoringKeys = useMemo(() => {
+    const claims = questionClaims(questions);
+    return new Map((simRun?.pool ?? []).map((question) => [question.id,
+      simulationScoringKey(question, claims.get(question.id), simRun?.sourceEvidenceV1)]));
+  }, [questions, simRun]);
 
   // --- run state
   const [pool, setPool] = useState<QuestionRecord[]>(() => restored
@@ -1067,11 +1085,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const originalById = new Map(simRun.pool.map((question) => [question.id, question]));
     // A changed/missing key must not be scored from a stale simulation snapshot.
     const validatedAnswers = answerList.map((answer) => {
-      const candidates = liveClaims.get(answer.questionId);
-      const current = candidates?.length === 1 ? candidates[0] : undefined;
-      const key = current && Object.prototype.hasOwnProperty.call(simRun.sourceEvidenceV1, answer.questionId)
-        && simRun.sourceEvidenceV1[answer.questionId] === simulationSourceFingerprint(current)
-        ? trustedSessionKey(originalById.get(answer.questionId), current) : undefined;
+      const key = simulationScoringKey(originalById.get(answer.questionId), liveClaims.get(answer.questionId), simRun.sourceEvidenceV1);
       return { ...answer, correct: key ? answer.answerKey === key : undefined };
     });
     const result: QuizSession = {
@@ -1399,6 +1413,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         skin={simRun.skin}
         mode={mode}
         pool={simRun.pool}
+        scoringKeys={simulationScoringKeys}
         unreviewedCount={simRun.pool.filter(question => community.questionIds.has(question.id)).length}
         communityPending={community.pending}
         runId={simRun.runId}
