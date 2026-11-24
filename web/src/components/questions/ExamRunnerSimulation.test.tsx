@@ -214,6 +214,60 @@ describe("Simulation protects active question identity at final save", () => {
   );
 });
 
+describe("Simulation preserves original source evidence across recovery", () => {
+  it.each(["unchanged", "key", "stem", "choices", "source", "legacy", "changed-then-reverted"] as const)(
+    "scores only verified original source after suspend and remount (%s)",
+    async (change) => {
+      const original = q("q1");
+      await act(async () => { useStore.setState({ questions: [original] }); });
+      let mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+      fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+      const recovery = readSuspendedBlock()!;
+      expect(recovery.items.q1.answerKey).toBe("B");
+      expect(recovery.sourceEvidenceV1?.q1).toMatch(/^[a-f0-9]{64}$/);
+      mounted.unmount();
+
+      const changed: QuestionRecord = change === "key" ? { ...original, correctKey: "A", correctAnswerText: "Alpha" }
+        : change === "stem" || change === "changed-then-reverted" ? { ...original, stem: "Different stem" }
+        : change === "choices" ? { ...original, correctKey: "A", correctAnswerText: "Beta", options: [{ key: "A", text: "Beta" }, { key: "B", text: "Alpha" }] }
+        : change === "source" ? { ...original, sourceDocumentId: "replacement-source" }
+        : original;
+      if (change === "legacy") {
+        const legacy = { ...recovery };
+        delete legacy.sourceEvidenceV1;
+        writeSuspendedBlock(legacy);
+      }
+      await act(async () => { useStore.setState({ questions: [changed] }); });
+      mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+      expect(screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ })).toBeTruthy();
+      expect(readSuspendedBlock()?.runId).toBe(recovery.runId);
+      if (change === "changed-then-reverted") {
+        expect(readSuspendedBlock()?.sourceEvidenceV1).toEqual({});
+        fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+        mounted.unmount();
+        await act(async () => { useStore.setState({ questions: [original] }); });
+        mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+        fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+        expect(readSuspendedBlock()?.sourceEvidenceV1).toEqual({});
+      }
+      const dialog = screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: /End Block/ }));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
+      await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+      const session = useStore.getState().quizSessions[0];
+      expect(session.id).toBe(recovery.runId);
+      expect(session.answers[0].answerKey).toBe("B");
+      expect(session.answers[0].correct).toBe(change === "unchanged" ? true : undefined);
+      expect(session.score).toMatchObject({ scored: change === "unchanged" ? 1 : 0, total: 1 });
+      expect(readSuspendedBlock()).toBeUndefined();
+    },
+  );
+});
+
 describe("Six-choice simulation keyboard", () => {
   it("keeps an F answer selectable in ExamSoft and reserves M for marking", async () => {
     const six: QuestionRecord = {
