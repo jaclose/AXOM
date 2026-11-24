@@ -638,6 +638,22 @@ describe("CloseoutModal daily loop", () => {
       expect(alert.textContent).not.toMatch(/Not saved on this device/i);
       expect(screen.getByRole("button", { name: "Close the day" })).toHaveProperty("disabled", true);
       expect(screen.getByRole("button", { name: "Expand into full notebook" })).toHaveProperty("disabled", true);
+      const copy = screen.getByLabelText("Closeout draft copy (not a backup)") as HTMLTextAreaElement;
+      expect(copy.readOnly).toBe(true);
+      expect(copy.value).toContain("2035-04-13");
+      expect(copy.value).toContain("One win: Disputed private win");
+      expect(copy.value).toContain("Add to Journal: Yes");
+      const beforeDismiss = await readPrimary();
+      fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+      fireEvent.keyDown(window, { key: "Escape" });
+      fireEvent.mouseDown(document.querySelector(".modal-scrim")!);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(copy.value).toContain("Disputed private win");
+      expect(await readPrimary()).toBe(beforeDismiss);
+      expect(storage.getItem(key)).toBe(peerBytes);
+      expect(useStore.getState().journal).toEqual([]);
+      fireEvent.click(screen.getByRole("button", { name: "Close without resolving" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
     } finally {
       put.mockRestore();
     }
