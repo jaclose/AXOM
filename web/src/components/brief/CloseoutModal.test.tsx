@@ -19,6 +19,15 @@ import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../../
 
 const DAY = "2035-04-13";
 
+function renderDashboardCloseout(restoreCloseoutFocus = () => screen.getByRole("button", { name: "Edit dashboard" }).focus()) {
+  render(<><StandupPrompt restoreCloseoutFocus={restoreCloseoutFocus} /><button>Edit dashboard</button></>);
+  const opener = screen.getByRole("button", { name: "Quick closeout" });
+  opener.focus();
+  fireEvent.click(opener);
+  expect(screen.getByRole("dialog", { name: "Daily closeout" }).contains(document.activeElement)).toBe(true);
+  return opener;
+}
+
 const storageValues = new Map<string, string>();
 const storage = {
   get length() { return storageValues.size; },
@@ -660,7 +669,8 @@ describe("CloseoutModal daily loop", () => {
     }
   });
 
-  it.each([false, true])("does not navigate when a newer ordinary write is refused after an accepted staged receipt (Dashboard parent: %s)", async (dashboardParent) => {
+  it.each(["standalone", "dashboard identity", "dashboard dismiss"] as const)("does not navigate when a newer ordinary write is refused after an accepted staged receipt (%s)", async (scenario) => {
+    const dashboardParent = scenario !== "standalone";
     if (dashboardParent) {
       await checkedSeed(() => useStore.getState().updateProfile({
         dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
@@ -687,8 +697,7 @@ describe("CloseoutModal daily loop", () => {
     });
     try {
       if (dashboardParent) {
-        render(<StandupPrompt />);
-        fireEvent.click(screen.getByRole("button", { name: "Quick closeout" }));
+        renderDashboardCloseout();
       } else {
         render(<CloseoutModal onClose={onClose} />);
       }
@@ -718,6 +727,17 @@ describe("CloseoutModal daily loop", () => {
       }
       expect(window.location.hash).toBe("#dashboard");
       expect(screen.getByLabelText("Closeout draft copy (not a backup)")).toBeTruthy();
+      if (scenario === "dashboard dismiss") {
+        const beforeDismiss = await readPrimary();
+        const close = screen.getByRole("button", { name: "Close without resolving" });
+        close.focus();
+        fireEvent.click(close);
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Daily closeout" })).toBeNull());
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit dashboard" })));
+        expect(await readPrimary()).toBe(beforeDismiss);
+        expect(window.location.hash).toBe("#dashboard");
+        return;
+      }
       const scope = getQuestionAttachmentScope();
       try {
         const assertRedacted = () => {
@@ -749,16 +769,41 @@ describe("CloseoutModal daily loop", () => {
     await checkedSeed(() => useStore.getState().updateProfile({
       dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
     }));
-    render(<StandupPrompt />);
-    fireEvent.click(screen.getByRole("button", { name: "Quick closeout" }));
+    renderDashboardCloseout();
     fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Dashboard confirmed win" } });
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Daily closeout" })).toBeNull());
     await expectPersistedCloseout();
     expect(JSON.parse(await readPrimary()).state.closeouts[0].oneWin).toBe("Dashboard confirmed win");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit dashboard" })));
     expect(useStore.getState().journal).toHaveLength(0);
     expect(screen.queryByRole("button", { name: "Quick closeout" })).toBeNull();
     expect(window.location.hash).toBe("#dashboard");
+  });
+
+  it("restores the original opener when the Dashboard dialog is cancelled before saving", async () => {
+    await checkedSeed(() => useStore.getState().updateProfile({
+      dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+    }));
+    const before = await readPrimary();
+    const opener = renderDashboardCloseout();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Daily closeout" })).toBeNull());
+    expect(document.activeElement).toBe(opener);
+    expect(await readPrimary()).toBe(before);
+  });
+
+  it("does not return focus to Dashboard when the confirmed save opens Journal", async () => {
+    await checkedSeed(() => useStore.getState().updateProfile({
+      dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+    }));
+    const fallback = vi.fn();
+    renderDashboardCloseout(fallback);
+    fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+    await waitFor(() => expect(window.location.hash).toBe("#journal"));
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    expect(fallback).not.toHaveBeenCalled();
+    await expectPersistedCloseout();
   });
 
   it("refuses a draft from the previous account even after an A-to-B-to-A transition", async () => {

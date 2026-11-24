@@ -73,6 +73,7 @@ const CURRENT_DASHBOARD_ID_SET = new Set<string>(CURRENT_DASHBOARD_WIDGET_IDS);
 export function DashboardPage() {
   const s = useStore();
   const [editDashboard, setEditDashboard] = useState(false);
+  const dashboardToolbarRef = useRef<HTMLDivElement>(null);
   const luster = useLuster();
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, s.activeDayKey, s.activeDayKey), [s]);
   const week = weeklySummary(s);
@@ -184,10 +185,12 @@ export function DashboardPage() {
 
       {!hiddenWidgets.has("commandBrief") && <UpNext readiness={readiness} onHide={hideUpNext} />}
 
-      <StandupPrompt />
+      <StandupPrompt restoreCloseoutFocus={() => {
+        dashboardToolbarRef.current?.querySelector<HTMLButtonElement>(".dashboard-edit-toggle")?.focus();
+      }} />
       <DoctordleReminder />
 
-      <div className="dashboard-edit-toolbar">
+      <div className="dashboard-edit-toolbar" ref={dashboardToolbarRef}>
         <DashboardNotificationCenter />
         <GhostButton
           className="dashboard-edit-toggle"
@@ -1164,7 +1167,7 @@ function ExamCountdownWidget() {
 // Conditional dashboard banner: shows the standup prompt inside the review
 // window, or a "you missed your standup" remediation strip once it lapses. It
 // disappears entirely when there's nothing to do.
-export function StandupPrompt() {
+export function StandupPrompt({ restoreCloseoutFocus }: { restoreCloseoutFocus?: () => void } = {}) {
   const s = useStore();
   const accountId = useAccount((state) => state.user?.id);
   const [localDeviceId] = useState(deviceId);
@@ -1176,6 +1179,29 @@ export function StandupPrompt() {
   const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today)) || journalPageComplete(s.journal, today);
   const closeoutDue = preferences.closeoutEnabled && !closeoutDone && isAfterLocalTime(preferences.closeoutTime);
   const [showCloseout, setShowCloseout] = useState(false);
+  const closingRoute = useRef<string | null>(null);
+  const restoreFocusRef = useRef(restoreCloseoutFocus);
+  restoreFocusRef.current = restoreCloseoutFocus;
+
+  const closeCloseout = () => {
+    closingRoute.current = window.location.hash;
+    setShowCloseout(false);
+  };
+
+  // Modal restores its original opener when it survives. After completion the
+  // reminder may have disappeared; only recover otherwise lost focus, after
+  // dialog cleanup and any synchronous navigation to the Journal.
+  useEffect(() => {
+    if (showCloseout || closingRoute.current === null) return;
+    const route = closingRoute.current;
+    closingRoute.current = null;
+    const frame = window.requestAnimationFrame(() => {
+      if (window.location.hash !== route || document.activeElement !== document.body
+        || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      restoreFocusRef.current?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showCloseout]);
   const [dismissed, setDismissed] = useState(() => {
     const entry = dailyLoopReminderLedger.read(today).closeout;
     return entry.disposition !== "pending"
@@ -1243,7 +1269,7 @@ export function StandupPrompt() {
           workspaceKey={`device:${localDeviceId}:account:${accountId ?? "local"}`}
         />
       ) : null}
-      {showCloseout && <CloseoutModal key="daily-closeout-dialog" onClose={() => setShowCloseout(false)} />}
+      {showCloseout && <CloseoutModal key="daily-closeout-dialog" onClose={closeCloseout} />}
     </>
   );
 }
