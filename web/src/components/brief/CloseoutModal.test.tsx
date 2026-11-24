@@ -417,6 +417,9 @@ describe("CloseoutModal daily loop", () => {
     const unsubscribe = useStore.subscribe(() => coordinator.queue());
     const onClose = vi.fn();
     try {
+      // Previously accepted work is already awaiting protection. A correct
+      // fix must allow this upload, not suppress every account checkpoint.
+      coordinator.queue();
       render(<CloseoutModal onClose={onClose} />);
       await rejectOptedInDraft(true);
       expect(onClose).not.toHaveBeenCalled();
@@ -424,8 +427,7 @@ describe("CloseoutModal daily loop", () => {
       // No second closeout submission or independent workspace edit occurs.
       await coordinator.flush(reason);
       const envelopes = push.mock.calls.map(([envelope]) => envelope);
-      if (reason === "manual") expect(envelopes.length).toBeGreaterThan(0);
-      // Automatic protection can legitimately omit an unchanged snapshot.
+      expect(envelopes.length).toBeGreaterThan(0);
       for (const envelope of envelopes) {
         expect(envelope.accountUserId).toBe(accountUserId);
         expect(envelope.reason).toBe(reason);
@@ -434,7 +436,7 @@ describe("CloseoutModal daily loop", () => {
         expect(envelope.payload.journal).toEqual(initial.journal);
         expect(envelope.payload.closeouts).toEqual(initial.closeouts);
       }
-      expect(["protected", "saved-locally"]).toContain(coordinator.currentStatus());
+      expect(coordinator.currentStatus()).toBe("protected");
       expect(await readPrimary()).toBe(before);
       expect(onClose).not.toHaveBeenCalled();
     } finally {
