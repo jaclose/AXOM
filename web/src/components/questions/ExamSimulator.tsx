@@ -34,6 +34,7 @@ export interface ExamSimulatorProps {
   skin: ExamSkin;
   mode: "exam" | "tutor";
   pool: QuestionRecord[];
+  scoringKeys?: ReadonlyMap<string, string | undefined>;
   runId?: string;
   timeLimitSeconds?: number;
   title?: string;
