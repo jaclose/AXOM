@@ -4,6 +4,8 @@ import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "../../lib/brand";
+import { assertVaultWritesSince, DB_NAME, STORE_NAME, flushLocalVaultWrites, getVaultWriteCheckpoint, localVaultStorage, resetLocalVaultRuntimeForTests } from "../../lib/localVault";
+import { readVaultWriteFailure } from "../../lib/vaultActivity";
 import { createLocalBackup, resetLocalBackupRuntimeForTests } from "../../lib/localBackup";
 import { makeSeed, SCHEMA_VERSION } from "../../lib/seed";
 import { useStore } from "../../lib/store";
@@ -28,13 +30,67 @@ const storage = {
   setItem: (key: string, value: string) => { storageValues.set(key, String(value)); },
 };
 
-beforeEach(() => {
+const fakeIndexedDb = new IDBFactory();
+
+function deleteTestDatabase(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = fakeIndexedDb.deleteDatabase(DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Settings test database deletion failed"));
+    request.onblocked = () => reject(new Error("Settings test database deletion blocked"));
+  });
+}
+
+async function readPrimary(): Promise<string> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = fakeIndexedDb.open(DB_NAME);
+    request.onupgradeneeded = () => request.transaction?.abort();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Settings test database open failed"));
+    request.onblocked = () => reject(new Error("Settings test database open blocked"));
+  });
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const request = tx.objectStore(STORE_NAME).get(STORAGE_KEYS.persistedState);
+      tx.oncomplete = () => {
+        if (typeof request.result === "string") resolve(request.result);
+        else reject(new Error("Settings test primary workspace missing"));
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("Settings test primary read failed"));
+      tx.onabort = tx.onerror;
+    });
+  } finally {
+    db.close();
+  }
+}
+
+beforeEach(async () => {
+  await flushLocalVaultWrites();
+  vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   operatorMocks.role = null;
   operatorMocks.state = "denied";
   operatorMocks.retry.mockReset();
   vi.stubGlobal("localStorage", storage);
+  await deleteTestDatabase();
+  resetLocalVaultRuntimeForTests();
   localStorage.clear();
-  useStore.setState(makeSeed());
+  await useStore.persist.rehydrate();
+  const seed = makeSeed();
+  const checkpoint = getVaultWriteCheckpoint();
+  await useStore.setState(seed);
+  await flushLocalVaultWrites();
+  expect(getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  assertVaultWritesSince(checkpoint);
+  const primary = await readPrimary();
+  expect(JSON.parse(primary).state).toMatchObject({
+    profile: { userId: seed.profile.userId, name: seed.profile.name },
+    terms: seed.terms,
+    courses: seed.courses,
+  });
+  expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(primary);
+  expect(readVaultWriteFailure()).toBeNull();
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({
     matches: false,
     media: "",
@@ -45,11 +101,17 @@ beforeEach(() => {
   }));
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetLocalBackupRuntimeForTests();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  try {
+    await flushLocalVaultWrites();
+    await deleteTestDatabase();
+    resetLocalVaultRuntimeForTests();
+    resetLocalBackupRuntimeForTests();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe("Settings information architecture", () => {
@@ -212,6 +274,26 @@ describe("Settings information architecture", () => {
     }
   });
 
+  it("reports a real rejected save instead of a healthy local status", async () => {
+    const before = await readPrimary();
+    const checkpoint = getVaultWriteCheckpoint();
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      await useStore.setState({ profile: { ...useStore.getState().profile, name: "Unsaved synthetic edit" } });
+      await flushLocalVaultWrites();
+      expect(getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      expect(() => assertVaultWritesSince(checkpoint)).toThrow();
+      expect(readVaultWriteFailure()).not.toBeNull();
+      render(<SettingsModal onClose={() => {}} initialTab="account" />);
+      expect(screen.getByRole("alert", { name: "Local save status" }).textContent).toContain("Save needs attention");
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+  });
+
   it("states accurate local-first semantics without promising a cloud account", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
@@ -241,8 +323,7 @@ describe("Settings information architecture", () => {
   });
 
   it("keeps hydrated markerless snapshots while adding backups discovered on a later render", async () => {
-    vi.stubGlobal("indexedDB", new IDBFactory());
-    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    await flushLocalVaultWrites();
     resetLocalBackupRuntimeForTests();
     localStorage.setItem(STORAGE_KEYS.persistedState, JSON.stringify({ state: { profile: { userId: "backup-test" } }, version: 34 }));
     const markerWrites = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
