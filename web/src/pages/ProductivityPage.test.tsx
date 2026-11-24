@@ -495,6 +495,100 @@ describe("ProductivityPage daily console", () => {
     expect(useStore.getState().logs).toHaveLength(0);
   });
 
+  it.each(["archived", "missing", "duplicate", "hidden"] as const)("requires a valid recovered category (%s)", async (change) => {
+    const state = useStore.getState();
+    const tracker = state.productivityTrackers.find((item) => item.id === "tracker-class")!;
+    expect(tracker).toMatchObject({ archived: false, visible: true, contributesToAcademicStudy: false, contributesToTotalProductiveTime: false });
+    const next = new Date(`${state.activeDayKey}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    render(<ProductivityPage />);
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Class review" } });
+    fireEvent.change(screen.getByLabelText("How long in minutes?"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("Productivity category"), { target: { value: tracker.id } });
+    const trackers = state.productivityTrackers.filter((item) => item.id !== tracker.id);
+    if (change === "archived") trackers.push({ ...tracker, archived: true });
+    if (change === "duplicate") trackers.push(tracker, { ...tracker, name: "Conflicting class" });
+    if (change === "hidden") trackers.push({ ...tracker, visible: false });
+    await act(async () => {
+      await checkedSeed(() => useStore.setState({ activeDayKey: next.toISOString().slice(0, 10), productivityTrackers: trackers }));
+    });
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const before = await readPrimary();
+    fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+    const select = screen.getByLabelText("Productivity category") as HTMLSelectElement;
+    const log = screen.getByRole("button", { name: "Log" }) as HTMLButtonElement;
+    expect(select.value).toBe(tracker.id);
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Class review");
+    expect((screen.getByLabelText("How long in minutes?") as HTMLInputElement).value).toBe("20");
+    if (change !== "hidden") {
+      expect(screen.getByText(/The selected category is no longer available/)).toBeTruthy();
+      expect(log.disabled).toBe(true);
+      fireEvent.click(log);
+      expect(useStore.getState().logs).toHaveLength(0);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(await readPrimary()).toBe(before);
+      // Only an intentional inference choice may remove the previous category.
+      fireEvent.change(select, { target: { value: "" } });
+    } else {
+      expect(select.selectedOptions[0].textContent).toContain("(hidden)");
+      expect(screen.queryByText(/The selected category is no longer available/)).toBeNull();
+    }
+    expect(log.disabled).toBe(false);
+    expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+    await act(async () => {
+      fireEvent.click(log);
+      await localVault.flushLocalVaultWrites();
+    });
+    localVault.assertVaultWritesSince(checkpoint);
+    const rows = useStore.getState().logs;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ type: "Class review", minutes: 20, academic: change !== "hidden", productive: change !== "hidden" });
+    expect(rows[0].trackerId).toBe(change === "hidden" ? tracker.id : undefined);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(rows)));
+  });
+
+  it("keeps saved form preferences without obscuring an older substantive draft", async () => {
+    const next = new Date(`${useStore.getState().activeDayKey}T12:00:00Z`);
+    render(<ProductivityPage />);
+    const value = (label: string) => (screen.getByLabelText(label) as HTMLInputElement | HTMLSelectElement).value;
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Earlier real draft" } });
+    fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "Earlier note" } });
+    next.setUTCDate(next.getUTCDate() + 1);
+    await act(async () => { await checkedSeed(() => useStore.setState({ activeDayKey: next.toISOString().slice(0, 10) })); });
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Saved question practice" } });
+    fireEvent.change(screen.getByLabelText("Quantity type"), { target: { value: "questions" } });
+    fireEvent.change(screen.getByLabelText("Questions"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Productivity category"), { target: { value: "tracker-class" } });
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Log" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    localVault.assertVaultWritesSince(checkpoint);
+    expect(value("Quantity type")).toBe("questions");
+    expect(value("Productivity category")).toBe("tracker-class");
+    expect(screen.queryByText("Unsaved activity drafts are kept only while this page stays open.")).toBeNull();
+    const before = await readPrimary();
+    const afterSave = localVault.getVaultWriteCheckpoint();
+    fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+    expect(value("What did you do?")).toBe("Earlier real draft");
+    expect(value("Note (optional)")).toBe("Earlier note");
+    expect(localVault.getVaultWriteCheckpoint()).toBe(afterSave);
+    expect(await readPrimary()).toBe(before);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Log" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    localVault.assertVaultWritesSince(afterSave);
+    const saved = useStore.getState().logs;
+    expect(saved).toHaveLength(2);
+    expect(saved.map((row) => row.type)).toEqual(["Earlier real draft", "Saved question practice"]);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(saved)));
+    next.setUTCDate(next.getUTCDate() + 1);
+    await act(async () => { await checkedSeed(() => useStore.setState({ activeDayKey: next.toISOString().slice(0, 10) })); });
+    expect(screen.queryByRole("button", { name: "Use earlier draft for today" })).toBeNull();
+  });
+
   it("keeps earlier activity visible after selecting a new target and shows only the picked day's history", () => {
     const state = makeSeed();
     state.activeDayKey = "2026-07-13";
