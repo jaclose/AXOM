@@ -90,6 +90,26 @@ describe("CourseBankBrowser academic navigation", () => {
     expect(onPractice).toHaveBeenCalledWith([state.questionSets[0]]);
   });
 
+  it.each([false, true])("keeps original week practice when review-only IDs collide (reversed=%s)", async (reversed) => {
+    const user = userEvent.setup();
+    const original = state.questionSets[0];
+    const review = { ...original, id: "duplicate-review", title: "Review A", kind: "review" as const };
+    const duplicate = { ...review, title: "Review B", scope: { ...review.scope!, week: 2 } };
+    state.questionSets = reversed
+      ? [duplicate, review, ...state.questionSets]
+      : [...state.questionSets, review, duplicate];
+    const snapshot = structuredClone([state.questionSets, state.questions]);
+    const onPractice = vi.fn();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={onPractice} />);
+    expect(screen.queryByText("Review A")).toBeNull();
+    expect(screen.queryByText("Review B")).toBeNull();
+    expect(screen.getByRole("button", { name: "Practice week" }).textContent).toContain("1 ready");
+    await user.click(screen.getByRole("button", { name: "Practice week" }));
+    expect(onPractice).toHaveBeenCalledTimes(1);
+    expect(onPractice).toHaveBeenCalledWith([original]);
+    expect([state.questionSets, state.questions]).toEqual(snapshot);
+  });
+
   it("composes term, course, collection type, readiness and search without leaking other courses", async () => {
     const user = userEvent.setup();
     render(<CourseBankBrowser onPractice={vi.fn()} />);
