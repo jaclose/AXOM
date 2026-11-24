@@ -39,9 +39,9 @@ regions. A passing log excerpt cannot hide a failing command.
   branches or stash in a dirty worktree; never reset, bulk-stage or rewrite history.
   Stage reviewed, named paths only. Never delete, overwrite or bulk-move user material
   without authority; uncertain provenance is REVIEW_REQUIRED.
-- This repository is public: no credentials, personal study data, private PDFs, phone
-  numbers or unlicensed media. Do not print secrets. No paid action, outbound message,
-  push, merge to main or production deployment without explicit authority. JD pushes.
+- Public repository: no secrets, private study data/PDFs, phone numbers or
+  unlicensed media. No paid, outbound or destructive work without owner approval.
+  JD authorizes validated batch releases via the [release gateway](docs/operations/deployment.md#axom-unified-release-gateway).
 
 ## Implement with focused tools
 

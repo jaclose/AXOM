@@ -2,7 +2,7 @@ import type { CurriculumTemplate } from "../curricula";
 import type { QuestionSet } from "../library";
 import { questionMappingStatus, type QuestionRecord } from "../questions";
 import type { Course, Term } from "../types";
-import { parseWeek, questionScope, type CourseScope } from "./scope";
+import { conflictingDuplicateIds, isSecondaryQuestionSet, parseWeek, questionScope, type CourseScope } from "./scope";
 import { canonicalModuleKey } from "./vocabulary";
 
 /**
@@ -124,15 +124,47 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     return next;
   };
   const byId = new Map(input.questions.map((question) => [question.id, question]));
+  // Keep every original-row variant for per-collection proof. The single-row
+  // lookup below is used only for the already-uncontested member path.
+  const originalsById = new Map<string, QuestionRecord[]>();
+  for (const question of input.questions) {
+    originalsById.set(question.id, [...(originalsById.get(question.id) ?? []), question]);
+  }
   const setsById = new Map(input.sets.map((set) => [set.id, set]));
+  // The same original ID must have one disposition across availability and
+  // Tracker progress. Source/scoring conflicts are review-held, not runnable.
+  const conflictingOriginals = conflictingDuplicateIds(
+    input.questions, setsById, input.sets.length > 0,
+  );
+  const mappingReviewIds = new Set(input.questions
+    .filter((question) => questionMappingStatus(question) !== "ready")
+    .map((question) => question.id));
+  // An original claimed by two different academic owners cannot be placed in
+  // either course just because one duplicate happened to arrive first.
+  const firstOwner = new Map<string, string | undefined>();
+  const ambiguousOwners = new Set<string>();
+  for (const question of input.questions) {
+    const owner = resolve(questionScope(question, setsById))?.key;
+    if (firstOwner.has(question.id) && firstOwner.get(question.id) !== owner) {
+      ambiguousOwners.add(question.id);
+    } else if (!firstOwner.has(question.id)) {
+      firstOwner.set(question.id, owner);
+    }
+  }
   const memberships = new Map<string, CourseScope[]>();
   for (const set of input.sets) {
+    // A secondary review list is never original source evidence for legacy
+    // questions that have no declared primary collection.
+    if (isSecondaryQuestionSet(set)) continue;
     for (const id of new Set(set.questionIds)) {
       if (!set.scope) continue;
       memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
     }
   }
   let unassignedQuestions = 0;
+  const resolvedScopesById = new Map<string, CourseScope>();
+  const unassignedIds = new Set<string>();
+  const sourceHeldIds = new Set(conflictingOriginals);
   for (const question of input.questions) {
     const scope = questionScope(question, setsById);
     // Older questions sometimes have immutable set membership but no setId.
@@ -159,12 +191,38 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       courseId: scope.courseId ?? (compatibleFallback && relatedCourseIds.size === 1 ? fallbackScope?.courseId : undefined),
       week: scope.week ?? (!hasDeclaredWeek(question.week) && compatibleFallback ? inheritedWeek : undefined),
     };
+    resolvedScopesById.set(question.id, finalScope);
     const resolved = resolve(finalScope);
-    if (!resolved) { unassignedQuestions += 1; continue; }
+    if (!resolved || ambiguousOwners.has(question.id)) {
+      sourceHeldIds.add(question.id);
+      if (!unassignedIds.has(question.id)) {
+        unassignedIds.add(question.id);
+        unassignedQuestions += 1;
+      }
+      continue;
+    }
+    // A key can be score-ready without its claimed primary source being valid.
+    // Keep the stored record visible, but never advertise it as scheduled,
+    // runnable material when exact source membership or filing disagrees.
+    const primary = question.setId != null ? setsById.get(question.setId) : undefined;
+    const primaryScope = primary?.scope;
+    const primaryWeek = parseWeek(primaryScope?.week);
+    const sourceReviewHeld = conflictingOriginals.has(question.id)
+      || (hasDeclaredWeek(question.week) && parseWeek(question.week) === undefined)
+      || (question.setId != null && (
+        !primary || isSecondaryQuestionSet(primary) || !primary.questionIds.includes(question.id)
+        || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
+        || Boolean(primaryScope?.module && finalScope.module
+          && canonicalModuleKey(primaryScope.module) !== canonicalModuleKey(finalScope.module))
+        || Boolean(primaryScope?.courseId && finalScope.courseId
+          && primaryScope.courseId !== finalScope.courseId)
+        || (primaryWeek !== undefined && finalScope.week !== undefined && primaryWeek !== finalScope.week)
+      ));
+    if (sourceReviewHeld) sourceHeldIds.add(question.id);
     const draft = draftFor(resolved);
     draft.present.add(question.id);
-    (questionMappingStatus(question) === "ready" ? draft.ready : draft.review).add(question.id);
-    if (finalScope.week !== undefined) draft.weeks.add(finalScope.week);
+    (!sourceReviewHeld && !mappingReviewIds.has(question.id) ? draft.ready : draft.review).add(question.id);
+    if (!sourceReviewHeld && finalScope.week !== undefined) draft.weeks.add(finalScope.week);
     else draft.unresolvedWeeks.add(question.id);
     (resolved.method === "course" ? draft.courseAssignments : draft.outlineAssignments).add(question.id);
   }
@@ -172,17 +230,63 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   for (const set of input.sets) {
     const indexedSetWeek = parseWeek(set.scope?.week);
     const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
+    // A held original cannot disappear before validating the source that
+    // originally claimed it. Require a compatible *exact primary* record,
+    // rather than letting a contradictory sole member (or a healthy sibling)
+    // validate an otherwise stale collection. Two disputed originals may
+    // independently verify distinct source sets, but neither becomes ready.
+    const sourceOwner = set.scope ? resolve(set.scope) : undefined;
+    const hasInvalidHeldPrimary = !isSecondaryQuestionSet(set) && [...new Set(set.questionIds)].some((id) => {
+      if (!sourceHeldIds.has(id)) return false;
+      const variants = originalsById.get(id);
+      if (!variants?.length) return false; // Uninstalled originals are missing, not forged local rows.
+      return !variants.some((member) => {
+        if (member.setId !== set.id
+          || (hasDeclaredWeek(member.week) && parseWeek(member.week) === undefined)) return false;
+        const own = questionScope(member, setsById);
+        const actualOwner = resolve(own);
+        if (!actualOwner || (sourceOwner && actualOwner.key !== sourceOwner.key)) return false;
+        if (set.scope?.module && canonicalModuleKey(own.module ?? "") !== canonicalModuleKey(set.scope.module)) return false;
+        if (set.scope?.courseId && own.courseId !== set.scope.courseId) return false;
+        if (indexedSetWeek !== undefined && own.week !== indexedSetWeek) return false;
+        return true;
+      });
+    });
+    if (hasInvalidHeldPrimary) {
+      unassignedCollections += 1;
+      continue;
+    }
+    // Never choose an arbitrary last duplicate row as a collection's proof.
+    // Conflicted original IDs stay review-held; independently filed source
+    // collections can still show their own source-declared week and missing IDs.
+    const presentMembers = [...new Set(set.questionIds)]
+      .filter((id) => !sourceHeldIds.has(id))
+      .flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
+    // A secondary review collection cannot make a conflicted original's
+    // otherwise unsupported week count as fresh source evidence. A review
+    // collection with another valid member still undergoes scope checks below.
+    if (isSecondaryQuestionSet(set) && presentMembers.length === 0
+      && set.questionIds.some((id) => sourceHeldIds.has(id))) {
+      unassignedCollections += 1;
+      continue;
+    }
     // Set-owned metadata wins if it resolves. A collection whose membership
     // spans different modules is not assigned by a filename or first record.
-    const presentMembers = [...new Set(set.questionIds)].flatMap((id) =>
-      byId.has(id) ? [byId.get(id)!] : []);
     const memberAssignments = presentMembers.map((member) => {
-      const scope = questionScope(member, setsById);
+      const scope = resolvedScopesById.get(member.id) ?? questionScope(member, setsById);
       return { scope, assignment: resolve(scope),
         invalidWeek: hasDeclaredWeek(member.week) && parseWeek(member.week) === undefined,
         alternatePrimary: member.setId != null && member.setId !== set.id };
 
     });
+    // Review-only metadata cannot independently turn a legacy or personal
+    // unscheduled question into a source-indexed week. The inferred scope here
+    // comes only from an original set or an explicit question assignment.
+    if (isSecondaryQuestionSet(set) && indexedSetWeek !== undefined
+      && !presentMembers.some((member) => resolvedScopesById.get(member.id)?.week === indexedSetWeek)) {
+      unassignedCollections += 1;
+      continue;
+    }
     const memberResolutions = memberAssignments.flatMap(({ assignment }) => assignment ? [assignment] : []);
     const direct = set.scope ? resolve(set.scope) : undefined;
     const uniqueMemberKeys = new Set(memberResolutions.map((entry) => entry.key));

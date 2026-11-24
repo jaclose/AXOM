@@ -29,7 +29,14 @@ export type QuestionSetScope = Pick<CourseScope, "module" | "week" | "courseId">
  * Older analysis callers may only have a source's scope, not its membership.
  * Such scope-only maps cannot establish immutable membership provenance.
  */
-export type QuestionSourceEvidence = Pick<QuestionSet, "scope"> & Partial<Pick<QuestionSet, "questionIds">>;
+export type QuestionSourceEvidence = Pick<QuestionSet, "scope"> & Partial<Pick<QuestionSet, "questionIds" | "kind" | "tags">>;
+
+/** Review/custom snapshots reference existing originals and cannot serve as
+ * their primary evidence. Older missed-review sets used a tag before kind. */
+export function isSecondaryQuestionSet(set: Pick<QuestionSourceEvidence, "kind" | "tags"> | undefined): boolean {
+  return Boolean(set && (set.kind === "review" || set.kind === "custom"
+    || (!set.kind && set.tags?.includes("missed-review"))));
+}
 
 export const UNASSIGNED_SCOPE_KEY = "unassigned";
 
@@ -112,7 +119,7 @@ function hasConsistentPrimaryFiling(
     && parseWeek(rawQuestionWeek) === undefined) return false;
   if (!question.setId || !setsById) return true;
   const primary = setsById.get(question.setId);
-  if (!primary) return false;
+  if (!primary || isSecondaryQuestionSet(primary)) return false;
   if (!primary.questionIds) return true; // Legacy scope-only analysis is not proof of membership.
   if (!primary.questionIds.includes(question.id)) return false;
   const declaredWeek = (value: unknown): boolean =>
@@ -132,7 +139,7 @@ function hasConsistentPrimaryFiling(
 /** Duplicate originals with competing primary/progress evidence cannot
  * receive mastery credit. Only duplicate IDs need the expensive source checks;
  * unique records are checked when they match the requested scope. */
-function conflictingDuplicateIds(
+export function conflictingDuplicateIds(
   questions: readonly QuestionRecord[],
   setsById: ReadonlyMap<ID, QuestionSourceEvidence> | undefined,
   hasFullSourceIndex: boolean,
@@ -141,6 +148,11 @@ function conflictingDuplicateIds(
   const held = new Set<ID>();
   const signature = (question: QuestionRecord, own: CourseScope): string => JSON.stringify([
     question.setId ?? null, question.sourceDocumentId ?? null, question.correctKey ?? null,
+    // Original source bodies and question numbering are immutable evidence.
+    // Distinct stems, choices or ordered content cannot share progress credit
+    // under one ID even when their current answer key and set match.
+    question.stem ?? null, question.options ?? null, question.content ?? null,
+    question.questionNumber ?? null, question.sourcePage ?? null,
     own.courseId ?? null, canonicalModuleKey(own.module ?? ""), own.week ?? null,
     question.status, question.attempts[0]?.status ?? null, question.attempts.length > 0,
   ]);
