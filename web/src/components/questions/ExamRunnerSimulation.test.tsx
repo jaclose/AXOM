@@ -250,7 +250,7 @@ describe("Simulation preserves original source evidence across recovery", () => 
         fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
         mounted.unmount();
         await act(async () => { useStore.setState({ questions: [original] }); });
-        mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+        render(<ExamRunner mode="exam" onClose={vi.fn()} />);
         fireEvent.click(screen.getByRole("button", { name: "Resume" }));
         expect(readSuspendedBlock()?.sourceEvidenceV1).toEqual({});
       }
@@ -264,6 +264,13 @@ describe("Simulation preserves original source evidence across recovery", () => 
       expect(session.answers[0].correct).toBe(change === "unchanged" ? true : undefined);
       expect(session.score).toMatchObject({ scored: change === "unchanged" ? 1 : 0, total: 1 });
       expect(readSuspendedBlock()).toBeUndefined();
+      fireEvent.click(screen.getByRole("button", { name: "Review in the exam interface" }));
+      const explanation = screen.getByRole("region", { name: "Explanation" });
+      expect(explanation.textContent).toContain(change === "unchanged" ? "Correct" : "Not scored in saved block");
+      expect(explanation.textContent).toContain("Current source material may differ");
+      if (change === "unchanged") expect(explanation.textContent).toContain("Current correct answer: B");
+      else expect(explanation.textContent).not.toContain("Current correct answer:");
+      expect(useStore.getState().quizSessions[0]).toEqual(session);
     },
   );
 });
