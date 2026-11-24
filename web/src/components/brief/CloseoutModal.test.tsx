@@ -11,6 +11,9 @@ import type { JournalEntry } from "../../lib/types";
 import { useUi } from "../../lib/uiStore";
 import * as localVault from "../../lib/localVault";
 import { CloseoutModal } from "./CloseoutModal";
+import { SyncCoordinator } from "../../lib/sync/syncCoordinator";
+import { SYNC_METADATA_KEY } from "../../lib/sync/syncMetadata";
+import type { SyncTransport } from "../../lib/sync/syncTypes";
 
 const DAY = "2035-04-13";
 
@@ -364,6 +367,82 @@ describe("CloseoutModal daily loop", () => {
     await expectPersistedCloseout();
   });
 
+  it("does not save a refused closeout through a later unrelated task write", async () => {
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    await rejectOptedInDraft();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(await readPrimary()).toBe(before);
+
+    // An independent successful write must not implicitly accept the failed draft.
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    await useStore.getState().toggleTask("open-task");
+    await localVault.flushLocalVaultWrites();
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+    localVault.assertVaultWritesSince(checkpoint);
+    const persisted = JSON.parse(await readPrimary()).state;
+    expect(persisted.tasks.find((task: { id: string }) => task.id === "open-task").done).toBe(true);
+    expect(persisted.questions).toEqual(initial.questions);
+    expect(persisted.logs).toEqual(initial.logs);
+    expect(persisted.journal).toEqual(initial.journal);
+    expect(persisted.closeouts).toEqual(initial.closeouts);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it.each(["automatic", "manual"] as const)("excludes a refused draft from a real coordinator %s snapshot", async (reason) => {
+    const authored: JournalEntry = {
+      id: "authored-before-account-protection",
+      date: `${DAY}T09:00:00`,
+      today: "Already accepted reflection",
+      tomorrow: "Already accepted plan",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    await checkedSeed(() => useStore.setState({ journal: [authored] }));
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const accountUserId = "synthetic-closeout-account";
+    localStorage.setItem(SYNC_METADATA_KEY, JSON.stringify({
+      accountUserId, deviceId: "synthetic-closeout-device", baseRevision: 1, pending: false, attempt: 0,
+    }));
+    const push = vi.fn<SyncTransport["push"]>().mockResolvedValue({
+      status: "accepted", revision: 2, revisionId: "synthetic-revision-2", idempotent: false,
+    });
+    const coordinator = new SyncCoordinator({ push, history: async () => [], revision: vi.fn() }, useStore.getState, 60_000);
+    // The real watcher queues on store mutation. Drive the same notification
+    // and flush explicitly instead of relying on real-time debounce delays.
+    const unsubscribe = useStore.subscribe(() => coordinator.queue());
+    const onClose = vi.fn();
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      await rejectOptedInDraft(true);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(await readPrimary()).toBe(before);
+      // No second closeout submission or independent workspace edit occurs.
+      await coordinator.flush(reason);
+      const envelopes = push.mock.calls.map(([envelope]) => envelope);
+      if (reason === "manual") expect(envelopes.length).toBeGreaterThan(0);
+      // Automatic protection can legitimately omit an unchanged snapshot.
+      for (const envelope of envelopes) {
+        expect(envelope.accountUserId).toBe(accountUserId);
+        expect(envelope.reason).toBe(reason);
+        expect(envelope.payload.tasks).toEqual(initial.tasks);
+        expect(envelope.payload.questions).toEqual(initial.questions);
+        expect(envelope.payload.journal).toEqual(initial.journal);
+        expect(envelope.payload.closeouts).toEqual(initial.closeouts);
+      }
+      expect(["protected", "saved-locally"]).toContain(coordinator.currentStatus());
+      expect(await readPrimary()).toBe(before);
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      coordinator.dispose();
+    }
+  });
+
   it("keeps an opt-out closeout open with its form data when durability cannot be confirmed", async () => {
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValueOnce(new Error("Synthetic closeout vault refusal"));
     const onClose = vi.fn();
@@ -401,6 +480,34 @@ describe("CloseoutModal daily loop", () => {
     expect(window.location.hash).toBe("#dashboard");
   });
 });
+
+// Fail real workspace writes while optionally allowing device-only sync
+// bookkeeping, which is independent of the workspace payload.
+async function rejectOptedInDraft(allowSyncMetadata = false): Promise<void> {
+  fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Refused draft reflection" } });
+  fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Refused draft win" } });
+  fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Refused draft obstacle" } });
+  fireEvent.click(screen.getByRole("checkbox"));
+  const checkpoint = localVault.getVaultWriteCheckpoint();
+  const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+  const denyFallback = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+    if (allowSyncMetadata && key === SYNC_METADATA_KEY) {
+      storageValues.set(key, String(value));
+      return;
+    }
+    throw new DOMException("Full", "QuotaExceededError");
+  });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open/i);
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+    expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+    expect(screen.getByDisplayValue("Refused draft reflection")).toBeTruthy();
+  } finally {
+    denyIdb.mockRestore();
+    denyFallback.mockRestore();
+  }
+}
 
 function setCloseoutState() {
   const seed = makeSeed();
