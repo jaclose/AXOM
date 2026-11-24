@@ -8,6 +8,8 @@ import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./Ques
 // every answer is recorded on the question for spaced retry.
 // ===========================================================================
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { BookOpenCheck, Check, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
@@ -254,6 +256,24 @@ function sessionSourceContent(question: QuestionRecord): string {
   });
 }
 
+/** Recovery must retain source identity without copying stems, options or keys into browser recovery. */
+function simulationSourceFingerprint(question: QuestionRecord): string {
+  return bytesToHex(sha256(utf8ToBytes(JSON.stringify([
+    trustedCorrectKey(question), question.stem, question.sourceDocumentId,
+    question.options.map(({ key, text }) => [key, text]), sessionSourceContent(question),
+  ]))));
+}
+
+/** A resumed block can only lose evidence, never acquire it from the live bank.
+ * This also prevents a changed-and-later-reverted record from recertifying answers. */
+function retainedSimulationEvidence(pool: readonly QuestionRecord[], evidence: SuspendedBlock["sourceEvidenceV1"]): Record<string, string> {
+  return Object.fromEntries(pool.flatMap((question) => {
+    const fingerprint = simulationSourceFingerprint(question);
+    return evidence && Object.prototype.hasOwnProperty.call(evidence, question.id)
+      && evidence[question.id] === fingerprint ? [[question.id, fingerprint]] : [];
+  }));
+}
+
 /** The displayed question is an immutable session snapshot. If its answer,
  * source image or stem/choices changed in the live vault, do not score it. */
 function trustedSessionKey(original: QuestionRecord | undefined, current: QuestionRecord | undefined): string | undefined {
@@ -346,7 +366,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   });
   const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
   const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
-  const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
+  const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; sourceEvidenceV1: Record<string, string>; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
 
   // --- run state
   const [pool, setPool] = useState<QuestionRecord[]>(() => restored
@@ -770,7 +790,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       else writeSuspendedBlock(null);
       setSuspended(undefined);
       clearActiveQuiz(runId);
-      setSimRun({ runId, skin: examInterface, pool: built, timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
+      setSimRun({ runId, skin: examInterface, pool: built,
+        sourceEvidenceV1: Object.fromEntries(built.map((question) => [question.id, simulationSourceFingerprint(question)])),
+        timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
       if (runBlockId) {
         const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
         if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: new Date().toISOString() });
@@ -996,7 +1018,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       });
       return;
     }
-    const resumed = { ...suspended, runId: suspended.runId ?? crypto.randomUUID() };
+    const sourceEvidenceV1 = retainedSimulationEvidence(ready, suspended.sourceEvidenceV1);
+    const resumed = { ...suspended, runId: suspended.runId ?? crypto.randomUUID(), sourceEvidenceV1 };
     try {
       writeSuspendedBlock(resumed);
       setSuspended(resumed);
@@ -1007,7 +1030,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const continueSuspended = () => media.verify(ready, () => {
       if (!readSuspendedBlock()) return;
       setMode(resumed.mode);
-      setSimRun({ runId: resumed.runId!, skin: resumed.skin, pool: ready, timeLimitSeconds: resumed.timeLimitSeconds, resume: resumed });
+      setSimRun({ runId: resumed.runId!, skin: resumed.skin, pool: ready, sourceEvidenceV1, timeLimitSeconds: resumed.timeLimitSeconds, resume: resumed });
       setStage("sim");
     }, { fresh: true });
     retryMediaStartRef.current = continueSuspended;
@@ -1027,7 +1050,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     recovery: SuspendedBlock,
   ): Promise<void> {
     if (!simRun) throw new Error("This exam run is no longer open.");
-    const durableRecovery = { ...recovery, runId: simRun.runId };
+    const durableRecovery = { ...recovery, runId: simRun.runId, sourceEvidenceV1: simRun.sourceEvidenceV1 };
     try {
       writeSuspendedBlock(durableRecovery);
       setSuspended(durableRecovery);
@@ -1046,7 +1069,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const validatedAnswers = answerList.map((answer) => {
       const candidates = liveClaims.get(answer.questionId);
       const current = candidates?.length === 1 ? candidates[0] : undefined;
-      const key = trustedSessionKey(originalById.get(answer.questionId), current);
+      const key = current && Object.prototype.hasOwnProperty.call(simRun.sourceEvidenceV1, answer.questionId)
+        && simRun.sourceEvidenceV1[answer.questionId] === simulationSourceFingerprint(current)
+        ? trustedSessionKey(originalById.get(answer.questionId), current) : undefined;
       return { ...answer, correct: key ? answer.answerKey === key : undefined };
     });
     const result: QuizSession = {
@@ -1088,13 +1113,15 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function suspendSimulation(block: SuspendedBlock) {
+    if (!simRun) throw new Error("This exam run is no longer open.");
+    const recovery = { ...block, runId: simRun.runId, sourceEvidenceV1: simRun.sourceEvidenceV1 };
     try {
-      writeSuspendedBlock(block);
+      writeSuspendedBlock(recovery);
     } catch (error) {
       pushToast({ title: "Exam is still open", body: error instanceof Error ? error.message : "Could not save the exam. Try again.", tone: "warn" });
       throw error;
     }
-    setSuspended(block);
+    setSuspended(recovery);
     const counts = blockCounts(block.poolIds, block.items);
     pushToast({
       title: "Exam saved",
