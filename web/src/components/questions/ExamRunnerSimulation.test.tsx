@@ -221,7 +221,7 @@ describe("Simulation preserves original source evidence across recovery", () => 
       const original = q("q1");
       await act(async () => { useStore.setState({ questions: [original] }); });
       let mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
-      fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
       fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
       fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
       fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
@@ -243,7 +243,7 @@ describe("Simulation preserves original source evidence across recovery", () => 
       await act(async () => { useStore.setState({ questions: [changed] }); });
       mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
       fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-      expect(screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ })).toBeTruthy();
+      expect(screen.getByRole("dialog", { name: /UWorld-style.*simulation/ })).toBeTruthy();
       expect(readSuspendedBlock()?.runId).toBe(recovery.runId);
       if (change === "changed-then-reverted") {
         expect(readSuspendedBlock()?.sourceEvidenceV1).toEqual({});
@@ -254,7 +254,7 @@ describe("Simulation preserves original source evidence across recovery", () => 
         fireEvent.click(screen.getByRole("button", { name: "Resume" }));
         expect(readSuspendedBlock()?.sourceEvidenceV1).toEqual({});
       }
-      const dialog = screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ });
+      const dialog = screen.getByRole("dialog", { name: /UWorld-style.*simulation/ });
       fireEvent.click(within(dialog).getByRole("button", { name: /End Block/ }));
       fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
       await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
