@@ -173,6 +173,47 @@ describe("Simulation uses current source evidence at submission", () => {
   });
 });
 
+
+describe("Simulation protects active question identity at final save", () => {
+  it.each(["held-first", "held-last", "identical"] as const)(
+    "retains recovery and refuses to mutate ambiguous attempts (%s)",
+    async (collision) => {
+      await act(async () => { useStore.setState({ questions: [q("q1")] }); });
+      render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+      const sim = screen.getByRole("dialog", { name: "UWorld-style exam simulation" });
+      fireEvent.click(within(sim).getAllByRole("radio", { name: "B. Beta" })[0]);
+
+      const original = q("q1");
+      const held = { ...q("q1"), needsReview: true, correctKey: "A", correctAnswerText: "Alpha" };
+      const claimants = collision === "held-first" ? [held, original]
+        : collision === "held-last" ? [original, held] : [original, q("q1")];
+      await act(async () => { useStore.setState({ questions: claimants }); });
+      const before = JSON.stringify(useStore.getState().questions);
+      fireEvent.click(within(sim).getByRole("button", { name: /End Block/ }));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
+      const warning = await screen.findByRole("alert");
+      expect(warning.textContent).toContain("Multiple records claim a question ID");
+      expect(useStore.getState().quizSessions).toHaveLength(0);
+      expect(JSON.stringify(useStore.getState().questions)).toBe(before);
+      const recovery = readSuspendedBlock();
+      expect(recovery?.runId).toEqual(expect.any(String));
+      expect(recovery?.items.q1.answerKey).toBe("B");
+
+      // An unrelated duplicate should not block this exact run after q1 is unique.
+      await act(async () => { useStore.setState({ questions: [original, q("other"), q("other")] }); });
+      fireEvent.click(within(warning).getByRole("button", { name: "Retry save" }));
+      await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+      const result = useStore.getState().quizSessions;
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ id: recovery?.runId, score: { correct: 1, scored: 1, total: 1 } });
+      expect(useStore.getState().questions.map((item) => item.attempts.length)).toEqual([1, 0, 0]);
+      expect(readSuspendedBlock()).toBeUndefined();
+    },
+  );
+});
+
 describe("Six-choice simulation keyboard", () => {
   it("keeps an F answer selectable in ExamSoft and reserves M for marking", async () => {
     const six: QuestionRecord = {
