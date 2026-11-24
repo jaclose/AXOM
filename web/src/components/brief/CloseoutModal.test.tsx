@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
 import { STORAGE_KEYS } from "../../lib/brand";
 import { makeDailyRequirement } from "../../lib/dailySuccess";
 import type { QuestionRecord } from "../../lib/questions";
@@ -578,6 +578,113 @@ describe("CloseoutModal daily loop", () => {
     } finally {
       gate.release();
       gate.restore();
+    }
+  });
+
+  it("keeps both physical copies when a peer fallback disputes a staged receipt", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const base = await readPrimary();
+    const peer = JSON.parse(base);
+    peer.state.tasks[0].title = "Independent peer edit";
+    const peerBytes = JSON.stringify(peer);
+    const scopedKey = `${key}:user:${peer.state.profile.userId}`;
+    // Produce a real acknowledged fallback, then restore this tab's observed
+    // primary baseline before introducing the peer at the commit boundary.
+    vi.stubGlobal("indexedDB", undefined);
+    try {
+      const checkpoint = localVault.getVaultWriteCheckpoint();
+      await localVault.localVaultStorage.setItem(key, peerBytes);
+      localVault.assertVaultWritesSince(checkpoint);
+      expect(storage.getItem(key)).toBe(peerBytes);
+    } finally {
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+    }
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    for (const k of [key, markerKey, scopedKey]) storageValues.delete(k);
+    expect(await localVault.localVaultStorage.getItem(key)).toBe(base);
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (!injected && storedKey === key && typeof value === "string" && value.includes("Disputed private win")) {
+        injected = true;
+        storageValues.set(key, peerBytes);
+        storageValues.set(markerKey, marker!);
+        storageValues.set(scopedKey, peerBytes);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    const onClose = vi.fn();
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Disputed private win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      const alert = await screen.findByRole("alert");
+      expect(injected).toBe(true);
+      expect(JSON.parse(await readPrimary()).state.closeouts[0].oneWin).toBe("Disputed private win");
+      expect(storage.getItem(key)).toBe(peerBytes);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(scopedKey)).toBe(peerBytes);
+      expect(useStore.getState().closeouts).toEqual([]);
+      expect(useStore.getState().journal).toEqual([]);
+      expect(screen.getByDisplayValue("Disputed private win")).toBeTruthy();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("#dashboard");
+      await expect(localVault.localVaultStorage.getItem(key)).rejects.toThrow(localVault.VAULT_CONFLICT_MESSAGE);
+      expect(alert.textContent).toMatch(/could not confirm which changes were saved/i);
+      expect(alert.textContent).not.toMatch(/Not saved on this device/i);
+      expect(screen.getByRole("button", { name: "Close the day" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("button", { name: "Expand into full notebook" })).toHaveProperty("disabled", true);
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it("does not navigate when a newer ordinary write is refused after an accepted staged receipt", async () => {
+    const onClose = vi.fn();
+    const gate = holdNextVaultOpen();
+    const originalPut = IDBObjectStore.prototype.put;
+    let refused = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (storedKey === STORAGE_KEYS.persistedState && typeof value === "string" && value.includes("Concurrent independent task")) {
+        refused = true;
+        throw new DOMException("Unavailable", "SecurityError");
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+      if (String(value).includes("Concurrent independent task")) throw new DOMException("Full", "QuotaExceededError");
+      storageValues.set(key, String(value));
+    });
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Durable staged win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      await gate.ready();
+      const tasks = useStore.getState().tasks.map((task) => task.id === "open-task"
+        ? { ...task, title: "Concurrent independent task" } : task);
+      const later = useStore.setState({ tasks });
+      gate.release();
+      await later;
+      await localVault.flushLocalVaultWrites();
+      await waitFor(() => expect(refused).toBe(true));
+      const persisted = JSON.parse(await readPrimary()).state;
+      expect(persisted.closeouts[0].oneWin).toBe("Durable staged win");
+      expect(persisted.tasks.find((task: { id: string }) => task.id === "open-task").title).not.toBe("Concurrent independent task");
+      expect(useStore.getState().tasks).toEqual(tasks);
+      expect(screen.getByDisplayValue("Durable staged win")).toBeTruthy();
+      expect((await screen.findByRole("alert")).textContent).toMatch(/closeout reached storage.*newer changes/i);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("#dashboard");
+    } finally {
+      gate.release();
+      gate.restore();
+      put.mockRestore();
+      denyFallback.mockRestore();
     }
   });
 
