@@ -218,6 +218,50 @@ describe("course bank read model", () => {
     }
   });
 
+
+  it("propagates whole-primary filing holds to secondary and legacy practice in either order", () => {
+    const primary = { ...set, questionIds: ["q1", "sibling"] };
+    const review = { ...set, id: "review", kind: "review" as const, questionIds: ["sibling"] };
+    const clean = { ...set, id: "clean", questionIds: ["clean-q"] };
+    const cleanQuestion = { ...question, id: "clean-q", setId: "clean" };
+    for (const invalid of [{ week: 3 }, { week: 0 }, { setId: "missing" }, { courseId: "c2" }]) {
+      for (const primaryId of ["s1", undefined]) {
+        const records = [{ ...question, ...invalid }, { ...question, id: "sibling", setId: primaryId }, cleanQuestion];
+        const snapshot = structuredClone(records);
+        for (const collections of [[primary, review, clean], [review, clean, primary]]) {
+          const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+          expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+          expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+          expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+        }
+        expect(records).toEqual(snapshot);
+      }
+    }
+  });
+
+  it("propagates dependent primary holds transitively but keeps an independent primary", () => {
+    const primary = { ...set, questionIds: ["q1", "sibling"] };
+    const dependent = { ...set, id: "dependent", questionIds: ["sibling", "other"] };
+    const review = { ...set, id: "other-review", kind: "review" as const, questionIds: ["other"] };
+    const clean = { ...set, id: "clean", questionIds: ["clean-q"] };
+    const records = [{ ...question, week: 3 }, { ...question, id: "sibling" },
+      { ...question, id: "other", setId: "dependent" }, { ...question, id: "clean-q", setId: "clean" }];
+    for (const collections of [[primary, dependent, review, clean], [review, dependent, clean, primary]]) {
+      const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+      expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+      expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+    }
+  });
+
+  it("keeps missing raw member references repairable without inventing a question", () => {
+    const primary = { ...set, questionIds: ["q1", "missing"] };
+    const review = { ...set, id: "review", kind: "review" as const };
+    const [module] = indexed([review, primary], [question]);
+    expect(module.weeks[0].questionIds).toEqual(["q1"]);
+    expect(module.weeks[0].sets.map((entry) => entry.id).sort()).toEqual(["review", "s1"]);
+    expect(primary.questionIds).toEqual(["q1", "missing"]);
+  });
+
   it("keeps generated and review provenance ahead of school-like titles", () => {
     expect(bankSource({ ...set, kind: "generated" })).toBe("AXOM generated");
     expect(bankSource({ ...set, kind: "review" })).toBe("Review");
