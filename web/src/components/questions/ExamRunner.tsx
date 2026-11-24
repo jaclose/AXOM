@@ -1034,10 +1034,19 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     } catch {
       throw new Error("AXOM could not create a browser recovery copy. Keep this exam window open and retry. No score was saved.");
     }
+    // Read raw live claims at the write boundary, not a render-time last-wins
+    // map. Even byte-identical duplicate IDs make an attempt target ambiguous.
+    // Keep the durable recovery above intact so the same run can be retried.
+    const liveClaims = questionClaims(useStore.getState().questions ?? EMPTY_QUESTIONS);
+    if (simRun.pool.some((question) => (liveClaims.get(question.id)?.length ?? 0) > 1)) {
+      throw new Error("Multiple records claim a question ID. Your exam recovery is still on this device. Resolve the duplicate records before retrying this save.");
+    }
     const originalById = new Map(simRun.pool.map((question) => [question.id, question]));
     // A changed/missing key must not be scored from a stale simulation snapshot.
     const validatedAnswers = answerList.map((answer) => {
-      const key = trustedSessionKey(originalById.get(answer.questionId), questionsById.get(answer.questionId));
+      const candidates = liveClaims.get(answer.questionId);
+      const current = candidates?.length === 1 ? candidates[0] : undefined;
+      const key = trustedSessionKey(originalById.get(answer.questionId), current);
       return { ...answer, correct: key ? answer.answerKey === key : undefined };
     });
     const result: QuizSession = {
