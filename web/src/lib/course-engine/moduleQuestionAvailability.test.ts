@@ -356,7 +356,7 @@ describe("source-week availability proof", () => {
     for (const raw of [0, 100, -1, "2026-11-05", "Week 2-3"]) {
       const report = buildQuestionAvailabilityIndex(input(
         [set("source", ["q"], { scope: goerScope })],
-        [question("q", { week: raw as number })],
+        [question("q", { module: "GOER", courseId: "ppm-501", week: raw as number })],
       ));
       expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
         storedQuestions: 1, unresolvedWeekQuestions: 1, collections: 0,
@@ -409,7 +409,7 @@ describe("source-week availability proof", () => {
     for (const raw of [0, 100, "Week 3-4", "2026-11-05"]) {
       const report = buildQuestionAvailabilityIndex(input([
         set("invalid", ["q"], { scope: { module: "GOER", courseId: "ppm-501", week: raw as number } }),
-      ], [question("q", { setId: "invalid" })]));
+      ], [question("q", { setId: "invalid", module: "GOER", courseId: "ppm-501" })]));
       expect(report.unassignedCollections).toBe(1);
       expect(report.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
         indexedWeeks: [], unresolvedWeekQuestions: 1, storedQuestions: 1,
@@ -629,6 +629,73 @@ describe("mixed legacy membership ownership", () => {
         expect(module?.readyQuestions ?? 0).toBe(1 - expected[3]);
         expect(fixture).toEqual(before);
       }
+    }
+  });
+});
+
+describe("scope-rejected source collections cannot certify inherited placement", () => {
+  it("withholds inherited-only legacy and primary questions while preserving explicit filing and history", () => {
+    const cases: Array<{ peer?: Partial<QuestionRecord>; accepted: boolean; peerWeeks: number[] }> = [
+      { accepted: true, peerWeeks: [] },
+      { peer: goerScope, accepted: true, peerWeeks: [2] },
+      { peer: { module: "NCRS", courseId: "ppm-500", week: 1 }, accepted: false, peerWeeks: [] },
+      { peer: { ...goerScope, week: 4 }, accepted: false, peerWeeks: [4] },
+      { peer: { ...goerScope, week: 0 }, accepted: false, peerWeeks: [] },
+    ];
+    for (const { peer, accepted, peerWeeks } of cases) {
+      const original = question("primary", { setId: "source", status: "correct",
+        attempts: [{ at: stamp, answerKey: "A", status: "correct" }] });
+      const legacy = question("legacy");
+      const own = question("own", { ...goerScope, setId: "source" });
+      const partial = question("partial", { module: "GOER", courseId: "ppm-501", setId: "source" });
+      const rows = [original, legacy, own, partial, ...(peer ? [question("peer", peer)] : [])];
+      const source = set("source", rows.map((row) => row.id), { scope: goerScope });
+      for (const records of [rows, rows.slice().reverse()]) {
+        const collections = [{ ...source, questionIds: records.map((row) => row.id) }];
+        const before = structuredClone([collections, records]);
+        const result = buildQuestionAvailabilityIndex(input(collections, records));
+        const goer = result.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"));
+        const peerInGoer = Number(peer?.module === "GOER");
+        expect(result.unassignedCollections).toBe(accepted ? 0 : 1);
+        expect(result.unassignedQuestions).toBe(accepted ? 0 : 2);
+        expect(goer).toMatchObject({
+          collections: accepted ? 1 : 0,
+          readyQuestions: (accepted ? 4 : 2) + peerInGoer,
+          indexedWeeks: [...new Set([2, ...peerWeeks])].sort((a, b) => a - b),
+          unresolvedWeekQuestions: Number(!accepted) + Number(peer?.week === 0),
+        });
+        expect([collections, records]).toEqual(before);
+      }
+    }
+  });
+
+  it("uses clean legacy membership, and removes secondary credit that depended on rejected primary scope", () => {
+    const source = set("source", ["primary", "legacy", "peer"], { scope: goerScope });
+    const secondary = set("secondary", ["primary", "secondary-only"], { kind: "review", scope: goerScope });
+    const clean = set("clean", ["legacy"], { scope: { ...goerScope, week: 4 } });
+    const rows = [question("primary", { setId: "source" }), question("legacy"),
+      question("secondary-only"), question("peer", { module: "NCRS", courseId: "ppm-500", week: 1 })];
+    for (const collections of [[source, secondary, clean], [clean, secondary, source]]) {
+      const before = structuredClone([collections, rows]);
+      const result = buildQuestionAvailabilityIndex(input(collections, rows));
+      expect(result.unassignedCollections).toBe(2);
+      expect(result.unassignedQuestions).toBe(2);
+      expect(result.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+        collections: 1, readyQuestions: 1, storedQuestions: 1, indexedWeeks: [4], unresolvedWeekQuestions: 0,
+      });
+      expect([collections, rows]).toEqual(before);
+    }
+  });
+
+  it("does not inherit from malformed source or member week evidence alone", () => {
+    for (const sourceWeek of [0, 2]) {
+      const source = set("source", ["primary", "legacy"], { scope: { ...goerScope, week: sourceWeek } });
+      const rows = [question("primary", { setId: "source" }),
+        question("legacy", sourceWeek === 2 ? { week: 0 } : {})];
+      const result = buildQuestionAvailabilityIndex(input([source], rows));
+      expect(result.unassignedCollections).toBe(1);
+      expect(result.unassignedQuestions).toBe(2);
+      expect(result.byModule.size).toBe(0);
     }
   });
 });

@@ -180,13 +180,89 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     if (duplicateSetIds.has(set.id) || ambiguousPrimary) heldSetIds.add(set.id);
   }
   const setsById = new Map(input.sets.filter((set) => !heldSetIds.has(set.id)).map((set) => [set.id, set]));
-  const memberships = new Map<string, CourseScope[]>();
+  const memberships = new Map<string, QuestionSet[]>();
   for (const set of input.sets) {
     if (heldSetIds.has(set.id)) continue;
     for (const id of new Set(set.questionIds)) {
       if (!set.scope) continue;
-      memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
+      memberships.set(id, [...(memberships.get(id) ?? []), set]);
     }
+  }
+  // Determine collection eligibility before any question inherits filing.
+  // A rejected source cannot lend its module/week to otherwise unfiled
+  // siblings. Revalidate dependent collections when their primary evidence
+  // disappears; each round removes all failures together, never by scan order.
+  const collectionTarget = (set: QuestionSet): Resolution | undefined => {
+    const indexedSetWeek = parseWeek(set.scope?.week);
+    const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
+    // Set-owned metadata wins if it resolves. A collection whose membership
+    // spans different modules is not assigned by a filename or first record.
+    const presentMembers = [...new Set(set.questionIds)].flatMap((id) =>
+      byId.has(id) ? [byId.get(id)!] : []);
+    const direct = set.scope ? resolve(set.scope) : undefined;
+    const memberAssignments = presentMembers.map((member) => {
+      const scope = questionScope(member, setsById);
+      // A partial own course is compatible only when the collection's
+      // resolved module also belongs to that exact local course.
+      const assignment = resolve(scope) ?? (!scope.module && scope.courseId && direct
+        ? resolve({ ...scope, module: direct.owner.module }) : undefined);
+      return { scope, assignment,
+        invalidWeek: hasDeclaredWeek(member.week) && parseWeek(member.week) === undefined,
+        alternatePrimary: member.setId != null && member.setId !== set.id };
+
+    });
+    const memberResolutions = memberAssignments.flatMap(({ assignment }) => assignment ? [assignment] : []);
+    const uniqueMemberKeys = new Set(memberResolutions.map((entry) => entry.key));
+    const target = direct ?? (memberResolutions.length > 0 && uniqueMemberKeys.size === 1
+      ? memberResolutions[0] : undefined);
+    const contradictsSource = memberAssignments.some(({ scope, assignment, invalidWeek, alternatePrimary }) => {
+      // Neither malformed own weeks nor review-set-only weeks justify a
+      // source-indexed collection.
+      if (invalidWeek || (alternatePrimary && indexedSetWeek !== undefined && scope.week === undefined)) return true;
+      if (assignment && target && assignment.key !== target.key) return true;
+      if (scope.courseId && set.scope?.courseId && scope.courseId !== set.scope.courseId) return true;
+      if (scope.week !== undefined && indexedSetWeek !== undefined && scope.week !== indexedSetWeek) return true;
+      // A present member with explicit but unresolvable ownership is not
+      // silently granted the set's declared course/term.
+      return Boolean((scope.module || scope.courseId) && !assignment);
+    });
+    if (!target || invalidSetWeek || contradictsSource || uniqueMemberKeys.size > 1
+      || (!direct && memberResolutions.length !== memberAssignments.length)
+      || (memberResolutions.length && !uniqueMemberKeys.has(target.key))) {
+      return undefined;
+    }
+    return target;
+  };
+  const collectionTargets = new Map<string, Resolution>();
+  const dependents = new Map<string, Set<string>>();
+  for (const set of setsById.values()) {
+    for (const id of new Set(set.questionIds)) {
+      const primary = byId.get(id)?.setId;
+      if (primary == null || primary === set.id) continue;
+      const dependentIds = dependents.get(primary) ?? new Set<string>();
+      dependentIds.add(set.id);
+      dependents.set(primary, dependentIds);
+    }
+  }
+  let pending = [...setsById.values()];
+  while (pending.length > 0) {
+    const rejected = new Set<string>();
+    for (const set of pending) {
+      const target = collectionTarget(set);
+      if (target) collectionTargets.set(set.id, target);
+      else rejected.add(set.id);
+    }
+    const next = new Set<string>();
+    for (const id of rejected) {
+      heldSetIds.add(id);
+      setsById.delete(id);
+      collectionTargets.delete(id);
+      for (const dependent of dependents.get(id) ?? []) next.add(dependent);
+    }
+    pending = [...next].flatMap((id) => {
+      const set = setsById.get(id);
+      return set ? [set] : [];
+    });
   }
   let unassignedQuestions = 0;
   for (const question of input.questions) {
@@ -203,7 +279,8 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     // Inherit it only when all eligible memberships agree on a unique module.
     // Declared primary references (including stale/empty IDs) may not be
     // silently repaired from secondary review-set membership.
-    const related = question.setId == null ? memberships.get(question.id) ?? [] : [];
+    const relatedSets = question.setId == null ? memberships.get(question.id) ?? [] : [];
+    const related = relatedSets.flatMap((set) => setsById.has(set.id) && set.scope ? [set.scope] : []);
     const fallback = related.map(resolve).filter((entry): entry is Resolution => entry !== undefined);
     const fallbackKeys = new Set(fallback.map((entry) => entry.key));
     // The resolved owner is common to every membership, but the first raw
@@ -213,7 +290,13 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       ? fallback[0]?.owner : undefined;
     const relatedCourseIds = new Set(related.map((entry) => entry.courseId).filter((id): id is string => Boolean(id)));
     const [relatedCourseId] = relatedCourseIds;
-    const compatibleFallback = Boolean(fallbackOwner
+    // A rejected conflicting explicit local course is not positive evidence.
+    // An outline-only survivor also cannot silently repair that own-course
+    // conflict; independent explicit matching evidence may still resolve it.
+    const rejectedCourseConflict = Boolean(scope.courseId && !relatedCourseId
+      && relatedSets.some((set) => !setsById.has(set.id)
+        && set.scope?.courseId && set.scope.courseId !== scope.courseId));
+    const compatibleFallback = Boolean(fallbackOwner && !rejectedCourseConflict
       && (!scope.module || canonicalModuleKey(scope.module) === canonicalModuleKey(fallbackOwner.module))
       && relatedCourseIds.size <= 1
       && (!scope.courseId || !relatedCourseId || scope.courseId === relatedCourseId));
@@ -236,48 +319,11 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     else draft.unresolvedWeeks.add(question.id);
     (resolved.method === "course" ? draft.courseAssignments : draft.outlineAssignments).add(question.id);
   }
-  let unassignedCollections = 0;
-  for (const set of input.sets) {
-    // Use the same identity gate that excluded unsafe scope inheritance.
-    if (heldSetIds.has(set.id)) {
-      unassignedCollections += 1;
-      continue;
-    }
+  const unassignedCollections = input.sets.length - collectionTargets.size;
+  for (const set of setsById.values()) {
+    const target = collectionTargets.get(set.id);
+    if (!target) continue;
     const indexedSetWeek = parseWeek(set.scope?.week);
-    const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
-    // Set-owned metadata wins if it resolves. A collection whose membership
-    // spans different modules is not assigned by a filename or first record.
-    const presentMembers = [...new Set(set.questionIds)].flatMap((id) =>
-      byId.has(id) ? [byId.get(id)!] : []);
-    const memberAssignments = presentMembers.map((member) => {
-      const scope = questionScope(member, setsById);
-      return { scope, assignment: resolve(scope),
-        invalidWeek: hasDeclaredWeek(member.week) && parseWeek(member.week) === undefined,
-        alternatePrimary: member.setId != null && member.setId !== set.id };
-
-    });
-    const memberResolutions = memberAssignments.flatMap(({ assignment }) => assignment ? [assignment] : []);
-    const direct = set.scope ? resolve(set.scope) : undefined;
-    const uniqueMemberKeys = new Set(memberResolutions.map((entry) => entry.key));
-    const target = direct ?? (memberResolutions.length > 0 && uniqueMemberKeys.size === 1
-      ? memberResolutions[0] : undefined);
-    const contradictsSource = memberAssignments.some(({ scope, assignment, invalidWeek, alternatePrimary }) => {
-      // Neither malformed own weeks nor review-set-only weeks justify a
-      // source-indexed collection.
-      if (invalidWeek || (alternatePrimary && indexedSetWeek !== undefined && scope.week === undefined)) return true;
-      if (assignment && target && assignment.key !== target.key) return true;
-      if (scope.courseId && set.scope?.courseId && scope.courseId !== set.scope.courseId) return true;
-      if (scope.week !== undefined && indexedSetWeek !== undefined && scope.week !== indexedSetWeek) return true;
-      // A present member with explicit but unresolvable ownership is not
-      // silently granted the set's declared course/term.
-      return Boolean((scope.module || scope.courseId) && !assignment);
-    });
-    if (!target || invalidSetWeek || contradictsSource || uniqueMemberKeys.size > 1
-      || (!direct && memberResolutions.length !== memberAssignments.length)
-      || (memberResolutions.length && !uniqueMemberKeys.has(target.key))) {
-      unassignedCollections += 1;
-      continue;
-    }
     const draft = draftFor(target);
     draft.collections.add(set.id);
     if (indexedSetWeek !== undefined) draft.weeks.add(indexedSetWeek);
