@@ -292,6 +292,78 @@ describe("CloseoutModal daily loop", () => {
     expect(await readPrimary()).toBe(before);
   });
 
+  it.each([
+    { label: "revoked consent, new page", existing: false, retryOptIn: false },
+    { label: "edited consent, new page", existing: false, retryOptIn: true },
+    { label: "revoked consent, existing page", existing: true, retryOptIn: false },
+    { label: "edited consent, existing page", existing: true, retryOptIn: true },
+  ])("persists only the latest journal consent after a real storage refusal: $label", async ({ existing, retryOptIn }) => {
+    const authored: JournalEntry = {
+      id: "authored-before-closeout",
+      date: `${DAY}T09:00:00`,
+      today: "Authored reflection",
+      tomorrow: "Authored plan",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    if (existing) await checkedSeed(() => useStore.setState({ journal: [authored] }));
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Rejected draft reflection" } });
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Rejected draft win" } });
+    fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Rejected draft obstacle" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open/i);
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("#dashboard");
+      expect(useUi.getState().journalDay).toBeNull();
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+
+    fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Final reflection" } });
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Final win" } });
+    fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Final obstacle" } });
+    if (!retryOptIn) fireEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("checkbox")).toHaveProperty("checked", retryOptIn);
+    const retryCheckpoint = localVault.getVaultWriteCheckpoint();
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(retryCheckpoint);
+    localVault.assertVaultWritesSince(retryCheckpoint);
+    const persisted = JSON.parse(await readPrimary()).state;
+    expect(persisted.closeouts).toHaveLength(1);
+    expect(persisted.closeouts[0]).toMatchObject({ dayKey: DAY, completedSummary: "Final reflection", oneWin: "Final win", blocker: "Final obstacle" });
+    expect(persisted.tasks).toEqual(initial.tasks);
+    expect(persisted.questions).toEqual(initial.questions);
+    expect(persisted.logs).toEqual(initial.logs);
+    if (!retryOptIn) {
+      expect(persisted.journal).toEqual(initial.journal);
+    } else {
+      expect(persisted.journal).toHaveLength(1);
+      expect(persisted.journal[0]).toMatchObject({
+        today: existing ? authored.today : "Final reflection",
+        blockers: "Final obstacle",
+        wins: ["Final win"],
+        ...(existing ? { id: authored.id, tomorrow: authored.tomorrow } : {}),
+      });
+      expect(JSON.stringify(persisted.journal)).not.toContain("Rejected draft");
+    }
+    await expectPersistedCloseout();
+  });
+
   it("keeps an opt-out closeout open with its form data when durability cannot be confirmed", async () => {
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValueOnce(new Error("Synthetic closeout vault refusal"));
     const onClose = vi.fn();
