@@ -11,6 +11,7 @@ import type { JournalEntry } from "../../lib/types";
 import { useUi } from "../../lib/uiStore";
 import * as localVault from "../../lib/localVault";
 import { CloseoutModal } from "./CloseoutModal";
+import { StandupPrompt } from "../../pages/DashboardPage";
 import { SyncCoordinator } from "../../lib/sync/syncCoordinator";
 import { SYNC_METADATA_KEY } from "../../lib/sync/syncMetadata";
 import type { SyncTransport } from "../../lib/sync/syncTypes";
@@ -659,7 +660,12 @@ describe("CloseoutModal daily loop", () => {
     }
   });
 
-  it("does not navigate when a newer ordinary write is refused after an accepted staged receipt", async () => {
+  it.each([false, true])("does not navigate when a newer ordinary write is refused after an accepted staged receipt (Dashboard parent: %s)", async (dashboardParent) => {
+    if (dashboardParent) {
+      await checkedSeed(() => useStore.getState().updateProfile({
+        dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+      }));
+    }
     const onClose = vi.fn();
     const gate = holdNextVaultOpen();
     const originalPut = IDBObjectStore.prototype.put;
@@ -680,7 +686,13 @@ describe("CloseoutModal daily loop", () => {
       storageValues.set(key, String(value));
     });
     try {
-      render(<CloseoutModal onClose={onClose} />);
+      if (dashboardParent) {
+        render(<StandupPrompt />);
+        fireEvent.click(screen.getByRole("button", { name: "Quick closeout" }));
+      } else {
+        render(<CloseoutModal onClose={onClose} />);
+      }
+      const originalDialog = screen.getByRole("dialog", { name: "Daily closeout" });
       fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Durable staged win" } });
       fireEvent.click(screen.getByRole("checkbox"));
       fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
@@ -698,7 +710,12 @@ describe("CloseoutModal daily loop", () => {
       expect(useStore.getState().tasks).toEqual(tasks);
       expect(screen.getByDisplayValue("Durable staged win")).toBeTruthy();
       expect((await screen.findByRole("alert")).textContent).toMatch(/closeout reached storage.*newer changes/i);
-      expect(onClose).not.toHaveBeenCalled();
+      if (dashboardParent) {
+        expect(screen.getByRole("dialog", { name: "Daily closeout" })).toBe(originalDialog);
+        expect(screen.queryByRole("button", { name: "Quick closeout" })).toBeNull();
+      } else {
+        expect(onClose).not.toHaveBeenCalled();
+      }
       expect(window.location.hash).toBe("#dashboard");
       expect(screen.getByLabelText("Closeout draft copy (not a backup)")).toBeTruthy();
       const scope = getQuestionAttachmentScope();
@@ -726,6 +743,22 @@ describe("CloseoutModal daily loop", () => {
       put.mockRestore();
       denyFallback.mockRestore();
     }
+  });
+
+  it("closes the Dashboard dialog after confirmed save and leaves the completed reminder hidden", async () => {
+    await checkedSeed(() => useStore.getState().updateProfile({
+      dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+    }));
+    render(<StandupPrompt />);
+    fireEvent.click(screen.getByRole("button", { name: "Quick closeout" }));
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Dashboard confirmed win" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Daily closeout" })).toBeNull());
+    await expectPersistedCloseout();
+    expect(JSON.parse(await readPrimary()).state.closeouts[0].oneWin).toBe("Dashboard confirmed win");
+    expect(useStore.getState().journal).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Quick closeout" })).toBeNull();
+    expect(window.location.hash).toBe("#dashboard");
   });
 
   it("refuses a draft from the previous account even after an A-to-B-to-A transition", async () => {

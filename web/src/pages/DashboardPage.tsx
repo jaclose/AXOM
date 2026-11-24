@@ -1164,7 +1164,7 @@ function ExamCountdownWidget() {
 // Conditional dashboard banner: shows the standup prompt inside the review
 // window, or a "you missed your standup" remediation strip once it lapses. It
 // disappears entirely when there's nothing to do.
-function StandupPrompt() {
+export function StandupPrompt() {
   const s = useStore();
   const accountId = useAccount((state) => state.user?.id);
   const [localDeviceId] = useState(deviceId);
@@ -1194,15 +1194,16 @@ function StandupPrompt() {
   useEffect(() => {
     if (dailyLoopRequest?.kind !== "closeout" || dailyLoopRequest.dayKey !== today) return;
     setDismissed(false);
-    setShowCloseout(true);
+    if (closeoutDue) setShowCloseout(true);
     clearDailyLoopRequest();
-  }, [clearDailyLoopRequest, dailyLoopRequest, today]);
+  }, [clearDailyLoopRequest, closeoutDue, dailyLoopRequest, today]);
 
-  if (!missed.length && (!closeoutDue || dismissed)) return null;
-
-  if (closeoutDue && !dismissed) {
-    return (
-      <>
+  // A completed record can appear in RAM before the final queued receipt.
+  // Keep an open dialog independent of reminder eligibility so a failed receipt
+  // cannot unmount its recovery controls. Day rollover retains its own guard.
+  return (
+    <>
+      {closeoutDue && !dismissed ? (
         <GlassCard pad className="standup-prompt-card due daily-closeout-card">
           <div className="standup-prompt-head">
             <span className="standup-prompt-mark"><BookText size={ICON_SIZE.emphasis} /></span>
@@ -1234,23 +1235,17 @@ function StandupPrompt() {
             </label>
           )}
         </GlassCard>
-        {showCloseout && <CloseoutModal onClose={() => setShowCloseout(false)} />}
-      </>
-    );
-  }
-
-  if (missed.length) {
-    return (
-      <ReflectionInbox
-        dayKeys={missed}
-        dayPlans={s.dayPlans}
-        activeDayKey={today}
-        workspaceKey={`device:${localDeviceId}:account:${accountId ?? "local"}`}
-      />
-    );
-  }
-
-  return null;
+      ) : missed.length ? (
+        <ReflectionInbox
+          dayKeys={missed}
+          dayPlans={s.dayPlans}
+          activeDayKey={today}
+          workspaceKey={`device:${localDeviceId}:account:${accountId ?? "local"}`}
+        />
+      ) : null}
+      {showCloseout && <CloseoutModal key="daily-closeout-dialog" onClose={() => setShowCloseout(false)} />}
+    </>
+  );
 }
 
 // Daily Check-In: optional first-open direction plus a gentle carry-over nudge.
