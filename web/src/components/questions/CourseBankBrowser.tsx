@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, FileText, Images, Play, Search } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { bankSource, buildCourseQuestionBank } from "../../lib/course-engine/questionBank";
@@ -96,6 +96,8 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
   const [limit, setLimit] = useState(12);
   const [openedState, setOpenedSet] = useState<{ id: string; scopeKey: string }>();
   const openedSet = openedState?.scopeKey === scopeKey ? openedState.id : undefined;
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [detailInvalidated, setDetailInvalidated] = useState(false);
 
   // A subsequent A → B → A handoff must not revive an old manual selection,
   // focused set, or term filter. Scoped identity checks above protect the
@@ -103,6 +105,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
   useEffect(() => {
     setChosen(undefined);
     setOpenedSet(undefined);
+    setDetailInvalidated(false);
     setTermFilter("");
     setCourseFilter("");
     setQuery("");
@@ -153,7 +156,17 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
       && matchesReadiness(state, readinessFilter)
       && (!search || `${set.title} ${set.tags.join(" ")} ${bankSource(set)} ${module.term} ${module.course} ${module.module} ${week.label}`.toLowerCase().includes(search));
   });
-  const detail = questionSets.find((set) => set.id === openedSet);
+  // Revalidate an already-open card against the same eligible projection as
+  // fresh navigation. A same-scope store refresh can hold its primary source.
+  const detail = matches.find(({ set }) => set.id === openedSet)?.set;
+  useEffect(() => {
+    if (openedSet !== undefined && !detail) {
+      // Close permanently, even if the source later becomes eligible again.
+      setOpenedSet(undefined);
+      setDetailInvalidated(true);
+      searchRef.current?.focus();
+    }
+  }, [openedSet, detail]);
   const availableSources = [...new Set(visibleBranches.flatMap((module) => module.weeks.flatMap((week) => week.sets.map(bankSource))))];
   const weekReadyIds = new Set(matches.flatMap(({ set }) => set.questionIds.filter((id) => {
     const question = questionsById.get(id);
@@ -174,10 +187,11 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
 
   return <section className={`course-bank ${onSelectionChange ? "cb-picker" : ""}`} aria-label="Course question bank">
     <div className="cb-searchbar">
-      <label className="cb-search"><Search size={16} aria-hidden="true" /><input type="search" name="question-set-search" autoComplete="off" aria-label="Search question sets" placeholder="Find a week, source or set" value={query}
+      <label className="cb-search"><Search size={16} aria-hidden="true" /><input ref={searchRef} type="search" name="question-set-search" autoComplete="off" aria-label="Search question sets" placeholder="Find a week, source or set" value={query}
         onChange={(event) => { setQuery(event.target.value); setLimit(12); }} /></label>
       {onSelectionChange && <span className="cb-selection" role="status">{selectedIds.length} selected</span>}
     </div>
+    {detailInvalidated && <p className="qb-collection-warning" role="status">The opened collection no longer matches the verified academic view. Review its source filing in the Question Bank before practicing.</p>}
     {branches.length > 0 && <div className="qb-academic-filters" role="group" aria-label="Academic question bank filters">
       <label>Term<select aria-label="Filter by term" value={termFilter} onChange={(event) => { setTermFilter(event.target.value); setCourseFilter(""); setChosen(undefined); setLimit(12); }}>
         <option value="">All terms</option>{termsAvailable.map((term) => <option key={term} value={term}>{term}</option>)}
@@ -236,7 +250,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
               {onSelectionChange && <input type="checkbox" aria-label={`Include ${set.title}`} checked={selected.has(set.id)} onChange={() => toggle([set.id])} />}
               <div className="cb-set-mark" aria-hidden="true">{images ? <Images size={ICON_SIZE.control} /> : <FileText size={ICON_SIZE.control} />}</div>
               <div className="cb-set-copy"><span className="cb-set-kicker"><span className={`cb-source ${set.kind === "generated" ? "cb-generated" : ""}`}>{bankSource(set)}</span>{images > 0 && <span className="cb-image-count">{images} with image references</span>}</span>
-                {renderSet ? <button className="cb-set-title" onClick={() => setOpenedSet({ id: set.id, scopeKey })}>{set.title}<ArrowUpRight size={14} aria-hidden="true" /></button> : <b>{set.title}</b>}
+                {renderSet ? <button className="cb-set-title" onClick={() => { setDetailInvalidated(false); setOpenedSet({ id: set.id, scopeKey }); }}>{set.title}<ArrowUpRight size={14} aria-hidden="true" /></button> : <b>{set.title}</b>}
                 <small>{search ? `${module.module} / ${week.label} · ` : ""}{state.stored} stored · {state.ready} ready{state.reviewSuggested ? ` · ${state.reviewSuggested} review suggested` : ""}{state.unresolved ? ` · ${state.unresolved} unresolved` : ""}{state.missing ? ` · ${state.missing} missing` : ""}</small>
                 {state.ready === 0 && <small className="qb-collection-warning" role="status">
                   {state.unresolved > 0 ? "Resolve the missing or conflicting answer evidence before practice."
