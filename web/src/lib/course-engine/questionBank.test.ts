@@ -253,6 +253,55 @@ describe("course bank read model", () => {
     }
   });
 
+  it("keeps an unambiguously filed legacy original available when a secondary review is stale", () => {
+    const legacy = { ...question, setId: undefined };
+    const primary = { ...set, scope: { module: "FTM 1", week: 2, courseId: "c1" } };
+    for (const stale of [{ week: 3 }, { week: 0 }, { module: "FTM 2" }, { courseId: "c2" }]) {
+      const review = { ...primary, id: "review", kind: "review" as const, scope: { ...primary.scope, ...stale } };
+      for (const collections of [[primary, review], [review, primary]]) {
+        const snapshot = structuredClone([collections, legacy]);
+        const weeks = indexed(collections, [legacy]).flatMap((module) => module.weeks);
+        expect(weeks).toHaveLength(1);
+        expect(weeks[0]).toMatchObject({ week: 2, questionIds: ["q1"], ready: 1, attempted: 1 });
+        expect(weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
+        expect([collections, legacy]).toEqual(snapshot);
+      }
+    }
+    const reviewOnly = { ...primary, id: "review", kind: "review" as const };
+    const otherOriginal = { ...primary, id: "other", scope: { ...primary.scope, week: 3 } };
+    expect(indexed([reviewOnly], [legacy])).toEqual([]);
+    expect(indexed([primary, otherOriginal], [legacy])).toEqual([]);
+  });
+
+  it("closes cyclic primary dependencies only when seeded by a filing hold, in every collection order", () => {
+    const scope = { module: "FTM 1", week: 2, courseId: "c1" };
+    const primaryA = { ...set, id: "a", scope, questionIds: ["qa", "qb", "seed"] };
+    const primaryB = { ...set, id: "b", scope, questionIds: ["qa", "qb"] };
+    const review = { ...set, id: "review", kind: "review" as const, scope, questionIds: ["qb"] };
+    const clean = { ...set, id: "clean", scope, questionIds: ["qc"] };
+    const orderings = (entries: QuestionSet[]): QuestionSet[][] => entries.length === 0 ? [[]]
+      : entries.flatMap((entry, index) => orderings(entries.filter((_, i) => i !== index)).map((rest) => [entry, ...rest]));
+    const permutations = orderings([primaryA, primaryB, review, clean]);
+    expect(permutations).toHaveLength(24);
+    for (const held of [false, true]) {
+      const records = [
+        { ...question, id: "qa", setId: "a" },
+        { ...question, id: "qb", setId: "b" },
+        { ...question, id: "seed", setId: "a", week: held ? 3 : 2 },
+        { ...question, id: "qc", setId: "clean" },
+      ];
+      for (const collections of permutations) {
+        const snapshot = structuredClone([collections, records]);
+        const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+        expect(weeks).toHaveLength(1);
+        expect(weeks[0]).toMatchObject({ week: 2, ready: held ? 1 : 4, attempted: held ? 1 : 4 });
+        expect(weeks[0].questionIds.slice().sort()).toEqual(held ? ["qc"] : ["qa", "qb", "qc", "seed"]);
+        expect(weeks[0].sets.map((entry) => entry.id).sort()).toEqual(held ? ["clean"] : ["a", "b", "clean", "review"]);
+        expect([collections, records]).toEqual(snapshot);
+      }
+    }
+  });
+
   it("keeps missing raw member references repairable without inventing a question", () => {
     const primary = { ...set, questionIds: ["q1", "missing"] };
     const review = { ...set, id: "review", kind: "review" as const };
