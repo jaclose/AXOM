@@ -224,7 +224,7 @@ describe("Simulation preserves original source evidence across recovery", () => 
       await act(async () => { useStore.setState({ questions: [original] }); });
       let mounted = render(<ExamRunner mode={mode} onClose={vi.fn()} />);
       fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
-      fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+      fireEvent.click(screen.getByRole("button", { name: `Start ${mode} block` }));
       fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
       if (mode === "tutor") fireEvent.click(screen.getByRole("button", { name: "Submit", exact: true }));
       fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
