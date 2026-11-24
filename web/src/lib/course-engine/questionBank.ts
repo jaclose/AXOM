@@ -118,13 +118,19 @@ export function buildCourseQuestionBank(
 
   const modules = new Map<string, BankModule>();
   const eligibleBySet = new Map<string, string[]>();
+  // First classify local filing contradictions without depending on iteration order.
+  const filingHeldIds = new Set(heldCollectionIds);
+  const candidates: Array<{ set: QuestionSet; members: QuestionRecord[]; scope: CourseScope; catalogCourse: Course | undefined }> = [];
   for (const set of sets) {
     // This also blocks secondary review sets from laundering a conflicted
     // primary original into a different source week.
     if (heldCollectionIds.has(set.id)) continue;
     const rawWeek = set.scope?.week;
     // Invalid explicit source weeks are review work, not a usable week label.
-    if (hasDeclaredWeek(rawWeek) && parseWeek(rawWeek) === undefined) continue;
+    if (hasDeclaredWeek(rawWeek) && parseWeek(rawWeek) === undefined) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
     const members = [...new Set(set.questionIds)].flatMap((id) =>
       questionsById.has(id) ? [questionsById.get(id)!] : []);
     const scopes = members.map((question) => scopesById.get(question.id)!);
@@ -135,7 +141,10 @@ export function buildCourseQuestionBank(
     };
 
     // Week numbering without a module has no unambiguous academic owner.
-    if (!scope.module && scope.week !== undefined) continue;
+    if (!scope.module && scope.week !== undefined) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
     const catalogCourse = courseForScope(scope, courses);
 
     // A contradictory source set is not a safe practice collection. Exclude
@@ -167,8 +176,40 @@ export function buildCourseQuestionBank(
         || Boolean(catalogCourse && own.courseId && own.courseId !== catalogCourse.id)
         || (scope.week !== undefined && own.week !== scope.week);
     });
-    if (conflicting) continue;
+    if (conflicting) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
+    candidates.push({ set, members, scope, catalogCourse });
+  }
 
+  // A collection-wide filing hold also invalidates practice collections that
+  // depend on that original, even if their own subset looks consistent. Legacy
+  // records without an explicit primary cannot prove independence from any of
+  // their non-review source memberships. Explicitly bound questions in a
+  // different, valid primary remain independent of secondary collection holds.
+  const dependentsByPrimary = new Map<string, Set<string>>();
+  for (const { set, members } of candidates) {
+    for (const question of members) {
+      const primaryIds = question.setId != null ? [question.setId]
+        : (memberships.get(question.id) ?? []).filter((entry) => entry.kind !== "review").map((entry) => entry.id);
+      for (const primaryId of primaryIds) {
+        if (primaryId === set.id) continue;
+        const dependents = dependentsByPrimary.get(primaryId) ?? new Set<string>();
+        dependents.add(set.id);
+        dependentsByPrimary.set(primaryId, dependents);
+      }
+    }
+  }
+  // Set iteration visits newly added holds; each ID is processed at most once.
+  // This closes transitive dependencies before any week/card becomes visible.
+  for (const heldId of filingHeldIds) {
+    for (const dependentId of dependentsByPrimary.get(heldId) ?? []) {
+      filingHeldIds.add(dependentId);
+    }
+  }
+  for (const { set, members, scope, catalogCourse } of candidates) {
+    if (filingHeldIds.has(set.id)) continue;
     const course = catalogCourse;
     const term = terms.find((item) => item.id === course?.termId)?.name ?? "Not yet assigned";
     const key = JSON.stringify([course?.id ?? scope.courseId ?? "unassigned", canonicalModuleKey(scope.module ?? "")]);
