@@ -644,7 +644,7 @@ describe("CloseoutModal daily loop", () => {
       expect(copy.value).toContain("One win: Disputed private win");
       expect(copy.value).toContain("Add to Journal: Yes");
       const beforeDismiss = await readPrimary();
-      fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: /^Close$/ }));
       fireEvent.keyDown(window, { key: "Escape" });
       fireEvent.mouseDown(document.querySelector(".modal-scrim")!);
       expect(onClose).not.toHaveBeenCalled();
@@ -703,10 +703,20 @@ describe("CloseoutModal daily loop", () => {
       expect(screen.getByLabelText("Closeout draft copy (not a backup)")).toBeTruthy();
       const scope = getQuestionAttachmentScope();
       try {
+        const assertRedacted = () => {
+          expect(screen.queryByLabelText("Closeout draft copy (not a backup)")).toBeNull();
+          expect(screen.queryByDisplayValue("Durable staged win")).toBeNull();
+          expect(screen.queryByRole("checkbox")).toBeNull();
+          expect(screen.queryByRole("button", { name: "Close the day" })).toBeNull();
+          expect(screen.queryByRole("button", { name: "Expand into full notebook" })).toBeNull();
+          expect(screen.queryByRole("region", { name: "Day at a glance" })).toBeNull();
+          expect(screen.getByRole("alert").textContent).toMatch(/previous workspace or day/);
+          expect(screen.getByRole("alert").textContent).not.toMatch(/newer changes could not be confirmed/);
+        };
         act(() => setQuestionAttachmentAccount("synthetic-recovery-other-account"));
-        expect(screen.queryByLabelText("Closeout draft copy (not a backup)")).toBeNull();
+        assertRedacted();
         act(() => setQuestionAttachmentAccount(scope.accountId));
-        expect(screen.queryByLabelText("Closeout draft copy (not a backup)")).toBeNull();
+        assertRedacted();
       } finally {
         act(() => setQuestionAttachmentAccount(scope.accountId));
       }
@@ -723,20 +733,44 @@ describe("CloseoutModal daily loop", () => {
     const scope = getQuestionAttachmentScope();
     const onClose = vi.fn();
     render(<CloseoutModal onClose={onClose} />);
-    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Previous account draft" } });
+    const privateFields = [
+      ["What went well?", "Private completion"],
+      ["One win", "Previous account draft"],
+      ["What got in the way?", "Private obstacle"],
+      ["One unfinished loop", "Private unfinished loop"],
+      ["What matters tomorrow?", "Private next task"],
+      ["Energy now (0–100)", "73"],
+    ] as const;
+    for (const [label, value] of privateFields) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
     fireEvent.click(screen.getByRole("checkbox"));
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const assertRedacted = () => {
+      for (const [label, value] of privateFields) {
+        expect(screen.queryByLabelText(label)).toBeNull();
+        expect(screen.queryByDisplayValue(value)).toBeNull();
+      }
+      expect(screen.queryByRole("checkbox")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Close the day" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Expand into full notebook" })).toBeNull();
+      expect(screen.queryByText("Finish the renal review", { exact: false })).toBeNull();
+      expect(screen.getByRole("alert").textContent).toMatch(/previous workspace or day/);
+    };
     try {
-      setQuestionAttachmentAccount("synthetic-other-account");
-      setQuestionAttachmentAccount(scope.accountId);
-      const checkpoint = localVault.getVaultWriteCheckpoint();
-      fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
-      expect((await screen.findByRole("alert")).textContent).toMatch(/previous workspace or day/);
+      act(() => setQuestionAttachmentAccount("synthetic-other-account"));
+      assertRedacted();
+      act(() => setQuestionAttachmentAccount(scope.accountId));
+      assertRedacted();
       expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
       expect(useStore.getState().journal).toHaveLength(0);
       expect(useStore.getState().closeouts).toHaveLength(0);
       expect(onClose).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: /^Close$/ }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
     } finally {
-      setQuestionAttachmentAccount(scope.accountId);
+      act(() => setQuestionAttachmentAccount(scope.accountId));
     }
     expect(await readPrimary()).toBe(before);
   });

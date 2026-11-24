@@ -192,6 +192,17 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // A mounted dialog can outlive the workspace that supplied its controlled
+  // inputs. Never render prior-scope content or actions, even on A → B → A.
+  // Keep the old draft out of the new account's DOM without touching storage.
+  if (activeScope !== origin.scope || !isCurrent()) {
+    return (
+      <Modal key="invalidated-closeout" title="Daily closeout" onClose={onClose}>
+        <p role="alert">This closeout belongs to a previous workspace or day. Its draft is no longer available here. Close this dialog and open a new closeout for the current workspace.</p>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       title="Daily closeout"
