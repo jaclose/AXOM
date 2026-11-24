@@ -3,11 +3,11 @@
 // much as possible from today's data so the user mostly confirms, not writes.
 // Saving updates tomorrow's Command Brief (first task + mode preference).
 // ===========================================================================
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { mergeCloseoutIntoJournal } from "../../lib/closeoutJournal";
 import type { NotebookJournalEntry } from "../../lib/journalNotebook";
 import { useStore, type Store } from "../../lib/store";
-import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import { read as readSyncMetadata } from "../../lib/sync/syncMetadata";
 import { closeoutForDay, type EnergyVsMorning } from "../../lib/closeout";
 import { MODE_LABEL, type BriefMode } from "../../lib/commandBrief";
@@ -24,6 +24,8 @@ const MODES: Array<"auto" | BriefMode> = ["auto", "maintain", "catch-up", "recov
 
 export function CloseoutModal({ onClose }: { onClose: () => void }) {
   const s = useStore();
+  // Re-render when the attachment identity changes, even without a store update.
+  const activeScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope);
   const existing = closeoutForDay(s.closeouts ?? [], s.activeDayKey);
 
   const today = s.activeDayKey;
@@ -69,6 +71,20 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       && live.profile.userId === origin.profileUserId
       && live.activeDayKey === origin.day;
   };
+  const showRecoveryDraft = reviewRequired && activeScope === origin.scope && isCurrent();
+  const recoveryDraft = showRecoveryDraft ? [
+    "Unconfirmed closeout draft (not an AXOM backup or import file)",
+    `Day: ${origin.day}`,
+    `What went well: ${completed}`,
+    `One win: ${oneWin}`,
+    `Blocker: ${blocker}`,
+    `Unfinished loop: ${remaining}`,
+    `Tomorrow first task: ${firstTask}`,
+    `Energy now: ${energyNow}`,
+    `Energy vs morning: ${energy ?? "Not selected"}`,
+    `Tomorrow mode: ${mode}`,
+    `Add to Journal: ${addToJournal ? "Yes" : "No"}`,
+  ].join("\n") : "";
   const glance = useMemo(() => selectDayAtAGlance(s, today, today), [s, today]);
   const existingJournal = s.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
 
@@ -179,7 +195,12 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title="Daily closeout"
-      onClose={() => { if (!submitting.current) onClose(); }}
+      onClose={() => {
+        if (submitting.current) return;
+        // Do not accidentally discard the only editable copy of a disputed draft.
+        if (reconciliationRequired.current && isCurrent()) return;
+        onClose();
+      }}
       footer={<>
         <GButton disabled={saving || reviewRequired} onClick={() => void save(true)}>Expand into full notebook</GButton>
         <GButton disabled={saving || reviewRequired} variant="primary" onClick={() => void save(false)}>{saving ? "Saving…" : "Close the day"}</GButton>
@@ -187,6 +208,14 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
     >
       <div className="sub">A short, honest closeout is enough. AXOM assembled the context below from today’s local records.</div>
       {saveError && <p role="alert">{saveError}</p>}
+      {showRecoveryDraft && (
+        <section className="stack gap6" aria-label="Unconfirmed closeout draft recovery">
+          <p className="sub">A workspace backup may exclude this draft and competing stored versions. Select and copy this text somewhere private before leaving. This is not a restore file and does not resolve the storage conflict.</p>
+          <TextAreaField label="Closeout draft copy (not a backup)" readOnly rows={6} value={recoveryDraft} />
+          <GButton disabled={saving} onClick={() => { if (!submitting.current) onClose(); }}>Close without resolving</GButton>
+          <p className="sub">Closing or reloading can discard this editable draft. Neither stored version is changed by closing.</p>
+        </section>
+      )}
       <section className="closeout-glance" aria-label="Day at a glance">
         <b>Day at a Glance</b>
         <span>{glance.intention?.text ? `Intention: ${glance.intention.text}` : "No intention was set"}</span>
