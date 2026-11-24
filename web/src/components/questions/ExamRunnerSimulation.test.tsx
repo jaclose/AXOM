@@ -215,15 +215,18 @@ describe("Simulation protects active question identity at final save", () => {
 });
 
 describe("Simulation preserves original source evidence across recovery", () => {
-  it.each(["unchanged", "key", "stem", "choices", "source", "legacy", "changed-then-reverted"] as const)(
-    "scores only verified original source after suspend and remount (%s)",
-    async (change) => {
+  const changes = ["unchanged", "key", "stem", "choices", "source", "legacy", "changed-then-reverted"] as const;
+  const cases = (["exam", "tutor"] as const).flatMap((mode) => changes.map((change) => [mode, change] as const));
+  it.each(cases)(
+    "scores only verified original source after suspend and remount (%s, %s)",
+    async (mode, change) => {
       const original = q("q1");
       await act(async () => { useStore.setState({ questions: [original] }); });
-      let mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+      let mounted = render(<ExamRunner mode={mode} onClose={vi.fn()} />);
       fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
       fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
       fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
+      if (mode === "tutor") fireEvent.click(screen.getByRole("button", { name: "Submit", exact: true }));
       fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
       const recovery = readSuspendedBlock()!;
       expect(recovery.items.q1.answerKey).toBe("B");
@@ -241,7 +244,7 @@ describe("Simulation preserves original source evidence across recovery", () => 
         writeSuspendedBlock(legacy);
       }
       await act(async () => { useStore.setState({ questions: [changed] }); });
-      mounted = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+      mounted = render(<ExamRunner mode={mode} onClose={vi.fn()} />);
       fireEvent.click(screen.getByRole("button", { name: "Resume" }));
       expect(screen.getByRole("dialog", { name: /UWorld-style.*simulation/ })).toBeTruthy();
       expect(readSuspendedBlock()?.runId).toBe(recovery.runId);
@@ -250,11 +253,17 @@ describe("Simulation preserves original source evidence across recovery", () => 
         fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
         mounted.unmount();
         await act(async () => { useStore.setState({ questions: [original] }); });
-        render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+        render(<ExamRunner mode={mode} onClose={vi.fn()} />);
         fireEvent.click(screen.getByRole("button", { name: "Resume" }));
         expect(readSuspendedBlock()?.sourceEvidenceV1).toEqual({});
       }
       const dialog = screen.getByRole("dialog", { name: /UWorld-style.*simulation/ });
+      if (mode === "tutor") {
+        const feedback = within(dialog).getByRole("region", { name: "Explanation" });
+        expect(feedback.textContent).toContain(change === "unchanged" ? "Correct" : "Answer key not confirmed");
+        expect(within(dialog).getByRole("button", { name: change === "unchanged" ? "Item 1, correct" : "Item 1, answered" })).toBeTruthy();
+        if (change !== "unchanged") expect(feedback.textContent).not.toContain("Correct answer:");
+      }
       fireEvent.click(within(dialog).getByRole("button", { name: /End Block/ }));
       fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
       await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
