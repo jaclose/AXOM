@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { STORAGE_KEYS } from "../lib/brand";
@@ -9,6 +9,7 @@ import { makeSeed } from "../lib/seed";
 import { makeDailyRequirement } from "../lib/dailySuccess";
 import { useStore } from "../lib/store";
 import { ProductivityPage } from "./ProductivityPage";
+import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../lib/questionAttachmentScope";
 
 const storageValues = new Map<string, string>();
 const storage = {
@@ -270,6 +271,93 @@ describe("ProductivityPage daily console", () => {
     expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
     expect(JSON.parse(await readPrimary()).state.logs).toEqual(attempted);
     expect(useStore.getState().logs).toEqual(attempted);
+  });
+
+  it("retries a refused manual activity through its real control without allocating another ID", async () => {
+    const before = await readPrimary();
+    render(<ProductivityPage />);
+    const fill = () => {
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Practice questions" } });
+      fireEvent.change(screen.getByLabelText("How long in minutes?"), { target: { value: "5" } });
+    };
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    let attempted: ReturnType<typeof useStore.getState>["logs"] = [];
+    try {
+      fill();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      await screen.findByRole("button", { name: "Retry activity save" });
+      attempted = structuredClone(useStore.getState().logs);
+      expect(attempted).toHaveLength(1);
+      expect(attempted[0]).toMatchObject({ type: "Practice questions", minutes: 5 });
+      expect(readVaultWriteFailure()).not.toBeNull();
+      fill();
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Retry activity save" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      await screen.findByRole("button", { name: "Retry activity save" });
+      expect(useStore.getState().logs).toEqual(attempted);
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry activity save" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull());
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+    localVault.assertVaultWritesSince(checkpoint);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(attempted);
+    expect(useStore.getState().logs).toEqual(attempted);
+    expect(readVaultWriteFailure()).toBeNull();
+    expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Log" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    const repeated = useStore.getState().logs;
+    expect(repeated).toHaveLength(2);
+    expect(repeated[0].id).not.toBe(attempted[0].id);
+    expect(repeated[1]).toEqual(attempted[0]);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(repeated)));
+    await act(async () => { await useStore.persist.rehydrate(); });
+    expect(useStore.getState().logs.map((log) => log.id)).toEqual(repeated.map((log) => log.id));
+  });
+
+  it("never offers a refused activity retry to a different account generation", async () => {
+    const initial = getQuestionAttachmentScope();
+    const before = await readPrimary();
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      render(<ProductivityPage />);
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Private activity" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      const retry = await screen.findByRole("button", { name: "Retry activity save" });
+      const checkpoint = localVault.getVaultWriteCheckpoint();
+      act(() => setQuestionAttachmentAccount(initial.accountId === "synthetic-other" ? "synthetic-different" : "synthetic-other"));
+      expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull();
+      act(() => setQuestionAttachmentAccount(initial.accountId));
+      expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull();
+      fireEvent.click(retry);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+    } finally {
+      setQuestionAttachmentAccount(initial.accountId);
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
   });
 
   it("keeps earlier activity visible after selecting a new target and shows only the picked day's history", () => {

@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import { Activity, BookOpen, CalendarDays, Clock, HelpCircle, History, Layers, Minus, Plus, Target, Timer, TrendingUp, X, Zap } from "lucide-react";
 import { useStore } from "../lib/store";
@@ -23,6 +23,8 @@ import { productivityInsight, formatStudyMinutes, recordedActivityEvidence } fro
 import { usePomodoro } from "../lib/pomodoro";
 import { ActivityIntelligence } from "../components/productivity/ActivityIntelligence";
 import { ProductivitySaveStatus, useProductivitySaveStatus } from "../components/productivity/ProductivitySaveStatus";
+import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../lib/localVault";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope, type QuestionAttachmentScope } from "../lib/questionAttachmentScope";
 import "../styles/productivity.css";
 
 export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
@@ -34,6 +36,22 @@ export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
 
 type ManualQuantityType = "cards" | "questions" | "pages" | "repetitions" | "count";
 
+type ManualSaveAttempt = {
+  scope: QuestionAttachmentScope;
+  profileId: string | undefined;
+  log: StudyLog;
+  phase: "pending" | "failed";
+};
+
+function currentManualOwner(attempt: ManualSaveAttempt) {
+  return isQuestionAttachmentScopeCurrent(attempt.scope) && useStore.getState().profile.userId === attempt.profileId;
+}
+
+function unchangedManualActivity(attempt: ManualSaveAttempt, logs: readonly StudyLog[]) {
+  // Never replay a replaced, removed, or ambiguously identified activity.
+  return logs.includes(attempt.log) && logs.filter((log) => log.id === attempt.log.id).length === 1;
+}
+
 const QUANTITY_META: Record<ManualQuantityType, { label: string; placeholder: string }> = {
   questions: { label: "Questions", placeholder: "20 questions" },
   cards: { label: "Cards", placeholder: "40 cards" },
@@ -44,7 +62,12 @@ const QUANTITY_META: Record<ManualQuantityType, { label: string; placeholder: st
 
 export function ProductivityPage() {
   const s = useStore();
-  const saveStatus = useProductivitySaveStatus();
+  const vaultStatus = useProductivitySaveStatus();
+  const accountScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope, getQuestionAttachmentScope);
+  const manualSaveRef = useRef<ManualSaveAttempt | null>(null);
+  const [manualSave, setManualSave] = useState<ManualSaveAttempt | null>(null);
+  const activeManualSave = manualSave?.scope === accountScope && manualSave.profileId === s.profile.userId ? manualSave : null;
+  const saveStatus = activeManualSave?.phase ?? vaultStatus;
   const running = usePomodoro((state) => state.running);
   const logs = useMemo(() => canonicalStudyLogs(s.logs).reverse(), [s.logs]);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
@@ -78,11 +101,46 @@ export function ProductivityPage() {
   const frequent = useMemo(() => frequentActivityShortcuts(logs, s.profile.hiddenActivityShortcuts, 2, 3, recentSignatures), [logs, s.profile.hiddenActivityShortcuts, recentSignatures]);
   const patternDays = new Set(logs.filter((log) => log.dayKey <= s.activeDayKey).map((log) => log.dayKey)).size;
 
+  function rememberManualSave(attempt: ManualSaveAttempt | null) {
+    manualSaveRef.current = attempt;
+    setManualSave(attempt);
+  }
+
+  async function confirmManualSave(attempt: ManualSaveAttempt, checkpoint: number) {
+    let confirmed = false;
+    try {
+      await flushLocalVaultWrites();
+      if (getVaultWriteCheckpoint() <= checkpoint) throw new Error("No workspace write was recorded.");
+      assertVaultWritesSince(checkpoint);
+      confirmed = true;
+    } catch { /* Retain the same RAM activity and require an explicit retry. */ }
+    if (manualSaveRef.current !== attempt) return;
+    rememberManualSave(!currentManualOwner(attempt) || confirmed ? null : { ...attempt, phase: "failed" });
+  }
+
+  function retryManualSave() {
+    const attempt = manualSaveRef.current;
+    const current = useStore.getState();
+    if (!attempt || attempt.phase !== "failed" || !currentManualOwner(attempt)
+      || !unchangedManualActivity(attempt, current.logs)) return;
+    const checkpoint = getVaultWriteCheckpoint();
+    const pending: ManualSaveAttempt = { ...attempt, phase: "pending" };
+    rememberManualSave(pending);
+    // Persist the current workspace, not a captured snapshot or a new log ID.
+    // The normal vault CAS and account/recovery constraints remain authoritative.
+    useStore.setState({ logs: current.logs });
+    void confirmManualSave(pending, checkpoint);
+  }
+
   function logManual() {
     const minutes = Number(manualMinutes) || 0;
     const quantity = Number(manualQuantity) || 0;
-    if (!manualType.trim()) return;
-    s.logActivity({
+    const current = useStore.getState();
+    if (!manualType.trim() || !isQuestionAttachmentScopeCurrent(accountScope)
+      || current.profile.userId !== s.profile.userId || current.activeDayKey !== s.activeDayKey
+      || (manualSaveRef.current && currentManualOwner(manualSaveRef.current))) return;
+    const checkpoint = getVaultWriteCheckpoint();
+    current.logActivity({
       label: manualType,
       trackerId: manualTrackerId || undefined,
       minutes,
@@ -91,6 +149,12 @@ export function ProductivityPage() {
       quantityLabel: quantity ? manualQuantityKind : undefined,
       note: manualNote || undefined,
     });
+    const log = useStore.getState().logs[0];
+    if (log && !current.logs.includes(log)) {
+      const attempt: ManualSaveAttempt = { scope: accountScope, profileId: current.profile.userId, log, phase: "pending" };
+      rememberManualSave(attempt);
+      void confirmManualSave(attempt, checkpoint);
+    }
     setManualType(""); setManualMinutes(""); setManualQuantity(""); setManualNote("");
   }
 
@@ -151,8 +215,14 @@ export function ProductivityPage() {
                 </div></div>
               </div>
               <label className="fast-field fast-activity-note"><span>Note (optional)</span><input className="field" aria-label="Note (optional)" placeholder="Add context if it will help later" value={manualNote} onChange={(event) => setManualNote(event.target.value)} /></label>
-              <GButton variant="primary" onClick={logManual} disabled={!manualType.trim()}><Plus size={ICON_SIZE.body} /> Log</GButton>
+              <GButton variant="primary" onClick={logManual} disabled={!manualType.trim() || activeManualSave !== null}><Plus size={ICON_SIZE.body} /> Log</GButton>
             </div>
+            {activeManualSave?.phase === "failed" && <div className="row wrap gap6" aria-live="polite">
+              {unchangedManualActivity(activeManualSave, s.logs) ? <>
+                <span>This activity is still in this tab. Retry saving it instead of logging it again.</span>
+                <GButton size="sm" onClick={retryManualSave}>Retry activity save</GButton>
+              </> : <span>The activity changed before saving was confirmed. Keep this tab open and review Activity history and Settings before logging again.</span>}
+            </div>}
             <details className="activity-category-disclosure">
               <summary>Category and contribution (optional)</summary>
               <label><span>Use existing category</span><select className="field" aria-label="Productivity category" value={manualTrackerId} onChange={(event) => setManualTrackerId(event.target.value)}>
