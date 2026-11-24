@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
 import { STORAGE_KEYS } from "../../lib/brand";
@@ -700,6 +700,16 @@ describe("CloseoutModal daily loop", () => {
       expect((await screen.findByRole("alert")).textContent).toMatch(/closeout reached storage.*newer changes/i);
       expect(onClose).not.toHaveBeenCalled();
       expect(window.location.hash).toBe("#dashboard");
+      expect(screen.getByLabelText("Closeout draft copy (not a backup)")).toBeTruthy();
+      const scope = getQuestionAttachmentScope();
+      try {
+        act(() => setQuestionAttachmentAccount("synthetic-recovery-other-account"));
+        expect(screen.queryByLabelText("Closeout draft copy (not a backup)")).toBeNull();
+        act(() => setQuestionAttachmentAccount(scope.accountId));
+        expect(screen.queryByLabelText("Closeout draft copy (not a backup)")).toBeNull();
+      } finally {
+        act(() => setQuestionAttachmentAccount(scope.accountId));
+      }
     } finally {
       gate.release();
       gate.restore();
