@@ -7,6 +7,7 @@ import { useStore } from "../../lib/store";
 import { findLiveSession } from "../../lib/sessions";
 import { UPDATE_PREFS_EVENT, readUpdatePreferences, writeUpdatePreferences } from "../../lib/updatePreferences";
 import { lazyWithFallback } from "../../lib/lazyWithFallback";
+import { RefreshAfterBackup } from "./RefreshAfterBackup";
 
 // Lives outside any route boundary: a missing chunk (tab open across a deploy)
 // must degrade to a note, not crash the update panel that would fix it.
@@ -89,6 +90,8 @@ export function AppUpdatePanel() {
       {state.restartPending && state.phase === "error" && <p className="sub">The update is already prepared. Retry the restart below; it will save your current workspace again without reinstalling.</p>}
       {canContinueWithVerifiedSave && <p className="sub">Your latest workspace was saved and verified. AXOM could not create the additional recovery copy. You can retry saving the full backup or refresh with the verified save after confirmation.</p>}
       {canRefreshWithoutVerifiedSave && <p className="sub" role="alert">AXOM could not verify your latest workspace save. You may retry saving or choose to refresh anyway, but unverified changes could be permanently lost. Export a backup from Settings first if possible.</p>}
+      {/* The safe way past a failed save: a backup of exactly what is open, then a refresh. */}
+      {canRefreshWithoutVerifiedSave && <RefreshAfterBackup intro={false} />}
       {state.phase === "downloading" && <div>
         <progress aria-label="Update download" value={state.totalBytes ? state.downloadedBytes : undefined} max={state.totalBytes ?? 1} style={{ width: "100%" }} />
         <p className="sub">{(state.downloadedBytes / 1_048_576).toFixed(1)} MB{state.totalBytes ? ` of ${(state.totalBytes / 1_048_576).toFixed(1)} MB` : " received"}</p>

@@ -3,6 +3,7 @@ import { exportStateWithAttachments } from "../../lib/backup";
 import { useStore } from "../../lib/store";
 import { pushToast } from "../../lib/toast";
 import { VAULT_WRITE_FAILURE_EVENT, readVaultWriteFailure } from "../../lib/vaultActivity";
+import { takeRefreshAfterBackupNotice } from "../../lib/refreshRecovery";
 
 /**
  * Says so when a save reaches no storage on this device. Ordinary saves are
@@ -28,6 +29,18 @@ export function VaultSaveWatcher() {
     }
     // A save can fail before this mounts (the first write after opening).
     if (readVaultWriteFailure()) warn();
+    // Say what just happened after "Refresh now" from a backup (RefreshAfterBackup).
+    const refreshedAfter = takeRefreshAfterBackupNotice();
+    if (refreshedAfter) {
+      const at = new Date(refreshedAfter).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      pushToast({
+        title: "AXOM refreshed after your backup",
+        body: `If anything looks older than before, merge the backup from ${at} in Settings › Emergency recovery.`,
+        tone: "info",
+        duration: 0,
+        dedupe: "refresh-after-backup",
+      });
+    }
     window.addEventListener(VAULT_WRITE_FAILURE_EVENT, warn);
     return () => window.removeEventListener(VAULT_WRITE_FAILURE_EVENT, warn);
   }, []);

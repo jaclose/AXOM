@@ -5,6 +5,10 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## Page-load hotfix · 2026-11-24
+
+See [update policy](UPDATE-POLICY.md) and [Journal](JOURNAL-NOTEBOOK-ARCHITECTURE.md).
+
 ## Academic source recovery and install diagnostics · 2026-11-22
 
 JD explicitly requested shared access for any account, working HOST approval,

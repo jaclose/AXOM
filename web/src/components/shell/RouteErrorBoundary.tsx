@@ -5,6 +5,7 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { createUpdateCheckpoint } from "../../lib/updateCheckpoint";
 import { activateWaitingWebUpdate } from "../../lib/webUpdates";
 import { isChunkLoadError } from "../../lib/chunkErrors";
+import { RefreshAfterBackup } from "./RefreshAfterBackup";
 
 export { isChunkLoadError };
 
@@ -85,6 +86,10 @@ export class RouteErrorBoundary extends Component<Props, State> {
             </GButton>
           </div>
           {this.state.recoveryError && <p role="status">{this.state.recoveryError} This window has been kept open.</p>}
+          {/* The save itself failed (often a browser refusing storage), so the
+              verified reload can never succeed here. A backup of what is open
+              is the safe way into the newer build. */}
+          {stale && this.state.recoveryError && !this.state.canContinueWithoutRecoverySnapshot && <RefreshAfterBackup />}
           {this.state.canContinueWithoutRecoverySnapshot && <p className="sub">Your saved workspace was verified, but AXOM could not create an extra recovery copy. Export a backup first if you need one, or refresh with the verified save after confirmation.</p>}
           <details className="route-error-details">
             <summary>Technical details</summary>

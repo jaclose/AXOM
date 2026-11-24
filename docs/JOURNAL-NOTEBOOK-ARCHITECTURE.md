@@ -126,7 +126,14 @@ the existing Zustand/IndexedDB workspace after a short idle interval. It also
 gates every app-owned page turn, requested-day change, Library exit, and editor
 close on the same vault flush and exact-write assertion. If that durability
 check fails, the transition is canceled, the current in-memory draft remains
-open, and the page offers export and Save retry actions. New entries are not
+open, and the page offers export and Save retry actions. Leaving the Journal for
+another screen or for Run setup again is the exception: it waits at most 8 seconds
+(`LEAVE_SAVE_WAIT_MS`) and goes ahead once the latest page is in the open
+workspace, even when this device did not confirm the write. The app-wide save
+notice then reports the failure and offers a backup that includes the page. A
+browser refusing all storage used to hold the learner on the Journal, so no
+other screen would open. A page that never reached the workspace (another
+account signed in, a failed image) still stays. New entries are not
 created until there is meaningful text, an attachment, or an included summary.
 A stable generated entry ID prevents duplicate pages during closely spaced
 saves.

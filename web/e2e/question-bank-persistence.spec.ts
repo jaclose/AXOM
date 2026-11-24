@@ -149,7 +149,7 @@ test("onboarding → import → block → repair → reload retains the full que
   await expect(page.getByText("What next?")).toBeVisible();
   await page.getByRole("button", { name: "Create set from missed" }).click();
   await expect(page.getByRole("button", { name: "Review set created", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "Done" }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
 
   await expect.poll(async () => (await readPersistedWorkspace(page)).questions?.[0]?.attempts?.length ?? 0).toBe(1);
   await page.reload({ waitUntil: "networkidle" });
