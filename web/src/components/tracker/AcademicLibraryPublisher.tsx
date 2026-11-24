@@ -24,7 +24,7 @@ const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 interface KeptFiles { keptLocal?: number; overLimit?: number }
 type CourseState =
   | { state: "checked"; ready: number; review: number; missingExplanations: number; files: number; bytes: number } & KeptFiles
-  | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; sharingError?: string } & KeptFiles
+  | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; sharingError?: string; sharingUnconfirmed?: boolean } & KeptFiles
   | { state: "failed"; message: string; during: "check" | "publish" }
   | { state: "stopped" };
 /** uploadAcademicBatch accepts at most 100 jobs per run. */
@@ -225,19 +225,25 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     const courses = chosen;
     const byKey = new Map(courses.map(course => [course.catalogId, course]));
     setBusy("publishing"); setError(""); setResults({});
+    const published = new Map<string, string>();
+    let sharingInFlight = false;
+    let uploadAttempted = false;
     try {
       const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
-      const published = new Map<string, string>();
+      let sharingUnconfirmed = false;
       let blocked = false;
       for (let start = 0; start < jobs.length && !blocked && !abort.signal.aborted; start += BATCH_SIZE) {
+        uploadAttempted = true;
         const report = await uploadAcademicBatch(jobs.slice(start, start + BATCH_SIZE), {
           signal: abort.signal,
           progress: message => {
+            scope.assertCurrent();
             const split = message.indexOf(": ");
             const course = byKey.get(message.slice(0, split));
             setProgress(course ? `${label(course)}: ${message.slice(split + 2)}` : message);
           },
           onOutcome: outcome => {
+            scope.assertCurrent();
             const course = byKey.get(outcome.key);
             if (!course) return;
             let next: CourseState;
@@ -255,12 +261,21 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
             setResults(states => ({ ...states, [outcome.key]: next }));
           },
         });
+        scope.assertCurrent();
         blocked = report.authBlocked > 0;
       }
       if (share && published.size && !abort.signal.aborted) {
+        sharingInFlight = true;
         setProgress("Sharing the published courses…");
         const outcomes = await shareAcademicCourses([...published.keys()], accountId,
           { assertCurrent: scope.assertCurrent, signal: abort.signal });
+        // A stopped client may have an already-committed visibility RPC without
+        // a confirmed receipt. Do not present the missing result as private.
+        const received = new Set(outcomes.map(outcome => outcome.collectionId));
+        const unknownKeys = abort.signal.aborted
+          ? [...published].filter(([id]) => !received.has(id)).map(([, key]) => key)
+          : [];
+        sharingUnconfirmed = unknownKeys.length > 0;
         setResults(states => {
           const next = { ...states };
           for (const outcome of outcomes) {
@@ -269,18 +284,56 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
             if (key && state?.state === "published") next[key] = { ...state, shared: outcome.shared,
               ...(outcome.error ? { sharingError: outcome.error } : {}) };
           }
+          for (const key of unknownKeys) {
+            const state = next[key];
+            if (state?.state === "published") next[key] = { ...state, sharingUnconfirmed: true };
+          }
           return next;
         });
+        sharingInFlight = false;
       }
       const verified = new Set(published.values());
       setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
       const missed = jobs.length - verified.size;
-      setProgress(abort.signal.aborted ? "Publishing stopped. Courses already published stay in your account."
+      setProgress(abort.signal.aborted
+        ? sharingUnconfirmed
+          ? "Publishing stopped. Verified courses stay in your account. Sharing status is unconfirmed for some courses; an in-flight request may have completed. Refresh My courses to verify visibility before retrying or withdrawing."
+          : "Publishing stopped. Courses already published stay in your account."
         : `${plural(verified.size, "course")} published and verified.${missed ? ` ${plural(missed, "course")} not published. See each course for the reason.` : ""}`);
       if (verified.size) onPublished();
     } catch (cause) {
-      setProgress("");
-      setError(cause instanceof Error ? cause.message : "Publishing could not start. Nothing was uploaded.");
+      // Preserve account isolation even when a delayed batch/report fails.
+      // Switching A→B→A cannot authorize an old operation to update the UI.
+      try { scope.assertCurrent(); } catch { return; }
+      if (sharingInFlight && published.size) {
+        // A network rejection cannot prove an already-dispatched visibility RPC
+        // failed or was rolled back. The verified private uploads still exist.
+        const verified = new Set(published.values());
+        setResults(states => {
+          const next = { ...states };
+          for (const key of verified) {
+            const state = next[key];
+            if (state?.state === "published") next[key] = { ...state, sharingUnconfirmed: true };
+          }
+          return next;
+        });
+        setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
+        setProgress(`${plural(verified.size, "course")} published and verified. Sharing outcome is unconfirmed because the request failed or its connection ended. An in-flight request may have completed. Refresh My courses to verify visibility before retrying or withdrawing.`);
+        onPublished();
+      } else if (uploadAttempted) {
+        // A later batch can reject after an earlier batch has already delivered
+        // immutable, owner-verified receipts. Neither those receipts nor an
+        // in-flight server write can be disproved by a rejected client promise.
+        const verified = new Set(published.values());
+        setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
+        setProgress(verified.size
+          ? `${plural(verified.size, "course")} published and verified before publishing was interrupted. Other uploads have no confirmed readback; a remote request may have completed. Refresh My courses to verify what was saved before retrying. Sharing was not requested for these verified courses.`
+          : "Publishing was interrupted. No verified upload receipts were returned. A remote write may have completed. Refresh My courses to verify what was saved before retrying.");
+        if (verified.size) onPublished();
+      } else {
+        setProgress("");
+        setError(cause instanceof Error ? cause.message : "Publishing could not start. Nothing was uploaded.");
+      }
     } finally { scope.dispose(); setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
   }
 
@@ -476,10 +529,12 @@ function CourseResult({ result }: { result: CourseState }) {
   </p>;
   return <p className="academic-publisher-result">
     <Tag tone="green">Published</Tag>
-    {result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
+    {result.sharingUnconfirmed ? <Tag tone="neutral">Sharing outcome unconfirmed</Tag>
+      : result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
     {" "}{plural(result.ready, "ready question")} and {plural(result.files, "file")} verified.
     {` ${plural(result.missingExplanations, "ready question")} without an explanation in the stored revision.`}
     {keptNote(result, false)}
     {result.sharingError ? ` ${result.sharingError}` : ""}
+    {result.sharingUnconfirmed ? " A sharing request may have completed remotely. Refresh My courses and check visibility before retrying or withdrawing." : ""}
   </p>;
 }

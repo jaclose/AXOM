@@ -164,7 +164,8 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
       if (changes.size) setChecked(false);
       setFailures(failed);
       const shared = changes.size;
-      setProgress(abort.signal.aborted ? `Sharing stopped. ${plural(shared, "course")} shared before stopping.`
+      setProgress(abort.signal.aborted
+        ? `Sharing stopped. ${plural(shared, "course")} confirmed before stopping. An in-flight request may still have completed; refresh course status before retrying.`
         : `${plural(shared, "course")} shared for review. Other accounts can find ${shared === 1 ? "it" : "them"} only after academic approval.`);
       if (shared) onChanged();
     } catch (cause) {
