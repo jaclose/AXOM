@@ -729,36 +729,47 @@ async function writeVault(
         tx.abort();
         return;
       }
-      const currentPrefix = chunkPrefix(name, userId);
-      const nextChunkCount = plan.manifest?.chunkPrefix === currentPrefix ? plan.manifest.chunkCount : 0;
-      for (const raw of previous) {
-        const manifest = readChunkedValueManifest(raw);
-        if (!manifest || manifest.chunkPrefix !== currentPrefix) continue;
-        for (let index = nextChunkCount; index < manifest.chunkCount; index += 1) {
-          store.delete(`${manifest.chunkPrefix}:${index}`);
+      try {
+        const currentPrefix = chunkPrefix(name, userId);
+        const nextChunkCount = plan.manifest?.chunkPrefix === currentPrefix ? plan.manifest.chunkCount : 0;
+        for (const raw of previous) {
+          const manifest = readChunkedValueManifest(raw);
+          if (!manifest || manifest.chunkPrefix !== currentPrefix) continue;
+          for (let index = nextChunkCount; index < manifest.chunkCount; index += 1) {
+            store.delete(`${manifest.chunkPrefix}:${index}`);
+          }
         }
+        if (plan.manifest) {
+          // Preserve unchanged chunks so a small edit does not rewrite megabytes.
+          plan.chunks.forEach((chunk, index) => {
+            const key = `${plan.manifest!.chunkPrefix}:${index}`;
+            const existing = store.get(key);
+            existing.onsuccess = () => {
+              if (existing.result === chunk) return;
+              try {
+                store.put(chunk, key);
+              } catch (error) {
+                failWrite(error);
+              }
+            };
+          });
+        }
+        store.put(plan.storedValue, name);
+        if (userId) {
+          store.put(userId, activeUserKey(name));
+          store.put(plan.storedValue, scopedStateKey(name, userId));
+        }
+      } catch (error) {
+        // A browser can refuse a write synchronously (quota, a value it cannot
+        // clone, a closing database). Thrown from this request callback, that
+        // escaped as an uncaught page error, and the save was rejected as a
+        // bare AbortError instead of its real cause.
+        failWrite(error);
       }
-      if (plan.manifest) {
-        // Preserve unchanged chunks so a small edit does not rewrite megabytes.
-        plan.chunks.forEach((chunk, index) => {
-          const key = `${plan.manifest!.chunkPrefix}:${index}`;
-          const existing = store.get(key);
-          existing.onsuccess = () => {
-            if (existing.result === chunk) return;
-            try {
-              store.put(chunk, key);
-            } catch (error) {
-              chunkWriteFailure = error instanceof Error ? error : new Error(String(error));
-              tx.abort();
-            }
-          };
-        });
-      }
-      store.put(plan.storedValue, name);
-      if (userId) {
-        store.put(userId, activeUserKey(name));
-        store.put(plan.storedValue, scopedStateKey(name, userId));
-      }
+    };
+    const failWrite = (error: unknown) => {
+      chunkWriteFailure ??= error instanceof Error ? error : new Error(String(error));
+      try { tx.abort(); } catch { /* already aborted or finished; onabort/onerror settle the promise */ }
     };
 
     const primary = store.get(name);

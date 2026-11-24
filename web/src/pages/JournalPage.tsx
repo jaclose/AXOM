@@ -15,6 +15,7 @@ import { hasWorkspaceHydrationReceipt, subscribeWorkspaceHydrationReceipt, works
 import { useUi } from "../lib/uiStore";
 import { useAccount } from "../lib/account/accountStore";
 import * as localVault from "../lib/localVault";
+import { isUnloadAllowedForRefresh } from "../lib/refreshRecovery";
 import { GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Field, Modal, SelectField, TextAreaField } from "../components/ui/Modal";
 import { dayKey, prettyDate } from "../lib/scoring";
@@ -64,7 +65,20 @@ type JournalProfile = Profile & { journalNotebook?: JournalNotebookPreferences }
 type TurnDirection = "previous" | "next" | null;
 export type JournalTransitionGuard = (transition: () => void) => Promise<boolean>;
 export type RegisterJournalTransitionGuard = (guard: JournalTransitionGuard) => () => void;
-type JournalPersistResult = "saved" | "no-change" | "superseded" | "aborted" | "failed";
+/** Moves inside the Journal use `guard`; leaving the Journal for another screen uses `leaveGuard`. */
+type RegisterNotebookTransitionGuards = (guard: JournalTransitionGuard, leaveGuard?: JournalTransitionGuard) => () => void;
+/** "unconfirmed": the page is in the open workspace (and in any backup made
+ * now), but this device's storage did not confirm the write. "failed": the
+ * page did not even reach the open workspace. */
+type JournalPersistResult = "saved" | "no-change" | "superseded" | "aborted" | "failed" | "unconfirmed";
+
+/** Leaving the Journal waits at most this long for this device to confirm a
+ * save. Storage that refuses or stops answering (a full disk) must never hold
+ * the learner on this screen; moves inside the Journal still wait for it. */
+export const LEAVE_SAVE_WAIT_MS = 8_000;
+function journalDelay(ms: number): Promise<undefined> {
+  return new Promise((settle) => { window.setTimeout(() => settle(undefined), ms); });
+}
 
 const outcomeTone = { won: "green", partial: "orange", missed: "red" } as const;
 const journalPurposePrompts: Record<JournalPurpose, string> = {
@@ -337,9 +351,11 @@ export function JournalPage({ registerAppTransitionGuard, hasAccountWorkspaceRec
     return () => window.clearTimeout(timeout);
   }, [closingDay, reducedMotion]);
 
-  const registerTransitionGuard = useCallback<RegisterJournalTransitionGuard>((guard) => {
+  const registerTransitionGuard = useCallback<RegisterNotebookTransitionGuards>((guard, leaveGuard = guard) => {
     transitionGuardRef.current = guard;
-    const unregisterAppGuard = registerAppTransitionGuard?.(guard);
+    // Leaving the Journal for another screen has its own guard: it is never
+    // held here by device storage (JournalWritingPage).
+    const unregisterAppGuard = registerAppTransitionGuard?.(leaveGuard);
     return () => {
       if (transitionGuardRef.current === guard) transitionGuardRef.current = null;
       unregisterAppGuard?.();
@@ -679,7 +695,7 @@ function JournalWritingPage({
   onNavigate: (direction: Exclude<TurnDirection, null>) => void;
   onClose: () => void;
   onCompleted: (day: string) => void;
-  registerTransitionGuard: RegisterJournalTransitionGuard;
+  registerTransitionGuard: RegisterNotebookTransitionGuards;
 }) {
   const s = useStore();
   const entry = s.journal.find((item) => entryDayKey(item) === day) as NotebookJournalEntry | undefined;
@@ -715,6 +731,8 @@ function JournalWritingPage({
   const draftVersionRef = useRef(0);
   const mountedRef = useRef(true);
   const transitionPendingRef = useRef(false);
+  /** Leaving the Journal has its own flag: a page turn stuck on a slow save must not also hold the learner here. */
+  const leavePendingRef = useRef(false);
   const lifecyclePersistPendingRef = useRef(false);
   const lifecyclePersistVersionRef = useRef<number | null>(null);
   const lifecycleTextQueueRef = useRef<Promise<JournalPersistResult> | null>(null);
@@ -856,16 +874,17 @@ function JournalWritingPage({
     previousSupportSignalRef.current = supportSignal;
   }, [supportSignal, openFullPage]);
 
-  const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
-    // The authenticated account must match even before React unmounts an old
-    // editor. An editable name-derived profile ID alone is not a privacy gate.
+  // The authenticated account must match even before React unmounts an old
+  // editor. An editable name-derived profile ID alone is not a privacy gate.
+  const ownsWorkspace = useCallback(() => {
     const account = useAccount.getState();
     const liveOwner = account.phase === "signed-in" ? account.user?.id ?? null : null;
-    if (!mountedRef.current || liveOwner !== ownerAccountId
-      || useStore.getState().profile.userId !== workspaceId) return "aborted";
+    return liveOwner === ownerAccountId && useStore.getState().profile.userId === workspaceId;
+  }, [ownerAccountId, workspaceId]);
+
+  /** The open draft as a journal record; assigns the entry ID on first use. */
+  const buildDraftRecord = useCallback((status?: "draft" | "complete") => {
     const current = draftRef.current;
-    if (!hasNotebookContent(current) && !entryIdRef.current) return "no-change";
-    const draftVersion = draftVersionRef.current;
     const timestamp = new Date().toISOString();
     // Stamp the entry's `date` with the local day key (noon), never a raw UTC
     // toISOString(): day-keyed lookups use `entry.date.slice(0,10)` against the
@@ -893,6 +912,28 @@ function JournalWritingPage({
         : `journal-${Date.now()}`;
       entryIdRef.current = id;
     }
+    return { current, id, payload };
+  }, []);
+
+  /** Writes the open draft into the in-memory workspace at once, without
+   * waiting for device storage. Device storage, backups and the account copy
+   * then pick it up like any other change. False when it may not be written. */
+  const commitOpenDraftToWorkspace = useCallback((): boolean => {
+    if (!ownsWorkspace()) return false;
+    if (!hasNotebookContent(draftRef.current) && !entryIdRef.current) return true;
+    const { id, payload } = buildDraftRecord();
+    const store = useStore.getState();
+    if (store.journal.some((item) => item.id === id)) store.updateJournal(id, payload);
+    else store.addJournal({ ...payload, id });
+    return true;
+  }, [buildDraftRecord, ownsWorkspace]);
+
+  const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
+    if (!mountedRef.current || !ownsWorkspace()) return "aborted";
+    const current = draftRef.current;
+    if (!hasNotebookContent(current) && !entryIdRef.current) return "no-change";
+    const draftVersion = draftVersionRef.current;
+    const { id, payload } = buildDraftRecord(status);
     if (draftVersion === draftVersionRef.current && dirtyRef.current) {
       onPreserveDraft({ draft: current, entryId: id, entryDate: entryDateRef.current });
     }
@@ -902,9 +943,11 @@ function JournalWritingPage({
       setSaveState("saving");
       setSaveError("");
     }
+    let inWorkspace = false;
     try {
       if (store.journal.some((item) => item.id === id)) store.updateJournal(id, payload);
       else store.addJournal({ ...payload, id });
+      inWorkspace = true;
       await localVault.flushLocalVaultWrites();
       localVault.assertVaultWrite(checkpoint + 1);
       localVault.assertVaultWritesSince(checkpoint);
@@ -931,11 +974,11 @@ function JournalWritingPage({
             ? cause.message
             : "Your latest changes are still open, but AXOM could not confirm them in local storage. Export a portable backup, then retry Save.");
         }
-        return "failed";
+        return inWorkspace ? "unconfirmed" : "failed";
       }
       return "superseded";
     }
-  }, [workspaceId, ownerAccountId, onPreserveDraft, onDraftSaved]);
+  }, [ownsWorkspace, buildDraftRecord, ownerAccountId, onPreserveDraft, onDraftSaved]);
 
   const persist = useCallback((status?: "draft" | "complete") => {
     const queued = persistQueueRef.current.then(
@@ -967,10 +1010,14 @@ function JournalWritingPage({
     }, 420);
   }, [workspaceId, persist, cancelScheduledSave]);
 
-  const requestDurableTransition = useCallback<JournalTransitionGuard>(async (transition) => {
-    if (transitionPendingRef.current) return false;
-    transitionPendingRef.current = true;
-    setTransitionSaving(true);
+  const requestDurableTransition = useCallback(async (
+    transition: () => void,
+    { leavingJournal = false }: { leavingJournal?: boolean } = {},
+  ): Promise<boolean> => {
+    const pendingRef = leavingJournal ? leavePendingRef : transitionPendingRef;
+    if (pendingRef.current) return false;
+    pendingRef.current = true;
+    if (!leavingJournal) setTransitionSaving(true);
     cancelScheduledSave();
     try {
       // A later image selection may have joined while an earlier read was
@@ -987,24 +1034,41 @@ function JournalWritingPage({
         transition();
         return true;
       }
+      // Moves inside the Journal wait for this device to confirm the save and
+      // stay put ("Your changes need saving") when it cannot. Leaving the
+      // Journal waits a bounded time: a browser that refuses storage (a full
+      // disk) or stops answering used to hold the learner here, so no other
+      // screen would open.
+      const deadline = leavingJournal ? Date.now() + LEAVE_SAVE_WAIT_MS : Number.POSITIVE_INFINITY;
       while (mountedRef.current) {
         if (attachmentErrorRef.current && draftRef.current.notebookStatus === "complete") return false;
         // Still persist valid writing/images after an image failed, but do not
         // navigate away and hide its warning. The save receipt is for the
         // accepted page content, never the rejected image.
-        const result = await persist();
-        if (result === "superseded") continue;
+        const result = leavingJournal
+          ? await Promise.race([persist(), journalDelay(Math.max(0, deadline - Date.now()))])
+          : await persist();
+        if (result === "superseded" && Date.now() < deadline) continue;
         if (result === "failed" || result === "aborted" || !mountedRef.current) return false;
         if (attachmentErrorRef.current) return false;
+        if (result !== "saved" && result !== "no-change") {
+          // Not confirmed on this device: "unconfirmed" (the page is already in
+          // the open workspace), superseded at the deadline, or no answer yet.
+          if (!leavingJournal) return false;
+          // Leaving is safe once the latest page is in the open workspace: the
+          // app-wide save notice reports the device failure and offers a
+          // backup, which includes this page.
+          if (result !== "unconfirmed" && !commitOpenDraftToWorkspace()) return false;
+        }
         transition();
         return true;
       }
       return false;
     } finally {
-      transitionPendingRef.current = false;
-      if (mountedRef.current) setTransitionSaving(false);
+      pendingRef.current = false;
+      if (!leavingJournal && mountedRef.current) setTransitionSaving(false);
     }
-  }, [cancelScheduledSave, persist]);
+  }, [cancelScheduledSave, commitOpenDraftToWorkspace, persist]);
 
   const requestLifecycleTextSave = useCallback(() => {
     if (!mountedRef.current || !dirtyRef.current) return;
@@ -1025,7 +1089,7 @@ function JournalWritingPage({
     void attempt.then((result) => {
       // A failed write must be eligible for retry on the next lifecycle event,
       // even if the writer did not type another character.
-      if ((result === "failed" || result === "aborted")
+      if ((result === "failed" || result === "unconfirmed" || result === "aborted")
         && lifecyclePersistVersionRef.current === version) lifecyclePersistVersionRef.current = null;
     }).catch(() => {
       if (lifecyclePersistVersionRef.current === version) lifecyclePersistVersionRef.current = null;
@@ -1076,9 +1140,14 @@ function JournalWritingPage({
 
   useEffect(() => {
     mountedRef.current = true;
-    const unregisterTransitionGuard = registerTransitionGuard(requestDurableTransition);
+    const unregisterTransitionGuard = registerTransitionGuard(
+      (transition) => requestDurableTransition(transition),
+      (transition) => requestDurableTransition(transition, { leavingJournal: true }),
+    );
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!dirtyRef.current && !attachmentReadRef.current && !attachmentErrorRef.current) return;
+      // The learner downloaded a backup that holds this page and chose to refresh.
+      if (isUnloadAllowedForRefresh()) return;
       event.preventDefault();
       event.returnValue = "";
     };

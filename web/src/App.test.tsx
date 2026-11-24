@@ -230,14 +230,18 @@ describe("Journal route durability", () => {
       .toMatchObject({ freeWriting: "Persist before leaving the Journal" });
   });
 
-  it("restores an external hash route and keeps the draft visible when durability fails", async () => {
-    openJournalShell();
+  it("follows an external hash route once the page is in the open workspace, even when this device refuses the save", async () => {
+    // A browser refusing storage (a nearly full disk) used to hold the learner
+    // on the Journal, so no other screen would open. Staying kept nothing safer:
+    // the page lives in the open workspace either way, and the app-wide save
+    // notice offers a backup that includes it.
+    const today = openJournalShell();
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced route write failure"));
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /Open My AXOM Journal/i }));
     fireEvent.change(screen.getByLabelText("Free writing"), {
-      target: { value: "Do not leave this route" },
+      target: { value: "Keep this page in the workspace" },
     });
 
     act(() => {
@@ -245,10 +249,11 @@ describe("Journal route durability", () => {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
 
-    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
-    await waitFor(() => expect(window.location.hash).toBe("#journal"));
-    expect(screen.getAllByDisplayValue("Do not leave this route")).toHaveLength(2);
-    expect(screen.queryByRole("heading", { name: "Tasks" })).toBeNull();
+    expect(await screen.findByPlaceholderText("What needs doing?", undefined, { timeout: 4_000 })).toBeTruthy();
+    expect(window.location.hash).toBe("#tasks");
+    expect(screen.queryByLabelText("Free writing")).toBeNull();
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
+      .toMatchObject({ freeWriting: "Keep this page in the workspace" });
   });
 
   it("keeps Journal and Settings mounted until Run setup again confirms durability", async () => {
@@ -280,24 +285,24 @@ describe("Journal route durability", () => {
       .toMatchObject({ freeWriting: "Persist before setup replaces the shell" });
   });
 
-  it("keeps Journal, Settings, and draft intact when Run setup again cannot be saved", async () => {
-    openJournalShell();
+  it("starts Run setup again with the page kept in the open workspace when this device refuses the save", async () => {
+    const today = openJournalShell();
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced setup transition failure"));
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /Open My AXOM Journal/i }));
     fireEvent.change(screen.getByLabelText("Free writing"), {
-      target: { value: "Keep this draft if setup cannot begin" },
+      target: { value: "Keep this draft while setup begins" },
     });
     act(() => useUi.getState().requestSettings("program"));
     const settings = await screen.findByRole("dialog", { name: "Settings" });
     fireEvent.click(within(settings).getByRole("button", { name: "Run setup again" }));
 
-    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
-    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-    expect(screen.getAllByDisplayValue("Keep this draft if setup cannot begin").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Who are you studying as?" })).toBeTruthy();
     expect(useUi.getState().onboardingRequested).toBe(false);
+    // A rerun never replaces the workspace, so the page is still there afterwards.
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
+      .toMatchObject({ freeWriting: "Keep this draft while setup begins" });
   });
 });
 

@@ -1509,6 +1509,47 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/still open.*export.*retry Save/i);
   });
 
+  it("lets the learner leave the Journal for another screen when this device refuses the save", async () => {
+    // A browser that refuses storage (a full disk) used to hold the learner
+    // here: no other screen would open. The page stays in the open workspace.
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new DOMException("The quota has been exceeded.", "QuotaExceededError"));
+    let leaveGuard: ((transition: () => void) => Promise<boolean>) | null = null;
+    render(<JournalPage registerAppTransitionGuard={(guard) => { leaveGuard = guard; return () => { if (leaveGuard === guard) leaveGuard = null; }; }} />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Written while the disk was full" } });
+    // Moves inside the Journal still wait for a confirmed save.
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
+    expect(useUi.getState().journalDay).toBeNull();
+
+    const leave = vi.fn();
+    let left = false;
+    await act(async () => { left = await leaveGuard!(leave); });
+    expect(left).toBe(true);
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ freeWriting: "Written while the disk was full" });
+  });
+
+  it("leaves after a bounded wait when this device never answers the save", async () => {
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockReturnValue(new Promise<void>(() => {}));
+    let leaveGuard: ((transition: () => void) => Promise<boolean>) | null = null;
+    render(<JournalPage registerAppTransitionGuard={(guard) => { leaveGuard = guard; return () => { if (leaveGuard === guard) leaveGuard = null; }; }} />);
+    openTodayInFullPage();
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "The save never answered" } });
+    vi.useFakeTimers();
+    const leave = vi.fn();
+    let outcome: Promise<boolean> = Promise.resolve(false);
+    await act(async () => { outcome = leaveGuard!(leave); await Promise.resolve(); });
+    expect(leave).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+    vi.useRealTimers();
+    await expect(outcome).resolves.toBe(true);
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().journal.find((item) => item.date.startsWith(TODAY_KEY)))
+      .toMatchObject({ freeWriting: "The save never answered" });
+  });
+
   it("retries a failed inline desk autosave without abandoning the private draft", async () => {
     vi.useFakeTimers();
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")

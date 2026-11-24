@@ -128,7 +128,7 @@ test("a refused account upload is sent once, explained, and recovers", async ({ 
   await expect(panel.locator(".account-protection-detail")).toHaveCount(0);
   await expect(panel.getByRole("button", { name: "Protect now" })).toBeVisible();
   expect(push.bodies.at(-1)).toMatchObject({ p_base_revision: 71, p_reason: "manual" });
-  await page.getByRole("button", { name: "Done" }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   await expect(statusDot(page)).toHaveAttribute("data-status", "protected");
   expect(unexpected).toEqual([]);
 });

@@ -36,7 +36,7 @@ test("account foundation preserves local-only use and manual recovery at every l
     else await page.getByRole("tab", { name: "Emergency recovery" }).click();
     await expect(page.getByRole("button", { name: "Export complete backup" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Choose backup to restore" })).toBeVisible();
-    await page.getByRole("button", { name: "Done" }).click();
+    await page.getByRole("button", { name: "Done", exact: true }).click();
   }
 
   expect(errors).toEqual([]);
