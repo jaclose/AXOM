@@ -51,6 +51,40 @@ export function buildCourseQuestionBank(
   sets: readonly QuestionSet[], questions: readonly QuestionRecord[],
   courses: readonly Course[], terms: readonly Term[],
 ): BankModule[] {
+  // Raw duplicate originals are ambiguous before Map indexing. A last-write-wins
+  // lookup or Set-deduplicated member list must never certify a source week,
+  // launchable set card or ready count. Leave the records in the library for
+  // review and exclude every affected membership from this navigator only.
+  const repeatedSetIds = new Set<string>();
+  const seenSetIds = new Set<string>();
+  const malformedMemberSets = new Set<QuestionSet>();
+  const ambiguousQuestionIds = new Set<string>();
+  for (const set of sets) {
+    if (seenSetIds.has(set.id)) repeatedSetIds.add(set.id);
+    seenSetIds.add(set.id);
+    if (new Set(set.questionIds).size !== set.questionIds.length) {
+      malformedMemberSets.add(set);
+      // A malformed review must not erase an independently verified primary.
+      // A malformed original cannot be rescued by an unrelated review set.
+      if (set.kind !== "review") set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
+    }
+  }
+  for (const set of sets) {
+    if (repeatedSetIds.has(set.id)) {
+      set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
+    }
+  }
+  const seenQuestionIds = new Set<string>();
+  for (const question of questions) {
+    if (seenQuestionIds.has(question.id)) ambiguousQuestionIds.add(question.id);
+    seenQuestionIds.add(question.id);
+  }
+  // A held collection cannot certify a sibling through another review set.
+  // Reuse the collection eligibility decision for primary and legacy scope.
+  const heldCollectionIds = new Set(sets.filter((set) =>
+    repeatedSetIds.has(set.id) || malformedMemberSets.has(set)
+      || set.questionIds.some((id) => ambiguousQuestionIds.has(id)),
+  ).map((set) => set.id));
   const questionsById = new Map(questions.map((question) => [question.id, question]));
   const setsById = new Map(sets.map((set) => [set.id, set]));
   const memberships = new Map<string, QuestionSet[]>();
@@ -66,7 +100,7 @@ export function buildCourseQuestionBank(
   // scheduled week or borrow the course of a different primary source.
   const scopesById = new Map<string, CourseScope>();
   for (const question of questions) {
-    const related = memberships.get(question.id) ?? [];
+    const related = (memberships.get(question.id) ?? []).filter((set) => !heldCollectionIds.has(set.id));
     // Bind legacy inference to a source collection, never to the first review
     // collection encountered in an arbitrary array ordering.
     const source = related.find((set) => set.kind !== "review");
@@ -85,6 +119,9 @@ export function buildCourseQuestionBank(
   const modules = new Map<string, BankModule>();
   const eligibleBySet = new Map<string, string[]>();
   for (const set of sets) {
+    // This also blocks secondary review sets from laundering a conflicted
+    // primary original into a different source week.
+    if (heldCollectionIds.has(set.id)) continue;
     const rawWeek = set.scope?.week;
     // Invalid explicit source weeks are review work, not a usable week label.
     if (hasDeclaredWeek(rawWeek) && parseWeek(rawWeek) === undefined) continue;
@@ -113,7 +150,7 @@ export function buildCourseQuestionBank(
       // A question's refiled fields cannot silently override contradictory
       // primary-source proof just because a secondary review set agrees.
       const contradictsPrimary = question.setId != null && (
-        !primary || !primary.questionIds.includes(question.id)
+        !primary || heldCollectionIds.has(primary.id) || !primary.questionIds.includes(question.id)
         || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
         || Boolean(primaryScope && (
           (primaryScope.module && own.module
