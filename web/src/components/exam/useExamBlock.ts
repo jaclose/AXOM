@@ -34,6 +34,8 @@ export interface ExamBlockOptions {
   skin: ExamSkin;
   mode: "exam" | "tutor";
   pool: QuestionRecord[];
+  /** If supplied, this map is authoritative even when a key is absent. */
+  scoringKeys?: ReadonlyMap<string, string | undefined>;
   /** Stable id shared by suspend recovery, attempts and the final session. */
   runId?: string;
   timeLimitSeconds?: number;
@@ -118,12 +120,12 @@ export interface ExamBlockApi {
   stemRef: RefObject<HTMLDivElement>;
 }
 
-export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume, review, onFinish, onSuspend }: ExamBlockOptions): ExamBlockApi {
+export function useExamBlock({ skin, mode, pool, scoringKeys, runId, timeLimitSeconds, resume, review, onFinish, onSuspend }: ExamBlockOptions): ExamBlockApi {
   const profile = EXAM_PROFILES[skin];
   const updateQuestion = useStore((s) => s.updateQuestion);
   const ids = useMemo(() => pool.map((question) => question.id), [pool]);
   const byId = useMemo(() => new Map(pool.map((question) => [question.id, question])), [pool]);
-  const correctKeyFor = useCallback((id: string) => trustedKey(byId.get(id)), [byId]);
+  const correctKeyFor = useCallback((id: string) => scoringKeys ? scoringKeys.get(id) : trustedKey(byId.get(id)), [byId, scoringKeys]);
 
   const [block, dispatch] = useReducer(examReducer, undefined, () => {
     if (review) return reviewBlock({ ids, answers: review.answers, mode, startedAt: review.startedAt, elapsedSeconds: review.elapsedSeconds });
@@ -157,7 +159,7 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
   const item = itemState(block, question?.id);
   const counts = countBlock(block);
   const entries = useMemo(() => navigatorEntries(block, correctKeyFor), [block, correctKeyFor]);
-  const correctKey = question ? reviewCorrectKey(block, question.id, trustedKey(question)) : undefined;
+  const correctKey = question ? reviewCorrectKey(block, question.id, correctKeyFor(question.id)) : undefined;
   const result = question ? shownResult(block, question.id, correctKey) : undefined;
   const revealed = result !== undefined;
   const elapsed = blockElapsedSeconds(block, now);
