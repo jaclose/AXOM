@@ -69,8 +69,11 @@ export function buildCourseQuestionBank(
       if (set.kind !== "review") set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
     }
   }
+  const originalSetIds = new Set(sets.filter((set) => set.kind !== "review").map((set) => set.id));
   for (const set of sets) {
-    if (repeatedSetIds.has(set.id)) {
+    // Repeated review-only IDs hold those collections, not independent originals.
+    // Any collision involving an original retains the full identity quarantine.
+    if (repeatedSetIds.has(set.id) && originalSetIds.has(set.id)) {
       set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
     }
   }
@@ -160,7 +163,7 @@ export function buildCourseQuestionBank(
       // A question's refiled fields cannot silently override contradictory
       // primary-source proof just because a secondary review set agrees.
       const contradictsPrimary = question.setId != null && (
-        !primary || heldCollectionIds.has(primary.id) || !primary.questionIds.includes(question.id)
+        !primary || primary.kind === "review" || heldCollectionIds.has(primary.id) || !primary.questionIds.includes(question.id)
         || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
         || Boolean(primaryScope && (
           (primaryScope.module && own.module
