@@ -304,7 +304,7 @@ describe("CourseBankBrowser explicit handoff search after manual outline selecti
 });
 
 describe("CourseBankBrowser focused collection eligibility", () => {
-  it("closes a held primary's focused review after a same-scope refresh and never resurrects it", async () => {
+  it.each(["identity collision", "filing contradiction"] as const)("closes a held primary's focused review after %s and never resurrects it", async (hold) => {
     const user = userEvent.setup();
     const primary = set("primary", "Original source", ["original", "sibling"], "c4", "Neuro");
     const review: QuestionSet = { ...set("review", "Sibling review", ["sibling"], "c4", "Neuro"), kind: "review" };
@@ -322,7 +322,9 @@ describe("CourseBankBrowser focused collection eligibility", () => {
     const view = render(bank());
     await user.click(screen.getByRole("button", { name: "Sibling review" }));
     expect(screen.getByRole("button", { name: "Start Sibling review" })).toBeTruthy();
-    state.questions = [...healthy, question("original", { setId: primary.id, correctKey: "B" })];
+    state.questions = hold === "identity collision"
+      ? [...healthy, question("original", { setId: primary.id, correctKey: "B" })]
+      : [{ ...original, week: 2 }, sibling, cleanQuestion];
     const snapshot = structuredClone({ questions: state.questions, sets: state.questionSets });
     view.rerender(bank());
     expect(screen.queryByRole("button", { name: "Start Sibling review" })).toBeNull();
@@ -333,6 +335,8 @@ describe("CourseBankBrowser focused collection eligibility", () => {
     expect({ questions: state.questions, sets: state.questionSets }).toEqual(snapshot);
     await user.click(screen.getByRole("button", { name: "Practice week" }));
     expect(onPractice).toHaveBeenCalledWith([clean]);
+    await user.click(screen.getByRole("button", { name: "Practice Independent source" }));
+    expect(onPractice).toHaveBeenLastCalledWith([clean]);
 
     state.questions = healthy;
     view.rerender(bank());
