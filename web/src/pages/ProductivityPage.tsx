@@ -63,8 +63,14 @@ function sameManualDraftOwner(a: ManualDraftOwner, b: ManualDraftOwner) {
 }
 
 function hasManualDraft(draft: ManualDraftFields) {
-  return Boolean(draft.manualType || draft.manualMinutes || draft.manualQuantity || draft.manualNote
-    || draft.manualTrackerId || draft.manualQuantityKind !== "count");
+  // Category and quantity kind are sticky form preferences, not unsaved activity.
+  return Boolean(draft.manualType || draft.manualMinutes || draft.manualQuantity || draft.manualNote);
+}
+
+function manualTrackerAvailable(trackers: readonly { id: string; archived: boolean }[], id: string) {
+  if (!id) return true; // Explicit inference is always available.
+  const matching = trackers.filter((tracker) => tracker.id === id);
+  return matching.length === 1 && !matching[0].archived;
 }
 
 function canRecoverManualDraft(draft: ManualDraft, owner: ManualDraftOwner) {
@@ -143,7 +149,11 @@ export function ProductivityPage() {
   const monthly = useMemo(() => summarizePeriod(logs, currentMonthDays(s.activeDayKey), "month", s.activeDayKey, gradeTargetsFor(s.profile)), [logs, s.activeDayKey, s.profile]);
   const monthCells = useMemo(() => buildMonthCells(monthly.days), [monthly.days]);
   const calendarToday = s.activeDayKey;
-  const visibleTrackers = s.productivityTrackers.filter((tracker) => tracker.visible && !tracker.archived);
+  const categoryAvailable = manualTrackerAvailable(s.productivityTrackers, manualTrackerId);
+  const visibleTrackers = s.productivityTrackers.filter((tracker) => tracker.visible && manualTrackerAvailable(s.productivityTrackers, tracker.id));
+  const selectedHiddenTracker = categoryAvailable && manualTrackerId
+    ? s.productivityTrackers.find((tracker) => tracker.id === manualTrackerId && !tracker.visible)
+    : undefined;
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, viewKey, s.activeDayKey), [s, viewKey]);
   const recent = useMemo(() => recentActivityShortcuts(logs, s.profile.hiddenActivityShortcuts), [logs, s.profile.hiddenActivityShortcuts]);
   const recentSignatures = useMemo(() => new Set(recent.map((item) => item.signature)), [recent]);
@@ -216,6 +226,7 @@ export function ProductivityPage() {
     const quantity = Number(manualQuantity) || 0;
     const current = useStore.getState();
     if (!manualType.trim() || !currentManualDraftOwner(draftOwner)
+      || !manualTrackerAvailable(current.productivityTrackers, manualTrackerId)
       || (manualSaveRef.current && currentManualOwner(manualSaveRef.current))) return;
     const checkpoint = getVaultWriteCheckpoint();
     current.logActivity({
@@ -298,7 +309,7 @@ export function ProductivityPage() {
                 </div></div>
               </div>
               <label className="fast-field fast-activity-note"><span>Note (optional)</span><input className="field" aria-label="Note (optional)" placeholder="Add context if it will help later" value={manualNote} onChange={(event) => patchManualDraft({ manualNote: event.target.value })} /></label>
-              <GButton variant="primary" onClick={logManual} disabled={!manualType.trim() || activeManualSave !== null}><Plus size={ICON_SIZE.body} /> Log</GButton>
+              <GButton variant="primary" onClick={logManual} disabled={!manualType.trim() || !categoryAvailable || activeManualSave !== null}><Plus size={ICON_SIZE.body} /> Log</GButton>
               {hasManualDraft(draft) && <small>Unsaved activity drafts are kept only while this page stays open.</small>}
             </div>
             {activeManualSave?.phase === "failed" && <div className="row wrap gap6" aria-live="polite">
@@ -310,10 +321,13 @@ export function ProductivityPage() {
                 <GButton size="sm" onClick={() => exitChangedManualRecovery(activeManualSave)}>Continue without confirming save</GButton>
               </>}
             </div>}
+            {!categoryAvailable && <p role="status">The selected category is no longer available. Choose an available category or explicitly select Infer from this activity before logging.</p>}
             <details className="activity-category-disclosure">
               <summary>Category and contribution (optional)</summary>
               <label><span>Use existing category</span><select className="field" aria-label="Productivity category" value={manualTrackerId} onChange={(event) => patchManualDraft({ manualTrackerId: event.target.value })}>
                 <option value="">Infer from this activity</option>
+                {!categoryAvailable && <option value={manualTrackerId} disabled>Unavailable category</option>}
+                {selectedHiddenTracker && <option value={selectedHiddenTracker.id}>{selectedHiddenTracker.name} (hidden)</option>}
                 {visibleTrackers.map((tracker) => <option key={tracker.id} value={tracker.id}>{tracker.name}</option>)}
               </select></label>
             </details>
