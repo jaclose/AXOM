@@ -77,8 +77,25 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       }
     }
   }
-  const termName = new Map(input.terms.map((term) => [term.id, term.name]));
-  const courseById = new Map(input.courses.map((course) => [course.id, course]));
+  // An installed term ID must identify exactly one row, even when duplicate
+  // names normalize to the same curriculum term. Never grant indexed credit
+  // from a last-write-wins catalog lookup.
+  const termName = new Map<string, string>();
+  const duplicateTermIds = new Set<string>();
+  for (const term of input.terms) {
+    if (termName.has(term.id)) duplicateTermIds.add(term.id);
+    termName.set(term.id, term.name);
+  }
+  for (const id of duplicateTermIds) termName.delete(id);
+  // Duplicate local IDs cannot identify a unique curriculum owner. Do not
+  // let Map insertion order select a different term, course or module.
+  const courseById = new Map<string, Course>();
+  const duplicateCourseIds = new Set<string>();
+  for (const course of input.courses) {
+    if (courseById.has(course.id)) duplicateCourseIds.add(course.id);
+    courseById.set(course.id, course);
+  }
+  for (const id of duplicateCourseIds) courseById.delete(id);
   const resolve = (scope: CourseScope): Resolution | undefined => {
     const code = canonicalModuleKey(scope.module ?? "");
     const matches = owners.get(code);
@@ -123,68 +140,78 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     drafts.set(resolution.key, next);
     return next;
   };
+  // Raw duplicate question IDs cannot be resolved by Map insertion order, even
+  // when both records happen to contain identical source or answer metadata.
+  // Keep both stored originals for repair, but neither can certify readiness
+  // or source-week coverage in this read model.
+  const seenQuestionIds = new Set<string>();
+  const duplicateQuestionIds = new Set<string>();
+  for (const question of input.questions) {
+    if (seenQuestionIds.has(question.id)) duplicateQuestionIds.add(question.id);
+    seenQuestionIds.add(question.id);
+  }
   const byId = new Map(input.questions.map((question) => [question.id, question]));
-  const setsById = new Map(input.sets.map((set) => [set.id, set]));
-  const memberships = new Map<string, CourseScope[]>();
+  // A Map silently drops the first source set when raw originals share an
+  // identity. Hold every collided original before scope or week attribution.
+  const seenSetIds = new Set<string>();
+  const duplicateSetIds = new Set<string>();
   for (const set of input.sets) {
-    for (const id of new Set(set.questionIds)) {
-      if (!set.scope) continue;
-      memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
+    if (seenSetIds.has(set.id)) duplicateSetIds.add(set.id);
+    seenSetIds.add(set.id);
+  }
+  const ambiguousMembers = new Set<string>();
+  for (const set of input.sets) {
+    if (duplicateSetIds.has(set.id)) {
+      for (const id of set.questionIds) ambiguousMembers.add(id);
     }
   }
-  let unassignedQuestions = 0;
-  for (const question of input.questions) {
-    const scope = questionScope(question, setsById);
-    // Older questions sometimes have immutable set membership but no setId.
-    // Inherit it only when all eligible memberships agree on a unique module.
-    // Declared primary references (including stale/empty IDs) may not be
-    // silently repaired from secondary review-set membership.
-    const related = question.setId == null ? memberships.get(question.id) ?? [] : [];
-    const fallback = related.map(resolve).filter((entry): entry is Resolution => entry !== undefined);
-    const fallbackKeys = new Set(fallback.map((entry) => entry.key));
-    const fallbackScope = fallbackKeys.size === 1 && related.length === fallback.length
-      ? related[0] : undefined;
-    const compatibleFallback = Boolean(fallbackScope
-      && (!scope.module || !fallbackScope.module
-        || canonicalModuleKey(scope.module) === canonicalModuleKey(fallbackScope.module))
-      && (!scope.courseId || !fallbackScope.courseId || scope.courseId === fallbackScope.courseId));
-    // All legacy set memberships must state the same valid week. Ambiguous
-    // or missing evidence is not a source-week assignment.
-    const relatedWeeks = related.map((entry) => parseWeek(entry.week));
-    const inheritedWeek = relatedWeeks.length > 0 && relatedWeeks.every((week) => week !== undefined)
-      && new Set(relatedWeeks).size === 1 ? relatedWeeks[0] : undefined;
-    const relatedCourseIds = new Set(related.map((entry) => entry.courseId).filter((id): id is string => Boolean(id)));
-    const finalScope: CourseScope = {
-      module: scope.module ?? (compatibleFallback ? fallbackScope?.module : undefined),
-      courseId: scope.courseId ?? (compatibleFallback && relatedCourseIds.size === 1 ? fallbackScope?.courseId : undefined),
-      week: scope.week ?? (!hasDeclaredWeek(question.week) && compatibleFallback ? inheritedWeek : undefined),
-    };
-    const resolved = resolve(finalScope);
-    if (!resolved) { unassignedQuestions += 1; continue; }
-    const draft = draftFor(resolved);
-    draft.present.add(question.id);
-    (questionMappingStatus(question) === "ready" ? draft.ready : draft.review).add(question.id);
-    if (finalScope.week !== undefined) draft.weeks.add(finalScope.week);
-    else draft.unresolvedWeeks.add(question.id);
-    (resolved.method === "course" ? draft.courseAssignments : draft.outlineAssignments).add(question.id);
-  }
-  let unassignedCollections = 0;
+  // A collection held for identity ambiguity cannot certify either its own
+  // coverage or inherited question scope. Keep one eligibility decision for
+  // primary lookups, legacy memberships and collection indexing.
+  const heldSetIds = new Set<string>();
   for (const set of input.sets) {
+    const ambiguousPrimary = set.questionIds.some((id) => {
+      if (duplicateQuestionIds.has(id)) return true;
+      const member = byId.get(id);
+      return Boolean(member && (member.setId != null
+        ? duplicateSetIds.has(member.setId)
+        : ambiguousMembers.has(id)));
+    });
+    if (duplicateSetIds.has(set.id) || ambiguousPrimary) heldSetIds.add(set.id);
+  }
+  const setsById = new Map(input.sets.filter((set) => !heldSetIds.has(set.id)).map((set) => [set.id, set]));
+  const memberships = new Map<string, QuestionSet[]>();
+  for (const set of input.sets) {
+    if (heldSetIds.has(set.id)) continue;
+    for (const id of new Set(set.questionIds)) {
+      if (!set.scope) continue;
+      memberships.set(id, [...(memberships.get(id) ?? []), set]);
+    }
+  }
+  // Determine collection eligibility before any question inherits filing.
+  // A rejected source cannot lend its module/week to otherwise unfiled
+  // siblings. Revalidate dependent collections when their primary evidence
+  // disappears; each round removes all failures together, never by scan order.
+  const collectionTarget = (set: QuestionSet): Resolution | undefined => {
     const indexedSetWeek = parseWeek(set.scope?.week);
     const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
     // Set-owned metadata wins if it resolves. A collection whose membership
     // spans different modules is not assigned by a filename or first record.
     const presentMembers = [...new Set(set.questionIds)].flatMap((id) =>
       byId.has(id) ? [byId.get(id)!] : []);
+    const direct = set.scope ? resolve(set.scope) : undefined;
     const memberAssignments = presentMembers.map((member) => {
       const scope = questionScope(member, setsById);
-      return { scope, assignment: resolve(scope),
+      // A partial own course is compatible only when the collection's
+      // resolved module also belongs to that exact local course.
+      const assignment = resolve(scope) ?? (!scope.module && scope.courseId && direct
+        ? resolve({ ...scope, module: direct.owner.module }) : undefined);
+      return { scope, assignment,
         invalidWeek: hasDeclaredWeek(member.week) && parseWeek(member.week) === undefined,
         alternatePrimary: member.setId != null && member.setId !== set.id };
 
     });
     const memberResolutions = memberAssignments.flatMap(({ assignment }) => assignment ? [assignment] : []);
-    const direct = set.scope ? resolve(set.scope) : undefined;
     const uniqueMemberKeys = new Set(memberResolutions.map((entry) => entry.key));
     const target = direct ?? (memberResolutions.length > 0 && uniqueMemberKeys.size === 1
       ? memberResolutions[0] : undefined);
@@ -202,9 +229,101 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     if (!target || invalidSetWeek || contradictsSource || uniqueMemberKeys.size > 1
       || (!direct && memberResolutions.length !== memberAssignments.length)
       || (memberResolutions.length && !uniqueMemberKeys.has(target.key))) {
-      unassignedCollections += 1;
+      return undefined;
+    }
+    return target;
+  };
+  const collectionTargets = new Map<string, Resolution>();
+  const dependents = new Map<string, Set<string>>();
+  for (const set of setsById.values()) {
+    for (const id of new Set(set.questionIds)) {
+      const primary = byId.get(id)?.setId;
+      if (primary == null || primary === set.id) continue;
+      const dependentIds = dependents.get(primary) ?? new Set<string>();
+      dependentIds.add(set.id);
+      dependents.set(primary, dependentIds);
+    }
+  }
+  let pending = [...setsById.values()];
+  while (pending.length > 0) {
+    const rejected = new Set<string>();
+    for (const set of pending) {
+      const target = collectionTarget(set);
+      if (target) collectionTargets.set(set.id, target);
+      else rejected.add(set.id);
+    }
+    const next = new Set<string>();
+    for (const id of rejected) {
+      heldSetIds.add(id);
+      setsById.delete(id);
+      collectionTargets.delete(id);
+      for (const dependent of dependents.get(id) ?? []) next.add(dependent);
+    }
+    pending = [...next].flatMap((id) => {
+      const set = setsById.get(id);
+      return set ? [set] : [];
+    });
+  }
+  let unassignedQuestions = 0;
+  for (const question of input.questions) {
+    // Neither a last-write-wins primary nor a legacy secondary membership may
+    // certify a question whose original source-set identity is ambiguous.
+    if (duplicateQuestionIds.has(question.id)
+      || (question.setId != null && duplicateSetIds.has(question.setId))
+      || (question.setId == null && ambiguousMembers.has(question.id))) {
+      unassignedQuestions += 1;
       continue;
     }
+    const scope = questionScope(question, setsById);
+    // Older questions sometimes have immutable set membership but no setId.
+    // Inherit it only when all eligible memberships agree on a unique module.
+    // Declared primary references (including stale/empty IDs) may not be
+    // silently repaired from secondary review-set membership.
+    const relatedSets = question.setId == null ? memberships.get(question.id) ?? [] : [];
+    const related = relatedSets.flatMap((set) => setsById.has(set.id) && set.scope ? [set.scope] : []);
+    const fallback = related.map(resolve).filter((entry): entry is Resolution => entry !== undefined);
+    const fallbackKeys = new Set(fallback.map((entry) => entry.key));
+    // The resolved owner is common to every membership, but the first raw
+    // scope may omit a course ID or contradict the question's own local ID.
+    // Combine all explicit evidence before inheriting any missing filing.
+    const fallbackOwner = fallbackKeys.size === 1 && related.length === fallback.length
+      ? fallback[0]?.owner : undefined;
+    const relatedCourseIds = new Set(related.map((entry) => entry.courseId).filter((id): id is string => Boolean(id)));
+    const [relatedCourseId] = relatedCourseIds;
+    // A rejected conflicting explicit local course is not positive evidence.
+    // An outline-only survivor also cannot silently repair that own-course
+    // conflict; independent explicit matching evidence may still resolve it.
+    const rejectedCourseConflict = Boolean(scope.courseId && !relatedCourseId
+      && relatedSets.some((set) => !setsById.has(set.id)
+        && set.scope?.courseId && set.scope.courseId !== scope.courseId));
+    const compatibleFallback = Boolean(fallbackOwner && !rejectedCourseConflict
+      && (!scope.module || canonicalModuleKey(scope.module) === canonicalModuleKey(fallbackOwner.module))
+      && relatedCourseIds.size <= 1
+      && (!scope.courseId || !relatedCourseId || scope.courseId === relatedCourseId));
+    // All legacy set memberships must state the same valid week. Ambiguous
+    // or missing evidence is not a source-week assignment.
+    const relatedWeeks = related.map((entry) => parseWeek(entry.week));
+    const inheritedWeek = relatedWeeks.length > 0 && relatedWeeks.every((week) => week !== undefined)
+      && new Set(relatedWeeks).size === 1 ? relatedWeeks[0] : undefined;
+    const finalScope: CourseScope = {
+      module: scope.module ?? (compatibleFallback ? fallbackOwner?.module : undefined),
+      courseId: scope.courseId ?? (compatibleFallback ? relatedCourseId : undefined),
+      week: scope.week ?? (!hasDeclaredWeek(question.week) && compatibleFallback ? inheritedWeek : undefined),
+    };
+    const resolved = resolve(finalScope);
+    if (!resolved) { unassignedQuestions += 1; continue; }
+    const draft = draftFor(resolved);
+    draft.present.add(question.id);
+    (questionMappingStatus(question) === "ready" ? draft.ready : draft.review).add(question.id);
+    if (finalScope.week !== undefined) draft.weeks.add(finalScope.week);
+    else draft.unresolvedWeeks.add(question.id);
+    (resolved.method === "course" ? draft.courseAssignments : draft.outlineAssignments).add(question.id);
+  }
+  const unassignedCollections = input.sets.length - collectionTargets.size;
+  for (const set of setsById.values()) {
+    const target = collectionTargets.get(set.id);
+    if (!target) continue;
+    const indexedSetWeek = parseWeek(set.scope?.week);
     const draft = draftFor(target);
     draft.collections.add(set.id);
     if (indexedSetWeek !== undefined) draft.weeks.add(indexedSetWeek);
