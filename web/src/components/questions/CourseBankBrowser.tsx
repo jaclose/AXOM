@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, FileText, Images, Play, Search } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { bankSource, buildCourseQuestionBank } from "../../lib/course-engine/questionBank";
@@ -79,14 +79,40 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
     }).length,
   ])), [questionsById, questionSets]);
 
-  const [chosen, setChosen] = useState<string>();
+  // Scope transitions can reuse the mounted browser. Bind manual navigation
+  // to the precise incoming Tracker handoff so a prior week is never reused.
+  const scopeKey = JSON.stringify([
+    initialScope?.courseId ?? null,
+    initialScope ? canonicalModuleKey(initialScope.module) : null,
+    initialScope?.week ?? null,
+  ]);
+  const [chosenState, setChosen] = useState<{ key: string; scopeKey: string }>();
+  const chosen = chosenState?.scopeKey === scopeKey ? chosenState.key : undefined;
   const [termFilter, setTermFilter] = useState("");
   const [courseFilter, setCourseFilter] = useState("");
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("");
   const [readinessFilter, setReadinessFilter] = useState<ReadinessFilter>("all");
   const [limit, setLimit] = useState(12);
-  const [openedSet, setOpenedSet] = useState<string>();
+  const [openedState, setOpenedSet] = useState<{ id: string; scopeKey: string }>();
+  const openedSet = openedState?.scopeKey === scopeKey ? openedState.id : undefined;
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [detailInvalidated, setDetailInvalidated] = useState(false);
+
+  // A subsequent A → B → A handoff must not revive an old manual selection,
+  // focused set, or term filter. Scoped identity checks above protect the
+  // synchronous render; this cleanup resets transient navigation state.
+  useEffect(() => {
+    setChosen(undefined);
+    setOpenedSet(undefined);
+    setDetailInvalidated(false);
+    setTermFilter("");
+    setCourseFilter("");
+    setQuery("");
+    setSource("");
+    setReadinessFilter("all");
+    setLimit(12);
+  }, [scopeKey]);
 
   const termsAvailable = [...new Set(branches.map((branch) => branch.term))];
   const termBranches = termFilter ? branches.filter((branch) => branch.term === termFilter) : branches;
@@ -115,8 +141,14 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
   const branch = visibleBranches.find((item) => item.weeks.some((week) => week.key === active?.key));
   const selected = new Set(selectedIds);
   const search = query.trim().toLowerCase();
+  // Ordinary browsing may search across visible modules. A Tracker handoff
+  // searches only the actively selected week, including after the learner
+  // explicitly changes weeks. A search must never offer Practice from a
+  // different module or an unavailable source week.
   const pool = search
-    ? visibleBranches.flatMap((module) => module.weeks.flatMap((week) => week.sets.map((set) => ({ module, week, set }))))
+    ? initialScope
+      ? active && branch ? active.sets.map((set) => ({ module: branch, week: active, set })) : []
+      : visibleBranches.flatMap((module) => module.weeks.flatMap((week) => week.sets.map((set) => ({ module, week, set }))))
     : active && branch ? active.sets.map((set) => ({ module: branch, week: active, set })) : [];
   const matches = pool.filter(({ set, module, week }) => {
     const state = readiness.get(set.id) ?? { stored: 0, ready: 0, reviewSuggested: 0, unresolved: 0, missing: 0 };
@@ -124,7 +156,17 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
       && matchesReadiness(state, readinessFilter)
       && (!search || `${set.title} ${set.tags.join(" ")} ${bankSource(set)} ${module.term} ${module.course} ${module.module} ${week.label}`.toLowerCase().includes(search));
   });
-  const detail = questionSets.find((set) => set.id === openedSet);
+  // Revalidate an already-open card against the same eligible projection as
+  // fresh navigation. A same-scope store refresh can hold its primary source.
+  const detail = matches.find(({ set }) => set.id === openedSet)?.set;
+  useEffect(() => {
+    if (openedSet !== undefined && !detail) {
+      // Close permanently, even if the source later becomes eligible again.
+      setOpenedSet(undefined);
+      setDetailInvalidated(true);
+      searchRef.current?.focus();
+    }
+  }, [openedSet, detail]);
   const availableSources = [...new Set(visibleBranches.flatMap((module) => module.weeks.flatMap((week) => week.sets.map(bankSource))))];
   const weekReadyIds = new Set(matches.flatMap(({ set }) => set.questionIds.filter((id) => {
     const question = questionsById.get(id);
@@ -145,10 +187,11 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
 
   return <section className={`course-bank ${onSelectionChange ? "cb-picker" : ""}`} aria-label="Course question bank">
     <div className="cb-searchbar">
-      <label className="cb-search"><Search size={16} aria-hidden="true" /><input type="search" name="question-set-search" autoComplete="off" aria-label="Search question sets" placeholder="Find a week, source or set" value={query}
+      <label className="cb-search"><Search size={16} aria-hidden="true" /><input ref={searchRef} type="search" name="question-set-search" autoComplete="off" aria-label="Search question sets" placeholder="Find a week, source or set" value={query}
         onChange={(event) => { setQuery(event.target.value); setLimit(12); }} /></label>
       {onSelectionChange && <span className="cb-selection" role="status">{selectedIds.length} selected</span>}
     </div>
+    {detailInvalidated && <p className="qb-collection-warning" role="status">The opened collection no longer matches the verified academic view. Review its source filing in the Question Bank before practicing.</p>}
     {branches.length > 0 && <div className="qb-academic-filters" role="group" aria-label="Academic question bank filters">
       <label>Term<select aria-label="Filter by term" value={termFilter} onChange={(event) => { setTermFilter(event.target.value); setCourseFilter(""); setChosen(undefined); setLimit(12); }}>
         <option value="">All terms</option>{termsAvailable.map((term) => <option key={term} value={term}>{term}</option>)}
@@ -173,12 +216,12 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
         {visibleBranches.map((item, index) => <div className="cb-branch" key={item.key}>
           {(index === 0 || visibleBranches[index - 1].term !== item.term) && <p className="cb-term">{item.term}</p>}
           {(index === 0 || visibleBranches[index - 1].course !== item.course || visibleBranches[index - 1].term !== item.term) && <p className="cb-course">{item.course}</p>}
-          <button className="cb-module" aria-expanded={branch?.key === item.key} onClick={() => { setChosen(item.weeks[0]?.key); setQuery(""); setLimit(12); }}>
+          <button className="cb-module" aria-expanded={branch?.key === item.key} onClick={() => { setChosen(item.weeks[0] ? { key: item.weeks[0].key, scopeKey } : undefined); setQuery(""); setLimit(12); }}>
             <ChevronRight size={14} aria-hidden="true" className={branch?.key === item.key ? "cb-rotated" : ""} /><b>{item.module}</b><span>{item.weeks.length} weeks</span>
           </button>
           {branch?.key === item.key && <ul>{item.weeks.map((week) => <li key={week.key}><button aria-current={active?.key === week.key ? "true" : undefined}
             aria-label={`${week.label} ${week.questionIds.length}`} aria-description={`${week.ready} of ${week.questionIds.length} ready for practice`}
-            onClick={() => { setChosen(week.key); setQuery(""); setLimit(12); }}><span>{week.label}</span><small>{week.ready}/{week.questionIds.length} ready</small></button></li>)}</ul>}
+            onClick={() => { setChosen({ key: week.key, scopeKey }); setQuery(""); setLimit(12); }}><span>{week.label}</span><small>{week.ready}/{week.questionIds.length} ready</small></button></li>)}</ul>}
         </div>)}
       </nav>
       <div className="cb-content">
@@ -207,7 +250,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
               {onSelectionChange && <input type="checkbox" aria-label={`Include ${set.title}`} checked={selected.has(set.id)} onChange={() => toggle([set.id])} />}
               <div className="cb-set-mark" aria-hidden="true">{images ? <Images size={ICON_SIZE.control} /> : <FileText size={ICON_SIZE.control} />}</div>
               <div className="cb-set-copy"><span className="cb-set-kicker"><span className={`cb-source ${set.kind === "generated" ? "cb-generated" : ""}`}>{bankSource(set)}</span>{images > 0 && <span className="cb-image-count">{images} with image references</span>}</span>
-                {renderSet ? <button className="cb-set-title" onClick={() => setOpenedSet(set.id)}>{set.title}<ArrowUpRight size={14} aria-hidden="true" /></button> : <b>{set.title}</b>}
+                {renderSet ? <button className="cb-set-title" onClick={() => { setDetailInvalidated(false); setOpenedSet({ id: set.id, scopeKey }); }}>{set.title}<ArrowUpRight size={14} aria-hidden="true" /></button> : <b>{set.title}</b>}
                 <small>{search ? `${module.module} / ${week.label} · ` : ""}{state.stored} stored · {state.ready} ready{state.reviewSuggested ? ` · ${state.reviewSuggested} review suggested` : ""}{state.unresolved ? ` · ${state.unresolved} unresolved` : ""}{state.missing ? ` · ${state.missing} missing` : ""}</small>
                 {state.ready === 0 && <small className="qb-collection-warning" role="status">
                   {state.unresolved > 0 ? "Resolve the missing or conflicting answer evidence before practice."

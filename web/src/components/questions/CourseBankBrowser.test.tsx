@@ -216,3 +216,139 @@ describe("CourseBankBrowser shared curriculum aliases", () => {
     expect(screen.getByText("Term 4 / Neuroscience / NB Block 2")).toBeTruthy();
   });
 });
+
+describe("CourseBankBrowser dynamic handoff isolation", () => {
+  it("does not expose other-course Practice by searching an unavailable explicit week", async () => {
+    const user = userEvent.setup();
+    const onPractice = vi.fn();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 99 }} onPractice={onPractice} />);
+    await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "School");
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice School PQ 1" })).toBeNull();
+    expect(onPractice).not.toHaveBeenCalled();
+  });
+
+  it("keeps search within a verified explicit source week until the user navigates", async () => {
+    const user = userEvent.setup();
+    const onPractice = vi.fn();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={onPractice} />);
+    await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "School");
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    await user.clear(screen.getByRole("searchbox", { name: "Search question sets" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "IMCQ");
+    expect(screen.getByText("IMCQ 1")).toBeTruthy();
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+  });
+
+  it("discards a previous manual week after a new explicit handoff prop", async () => {
+    const user = userEvent.setup();
+    const onPractice = vi.fn();
+    const view = render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={onPractice} />);
+    await user.click(screen.getByRole("button", { name: /Biomolecules/ }));
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 99 }} onPractice={onPractice} />);
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice week" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Select an academic week" })).toBeTruthy();
+  });
+
+  it("closes an old focused set immediately when the incoming Tracker scope changes", async () => {
+    const user = userEvent.setup();
+    const renderSet = (entry: QuestionSet) => <div data-testid="focused-set">{entry.title}</div>;
+    const view = render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} renderSet={renderSet} />);
+    await user.click(screen.getByRole("button", { name: /IMCQ 1/ }));
+    expect(screen.getByTestId("focused-set").textContent).toBe("IMCQ 1");
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c2", module: "Biomolecules", week: 1 }} renderSet={renderSet} />);
+    expect(screen.queryByTestId("focused-set")).toBeNull();
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+  });
+});
+
+describe("CourseBankBrowser repeated Tracker handoffs", () => {
+  it("does not resurrect a prior manual week after an A to B to A handoff", async () => {
+    const user = userEvent.setup();
+    const view = render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Biomolecules/ }));
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 99 }} onPractice={vi.fn()} />);
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    expect(screen.getByText("IMCQ 1")).toBeTruthy();
+  });
+
+  it("clears an old term filter when a different explicit Tracker handoff arrives", async () => {
+    const user = userEvent.setup();
+    const view = render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "Term 2");
+    expect(screen.getByRole("combobox", { name: "Filter by term" }).getAttribute("value")).toBeNull();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c2", module: "Biomolecules", week: 1 }} onPractice={vi.fn()} />);
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+    view.rerender(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    expect(screen.getByText("IMCQ 1")).toBeTruthy();
+    expect((screen.getByRole("combobox", { name: "Filter by term" }) as HTMLSelectElement).value).toBe("");
+  });
+});
+
+describe("CourseBankBrowser explicit handoff search after manual outline selection", () => {
+  it("never turns a click on the same module into cross-course search", async () => {
+    const user = userEvent.setup();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Neuro.*weeks/ }));
+    await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "School");
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Biomolecules.*weeks/ }));
+    await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "School");
+    expect(screen.getByText("School PQ 1")).toBeTruthy();
+  });
+});
+
+describe("CourseBankBrowser focused collection eligibility", () => {
+  it("closes a held primary's focused review after a same-scope refresh and never resurrects it", async () => {
+    const user = userEvent.setup();
+    const primary = set("primary", "Original source", ["original", "sibling"], "c4", "Neuro");
+    const review: QuestionSet = { ...set("review", "Sibling review", ["sibling"], "c4", "Neuro"), kind: "review" };
+    const clean = set("clean", "Independent source", ["clean-q"], "c4", "Neuro");
+    const original = question("original", { setId: primary.id });
+    const sibling = question("sibling", { setId: primary.id });
+    const cleanQuestion = question("clean-q", { setId: clean.id });
+    const healthy = [original, sibling, cleanQuestion];
+    state.questions = healthy;
+    state.questionSets = [primary, review, clean];
+    const onPractice = vi.fn();
+    const renderSet = (entry: QuestionSet) => <button onClick={() => onPractice([entry])}>Start {entry.title}</button>;
+    const bank = () => <CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }}
+      renderSet={renderSet} onPractice={onPractice} />;
+    const view = render(bank());
+    await user.click(screen.getByRole("button", { name: "Sibling review" }));
+    expect(screen.getByRole("button", { name: "Start Sibling review" })).toBeTruthy();
+    state.questions = [...healthy, question("original", { setId: primary.id, correctKey: "B" })];
+    const snapshot = structuredClone({ questions: state.questions, sets: state.questionSets });
+    view.rerender(bank());
+    expect(screen.queryByRole("button", { name: "Start Sibling review" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice Sibling review" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Practice Original source" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("searchbox", { name: "Search question sets" }));
+    expect(onPractice).not.toHaveBeenCalled();
+    expect({ questions: state.questions, sets: state.questionSets }).toEqual(snapshot);
+    await user.click(screen.getByRole("button", { name: "Practice week" }));
+    expect(onPractice).toHaveBeenCalledWith([clean]);
+
+    state.questions = healthy;
+    view.rerender(bank());
+    expect(screen.queryByRole("button", { name: "Start Sibling review" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Sibling review" }));
+    expect(screen.getByRole("button", { name: "Start Sibling review" })).toBeTruthy();
+  });
+
+  it("keeps an eligible focused collection open on an unrelated same-scope refresh", async () => {
+    const user = userEvent.setup();
+    const renderSet = (entry: QuestionSet) => <div data-testid="focused-set">{entry.title}</div>;
+    const bank = () => <CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} renderSet={renderSet} />;
+    const view = render(bank());
+    await user.click(screen.getByRole("button", { name: "IMCQ 1" }));
+    state.questions = [...state.questions, question("unrelated")];
+    view.rerender(bank());
+    expect(screen.getByTestId("focused-set").textContent).toBe("IMCQ 1");
+  });
+});
