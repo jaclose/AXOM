@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import { Activity, BookOpen, CalendarDays, Clock, HelpCircle, History, Layers, Minus, Plus, Target, Timer, TrendingUp, X, Zap } from "lucide-react";
 import { useStore } from "../lib/store";
@@ -23,6 +23,8 @@ import { productivityInsight, formatStudyMinutes, recordedActivityEvidence } fro
 import { usePomodoro } from "../lib/pomodoro";
 import { ActivityIntelligence } from "../components/productivity/ActivityIntelligence";
 import { ProductivitySaveStatus, useProductivitySaveStatus } from "../components/productivity/ProductivitySaveStatus";
+import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../lib/localVault";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope, type QuestionAttachmentScope } from "../lib/questionAttachmentScope";
 import "../styles/productivity.css";
 
 export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
@@ -34,6 +36,74 @@ export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
 
 type ManualQuantityType = "cards" | "questions" | "pages" | "repetitions" | "count";
 
+type ManualDraftOwner = {
+  scope: QuestionAttachmentScope;
+  profileId: string | undefined;
+  dayKey: string;
+};
+
+type ManualDraftFields = {
+  manualType: string;
+  manualMinutes: string;
+  manualQuantity: string;
+  manualQuantityKind: ManualQuantityType;
+  manualNote: string;
+  manualTrackerId: string;
+};
+
+type ManualDraft = ManualDraftOwner & ManualDraftFields;
+
+const EMPTY_MANUAL_DRAFT: ManualDraftFields = {
+  manualType: "", manualMinutes: "", manualQuantity: "", manualQuantityKind: "count",
+  manualNote: "", manualTrackerId: "",
+};
+
+function sameManualDraftOwner(a: ManualDraftOwner, b: ManualDraftOwner) {
+  return a.scope === b.scope && a.profileId === b.profileId && a.dayKey === b.dayKey;
+}
+
+function hasManualDraft(draft: ManualDraftFields) {
+  // Category and quantity kind are sticky form preferences, not unsaved activity.
+  return Boolean(draft.manualType || draft.manualMinutes || draft.manualQuantity || draft.manualNote);
+}
+
+function manualTrackerAvailable(trackers: readonly { id: string; archived: boolean }[], id: string) {
+  if (!id) return true; // Explicit inference is always available.
+  const matching = trackers.filter((tracker) => tracker.id === id);
+  return matching.length === 1 && !matching[0].archived;
+}
+
+function canRecoverManualDraft(draft: ManualDraft, owner: ManualDraftOwner) {
+  // An anonymous device is not proof of identity after an account transition.
+  // A returning signed-in owner must also match the original workspace profile.
+  return !sameManualDraftOwner(draft, owner) && hasManualDraft(draft)
+    && draft.profileId === owner.profileId
+    && (draft.scope === owner.scope || Boolean(owner.scope.accountId && owner.profileId
+      && draft.scope.accountId === owner.scope.accountId));
+}
+
+function currentManualDraftOwner(owner: ManualDraftOwner) {
+  const current = useStore.getState();
+  return isQuestionAttachmentScopeCurrent(owner.scope) && current.profile.userId === owner.profileId
+    && current.activeDayKey === owner.dayKey;
+}
+
+type ManualSaveAttempt = {
+  scope: QuestionAttachmentScope;
+  profileId: string | undefined;
+  log: StudyLog;
+  phase: "pending" | "failed";
+};
+
+function currentManualOwner(attempt: ManualSaveAttempt) {
+  return isQuestionAttachmentScopeCurrent(attempt.scope) && useStore.getState().profile.userId === attempt.profileId;
+}
+
+function unchangedManualActivity(attempt: ManualSaveAttempt, logs: readonly StudyLog[]) {
+  // Never replay a replaced, removed, or ambiguously identified activity.
+  return logs.includes(attempt.log) && logs.filter((log) => log.id === attempt.log.id).length === 1;
+}
+
 const QUANTITY_META: Record<ManualQuantityType, { label: string; placeholder: string }> = {
   questions: { label: "Questions", placeholder: "20 questions" },
   cards: { label: "Cards", placeholder: "40 cards" },
@@ -44,16 +114,24 @@ const QUANTITY_META: Record<ManualQuantityType, { label: string; placeholder: st
 
 export function ProductivityPage() {
   const s = useStore();
-  const saveStatus = useProductivitySaveStatus();
+  const vaultStatus = useProductivitySaveStatus();
+  const accountScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope, getQuestionAttachmentScope);
+  const manualSaveRef = useRef<ManualSaveAttempt | null>(null);
+  const [manualSave, setManualSave] = useState<ManualSaveAttempt | null>(null);
+  const [unconfirmedManualExit, setUnconfirmedManualExit] = useState<Pick<ManualSaveAttempt, "scope" | "profileId"> | null>(null);
+  const activeManualSave = manualSave?.scope === accountScope && manualSave.profileId === s.profile.userId ? manualSave : null;
+  const saveStatus = activeManualSave?.phase ?? vaultStatus;
+  const hasUnconfirmedManualExit = unconfirmedManualExit?.scope === accountScope && unconfirmedManualExit.profileId === s.profile.userId;
   const running = usePomodoro((state) => state.running);
   const logs = useMemo(() => canonicalStudyLogs(s.logs).reverse(), [s.logs]);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
-  const [manualType, setManualType] = useState("");
-  const [manualMinutes, setManualMinutes] = useState("");
-  const [manualQuantity, setManualQuantity] = useState("");
-  const [manualQuantityKind, setManualQuantityKind] = useState<ManualQuantityType>("count");
-  const [manualNote, setManualNote] = useState("");
-  const [manualTrackerId, setManualTrackerId] = useState("");
+  // Retain displaced drafts only in this mounted page. Never publish or display
+  // them under a new identity/day, even when the workspace itself has not switched.
+  const [manualDrafts, setManualDrafts] = useState<ManualDraft[]>([]);
+  const draftOwner: ManualDraftOwner = { scope: accountScope, profileId: s.profile.userId, dayKey: s.activeDayKey };
+  const draft = manualDrafts.find((item) => sameManualDraftOwner(item, draftOwner)) ?? EMPTY_MANUAL_DRAFT;
+  const { manualType, manualMinutes, manualQuantity, manualQuantityKind, manualNote, manualTrackerId } = draft;
+  const recoverableDraft = !hasManualDraft(draft) ? manualDrafts.find((item) => canRecoverManualDraft(item, draftOwner)) : undefined;
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const strip = useInView<HTMLDivElement>();
 
@@ -71,18 +149,87 @@ export function ProductivityPage() {
   const monthly = useMemo(() => summarizePeriod(logs, currentMonthDays(s.activeDayKey), "month", s.activeDayKey, gradeTargetsFor(s.profile)), [logs, s.activeDayKey, s.profile]);
   const monthCells = useMemo(() => buildMonthCells(monthly.days), [monthly.days]);
   const calendarToday = s.activeDayKey;
-  const visibleTrackers = s.productivityTrackers.filter((tracker) => tracker.visible && !tracker.archived);
+  const categoryAvailable = manualTrackerAvailable(s.productivityTrackers, manualTrackerId);
+  const visibleTrackers = s.productivityTrackers.filter((tracker) => tracker.visible && manualTrackerAvailable(s.productivityTrackers, tracker.id));
+  const selectedHiddenTracker = categoryAvailable && manualTrackerId
+    ? s.productivityTrackers.find((tracker) => tracker.id === manualTrackerId && !tracker.visible)
+    : undefined;
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, viewKey, s.activeDayKey), [s, viewKey]);
   const recent = useMemo(() => recentActivityShortcuts(logs, s.profile.hiddenActivityShortcuts), [logs, s.profile.hiddenActivityShortcuts]);
   const recentSignatures = useMemo(() => new Set(recent.map((item) => item.signature)), [recent]);
   const frequent = useMemo(() => frequentActivityShortcuts(logs, s.profile.hiddenActivityShortcuts, 2, 3, recentSignatures), [logs, s.profile.hiddenActivityShortcuts, recentSignatures]);
   const patternDays = new Set(logs.filter((log) => log.dayKey <= s.activeDayKey).map((log) => log.dayKey)).size;
 
+  function rememberManualSave(attempt: ManualSaveAttempt | null) {
+    manualSaveRef.current = attempt;
+    setManualSave(attempt);
+  }
+
+  async function confirmManualSave(attempt: ManualSaveAttempt, checkpoint: number) {
+    let confirmed = false;
+    try {
+      await flushLocalVaultWrites();
+      if (getVaultWriteCheckpoint() <= checkpoint) throw new Error("No workspace write was recorded.");
+      assertVaultWritesSince(checkpoint);
+      confirmed = true;
+    } catch { /* Retain the same RAM activity and require an explicit retry. */ }
+    if (manualSaveRef.current !== attempt) return;
+    rememberManualSave(!currentManualOwner(attempt) || confirmed ? null : { ...attempt, phase: "failed" });
+  }
+
+  function retryManualSave() {
+    const attempt = manualSaveRef.current;
+    const current = useStore.getState();
+    if (!attempt || attempt.phase !== "failed" || !currentManualOwner(attempt)
+      || !unchangedManualActivity(attempt, current.logs)) return;
+    const checkpoint = getVaultWriteCheckpoint();
+    const pending: ManualSaveAttempt = { ...attempt, phase: "pending" };
+    rememberManualSave(pending);
+    // Persist the current workspace, not a captured snapshot or a new log ID.
+    // The normal vault CAS and account/recovery constraints remain authoritative.
+    useStore.setState({ logs: current.logs });
+    void confirmManualSave(pending, checkpoint);
+  }
+
+  function exitChangedManualRecovery(attempt: ManualSaveAttempt) {
+    const current = useStore.getState();
+    if (manualSaveRef.current !== attempt || attempt.phase !== "failed" || !currentManualOwner(attempt)
+      || unchangedManualActivity(attempt, current.logs)) return;
+    // This is an explicit exit from retry, not a save or reconciliation receipt.
+    // Never replay the old row, remove a claimant, or modify habit contributions.
+    setUnconfirmedManualExit({ scope: attempt.scope, profileId: attempt.profileId });
+    rememberManualSave(null);
+  }
+
+  function patchManualDraft(patch: Partial<ManualDraftFields>) {
+    if (!currentManualDraftOwner(draftOwner)) return;
+    setManualDrafts((previous) => {
+      const existing = previous.find((item) => sameManualDraftOwner(item, draftOwner));
+      const next = { ...EMPTY_MANUAL_DRAFT, ...existing, ...draftOwner, ...patch };
+      return [next, ...previous.filter((item) => !sameManualDraftOwner(item, draftOwner))];
+    });
+  }
+
+  function recoverManualDraft() {
+    if (!recoverableDraft || !currentManualDraftOwner(draftOwner)) return;
+    setManualDrafts((previous) => {
+      const existing = previous.find((item) => sameManualDraftOwner(item, draftOwner));
+      if ((existing && hasManualDraft(existing)) || !previous.includes(recoverableDraft)
+        || !canRecoverManualDraft(recoverableDraft, draftOwner)) return previous;
+      return [{ ...recoverableDraft, ...draftOwner }, ...previous.filter((item) =>
+        item !== recoverableDraft && !sameManualDraftOwner(item, draftOwner))];
+    });
+  }
+
   function logManual() {
     const minutes = Number(manualMinutes) || 0;
     const quantity = Number(manualQuantity) || 0;
-    if (!manualType.trim()) return;
-    s.logActivity({
+    const current = useStore.getState();
+    if (!manualType.trim() || !currentManualDraftOwner(draftOwner)
+      || !manualTrackerAvailable(current.productivityTrackers, manualTrackerId)
+      || (manualSaveRef.current && currentManualOwner(manualSaveRef.current))) return;
+    const checkpoint = getVaultWriteCheckpoint();
+    current.logActivity({
       label: manualType,
       trackerId: manualTrackerId || undefined,
       minutes,
@@ -91,20 +238,26 @@ export function ProductivityPage() {
       quantityLabel: quantity ? manualQuantityKind : undefined,
       note: manualNote || undefined,
     });
-    setManualType(""); setManualMinutes(""); setManualQuantity(""); setManualNote("");
+    const log = useStore.getState().logs[0];
+    if (log && !current.logs.includes(log)) {
+      const attempt: ManualSaveAttempt = { scope: accountScope, profileId: current.profile.userId, log, phase: "pending" };
+      rememberManualSave(attempt);
+      void confirmManualSave(attempt, checkpoint);
+    }
+    patchManualDraft({ manualType: "", manualMinutes: "", manualQuantity: "", manualNote: "" });
   }
 
   function fillShortcut(shortcut: ActivityShortcut) {
-    setManualType(shortcut.label);
-    setManualTrackerId(shortcut.trackerId ?? "");
-    setManualMinutes(shortcut.minutes ? String(shortcut.minutes) : "");
-    setManualQuantity(shortcut.quantity ? String(shortcut.quantity) : "");
     const semantic = shortcut.quantityLabel?.toLowerCase();
-    setManualQuantityKind(
-      shortcut.quantityKind === "count" && (semantic === "pages" || semantic === "repetitions")
+    patchManualDraft({
+      manualType: shortcut.label,
+      manualTrackerId: shortcut.trackerId ?? "",
+      manualMinutes: shortcut.minutes ? String(shortcut.minutes) : "",
+      manualQuantity: shortcut.quantity ? String(shortcut.quantity) : "",
+      manualQuantityKind: shortcut.quantityKind === "count" && (semantic === "pages" || semantic === "repetitions")
         ? semantic
         : shortcut.quantityKind ?? "count",
-    );
+    });
   }
 
   function hideShortcut(signature: string) {
@@ -117,6 +270,7 @@ export function ProductivityPage() {
     <>
       {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
       <ProductivitySaveStatus status={saveStatus} />
+      {hasUnconfirmedManualExit && <p className="productivity-save" role="status">An earlier activity save is still unconfirmed. Review Activity history and Settings before recording it again.</p>}
       <div className="productivity-primary-grid">
       <GlassCard pad id="productivity-log" data-tour="log" data-module-tour="productivity-log">
         <PanelHeader
@@ -135,13 +289,17 @@ export function ProductivityPage() {
 
         {isActive ? (
           <>
+            {recoverableDraft && <div className="row wrap gap6">
+              <span role="status">An unsaved activity draft from {prettyDate(`${recoverableDraft.dayKey}T12:00:00`)} is still in this page.</span>
+              <GButton size="sm" onClick={recoverManualDraft}>Use earlier draft for today</GButton>
+            </div>}
             <div className="fast-activity-logger">
-              <ActivityLabelInput value={manualType} onChange={setManualType} />
+              <ActivityLabelInput value={manualType} onChange={(value) => patchManualDraft({ manualType: value })} />
               <div className="fast-activity-measures" aria-label="Optional activity measurements">
-                <label className="fast-field"><span>How long? (optional)</span><div><input className="field" aria-label="How long in minutes?" type="number" min="0" placeholder="30" value={manualMinutes} onChange={(event) => setManualMinutes(event.target.value)} /><small>min</small></div></label>
+                <label className="fast-field"><span>How long? (optional)</span><div><input className="field" aria-label="How long in minutes?" type="number" min="0" placeholder="30" value={manualMinutes} onChange={(event) => patchManualDraft({ manualMinutes: event.target.value })} /><small>min</small></div></label>
                 <div className="fast-field quantity"><span>Quantity (optional)</span><div>
-                  <input className="field" aria-label={QUANTITY_META[manualQuantityKind].label} type="number" min="0" placeholder={QUANTITY_META[manualQuantityKind].placeholder} value={manualQuantity} onChange={(event) => setManualQuantity(event.target.value)} />
-                  <select className="field" aria-label="Quantity type" value={manualQuantityKind} onChange={(event) => setManualQuantityKind(event.target.value as ManualQuantityType)}>
+                  <input className="field" aria-label={QUANTITY_META[manualQuantityKind].label} type="number" min="0" placeholder={QUANTITY_META[manualQuantityKind].placeholder} value={manualQuantity} onChange={(event) => patchManualDraft({ manualQuantity: event.target.value })} />
+                  <select className="field" aria-label="Quantity type" value={manualQuantityKind} onChange={(event) => patchManualDraft({ manualQuantityKind: event.target.value as ManualQuantityType })}>
                     <option value="count">Count</option>
                     <option value="questions">Questions</option>
                     <option value="cards">Cards</option>
@@ -150,13 +308,26 @@ export function ProductivityPage() {
                   </select>
                 </div></div>
               </div>
-              <label className="fast-field fast-activity-note"><span>Note (optional)</span><input className="field" aria-label="Note (optional)" placeholder="Add context if it will help later" value={manualNote} onChange={(event) => setManualNote(event.target.value)} /></label>
-              <GButton variant="primary" onClick={logManual} disabled={!manualType.trim()}><Plus size={ICON_SIZE.body} /> Log</GButton>
+              <label className="fast-field fast-activity-note"><span>Note (optional)</span><input className="field" aria-label="Note (optional)" placeholder="Add context if it will help later" value={manualNote} onChange={(event) => patchManualDraft({ manualNote: event.target.value })} /></label>
+              <GButton variant="primary" onClick={logManual} disabled={!manualType.trim() || !categoryAvailable || activeManualSave !== null}><Plus size={ICON_SIZE.body} /> Log</GButton>
+              {hasManualDraft(draft) && <small>Unsaved activity drafts are kept only while this page stays open.</small>}
             </div>
+            {activeManualSave?.phase === "failed" && <div className="row wrap gap6" aria-live="polite">
+              {unchangedManualActivity(activeManualSave, s.logs) ? <>
+                <span>This activity is still in this tab. Retry saving it instead of logging it again.</span>
+                <GButton size="sm" onClick={retryManualSave}>Retry activity save</GButton>
+              </> : <>
+                <span>The activity changed before saving was confirmed. Review Activity history and Settings. Continuing does not confirm that save or remove any records.</span>
+                <GButton size="sm" onClick={() => exitChangedManualRecovery(activeManualSave)}>Continue without confirming save</GButton>
+              </>}
+            </div>}
+            {!categoryAvailable && <p role="status">The selected category is no longer available. Choose an available category or explicitly select Infer from this activity before logging.</p>}
             <details className="activity-category-disclosure">
               <summary>Category and contribution (optional)</summary>
-              <label><span>Use existing category</span><select className="field" aria-label="Productivity category" value={manualTrackerId} onChange={(event) => setManualTrackerId(event.target.value)}>
+              <label><span>Use existing category</span><select className="field" aria-label="Productivity category" value={manualTrackerId} onChange={(event) => patchManualDraft({ manualTrackerId: event.target.value })}>
                 <option value="">Infer from this activity</option>
+                {!categoryAvailable && <option value={manualTrackerId} disabled>Unavailable category</option>}
+                {selectedHiddenTracker && <option value={selectedHiddenTracker.id}>{selectedHiddenTracker.name} (hidden)</option>}
                 {visibleTrackers.map((tracker) => <option key={tracker.id} value={tracker.id}>{tracker.name}</option>)}
               </select></label>
             </details>

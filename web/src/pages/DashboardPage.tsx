@@ -73,6 +73,7 @@ const CURRENT_DASHBOARD_ID_SET = new Set<string>(CURRENT_DASHBOARD_WIDGET_IDS);
 export function DashboardPage() {
   const s = useStore();
   const [editDashboard, setEditDashboard] = useState(false);
+  const dashboardToolbarRef = useRef<HTMLDivElement>(null);
   const luster = useLuster();
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, s.activeDayKey, s.activeDayKey), [s]);
   const week = weeklySummary(s);
@@ -184,10 +185,12 @@ export function DashboardPage() {
 
       {!hiddenWidgets.has("commandBrief") && <UpNext readiness={readiness} onHide={hideUpNext} />}
 
-      <StandupPrompt />
+      <StandupPrompt restoreCloseoutFocus={() => {
+        dashboardToolbarRef.current?.querySelector<HTMLButtonElement>(".dashboard-edit-toggle")?.focus();
+      }} />
       <DoctordleReminder />
 
-      <div className="dashboard-edit-toolbar">
+      <div className="dashboard-edit-toolbar" ref={dashboardToolbarRef}>
         <DashboardNotificationCenter />
         <GhostButton
           className="dashboard-edit-toggle"
@@ -1164,7 +1167,7 @@ function ExamCountdownWidget() {
 // Conditional dashboard banner: shows the standup prompt inside the review
 // window, or a "you missed your standup" remediation strip once it lapses. It
 // disappears entirely when there's nothing to do.
-function StandupPrompt() {
+export function StandupPrompt({ restoreCloseoutFocus }: { restoreCloseoutFocus?: () => void } = {}) {
   const s = useStore();
   const accountId = useAccount((state) => state.user?.id);
   const [localDeviceId] = useState(deviceId);
@@ -1176,6 +1179,29 @@ function StandupPrompt() {
   const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today)) || journalPageComplete(s.journal, today);
   const closeoutDue = preferences.closeoutEnabled && !closeoutDone && isAfterLocalTime(preferences.closeoutTime);
   const [showCloseout, setShowCloseout] = useState(false);
+  const closingRoute = useRef<string | null>(null);
+  const restoreFocusRef = useRef(restoreCloseoutFocus);
+  restoreFocusRef.current = restoreCloseoutFocus;
+
+  const closeCloseout = () => {
+    closingRoute.current = window.location.hash;
+    setShowCloseout(false);
+  };
+
+  // Modal restores its original opener when it survives. After completion the
+  // reminder may have disappeared; only recover otherwise lost focus, after
+  // dialog cleanup and any synchronous navigation to the Journal.
+  useEffect(() => {
+    if (showCloseout || closingRoute.current === null) return;
+    const route = closingRoute.current;
+    closingRoute.current = null;
+    const frame = window.requestAnimationFrame(() => {
+      if (window.location.hash !== route || document.activeElement !== document.body
+        || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      restoreFocusRef.current?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showCloseout]);
   const [dismissed, setDismissed] = useState(() => {
     const entry = dailyLoopReminderLedger.read(today).closeout;
     return entry.disposition !== "pending"
@@ -1194,15 +1220,16 @@ function StandupPrompt() {
   useEffect(() => {
     if (dailyLoopRequest?.kind !== "closeout" || dailyLoopRequest.dayKey !== today) return;
     setDismissed(false);
-    setShowCloseout(true);
+    if (closeoutDue) setShowCloseout(true);
     clearDailyLoopRequest();
-  }, [clearDailyLoopRequest, dailyLoopRequest, today]);
+  }, [clearDailyLoopRequest, closeoutDue, dailyLoopRequest, today]);
 
-  if (!missed.length && (!closeoutDue || dismissed)) return null;
-
-  if (closeoutDue && !dismissed) {
-    return (
-      <>
+  // A completed record can appear in RAM before the final queued receipt.
+  // Keep an open dialog independent of reminder eligibility so a failed receipt
+  // cannot unmount its recovery controls. Day rollover retains its own guard.
+  return (
+    <>
+      {closeoutDue && !dismissed ? (
         <GlassCard pad className="standup-prompt-card due daily-closeout-card">
           <div className="standup-prompt-head">
             <span className="standup-prompt-mark"><BookText size={ICON_SIZE.emphasis} /></span>
@@ -1234,23 +1261,17 @@ function StandupPrompt() {
             </label>
           )}
         </GlassCard>
-        {showCloseout && <CloseoutModal onClose={() => setShowCloseout(false)} />}
-      </>
-    );
-  }
-
-  if (missed.length) {
-    return (
-      <ReflectionInbox
-        dayKeys={missed}
-        dayPlans={s.dayPlans}
-        activeDayKey={today}
-        workspaceKey={`device:${localDeviceId}:account:${accountId ?? "local"}`}
-      />
-    );
-  }
-
-  return null;
+      ) : missed.length ? (
+        <ReflectionInbox
+          dayKeys={missed}
+          dayPlans={s.dayPlans}
+          activeDayKey={today}
+          workspaceKey={`device:${localDeviceId}:account:${accountId ?? "local"}`}
+        />
+      ) : null}
+      {showCloseout && <CloseoutModal key="daily-closeout-dialog" onClose={closeCloseout} />}
+    </>
+  );
 }
 
 // Daily Check-In: optional first-open direction plus a gentle carry-over nudge.

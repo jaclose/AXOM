@@ -1,24 +1,101 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import { STORAGE_KEYS } from "../lib/brand";
+import * as localVault from "../lib/localVault";
+import { readVaultWriteFailure } from "../lib/vaultActivity";
 import { makeSeed } from "../lib/seed";
 import { makeDailyRequirement } from "../lib/dailySuccess";
 import { useStore } from "../lib/store";
 import { ProductivityPage } from "./ProductivityPage";
+import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../lib/questionAttachmentScope";
 
-beforeEach(() => {
+const storageValues = new Map<string, string>();
+const storage = {
+  get length() { return storageValues.size; },
+  clear: () => storageValues.clear(),
+  getItem: (key: string) => storageValues.get(key) ?? null,
+  key: (index: number) => [...storageValues.keys()][index] ?? null,
+  removeItem: (key: string) => { storageValues.delete(key); },
+  setItem: (key: string, value: string) => { storageValues.set(key, String(value)); },
+};
+
+const fakeIndexedDb = new IDBFactory();
+
+function deleteTestDatabase(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = fakeIndexedDb.deleteDatabase(localVault.DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Productivity test database deletion failed"));
+    request.onblocked = () => reject(new Error("Productivity test database deletion blocked"));
+  });
+}
+
+async function readPrimary(): Promise<string> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = fakeIndexedDb.open(localVault.DB_NAME);
+    request.onupgradeneeded = () => request.transaction?.abort();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Productivity test database open failed"));
+    request.onblocked = () => reject(new Error("Productivity test database open blocked"));
+  });
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(localVault.STORE_NAME, "readonly");
+      const request = tx.objectStore(localVault.STORE_NAME).get(STORAGE_KEYS.persistedState);
+      tx.oncomplete = () => {
+        if (typeof request.result === "string") resolve(request.result);
+        else reject(new Error("Productivity test primary workspace missing"));
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("Productivity test primary read failed"));
+      tx.onabort = tx.onerror;
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function checkedSeed(write: () => unknown): Promise<void> {
+  const checkpoint = localVault.getVaultWriteCheckpoint();
+  await write();
+  await localVault.flushLocalVaultWrites();
+  expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  localVault.assertVaultWritesSince(checkpoint);
+  expect(readVaultWriteFailure()).toBeNull();
+  const raw = await readPrimary();
+  expect(JSON.parse(raw).state.logs).toEqual(JSON.parse(JSON.stringify(useStore.getState().logs)));
+  expect(await localVault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(raw);
+}
+
+beforeEach(async () => {
+  await localVault.flushLocalVaultWrites();
+  vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  vi.stubGlobal("localStorage", storage);
+  await deleteTestDatabase();
+  localVault.resetLocalVaultRuntimeForTests();
+  localStorage.clear();
+  await useStore.persist.rehydrate();
   vi.stubGlobal("IntersectionObserver", class {
     observe() {}
     disconnect() {}
     unobserve() {}
   });
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
-  useStore.setState(makeSeed());
+  await checkedSeed(() => useStore.setState(makeSeed()));
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  try {
+    await localVault.flushLocalVaultWrites();
+    await deleteTestDatabase();
+    localVault.resetLocalVaultRuntimeForTests();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe("ProductivityPage daily console", () => {
@@ -136,14 +213,15 @@ describe("ProductivityPage daily console", () => {
     expect(within(bestDay).getByText("0m · 0 cards")).toBeTruthy();
   });
 
-  it("uses canonical activity for period boundaries and shortcuts without deleting duplicate records", () => {
+  it("uses canonical activity for period boundaries and shortcuts without deleting duplicate records", async () => {
     const state = makeSeed();
     state.activeDayKey = "2026-07-13";
     const old = { id: "moved", dayKey: "2026-07-01", ts: "2026-07-13T11:00:00", type: "Obsolete study label", minutes: 999, cards: 0 };
     const latest = { ...old, dayKey: state.activeDayKey, ts: "2026-07-13T12:00:00", type: "Corrected study label", minutes: 10 };
     state.logs = [old, latest, ...["2026-07-11", "2026-07-12"].map((dayKey) => ({ id: dayKey, dayKey, ts: `${dayKey}T12:00:00`, type: `Study ${dayKey}`, minutes: 10, cards: 0 }))];
     const original = structuredClone(state.logs);
-    useStore.setState(state);
+    await checkedSeed(() => useStore.setState(state));
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(original);
     render(<ProductivityPage />);
 
     const month = screen.getByText("Monthly activity calendar").closest(".glass-card") as HTMLElement;
@@ -154,6 +232,361 @@ describe("ProductivityPage daily console", () => {
     expect(screen.queryByText("Obsolete study label")).toBeNull();
     expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
     expect(useStore.getState().logs).toEqual(original);
+  });
+
+  it("prioritizes a real failed save over duplicate review and restores review after an acknowledged retry", async () => {
+    const state = makeSeed();
+    state.activeDayKey = "2026-07-13";
+    const old = { id: "moved", dayKey: "2026-07-01", ts: "2026-07-13T11:00:00", type: "Obsolete study label", minutes: 999, cards: 0 };
+    const latest = { ...old, dayKey: state.activeDayKey, ts: "2026-07-13T12:00:00", type: "Corrected study label", minutes: 10 };
+    state.logs = [old, latest, ...["2026-07-11", "2026-07-12"].map((dayKey) => ({ id: dayKey, dayKey, ts: `${dayKey}T12:00:00`, type: `Study ${dayKey}`, minutes: 10, cards: 0 }))];
+    const original = structuredClone(state.logs);
+    await checkedSeed(() => useStore.setState(state));
+    const before = await readPrimary();
+    render(<ProductivityPage />);
+    expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
+
+    const attempted = [...original, { id: "new-activity", dayKey: state.activeDayKey, ts: "2026-07-13T13:00:00", type: "New study", minutes: 5, cards: 0 }];
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      await act(async () => {
+        await useStore.setState({ logs: attempted });
+        await localVault.flushLocalVaultWrites();
+      });
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+      expect(readVaultWriteFailure()).not.toBeNull();
+      expect(screen.getByRole("heading", { name: "Check your save" })).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: "Review activity records" })).toBeNull();
+      expect(useStore.getState().logs).toEqual(attempted);
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+    await act(async () => { await checkedSeed(() => useStore.setState({ logs: attempted })); });
+    expect(screen.queryByRole("heading", { name: "Check your save" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(attempted);
+    expect(useStore.getState().logs).toEqual(attempted);
+  });
+
+  it("retries a refused manual activity through its real control without allocating another ID", async () => {
+    const before = await readPrimary();
+    render(<ProductivityPage />);
+    const fill = () => {
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Practice questions" } });
+      fireEvent.change(screen.getByLabelText("How long in minutes?"), { target: { value: "5" } });
+    };
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    let attempted: ReturnType<typeof useStore.getState>["logs"];
+    try {
+      fill();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      await screen.findByRole("button", { name: "Retry activity save" });
+      attempted = structuredClone(useStore.getState().logs);
+      expect(attempted).toHaveLength(1);
+      expect(attempted[0]).toMatchObject({ type: "Practice questions", minutes: 5 });
+      expect(readVaultWriteFailure()).not.toBeNull();
+      fill();
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Retry activity save" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      await screen.findByRole("button", { name: "Retry activity save" });
+      expect(useStore.getState().logs).toEqual(attempted);
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry activity save" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull());
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+    localVault.assertVaultWritesSince(checkpoint);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(attempted);
+    expect(useStore.getState().logs).toEqual(attempted);
+    expect(readVaultWriteFailure()).toBeNull();
+    expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Log" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    const repeated = useStore.getState().logs;
+    expect(repeated).toHaveLength(2);
+    expect(repeated[0].id).not.toBe(attempted[0].id);
+    expect(repeated[1]).toEqual(attempted[0]);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(repeated)));
+    await act(async () => { await useStore.persist.rehydrate(); });
+    expect(useStore.getState().logs.map((log) => log.id)).toEqual(repeated.map((log) => log.id));
+  });
+
+  it.each(["cloned", "removed", "duplicate"] as const)("allows an explicit non-writing exit when a refused activity is %s", async (change) => {
+    const initial = getQuestionAttachmentScope();
+    const before = await readPrimary();
+    render(<ProductivityPage />);
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Original activity" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      await screen.findByRole("button", { name: "Retry activity save" });
+      const row = useStore.getState().logs[0];
+      const changed = change === "removed" ? [] : change === "cloned" ? [{ ...row, academic: !row.academic }] : [row, { ...row }];
+      await act(async () => {
+        useStore.setState({ logs: changed });
+        await localVault.flushLocalVaultWrites();
+      });
+      expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull();
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Distinct later activity" } });
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      const checkpoint = localVault.getVaultWriteCheckpoint();
+      const current = useStore.getState();
+      fireEvent.click(screen.getByRole("button", { name: "Continue without confirming save" }));
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(useStore.getState()).toBe(current);
+      expect(screen.getByText(/An earlier activity save is still unconfirmed/)).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(false);
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+      expect(await readPrimary()).toBe(before);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      localVault.assertVaultWritesSince(checkpoint);
+      expect(readVaultWriteFailure()).toBeNull();
+      const after = useStore.getState().logs;
+      expect(after[0]).toMatchObject({ type: "Distinct later activity" });
+      expect(after[0].id).not.toBe(row.id);
+      expect(after.slice(1)).toEqual(changed);
+      expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(after)));
+      expect(screen.getByText(/An earlier activity save is still unconfirmed/)).toBeTruthy();
+      act(() => setQuestionAttachmentAccount(initial.accountId === "synthetic-other" ? "synthetic-different" : "synthetic-other"));
+      expect(screen.queryByText(/An earlier activity save is still unconfirmed/)).toBeNull();
+      act(() => setQuestionAttachmentAccount(initial.accountId));
+      expect(screen.queryByText(/An earlier activity save is still unconfirmed/)).toBeNull();
+    } finally {
+      setQuestionAttachmentAccount(initial.accountId);
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+  });
+
+  it("never offers a refused activity retry to a different account generation", async () => {
+    const initial = getQuestionAttachmentScope();
+    const before = await readPrimary();
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      render(<ProductivityPage />);
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Private activity" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      const retry = await screen.findByRole("button", { name: "Retry activity save" });
+      const checkpoint = localVault.getVaultWriteCheckpoint();
+      act(() => setQuestionAttachmentAccount(initial.accountId === "synthetic-other" ? "synthetic-different" : "synthetic-other"));
+      expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull();
+      act(() => setQuestionAttachmentAccount(initial.accountId));
+      expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull();
+      fireEvent.click(retry);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+    } finally {
+      setQuestionAttachmentAccount(initial.accountId);
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+  });
+
+  it("quarantines unsaved fields across A to B to A and restores only by explicit owner action", async () => {
+    const initial = getQuestionAttachmentScope();
+    const profileId = "synthetic-draft-workspace";
+    await checkedSeed(() => useStore.setState({ profile: { ...useStore.getState().profile, userId: profileId } }));
+    const before = await readPrimary();
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const value = (label: string) => (screen.getByLabelText(label) as HTMLInputElement | HTMLSelectElement).value;
+    const fill = (label: string, note: string) => {
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: label } });
+      fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: note } });
+    };
+    try {
+      act(() => setQuestionAttachmentAccount("synthetic-draft-A"));
+      render(<ProductivityPage />);
+      fill("Private A activity", "Private A note");
+      fireEvent.change(screen.getByLabelText("How long in minutes?"), { target: { value: "25" } });
+      fireEvent.change(screen.getByLabelText("Quantity type"), { target: { value: "questions" } });
+      fireEvent.change(screen.getByLabelText("Questions"), { target: { value: "30" } });
+
+      // Keep the same mounted component and workspace profile across the account
+      // transition. A new auth generation alone must invalidate the draft.
+      act(() => setQuestionAttachmentAccount("synthetic-draft-B"));
+      expect(value("What did you do?")).toBe("");
+      expect(value("Note (optional)")).toBe("");
+      expect(value("How long in minutes?")).toBe("");
+      expect(value("Quantity type")).toBe("count");
+      expect(value("Count")).toBe("");
+      expect(value("Productivity category")).toBe("");
+      expect(screen.queryByRole("button", { name: "Use earlier draft for today" })).toBeNull();
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      fill("Private B activity", "Private B note");
+
+      act(() => setQuestionAttachmentAccount("synthetic-draft-A"));
+      expect(value("What did you do?")).toBe("");
+      expect(value("Note (optional)")).toBe("");
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(await readPrimary()).toBe(before);
+      fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+      expect(value("What did you do?")).toBe("Private A activity");
+      expect(value("Note (optional)")).toBe("Private A note");
+      expect(value("How long in minutes?")).toBe("25");
+      expect(value("Quantity type")).toBe("questions");
+      expect(value("Questions")).toBe("30");
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      localVault.assertVaultWritesSince(checkpoint);
+      expect(useStore.getState().logs).toHaveLength(1);
+      expect(useStore.getState().logs[0]).toMatchObject({ type: "Private A activity", note: "Private A note", minutes: 25, quantity: 30 });
+      expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(useStore.getState().logs)));
+    } finally {
+      setQuestionAttachmentAccount(initial.accountId);
+    }
+  });
+
+  it("never implicitly carries an unsaved activity to a new day", async () => {
+    const beforeDay = useStore.getState().activeDayKey;
+    const tomorrow = new Date(`${beforeDay}T12:00:00Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const nextDay = tomorrow.toISOString().slice(0, 10);
+    render(<ProductivityPage />);
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Previous day draft" } });
+    fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "Previous day note" } });
+    await act(async () => { await checkedSeed(() => useStore.setState({ activeDayKey: nextDay })); });
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Note (optional)") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Previous day draft");
+    expect((screen.getByLabelText("Note (optional)") as HTMLInputElement).value).toBe("Previous day note");
+    expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+
+  it.each(["archived", "missing", "duplicate", "hidden"] as const)("requires a valid recovered category (%s)", async (change) => {
+    const state = useStore.getState();
+    const tracker = state.productivityTrackers.find((item) => item.id === "tracker-class")!;
+    expect(tracker).toMatchObject({ archived: false, visible: true, contributesToAcademicStudy: false, contributesToTotalProductiveTime: false });
+    const next = new Date(`${state.activeDayKey}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    render(<ProductivityPage />);
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Class review" } });
+    fireEvent.change(screen.getByLabelText("How long in minutes?"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("Productivity category"), { target: { value: tracker.id } });
+    const trackers = state.productivityTrackers.filter((item) => item.id !== tracker.id);
+    if (change === "archived") trackers.push({ ...tracker, archived: true });
+    if (change === "duplicate") trackers.push(tracker, { ...tracker, name: "Conflicting class" });
+    if (change === "hidden") trackers.push({ ...tracker, visible: false });
+    await act(async () => {
+      await checkedSeed(() => useStore.setState({ activeDayKey: next.toISOString().slice(0, 10), productivityTrackers: trackers }));
+    });
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const before = await readPrimary();
+    fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+    const select = screen.getByLabelText("Productivity category") as HTMLSelectElement;
+    const log = screen.getByRole("button", { name: "Log" }) as HTMLButtonElement;
+    expect(select.value).toBe(tracker.id);
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Class review");
+    expect((screen.getByLabelText("How long in minutes?") as HTMLInputElement).value).toBe("20");
+    if (change !== "hidden") {
+      expect(screen.getByText(/The selected category is no longer available/)).toBeTruthy();
+      expect(log.disabled).toBe(true);
+      fireEvent.click(log);
+      expect(useStore.getState().logs).toHaveLength(0);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(await readPrimary()).toBe(before);
+      // Only an intentional inference choice may remove the previous category.
+      fireEvent.change(select, { target: { value: "" } });
+    } else {
+      expect(select.selectedOptions[0].textContent).toContain("(hidden)");
+      expect(screen.queryByText(/The selected category is no longer available/)).toBeNull();
+    }
+    expect(log.disabled).toBe(false);
+    expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+    await act(async () => {
+      fireEvent.click(log);
+      await localVault.flushLocalVaultWrites();
+    });
+    localVault.assertVaultWritesSince(checkpoint);
+    const rows = useStore.getState().logs;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ type: "Class review", minutes: 20, academic: change !== "hidden", productive: change !== "hidden" });
+    expect(rows[0].trackerId).toBe(change === "hidden" ? tracker.id : undefined);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(rows)));
+  });
+
+  it("keeps saved form preferences without obscuring an older substantive draft", async () => {
+    const next = new Date(`${useStore.getState().activeDayKey}T12:00:00Z`);
+    render(<ProductivityPage />);
+    const value = (label: string) => (screen.getByLabelText(label) as HTMLInputElement | HTMLSelectElement).value;
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Earlier real draft" } });
+    fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "Earlier note" } });
+    next.setUTCDate(next.getUTCDate() + 1);
+    await act(async () => { await checkedSeed(() => useStore.setState({ activeDayKey: next.toISOString().slice(0, 10) })); });
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Saved question practice" } });
+    fireEvent.change(screen.getByLabelText("Quantity type"), { target: { value: "questions" } });
+    fireEvent.change(screen.getByLabelText("Questions"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Productivity category"), { target: { value: "tracker-class" } });
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Log" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    localVault.assertVaultWritesSince(checkpoint);
+    expect(value("Quantity type")).toBe("questions");
+    expect(value("Productivity category")).toBe("tracker-class");
+    expect(screen.queryByText("Unsaved activity drafts are kept only while this page stays open.")).toBeNull();
+    const before = await readPrimary();
+    const afterSave = localVault.getVaultWriteCheckpoint();
+    fireEvent.click(screen.getByRole("button", { name: "Use earlier draft for today" }));
+    expect(value("What did you do?")).toBe("Earlier real draft");
+    expect(value("Note (optional)")).toBe("Earlier note");
+    expect(localVault.getVaultWriteCheckpoint()).toBe(afterSave);
+    expect(await readPrimary()).toBe(before);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Log" }));
+      await localVault.flushLocalVaultWrites();
+    });
+    localVault.assertVaultWritesSince(afterSave);
+    const saved = useStore.getState().logs;
+    expect(saved).toHaveLength(2);
+    expect(saved.map((row) => row.type)).toEqual(["Earlier real draft", "Saved question practice"]);
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(saved)));
+    next.setUTCDate(next.getUTCDate() + 1);
+    await act(async () => { await checkedSeed(() => useStore.setState({ activeDayKey: next.toISOString().slice(0, 10) })); });
+    expect(screen.queryByRole("button", { name: "Use earlier draft for today" })).toBeNull();
   });
 
   it("keeps earlier activity visible after selecting a new target and shows only the picked day's history", () => {

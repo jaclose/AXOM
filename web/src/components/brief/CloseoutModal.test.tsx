@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
+import { STORAGE_KEYS } from "../../lib/brand";
 import { makeDailyRequirement } from "../../lib/dailySuccess";
 import type { QuestionRecord } from "../../lib/questions";
 import { makeSeed } from "../../lib/seed";
@@ -9,20 +11,112 @@ import type { JournalEntry } from "../../lib/types";
 import { useUi } from "../../lib/uiStore";
 import * as localVault from "../../lib/localVault";
 import { CloseoutModal } from "./CloseoutModal";
+import { StandupPrompt } from "../../pages/DashboardPage";
+import { SyncCoordinator } from "../../lib/sync/syncCoordinator";
+import { SYNC_METADATA_KEY } from "../../lib/sync/syncMetadata";
+import type { SyncTransport } from "../../lib/sync/syncTypes";
+import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
 
 const DAY = "2035-04-13";
 
+function renderDashboardCloseout(restoreCloseoutFocus = () => screen.getByRole("button", { name: "Edit dashboard" }).focus()) {
+  render(<><StandupPrompt restoreCloseoutFocus={restoreCloseoutFocus} /><button>Edit dashboard</button></>);
+  const opener = screen.getByRole("button", { name: "Quick closeout" });
+  opener.focus();
+  fireEvent.click(opener);
+  expect(screen.getByRole("dialog", { name: "Daily closeout" }).contains(document.activeElement)).toBe(true);
+  return opener;
+}
+
+const storageValues = new Map<string, string>();
+const storage = {
+  get length() { return storageValues.size; },
+  clear: () => storageValues.clear(),
+  getItem: (key: string) => storageValues.get(key) ?? null,
+  key: (index: number) => [...storageValues.keys()][index] ?? null,
+  removeItem: (key: string) => { storageValues.delete(key); },
+  setItem: (key: string, value: string) => { storageValues.set(key, String(value)); },
+};
+
+const fakeIndexedDb = new IDBFactory();
+
+function deleteTestDatabase(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = fakeIndexedDb.deleteDatabase(localVault.DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Closeout test database deletion failed"));
+    request.onblocked = () => reject(new Error("Closeout test database deletion blocked"));
+  });
+}
+
+async function readPrimary(): Promise<string> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = fakeIndexedDb.open(localVault.DB_NAME);
+    request.onupgradeneeded = () => request.transaction?.abort();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Closeout test database open failed"));
+    request.onblocked = () => reject(new Error("Closeout test database open blocked"));
+  });
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(localVault.STORE_NAME, "readonly");
+      const request = tx.objectStore(localVault.STORE_NAME).get(STORAGE_KEYS.persistedState);
+      tx.oncomplete = () => {
+        if (typeof request.result === "string") resolve(request.result);
+        else reject(new Error("Closeout test primary workspace missing"));
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("Closeout test primary read failed"));
+      tx.onabort = tx.onerror;
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function checkedSeed(write: () => unknown): Promise<void> {
+  const checkpoint = localVault.getVaultWriteCheckpoint();
+  await write();
+  await localVault.flushLocalVaultWrites();
+  expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  localVault.assertVaultWritesSince(checkpoint);
+  await expectPersistedCloseout();
+}
+
+async function expectPersistedCloseout(): Promise<void> {
+  const raw = await readPrimary();
+  const persisted = JSON.parse(raw).state;
+  const { closeouts, journal, tasks, questions, logs, activeDayKey } = useStore.getState();
+  // JSON round-trip strips optional undefined fields exactly as the storage adapter does.
+  expect(persisted).toMatchObject(JSON.parse(JSON.stringify({ closeouts, journal, tasks, questions, logs, activeDayKey })));
+  expect(persisted.closeouts).toEqual(JSON.parse(JSON.stringify(closeouts)));
+  expect(persisted.journal).toEqual(JSON.parse(JSON.stringify(journal)));
+  expect(await localVault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(raw);
+}
+
 beforeEach(async () => {
+  await localVault.flushLocalVaultWrites();
+  vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  vi.stubGlobal("localStorage", storage);
+  await deleteTestDatabase();
+  localVault.resetLocalVaultRuntimeForTests();
   localStorage.clear();
-  setCloseoutState();
+  await useStore.persist.rehydrate();
+  await checkedSeed(setCloseoutState);
   useUi.setState({ journalDay: null });
   window.location.hash = "#dashboard";
-  await localVault.flushLocalVaultWrites();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
+  try {
+    await localVault.flushLocalVaultWrites();
+    await deleteTestDatabase();
+    localVault.resetLocalVaultRuntimeForTests();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe("CloseoutModal daily loop", () => {
@@ -64,6 +158,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     expect(useStore.getState().closeouts).toHaveLength(1);
     expect(useStore.getState().closeouts[0]).toMatchObject({
       dayKey: DAY,
@@ -89,7 +184,7 @@ describe("CloseoutModal daily loop", () => {
       energy: "Medium",
       rating: "Useful",
     };
-    useStore.setState({ journal: [existing] });
+    await checkedSeed(() => useStore.setState({ journal: [existing] }));
     const onClose = vi.fn();
     render(<CloseoutModal onClose={onClose} />);
 
@@ -98,6 +193,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     expect(useStore.getState().journal).toEqual([existing]);
     expect(useStore.getState().closeouts[0].completedSummary).toBe("New closeout reflection");
   });
@@ -112,7 +208,7 @@ describe("CloseoutModal daily loop", () => {
       energy: "Medium",
       rating: "Useful",
     };
-    useStore.setState({ journal: [existing] });
+    await checkedSeed(() => useStore.setState({ journal: [existing] }));
     const onClose = vi.fn();
     render(<CloseoutModal onClose={onClose} />);
 
@@ -125,6 +221,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     const [page] = useStore.getState().journal;
     expect(useStore.getState().journal).toHaveLength(1);
     expect(page).toMatchObject({
@@ -153,6 +250,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     unsubscribe();
     expect(stateChanges).toBe(1);
     expect(useStore.getState().journal).toHaveLength(1);
@@ -175,11 +273,584 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await expectPersistedCloseout();
     expect(useStore.getState().closeouts).toHaveLength(1);
     expect(useStore.getState().closeouts[0].tomorrowFirstTask).toBe("Start cardiology");
     expect(useStore.getState().journal).toHaveLength(0);
     expect(useUi.getState().journalDay).toBe(DAY);
     expect(window.location.hash).toBe("#journal");
+  });
+
+  it("keeps the combined closeout and journal unsaved when both physical stores reject the write", async () => {
+    const before = await readPrimary();
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Keep this unsaved win" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Create today’s journal page from this closeout/i }));
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open/i);
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue("Keep this unsaved win")).toBeTruthy();
+      expect(window.location.hash).toBe("#dashboard");
+      expect(useUi.getState().journalDay).toBeNull();
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+  });
+
+  it.each([
+    { label: "revoked consent, new page", existing: false, retryOptIn: false },
+    { label: "edited consent, new page", existing: false, retryOptIn: true },
+    { label: "revoked consent, existing page", existing: true, retryOptIn: false },
+    { label: "edited consent, existing page", existing: true, retryOptIn: true },
+  ])("persists only the latest journal consent after a real storage refusal: $label", async ({ existing, retryOptIn }) => {
+    const authored: JournalEntry = {
+      id: "authored-before-closeout",
+      date: `${DAY}T09:00:00`,
+      today: "Authored reflection",
+      tomorrow: "Authored plan",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    if (existing) await checkedSeed(() => useStore.setState({ journal: [authored] }));
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Rejected draft reflection" } });
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Rejected draft win" } });
+    fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Rejected draft obstacle" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open/i);
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("#dashboard");
+      expect(useUi.getState().journalDay).toBeNull();
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+
+    fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Final reflection" } });
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Final win" } });
+    fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Final obstacle" } });
+    if (!retryOptIn) fireEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("checkbox")).toHaveProperty("checked", retryOptIn);
+    const retryCheckpoint = localVault.getVaultWriteCheckpoint();
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(retryCheckpoint);
+    localVault.assertVaultWritesSince(retryCheckpoint);
+    const persisted = JSON.parse(await readPrimary()).state;
+    expect(persisted.closeouts).toHaveLength(1);
+    expect(persisted.closeouts[0]).toMatchObject({ dayKey: DAY, completedSummary: "Final reflection", oneWin: "Final win", blocker: "Final obstacle" });
+    expect(persisted.tasks).toEqual(initial.tasks);
+    expect(persisted.questions).toEqual(initial.questions);
+    expect(persisted.logs).toEqual(initial.logs);
+    if (!retryOptIn) {
+      expect(persisted.journal).toEqual(initial.journal);
+    } else {
+      expect(persisted.journal).toHaveLength(1);
+      expect(persisted.journal[0]).toMatchObject({
+        today: existing ? authored.today : "Final reflection",
+        blockers: "Final obstacle",
+        wins: ["Final win"],
+        ...(existing ? { id: authored.id, tomorrow: authored.tomorrow } : {}),
+      });
+      expect(JSON.stringify(persisted.journal)).not.toContain("Rejected draft");
+    }
+    await expectPersistedCloseout();
+  });
+
+  it("does not save a refused closeout through a later unrelated task write", async () => {
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    await rejectOptedInDraft();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(await readPrimary()).toBe(before);
+
+    // An independent successful write must not implicitly accept the failed draft.
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    await useStore.getState().toggleTask("open-task");
+    await localVault.flushLocalVaultWrites();
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+    localVault.assertVaultWritesSince(checkpoint);
+    const persisted = JSON.parse(await readPrimary()).state;
+    expect(persisted.tasks.find((task: { id: string }) => task.id === "open-task").done).toBe(true);
+    expect(persisted.questions).toEqual(initial.questions);
+    expect(persisted.logs).toEqual(initial.logs);
+    expect(persisted.journal).toEqual(initial.journal);
+    expect(persisted.closeouts).toEqual(initial.closeouts);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it.each(["automatic", "manual"] as const)("excludes a refused draft from a real coordinator %s snapshot", async (reason) => {
+    const authored: JournalEntry = {
+      id: "authored-before-account-protection",
+      date: `${DAY}T09:00:00`,
+      today: "Already accepted reflection",
+      tomorrow: "Already accepted plan",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    await checkedSeed(() => useStore.setState({ journal: [authored] }));
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const accountUserId = "synthetic-closeout-account";
+    localStorage.setItem(SYNC_METADATA_KEY, JSON.stringify({
+      accountUserId, deviceId: "synthetic-closeout-device", baseRevision: 1, pending: false, attempt: 0,
+    }));
+    const push = vi.fn<SyncTransport["push"]>().mockResolvedValue({
+      status: "accepted", revision: 2, revisionId: "synthetic-revision-2", idempotent: false,
+    });
+    const coordinator = new SyncCoordinator({ push, history: async () => [], revision: vi.fn() }, useStore.getState, 60_000);
+    // The real watcher queues on store mutation. Drive the same notification
+    // and flush explicitly instead of relying on real-time debounce delays.
+    const unsubscribe = useStore.subscribe(() => coordinator.queue());
+    const onClose = vi.fn();
+    try {
+      // Previously accepted work is already awaiting protection. A correct
+      // fix must allow this upload, not suppress every account checkpoint.
+      coordinator.queue();
+      render(<CloseoutModal onClose={onClose} />);
+      await rejectOptedInDraft(true);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(await readPrimary()).toBe(before);
+      // No second closeout submission or independent workspace edit occurs.
+      await coordinator.flush(reason);
+      const envelopes = push.mock.calls.map(([envelope]) => envelope);
+      expect(envelopes.length).toBeGreaterThan(0);
+      for (const envelope of envelopes) {
+        expect(envelope.accountUserId).toBe(accountUserId);
+        expect(envelope.reason).toBe(reason);
+        expect(envelope.payload.tasks).toEqual(initial.tasks);
+        expect(envelope.payload.questions).toEqual(initial.questions);
+        expect(envelope.payload.journal).toEqual(initial.journal);
+        expect(envelope.payload.closeouts).toEqual(initial.closeouts);
+      }
+      expect(coordinator.currentStatus()).toBe("protected");
+      expect(await readPrimary()).toBe(before);
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      coordinator.dispose();
+    }
+  });
+
+  it("does not publish a draft while the exact local receipt is still pending", async () => {
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const accountUserId = "synthetic-pending-closeout-account";
+    localStorage.setItem(SYNC_METADATA_KEY, JSON.stringify({
+      accountUserId, deviceId: "synthetic-pending-closeout-device", baseRevision: 1, pending: false, attempt: 0,
+    }));
+    const push = vi.fn<SyncTransport["push"]>().mockResolvedValue({
+      status: "accepted", revision: 2, revisionId: "synthetic-pending-revision", idempotent: false,
+    });
+    const coordinator = new SyncCoordinator({ push, history: async () => [], revision: vi.fn() }, useStore.getState, 60_000);
+    const unsubscribe = useStore.subscribe(() => coordinator.queue());
+    const held = { error: new DOMException("Unavailable", "SecurityError"), onerror: null } as unknown as IDBOpenDBRequest;
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementationOnce(() => held)
+      .mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+      if (key === SYNC_METADATA_KEY) { storageValues.set(key, String(value)); return; }
+      throw new DOMException("Full", "QuotaExceededError");
+    });
+    const release = () => held.onerror?.call(held, new Event("error"));
+    const onClose = vi.fn();
+    try {
+      coordinator.queue();
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Pending private draft" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+      await waitFor(() => expect(typeof held.onerror).toBe("function"));
+      expect(useStore.getState().closeouts).toEqual(initial.closeouts);
+      expect(useStore.getState().journal).toEqual(initial.journal);
+      expect(screen.getByRole("button", { name: "Saving…" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("checkbox")).toHaveProperty("disabled", true);
+      expect(screen.getByLabelText("One win")).toHaveProperty("disabled", true);
+      await coordinator.flush("manual");
+      expect(push.mock.calls.length).toBeGreaterThan(0);
+      for (const [envelope] of push.mock.calls) {
+        expect(envelope.accountUserId).toBe(accountUserId);
+        expect(envelope.payload.journal).toEqual(initial.journal);
+        expect(envelope.payload.closeouts).toEqual(initial.closeouts);
+        expect(envelope.payload.tasks).toEqual(initial.tasks);
+      }
+      release();
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device/);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue("Pending private draft")).toBeTruthy();
+      expect(screen.getByRole("checkbox")).toHaveProperty("disabled", false);
+    } finally {
+      release();
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+      unsubscribe();
+      coordinator.dispose();
+    }
+    expect(await readPrimary()).toBe(before);
+  });
+
+  it("keeps a concurrent unrelated task and independently authored page on successful receipt", async () => {
+    const before = JSON.parse(await readPrimary()).state;
+    const onClose = vi.fn();
+    const otherDay: JournalEntry = {
+      id: "independent-journal",
+      date: "2035-04-12T09:00:00",
+      today: "Independent authored page",
+      tomorrow: "",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    const gate = holdNextVaultOpen();
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Accepted staged win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+      await gate.ready();
+      expect(useStore.getState().journal).toEqual(before.journal);
+      expect(useStore.getState().closeouts).toEqual(before.closeouts);
+      const taskWrite = useStore.getState().toggleTask("open-task");
+      const journalWrite = useStore.setState({ journal: [otherDay] });
+      gate.release();
+      await Promise.all([taskWrite, journalWrite]);
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+      await expectPersistedCloseout();
+      const saved = JSON.parse(await readPrimary()).state;
+      expect(saved.tasks.find((task: { id: string }) => task.id === "open-task").done).toBe(true);
+      expect(saved.questions).toEqual(before.questions);
+      expect(saved.journal.find((entry: JournalEntry) => entry.id === otherDay.id)).toEqual(otherDay);
+      expect(saved.journal).toHaveLength(2);
+      expect(saved.journal.find((entry: JournalEntry) => entry.id !== otherDay.id)).toMatchObject({ wins: ["Accepted staged win"] });
+      expect(saved.closeouts).toHaveLength(1);
+      expect(saved.closeouts[0]).toMatchObject({ oneWin: "Accepted staged win", dayKey: DAY });
+    } finally {
+      gate.release();
+      gate.restore();
+    }
+  });
+
+  it("does not overwrite a newer same-day journal edit while a closeout receipt is pending", async () => {
+    const authored: JournalEntry = {
+      id: "concurrent-same-day-journal",
+      date: `${DAY}T09:00:00`,
+      today: "Earlier authored page",
+      tomorrow: "",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    await checkedSeed(() => useStore.setState({ journal: [authored] }));
+    const onClose = vi.fn();
+    const gate = holdNextVaultOpen();
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Superseded staged win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      await gate.ready();
+      const latest = { ...authored, today: "New independently authored prose", blockers: "New authored obstacle" };
+      const laterWrite = useStore.setState({ journal: [latest] });
+      gate.release();
+      await laterWrite;
+      expect((await screen.findByRole("alert")).textContent).toMatch(/reached storage, but could not be confirmed here/);
+      await localVault.flushLocalVaultWrites();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("#dashboard");
+      expect(screen.getByDisplayValue("Superseded staged win")).toBeTruthy();
+      const saved = JSON.parse(await readPrimary()).state;
+      expect(saved.journal).toEqual([latest]);
+      expect(saved.closeouts).toHaveLength(0);
+      await expectPersistedCloseout();
+    } finally {
+      gate.release();
+      gate.restore();
+    }
+  });
+
+  it("keeps both physical copies when a peer fallback disputes a staged receipt", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const base = await readPrimary();
+    const peer = JSON.parse(base);
+    peer.state.tasks[0].title = "Independent peer edit";
+    const peerBytes = JSON.stringify(peer);
+    const scopedKey = `${key}:user:${peer.state.profile.userId}`;
+    // Produce a real acknowledged fallback, then restore this tab's observed
+    // primary baseline before introducing the peer at the commit boundary.
+    vi.stubGlobal("indexedDB", undefined);
+    try {
+      const checkpoint = localVault.getVaultWriteCheckpoint();
+      await localVault.localVaultStorage.setItem(key, peerBytes);
+      localVault.assertVaultWritesSince(checkpoint);
+      expect(storage.getItem(key)).toBe(peerBytes);
+    } finally {
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+    }
+    const marker = storage.getItem(markerKey);
+    expect(marker).not.toBeNull();
+    for (const k of [key, markerKey, scopedKey]) storageValues.delete(k);
+    expect(await localVault.localVaultStorage.getItem(key)).toBe(base);
+
+    const originalPut = IDBObjectStore.prototype.put;
+    let injected = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (!injected && storedKey === key && typeof value === "string" && value.includes("Disputed private win")) {
+        injected = true;
+        storageValues.set(key, peerBytes);
+        storageValues.set(markerKey, marker!);
+        storageValues.set(scopedKey, peerBytes);
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    const onClose = vi.fn();
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Disputed private win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      const alert = await screen.findByRole("alert");
+      expect(injected).toBe(true);
+      expect(JSON.parse(await readPrimary()).state.closeouts[0].oneWin).toBe("Disputed private win");
+      expect(storage.getItem(key)).toBe(peerBytes);
+      expect(storage.getItem(markerKey)).toBe(marker);
+      expect(storage.getItem(scopedKey)).toBe(peerBytes);
+      expect(useStore.getState().closeouts).toEqual([]);
+      expect(useStore.getState().journal).toEqual([]);
+      expect(screen.getByDisplayValue("Disputed private win")).toBeTruthy();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("#dashboard");
+      await expect(localVault.localVaultStorage.getItem(key)).rejects.toThrow(localVault.VAULT_CONFLICT_MESSAGE);
+      expect(alert.textContent).toMatch(/could not confirm which changes were saved/i);
+      expect(alert.textContent).not.toMatch(/Not saved on this device/i);
+      expect(screen.getByRole("button", { name: "Close the day" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("button", { name: "Expand into full notebook" })).toHaveProperty("disabled", true);
+      const copy = screen.getByLabelText("Closeout draft copy (not a backup)") as HTMLTextAreaElement;
+      expect(copy.readOnly).toBe(true);
+      expect(copy.value).toContain("2035-04-13");
+      expect(copy.value).toContain("One win: Disputed private win");
+      expect(copy.value).toContain("Add to Journal: Yes");
+      const beforeDismiss = await readPrimary();
+      fireEvent.click(screen.getByRole("button", { name: /^Close$/ }));
+      fireEvent.keyDown(window, { key: "Escape" });
+      fireEvent.mouseDown(document.querySelector(".modal-scrim")!);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(copy.value).toContain("Disputed private win");
+      expect(await readPrimary()).toBe(beforeDismiss);
+      expect(storage.getItem(key)).toBe(peerBytes);
+      expect(useStore.getState().journal).toEqual([]);
+      fireEvent.click(screen.getByRole("button", { name: "Close without resolving" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it.each(["standalone", "dashboard identity", "dashboard dismiss"] as const)("does not navigate when a newer ordinary write is refused after an accepted staged receipt (%s)", async (scenario) => {
+    const dashboardParent = scenario !== "standalone";
+    if (dashboardParent) {
+      await checkedSeed(() => useStore.getState().updateProfile({
+        dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+      }));
+    }
+    const onClose = vi.fn();
+    const gate = holdNextVaultOpen();
+    const originalPut = IDBObjectStore.prototype.put;
+    let refused = false;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (storedKey === STORAGE_KEYS.persistedState && typeof value === "string" && value.includes("Concurrent independent task")) {
+        refused = true;
+        const request = originalPut.call(this, value, storedKey);
+        // Abort asynchronously after the adapter queues its scoped writes, so
+        // no synchronous exception escapes its IndexedDB event handler.
+        request.onsuccess = () => this.transaction.abort();
+        return request;
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+      if (refused) throw new DOMException("Full", "QuotaExceededError");
+      storageValues.set(key, String(value));
+    });
+    try {
+      if (dashboardParent) {
+        renderDashboardCloseout();
+      } else {
+        render(<CloseoutModal onClose={onClose} />);
+      }
+      const originalDialog = screen.getByRole("dialog", { name: "Daily closeout" });
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Durable staged win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      await gate.ready();
+      const tasks = useStore.getState().tasks.map((task) => task.id === "open-task"
+        ? { ...task, title: "Concurrent independent task" } : task);
+      const later = useStore.setState({ tasks });
+      gate.release();
+      await later;
+      await localVault.flushLocalVaultWrites();
+      await waitFor(() => expect(refused).toBe(true));
+      const persisted = JSON.parse(await readPrimary()).state;
+      expect(persisted.closeouts[0].oneWin).toBe("Durable staged win");
+      expect(persisted.tasks.find((task: { id: string }) => task.id === "open-task").title).not.toBe("Concurrent independent task");
+      expect(useStore.getState().tasks).toEqual(tasks);
+      expect(screen.getByDisplayValue("Durable staged win")).toBeTruthy();
+      expect((await screen.findByRole("alert")).textContent).toMatch(/closeout reached storage.*newer changes/i);
+      if (dashboardParent) {
+        expect(screen.getByRole("dialog", { name: "Daily closeout" })).toBe(originalDialog);
+        expect(screen.queryByRole("button", { name: "Quick closeout" })).toBeNull();
+      } else {
+        expect(onClose).not.toHaveBeenCalled();
+      }
+      expect(window.location.hash).toBe("#dashboard");
+      expect(screen.getByLabelText("Closeout draft copy (not a backup)")).toBeTruthy();
+      if (scenario === "dashboard dismiss") {
+        const beforeDismiss = await readPrimary();
+        const close = screen.getByRole("button", { name: "Close without resolving" });
+        close.focus();
+        fireEvent.click(close);
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Daily closeout" })).toBeNull());
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit dashboard" })));
+        expect(await readPrimary()).toBe(beforeDismiss);
+        expect(window.location.hash).toBe("#dashboard");
+        return;
+      }
+      const scope = getQuestionAttachmentScope();
+      try {
+        const assertRedacted = () => {
+          expect(screen.queryByLabelText("Closeout draft copy (not a backup)")).toBeNull();
+          expect(screen.queryByDisplayValue("Durable staged win")).toBeNull();
+          expect(screen.queryByRole("checkbox")).toBeNull();
+          expect(screen.queryByRole("button", { name: "Close the day" })).toBeNull();
+          expect(screen.queryByRole("button", { name: "Expand into full notebook" })).toBeNull();
+          expect(screen.queryByRole("region", { name: "Day at a glance" })).toBeNull();
+          expect(screen.getByRole("alert").textContent).toMatch(/previous workspace or day/);
+          expect(screen.getByRole("alert").textContent).not.toMatch(/newer changes could not be confirmed/);
+        };
+        act(() => setQuestionAttachmentAccount("synthetic-recovery-other-account"));
+        assertRedacted();
+        act(() => setQuestionAttachmentAccount(scope.accountId));
+        assertRedacted();
+      } finally {
+        act(() => setQuestionAttachmentAccount(scope.accountId));
+      }
+    } finally {
+      gate.release();
+      gate.restore();
+      put.mockRestore();
+      denyFallback.mockRestore();
+    }
+  });
+
+  it("closes the Dashboard dialog after confirmed save and leaves the completed reminder hidden", async () => {
+    await checkedSeed(() => useStore.getState().updateProfile({
+      dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+    }));
+    renderDashboardCloseout();
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Dashboard confirmed win" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Daily closeout" })).toBeNull());
+    await expectPersistedCloseout();
+    expect(JSON.parse(await readPrimary()).state.closeouts[0].oneWin).toBe("Dashboard confirmed win");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit dashboard" })));
+    expect(useStore.getState().journal).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Quick closeout" })).toBeNull();
+    expect(window.location.hash).toBe("#dashboard");
+  });
+
+  it("restores the original opener when the Dashboard dialog is cancelled before saving", async () => {
+    await checkedSeed(() => useStore.getState().updateProfile({
+      dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+    }));
+    const before = await readPrimary();
+    const opener = renderDashboardCloseout();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Daily closeout" })).toBeNull());
+    expect(document.activeElement).toBe(opener);
+    expect(await readPrimary()).toBe(before);
+  });
+
+  it("does not return focus to Dashboard when the confirmed save opens Journal", async () => {
+    await checkedSeed(() => useStore.getState().updateProfile({
+      dailyLoopReminders: { closeoutEnabled: true, closeoutTime: "00:00" },
+    }));
+    const fallback = vi.fn();
+    renderDashboardCloseout(fallback);
+    fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+    await waitFor(() => expect(window.location.hash).toBe("#journal"));
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    expect(fallback).not.toHaveBeenCalled();
+    await expectPersistedCloseout();
+  });
+
+  it("refuses a draft from the previous account even after an A-to-B-to-A transition", async () => {
+    const before = await readPrimary();
+    const scope = getQuestionAttachmentScope();
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    const privateFields = [
+      ["What went well?", "Private completion"],
+      ["One win", "Previous account draft"],
+      ["What got in the way?", "Private obstacle"],
+      ["One unfinished loop", "Private unfinished loop"],
+      ["What matters tomorrow?", "Private next task"],
+      ["Energy now (0–100)", "73"],
+    ] as const;
+    for (const [label, value] of privateFields) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
+    fireEvent.click(screen.getByRole("checkbox"));
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const assertRedacted = () => {
+      for (const [label, value] of privateFields) {
+        expect(screen.queryByLabelText(label)).toBeNull();
+        expect(screen.queryByDisplayValue(value)).toBeNull();
+      }
+      expect(screen.queryByRole("checkbox")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Close the day" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Expand into full notebook" })).toBeNull();
+      expect(screen.queryByText("Finish the renal review", { exact: false })).toBeNull();
+      expect(screen.getByRole("alert").textContent).toMatch(/previous workspace or day/);
+    };
+    try {
+      act(() => setQuestionAttachmentAccount("synthetic-other-account"));
+      assertRedacted();
+      act(() => setQuestionAttachmentAccount(scope.accountId));
+      assertRedacted();
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(useStore.getState().journal).toHaveLength(0);
+      expect(useStore.getState().closeouts).toHaveLength(0);
+      expect(onClose).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: /^Close$/ }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+    } finally {
+      act(() => setQuestionAttachmentAccount(scope.accountId));
+    }
+    expect(await readPrimary()).toBe(before);
   });
 
   it("keeps an opt-out closeout open with its form data when durability cannot be confirmed", async () => {
@@ -210,15 +881,77 @@ describe("CloseoutModal daily loop", () => {
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open.*Synthetic combined vault refusal/i);
     unsubscribe();
-    expect(stateChanges).toBe(1);
+    expect(stateChanges).toBe(0);
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue("Retain this win for retry")).toBeTruthy();
-    expect(useStore.getState().closeouts).toHaveLength(1);
-    expect(useStore.getState().journal).toHaveLength(1);
-    expect(useStore.getState().journal[0]).toMatchObject({ wins: ["Retain this win for retry"] });
+    expect(useStore.getState().closeouts).toHaveLength(0);
+    expect(useStore.getState().journal).toHaveLength(0);
     expect(window.location.hash).toBe("#dashboard");
   });
 });
+
+// Hold one real fake-IDB open completion without replacing the actual DB,
+// its transactions, or the adapter. Release also works on an early assertion
+// failure so teardown does not strand a synthetic connection.
+function holdNextVaultOpen() {
+  const original = fakeIndexedDb.open.bind(fakeIndexedDb);
+  let resume: (() => void) | undefined;
+  let released = false;
+  const spy = vi.spyOn(fakeIndexedDb, "open").mockImplementationOnce((name, version) => {
+    const request = original(name, version);
+    return new Proxy(request, {
+      get(target, key) { return Reflect.get(target, key, target); },
+      set(target, key, value) {
+        if (key === "onsuccess") {
+          target.onsuccess = (event) => {
+            if (released) value.call(target, event);
+            else resume = () => value.call(target, event);
+          };
+          return true;
+        }
+        return Reflect.set(target, key, value, target);
+      },
+    });
+  });
+  return {
+    ready: () => waitFor(() => expect(resume).toBeTypeOf("function")),
+    release: () => {
+      released = true;
+      const next = resume;
+      resume = undefined;
+      next?.();
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
+
+// Fail real workspace writes while optionally allowing device-only sync
+// bookkeeping, which is independent of the workspace payload.
+async function rejectOptedInDraft(allowSyncMetadata = false): Promise<void> {
+  fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Refused draft reflection" } });
+  fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Refused draft win" } });
+  fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Refused draft obstacle" } });
+  fireEvent.click(screen.getByRole("checkbox"));
+  const checkpoint = localVault.getVaultWriteCheckpoint();
+  const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+  const denyFallback = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+    if (allowSyncMetadata && key === SYNC_METADATA_KEY) {
+      storageValues.set(key, String(value));
+      return;
+    }
+    throw new DOMException("Full", "QuotaExceededError");
+  });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open/i);
+    expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+    expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+    expect(screen.getByDisplayValue("Refused draft reflection")).toBeTruthy();
+  } finally {
+    denyIdb.mockRestore();
+    denyFallback.mockRestore();
+  }
+}
 
 function setCloseoutState() {
   const seed = makeSeed();
@@ -230,7 +963,7 @@ function setCloseoutState() {
     unit: "minutes",
     trackingStartsAt: DAY,
   }, DAY);
-  useStore.setState({
+  return useStore.setState({
     ...seed,
     activeDayKey: DAY,
     profile: {
