@@ -20,7 +20,7 @@
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
-    "web/src/lib/localVault.ts": "0ba028c037c40c8ab0f18665cfe0332803e8ebc47d06c141361bb5d0f46cbac1",
+    "web/src/lib/localVault.ts": "6ccdc1f6866245b9ee76b2aa6e96ba60da1a0d8c4312324c2ed6e1372a2f4098",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
     "web/src/lib/questionAttachments.ts": "04b8e5f025a86c449c2d3f2949289e4bcd8ee30a43bd739670081f2c3acedf0e",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
@@ -32,7 +32,7 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "e41e6051486043e75e923f23ba0f485c715bff4616c6a828faca1d3c35176de1"
+    "sha256": "6d999326624830ffc30cc13023d330ded8e0c7baff41c5383f32b226041ca1ae"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",
