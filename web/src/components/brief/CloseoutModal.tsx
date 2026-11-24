@@ -17,7 +17,8 @@ import { GButton } from "../ui/primitives";
 import { selectDayAtAGlance } from "../../lib/dayAtAGlance";
 import { entryDayKey } from "../../lib/journal";
 import { gotoJournalDay } from "../../lib/uiStore";
-import { commitLocalVaultItem, flushLocalVaultWrites } from "../../lib/localVault";
+import { assertVaultWritesSince, commitLocalVaultItem, flushLocalVaultWrites, getVaultWriteCheckpoint, isVaultConflictError } from "../../lib/localVault";
+import { isPackedFallbackError } from "../../lib/packedVaultFallback";
 
 const MODES: Array<"auto" | BriefMode> = ["auto", "maintain", "catch-up", "recovery", "sprint", "exam-week"];
 
@@ -48,6 +49,13 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const submitting = useRef(false);
+  const reconciliationRequired = useRef(false);
+  const [reviewRequired, setReviewRequired] = useState(false);
+  const requireReconciliation = (message: string) => {
+    reconciliationRequired.current = true;
+    setReviewRequired(true);
+    setSaveError(message);
+  };
   const [origin] = useState(() => ({
     scope: getQuestionAttachmentScope(),
     linkedAccountId: readSyncMetadata().accountUserId,
@@ -65,7 +73,7 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
   const existingJournal = s.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
 
   async function save(openNotebook = false) {
-    if (submitting.current) return;
+    if (submitting.current || reconciliationRequired.current) return;
     if (!isCurrent()) {
       setSaveError("This closeout belongs to a previous workspace or day. Copy your draft before closing and open a new closeout for the current workspace.");
       return;
@@ -84,12 +92,14 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       energyVsMorning: energy,
       tomorrowMode: mode,
     };
+    let acknowledged = false;
     try {
       // Drain previously requested work before preparing the isolated draft.
       await flushLocalVaultWrites();
       const options = useStore.persist.getOptions();
       if (!options.name || !options.partialize) throw new Error("The workspace persistence configuration is unavailable.");
       const { name, partialize, version } = options;
+      const checkpoint = getVaultWriteCheckpoint();
       const published = await commitLocalVaultItem(name, () => {
         if (!isCurrent()) throw new Error("The workspace or day changed before this save started.");
         const base = useStore.getState();
@@ -138,20 +148,28 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
           },
         };
       });
-      if (!published || !isCurrent()) {
-        setSaveError("The closeout reached storage, but could not be confirmed here. Another edit or workspace change may have superseded it. Review your current workspace before retrying.");
-        return;
-      }
+      acknowledged = true;
+      // Draining is not a receipt: a newer coalesced snapshot may fail after
+      // the staged candidate was acknowledged. Never navigate on that result.
       await flushLocalVaultWrites();
-      if (!isCurrent()) {
-        setSaveError("The closeout was saved, but the workspace or day changed. Review the current workspace before continuing.");
+      assertVaultWritesSince(checkpoint);
+      if (!published || !isCurrent()) {
+        requireReconciliation("The closeout reached storage, but could not be confirmed here. Another edit or workspace change may have superseded it. Copy your draft and review your current workspace before retrying.");
         return;
       }
       onClose();
       if (openNotebook) gotoJournalDay(today);
     } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : "The local vault write failed.";
-      setSaveError(`Not saved on this device. This closeout is still open, and your entries remain here so you can retry. ${detail}`);
+      if (acknowledged) {
+        requireReconciliation("The closeout reached storage, but newer changes could not be confirmed. Keep this workspace open, copy or export unsaved work, and review saved work before trying again.");
+      } else if (isVaultConflictError(cause) || isPackedFallbackError(cause)) {
+        // A conflict can occur AFTER the primary transaction commits. A
+        // rejected receipt is not proof that the candidate is absent.
+        requireReconciliation("AXOM could not confirm which changes were saved. Keep both copies, copy your draft, and review saved work before trying again.");
+      } else {
+        const detail = cause instanceof Error ? cause.message : "The local vault write failed.";
+        setSaveError(`Not saved on this device. This closeout is still open, and your entries remain here so you can retry. ${detail}`);
+      }
     } finally {
       submitting.current = false;
       setSaving(false);
@@ -163,8 +181,8 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       title="Daily closeout"
       onClose={() => { if (!submitting.current) onClose(); }}
       footer={<>
-        <GButton disabled={saving} onClick={() => void save(true)}>Expand into full notebook</GButton>
-        <GButton disabled={saving} variant="primary" onClick={() => void save(false)}>{saving ? "Saving…" : "Close the day"}</GButton>
+        <GButton disabled={saving || reviewRequired} onClick={() => void save(true)}>Expand into full notebook</GButton>
+        <GButton disabled={saving || reviewRequired} variant="primary" onClick={() => void save(false)}>{saving ? "Saving…" : "Close the day"}</GButton>
       </>}
     >
       <div className="sub">A short, honest closeout is enough. AXOM assembled the context below from today’s local records.</div>
