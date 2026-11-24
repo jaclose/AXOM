@@ -123,6 +123,8 @@ export interface SuspendedBlock {
   skin: ExamSkin;
   mode: "exam" | "tutor";
   poolIds: string[];
+  /** SHA-256 of the immutable displayed source, never raw question content. Missing entries are unverified. */
+  sourceEvidenceV1?: Record<string, string>;
   index: number;
   items: Record<string, ExamItemState>;
   elapsedMs: number;
