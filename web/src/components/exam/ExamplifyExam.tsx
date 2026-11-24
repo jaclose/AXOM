@@ -301,7 +301,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose, unreview
           <QuestionSupportingContent question={question} mode="question" />
           <p className="xfy-selected">
             <b>{revealed ? "Your Answer" : "Currently Selected"} : {selectedWords}</b>
-            {revealed && correctKey && <b className="xfy-correct-line">Correct Answer : {correctKey}</b>}
+            {revealed && correctKey && <b className="xfy-correct-line">{reviewing ? "Current Correct Answer" : "Correct Answer"} : {correctKey}</b>}
           </p>
 
           <div className="xfy-choices" role="radiogroup" aria-label="Answer choices">
@@ -342,7 +342,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose, unreview
           {exam.block.mode === "tutor" && !reviewing && !revealed && (
             <button type="button" className="xfy-check" disabled={!item.answerKey || exam.finishLocked} onClick={exam.reveal}>Check answer</button>
           )}
-          {revealed && <ExplanationBody question={question} picked={item.answerKey} correctKey={correctKey} result={result} seconds={exam.seconds} />}
+          {revealed && <ExplanationBody question={question} picked={item.answerKey} correctKey={correctKey} result={result} seconds={exam.seconds} reviewing={reviewing} />}
         </section>
 
         {attachment && <AttachmentPane question={question} attachmentId={attachment} number={index + 1} onClose={() => setAttachment(null)} />}
