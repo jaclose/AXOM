@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 
 /**
@@ -33,7 +33,9 @@ function watchProblems(page: Page) {
     if (/^Blocked script execution in 'about:srcdoc'/.test(message.text())) return;
     if (message.type() === "error") problems.push(`console: ${message.text().slice(0, 300)}`);
   });
+  const answered = new WeakSet<Request>();
   page.on("response", (response) => {
+    answered.add(response.request());
     const url = new URL(response.url());
     if (url.origin !== new URL(page.url() || "http://invalid").origin) return;
     // Account endpoints answer 4xx without an account; that is not a broken screen.
@@ -41,11 +43,16 @@ function watchProblems(page: Page) {
     if (response.status() >= 400) problems.push(`${response.status()} ${url.pathname}`);
   });
   page.on("requestfailed", (request) => {
+    const error = request.failure()?.errorText ?? "unknown";
     // Leaving a screen cancels its background video, audio and images; that is not a failure.
-    if (request.failure()?.errorText === "net::ERR_ABORTED" && ["media", "image"].includes(request.resourceType())) return;
+    if (error === "net::ERR_ABORTED" && ["media", "image"].includes(request.resourceType())) return;
+    // The server answered and the page did not read the body, such as the dev
+    // server's 204 "no private library here" for the Question Bank. Error
+    // answers are already reported by status above.
+    if (error === "net::ERR_ABORTED" && answered.has(request)) return;
     const url = new URL(request.url());
     if (url.origin === new URL(page.url() || "http://invalid").origin && !url.pathname.startsWith("/api/")) {
-      problems.push(`failed request ${url.pathname}: ${request.failure()?.errorText ?? "unknown"}`);
+      problems.push(`failed request ${url.pathname}: ${error}`);
     }
   });
   return problems;
