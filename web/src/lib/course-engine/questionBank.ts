@@ -100,10 +100,11 @@ export function buildCourseQuestionBank(
   // scheduled week or borrow the course of a different primary source.
   const scopesById = new Map<string, CourseScope>();
   for (const question of questions) {
-    const related = (memberships.get(question.id) ?? []).filter((set) => !heldCollectionIds.has(set.id));
-    // Bind legacy inference to a source collection, never to the first review
-    // collection encountered in an arbitrary array ordering.
-    const source = related.find((set) => set.kind !== "review");
+    // Review collections neither certify nor veto an independently supported
+    // legacy source week. Their own contradictory filing is checked below.
+    const related = (memberships.get(question.id) ?? []).filter((set) =>
+      !heldCollectionIds.has(set.id) && set.kind !== "review");
+    const source = related[0];
     const first = source?.scope;
     const unanimousLegacy = !question.setId && Boolean(first?.module)
       && related.every((set) =>
