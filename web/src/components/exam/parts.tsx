@@ -119,6 +119,7 @@ export function ExplanationBody({ question, picked, correctKey, result, seconds,
         <span>Time spent: {formatQuestionTime(seconds)}</span>
       </div>
       {reviewing && <p className="sim-review-empty">Current source material may differ from the saved exam. The verdict above reflects the saved result.</p>}
+      {!reviewing && result === "unscored" && <p className="sim-review-empty">This answer cannot be scored against verified block evidence. Current teaching material may differ from the original question.</p>}
       {question.explanation && <div className="sim-explanation-text"><QuestionContent question={question} part="explanation" mode="answered" fallback={question.explanation.trim()} /></div>}
       <AxomDiagramCard question={question} />
       <QuestionSupportingContent question={question} mode="answered" />
