@@ -585,3 +585,50 @@ describe("duplicate installed term identity", () => {
     }
   });
 });
+
+
+describe("mixed legacy membership ownership", () => {
+  it("inherits only mutually compatible local course and week evidence in either membership order", () => {
+    const curriculum: CurriculumTemplate = { id: "legacy-owner", label: "Synthetic outline", terms: [
+      { name: "Term 5", courses: [{ code: "PPM 501", name: "Shared", modules: ["GOER"] }] },
+    ] };
+    const secondCourse = { ...courses[1], id: "other-local-course" };
+    const explicit = { module: "GOER", courseId: "ppm-501", week: 2 };
+    const outline = { module: "GOER", week: 2 };
+    const second = { ...explicit, courseId: secondCourse.id };
+    const variants: Array<{
+      scopes: Array<{ module: string; courseId?: string; week?: number }>;
+      own: Partial<QuestionRecord>;
+      expected: [number, number, number, number];
+    }> = [
+      { scopes: [outline, explicit], own: {}, expected: [1, 0, 0, 0] },
+      { scopes: [outline, explicit], own: { module: "GOER", courseId: secondCourse.id }, expected: [1, 0, 1, 0] },
+      { scopes: [outline, explicit], own: { courseId: secondCourse.id }, expected: [0, 0, 0, 1] },
+      { scopes: [outline, explicit], own: { courseId: "ppm-501" }, expected: [1, 0, 0, 0] },
+      { scopes: [explicit, second], own: { module: "GOER" }, expected: [0, 1, 1, 0] },
+      { scopes: [explicit, second], own: {}, expected: [0, 0, 0, 1] },
+      { scopes: [explicit, second], own: { module: "GOER", courseId: "ppm-501", week: 4 }, expected: [1, 0, 0, 0] },
+      { scopes: [explicit, { ...outline, week: 3 }], own: {}, expected: [1, 0, 1, 0] },
+      { scopes: [explicit, { module: "GOER" }], own: {}, expected: [1, 0, 1, 0] },
+      { scopes: [outline, { ...outline }], own: {}, expected: [0, 1, 0, 0] },
+    ];
+    for (const { scopes, own, expected } of variants) {
+      const rows = [question("legacy", { status: "correct",
+        attempts: [{ at: stamp, status: "correct", answerKey: "A" }], ...own })];
+      const members = scopes.map((scope, index) => set(`member-${index}`, ["legacy"], { scope }));
+      for (const sets of [members, members.slice().reverse()]) {
+        const fixture = { curriculum, terms, courses: [courses[1], secondCourse], sets, questions: rows };
+        const before = structuredClone(fixture);
+        const result = buildQuestionAvailabilityIndex(fixture);
+        const module = result.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"));
+        expect([
+          module?.explicitCourseAssignments ?? 0, module?.outlineAssignments ?? 0,
+          module?.unresolvedWeekQuestions ?? 0, result.unassignedQuestions,
+        ]).toEqual(expected);
+        expect(module?.storedQuestions ?? 0).toBe(1 - expected[3]);
+        expect(module?.readyQuestions ?? 0).toBe(1 - expected[3]);
+        expect(fixture).toEqual(before);
+      }
+    }
+  });
+});

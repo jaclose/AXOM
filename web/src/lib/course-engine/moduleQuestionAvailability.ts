@@ -206,21 +206,25 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     const related = question.setId == null ? memberships.get(question.id) ?? [] : [];
     const fallback = related.map(resolve).filter((entry): entry is Resolution => entry !== undefined);
     const fallbackKeys = new Set(fallback.map((entry) => entry.key));
-    const fallbackScope = fallbackKeys.size === 1 && related.length === fallback.length
-      ? related[0] : undefined;
-    const compatibleFallback = Boolean(fallbackScope
-      && (!scope.module || !fallbackScope.module
-        || canonicalModuleKey(scope.module) === canonicalModuleKey(fallbackScope.module))
-      && (!scope.courseId || !fallbackScope.courseId || scope.courseId === fallbackScope.courseId));
+    // The resolved owner is common to every membership, but the first raw
+    // scope may omit a course ID or contradict the question's own local ID.
+    // Combine all explicit evidence before inheriting any missing filing.
+    const fallbackOwner = fallbackKeys.size === 1 && related.length === fallback.length
+      ? fallback[0]?.owner : undefined;
+    const relatedCourseIds = new Set(related.map((entry) => entry.courseId).filter((id): id is string => Boolean(id)));
+    const [relatedCourseId] = relatedCourseIds;
+    const compatibleFallback = Boolean(fallbackOwner
+      && (!scope.module || canonicalModuleKey(scope.module) === canonicalModuleKey(fallbackOwner.module))
+      && relatedCourseIds.size <= 1
+      && (!scope.courseId || !relatedCourseId || scope.courseId === relatedCourseId));
     // All legacy set memberships must state the same valid week. Ambiguous
     // or missing evidence is not a source-week assignment.
     const relatedWeeks = related.map((entry) => parseWeek(entry.week));
     const inheritedWeek = relatedWeeks.length > 0 && relatedWeeks.every((week) => week !== undefined)
       && new Set(relatedWeeks).size === 1 ? relatedWeeks[0] : undefined;
-    const relatedCourseIds = new Set(related.map((entry) => entry.courseId).filter((id): id is string => Boolean(id)));
     const finalScope: CourseScope = {
-      module: scope.module ?? (compatibleFallback ? fallbackScope?.module : undefined),
-      courseId: scope.courseId ?? (compatibleFallback && relatedCourseIds.size === 1 ? fallbackScope?.courseId : undefined),
+      module: scope.module ?? (compatibleFallback ? fallbackOwner?.module : undefined),
+      courseId: scope.courseId ?? (compatibleFallback ? relatedCourseId : undefined),
       week: scope.week ?? (!hasDeclaredWeek(question.week) && compatibleFallback ? inheritedWeek : undefined),
     };
     const resolved = resolve(finalScope);
