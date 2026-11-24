@@ -66,8 +66,10 @@ export function ProductivityPage() {
   const accountScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope, getQuestionAttachmentScope);
   const manualSaveRef = useRef<ManualSaveAttempt | null>(null);
   const [manualSave, setManualSave] = useState<ManualSaveAttempt | null>(null);
+  const [unconfirmedManualExit, setUnconfirmedManualExit] = useState<Pick<ManualSaveAttempt, "scope" | "profileId"> | null>(null);
   const activeManualSave = manualSave?.scope === accountScope && manualSave.profileId === s.profile.userId ? manualSave : null;
   const saveStatus = activeManualSave?.phase ?? vaultStatus;
+  const hasUnconfirmedManualExit = unconfirmedManualExit?.scope === accountScope && unconfirmedManualExit.profileId === s.profile.userId;
   const running = usePomodoro((state) => state.running);
   const logs = useMemo(() => canonicalStudyLogs(s.logs).reverse(), [s.logs]);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
@@ -132,6 +134,16 @@ export function ProductivityPage() {
     void confirmManualSave(pending, checkpoint);
   }
 
+  function exitChangedManualRecovery(attempt: ManualSaveAttempt) {
+    const current = useStore.getState();
+    if (manualSaveRef.current !== attempt || attempt.phase !== "failed" || !currentManualOwner(attempt)
+      || unchangedManualActivity(attempt, current.logs)) return;
+    // This is an explicit exit from retry, not a save or reconciliation receipt.
+    // Never replay the old row, remove a claimant, or modify habit contributions.
+    setUnconfirmedManualExit({ scope: attempt.scope, profileId: attempt.profileId });
+    rememberManualSave(null);
+  }
+
   function logManual() {
     const minutes = Number(manualMinutes) || 0;
     const quantity = Number(manualQuantity) || 0;
@@ -181,6 +193,7 @@ export function ProductivityPage() {
     <>
       {isActive && <ActivityIntelligence insight={productivityInsight(s, saveStatus === "failed", running)} />}
       <ProductivitySaveStatus status={saveStatus} />
+      {hasUnconfirmedManualExit && <p className="productivity-save" role="status">An earlier activity save is still unconfirmed. Review Activity history and Settings before recording it again.</p>}
       <div className="productivity-primary-grid">
       <GlassCard pad id="productivity-log" data-tour="log" data-module-tour="productivity-log">
         <PanelHeader
@@ -221,7 +234,10 @@ export function ProductivityPage() {
               {unchangedManualActivity(activeManualSave, s.logs) ? <>
                 <span>This activity is still in this tab. Retry saving it instead of logging it again.</span>
                 <GButton size="sm" onClick={retryManualSave}>Retry activity save</GButton>
-              </> : <span>The activity changed before saving was confirmed. Keep this tab open and review Activity history and Settings before logging again.</span>}
+              </> : <>
+                <span>The activity changed before saving was confirmed. Review Activity history and Settings. Continuing does not confirm that save or remove any records.</span>
+                <GButton size="sm" onClick={() => exitChangedManualRecovery(activeManualSave)}>Continue without confirming save</GButton>
+              </>}
             </div>}
             <details className="activity-category-disclosure">
               <summary>Category and contribution (optional)</summary>

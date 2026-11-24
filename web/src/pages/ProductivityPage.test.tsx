@@ -282,7 +282,7 @@ describe("ProductivityPage daily console", () => {
     };
     const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
     const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
-    let attempted: ReturnType<typeof useStore.getState>["logs"] = [];
+    let attempted: ReturnType<typeof useStore.getState>["logs"];
     try {
       fill();
       await act(async () => {
@@ -330,6 +330,62 @@ describe("ProductivityPage daily console", () => {
     expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(repeated)));
     await act(async () => { await useStore.persist.rehydrate(); });
     expect(useStore.getState().logs.map((log) => log.id)).toEqual(repeated.map((log) => log.id));
+  });
+
+  it.each(["cloned", "removed", "duplicate"] as const)("allows an explicit non-writing exit when a refused activity is %s", async (change) => {
+    const initial = getQuestionAttachmentScope();
+    const before = await readPrimary();
+    render(<ProductivityPage />);
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Original activity" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      await screen.findByRole("button", { name: "Retry activity save" });
+      const row = useStore.getState().logs[0];
+      const changed = change === "removed" ? [] : change === "cloned" ? [{ ...row, academic: !row.academic }] : [row, { ...row }];
+      await act(async () => {
+        useStore.setState({ logs: changed });
+        await localVault.flushLocalVaultWrites();
+      });
+      expect(screen.queryByRole("button", { name: "Retry activity save" })).toBeNull();
+      fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Distinct later activity" } });
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(true);
+      const checkpoint = localVault.getVaultWriteCheckpoint();
+      const current = useStore.getState();
+      fireEvent.click(screen.getByRole("button", { name: "Continue without confirming save" }));
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(useStore.getState()).toBe(current);
+      expect(screen.getByText(/An earlier activity save is still unconfirmed/)).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Log" }) as HTMLButtonElement).disabled).toBe(false);
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+      expect(await readPrimary()).toBe(before);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Log" }));
+        await localVault.flushLocalVaultWrites();
+      });
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      localVault.assertVaultWritesSince(checkpoint);
+      expect(readVaultWriteFailure()).toBeNull();
+      const after = useStore.getState().logs;
+      expect(after[0]).toMatchObject({ type: "Distinct later activity" });
+      expect(after[0].id).not.toBe(row.id);
+      expect(after.slice(1)).toEqual(changed);
+      expect(JSON.parse(await readPrimary()).state.logs).toEqual(JSON.parse(JSON.stringify(after)));
+      expect(screen.getByText(/An earlier activity save is still unconfirmed/)).toBeTruthy();
+      act(() => setQuestionAttachmentAccount(initial.accountId === "synthetic-other" ? "synthetic-different" : "synthetic-other"));
+      expect(screen.queryByText(/An earlier activity save is still unconfirmed/)).toBeNull();
+      act(() => setQuestionAttachmentAccount(initial.accountId));
+      expect(screen.queryByText(/An earlier activity save is still unconfirmed/)).toBeNull();
+    } finally {
+      setQuestionAttachmentAccount(initial.accountId);
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
   });
 
   it("never offers a refused activity retry to a different account generation", async () => {
