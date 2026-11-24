@@ -102,28 +102,30 @@ export function verdictLine(result: ItemResult | undefined): string {
   return result === "correct" ? "Correct" : result === "incorrect" ? "Incorrect" : result === "omitted" ? "Not answered" : "Answer key not confirmed";
 }
 
-export function ExplanationBody({ question, picked, correctKey, result, seconds }: {
+export function ExplanationBody({ question, picked, correctKey, result, seconds, reviewing = false }: {
   question: QuestionRecord;
   picked?: string;
   correctKey?: string;
   result: ItemResult | undefined;
   seconds: number;
+  reviewing?: boolean;
 }) {
   const rationales = question.choiceRationales ?? {};
   return (
     <section className="sim-explanation" aria-label="Explanation">
       <div className={`sim-explanation-verdict ${result === "correct" ? "ok" : result === "incorrect" ? "bad" : ""}`}>
-        <b>{verdictLine(result)}</b>
-        {correctKey && <span>Correct answer: {correctKey}</span>}
+        <b>{reviewing && result === "unscored" ? "Not scored in saved block" : verdictLine(result)}</b>
+        {correctKey && <span>{reviewing ? "Current correct answer" : "Correct answer"}: {correctKey}</span>}
         <span>Time spent: {formatQuestionTime(seconds)}</span>
       </div>
+      {reviewing && <p className="sim-review-empty">Current source material may differ from the saved exam. The verdict above reflects the saved result.</p>}
       {question.explanation && <div className="sim-explanation-text"><QuestionContent question={question} part="explanation" mode="answered" fallback={question.explanation.trim()} /></div>}
       <AxomDiagramCard question={question} />
       <QuestionSupportingContent question={question} mode="answered" />
       {Object.keys(rationales).length > 0 && (
         <dl className="sim-rationales">
           {question.options.filter((option) => rationales[option.key]).map((option) => (
-            <div key={option.key} className={option.key === correctKey ? "ok" : option.key === picked ? "bad" : ""}>
+            <div key={option.key} className={option.key === correctKey ? "ok" : correctKey && option.key === picked ? "bad" : ""}>
               <dt>({option.key}) {option.text}</dt>
               <dd>{rationales[option.key]}</dd>
             </div>
