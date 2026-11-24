@@ -180,6 +180,36 @@ describe("course bank read model", () => {
     expect(duplicateMembers.questionIds).toEqual(["q1", "q1"]);
   });
 
+  it("isolates duplicate review-only collection IDs without suppressing independent originals", () => {
+    const review = { ...set, id: "review", kind: "review" as const };
+    const duplicate = { ...review, title: "Stale review", scope: { module: "FTM 1", week: 3 } };
+    for (const setId of ["s1", undefined]) {
+      const records = [{ ...question, setId }];
+      for (const collections of [[set, review, duplicate], [duplicate, review, set]]) {
+        const snapshot = structuredClone([collections, records]);
+        const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+        expect(weeks).toHaveLength(1);
+        expect(weeks[0]).toMatchObject({ week: 2, questionIds: ["q1"], ready: 1, attempted: 1 });
+        expect(weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
+        expect([collections, records]).toEqual(snapshot);
+      }
+      const mixed = { ...review, id: "s1" };
+      for (const collections of [[set, mixed], [mixed, set]]) {
+        expect(indexed(collections, records)).toEqual([]);
+      }
+    }
+  });
+
+  it("holds explicit review-only primary bindings even with matching own filing", () => {
+    const review = { ...set, id: "review", kind: "review" as const };
+    for (const own of [{}, { module: "FTM 1", week: 2 }]) {
+      const record = { ...question, ...own, setId: "review" };
+      const snapshot = structuredClone(record);
+      expect(indexed([review], [record])).toEqual([]);
+      expect(record).toEqual(snapshot);
+    }
+  });
+
   it("does not let a malformed secondary review suppress an independently verified primary", () => {
     const malformedReview = { ...set, id: "review", kind: "review" as const, questionIds: ["q1", "q1"] };
     const [module] = indexed([set, malformedReview], [question]);
