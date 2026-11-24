@@ -78,7 +78,15 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     }
   }
   const termName = new Map(input.terms.map((term) => [term.id, term.name]));
-  const courseById = new Map(input.courses.map((course) => [course.id, course]));
+  // Duplicate local IDs cannot identify a unique curriculum owner. Do not
+  // let Map insertion order select a different term, course or module.
+  const courseById = new Map<string, Course>();
+  const duplicateCourseIds = new Set<string>();
+  for (const course of input.courses) {
+    if (courseById.has(course.id)) duplicateCourseIds.add(course.id);
+    courseById.set(course.id, course);
+  }
+  for (const id of duplicateCourseIds) courseById.delete(id);
   const resolve = (scope: CourseScope): Resolution | undefined => {
     const code = canonicalModuleKey(scope.module ?? "");
     const matches = owners.get(code);

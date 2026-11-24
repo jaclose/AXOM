@@ -485,3 +485,42 @@ describe("current practice eligibility versus recorded scope progress", () => {
     }
   });
 });
+
+describe("duplicate installed course identity", () => {
+  it("holds explicit curriculum ownership in either catalog order and preserves independent source availability", () => {
+    const originalCourse = courses[1];
+    const other = { ...originalCourse, termId: "term-4", code: "OTHER 500", name: "Other owner" };
+    const curriculum = { id: "synthetic", label: "Synthetic outline", terms: [
+      { name: "Term 4", courses: [
+        { code: "OTHER 500", name: "Other owner", modules: ["GOER"] },
+        { code: courses[0].code, name: courses[0].name, modules: ["NCRS"] },
+      ] },
+      { name: "Term 5", courses: [{ code: originalCourse.code, name: originalCourse.name, modules: ["GOER"] }] },
+    ] };
+    const collections = [
+      set("ambiguous", ["q"], { scope: goerScope }),
+      set("secondary", ["q"], { scope: goerScope, kind: "review" }),
+      set("clean", ["clean-q"], { scope: { courseId: courses[0].id, module: "NCRS", week: 3 } }),
+    ];
+    const records = [
+      question("q", { setId: "ambiguous", status: "correct",
+        attempts: [{ at: stamp, status: "correct", answerKey: "A" }] }),
+      question("clean-q", { setId: "clean" }),
+    ];
+    for (const duplicate of [other, { ...other, modules: [{ id: "other", name: "Other module" }] }, { ...originalCourse }]) {
+      for (const catalog of [[originalCourse, duplicate, courses[0]], [duplicate, originalCourse, courses[0]]]) {
+        for (const sets of [collections, collections.slice().reverse()]) {
+          const snapshot = structuredClone([catalog, sets, records]);
+          const result = buildQuestionAvailabilityIndex({ curriculum, terms, courses: catalog, sets, questions: records });
+          expect(result.unassignedQuestions).toBe(1);
+          expect(result.unassignedCollections).toBe(2);
+          expect(result.byModule.size).toBe(1);
+          expect(result.byModule.get(questionAvailabilityModuleKey("Term 4", "NCRS"))).toMatchObject({
+            readyQuestions: 1, storedQuestions: 1, indexedWeeks: [3], collections: 1,
+          });
+          expect([catalog, sets, records]).toEqual(snapshot);
+        }
+      }
+    }
+  });
+});
