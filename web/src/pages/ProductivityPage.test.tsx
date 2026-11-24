@@ -1,24 +1,100 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import { STORAGE_KEYS } from "../lib/brand";
+import * as localVault from "../lib/localVault";
+import { readVaultWriteFailure } from "../lib/vaultActivity";
 import { makeSeed } from "../lib/seed";
 import { makeDailyRequirement } from "../lib/dailySuccess";
 import { useStore } from "../lib/store";
 import { ProductivityPage } from "./ProductivityPage";
 
-beforeEach(() => {
+const storageValues = new Map<string, string>();
+const storage = {
+  get length() { return storageValues.size; },
+  clear: () => storageValues.clear(),
+  getItem: (key: string) => storageValues.get(key) ?? null,
+  key: (index: number) => [...storageValues.keys()][index] ?? null,
+  removeItem: (key: string) => { storageValues.delete(key); },
+  setItem: (key: string, value: string) => { storageValues.set(key, String(value)); },
+};
+
+const fakeIndexedDb = new IDBFactory();
+
+function deleteTestDatabase(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = fakeIndexedDb.deleteDatabase(localVault.DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Productivity test database deletion failed"));
+    request.onblocked = () => reject(new Error("Productivity test database deletion blocked"));
+  });
+}
+
+async function readPrimary(): Promise<string> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = fakeIndexedDb.open(localVault.DB_NAME);
+    request.onupgradeneeded = () => request.transaction?.abort();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Productivity test database open failed"));
+    request.onblocked = () => reject(new Error("Productivity test database open blocked"));
+  });
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(localVault.STORE_NAME, "readonly");
+      const request = tx.objectStore(localVault.STORE_NAME).get(STORAGE_KEYS.persistedState);
+      tx.oncomplete = () => {
+        if (typeof request.result === "string") resolve(request.result);
+        else reject(new Error("Productivity test primary workspace missing"));
+      };
+      tx.onerror = () => reject(tx.error ?? new Error("Productivity test primary read failed"));
+      tx.onabort = tx.onerror;
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function checkedSeed(write: () => unknown): Promise<void> {
+  const checkpoint = localVault.getVaultWriteCheckpoint();
+  await write();
+  await localVault.flushLocalVaultWrites();
+  expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  localVault.assertVaultWritesSince(checkpoint);
+  expect(readVaultWriteFailure()).toBeNull();
+  const raw = await readPrimary();
+  expect(JSON.parse(raw).state.logs).toEqual(JSON.parse(JSON.stringify(useStore.getState().logs)));
+  expect(await localVault.localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(raw);
+}
+
+beforeEach(async () => {
+  await localVault.flushLocalVaultWrites();
+  vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  vi.stubGlobal("localStorage", storage);
+  await deleteTestDatabase();
+  localVault.resetLocalVaultRuntimeForTests();
+  localStorage.clear();
+  await useStore.persist.rehydrate();
   vi.stubGlobal("IntersectionObserver", class {
     observe() {}
     disconnect() {}
     unobserve() {}
   });
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
-  useStore.setState(makeSeed());
+  await checkedSeed(() => useStore.setState(makeSeed()));
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  try {
+    await localVault.flushLocalVaultWrites();
+    await deleteTestDatabase();
+    localVault.resetLocalVaultRuntimeForTests();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe("ProductivityPage daily console", () => {
@@ -136,14 +212,15 @@ describe("ProductivityPage daily console", () => {
     expect(within(bestDay).getByText("0m · 0 cards")).toBeTruthy();
   });
 
-  it("uses canonical activity for period boundaries and shortcuts without deleting duplicate records", () => {
+  it("uses canonical activity for period boundaries and shortcuts without deleting duplicate records", async () => {
     const state = makeSeed();
     state.activeDayKey = "2026-07-13";
     const old = { id: "moved", dayKey: "2026-07-01", ts: "2026-07-13T11:00:00", type: "Obsolete study label", minutes: 999, cards: 0 };
     const latest = { ...old, dayKey: state.activeDayKey, ts: "2026-07-13T12:00:00", type: "Corrected study label", minutes: 10 };
     state.logs = [old, latest, ...["2026-07-11", "2026-07-12"].map((dayKey) => ({ id: dayKey, dayKey, ts: `${dayKey}T12:00:00`, type: `Study ${dayKey}`, minutes: 10, cards: 0 }))];
     const original = structuredClone(state.logs);
-    useStore.setState(state);
+    await checkedSeed(() => useStore.setState(state));
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(original);
     render(<ProductivityPage />);
 
     const month = screen.getByText("Monthly activity calendar").closest(".glass-card") as HTMLElement;
@@ -154,6 +231,45 @@ describe("ProductivityPage daily console", () => {
     expect(screen.queryByText("Obsolete study label")).toBeNull();
     expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
     expect(useStore.getState().logs).toEqual(original);
+  });
+
+  it("prioritizes a real failed save over duplicate review and restores review after an acknowledged retry", async () => {
+    const state = makeSeed();
+    state.activeDayKey = "2026-07-13";
+    const old = { id: "moved", dayKey: "2026-07-01", ts: "2026-07-13T11:00:00", type: "Obsolete study label", minutes: 999, cards: 0 };
+    const latest = { ...old, dayKey: state.activeDayKey, ts: "2026-07-13T12:00:00", type: "Corrected study label", minutes: 10 };
+    state.logs = [old, latest, ...["2026-07-11", "2026-07-12"].map((dayKey) => ({ id: dayKey, dayKey, ts: `${dayKey}T12:00:00`, type: `Study ${dayKey}`, minutes: 10, cards: 0 }))];
+    const original = structuredClone(state.logs);
+    await checkedSeed(() => useStore.setState(state));
+    const before = await readPrimary();
+    render(<ProductivityPage />);
+    expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
+
+    const attempted = [...original, { id: "new-activity", dayKey: state.activeDayKey, ts: "2026-07-13T13:00:00", type: "New study", minutes: 5, cards: 0 }];
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    try {
+      await act(async () => {
+        await useStore.setState({ logs: attempted });
+        await localVault.flushLocalVaultWrites();
+      });
+      expect(localVault.getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+      expect(() => localVault.assertVaultWritesSince(checkpoint)).toThrow();
+      expect(readVaultWriteFailure()).not.toBeNull();
+      expect(screen.getByRole("heading", { name: "Check your save" })).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: "Review activity records" })).toBeNull();
+      expect(useStore.getState().logs).toEqual(attempted);
+    } finally {
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+    }
+    expect(await readPrimary()).toBe(before);
+    await act(async () => { await checkedSeed(() => useStore.setState({ logs: attempted })); });
+    expect(screen.queryByRole("heading", { name: "Check your save" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
+    expect(JSON.parse(await readPrimary()).state.logs).toEqual(attempted);
+    expect(useStore.getState().logs).toEqual(attempted);
   });
 
   it("keeps earlier activity visible after selecting a new target and shows only the picked day's history", () => {
