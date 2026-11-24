@@ -77,8 +77,25 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       }
     }
   }
-  const termName = new Map(input.terms.map((term) => [term.id, term.name]));
-  const courseById = new Map(input.courses.map((course) => [course.id, course]));
+  // An installed term ID must identify exactly one row, even when duplicate
+  // names normalize to the same curriculum term. Never grant indexed credit
+  // from a last-write-wins catalog lookup.
+  const termName = new Map<string, string>();
+  const duplicateTermIds = new Set<string>();
+  for (const term of input.terms) {
+    if (termName.has(term.id)) duplicateTermIds.add(term.id);
+    termName.set(term.id, term.name);
+  }
+  for (const id of duplicateTermIds) termName.delete(id);
+  // Duplicate local IDs cannot identify a unique curriculum owner. Do not
+  // let Map insertion order select a different term, course or module.
+  const courseById = new Map<string, Course>();
+  const duplicateCourseIds = new Set<string>();
+  for (const course of input.courses) {
+    if (courseById.has(course.id)) duplicateCourseIds.add(course.id);
+    courseById.set(course.id, course);
+  }
+  for (const id of duplicateCourseIds) courseById.delete(id);
   const resolve = (scope: CourseScope): Resolution | undefined => {
     const code = canonicalModuleKey(scope.module ?? "");
     const matches = owners.get(code);
@@ -123,10 +140,49 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     drafts.set(resolution.key, next);
     return next;
   };
+  // Raw duplicate question IDs cannot be resolved by Map insertion order, even
+  // when both records happen to contain identical source or answer metadata.
+  // Keep both stored originals for repair, but neither can certify readiness
+  // or source-week coverage in this read model.
+  const seenQuestionIds = new Set<string>();
+  const duplicateQuestionIds = new Set<string>();
+  for (const question of input.questions) {
+    if (seenQuestionIds.has(question.id)) duplicateQuestionIds.add(question.id);
+    seenQuestionIds.add(question.id);
+  }
   const byId = new Map(input.questions.map((question) => [question.id, question]));
-  const setsById = new Map(input.sets.map((set) => [set.id, set]));
+  // A Map silently drops the first source set when raw originals share an
+  // identity. Hold every collided original before scope or week attribution.
+  const seenSetIds = new Set<string>();
+  const duplicateSetIds = new Set<string>();
+  for (const set of input.sets) {
+    if (seenSetIds.has(set.id)) duplicateSetIds.add(set.id);
+    seenSetIds.add(set.id);
+  }
+  const ambiguousMembers = new Set<string>();
+  for (const set of input.sets) {
+    if (duplicateSetIds.has(set.id)) {
+      for (const id of set.questionIds) ambiguousMembers.add(id);
+    }
+  }
+  // A collection held for identity ambiguity cannot certify either its own
+  // coverage or inherited question scope. Keep one eligibility decision for
+  // primary lookups, legacy memberships and collection indexing.
+  const heldSetIds = new Set<string>();
+  for (const set of input.sets) {
+    const ambiguousPrimary = set.questionIds.some((id) => {
+      if (duplicateQuestionIds.has(id)) return true;
+      const member = byId.get(id);
+      return Boolean(member && (member.setId != null
+        ? duplicateSetIds.has(member.setId)
+        : ambiguousMembers.has(id)));
+    });
+    if (duplicateSetIds.has(set.id) || ambiguousPrimary) heldSetIds.add(set.id);
+  }
+  const setsById = new Map(input.sets.filter((set) => !heldSetIds.has(set.id)).map((set) => [set.id, set]));
   const memberships = new Map<string, CourseScope[]>();
   for (const set of input.sets) {
+    if (heldSetIds.has(set.id)) continue;
     for (const id of new Set(set.questionIds)) {
       if (!set.scope) continue;
       memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
@@ -134,6 +190,14 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   let unassignedQuestions = 0;
   for (const question of input.questions) {
+    // Neither a last-write-wins primary nor a legacy secondary membership may
+    // certify a question whose original source-set identity is ambiguous.
+    if (duplicateQuestionIds.has(question.id)
+      || (question.setId != null && duplicateSetIds.has(question.setId))
+      || (question.setId == null && ambiguousMembers.has(question.id))) {
+      unassignedQuestions += 1;
+      continue;
+    }
     const scope = questionScope(question, setsById);
     // Older questions sometimes have immutable set membership but no setId.
     // Inherit it only when all eligible memberships agree on a unique module.
@@ -170,6 +234,11 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   let unassignedCollections = 0;
   for (const set of input.sets) {
+    // Use the same identity gate that excluded unsafe scope inheritance.
+    if (heldSetIds.has(set.id)) {
+      unassignedCollections += 1;
+      continue;
+    }
     const indexedSetWeek = parseWeek(set.scope?.week);
     const invalidSetWeek = hasDeclaredWeek(set.scope?.week) && indexedSetWeek === undefined;
     // Set-owned metadata wins if it resolves. A collection whose membership
