@@ -73,19 +73,23 @@ export function isUnloadAllowedForRefresh(): boolean {
   return unloadAllowed;
 }
 
+const WORKSPACE_CHANGED = "Your workspace changed after the backup was downloaded. Download a new backup, then refresh.";
+
 /**
  * Reload into the newest build after a covering backup. A waiting web update
  * is activated when possible; a failure there never blocks the refresh itself.
+ * Activating can take seconds, and the workspace stays editable meanwhile, so
+ * the backup is checked again after it, immediately before the reload.
  */
 export async function refreshAfterPortableBackup(
   activate: () => Promise<void> = async () => (await import("./webUpdates")).activateWaitingWebUpdate(),
   reload: () => void = () => window.location.reload(),
 ): Promise<void> {
-  if (!coverage || !backupCoversOpenWorkspace()) {
-    throw new Error("Your workspace changed after the backup was downloaded. Download a new backup, then refresh.");
-  }
-  try { sessionStorage.setItem(REFRESH_NOTICE_KEY, coverage.at); } catch { /* the notice is optional */ }
+  if (!coverage || !backupCoversOpenWorkspace()) throw new Error(WORKSPACE_CHANGED);
   try { await activate(); } catch { /* the reload below still loads the newest build */ }
+  const covering = coverage;
+  if (!covering || !backupCoversOpenWorkspace()) throw new Error(WORKSPACE_CHANGED);
+  try { sessionStorage.setItem(REFRESH_NOTICE_KEY, covering.at); } catch { /* the notice is optional */ }
   unloadAllowed = true;
   reload();
 }

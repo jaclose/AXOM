@@ -35,6 +35,43 @@ describe("refresh after a portable backup", () => {
     expect(isUnloadAllowedForRefresh()).toBe(false);
   });
 
+  it.each([
+    ["is activated", false],
+    ["cannot be activated", true],
+  ])("does not refresh when the workspace changes while the update %s", async (_label, activationFails) => {
+    recordPortableBackup(useStore.getState());
+    let settle!: () => void;
+    const activation = new Promise<void>((resolve, reject) => {
+      settle = () => (activationFails ? reject(new Error("worker redundant")) : resolve());
+    });
+    const reload = vi.fn();
+    const refresh = refreshAfterPortableBackup(() => activation, reload);
+    // Activating takes seconds; the learner (or a running timer) can change
+    // the workspace meanwhile, and that change is not in the backup.
+    useStore.setState({ tasks: [{ id: "t2", title: "Typed while refreshing", done: false } as never] });
+    settle();
+    await expect(refresh).rejects.toThrow(/changed after the backup/);
+    expect(reload).not.toHaveBeenCalled();
+    expect(isUnloadAllowedForRefresh()).toBe(false);
+    expect(takeRefreshAfterBackupNotice()).toBeNull();
+  });
+
+  it("refreshes after a slow activation when nothing changed meanwhile", async () => {
+    recordPortableBackup(useStore.getState());
+    let settle!: () => void;
+    const activation = new Promise<void>((resolve) => { settle = resolve; });
+    const reload = vi.fn();
+    const refresh = refreshAfterPortableBackup(() => activation, reload);
+    expect(reload).not.toHaveBeenCalled();
+    expect(isUnloadAllowedForRefresh()).toBe(false);
+    expect(takeRefreshAfterBackupNotice()).toBeNull();
+    settle();
+    await refresh;
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(isUnloadAllowedForRefresh()).toBe(true);
+    expect(takeRefreshAfterBackupNotice()).toBe(lastPortableBackupAt());
+  });
+
   it("refreshes when the backup holds exactly what is open, even if activating the update fails", async () => {
     const listener = vi.fn();
     const unsubscribe = subscribePortableBackup(listener);
