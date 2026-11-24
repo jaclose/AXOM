@@ -316,7 +316,7 @@ describe("atomic reviewed-import store transaction", () => {
     expect(await readPrimary()).toBe(durableBefore);
   });
 
-  it("restores prepared-review metadata in memory and leaves the durable baseline intact after a real vault outage", async () => {
+  it.each([false, true])("guards prepared-review rollback with a verified physical seed (reject seed: %s)", async (rejectSeed) => {
     const checksum = "a".repeat(64);
     const catalogDocument: SourceDocument = {
       id: "private-library-prepared",
@@ -393,23 +393,33 @@ describe("atomic reviewed-import store transaction", () => {
       filing: { module: "FTCM", term: 1, agrees: true },
       errors: [],
     };
-    useStore.setState({ questions: [], questionSets: [], documents: [catalogDocument, reviewDocument] });
-    await flushLocalVaultWrites();
-    const durableBefore = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
-    expect(durableBefore).toBe(await readPrimary());
+    const expected = { questions: [], questionSets: [], documents: [catalogDocument, reviewDocument] };
+    if (rejectSeed) {
+      // Negative control: the previous empty snapshot must not qualify as a
+      // durable seed merely because it is unchanged and physically readable.
+      const emptyBefore = await readPrimary();
+      vi.stubGlobal("indexedDB", undefined);
+      vi.stubGlobal("localStorage", undefined);
+      await expect(seedDurableAcademicSlices(expected)).rejects.toThrow(/no local storage fallback/i);
+      expect(await readPrimary()).toBe(emptyBefore);
+      expect(JSON.parse(emptyBefore).state).toMatchObject({ questions: [], questionSets: [], documents: [] });
+      return;
+    }
+    const durableBefore = await seedDurableAcademicSlices(expected);
 
     vi.stubGlobal("indexedDB", undefined);
     vi.stubGlobal("localStorage", undefined);
     await expect(persistPreparedLibraryReview(reviewDocument.id, bank, pkg, result))
       .rejects.toThrow(/could not confirm.*prior review metadata could not be restored.*no local storage fallback/i);
 
-    expect(useStore.getState().documents).toEqual([catalogDocument, reviewDocument]);
+    expectAcademicSlices(useStore.getState(), expected);
     vi.stubGlobal("indexedDB", fakeIndexedDb);
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);
     vi.stubGlobal("localStorage", storage);
-    const durableAfter = await localVaultStorage.getItem(STORAGE_KEYS.persistedState);
-    expect(durableAfter).toBe(await readPrimary());
-    expect(JSON.parse(durableAfter!).state.documents).toEqual(JSON.parse(durableBefore!).state.documents);
+    const durableAfter = await readPrimary();
+    expect(durableAfter).toBe(durableBefore);
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(durableAfter);
+    expectAcademicSlices(JSON.parse(durableAfter).state, expected);
   });
 
   it("preserves a concurrent mutation to an existing question after a deferred write failure", async () => {
@@ -959,6 +969,26 @@ function deleteDatabase(name: string): Promise<void> {
     request.onerror = () => reject(request.error ?? new Error("Synthetic database deletion failed"));
     request.onblocked = () => reject(new Error("Synthetic database deletion blocked"));
   });
+}
+
+type AcademicSlices = { questions: QuestionRecord[]; questionSets: QuestionSet[]; documents: SourceDocument[] };
+
+function expectAcademicSlices(actual: AcademicSlices, expected: AcademicSlices): void {
+  expect(actual.questions).toEqual(expected.questions);
+  expect(actual.questionSets).toEqual(expected.questionSets);
+  expect(actual.documents).toEqual(expected.documents);
+}
+
+async function seedDurableAcademicSlices(expected: AcademicSlices): Promise<string> {
+  const checkpoint = getVaultWriteCheckpoint();
+  await useStore.setState(expected);
+  await flushLocalVaultWrites();
+  expect(getVaultWriteCheckpoint()).toBeGreaterThan(checkpoint);
+  assertVaultWritesSince(checkpoint);
+  const primary = await readPrimary();
+  expectAcademicSlices(JSON.parse(primary).state, expected);
+  expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(primary);
+  return primary;
 }
 
 // Independent physical read of this small unchunked synthetic workspace.
