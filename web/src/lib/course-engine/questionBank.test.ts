@@ -187,6 +187,37 @@ describe("course bank read model", () => {
     expect(module.weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
   });
 
+  it("does not let a secondary collection certify a healthy sibling of a held primary", () => {
+    const primary = { ...set, questionIds: ["q1", "sibling"] };
+    const secondary = { ...set, id: "secondary", kind: "review" as const, questionIds: ["sibling"] };
+    const clean = { ...set, id: "clean", questionIds: ["clean-q"] };
+    const sibling = { ...question, id: "sibling", module: "FTM 1", week: 2 };
+    const cleanQuestion = { ...question, id: "clean-q", setId: "clean" };
+    const collision = { ...question, sourceDocumentId: "different-original" };
+    const original = structuredClone([primary, secondary, clean, question, collision, sibling, cleanQuestion]);
+    for (const collections of [[primary, secondary, clean], [secondary, primary, clean]]) {
+      for (const records of [[question, collision], [collision, question]]) {
+        const weeks = indexed(collections, [...records, sibling, cleanQuestion]).flatMap((module) => module.weeks);
+        expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+        expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+      }
+    }
+    expect([primary, secondary, clean, question, collision, sibling, cleanQuestion]).toEqual(original);
+  });
+
+  it("does not inherit legacy source scope from a held original into a review collection", () => {
+    const primary = { ...set, questionIds: ["q1", "legacy"] };
+    const secondary = { ...set, id: "secondary", kind: "review" as const, questionIds: ["legacy"] };
+    const legacy = { ...question, id: "legacy", setId: undefined };
+    const collision = { ...question, sourceDocumentId: "different-original" };
+    for (const collections of [[primary, secondary], [secondary, primary]]) {
+      expect(indexed(collections, [question, collision, legacy])).toEqual([]);
+      const healthy = indexed(collections, [question, legacy]).flatMap((module) => module.weeks);
+      expect(healthy.flatMap((week) => week.questionIds).sort()).toEqual(["legacy", "q1"]);
+      expect(healthy[0].ready).toBe(2);
+    }
+  });
+
   it("keeps generated and review provenance ahead of school-like titles", () => {
     expect(bankSource({ ...set, kind: "generated" })).toBe("AXOM generated");
     expect(bankSource({ ...set, kind: "review" })).toBe("Review");
