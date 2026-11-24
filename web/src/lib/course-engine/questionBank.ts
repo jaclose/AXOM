@@ -151,6 +151,16 @@ export function buildCourseQuestionBank(
     }
     const catalogCourse = courseForScope(scope, courses);
 
+    // Explicit course/module ownership must agree with the local catalog.
+    // Do not reparent a stale assignment to another course or certify a
+    // module absent from the assigned course. Keep the original collection
+    // and attempts intact for review outside this academic navigator.
+    if (scope.courseId && scope.module && (!catalogCourse || !catalogCourse.modules.some((module) =>
+      canonicalModuleKey(module.name) === canonicalModuleKey(scope.module!)))) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
+
     // A contradictory source set is not a safe practice collection. Exclude
     // the *entire* set from this course/week navigator (not from the library)
     // so its raw IDs cannot still launch through Practice week or a set card.

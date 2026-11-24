@@ -3,6 +3,7 @@ import type { Course } from "../types";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { bankSource, buildCourseQuestionBank, courseForScope } from "./questionBank";
+import { buildQuestionAvailabilityIndex } from "./moduleQuestionAvailability";
 
 const course: Course = { id: "c1", termId: "t1", code: "TEST 1", name: "First course", files: 0, modules: [{ id: "m1", name: "FTM 1" }] };
 const question: QuestionRecord = { id: "q1", source: "manual", stem: "Which sample?", options: [{ key: "A", text: "One" }, { key: "B", text: "Two" }],
@@ -345,5 +346,63 @@ describe("course bank read model", () => {
     expect(bankSource({ ...set, kind: "generated" })).toBe("AXOM generated");
     expect(bankSource({ ...set, kind: "review" })).toBe("Review");
     expect(bankSource(set)).toBe("IMCQ");
+  });
+});
+
+describe("catalog course/module ownership", () => {
+  it("agrees with Tracker availability for explicit catalog contradictions without refiling stored records", () => {
+    const second = { ...course, id: "c2", code: "TEST 2", name: "Second course", termId: "t2",
+      modules: [{ id: "m2", name: "DERS" }] };
+    const terms = [term, { id: "t2", name: "Term 2" }];
+    const curriculum = { id: "synthetic", label: "Synthetic outline", terms: [
+      { name: "Term 1", courses: [{ code: course.code, name: course.name, modules: ["FTM 1"] }] },
+      { name: "Term 2", courses: [{ code: second.code, name: second.name, modules: ["DERS"] }] },
+    ] };
+    for (const invalid of [
+      { courseId: "c1", module: "DERS" },
+      { courseId: "c1", module: "Unknown module" },
+      { courseId: "deleted", module: "DERS" },
+      { courseId: "empty", module: "FTM 1" },
+    ]) {
+      const courses = [course, second, { ...course, id: "empty", modules: [] }];
+      const scope = { ...invalid, week: 2 };
+      const original = { ...set, scope };
+      const record = { ...question, ...scope };
+      const review = { ...original, id: "secondary", kind: "review" as const };
+      const validScope = { courseId: "c2", module: "DERS", week: 2 };
+      const clean = { ...set, id: "clean", questionIds: ["clean-q"], scope: validScope };
+      const records = [record, { ...question, ...validScope, id: "clean-q", setId: "clean" }];
+      for (const sets of [[original, review, clean], [clean, review, original]]) {
+        const snapshot = structuredClone([sets, records, courses]);
+        const bank = buildCourseQuestionBank(sets, records, courses, terms);
+        const weeks = bank.flatMap((branch) => branch.weeks);
+        expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+        expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+        expect(bank[0].courseId).toBe("c2");
+        expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+        const tracker = buildQuestionAvailabilityIndex({ curriculum, terms, courses, sets, questions: records });
+        expect(tracker.unassignedQuestions).toBe(1);
+        expect(tracker.unassignedCollections).toBe(2);
+        expect([...tracker.byModule.values()]).toHaveLength(1);
+        expect([...tracker.byModule.values()][0]).toMatchObject({ readyQuestions: 1, storedQuestions: 1, indexedWeeks: [2] });
+        expect([sets, records, courses]).toEqual(snapshot);
+      }
+    }
+  });
+
+  it("preserves aliases, explicit ownership of repeated modules and unscheduled/custom practice", () => {
+    const repeated = { ...course, id: "c2", termId: "t2" };
+    const custom = { ...course, modules: [{ id: "custom", name: "Personal practice" }] };
+    for (const { scope, courses, expectedCourse } of [
+      { scope: { courseId: "c1", module: "FTM-1", week: 2 }, courses: [course], expectedCourse: "c1" },
+      { scope: { courseId: "c2", module: "ftm1", week: 2 }, courses: [course, repeated], expectedCourse: "c2" },
+      { scope: { courseId: "c1", module: "Personal practice", week: 2 }, courses: [custom], expectedCourse: "c1" },
+      { scope: { module: "Personal practice" }, courses: [course], expectedCourse: undefined },
+      { scope: { courseId: "c1" }, courses: [course], expectedCourse: "c1" },
+    ]) {
+      const [branch] = indexed([{ ...set, scope }], [{ ...question, ...scope }], courses);
+      expect(branch.courseId).toBe(expectedCourse);
+      expect(branch.weeks[0]).toMatchObject({ questionIds: ["q1"], ready: 1, attempted: 1 });
+    }
   });
 });
