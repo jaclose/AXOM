@@ -1829,11 +1829,50 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
 // stale full-workspace writes.
 type VaultOp = { kind: "set" | "replace"; value: string } | { kind: "remove" };
 const pendingVaultOps = new Map<string, VaultOp>();
+
+/** Explicit receipt-bound writes cannot be coalesced with ordinary snapshots.
+ * Prepare runs inside the single writer, after older queued operations. Publish
+ * runs synchronously only after this exact adapter write succeeds, before a
+ * later ordinary snapshot can drain. The caller must rebase its owned fields
+ * on current state and refuse publication if its workspace identity changed. */
+type StagedVaultCommit = {
+  name: string;
+  replacementEpoch: number;
+  prepare: () => { value: string; publish: () => boolean };
+  resolve: (published: boolean) => void;
+  reject: (error: unknown) => void;
+};
+const pendingVaultCommits: StagedVaultCommit[] = [];
+const replacementEpochs = new Map<string, number>();
+const replacementEpoch = (name: string) => replacementEpochs.get(name) ?? 0;
 let vaultDrain: Promise<void> | null = null;
+
+async function runStagedVaultCommit(commit: StagedVaultCommit): Promise<void> {
+  try {
+    if (commit.replacementEpoch !== replacementEpoch(commit.name)) {
+      throw new Error("The workspace was replaced before this save could start.");
+    }
+    const prepared = commit.prepare();
+    const sequence = getVaultWriteCheckpoint() + 1;
+    await vaultStorage.setItem(commit.name, prepared.value);
+    assertVaultWrite(sequence);
+    // A replacement/removal requested during the write owns the next
+    // snapshot. Do not republish the old workspace over that operation.
+    const published = commit.replacementEpoch === replacementEpoch(commit.name)
+      && prepared.publish();
+    commit.resolve(published);
+  } catch (error) {
+    commit.reject(error);
+  }
+}
 
 async function drainVaultWrites(): Promise<void> {
   try {
-    while (pendingVaultOps.size) {
+    while (pendingVaultOps.size || pendingVaultCommits.length) {
+      if (!pendingVaultOps.size) {
+        await runStagedVaultCommit(pendingVaultCommits.shift()!);
+        continue;
+      }
       const [name, op] = pendingVaultOps.entries().next().value as [string, VaultOp];
       pendingVaultOps.delete(name);
       try {
@@ -1850,9 +1889,25 @@ async function drainVaultWrites(): Promise<void> {
 }
 
 function scheduleVaultWrite(name: string, op: VaultOp): Promise<void> {
+  if (op.kind !== "set") replacementEpochs.set(name, replacementEpoch(name) + 1);
   pendingVaultOps.set(name, op);
   vaultDrain ??= drainVaultWrites();
   return vaultDrain;
+}
+
+/** Commit an isolated candidate through the same writer as ordinary saves.
+ * Resolves true only when publication was allowed after the exact receipt.
+ * False means the bytes reached a durable tier, but a newer context owns the
+ * live workspace. Rejected writes never call publish. Do not await an ordinary
+ * store write from inside publish: it must queue behind this commit. */
+export function commitLocalVaultItem(
+  name: string,
+  prepare: StagedVaultCommit["prepare"],
+): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    pendingVaultCommits.push({ name, replacementEpoch: replacementEpoch(name), prepare, resolve, reject });
+    vaultDrain ??= drainVaultWrites();
+  });
 }
 
 /** Resolves once every save requested so far (or a newer one) is on disk. */

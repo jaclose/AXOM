@@ -14,6 +14,7 @@ import { CloseoutModal } from "./CloseoutModal";
 import { SyncCoordinator } from "../../lib/sync/syncCoordinator";
 import { SYNC_METADATA_KEY } from "../../lib/sync/syncMetadata";
 import type { SyncTransport } from "../../lib/sync/syncTypes";
+import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../../lib/questionAttachmentScope";
 
 const DAY = "2035-04-13";
 
@@ -445,6 +446,82 @@ describe("CloseoutModal daily loop", () => {
     }
   });
 
+  it("does not publish a draft while the exact local receipt is still pending", async () => {
+    const before = await readPrimary();
+    const initial = JSON.parse(before).state;
+    const accountUserId = "synthetic-pending-closeout-account";
+    localStorage.setItem(SYNC_METADATA_KEY, JSON.stringify({
+      accountUserId, deviceId: "synthetic-pending-closeout-device", baseRevision: 1, pending: false, attempt: 0,
+    }));
+    const push = vi.fn<SyncTransport["push"]>().mockResolvedValue({
+      status: "accepted", revision: 2, revisionId: "synthetic-pending-revision", idempotent: false,
+    });
+    const coordinator = new SyncCoordinator({ push, history: async () => [], revision: vi.fn() }, useStore.getState, 60_000);
+    const unsubscribe = useStore.subscribe(() => coordinator.queue());
+    const held = { error: new DOMException("Unavailable", "SecurityError"), onerror: null } as unknown as IDBOpenDBRequest;
+    const denyIdb = vi.spyOn(fakeIndexedDb, "open").mockImplementationOnce(() => held)
+      .mockImplementation(() => { throw new DOMException("Unavailable", "SecurityError"); });
+    const denyFallback = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+      if (key === SYNC_METADATA_KEY) { storageValues.set(key, String(value)); return; }
+      throw new DOMException("Full", "QuotaExceededError");
+    });
+    const release = () => held.onerror?.call(held, new Event("error"));
+    const onClose = vi.fn();
+    try {
+      coordinator.queue();
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Pending private draft" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+      await waitFor(() => expect(typeof held.onerror).toBe("function"));
+      expect(useStore.getState().closeouts).toEqual(initial.closeouts);
+      expect(useStore.getState().journal).toEqual(initial.journal);
+      expect(screen.getByRole("button", { name: "Saving…" })).toHaveProperty("disabled", true);
+      await coordinator.flush("manual");
+      expect(push.mock.calls.length).toBeGreaterThan(0);
+      for (const [envelope] of push.mock.calls) {
+        expect(envelope.accountUserId).toBe(accountUserId);
+        expect(envelope.payload.journal).toEqual(initial.journal);
+        expect(envelope.payload.closeouts).toEqual(initial.closeouts);
+        expect(envelope.payload.tasks).toEqual(initial.tasks);
+      }
+      release();
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device/);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue("Pending private draft")).toBeTruthy();
+    } finally {
+      release();
+      denyIdb.mockRestore();
+      denyFallback.mockRestore();
+      unsubscribe();
+      coordinator.dispose();
+    }
+    expect(await readPrimary()).toBe(before);
+  });
+
+  it("refuses a draft from the previous account even after an A-to-B-to-A transition", async () => {
+    const before = await readPrimary();
+    const scope = getQuestionAttachmentScope();
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Previous account draft" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    try {
+      setQuestionAttachmentAccount("synthetic-other-account");
+      setQuestionAttachmentAccount(scope.accountId);
+      const checkpoint = localVault.getVaultWriteCheckpoint();
+      fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/previous workspace or day/);
+      expect(localVault.getVaultWriteCheckpoint()).toBe(checkpoint);
+      expect(useStore.getState().journal).toHaveLength(0);
+      expect(useStore.getState().closeouts).toHaveLength(0);
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      setQuestionAttachmentAccount(scope.accountId);
+    }
+    expect(await readPrimary()).toBe(before);
+  });
+
   it("keeps an opt-out closeout open with its form data when durability cannot be confirmed", async () => {
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValueOnce(new Error("Synthetic closeout vault refusal"));
     const onClose = vi.fn();
@@ -473,12 +550,11 @@ describe("CloseoutModal daily loop", () => {
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open.*Synthetic combined vault refusal/i);
     unsubscribe();
-    expect(stateChanges).toBe(1);
+    expect(stateChanges).toBe(0);
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue("Retain this win for retry")).toBeTruthy();
-    expect(useStore.getState().closeouts).toHaveLength(1);
-    expect(useStore.getState().journal).toHaveLength(1);
-    expect(useStore.getState().journal[0]).toMatchObject({ wins: ["Retain this win for retry"] });
+    expect(useStore.getState().closeouts).toHaveLength(0);
+    expect(useStore.getState().journal).toHaveLength(0);
     expect(window.location.hash).toBe("#dashboard");
   });
 });

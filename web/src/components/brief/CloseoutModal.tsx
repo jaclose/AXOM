@@ -3,10 +3,12 @@
 // much as possible from today's data so the user mostly confirms, not writes.
 // Saving updates tomorrow's Command Brief (first task + mode preference).
 // ===========================================================================
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { mergeCloseoutIntoJournal } from "../../lib/closeoutJournal";
 import type { NotebookJournalEntry } from "../../lib/journalNotebook";
-import { useStore } from "../../lib/store";
+import { useStore, type Store } from "../../lib/store";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
+import { read as readSyncMetadata } from "../../lib/sync/syncMetadata";
 import { closeoutForDay, type EnergyVsMorning } from "../../lib/closeout";
 import { MODE_LABEL, type BriefMode } from "../../lib/commandBrief";
 import type { DailyCloseout } from "../../lib/closeout";
@@ -15,12 +17,7 @@ import { GButton } from "../ui/primitives";
 import { selectDayAtAGlance } from "../../lib/dayAtAGlance";
 import { entryDayKey } from "../../lib/journal";
 import { gotoJournalDay } from "../../lib/uiStore";
-import {
-  assertVaultWrite,
-  assertVaultWritesSince,
-  flushLocalVaultWrites,
-  getVaultWriteCheckpoint,
-} from "../../lib/localVault";
+import { commitLocalVaultItem, flushLocalVaultWrites } from "../../lib/localVault";
 
 const MODES: Array<"auto" | BriefMode> = ["auto", "maintain", "catch-up", "recovery", "sprint", "exam-week"];
 
@@ -50,11 +47,30 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
   const [addToJournal, setAddToJournal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const submitting = useRef(false);
+  const [origin] = useState(() => ({
+    scope: getQuestionAttachmentScope(),
+    linkedAccountId: readSyncMetadata().accountUserId,
+    profileUserId: s.profile.userId,
+    day: today,
+  }));
+  const isCurrent = () => {
+    const live = useStore.getState();
+    return isQuestionAttachmentScopeCurrent(origin.scope)
+      && readSyncMetadata().accountUserId === origin.linkedAccountId
+      && live.profile.userId === origin.profileUserId
+      && live.activeDayKey === origin.day;
+  };
   const glance = useMemo(() => selectDayAtAGlance(s, today, today), [s, today]);
   const existingJournal = s.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
 
   async function save(openNotebook = false) {
-    if (saving) return;
+    if (submitting.current) return;
+    if (!isCurrent()) {
+      setSaveError("This closeout belongs to a previous workspace or day. Copy your draft before closing and open a new closeout for the current workspace.");
+      return;
+    }
+    submitting.current = true;
     setSaving(true);
     setSaveError("");
     const record: Omit<DailyCloseout, "id" | "createdAt" | "updatedAt"> = {
@@ -68,43 +84,76 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       energyVsMorning: energy,
       tomorrowMode: mode,
     };
-    const checkpoint = getVaultWriteCheckpoint();
     try {
-      useStore.setState((state) => {
+      // Drain previously requested work before preparing the isolated draft.
+      await flushLocalVaultWrites();
+      const options = useStore.persist.getOptions();
+      if (!options.name || !options.partialize) throw new Error("The workspace persistence configuration is unavailable.");
+      const { name, partialize, version } = options;
+      const published = await commitLocalVaultItem(name, () => {
+        if (!isCurrent()) throw new Error("The workspace or day changed before this save started.");
+        const base = useStore.getState();
         const stamp = new Date().toISOString();
-        const priorCloseout = closeoutForDay(state.closeouts ?? [], today);
+        const priorCloseout = closeoutForDay(base.closeouts ?? [], today);
         const nextCloseout: DailyCloseout = {
           ...record,
           id: priorCloseout?.id ?? crypto.randomUUID(),
           createdAt: priorCloseout?.createdAt ?? stamp,
           updatedAt: stamp,
         };
-        let journal = state.journal;
+        const priorJournal = base.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
+        let nextJournal: NotebookJournalEntry | undefined;
         if (addToJournal) {
-          const liveJournal = state.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
-          const merged = mergeCloseoutIntoJournal(liveJournal, {
+          const merged = mergeCloseoutIntoJournal(priorJournal, {
             completed, oneWin, blocker, remaining, tomorrow: firstTask,
             energyLabel: energyNow ? numericEnergyLabel(Number(energyNow)) : "",
           }, today);
-          if (merged.create) journal = [{ ...merged.create, id: crypto.randomUUID() }, ...state.journal];
-          else if (merged.patch && liveJournal) {
-            journal = state.journal.map((entry) => entry.id === liveJournal.id ? { ...entry, ...merged.patch } : entry);
-          }
+          if (merged.create) nextJournal = { ...merged.create, id: crypto.randomUUID() } as NotebookJournalEntry;
+          else if (merged.patch && priorJournal) nextJournal = { ...priorJournal, ...merged.patch };
         }
+        const apply = (live: Store) => ({
+          closeouts: [nextCloseout, ...(live.closeouts ?? []).filter((item) => item.dayKey !== today)],
+          ...(nextJournal ? {
+            journal: priorJournal
+              ? live.journal.map((entry) => entry.id === priorJournal.id ? nextJournal! : entry)
+              : [nextJournal, ...live.journal],
+          } : {}),
+        });
+        const candidate = { ...base, ...apply(base) };
         return {
-          closeouts: [nextCloseout, ...(state.closeouts ?? []).filter((item) => item.dayKey !== today)],
-          ...(journal === state.journal ? {} : { journal }),
+          value: JSON.stringify({ state: partialize(candidate), version }),
+          publish: () => {
+            if (!isCurrent()) return false;
+            const live = useStore.getState();
+            // An unrelated task or another day's Journal edit may have been
+            // queued while the candidate was writing. Preserve that edit.
+            // A newer same-day edit owns its own fields; do not overwrite it.
+            if (closeoutForDay(live.closeouts ?? [], today) !== priorCloseout
+              || (addToJournal && live.journal.find((entry) => entryDayKey(entry) === today) !== priorJournal)) return false;
+            // Zustand queues a fresh snapshot with the accepted delta and
+            // any independent edits. This replaces a stale queued ordinary
+            // snapshot before the single writer resumes draining.
+            void useStore.setState(apply(live));
+            return true;
+          },
         };
       });
+      if (!published || !isCurrent()) {
+        setSaveError("The closeout reached storage, but the workspace or day changed before it could be confirmed here. Review the current workspace before retrying.");
+        return;
+      }
       await flushLocalVaultWrites();
-      assertVaultWrite(checkpoint + 1);
-      assertVaultWritesSince(checkpoint);
+      if (!isCurrent()) {
+        setSaveError("The closeout was saved, but the workspace or day changed. Review the current workspace before continuing.");
+        return;
+      }
       onClose();
       if (openNotebook) gotoJournalDay(today);
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : "The local vault write failed.";
       setSaveError(`Not saved on this device. This closeout is still open, and your entries remain here so you can retry. ${detail}`);
     } finally {
+      submitting.current = false;
       setSaving(false);
     }
   }
