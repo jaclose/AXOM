@@ -64,15 +64,20 @@ async function prepareTour(page: Page, position: "scrolled" | "top"): Promise<La
 }
 
 async function advanceAndFinish(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Next" }).click();
-  await expect(page.getByRole("dialog", { name: "Choose targets" })).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
-  await expect(page.getByRole("dialog", { name: "Use the focus timer" })).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
-  const finalDialog = page.getByRole("dialog", { name: "Read trends" });
+  // Click each step's own control. The top bar's daily quote is also a button,
+  // and some days its text contains "next" or "finish" ("The block you finish
+  // is worth more than the plan you perfect."), which a page-wide name
+  // substring match also selects.
+  const step = (name: string) => page.getByRole("dialog", { name });
+  await step("Log activity").getByRole("button", { name: "Next", exact: true }).click();
+  await expect(step("Choose targets")).toBeVisible();
+  await step("Choose targets").getByRole("button", { name: "Next", exact: true }).click();
+  await expect(step("Use the focus timer")).toBeVisible();
+  await step("Use the focus timer").getByRole("button", { name: "Next", exact: true }).click();
+  const finalDialog = step("Read trends");
   await expect(finalDialog).toBeVisible();
   await expect(finalDialog).toHaveClass(/centered/);
-  await page.getByRole("button", { name: "Finish" }).click();
+  await finalDialog.getByRole("button", { name: "Finish", exact: true }).click();
 }
 
 async function assertRestoredLayout(page: Page, baseline: LayoutSnapshot): Promise<void> {

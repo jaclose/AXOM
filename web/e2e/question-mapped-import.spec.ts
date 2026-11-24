@@ -120,7 +120,7 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
     await expect(page.locator(".question-exhibit")).toHaveCount(0);
     await page.locator(".option-pick").first().click();
     await page.getByRole("button", { name: "Check answer" }).click();
-    await page.getByRole("button", { name: "Next question" }).click();
+    await page.getByRole("button", { name: "Next question", exact: true }).click();
   }
   expect(errors).toEqual([]);
 });
