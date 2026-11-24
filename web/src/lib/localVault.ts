@@ -1858,8 +1858,16 @@ async function runStagedVaultCommit(commit: StagedVaultCommit): Promise<void> {
     assertVaultWrite(sequence);
     // A replacement/removal requested during the write owns the next
     // snapshot. Do not republish the old workspace over that operation.
-    const published = commit.replacementEpoch === replacementEpoch(commit.name)
-      && prepared.publish();
+    let published = false;
+    if (commit.replacementEpoch === replacementEpoch(commit.name)) {
+      try {
+        published = prepared.publish();
+      } catch {
+        // The exact write is already acknowledged. A subscriber/publication
+        // failure must not be presented as a refusal of the durable write.
+        // The caller must show a reconciliation notice, not retry blindly.
+      }
+    }
     commit.resolve(published);
   } catch (error) {
     commit.reject(error);
@@ -1897,8 +1905,8 @@ function scheduleVaultWrite(name: string, op: VaultOp): Promise<void> {
 
 /** Commit an isolated candidate through the same writer as ordinary saves.
  * Resolves true only when publication was allowed after the exact receipt.
- * False means the bytes reached a durable tier, but a newer context owns the
- * live workspace. Rejected writes never call publish. Do not await an ordinary
+ * False means the bytes reached a durable tier, but publication was refused
+ * or failed. Rejected writes never call publish. Do not await an ordinary
  * store write from inside publish: it must queue behind this commit. */
 export function commitLocalVaultItem(
   name: string,

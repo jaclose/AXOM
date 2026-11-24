@@ -139,7 +139,7 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
         };
       });
       if (!published || !isCurrent()) {
-        setSaveError("The closeout reached storage, but the workspace or day changed before it could be confirmed here. Review the current workspace before retrying.");
+        setSaveError("The closeout reached storage, but could not be confirmed here. Another edit or workspace change may have superseded it. Review your current workspace before retrying.");
         return;
       }
       await flushLocalVaultWrites();
@@ -161,7 +161,7 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title="Daily closeout"
-      onClose={() => { if (!saving) onClose(); }}
+      onClose={() => { if (!submitting.current) onClose(); }}
       footer={<>
         <GButton disabled={saving} onClick={() => void save(true)}>Expand into full notebook</GButton>
         <GButton disabled={saving} variant="primary" onClick={() => void save(false)}>{saving ? "Saving…" : "Close the day"}</GButton>
@@ -176,12 +176,12 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
         <span>{glance.focusedMinutes.value} focused min · {glance.questions.trustedAttempts} questions · {glance.cards.reviewed} cards</span>
         <span>{glance.tasks.completed.length} tasks completed · {glance.unfinishedItems.length} open loops</span>
       </section>
-      <TextAreaField label="What went well?" rows={2} value={completed} onChange={(e) => setCompleted(e.target.value)} />
-      <Field label="One win" value={oneWin} onChange={(e) => setOneWin(e.target.value)} placeholder="the moment worth keeping" />
-      <Field label="What got in the way?" value={blocker} onChange={(e) => setBlocker(e.target.value)} placeholder="one sentence is enough" />
-      <Field label="One unfinished loop" value={remaining} onChange={(e) => setRemaining(e.target.value)} placeholder="e.g. finish the final lecture" />
-      <Field label="What matters tomorrow?" value={firstTask} onChange={(e) => setFirstTask(e.target.value)} placeholder="Up next can put this on top" />
-      <Field label="Energy now (0–100)" type="number" min="0" max="100" value={energyNow} onChange={(e) => setEnergyNow(e.target.value)} />
+      <TextAreaField disabled={saving} label="What went well?" rows={2} value={completed} onChange={(e) => setCompleted(e.target.value)} />
+      <Field disabled={saving} label="One win" value={oneWin} onChange={(e) => setOneWin(e.target.value)} placeholder="the moment worth keeping" />
+      <Field disabled={saving} label="What got in the way?" value={blocker} onChange={(e) => setBlocker(e.target.value)} placeholder="one sentence is enough" />
+      <Field disabled={saving} label="One unfinished loop" value={remaining} onChange={(e) => setRemaining(e.target.value)} placeholder="e.g. finish the final lecture" />
+      <Field disabled={saving} label="What matters tomorrow?" value={firstTask} onChange={(e) => setFirstTask(e.target.value)} placeholder="Up next can put this on top" />
+      <Field disabled={saving} label="Energy now (0–100)" type="number" min="0" max="100" value={energyNow} onChange={(e) => setEnergyNow(e.target.value)} />
 
       <details className="closeout-advanced">
         <summary>Planning details</summary>
@@ -189,7 +189,7 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
         <span className="field-label">Energy vs this morning</span>
         <div className="row">
           {(["lower", "same", "higher"] as const).map((v) => (
-            <button key={v} className={`filter-pill ${energy === v ? "on" : ""}`} onClick={() => setEnergy(v)}>
+            <button key={v} disabled={saving} className={`filter-pill ${energy === v ? "on" : ""}`} onClick={() => setEnergy(v)}>
               {v[0].toUpperCase() + v.slice(1)}
             </button>
           ))}
@@ -200,7 +200,7 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
         <span className="field-label">Tomorrow's mode</span>
         <div className="row" style={{ flexWrap: "wrap" }}>
           {MODES.map((m) => (
-            <button key={m} className={`filter-pill ${mode === m ? "on" : ""}`} onClick={() => setMode(m)}>
+            <button key={m} disabled={saving} className={`filter-pill ${mode === m ? "on" : ""}`} onClick={() => setMode(m)}>
               {m === "auto" ? "Auto-decide" : MODE_LABEL[m]}
             </button>
           ))}
@@ -209,7 +209,7 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       </details>
 
       <label className="sub closeout-journal-option row gap8">
-        <input type="checkbox" checked={addToJournal} onChange={(event) => setAddToJournal(event.target.checked)} />
+        <input type="checkbox" disabled={saving} checked={addToJournal} onChange={(event) => setAddToJournal(event.target.checked)} />
         <span>
           {existingJournal
             ? "Add this closeout to today’s journal. Your existing writing stays unchanged; AXOM only fills empty closeout fields and adds new wins or unfinished loops."

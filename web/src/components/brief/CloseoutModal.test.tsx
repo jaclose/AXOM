@@ -477,6 +477,8 @@ describe("CloseoutModal daily loop", () => {
       expect(useStore.getState().closeouts).toEqual(initial.closeouts);
       expect(useStore.getState().journal).toEqual(initial.journal);
       expect(screen.getByRole("button", { name: "Saving…" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("checkbox")).toHaveProperty("disabled", true);
+      expect(screen.getByLabelText("One win")).toHaveProperty("disabled", true);
       await coordinator.flush("manual");
       expect(push.mock.calls.length).toBeGreaterThan(0);
       for (const [envelope] of push.mock.calls) {
@@ -489,6 +491,7 @@ describe("CloseoutModal daily loop", () => {
       expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device/);
       expect(onClose).not.toHaveBeenCalled();
       expect(screen.getByDisplayValue("Pending private draft")).toBeTruthy();
+      expect(screen.getByRole("checkbox")).toHaveProperty("disabled", false);
     } finally {
       release();
       denyIdb.mockRestore();
@@ -497,6 +500,85 @@ describe("CloseoutModal daily loop", () => {
       coordinator.dispose();
     }
     expect(await readPrimary()).toBe(before);
+  });
+
+  it("keeps a concurrent unrelated task and independently authored page on successful receipt", async () => {
+    const before = JSON.parse(await readPrimary()).state;
+    const onClose = vi.fn();
+    const otherDay: JournalEntry = {
+      id: "independent-journal",
+      date: "2035-04-12T09:00:00",
+      today: "Independent authored page",
+      tomorrow: "",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    const gate = holdNextVaultOpen();
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Accepted staged win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+      await gate.ready();
+      expect(useStore.getState().journal).toEqual(before.journal);
+      expect(useStore.getState().closeouts).toEqual(before.closeouts);
+      const taskWrite = useStore.getState().toggleTask("open-task");
+      const journalWrite = useStore.setState({ journal: [otherDay] });
+      gate.release();
+      await Promise.all([taskWrite, journalWrite]);
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+      await expectPersistedCloseout();
+      const saved = JSON.parse(await readPrimary()).state;
+      expect(saved.tasks.find((task: { id: string }) => task.id === "open-task").done).toBe(true);
+      expect(saved.questions).toEqual(before.questions);
+      expect(saved.journal.find((entry: JournalEntry) => entry.id === otherDay.id)).toEqual(otherDay);
+      expect(saved.journal).toHaveLength(2);
+      expect(saved.journal.find((entry: JournalEntry) => entry.id !== otherDay.id)).toMatchObject({ wins: ["Accepted staged win"] });
+      expect(saved.closeouts).toHaveLength(1);
+      expect(saved.closeouts[0]).toMatchObject({ oneWin: "Accepted staged win", dayKey: DAY });
+    } finally {
+      gate.release();
+      gate.restore();
+    }
+  });
+
+  it("does not overwrite a newer same-day journal edit while a closeout receipt is pending", async () => {
+    const authored: JournalEntry = {
+      id: "concurrent-same-day-journal",
+      date: `${DAY}T09:00:00`,
+      today: "Earlier authored page",
+      tomorrow: "",
+      blockers: "",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    await checkedSeed(() => useStore.setState({ journal: [authored] }));
+    const onClose = vi.fn();
+    const gate = holdNextVaultOpen();
+    try {
+      render(<CloseoutModal onClose={onClose} />);
+      fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Superseded staged win" } });
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
+      await gate.ready();
+      const latest = { ...authored, today: "New independently authored prose", blockers: "New authored obstacle" };
+      const laterWrite = useStore.setState({ journal: [latest] });
+      gate.release();
+      await laterWrite;
+      expect((await screen.findByRole("alert")).textContent).toMatch(/reached storage, but could not be confirmed here/);
+      await localVault.flushLocalVaultWrites();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("#dashboard");
+      expect(screen.getByDisplayValue("Superseded staged win")).toBeTruthy();
+      const saved = JSON.parse(await readPrimary()).state;
+      expect(saved.journal).toEqual([latest]);
+      expect(saved.closeouts).toHaveLength(0);
+      await expectPersistedCloseout();
+    } finally {
+      gate.release();
+      gate.restore();
+    }
   });
 
   it("refuses a draft from the previous account even after an A-to-B-to-A transition", async () => {
@@ -558,6 +640,41 @@ describe("CloseoutModal daily loop", () => {
     expect(window.location.hash).toBe("#dashboard");
   });
 });
+
+// Hold one real fake-IDB open completion without replacing the actual DB,
+// its transactions, or the adapter. Release also works on an early assertion
+// failure so teardown does not strand a synthetic connection.
+function holdNextVaultOpen() {
+  const original = fakeIndexedDb.open.bind(fakeIndexedDb);
+  let resume: (() => void) | undefined;
+  let released = false;
+  const spy = vi.spyOn(fakeIndexedDb, "open").mockImplementationOnce((name, version) => {
+    const request = original(name, version);
+    return new Proxy(request, {
+      get(target, key) { return Reflect.get(target, key, target); },
+      set(target, key, value) {
+        if (key === "onsuccess") {
+          target.onsuccess = (event) => {
+            if (released) value.call(target, event);
+            else resume = () => value.call(target, event);
+          };
+          return true;
+        }
+        return Reflect.set(target, key, value, target);
+      },
+    });
+  });
+  return {
+    ready: () => waitFor(() => expect(resume).toBeTypeOf("function")),
+    release: () => {
+      released = true;
+      const next = resume;
+      resume = undefined;
+      next?.();
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
 
 // Fail real workspace writes while optionally allowing device-only sync
 // bookkeeping, which is independent of the workspace payload.
