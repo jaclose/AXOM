@@ -55,6 +55,12 @@ export function buildCourseQuestionBank(
   // lookup or Set-deduplicated member list must never certify a source week,
   // launchable set card or ready count. Leave the records in the library for
   // review and exclude every affected membership from this navigator only.
+  // An explicit local catalog ID must identify exactly one course, even if
+  // only one of its duplicate rows happens to contain the requested module.
+  const catalogIdCounts = new Map<string, number>();
+  for (const course of courses) {
+    catalogIdCounts.set(course.id, (catalogIdCounts.get(course.id) ?? 0) + 1);
+  }
   const repeatedSetIds = new Set<string>();
   const seenSetIds = new Set<string>();
   const malformedMemberSets = new Set<QuestionSet>();
@@ -150,6 +156,11 @@ export function buildCourseQuestionBank(
       continue;
     }
     const catalogCourse = courseForScope(scope, courses);
+    const catalogIdentity = scope.courseId ?? catalogCourse?.id;
+    if (catalogIdentity && (catalogIdCounts.get(catalogIdentity) ?? 0) > 1) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
 
     // Explicit course/module ownership must agree with the local catalog.
     // Do not reparent a stale assignment to another course or certify a

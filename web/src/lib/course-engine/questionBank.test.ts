@@ -406,3 +406,58 @@ describe("catalog course/module ownership", () => {
     }
   });
 });
+
+describe("local catalog identity and curriculum evidence", () => {
+  it("holds duplicate course identities in either order without suppressing an unrelated original", () => {
+    const second = { ...course, termId: "t2", code: "TEST 2", name: "Other owner" };
+    const cleanCourse = { ...course, id: "clean-course", termId: "t2", code: "TEST 3",
+      modules: [{ id: "m2", name: "DERS" }] };
+    const scope = { courseId: "c1", module: "FTM 1", week: 2 };
+    const cleanScope = { courseId: cleanCourse.id, module: "DERS", week: 2 };
+    const original = { ...set, scope };
+    const review = { ...original, id: "secondary", kind: "review" as const };
+    const clean = { ...set, id: "clean", scope: cleanScope, questionIds: ["clean-q"] };
+    const records = [{ ...question, ...scope }, { ...question, ...cleanScope, id: "clean-q", setId: "clean" }];
+    for (const duplicate of [second, { ...second, modules: [{ id: "other", name: "Other module" }] }, { ...course }]) {
+      for (const catalog of [[course, duplicate, cleanCourse], [duplicate, course, cleanCourse]]) {
+        for (const collections of [[original, review, clean], [clean, review, original]]) {
+          const snapshot = structuredClone([collections, records, catalog]);
+          const bank = buildCourseQuestionBank(collections, records, catalog, [term, { id: "t2", name: "Term 2" }]);
+          expect(bank.flatMap((branch) => branch.weeks.flatMap((week) => week.questionIds))).toEqual(["clean-q"]);
+          expect(bank.flatMap((branch) => branch.weeks.flatMap((week) => week.sets.map((entry) => entry.id)))).toEqual(["clean"]);
+          expect([collections, records, catalog]).toEqual(snapshot);
+        }
+      }
+    }
+  });
+
+  it("preserves local practice without asserting curriculum-indexed availability for unsupported owners", () => {
+    const outline = { id: "synthetic", label: "Synthetic outline", terms: [
+      { name: "Term 1", courses: [{ code: course.code, name: course.name, modules: ["FTM 1"] }] },
+    ] };
+    const duplicateOutline = { ...outline, terms: [{ ...outline.terms[0],
+      courses: [...outline.terms[0].courses, ...outline.terms[0].courses] }] };
+    for (const { local, terms, curriculum, module } of [
+      { local: course, terms: [term], curriculum: outline, module: "FTM 1" },
+      { local: course, terms: [], curriculum: outline, module: "FTM 1" },
+      { local: { ...course, code: "UNKNOWN" }, terms: [term], curriculum: outline, module: "FTM 1" },
+      { local: course, terms: [term], curriculum: duplicateOutline, module: "FTM 1" },
+      { local: { ...course, modules: [{ id: "custom", name: "Personal practice" }] },
+        terms: [term], curriculum: outline, module: "Personal practice" },
+    ]) {
+      const scope = { courseId: local.id, module, week: 2 };
+      const collections = [{ ...set, scope }];
+      const records = [{ ...question, ...scope }];
+      const catalog = [local];
+      const snapshot = structuredClone([collections, records, catalog, terms, curriculum]);
+      const bank = buildCourseQuestionBank(collections, records, catalog, terms);
+      expect(bank[0].weeks[0]).toMatchObject({ questionIds: ["q1"], ready: 1, attempted: 1 });
+      const tracker = buildQuestionAvailabilityIndex({ sets: collections, questions: records, courses: catalog, terms, curriculum });
+      const indexedOwner = local === course && terms.length === 1 && curriculum === outline;
+      expect(tracker.unassignedQuestions).toBe(indexedOwner ? 0 : 1);
+      expect(tracker.unassignedCollections).toBe(indexedOwner ? 0 : 1);
+      expect(tracker.byModule.size).toBe(indexedOwner ? 1 : 0);
+      expect([collections, records, catalog, terms, curriculum]).toEqual(snapshot);
+    }
+  });
+});
