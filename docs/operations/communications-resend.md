@@ -229,6 +229,29 @@ Do not broaden redirect allowlists to wildcards as a shortcut.
 
 ## 7. Worker scheduling
 
+The versioned migration `supabase/migrations/20261106200000_communications_cron_worker.sql`
+creates the named `axom-communications-worker-5m` schedule and enables
+`pg_cron` / `pg_net` only when those extensions are available. It makes **no HTTP
+request** until BOTH of these Supabase Vault entries exist:
+
+- `axom_communications_project_url`: exactly the actual project origin, for
+  example `https://<project-ref>.supabase.co` (no function route or trailing path).
+- `axom_communications_cron_secret`: the exact same independently random secret
+  configured in hosted Edge Functions as `AXOM_COMMUNICATIONS_CRON_SECRET`, at
+  least 32 characters. Keep it out of source code, logs and SQL history.
+
+The schedule runs every five minutes but deliberately stays dormant while either
+value is missing. Its cron command retrieves them at execution time from Vault.
+This is **schedule installation**, not Resend activation or confirmed delivery.
+Do not configure a second manual cron job with the same responsibility.
+Check `select jobname, schedule, active from cron.job where
+jobname = 'axom-communications-worker-5m';` and non-sensitive summaries of
+`cron.job_run_details`, Edge execution logs and email job state after enabling it.
+If a worker request returns 401, confirm the two hosted secret values match;
+do not disable signature verification. To disable this schedule without touching
+other owners' extensions: `select cron.unschedule('axom-communications-worker-5m');`.
+
+
 The worker is POST-only:
 
 ```text
