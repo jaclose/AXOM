@@ -4,6 +4,7 @@ import {
   EXAM_SIM_SUSPENDED_KEY, answersFromItems, blockCounts, clearSuspendedBlock, clockElapsedMs, formatClock,
   discardSuspendedBlock, inspectSuspendedBlock, pauseClock, resumeClock, reviewIndices, writeSuspendedBlock, type SuspendedBlock,
 } from "./examSim";
+import { blockAnswers, elapsedSeconds, resumeBlock, suspendBlock } from "./exam/engine";
 import { searchLabValues, LAB_SECTIONS } from "../data/labValues";
 
 const ids = ["a", "b", "c", "d"];
@@ -72,6 +73,8 @@ describe("explicit simulation recovery", () => {
     items: { a: items.a }, elapsedMs: 40000, notes: "original", startedAt: at, suspendedAt: at,
   };
   const scopedKey = `${EXAM_SIM_SUSPENDED_KEY}:run:selected`;
+  const maxDurationMs = Math.floor(Number.MAX_SAFE_INTEGER / 2);
+  const maxDurationSeconds = maxDurationMs / 1000;
 
   beforeEach(() => {
     localStorage.clear();
@@ -98,6 +101,19 @@ describe("explicit simulation recovery", () => {
     ["negative elapsed time", { elapsedMs: -1 }],
     ["nonfinite elapsed time", { elapsedMs: Infinity }],
     ["invalid time limit", { timeLimitSeconds: "90" }],
+    ["finite but frozen elapsed clock", { elapsedMs: 1e308 }],
+    ["elapsed outside representable domain", { elapsedMs: maxDurationMs + 1 }],
+    ["finite but overflowing time limit", { timeLimitSeconds: 1e308 }],
+    ["time limit outside representable domain", { timeLimitSeconds: Math.ceil(maxDurationSeconds) + 1 }],
+    ["finite but frozen item time", { items: { a: { ...items.a, seconds: 1e308 } } }],
+    ["item outside representable domain", { items: { a: { ...items.a, seconds: Math.ceil(maxDurationSeconds) + 1 } } }],
+    ["overflowing total item time", { poolIds: ["a", "b"], items: {
+      a: { ...items.a, seconds: 1e308 }, b: { ...items.b, seconds: 1e308 },
+    } }],
+    ["aggregate outside domain with individually representable items", { poolIds: ["a", "b"], items: {
+      a: { ...items.a, seconds: Math.floor(maxDurationSeconds * 0.75) },
+      b: { ...items.b, seconds: Math.floor(maxDurationSeconds * 0.75) },
+    } }],
     ["invalid notes", { notes: {} }],
     ["invalid timestamp", { startedAt: "invalid" }],
     ["invalid strike list", { items: { a: { ...items.a, struck: {} } } }],
@@ -136,6 +152,49 @@ describe("explicit simulation recovery", () => {
     localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, raw);
     expect(inspectSuspendedBlock()).toEqual({ status: "present", block: JSON.parse(raw) });
     expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(raw);
+  });
+
+  it("preserves fractional durations through the actual resume and answer-recording engine", () => {
+    const fractional: SuspendedBlock = {
+      ...block, elapsedMs: 40000.5, timeLimitSeconds: 90.5,
+      items: { a: { ...items.a, seconds: 40.5 } },
+    };
+    writeSuspendedBlock(fractional);
+    const recovered = inspectSuspendedBlock();
+    expect(recovered).toEqual({ status: "present", block: fractional });
+    if (recovered.status !== "present") throw new Error("Expected recoverable examination");
+    const now = Date.parse(at);
+    const resumed = resumeBlock(recovered.block, fractional.poolIds, now);
+    expect(elapsedSeconds(resumed, now + 1000)).toBe(41);
+    expect(blockAnswers(resumed, now + 1000, () => "B")[0]).toMatchObject({ seconds: 42, correct: true });
+    const suspended = suspendBlock(resumed, now + 1000, {
+      skin: fractional.skin, timeLimitSeconds: fractional.timeLimitSeconds, runId: fractional.runId,
+    });
+    expect(suspended.elapsedMs).toBe(41000.5);
+    expect(suspended.items.a.seconds).toBe(41.5);
+    expect(suspended.timeLimitSeconds).toBe(90.5);
+  });
+
+  it("keeps representable aggregate durations and leaves room for subsequent clock ticks", () => {
+    const seconds = Math.floor(maxDurationSeconds * 0.49);
+    const large: SuspendedBlock = {
+      ...block, elapsedMs: maxDurationMs, timeLimitSeconds: Math.floor(maxDurationSeconds),
+      poolIds: ["a", "b"], items: {
+        a: { ...items.a, seconds }, b: { ...items.b, seconds },
+      },
+    };
+    writeSuspendedBlock(large);
+    const recovered = inspectSuspendedBlock();
+    expect(recovered).toEqual({ status: "present", block: large });
+    if (recovered.status !== "present") throw new Error("Expected recoverable examination");
+    const now = Date.parse(at);
+    const resumed = resumeBlock(recovered.block, large.poolIds, now);
+    expect(elapsedSeconds(resumed, now + 1000) - elapsedSeconds(resumed, now)).toBe(1);
+    const answers = blockAnswers(resumed, now + 1000, () => "B");
+    expect(answers[0].seconds).toBe(seconds + 1);
+    expect(answers[1].seconds).toBe(seconds);
+    expect(Number.isSafeInteger(answers.reduce((sum, answer) => sum + answer.seconds, 0))).toBe(true);
+    expect(Number.isSafeInteger((large.timeLimitSeconds ?? 0) * 1000)).toBe(true);
   });
 
   it("accepts valid tutor recovery with source evidence and optional timing", () => {

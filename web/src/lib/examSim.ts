@@ -134,6 +134,13 @@ export interface SuspendedBlock {
   suspendedAt: string;
 }
 
+// Bound recovered durations in milliseconds, with headroom for resumed clock
+// accumulation, per-item rounding and seconds-to-milliseconds conversion.
+// Below half the safe-integer range, seconds also retain millisecond-scale
+// precision. Fractions are valid; reject out-of-domain data without clamping.
+const MAX_RECOVERY_DURATION_MS = Math.floor(Number.MAX_SAFE_INTEGER / 2);
+const MAX_RECOVERY_DURATION_SECONDS = MAX_RECOVERY_DURATION_MS / 1000;
+
 /** V1 snapshots are untrusted browser data. Sparse items and the documented
  * optional legacy fields are valid; malformed values must not reach the engine
  * or be silently normalized and rewritten by a resume. */
@@ -148,21 +155,25 @@ function parseSuspendedBlock(raw: string | null): SuspendedBlock | undefined {
       || typeof value.skin !== "string" || !Object.prototype.hasOwnProperty.call(EXAM_SKINS, value.skin)
       || (value.mode !== "exam" && value.mode !== "tutor")
       || !Number.isInteger(value.index) || value.index < 0 || value.index >= value.poolIds.length
-      || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0
-      || (value.timeLimitSeconds !== undefined && (!Number.isFinite(value.timeLimitSeconds) || value.timeLimitSeconds <= 0))
+      || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0 || value.elapsedMs > MAX_RECOVERY_DURATION_MS
+      || (value.timeLimitSeconds !== undefined && (!Number.isFinite(value.timeLimitSeconds)
+        || value.timeLimitSeconds <= 0 || value.timeLimitSeconds > MAX_RECOVERY_DURATION_SECONDS))
       || typeof value.notes !== "string"
       || typeof value.startedAt !== "string" || !Number.isFinite(Date.parse(value.startedAt))
       || typeof value.suspendedAt !== "string" || !Number.isFinite(Date.parse(value.suspendedAt))
       || !value.items || typeof value.items !== "object" || Array.isArray(value.items)) return undefined;
 
     const pool = new Set(value.poolIds);
+    let totalItemSeconds = 0;
     for (const [id, item] of Object.entries(value.items)) {
       if (!pool.has(id) || !item || typeof item !== "object" || Array.isArray(item)
         || (item.answerKey !== undefined && (typeof item.answerKey !== "string" || !item.answerKey))
         || typeof item.marked !== "boolean" || typeof item.visited !== "boolean"
         || (item.submitted !== undefined && typeof item.submitted !== "boolean")
         || !Array.isArray(item.struck) || item.struck.some((key) => typeof key !== "string" || !key)
-        || !Number.isFinite(item.seconds) || item.seconds < 0) return undefined;
+        || !Number.isFinite(item.seconds) || item.seconds < 0 || item.seconds > MAX_RECOVERY_DURATION_SECONDS) return undefined;
+      totalItemSeconds += item.seconds;
+      if (totalItemSeconds > MAX_RECOVERY_DURATION_SECONDS) return undefined;
     }
     if (value.sourceEvidenceV1 !== undefined
       && (!value.sourceEvidenceV1 || typeof value.sourceEvidenceV1 !== "object" || Array.isArray(value.sourceEvidenceV1)
