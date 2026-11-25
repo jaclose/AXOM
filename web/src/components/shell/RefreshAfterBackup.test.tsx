@@ -10,7 +10,7 @@ import { useStore } from "../../lib/store";
 
 vi.mock("../../lib/backup", () => ({ exportStateWithAttachments: vi.fn() }));
 
-const complete = { attachmentCount: 0, missingBlobKeys: [], originalCount: 0, missingOriginalIds: [], deferredSourceCount: 0 };
+const complete: Awaited<ReturnType<typeof exportStateWithAttachments>> = { attachmentCount: 0, missingBlobKeys: [], originalCount: 0, missingOriginalIds: [], deferredSourceCount: 0 };
 
 beforeEach(() => {
   resetQuestionAttachmentScopeForTests();
